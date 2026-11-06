@@ -3,7 +3,7 @@
 // network under its own watch, is networks.test.ts's.
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -74,4 +74,27 @@ test("one key on one account in both relayers is refused at start (two nonce cou
   assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), ...withdraw, WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: key }, {}));
   // the other network's withdrawal keys are not this network's
   assert.doesNotThrow(() => bindSenderFromEnv({ ...good(), WITHDRAW_RELAYER_MAINNET: "bind.test.testnet", WITHDRAW_RELAYER_KEYS_MAINNET: key }, {}));
+});
+
+test("delivered (card helper-create-u): the recorded 1Click SUCCESS on mainnet USDC starts mainnet's creation, one on a token no network carries reads nothing; it returns at once and a failed start is logged, never thrown", async (t) => {
+  const recorded = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/oneclick-status.json"), "utf8")) as { answers: Record<string, unknown> };
+  const reads: string[] = [];
+  const fetchFn = (async (url: string) => {
+    reads.push(String(url));
+    throw new Error("provider down");
+  }) as unknown as typeof fetch;
+  const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "benv-")) };
+  const logged: string[] = [];
+  t.mock.method(console, "error", (line: string) => void logged.push(line));
+  const s = bindSenderFromEnv(env, {}, fetchFn);
+  assert.ok(s.delivered);
+  assert.equal(s.delivered(JSON.stringify(recorded.answers.success_sol)), undefined);
+  assert.equal(s.delivered("not json"), undefined);
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(reads, [], "an answer that names no carried delivery reads nothing");
+  assert.equal(s.delivered(JSON.stringify(recorded.answers.success_usdc)), undefined);
+  for (let i = 0; i < 100 && logged.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
+  assert.ok(reads.length > 0, "mainnet's start read its providers");
+  assert.match(logged.join("\n"), /^helper: create failed: /m);
+  s.stop();
 });

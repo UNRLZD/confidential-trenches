@@ -13,6 +13,14 @@
 //      fails or disagrees sends nothing.
 //   4. One Transfer of CREATE_YOCTO, the only action of its transaction, written to the store before it is broadcast.
 //
+// What calls it: the helper's 1Click proxy, after it carried a status answer (POST /v1/proxy/oneclick/v0/status, read
+// with our key) that says SUCCESS for a live quote whose recipient is a 64-hex id on the vault's token (deliveryOf). The
+// device's answer is not changed or waited on (bind/env.ts delivered). Each such delivery, by its deposit address,
+// creates at most once, ever (its claim in the store): an id whose holder deletes it and keeps the token in it is never
+// created again by the same swap, so every creation costs a real completed 1Click swap to that id, read from 1Click by
+// us. U, R and V alike: each is a 1Click quote's recipient on the token (wallet.md §2.4 step 2; W:694-696 for R,
+// W:659 for V).
+//
 // Why the gate: a Transfer before delivery is the cheapest grief, about 0.007-0.01 N of ours per id against 0.00125 N
 // of the attacker's (V@1a7a23f:759-762, M280). With it, every id we create holds at least MIN_DEPOSIT, and we spend at
 // most one creation per delivery. CREATE_YOCTO comes back to the relayer by the id's clean-up (wallet.md "Clean-up");
@@ -46,7 +54,9 @@ export type CreateCode =
   /** The gas account cannot hold the Transfer and one deposit's worst after it. */
   | "relayer_low"
   /** A read failed or the providers disagree: nothing sent. */
-  | "unread";
+  | "unread"
+  /** This 1Click delivery created its id already, or names another id than its claim: nothing sent. */
+  | "delivery_used";
 
 export type CreateAnswer = { code: CreateCode; tx_hash?: string; why?: string };
 
@@ -58,7 +68,7 @@ export type CreateDeps = {
   token: string;
   /** The gate's read of `id` (deliveryReads). */
   delivery(id: string): Promise<Delivery>;
-  store: Pick<DepositStore, "creation" | "putCreation">;
+  store: Pick<DepositStore, "creation" | "putCreation" | "deliveryClaim" | "putDeliveryClaim">;
   relayer: Relayer;
 };
 
@@ -83,16 +93,81 @@ export function gate(d: Delivery, landedAt: bigint | null): CreateCode | null {
   return null;
 }
 
+/** The most of a status answer read: 1Click's is a few KB (wallet follow.ts DEPOSIT_STATUS_ANSWER_MAX). */
+export const STATUS_ANSWER_MAX = 65_536;
+
+/** A delivery as 1Click's status answer names it: the id, the token and the quote's deposit address. */
+export type Delivered = { id: string; token: string; address: string };
+
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+
+/**
+ * The delivery a 1Click /v0/status answer names, or null: status SUCCESS, a live quote (dry false) whose recipient is
+ * a 64-hex id with recipientType DESTINATION_CHAIN (delivered on the token, to that id's own NEAR account), whose
+ * destination is one of `tokens` as nep141, whose deposit address is one plain string, and whose swapDetails.amountOut
+ * is at least MIN_DEPOSIT. Anything else, malformed or too big, is null. The answer is 1Click's word only: the gate's
+ * chain reads decide.
+ */
+export function deliveryOf(body: string, tokens: ReadonlySet<string>): Delivered | null {
+  if (typeof body !== "string" || body.length > STATUS_ANSWER_MAX) return null;
+  let a: unknown;
+  try {
+    a = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!isObj(a) || a.status !== "SUCCESS" || !isObj(a.quoteResponse) || !isObj(a.swapDetails)) return null;
+  const req = a.quoteResponse.quoteRequest;
+  const quote = a.quoteResponse.quote;
+  if (!isObj(req) || !isObj(quote) || req.dry !== false || req.recipientType !== "DESTINATION_CHAIN") return null;
+  const id = req.recipient;
+  const asset = req.destinationAsset;
+  const address = quote.depositAddress;
+  const out = a.swapDetails.amountOut;
+  if (typeof id !== "string" || !/^[0-9a-f]{64}$/.test(id)) return null;
+  if (typeof asset !== "string" || !asset.startsWith("nep141:") || !tokens.has(asset.slice(7))) return null;
+  if (typeof address !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(address)) return null;
+  if (typeof out !== "string" || !/^(0|[1-9][0-9]{0,38})$/.test(out) || BigInt(out) < MIN_DEPOSIT) return null;
+  return { id, token: asset.slice(7), address };
+}
+
+/**
+ * The delivery's claim against a new Transfer to `id`: null when none holds it (no claim, or the claim's Transfer to
+ * this id is still open, was dropped or failed), else delivery_used.
+ */
+function claimHolds(store: CreateDeps["store"], address: string, id: string): { code: "delivery_used"; tx_hash: string } | null {
+  const c = store.deliveryClaim(address);
+  if (c === null) return null;
+  const rec = c.id === id ? store.creation(id) : null;
+  if (rec !== null && rec.last.tx_hash === c.tx_hash && rec.last.state !== "landed") return null;
+  return { code: "delivery_used", tx_hash: c.tx_hash };
+}
+
+/**
+ * The hook on a 1Click status answer the proxy carried (`body`, as the device got it): when it names a delivery on one
+ * of `nets`' tokens, that network's id is created once (createOnDelivery, keyed by the delivery's deposit address).
+ * null when the answer names none; a network that cannot start throws.
+ */
+export async function onStatusAnswer(body: string, nets: ReadonlyMap<string, () => Promise<CreateDeps>>): Promise<(CreateAnswer & { id: string }) | null> {
+  const d = deliveryOf(body, new Set(nets.keys()));
+  if (d === null) return null;
+  const deps = await nets.get(d.token)!();
+  return { id: d.id, ...(await createOnDelivery(d.id, deps, d.address)) };
+}
+
 /** The ids being created in this process, per gas account (one per network): "<account>/<id>" -> the run's answer. */
 const running = new Map<string, Promise<CreateAnswer>>();
 
-/** Creates `id` once 1Click delivered to it; see the header. Concurrent calls for one id share one run. */
-export function createOnDelivery(id: string, deps: CreateDeps): Promise<CreateAnswer> {
+/**
+ * Creates `id` once 1Click delivered to it; see the header. `address`: the delivery's deposit address, which creates
+ * at most once. Concurrent calls for one id share one run.
+ */
+export function createOnDelivery(id: string, deps: CreateDeps, address?: string): Promise<CreateAnswer> {
   if (typeof id !== "string" || !/^[0-9a-f]{64}$/.test(id)) return Promise.resolve({ code: "not_implicit" });
   const slot = `${deps.relayer.account}/${id}`;
   const busy = running.get(slot);
   if (busy !== undefined) return busy;
-  const run = createOnce(id, deps).finally(() => running.delete(slot));
+  const run = createOnce(id, deps, address).finally(() => running.delete(slot));
   running.set(slot, run);
   return run;
 }
@@ -105,8 +180,12 @@ function outcomeOf(rec: CreationRecord, out: Extract<TxOutcome, { kind: "final" 
   return { ...rec, last: { ...rec.last, state: ok ? "landed" : "failed", landed_at: top.toString() } };
 }
 
-async function createOnce(id: string, deps: CreateDeps): Promise<CreateAnswer> {
+async function createOnce(id: string, deps: CreateDeps, address?: string): Promise<CreateAnswer> {
   const { store, relayer } = deps;
+  // a delivery that created its id already reads nothing (a device polls its status many times); one run per id at a
+  // time (createOnDelivery), so no other run writes this claim meanwhile
+  const used = address === undefined ? null : claimHolds(store, address, id);
+  if (used !== null) return used;
   let rec: CreationRecord | null = store.creation(id);
 
   // 2. The read-back: an id that exists is never sent to, so its account is read first; a Transfer of ours that may
@@ -147,6 +226,7 @@ async function createOnce(id: string, deps: CreateDeps): Promise<CreateAnswer> {
       const sent: CreationRecord = { id, last: { ...tx, state: "pending", landed_at: null } };
       rec = sent;
       store.putCreation(sent);
+      if (address !== undefined) store.putDeliveryClaim({ address, id, tx_hash: tx.tx_hash });
     },
   );
   if (out.kind === "guarded") return out.code === "unread" ? { code: "unread", why: unread } : { code: out.code };

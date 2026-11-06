@@ -200,6 +200,8 @@ export function tally(rec: DepositRecord): DepositRecord {
  */
 export type CreationEntry = TxRef & { state: "pending" | "landed" | "failed" | "dropped"; landed_at: string | null };
 export type CreationRecord = { id: string; last: CreationEntry };
+/** One 1Click delivery (its deposit address) and the Transfer it created its id with: a delivery creates once. */
+export type DeliveryClaim = { address: string; id: string; tx_hash: string };
 
 export type DepositStore = {
   get(u: string): DepositRecord | null;
@@ -207,6 +209,10 @@ export type DepositStore = {
   creation(id: string): CreationRecord | null;
   /** Durable replace of the id's creation record. */
   putCreation(rec: CreationRecord): void;
+  /** The delivery's claim (create.ts), by its deposit address, or null. */
+  deliveryClaim(address: string): DeliveryClaim | null;
+  /** Durable replace of the delivery's claim. */
+  putDeliveryClaim(claim: DeliveryClaim): void;
   /** R7: create-if-absent on U, durable before it returns; the existing record when one is there. */
   create(rec: DepositRecord): { created: boolean; rec: DepositRecord };
   /** Durable replace of U's record. */
@@ -282,6 +288,8 @@ function fileStoreOn(d: DurableDir): DepositStore {
     const c = read<{ next: string }>(kName(key));
     return c === null ? null : BigInt(c.next);
   };
+  // a deposit address is any chain's (hex, base58, 0x…): its file is named by its sha256
+  const qName = (address: string) => `q-${createHash("sha256").update(address).digest("hex")}.json`;
   const cName = (id: string) => {
     if (!/^[0-9a-f]{64}$/.test(id)) throw new Error("store: not a 64-hex id");
     return `c-${id}.json`;
@@ -289,6 +297,11 @@ function fileStoreOn(d: DurableDir): DepositStore {
   return {
     get: (u) => read<DepositRecord>(uName(u)),
     creation: (id) => read<CreationRecord>(cName(id)),
+    deliveryClaim: (address) => read<DeliveryClaim>(qName(address)),
+    putDeliveryClaim(claim) {
+      held();
+      d.replace(qName(claim.address), JSON.stringify(claim));
+    },
     putCreation(rec) {
       held();
       d.replace(cName(rec.id), JSON.stringify(rec));

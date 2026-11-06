@@ -7,11 +7,11 @@
 //   node --test apps/helper/src/bind/create.test.ts
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { CREATE_YOCTO, createOnDelivery, deliveryReads, type CreateDeps } from "./create.ts";
+import { CREATE_YOCTO, createOnDelivery, deliveryOf, deliveryReads, onStatusAnswer, STATUS_ANSWER_MAX, type CreateDeps } from "./create.ts";
 import { MIN_DEPOSIT, base58 } from "./checks.ts";
 import { RELAYER_FLOOR_YOCTO, RpcError, createFileStore, encodeAction, type DepositStore, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "./send.ts";
 import { hashOf } from "../../test/token-status/near.ts";
@@ -30,16 +30,19 @@ type World = {
   balance: [string, string];
   fork: [string, string];
   down: [boolean, boolean];
+  /** Every read either provider answered. */
+  reads: number;
 };
 type Acct = "absent" | { keys: string[] };
 
 function world(over: Partial<World> = {}): World {
-  return { height: 1000, account: ["absent", "absent"], balance: [MIN_DEPOSIT.toString(), MIN_DEPOSIT.toString()], fork: ["", ""], down: [false, false], ...over };
+  return { height: 1000, account: ["absent", "absent"], balance: [MIN_DEPOSIT.toString(), MIN_DEPOSIT.toString()], fork: ["", ""], down: [false, false], reads: 0, ...over };
 }
 
 function provider(w: World, i: 0 | 1, id: () => string): Rpc {
   return async (method, params) => {
     if (w.down[i]) throw new Error("fetch failed");
+    w.reads++;
     const p = params as Record<string, unknown>;
     const h = p.finality === "final" ? w.height : Number(p.block_id);
     const at = { block_height: h, block_hash: hashOf(h, w.fork[i]) };
@@ -283,4 +286,116 @@ test("the Transfer's bytes: borsh Action::Transfer (3) and the amount as a u128 
   assert.equal(BigInt(`0x${Buffer.from(b.subarray(1)).reverse().toString("hex")}`), CREATE_YOCTO);
   assert.throws(() => encodeAction({ kind: "transfer", receiver: "x", amount: 0n }), /amount/);
   assert.throws(() => encodeAction({ kind: "transfer", receiver: "x", amount: 1n << 128n }), /amount/);
+});
+
+// ---- The trigger: a 1Click status answer the proxy carried (onStatusAnswer, deliveryOf) ----
+
+/** Two status answers as 1Click sent them (fixtures/oneclick-status.json: its source line). */
+const STATUS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/oneclick-status.json"), "utf8")) as { answers: Record<"success_usdc" | "success_sol", Answer> };
+type Answer = { status: string; swapDetails: Record<string, unknown>; quoteResponse: { quoteRequest: Record<string, unknown>; quote: Record<string, unknown> } };
+const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+/** The recorded USDC delivery, its recipient, token and address set for a test (the fake chain decides what they hold). */
+function answer(edit: { id?: string; token?: string; address?: string; status?: string; req?: Record<string, unknown>; out?: unknown } = {}): string {
+  const a = structuredClone(STATUS.answers.success_usdc);
+  if (edit.status !== undefined) a.status = edit.status;
+  if (edit.id !== undefined) a.quoteResponse.quoteRequest.recipient = edit.id;
+  if (edit.token !== undefined) a.quoteResponse.quoteRequest.destinationAsset = `nep141:${edit.token}`;
+  if (edit.address !== undefined) a.quoteResponse.quote.depositAddress = edit.address;
+  if ("out" in edit) a.swapDetails.amountOut = edit.out;
+  Object.assign(a.quoteResponse.quoteRequest, edit.req ?? {});
+  return JSON.stringify(a);
+}
+const nets = (deps: () => CreateDeps, token = TOKEN) => new Map([[token, async () => deps()]]);
+
+test("deliveryOf on the recorded answers: the USDC delivery names its 64-hex recipient, token and deposit address; the SOL one (a Solana recipient, another token) names none", () => {
+  const usdc = JSON.stringify(STATUS.answers.success_usdc);
+  assert.deepEqual(deliveryOf(usdc, new Set([USDC])), { id: "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8", token: USDC, address: "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f" });
+  assert.equal(deliveryOf(usdc, new Set([TOKEN])), null, "a token no carried network holds");
+  const sol = JSON.stringify(STATUS.answers.success_sol);
+  assert.equal(deliveryOf(sol, new Set([USDC, "sol.omft.near"])), null, "a recipient that is no 64-hex id");
+});
+
+test("deliveryOf: only SUCCESS of a live quote to a 64-hex id delivered on the token, with amountOut at least MIN_DEPOSIT; anything malformed is none", () => {
+  const t = new Set([TOKEN]);
+  const id = "ab".repeat(32);
+  assert.notEqual(deliveryOf(answer({ id, token: TOKEN }), t), null);
+  for (const status of ["PENDING_DEPOSIT", "KNOWN_DEPOSIT_TX", "PROCESSING", "INCOMPLETE_DEPOSIT", "REFUNDED", "FAILED", "success", ""]) assert.equal(deliveryOf(answer({ id, token: TOKEN, status }), t), null, status);
+  for (const bad of ["alice.near", "AB".repeat(32), "ab".repeat(31), `${"ab".repeat(32)}0`, "0x" + "ab".repeat(31)]) assert.equal(deliveryOf(answer({ id: bad, token: TOKEN }), t), null, bad);
+  assert.equal(deliveryOf(answer({ id, token: TOKEN, req: { recipient: 7 } }), t), null);
+  assert.equal(deliveryOf(answer({ id, token: TOKEN, req: { dry: true } }), t), null, "a dry quote delivers nothing");
+  assert.equal(deliveryOf(answer({ id, token: TOKEN, req: { recipientType: "INTENTS" } }), t), null, "delivered inside intents.near, not to the id's own account");
+  assert.equal(deliveryOf(answer({ id, token: TOKEN, req: { destinationAsset: TOKEN } }), t), null, "no nep141: prefix");
+  assert.equal(deliveryOf(answer({ id, token: TOKEN, out: (MIN_DEPOSIT - 1n).toString() }), t), null, "under MIN_DEPOSIT by 1Click's own word");
+  assert.notEqual(deliveryOf(answer({ id, token: TOKEN, out: MIN_DEPOSIT.toString() }), t), null);
+  for (const out of [undefined, 5, "-1", "01", "1e9", "9".repeat(40)]) assert.equal(deliveryOf(answer({ id, token: TOKEN, out }), t), null, String(out));
+  for (const address of ["", "a b", "x".repeat(129)]) assert.equal(deliveryOf(answer({ id, token: TOKEN, address }), t), null, JSON.stringify(address));
+  for (const body of ["", "{", "[]", "null", JSON.stringify({ status: "SUCCESS" }), " ".repeat(STATUS_ANSWER_MAX + 1)]) assert.equal(deliveryOf(body, t), null, body.slice(0, 20));
+  // the cap is on the whole answer
+  const big = answer({ id, token: TOKEN }).replace("{", `{"pad":"${"x".repeat(STATUS_ANSWER_MAX)}",`);
+  assert.equal(deliveryOf(big, t), null);
+});
+
+test("hook: a SUCCESS to an absent id that holds the delivery gives one Transfer; every later poll of the same answer sends nothing and reads nothing", async () => {
+  const s = setup();
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  const first = await onStatusAnswer(body, nets(s.deps));
+  assert.equal(first?.code, "created");
+  assert.equal(first?.id, s.id);
+  assert.equal(s.relayer.sent.length, 1);
+  assert.deepEqual(s.relayer.sent[0]!.action, { kind: "transfer", receiver: s.id, amount: CREATE_YOCTO });
+  const reads = s.w.reads;
+  for (let i = 0; i < 5; i++) assert.deepEqual(await onStatusAnswer(body, nets(s.deps)), { id: s.id, code: "delivery_used", tx_hash: first?.tx_hash });
+  assert.equal(s.relayer.sent.length, 1);
+  assert.equal(s.w.reads, reads, "a used delivery reads no chain");
+});
+
+test("hook: 8 polls of one SUCCESS at once give one Transfer", async () => {
+  const s = setup();
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  const all = await Promise.all(Array.from({ length: 8 }, () => onStatusAnswer(body, nets(s.deps))));
+  assert.equal(s.relayer.sent.length, 1);
+  assert.ok(all.every((a) => a?.code === "created"));
+});
+
+test("hook: PENDING, a recipient that is no 64-hex id, another token or an id that exists give no Transfer", async () => {
+  const s = setup();
+  for (const body of [answer({ id: s.id, token: TOKEN, status: "PENDING_DEPOSIT" }), answer({ id: "alice.near", token: TOKEN }), answer({ id: s.id, token: "other.near" })]) assert.equal(await onStatusAnswer(body, nets(s.deps)), null);
+  assert.equal(s.w.reads, 0, "an answer that names no delivery reads no chain");
+  const e = setup({ account: [{ keys: ["ed25519:k"] }, { keys: ["ed25519:k"] }] });
+  assert.deepEqual(await onStatusAnswer(answer({ id: e.id, token: TOKEN, address: `dep-${e.id}` }), nets(e.deps)), { id: e.id, code: "exists" });
+  assert.equal(s.relayer.sent.length + e.relayer.sent.length, 0);
+});
+
+test("hook, the drain: an id its holder deleted, its token left in it, is never created again by the same delivery (after a restart too); a new 1Click delivery to it is", async () => {
+  const s = setup();
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "created");
+  // DeleteAccount by the id's own key: absent again, the token's balance stays with the token contract
+  s.w.account = ["absent", "absent"];
+  s.w.height += 10;
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "delivery_used");
+  s.reopen();
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "delivery_used");
+  assert.equal(s.relayer.sent.length, 1);
+  // a second real swap to the same id (a second arrival): a new deposit address, created once more
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `dep2-${s.id}` }), nets(s.deps)))?.code, "created");
+  assert.equal(s.relayer.sent.length, 2);
+});
+
+test("hook: a delivery whose Transfer is still open reads it back, never sends a second; one whose Transfer was dropped may be sent afresh", async () => {
+  let kind: TxOutcome["kind"] = "unknown";
+  const s = setup({}, { outcome: () => kind });
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "in_flight");
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "in_flight");
+  assert.equal(s.relayer.sent.length, 1);
+  assert.equal(s.relayer.resolved.length, 1, "the open Transfer is read again (its stored bytes)");
+  kind = "dropped";
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "in_flight");
+  assert.equal(s.relayer.sent.length, 2, "a Transfer known dropped may be signed afresh");
+});
+
+test("hook: a network that cannot start rejects (env.ts logs it); the answer was already sent", async () => {
+  const body = answer({ id: "cd".repeat(32), token: TOKEN });
+  await assert.rejects(onStatusAnswer(body, new Map([[TOKEN, async () => { throw new Error("rpc down"); }]])), /rpc down/);
 });
