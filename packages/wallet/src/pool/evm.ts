@@ -402,7 +402,10 @@ export const EVM_SPARE_REST_MS = 60_000;
  * call's time, or a resting one that answered a page, after its rest (its Retry-After, else EVM_SPARE_REST_MS), when
  * the seat waits for it with that provider's own throttle; so a seat whose wide provider throttled waits for it rather
  * than page blastapi's 10 blocks, and takes a narrow spare for a page it ends sooner. A seat on a provider of a known
- * cap moves back to a free one wider than it once that one's rest ends; a provider that answers is no longer resting.
+ * cap moves back to a free one wider than it once that one's rest ends (inside an agreed read, from a provider that
+ * answered the seat, only to one that answered it too), and to its own again when that one fails; a
+ * provider that answers is no longer resting. Inside an agreed read a capped provider that answered the seat holds it
+ * at its cap, so one seat's walk takes no second wide provider the other seat needs.
  * A pair passed in again (evmPool's to evmTreeSync, the restore's) is that pair, so its reads bind its own seats. Read live: the kit's Base list seats blastapi second, which
  * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
  * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
@@ -428,6 +431,8 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   const sides: [Set<number>, Set<number>] = [new Set(), new Set()];
   const open: [number[], number[]] = [list.map(() => 0), list.map(() => 0)];
   let inflight = 0;
+  // the narrow provider each seat last took for want of a wider one (cheapest): a seat leaves it for any wider one
+  const narrowed: (number | null)[] = [null, null];
   const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i) && open[1 - k]![i] === 0;
   const rested = (i: number) => restUntil[i]! <= Date.now();
   // each provider's eth_getLogs cap as its last refusal named it (null: none known), the widest span it answered, and
@@ -438,11 +443,11 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   // a provider whose known cap is under `span` (more pages than one for it)
   const narrow = (i: number, span: bigint | null) => span !== null && capOf[i] !== null && capOf[i]! < span;
   // the provider seat k moves to: the next one in list order after its own, free for it, rested, not asked in this
-  // call, and with no cap known under `span`
-  const next = (k: number, span: bigint | null, asked: ReadonlyMap<number, unknown>): number | null => {
+  // call, and with no cap known under `span`; `held`: only one already held to its side in the reads in flight
+  const next = (k: number, span: bigint | null, asked: ReadonlyMap<number, unknown>, held = false): number | null => {
     for (let s = 1; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (free(k, i) && rested(i) && !asked.has(i) && !narrow(i, span)) return i;
+      if (free(k, i) && rested(i) && !asked.has(i) && !narrow(i, span) && (!held || sides[k]!.has(i))) return i;
     }
     return null;
   };
@@ -485,10 +490,12 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
       // callEvm): a call ends after at most one ask of each provider in the list
       const asked = new Map<number, unknown>();
       // a seat on a resting provider, or on one of a known cap with a wider one free and rested (back from a narrow
-      // provider once the wide one's rest ends), moves at once
+      // provider once the wide one's rest ends), moves at once; held to its provider in the read, only to one held to
+      // its side already, unless it took that provider narrow for want of a wider one
       const c = capOf[at[k]!]!;
+      const home = at[k]!;
       if (!rested(at[k]!)) at[k] = next(k, span, asked) ?? at[k]!;
-      else if (span !== null && c !== null) at[k] = next(k, c + 1n, asked) ?? at[k]!;
+      else if (span !== null && c !== null) at[k] = next(k, c + 1n, asked, sides[k]!.has(at[k]!) && narrowed[k] !== at[k]) ?? at[k]!;
       for (;;) {
         const i = at[k]!;
         if (asked.has(i)) throw asked.get(i);
@@ -503,19 +510,24 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           asked.set(i, e);
           const t = throttled(e);
           const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
-          if (span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!)) {
+          const capped = span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!);
+          if (capped) {
             capOf[i] = cap;
             restUntil[i] = 0; // it answers: no longer resting
-          }
-          else if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
+          } else if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
           else {
             restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
             named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
             restErr[i] = e;
           }
           if (at[k] !== i) continue; // another call on this seat moved it already
-          // a free provider, rested and wide enough: the call again there at once
-          const n = next(k, span, asked);
+          // a provider that answered this seat in the read is held to this side to its end anyway: the seat pages at its
+          // cap, and binds no second wide provider the other seat may need (with a 30 ms slower blastapi, seat 0 walked
+          // from publicnode onto Pocket first and left seat 1 blastapi's 10 blocks for the whole read)
+          if (capped && sides[k]!.has(i)) throw e;
+          // a free provider, rested and wide enough: the call again there at once, the seat's own from the call's start
+          // first (a move back that failed returns to it, never on to a provider the other seat may need)
+          const n = home !== i && free(k, home) && rested(home) && !asked.has(home) && !narrow(home, span) ? home : next(k, span, asked);
           if (n !== null) {
             at[k] = n;
             continue;
@@ -525,6 +537,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           const x = span === null ? null : cheapest(k, span);
           if (x !== null) {
             at[k] = x;
+            if (rested(x)) narrowed[k] = x;
             if (x === i) throw e;
             // the narrow one asked here at once (asked already in this call: its own refusal goes up, so the pager
             // pages at its cap)
