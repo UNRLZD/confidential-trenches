@@ -125,7 +125,12 @@ export interface BindDeps {
   sleep?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
   pollMs?: number;
-  /** Told each time the bind waits on a code it reads again after (a halt among them: "halted", "token_halted"). */
+  /**
+   * Told before every wait of the bind (a code it reads again after: a halt among them, "halted", "token_halted"; the
+   * pages, "pages"; a lapse, "lapse"; the relayer's answers). A throw from it ends the bind there, the seed zeroed, with
+   * what it wrote kept: a later bind of the note picks up from the store (the call written) and the pages, so a caller
+   * that opens the seed only for each step (card wallet-deposit-follow) throws here and calls again.
+   */
   onWait?: (code: string) => Promise<void> | void;
 }
 
@@ -142,6 +147,9 @@ export type BindOutcome =
 // ---------- this tab's binds, per U (the calls U signed are the note store's, see bindDeposit) ----------
 const struck = new Set<string>();
 const running = new Map<string, number>(); // U -> binds running for it in this tab
+// note id -> the call the relayer refused for now (prepay_open, a retry code), so a bind that ended on its wait (onWait
+// threw) sends the same bytes again while ahead of max_block_height, as one that waited would; a reload settles it
+const resend = new Map<string, { nonce: bigint; code: string }>();
 
 // ---------- reads on two RPCs ----------
 type Obj = Record<string, unknown>;
@@ -496,8 +504,13 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     type Step = BindOutcome | { call: SignedDepositDelegate; send: boolean };
 
     const stopped = () => signal?.throwIfAborted();
-    const pause = async () => {
+    // the code the last sign waited on (an RPC behind, USDC not back, U not created): the next pause names it
+    let waitOn: string | null = null;
+    const pause = async (code: string) => {
+      code = waitOn ?? code;
+      waitOn = null;
       stopped();
+      await deps.onWait?.(code);
       await sleep(pollMs);
       stopped();
     };
@@ -530,7 +543,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       try {
         return await f();
       } catch (e) {
-        if (e instanceof DepositAccountRefused && WAIT_READ.has(e.code)) return (await deps.onWait?.(e.code), null);
+        if (e instanceof DepositAccountRefused && WAIT_READ.has(e.code)) return ((waitOn = e.code), null);
         if (e instanceof DepositBindRefused && (e.code === "early" || e.code === "nonce")) return null;
         throw e;
       }
@@ -622,7 +635,23 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           } else if (u !== null && u.nonce >= out.nonce) next = await afterRefusal(out);
           if (next !== null) return next;
         }
-        await pause();
+        await pause("lapse");
+      }
+    };
+    // a call the relayer refused for now: the same bytes again while ahead of max_block_height, else settled
+    const sendAgain = async (out: SignedDepositDelegate): Promise<Step> => {
+      resend.delete(own.noteId);
+      const u = await readU(U, rpcs);
+      const high = u === null ? null : u.heights[0] > u.heights[1] ? u.heights[0] : u.heights[1];
+      return high !== null && high < out.max_block_height ? { call: out, send: true } : await settle(out); // the same bytes while ahead
+    };
+    // R2 (prepay_open): wait until the pages hold U's previous P; the note's own P landing ends it too
+    const prepaid = async (): Promise<BindOutcome | null> => {
+      for (;;) {
+        const mine = await watch.read(signal);
+        if (mine.state === "held") return await land(mine.row);
+        if (await previousLanded()) return null;
+        await pause("prepay_open");
       }
     };
 
@@ -631,7 +660,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       const first = await watch.read(signal);
       if (first.state === "held") return await land(first.row);
       if (first.state === "absent") break;
-      await pause();
+      await pause("pages");
     }
     note = await reread();
     if (note.state === "PLANNED") {
@@ -648,12 +677,17 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     // A note with a call written (a reload, a retry, another tab): that call is settled before anything is signed.
     let step: Step;
     const last = calls.at(-1);
-    if (last !== undefined) step = { call: callOf(last), send: false };
-    else {
+    if (last !== undefined) {
+      const out = callOf(last);
+      const was = resend.get(own.noteId);
+      if (was?.nonce !== out.nonce) step = { call: out, send: false };
+      else if (was.code === "prepay_open") step = (await prepaid()) ?? (await sendAgain(out));
+      else step = await sendAgain(out);
+    } else {
       let c: SignedDepositDelegate | null = null;
       while (c === null) {
         c = await signing(() => depositDelegate(seed, own.s, own.i, call, rpcs));
-        if (c === null) await pause();
+        if (c === null) await pause("sign");
       }
       step = await commit(c);
     }
@@ -668,25 +702,20 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       if (answer === null || answer.ok || SETTLE.has(answer.code)) step = await settle(out);
       else if (answer.code === "sender_struck") return strike();
       else if (answer.code === "resign_needed") {
-        await pause();
+        await pause("resign_needed");
         const again: SignedDepositDelegate | null = await signing(() => resignDeposit(seed, own.s, own.i, call, out, "resign_needed", rpcs));
         step = again === null ? await settle(out) : await commit(again);
       } else if (answer.code === "prepay_open" || RETRY.has(answer.code)) {
-        await deps.onWait?.(answer.code);
+        // R2: U's first note has no earlier P the relayer could wait for: refused, before any wait
+        if (answer.code === "prepay_open" && previousP === null) return { kind: "refused", code: answer.code };
+        // kept before the wait: a bind that ends on it (onWait threw) sends these bytes again on its next call
+        resend.set(own.noteId, { nonce: out.nonce, code: answer.code });
         if (answer.code === "prepay_open") {
-          // R2: wait until the pages hold U's previous P (U's first note has none: the relayer has no earlier P of U)
-          if (previousP === null) return { kind: "refused", code: answer.code };
-          for (;;) {
-            const mine = await watch.read(signal);
-            if (mine.state === "held") return await land(mine.row);
-            if (await previousLanded()) break;
-            await pause();
-          }
+          const landed = await prepaid();
+          if (landed !== null) return (resend.delete(own.noteId), landed);
         }
-        await pause();
-        const u = await readU(U, rpcs);
-        const high = u === null ? null : u.heights[0] > u.heights[1] ? u.heights[0] : u.heights[1];
-        step = high !== null && high < out.max_block_height ? { call: out, send: true } : await settle(out); // the same bytes while ahead
+        await pause(answer.code);
+        step = await sendAgain(out);
       } else return { kind: "refused", code: answer.code };
     }
   } finally {
@@ -701,4 +730,5 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
 export function resetBindSession(): void {
   struck.clear();
   running.clear();
+  resend.clear();
 }

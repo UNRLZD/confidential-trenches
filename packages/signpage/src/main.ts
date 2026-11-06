@@ -477,15 +477,20 @@ function shown(s: Seed): { account: string; code_saved: boolean; signout: boolea
 }
 
 let store: WalletStore | null = null;
-const open = async (): Promise<WalletStore> =>
-  (store ??= await openWalletStore({
+// the store's connection closed under the deposit follows: they start again once it is opened next
+let followsClosed = false;
+const open = async (): Promise<WalletStore> => {
+  const had = store;
+  const s = (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
       moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
-      if (e.kind === "closed") store = null;
+      // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
+      if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed();
       if (e.kind !== "signout") return;
       store = null;
+      followsClosed = false;
       openedBy = null;
       void testnet?.signedOut();
       restore?.signedOut();
@@ -493,6 +498,9 @@ const open = async (): Promise<WalletStore> =>
       show("signed-out");
     },
   }));
+  if (had === null && followsClosed) (followsClosed = false), void follows?.settle();
+  return s;
+};
 
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 // The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed

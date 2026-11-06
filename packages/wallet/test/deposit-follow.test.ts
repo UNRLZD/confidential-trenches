@@ -18,9 +18,9 @@ import { IDBFactory } from "fake-indexeddb";
 import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { DepositAccountRefused, depositAccount, HEIGHT_SPREAD_MAX, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
-import { type BindOutcome, bindDeposit, resetBindSession } from "../src/deposit/bind.ts";
+import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src/deposit/bind.ts";
 import { RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
-import { DEPOSIT_STATUS_URL, type DepositOp, type FollowArgs, type FollowDeps, followDeposit, type FollowRpc, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
+import { DEPOSIT_STATUS_URL, type DepositOp, followEnded, REFUND_MOVE_MS, type FollowArgs, type FollowDeps, followDeposit, type FollowRpc, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
@@ -66,6 +66,8 @@ class Chain {
   readonly u: string;
   codeHash: string | null = null;
   heldUsdc = 0n;
+  /** The nonces intents.near holds used for U (is_nonce_used), base64. */
+  used = new Set<string>();
   constructor(u: string, height = 275753808n, nonce = 275753000000001n) {
     this.u = u;
     this.a = { height, nonce, rows: [], balance: 0n, held: 0n, timeMs: DEADLINE - 3_600_000, finalLag: 0n };
@@ -99,6 +101,13 @@ class Chain {
             j.result.result = [...Buffer.from(JSON.stringify(s.rows.slice(from, from + limit)))];
           } else j.result.result = [...Buffer.from(JSON.stringify({ size: s.rows.length, depth: 20, root: "0" }))];
           return stamp(j);
+        }
+        if (params.method_name === "is_nonce_used") {
+          assert.equal(params.account_id, INTENTS);
+          const a = JSON.parse(Buffer.from(params.args_base64 as string, "base64").toString());
+          assert.equal(a.account_id, this.u);
+          assert.equal(Buffer.from(a.nonce, "base64").length, 32);
+          return stamp({ jsonrpc: "2.0", id: "x", result: { result: [...Buffer.from(JSON.stringify(this.used.has(a.nonce)))], logs: [] } });
         }
         if (params.method_name === "mt_balance_of") {
           assert.equal(params.account_id, INTENTS);
@@ -342,21 +351,33 @@ test("a stale answer never takes the stage back, and an answer for another addre
   assert.deepEqual(t.stages, ["in_transit"]);
 });
 
-test("E4 and N3: refunded only once U's refund reads inside intents.near on both RPCs, and it is no end: a stranger's dust, then the delivery, is bound to done", async () => {
+test("E4 and N3: refunded only for an op whose own status read REFUNDED and once U's refund reads inside intents.near on both RPCs; a stranger's dust under U shows nothing; it is no end", async () => {
   const t = await setup(["PROCESSING", "PROCESSING", "PROCESSING", "SUCCESS"]);
   t.onTick.fn = (n) => {
-    if (n === 1) t.chain.a.held = 1n; // one RPC only: no read
-    if (n === 2) t.chain.b.held = 1n; // a stranger's dust under U, on both
+    if (n === 2) t.chain.a.held = t.chain.b.held = 1n; // a stranger's dust under U, on both: no op of U read REFUNDED
     if (n === 6) t.chain.credit(CREDIT); // 1Click's real delivery
   };
   const out = await followDeposit(t.args, t.deps);
   assert.equal(out.kind, "done");
-  assert.deepEqual(t.stages, ["in_transit", "refunded", "into_vault", "done"]);
+  assert.deepEqual(t.stages, ["in_transit", "into_vault", "done"]);
   assert.deepEqual(t.binds.map((b) => b.amount), [CREDIT]);
+
+  // REFUNDED read: the refund on one RPC only is no read; on both, refunded; the rounds go on
+  const r = await setup(["REFUNDED"]);
+  r.onTick.fn = (n) => {
+    if (n === 1) r.chain.a.held = 1n;
+    if (n === 4) r.chain.b.held = 1n;
+  };
+  const between: (string | undefined)[] = [];
+  const was = r.onTick.fn;
+  r.onTick.fn = (n) => (was(n), between.push(r.stages.at(-1)));
+  await assert.rejects(followDeposit(r.args, { ...r.deps, signal: stop(r, 8) }), /stop/);
+  assert.deepEqual(between.slice(0, 4), [undefined, undefined, undefined, undefined], "nothing shown while one RPC reads it");
+  assert.deepEqual(r.stages, ["refunded"]);
 });
 
 test("a refund as NEAR USDC inside intents (U's USDC token id) is read too: refunded", async () => {
-  const t = await setup(["PROCESSING"]);
+  const t = await setup(["REFUNDED"]);
   t.chain.heldUsdc = 3_000_000n;
   await assert.rejects(followDeposit(t.args, { ...t.deps, signal: stop(t, 3) }), /stop/);
   assert.equal((await opOf(t.w)).stage, "refunded");
@@ -366,13 +387,20 @@ test("refunded with the refund move: done once its credit is bound; N8: a move w
   const t = await setup(["REFUNDED"]);
   t.chain.a.held = t.chain.b.held = CREDIT;
   let moves = 0;
-  const refundMove = async (u: string) => {
+  let unsureStage: string | undefined;
+  const refundMove = async (u: string, move: { nonce: string; deadline_ms: number }) => {
     assert.equal(u, t.u);
+    // recorded before it is sent
+    assert.deepEqual((await opOf(t.w)).follow.move, move);
+    assert.equal(move.deadline_ms, t.chain.a.timeMs + REFUND_MOVE_MS);
     moves++;
-    // the move's debit is not final for 5 rounds; then U's USDC comes back on the token
+    // the move's debit is not final for 5 rounds, and RPC a reads it 2 rounds before RPC b (no read); then U's USDC
+    // comes back on the token
     let k = 0;
     t.onTick.fn = () => {
-      if (++k === 5) t.chain.a.held = t.chain.b.held = 0n;
+      if (++k === 3) t.chain.a.held = 0n;
+      if (k === 5) t.chain.b.held = 0n;
+      if (k === 5) unsureStage = t.stages.at(-1);
       if (k === 7) t.chain.credit(CREDIT);
     };
   };
@@ -383,6 +411,8 @@ test("refunded with the refund move: done once its credit is bound; N8: a move w
   const op = await opOf(t.w);
   assert.equal(op.refunded, true);
   assert.equal(op.follow.move, undefined);
+  assert.equal(op.follow.moved, true);
+  assert.equal(unsureStage, "refund_move", "through on a read only one RPC gives");
 });
 
 test("F6 and E8: a stop during the refund move's credit wait, and a stop right after it is sent: the resume never sends it again", async () => {
@@ -398,7 +428,7 @@ test("F6 and E8: a stop during the refund move's credit wait, and a stop right a
     };
     if (when === "after") t.onTick.fn = (n) => n === 4 && ac.abort(new Error("reload"));
     await assert.rejects(followDeposit(t.args, { ...t.deps, refundMove, signal: ac.signal }), /reload/);
-    assert.equal((await opOf(t.w)).follow.move, when === "inside" ? "sent" : undefined, when);
+    assert.equal((await opOf(t.w)).follow.move !== undefined, when === "inside", when);
     t.chain.credit(CREDIT);
     t.onTick.fn = () => {};
     assert.equal((await followDeposit(t.args, { ...t.deps, refundMove })).kind, "done", when);
@@ -468,20 +498,28 @@ test("F1: a forged REFUNDED while 1Click delivered: U's credit is bound, never r
   assert.ok(t.oc.urls.length >= 5, "done waited for the op's own SUCCESS");
 });
 
-test("F3 and M2: a forged SUCCESS and a 1.99 USDC gift (over min_amount_out, under what 1Click delivered): the gift binds, done waits for what 1Click delivered, the real delivery binds after it", async () => {
+test("F3 and M2: SUCCESS and a 1.99 USDC gift (over min_amount_out, under what 1Click delivered): done on U's bound sum at the min; U is followed to the deadline, so the real delivery binds after it and shows", async () => {
   const GIFT = 1_990_000n;
   assert.ok(GIFT > BigInt(MIN_OUT) && GIFT < CREDIT);
   const t = await setup(["SUCCESS"]);
   t.oc.fetchFn = perAddress(t.u, { [ADDR]: [["SUCCESS", CREDIT]] }).fetchFn;
   t.chain.credit(GIFT); // anyone can ft_transfer to U
-  t.onTick.fn = (n) => n === 8 && t.chain.credit(CREDIT);
-  const out = await followDeposit(t.args, { ...t.deps, fetchFn: t.oc.fetchFn });
+  let doneAt = 0;
+  t.onTick.fn = (n) => {
+    if (doneAt === 0 && t.stages.at(-1) === "done") doneAt = n;
+    if (n === 8) t.chain.credit(CREDIT);
+    if (n === 14) t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1; // the quote's deadline passes on both
+  };
+  const out = await followDeposit(t.args, { ...t.deps, fetchFn: t.oc.fetchFn, untilFinal: true });
   assert.equal(out.kind, "done");
+  assert.ok(doneAt > 0 && doneAt < 8, `done on the gift (at tick ${doneAt}), before the delivery`);
   assert.deepEqual(t.binds.map((b) => b.amount), [GIFT, CREDIT]);
   const op = await opOf(t.w);
   assert.equal(op.amount_usd, usdOf(GIFT + CREDIT));
   assert.equal(op.follow.notes!.length, 2);
   assert.equal(op.follow.delivered, CREDIT.toString());
+  assert.equal(op.follow.final, true);
+  assert.ok(t.ticks() >= 14, "resolved only once the deadline is past on both RPCs");
 
   // M2: the store's leaf names another value than the pages' row at the same index and commitment: held
   const m = await setup(["SUCCESS"]);
@@ -585,7 +623,7 @@ test("E6 and M13: a landed note counts whatever its state now (SPENT once withdr
   assert.deepEqual(await followDeposit(m.args, { ...m.deps, bind: relabel }), { kind: "held", why: "leaf" });
 });
 
-test("N2: two quotes before payment name one U: B's money is bound as U's next note and B is done on its own note, never on A's", async () => {
+test("N2: two quotes before payment name one U: B's money is bound as U's next note and B is done once U's sum covers both mins, showing its own part", async () => {
   const t = await setup(["PENDING_DEPOSIT"]);
   const BADDR = "b".repeat(64);
   const B = { ...t.args, opId: "dq-B", address: BADDR };
@@ -605,7 +643,9 @@ test("N2: two quotes before payment name one U: B's money is bound as U's next n
   const opB = await opOf(t.w, "dq-B");
   assert.equal(opB.amount_usd, usdOf(CB), "B's done is its own money");
   assert.equal(opA.amount_usd, usdOf(CREDIT));
-  assert.equal(opA.follow.notes!.filter((n) => opB.follow.notes!.includes(n)).length, 0, "no note counted by both");
+  // U's money is one sum: both ops name U's landed notes, and each shows its own part of it once
+  assert.equal(BigInt(opA.follow.bound!) + BigInt(opB.follow.bound!), CREDIT + CB, "U's sum, shown once across its ops");
+  assert.deepEqual(opB.follow.notes, opA.follow.notes);
   assert.deepEqual(t.binds.map((x) => x.amount), [CREDIT, CB]);
   assert.equal(t.chain.a.balance, 0n, "nothing left in U");
 });
@@ -633,6 +673,8 @@ test("E5: a throw that is no refusal (a store read, an RPC) pauses and the round
   let listFails = 2;
   const store = new Proxy(t.store, { get: (o, k) => (k === "list" ? async () => (listFails-- > 0 ? Promise.reject(new Error("IDB busy")) : o.list()) : (o as never)[k]) });
   assert.equal((await followDeposit(t.args, { ...t.deps, rpcs, store })).kind, "done");
+  // each throw paused before the round ran again: doubling from the bind's poll
+  assert.deepEqual(t.sleeps.slice(0, 2), [POLL_MS, POLL_MS * 2], t.sleeps.join());
 });
 
 test("1Click's 429: the status read waits Retry-After; a date or none is read too", async () => {
@@ -680,26 +722,33 @@ test("the seed opens only for a bind phase, each copy zeroed after it, under dep
   assert.deepEqual((await opOf(t.w)).txs, [{ chain: "near", hash: "7Yk3pQ" }]);
 });
 
-test("E9: halted while the bind waits on a halt and cleared with it; a wait that is no halt ends the bind phase for the next round", async () => {
+test("E9: every wait of the bind ends the phase (the seed never open across a sleep); halted shows on a halt and clears in the next phase that waits on no halt", async () => {
   const t = await setup(["SUCCESS"]);
   const between: (string | undefined)[] = [];
   t.onTick.fn = (n) => (between.push(t.stages.at(-1)), n === 1 && t.chain.credit(CREDIT));
   const spy = t.deps.bind!;
   let calls = 0;
+  let wentOn = 0;
   const bind: typeof bindDeposit = async (s, a, dps) => {
     calls++;
-    if (calls === 1) {
+    // the halt holds 3 rounds: halted shows once and stays, no into_vault between
+    if (calls <= 3) {
       await dps.onWait?.("halted");
+      wentOn++;
+    }
+    if (calls === 4) {
       await dps.onWait?.("balance"); // the halt lifts; USDC not back yet: the phase ends here
-      assert.fail("the phase went on after a wait that is no halt");
+      wentOn++;
     }
     return spy(s, a, dps);
   };
   const out = await followDeposit(t.args, { ...t.deps, bind });
   assert.equal(out.kind, "done");
-  assert.equal(calls, 2, "bound again on the next round");
+  assert.equal(wentOn, 0, "a phase went on after a wait");
+  assert.equal(calls, 5, "bound again on each next round");
   assert.deepEqual(t.stages, ["in_transit", "into_vault", "halted", "into_vault", "done"]);
-  assert.ok(!between.includes("halted"), "halted cleared in the round the halt lifted, not left for the next bind");
+  const h = between.indexOf("halted");
+  assert.deepEqual(between.slice(h, h + 4), ["halted", "halted", "halted", "into_vault"], `halted between rounds while the halt holds, cleared by the next phase: ${between.join()}`);
 });
 
 test("the seed's U is checked against the op's U before any bind", async () => {
@@ -775,4 +824,288 @@ test("helper-create-u: after SUCCESS, while U reads not_created, the status is r
   assert.deepEqual(reads, [0, 1, 2], "SUCCESS read at round 0, read again in rounds 1 and 2 while U was not created, none once it exists");
   assert.deepEqual(binds, [0, 1, 2, 3]);
   assert.ok(t.ticks() >= 7, "rounds ran after U existed, with no status read");
+});
+
+// ---------- r2: U's money as one sum, refunds per op, the refund move by nonce, no seed across a wait ----------
+const settled = async <T,>(p: Promise<T>) => p.then((v) => ({ ok: true as const, v }), (e: unknown) => ({ ok: false as const, e }));
+const VAULT_MIN = 1_000_000n;
+
+test("C1: two ops on one U, both SUCCESS, both deliveries in U as one credit before the page opens: both done, each its own part", async () => {
+  const t = await setup(["PENDING_DEPOSIT"]);
+  const BADDR = "b".repeat(64);
+  const B = { ...t.args, opId: "dq-B", address: BADDR };
+  const CB = 5_000_000n;
+  const p = perAddress(t.u, { [ADDR]: [["SUCCESS", CREDIT]], [BADDR]: [["SUCCESS", CB]] });
+  t.chain.credit(CREDIT + CB);
+  const deps = { ...t.deps, fetchFn: p.fetchFn, signal: stop(t, 30) };
+  const [a, b] = await Promise.all([settled(followDeposit(t.args, deps)), settled(followDeposit(B, deps))]);
+  assert.ok(a.ok && a.v.kind === "done");
+  assert.ok(b.ok && b.v.kind === "done");
+  assert.equal((await opOf(t.w)).amount_usd, usdOf(CREDIT));
+  assert.equal((await opOf(t.w, "dq-B")).amount_usd, usdOf(CB));
+});
+
+test("C2: SIGN_HOST's deps (no refundMove): a stranger's 1-unit dust in intents and a 1 USDC gift bind, but no op is done before its own SUCCESS", async () => {
+  const t = await setup(["PROCESSING"]);
+  t.onTick.fn = (n) => {
+    if (n === 1) t.chain.heldUsdc = 1n;
+    if (n === 3) t.chain.credit(VAULT_MIN);
+  };
+  await assert.rejects(followDeposit(t.args, { ...t.deps, signal: stop(t, 20) }), /stop/);
+  const op = await opOf(t.w);
+  assert.deepEqual(t.binds.map((b) => b.amount), [VAULT_MIN], "the gift is bound");
+  assert.notEqual(op.stage, "done");
+  assert.notEqual(op.stage, "refunded", "dust under U is no refund of this op");
+});
+
+test("C3: two quotes on one U: A refunded (its origin asset under U in intents), B paid: B done on U's sum, A refunded and never done", async () => {
+  const t = await setup(["PENDING_DEPOSIT"]);
+  const BADDR = "b".repeat(64);
+  const B = { ...t.args, opId: "dq-B", address: BADDR };
+  const CB = 5_000_000n;
+  const scripts: Record<string, (OneClickStatus | [OneClickStatus, bigint])[]> = { [ADDR]: ["PROCESSING", "REFUNDED"], [BADDR]: ["PENDING_DEPOSIT"] };
+  const p = perAddress(t.u, scripts);
+  t.chain.a.held = t.chain.b.held = 452_500_000_000_000_000_000_000n;
+  const ac = new AbortController();
+  const deps = { ...t.deps, fetchFn: p.fetchFn };
+  const a = settled(followDeposit(t.args, { ...deps, signal: ac.signal }));
+  await turn();
+  const b = settled(followDeposit(B, { ...deps, signal: ac.signal }));
+  t.onTick.fn = (n) => {
+    if (n === 4) (t.chain.credit(CB), scripts[BADDR]!.splice(0, 1, ["SUCCESS", CB]));
+    if (n >= 30) ac.abort(new Error("stop"));
+  };
+  const [, rb] = await Promise.all([a, b]);
+  assert.ok(rb.ok && rb.v.kind === "done");
+  const opA = await opOf(t.w);
+  assert.equal(opA.stage, "refunded");
+  assert.equal((await opOf(t.w, "dq-B")).amount_usd, usdOf(CB));
+});
+
+test("C4: the refund move throws before it sends: recorded with its nonce, and signed again with a fresh nonce once that nonce reads unused and its deadline is past on both RPCs", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const moves: { nonce: string; deadline_ms: number }[] = [];
+  const refundMove = async (_u: string, m: { nonce: string; deadline_ms: number }) => {
+    moves.push(m);
+    assert.deepEqual((await opOf(t.w)).follow.move, m, "recorded before it is sent");
+    if (moves.length === 1) throw new TypeError("fetch failed");
+    t.chain.used.add(m.nonce);
+    t.chain.a.held = t.chain.b.held = 0n;
+  };
+  let early = 0;
+  let back = 0;
+  t.onTick.fn = (n) => {
+    // one minute of block time a round: the first move's deadline (5 min) passes after 5 rounds
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000;
+    if (moves.length === 1 && t.chain.a.timeMs <= moves[0]!.deadline_ms) early++;
+    if (moves.length === 2 && ++back === 2) t.chain.credit(CREDIT); // the moved USDC back on the token under U
+  };
+  const out = await followDeposit(t.args, { ...t.deps, refundMove });
+  assert.equal(out.kind, "done");
+  assert.equal(moves.length, 2, "tried again once, and only once");
+  assert.notEqual(moves[1]!.nonce, moves[0]!.nonce, "a fresh nonce");
+  assert.ok(moves[1]!.deadline_ms > moves[0]!.deadline_ms);
+  assert.ok(early >= 3, `rounds ran while the first move could still land (${early}), and it was not sent again then`);
+  assert.equal((await opOf(t.w)).refunded, true);
+
+  // a used nonce (the move landed) is never signed again, past its deadline too, while U's balance has not read 0 yet
+  const u = await setup(["REFUNDED"]);
+  u.chain.a.held = u.chain.b.held = CREDIT;
+  let sends = 0;
+  const landed = async (_u: string, m: { nonce: string }) => void (sends++, u.chain.used.add(m.nonce));
+  u.onTick.fn = () => (u.chain.a.timeMs = u.chain.b.timeMs = u.chain.a.timeMs + 600_000);
+  await assert.rejects(followDeposit(u.args, { ...u.deps, refundMove: landed, signal: stop(u, 12) }), /stop/);
+  assert.equal(sends, 1);
+});
+
+test("C5: with bind.ts, the seed is never open (nor the seed lock held) across a sleep: each wait of the bind ends the phase", async () => {
+  const t = await setup(["SUCCESS"], { bind: bindDeposit });
+  t.chain.credit(CREDIT);
+  const sent: Sent[] = [];
+  const fetchFn = (async (url: string, init?: RequestInit) => {
+    if (url.startsWith(DEPOSIT_STATUS_URL)) return t.oc.fetchFn(url, init);
+    const body = JSON.parse(init!.body as string);
+    const dl = decodeSignedDelegate(new Uint8Array(Buffer.from(body.signed_delegate, "base64")));
+    const fc = dl.actions[0] as { args: Uint8Array };
+    sent.push({ nonce: dl.nonce, p: BigInt(JSON.parse(JSON.parse(Buffer.from(fc.args).toString()).msg).precommitment) });
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  let inside = false;
+  const during: boolean[] = [];
+  const seedLock = async <T,>(fn: () => Promise<T>) => {
+    inside = true;
+    try {
+      return await fn();
+    } finally {
+      inside = false;
+    }
+  };
+  let n = 0;
+  t.onTick.fn = () => {
+    during.push(inside || t.seeds.some((s) => s.some((b) => b !== 0)));
+    if (sent.length > 0 && ++n === 6) {
+      t.chain.a.nonce = t.chain.b.nonce = sent[0]!.nonce;
+      t.chain.credit(0n);
+      t.chain.addRow(sent[0]!.p, { value: CREDIT });
+    }
+  };
+  const out = await followDeposit(t.args, { ...t.deps, fetchFn, seedLock });
+  assert.equal(out.kind, "done");
+  assert.equal(sent.length, 1, "the call out is settled, never sent again at a new nonce");
+  assert.ok(during.length >= 6);
+  assert.equal(during.filter(Boolean).length, 0, `${during.filter(Boolean).length} of ${during.length} sleeps ran with the seed open or its lock held`);
+});
+
+test("C6: once U exists and the bind waits on another read (an RPC behind), the status is not read again", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  const spy = t.deps.bind!;
+  let calls = 0;
+  const reads: number[] = [];
+  const bind: typeof bindDeposit = async (s, a, dps) => {
+    calls++;
+    if (calls === 1) await dps.onWait?.("not_created");
+    else if (calls <= 6) await dps.onWait?.("rpc");
+    return spy(s, a, dps);
+  };
+  const fetchFn = (async (url: string, init?: RequestInit) => (reads.push(t.ticks()), t.oc.fetchFn(url, init))) as typeof fetch;
+  assert.equal((await followDeposit(t.args, { ...t.deps, bind, fetchFn })).kind, "done");
+  assert.equal(calls, 7);
+  assert.ok(reads.length <= 2, `status read in ${reads.length} rounds`);
+});
+
+test("C7: a code_hash hold with bind.ts holds the op, its money under U; the money reached U, so the next quote names the lane's next index (wallet.md: one index until money reaches it)", async () => {
+  const t = await setup(["SUCCESS"], { bind: bindDeposit });
+  t.chain.credit(CREDIT);
+  t.chain.codeHash = "11111111111111111111111111111111";
+  assert.deepEqual(await followDeposit(t.args, t.deps), { kind: "held", why: "code_hash" });
+  assert.equal((await opOf(t.w)).held_id, t.u, "the money under U for withdraw.open");
+  assert.equal(t.chain.a.balance, CREDIT);
+  assert.notEqual((await t.store.get(t.note.id))!.state, "PLANNED");
+  const next = await t.store.planDeposit(1n, pc);
+  assert.equal((next.ref as { i: number }).i, t.i + 8, "the lane's next index (lanes of 8)");
+});
+
+test("R1-F1': a forged REFUNDED, then the real delivery: the credit binds, refunded never shows (nothing under U in intents), and no done without SUCCESS", async () => {
+  const t = await setup(["PROCESSING", "REFUNDED"]);
+  t.onTick.fn = (n) => n === 3 && t.chain.credit(CREDIT);
+  await assert.rejects(followDeposit(t.args, { ...t.deps, signal: stop(t, 10) }), /stop/);
+  assert.deepEqual(t.binds.map((b) => b.amount), [CREDIT]);
+  assert.ok(!t.stages.includes("refunded"), t.stages.join());
+  const op = await opOf(t.w);
+  assert.equal(op.follow.status, "REFUNDED");
+  assert.ok(op.stage !== "refunded" && op.stage !== "done", op.stage);
+});
+
+test("late send: A done on U, then B, quoted earlier on the same U, is paid late: U is still followed, B's money binds and B is done; A keeps its part", async () => {
+  const t = await setup(["PENDING_DEPOSIT"]);
+  const BADDR = "b".repeat(64);
+  const CB = 5_000_000n;
+  const scripts: Record<string, (OneClickStatus | [OneClickStatus, bigint])[]> = { [ADDR]: ["PENDING_DEPOSIT"], [BADDR]: ["PENDING_DEPOSIT"] };
+  const deps = { ...t.deps, fetchFn: perAddress(t.u, scripts).fetchFn, untilFinal: true };
+  // B quoted first (the older quote), A after: both name U (no deposit landed between)
+  const B = { ...t.args, opId: "dq-B", address: BADDR };
+  const now = { at: NOW };
+  const b = settled(followDeposit(B, { ...deps, now: () => now.at }));
+  while ((await t.w.get("ops", "dq-B")) === undefined) await turn();
+  now.at = NOW + 60_000;
+  const a = settled(followDeposit(t.args, { ...deps, now: () => now.at }));
+  while ((await t.w.get("ops", "dq-1")) === undefined) await turn();
+  assert.ok((await opOf(t.w, "dq-B")).created_ms < (await opOf(t.w)).created_ms);
+  let aDone = 0;
+  t.onTick.fn = (n) => {
+    if (n === 2) (t.chain.credit(CREDIT), scripts[ADDR]!.splice(0, 1, ["SUCCESS", CREDIT]));
+    if (aDone === 0 && t.stages.includes("done")) aDone = n;
+    // B's late send, after A is done: 1Click delivers it to U and says SUCCESS for B's address
+    if (aDone > 0 && n === aDone + 3) (t.chain.credit(CB), scripts[BADDR]!.splice(0, 1, ["SUCCESS", CB]));
+    if (n === aDone + 12 && aDone > 0) t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
+  };
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.ok(aDone > 0);
+  assert.ok(ra.ok && ra.v.kind === "done");
+  assert.ok(rb.ok && rb.v.kind === "done", "B done on its late send");
+  assert.deepEqual(t.binds.map((x) => x.amount), [CREDIT, CB]);
+  const opA = await opOf(t.w);
+  const opB = await opOf(t.w, "dq-B");
+  assert.equal(opB.amount_usd, usdOf(CB));
+  assert.equal(opA.amount_usd, usdOf(CREDIT), "A keeps its part");
+  assert.ok(followEnded(opA) && followEnded(opB));
+});
+
+test("late send, no follow of B's own: A's follow holds U until A's deadline is past on both RPCs, so B's late send binds and B is done", async () => {
+  const t = await setup(["PENDING_DEPOSIT"]);
+  const BADDR = "b".repeat(64);
+  const CB = 5_000_000n;
+  const scripts: Record<string, (OneClickStatus | [OneClickStatus, bigint])[]> = { [ADDR]: ["PENDING_DEPOSIT"], [BADDR]: ["PENDING_DEPOSIT"] };
+  const deps = { ...t.deps, fetchFn: perAddress(t.u, scripts).fetchFn, untilFinal: true };
+  // B's op is in the store (its quote answered, then its tab closed): nothing waits on it
+  const ac = new AbortController();
+  ac.abort(new Error("closed"));
+  await assert.rejects(followDeposit({ ...t.args, opId: "dq-B", address: BADDR }, { ...deps, now: () => NOW - 60_000, signal: ac.signal }));
+  let aDone = 0;
+  t.onTick.fn = (n) => {
+    if (n === 2) (t.chain.credit(CREDIT), scripts[ADDR]!.splice(0, 1, ["SUCCESS", CREDIT]));
+    if (aDone === 0 && t.stages.includes("done")) aDone = n;
+    if (aDone > 0 && n === aDone + 3) (t.chain.credit(CB), scripts[BADDR]!.splice(0, 1, ["SUCCESS", CB]));
+    if (aDone > 0 && n === aDone + 12) t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
+  };
+  assert.equal((await followDeposit(t.args, deps)).kind, "done");
+  assert.ok(aDone > 0 && t.ticks() >= aDone + 12, "A resolved only past its deadline");
+  assert.deepEqual(t.binds.map((x) => x.amount), [CREDIT, CB]);
+  const opB = await opOf(t.w, "dq-B");
+  assert.equal(opB.stage, "done");
+  assert.equal(opB.amount_usd, usdOf(CB));
+});
+
+test("N2c: B's SUCCESS reads before its money reaches U: B is not done until U's sum covers A's and B's mins", async () => {
+  const t = await setup(["PENDING_DEPOSIT"]);
+  const BADDR = "b".repeat(64);
+  const B = { ...t.args, opId: "dq-B", address: BADDR };
+  const CB = 5_000_000n;
+  const scripts: Record<string, (OneClickStatus | [OneClickStatus, bigint])[]> = { [ADDR]: [["SUCCESS", CREDIT]], [BADDR]: ["PENDING_DEPOSIT"] };
+  let bDoneAt = -1;
+  const deps: FollowDeps = { ...t.deps, fetchFn: perAddress(t.u, scripts).fetchFn, onStage: (st, f, id) => (t.deps.onStage!(st, f, id), id === "dq-B" && st === "done" && bDoneAt < 0 && (bDoneAt = t.ticks())) };
+  t.chain.credit(CREDIT);
+  const a = followDeposit(t.args, deps);
+  const b = followDeposit(B, deps);
+  assert.equal((await a).kind, "done");
+  // B's SUCCESS first (1Click ahead of the chain, or forged): U's sum is A's alone for 8 rounds
+  scripts[BADDR]!.splice(0, 1, ["SUCCESS", CB]);
+  const from = t.ticks();
+  t.onTick.fn = (n) => n === from + 8 && t.chain.credit(CB);
+  assert.equal((await b).kind, "done");
+  assert.equal((await opOf(t.w, "dq-B")).follow.status, "SUCCESS");
+  assert.ok(bDoneAt >= from + 8, `B done at tick ${bDoneAt}, on A's money (B's arrived at ${from + 8})`);
+  assert.equal((await opOf(t.w, "dq-B")).amount_usd, usdOf(CB));
+});
+
+test("L4: with untilFinal, a done op followed again (a reload) resolves only once its deadline is past on both RPCs, and a late gift binds meanwhile", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  assert.equal((await followDeposit(t.args, t.deps)).kind, "done");
+  assert.equal((await opOf(t.w)).follow.final, undefined);
+  const from = t.ticks();
+  t.onTick.fn = (n) => {
+    if (n === from + 2) t.chain.credit(VAULT_MIN);
+    if (n === from + 6) t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
+  };
+  assert.equal((await followDeposit(t.args, { ...t.deps, untilFinal: true })).kind, "done");
+  assert.ok(t.ticks() >= from + 6, "resolved before the deadline");
+  assert.deepEqual(t.binds.map((b) => b.amount), [CREDIT, VAULT_MIN]);
+  const op = await opOf(t.w);
+  assert.equal(op.follow.final, true);
+  assert.equal(op.amount_usd, usdOf(CREDIT + VAULT_MIN));
+});
+
+test("F5e: a forged REFUNDED with nothing under U inside intents, and a 1 USDC gift: no refund move is through, and the op is never done", async () => {
+  const t = await setup(["PROCESSING", "REFUNDED"]);
+  let moves = 0;
+  t.onTick.fn = (n) => n === 3 && t.chain.credit(VAULT_MIN);
+  await assert.rejects(followDeposit(t.args, { ...t.deps, refundMove: async () => void moves++, signal: stop(t, 12) }), /stop/);
+  const op = await opOf(t.w);
+  assert.equal(moves, 0);
+  assert.equal(op.follow.moved, undefined);
+  assert.notEqual(op.stage, "done");
+  assert.deepEqual(t.binds.map((b) => b.amount), [VAULT_MIN], "the gift is bound all the same");
 });

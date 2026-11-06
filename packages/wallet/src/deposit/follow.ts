@@ -14,21 +14,29 @@
 //   MIN_DEPOSIT or more bound as U's next note from the note store (its lowest note not landed, else a new second
 //   arrival; a note with its call out is settled by bind.ts before anything new is signed). Anything that credits U, a
 //   stranger's gift or a refund's return too, is bound, so nothing under U is left unfollowed.
-// - done: an op is done once 1Click's status of its own address read SUCCESS, and the notes it counts (their ids in
-//   op.follow.notes) cover what 1Click says it delivered and the quote's min_amount_out. Each note counts for one op
-//   only, the oldest op first, and only once the pages on both RPCs hold its leaf for U (whatever its state now: a
-//   withdraw may have begun). A refunded op whose refund move is through counts any note of U.
+// - done: U's money is one sum, never split between its ops (two quotes before a payment name one U, wallet.md:353-361).
+//   An op is done once its own status read SUCCESS and the USDC bound into the vault from U (its notes whose leaf the
+//   pages on both RPCs hold for U, whatever their state now: a withdraw may have begun) is at least the sum of the
+//   checked min_amount_out of every op of U whose own status read SUCCESS. Each done op shows its part of U's sum, oldest
+//   first (what 1Click says it delivered, at least its min, the later ones keeping theirs; the last one the rest), shown
+//   again as the sum grows. With deps.untilFinal (SIGN_HOST) a done op is followed on until its quote's deadline is past
+//   on both RPCs (FollowRecord.final), so an older quote's late send to U is bound and counted.
 // - held: the relayer struck U or refused the call, the bind refused (USDC's code hash moved, a note with another leaf,
-//   the seed not U's), or the pages do not hold a note's leaf. halted while the bind waits on a halt, cleared with it; a
-//   wait that is no halt ends the bind phase and the next round binds again.
-// - refunded: what U holds inside intents.near of an op's origin asset or of NEAR USDC, on both RPCs. A stage, no end:
-//   the rounds go on. The refund move (deps.refundMove) is recorded in the op before it is sent and never sent again
-//   until that balance reads 0.
+//   the seed not U's), or the pages do not hold a note's leaf. halted while the bind waits on a halt, cleared by the next
+//   bind phase that waits on none.
+// - refunded: only for an op whose own status read REFUNDED, once what U holds inside intents.near of its origin asset
+//   or of NEAR USDC reads more than 0 on both RPCs. A stage, no end: U's USDC is still bound each round. With
+//   deps.refundMove (wallet.md §2.4 point 8) the move is recorded in the op with its intent's nonce and deadline before
+//   it is sent, and signed again with a fresh nonce only once U still holds the refund, intents.near reads that nonce
+//   unused (is_nonce_used) and both RPCs' block time is past its deadline; it is through once that balance reads 0 on
+//   both, and the op then needs MIN_DEPOSIT of U's sum (its money back under U as USDC).
 // - Pace: 1 s while a status shows a send in flight or a credit is being bound; else 15 s, doubling to 60 s. Past the
 //   deadline on both RPCs' block time with no send seen, expired shows and only the chain is read, slowly. 1Click's 429
 //   and Retry-After hold that op's status read. A throw that is no refusal pauses and the round runs again; only the
 //   signal ends a follow. No timer ever makes a stage.
-// - The seed: only a bind phase opens it (deps.seed64, under deps.seedLock), and zeroes it once the phase ends.
+// - The seed: only a bind phase opens it (deps.seed64, under deps.seedLock), and zeroes it once the phase ends. Every
+//   wait of the bind ends the phase (bind.ts onWait), so no sleep ever runs with the seed open; the next round binds
+//   again from the call written.
 // - The ops in the wallet store's "ops" (kit messages.ts Operation, src/state.ts op contract) hold the follow's state:
 //   stage, facts, txs (the counted notes' NEAR tx hashes as heard) and under `follow` what a reload needs. U's notes are
 //   the note store's. Nothing secret: no key, words, note secret or signed payload.
@@ -165,7 +173,16 @@ export function followRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs 
 
 /** Both RPCs' final block time is past `deadlineMs` (each read on its own; either unread: not past). */
 export async function pastOnBoth(rpcs: readonly [FollowRpc, FollowRpc], deadlineMs: number): Promise<boolean> {
-  const sides = await Promise.all(
+  const sides = await finalTimes(rpcs);
+  return sides.every((ms) => ms !== null && ms > BigInt(deadlineMs));
+}
+/** The lower of both RPCs' final block times (unix ms), or null when either gives none. */
+export async function lowerFinalMs(rpcs: readonly [FollowRpc, FollowRpc]): Promise<number | null> {
+  const [a, b] = await finalTimes(rpcs);
+  return a === null || b === null ? null : Number(a < b ? a : b);
+}
+async function finalTimes(rpcs: readonly [FollowRpc, FollowRpc]): Promise<(bigint | null)[]> {
+  return await Promise.all(
     rpcs.map(async (r) => {
       try {
         const a = await r.block({ finality: "final" });
@@ -177,7 +194,24 @@ export async function pastOnBoth(rpcs: readonly [FollowRpc, FollowRpc], deadline
       }
     }),
   );
-  return sides.every((ms) => ms !== null && ms > BigInt(deadlineMs));
+}
+/** Whether intents.near holds `nonce` (base64, 32 bytes) used for `account` (is_nonce_used), true or false on both RPCs alike; else null. */
+export async function nonceUsed(intents: string, account: string, nonce: string, rpcs: readonly [FollowRpc, FollowRpc]): Promise<boolean | null> {
+  const args = base64.encode(new TextEncoder().encode(JSON.stringify({ account_id: account, nonce })));
+  const sides = await Promise.all(
+    rpcs.map(async (r) => {
+      try {
+        const res = resultAt(await r.query({ request_type: "call_function", account_id: intents, method_name: "is_nonce_used", args_base64: args, finality: "final" }));
+        const bytes = res?.result;
+        if (res === undefined || !Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) return null;
+        const out: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
+        return typeof out === "boolean" ? out : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return sides[0] !== null && sides[0] === sides[1] ? sides[0]! : null;
 }
 
 const resultAt = (a: unknown, at?: number): Obj | undefined => {
@@ -239,12 +273,23 @@ export interface FollowRecord {
   min_out: string;
   /** 1Click's status of this address has shown a send (any status past PENDING_DEPOSIT). */
   sent?: boolean;
+  /** 1Click's status of this address as last read (one of its seven). */
+  status?: OneClickStatus;
   /** On 1Click's SUCCESS: what it says it delivered (USDC base units; "0" when it names none). */
   delivered?: string;
-  /** The ids of U's notes this op counts, each landed for U on both RPCs and counted by no other op. */
+  /** Once done: the ids of U's notes landed by then (their tx hashes in the op's txs), and the USDC shown as its own. */
   notes?: string[];
-  /** The refund move of U's intents balance is sent: it is never sent again until that balance reads 0. */
-  move?: "sent";
+  bound?: string;
+  /**
+   * The refund move (wallet.md §2.4 point 8), recorded before it is sent: its intent's nonce (base64, 32 bytes) and
+   * deadline (unix ms, from block time). Signed again with a fresh nonce only once U still holds the refund, that nonce
+   * reads unused on intents.near and both RPCs' block time is past its deadline.
+   */
+  move?: { nonce: string; deadline_ms: number };
+  /** The refund move is through: U's intents balance read 0 after it. */
+  moved?: true;
+  /** Done, and the quote's deadline is past on both RPCs: no send to its address can come any more (deps.untilFinal). */
+  final?: true;
   /** Why the op is held. */
   why?: string;
 }
@@ -282,10 +327,16 @@ export interface FollowDeps {
   relayerAccount?: string | null;
   /** INTENTS_CONTRACT of the network unless given (tests). */
   intents?: string | null;
-  /** The refund move (wallet.md §2.4 point 8): moves what U holds inside intents.near to U on the token. */
-  refundMove?: (u: string, signal?: AbortSignal) => Promise<void>;
+  /** The refund move (wallet.md §2.4 point 8): moves what U holds inside intents.near to U on the token, as one intent
+   * signed at `move.nonce` with `move.deadline_ms`. */
+  refundMove?: (u: string, move: { nonce: string; deadline_ms: number }, signal?: AbortSignal) => Promise<void>;
+  /** Resolve a done op only once its quote's deadline is past on both RPCs, U followed till then (SIGN_HOST); else at done. */
+  untilFinal?: boolean;
   now?: () => number;
 }
+
+/** An op no follow reads again: held, or done past its quote's deadline (FollowRecord.final). */
+export const followEnded = (op: Pick<DepositOp, "stage" | "follow">): boolean => op.stage === "held" || (op.stage === "done" && op.follow.final === true);
 
 export class DepositFollowRefused extends Error {
   constructor(detail: string) {
@@ -301,6 +352,8 @@ const FOLLOW_KEYS = ["network", "s", "i", "u", "address", "deadline_ms", "origin
 const ENDS: ReadonlySet<DepositStage> = new Set(["done", "held"]);
 // The bind's waits on a halt (bind.ts onWait): USDC halted on U's read, the relayer's token_halted or relayer_low.
 const HALTS = new Set(["halted", "token_halted", "relayer_low"]);
+/** A refund move's intent deadline past the lower final block time: 5 min. */
+export const REFUND_MOVE_MS = 300_000;
 /** The rounds' pace with nothing in flight: from 15 s, doubling, to 60 s. */
 export const SLOW_MS = 15_000;
 export const SLOW_MAX_MS = 60_000;
@@ -342,7 +395,7 @@ export async function followDeposit(args: FollowArgs, deps: FollowDeps): Promise
   if (!isObj(op) || op.kind !== "deposit" || !isObj(op.follow)) throw new DepositFollowRefused("the op is not a deposit op");
   if (FOLLOW_KEYS.some((k) => op.follow[k] !== fresh[k])) throw new DepositFollowRefused("the op names another deposit");
   const ended = await outcomeOf(op, deps.store);
-  if (ended !== null) return ended;
+  if (ended !== null && (ended.kind === "held" || !deps.untilFinal || op.follow.final === true)) return ended;
   deps.signal?.throwIfAborted();
 
   let byU = runners.get(deps.ops);
@@ -493,7 +546,8 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   // ---------- a bind phase: the seed open (under deps.seedLock), U's next note bound at U's credit ----------
   const bindPhase = async (amount: bigint): Promise<"bound" | "paused" | "held"> => {
     for (const [id, op] of await opsOfU())
-      if (!ENDS.has(op.stage) && (op.follow.sent || op.follow.move || op.stage === "refunded")) await write(id, "into_vault", legFacts(op, "into_vault"));
+      // an op whose refund reads under U inside intents stays refunded: the USDC bound is not its money until it is moved
+      if (!ENDS.has(op.stage) && op.stage !== "halted" && ((op.follow.sent && op.stage !== "refunded") || op.follow.move || op.follow.moved)) await write(id, "into_vault", legFacts(op, "into_vault"));
     let halted = false;
     let out: BindOutcome | "paused";
     try {
@@ -513,11 +567,15 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
           const bindDeps: BindDeps = {
             store, rpcs, fetchFn, sleep, pollMs, signal,
             ...(deps.relayerAccount !== undefined ? { relayerAccount: deps.relayerAccount } : {}),
+            // every wait of the bind ends the phase, so the seed is never open across a sleep; the next round binds
+            // again, from the call written (bind.ts). A halt shows halted first, kept until a phase sees no halt.
             onWait: async (code) => {
-              if (code === "not_created") uMissing = true;
-              if (!HALTS.has(code)) throw new BindPaused(code);
-              halted = true;
-              for (const [id, op] of await opsOfU()) if (!ENDS.has(op.stage) && op.stage === "into_vault") await write(id, "halted", legFacts(op, "halted"));
+              uMissing = code === "not_created";
+              if (HALTS.has(code)) {
+                halted = true;
+                for (const [id, op] of await opsOfU()) if (!ENDS.has(op.stage) && op.stage === "into_vault") await write(id, "halted", legFacts(op, "halted"));
+              }
+              throw new BindPaused(code);
             },
           };
           return await bind(seed, { network, s, i, noteId: note.id, amount }, bindDeps);
@@ -534,8 +592,8 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
         return "held";
       } else throw e;
     }
-    // halted clears when the halt does
-    if (halted) for (const [id, op] of await opsOfU()) if (op.stage === "halted") await write(id, "into_vault", legFacts(op, "into_vault"));
+    // halted clears when a phase sees no halt
+    if (!halted) for (const [id, op] of await opsOfU()) if (op.stage === "halted") await write(id, "into_vault", legFacts(op, "into_vault"));
     if (out === "paused") return "paused";
     uMissing = false;
     if (out.kind === "struck" || out.kind === "refused") {
@@ -545,14 +603,17 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     return "bound";
   };
 
-  // ---------- the counts: each landed note of U goes to the oldest op 1Click says delivered, until that op is covered ----------
+  // ---------- the count: U's money as one sum, never split between its ops ----------
+  // U's landed notes, each read once on both RPCs: ours (U the depositor, its value) or a front-run on P (theirs)
+  const ours = new Map<string, bigint>();
+  const theirs = new Set<string>();
+  // what an op needs of U's sum: the checked min_amount_out once its own status read SUCCESS; MIN_DEPOSIT once its
+  // refund move is through (its money back under U as USDC); nothing before either
+  const needOf = (op: DepositOp): bigint | null => (op.follow.delivered !== undefined ? BigInt(op.follow.min_out) : op.follow.moved ? VAULT_CONSTANTS.MIN_DEPOSIT : null);
   const count = async (): Promise<{ held: boolean; unsure: boolean; free: boolean }> => {
-    const all = await opsOfU();
-    const counted = new Set(all.flatMap(([, op]) => op.follow.notes ?? []));
-    const free: { note: NoteRecord; value: bigint }[] = [];
     let unsure = false;
     for (const { note } of await notesOfU()) {
-      if (note.leaf === undefined || counted.has(note.id)) continue;
+      if (note.leaf === undefined || ours.has(note.id) || theirs.has(note.id)) continue;
       // landed: the pages hold its leaf, whatever its state now (UNSPENT, or HELD and SPENT once a withdraw began)
       const p = await pagesOf(note);
       if (p.state === "mismatch") {
@@ -560,30 +621,31 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
         return { held: true, unsure, free: false };
       }
       if (p.state === "unsure") unsure = true;
-      else if (p.state === "ours") free.push({ note, value: p.value });
+      else if (p.state === "ours") ours.set(note.id, p.value);
+      else theirs.add(note.id);
     }
-    for (const [id, op] of all) {
-      // an op counts notes once 1Click says it delivered; a refunded op once its refund move is through (its own
-      // quote's status is the refund move's, card wallet-refund-move): then any note of U at MIN_DEPOSIT covers it
-      const moved = op.refunded === true && op.follow.move === undefined && op.stage !== "refunded";
-      if (ENDS.has(op.stage) || (op.follow.delivered === undefined && !moved)) continue;
-      const need = moved && op.follow.delivered === undefined ? VAULT_CONSTANTS.MIN_DEPOSIT : [BigInt(op.follow.min_out), BigInt(op.follow.delivered!)].reduce((a, b) => (a > b ? a : b));
-      const mine = op.follow.notes ?? [];
-      let sum = 0n;
-      for (const nid of mine) sum += (await store.get(nid))?.leaf?.value ?? 0n;
-      const took: string[] = [];
-      while (sum < need && free.length > 0) {
-        const f = free.shift()!;
-        took.push(f.note.id);
-        sum += f.value;
-      }
-      if (took.length === 0 && sum < need) continue;
-      const notes = [...mine, ...took];
+    const total = [...ours.values()].reduce((a, b) => a + b, 0n);
+    const all = await opsOfU();
+    const paid = all.filter(([, op]) => op.stage !== "held" && needOf(op) !== null);
+    const need = paid.reduce((a, [, op]) => a + needOf(op)!, 0n);
+    // an op is done once its own status read SUCCESS (or its refund came back) and U's bound sum covers every such op's
+    // need: a gift only adds to the sum, a status alone binds nothing. The sum shown per op, oldest first: what 1Click
+    // says it delivered (at least its min) while the later ones keep their min, the last one the rest; shown again as
+    // U's sum grows (a late delivery, an older quote's late send), never under an op's min.
+    if (paid.length > 0 && total >= need) {
+      const notes = [...ours.keys()];
       const txs = (await Promise.all(notes.map(async (nid) => (await store.get(nid))?.calls ?? []))).flat().flatMap((c) => c.tx_hashes);
-      if (sum >= need) await write(id, "done", { ...(op.refunded ? { refunded: true } : {}), since_ms: op.since_ms ?? now(), amount_usd: usdOf(sum) }, { notes }, txs);
-      else await write(id, "in_transit", legFacts(op, "in_transit"), { notes }, txs);
+      let rest = total;
+      for (const [k, [id, op]] of paid.entries()) {
+        const later = paid.slice(k + 1).reduce((a, [, o]) => a + needOf(o)!, 0n);
+        const own = needOf(op)!;
+        const want = op.follow.delivered !== undefined && BigInt(op.follow.delivered) > own ? BigInt(op.follow.delivered) : own;
+        const take = k === paid.length - 1 ? rest : want < rest - later ? want : rest - later;
+        rest -= take;
+        await write(id, "done", { ...(op.refunded ? { refunded: true } : {}), since_ms: op.since_ms ?? now(), amount_usd: usdOf(take) }, { notes, bound: take.toString() }, txs);
+      }
     }
-    return { held: false, unsure, free: free.length > 0 };
+    return { held: false, unsure, free: total > need };
   };
 
   // ---------- one round ----------
@@ -591,40 +653,55 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   const backoff = new Map<string, number>();
   const round = async (): Promise<boolean> => {
     let fast = false;
-    if ((await opsOfU()).every(([, op]) => ENDS.has(op.stage))) return false;
+    if ((await opsOfU()).every(([, op]) => op.stage === "held")) return false;
     // the chain first: U's own USDC; MIN_DEPOSIT or more is bound as U's next note
     const c = await readCredit(U, token, rpcs);
-    if (c !== null && c >= VAULT_CONSTANTS.MIN_DEPOSIT) {
-      const r = await bindPhase(c);
+    // a note whose call is out (INCOMING, a call written) is settled each round even with U's USDC gone (the call took
+    // it), at the amount that call was signed from: each bind phase ends at its first wait (bindPhase onWait)
+    const out = (await notesOfU()).find(({ note }) => note.leaf === undefined && note.state === "INCOMING" && (note.calls?.length ?? 0) > 0)?.note;
+    const amount = out !== undefined ? out.calls!.at(-1)!.balance : c;
+    if (amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {
+      const r = await bindPhase(amount);
       if (r === "held") return false;
       fast = true;
     }
     const counted = await count();
     if (counted.held) return false;
     if (counted.unsure) fast = true;
-    // what U holds inside intents.near: each open op's origin asset and NEAR USDC (a refund); refunded is a stage, no end
+    // a done op is followed until its quote's deadline is past on both RPCs: a send to it after that cannot come
+    if (deps.untilFinal)
+      for (const [id, op] of await opsOfU()) if (op.stage === "done" && op.follow.final !== true && (await pastOnBoth(rpcs, op.follow.deadline_ms))) await write(id, "done", factsOf(op), { final: true });
+    // what U holds inside intents.near, for an op whose own status read REFUNDED: its origin asset and NEAR USDC (1Click
+    // refunds there, refundType INTENTS). refunded is a stage, no end: U's USDC is still bound each round
     if (intents !== null) {
-      const open = (await opsOfU()).filter(([, op]) => !ENDS.has(op.stage));
-      const assets = [...new Set([usdcId, ...open.map(([, op]) => op.follow.origin)])];
-      const bal = new Map<string, bigint | null>();
-      for (const a of assets) bal.set(a, await readHeld(intents, U, a, rpcs));
-      const heldOf = (op: DepositOp) => (bal.get(op.follow.origin) ?? 0n) + (op.follow.origin === usdcId ? 0n : (bal.get(usdcId) ?? 0n));
-      const read = [...bal.values()].every((v) => v !== null);
-      const any = [...bal.values()].some((v) => v !== null && v > 0n);
-      if (deps.refundMove !== undefined) {
-        const sent = open.filter(([, op]) => op.follow.move === "sent");
-        if (any && sent.length === 0) {
-          // recorded before it is sent: a reload, or a move whose debit is not final yet, never sends it again
-          for (const [id, op] of open) if (heldOf(op) > 0n || !open.some(([, o]) => heldOf(o) > 0n)) await write(id, "refund_move", legFacts(op, "refund_move", true), { move: "sent" });
-          await deps.refundMove(U, signal);
-          await sleep(pollMs);
+      const back = (await opsOfU()).filter(([, op]) => !ENDS.has(op.stage) && op.follow.status === "REFUNDED" && !op.follow.moved);
+      if (back.length > 0) {
+        const assets = [...new Set([usdcId, ...back.map(([, op]) => op.follow.origin)])];
+        const bal: (bigint | null)[] = [];
+        for (const a of assets) bal.push(await readHeld(intents, U, a, rpcs));
+        const read = bal.every((v) => v !== null);
+        const held = bal.some((v) => v !== null && v > 0n);
+        const move = back.find(([, op]) => op.follow.move !== undefined)?.[1].follow.move;
+        if (deps.refundMove === undefined) {
+          if (held) for (const [id, op] of back) if (op.stage !== "refunded" && RANK[op.stage] !== undefined) await write(id, "refunded", legFacts(op, "refunded"));
+        } else if (held) {
+          // a move recorded and not through: signed again only once its nonce reads unused and its deadline is past on
+          // both RPCs (it can no longer land); a throw before the send leaves exactly that, so it is tried again
+          let again = move === undefined;
+          if (move !== undefined && (await nonceUsed(intents, U, move.nonce, rpcs)) === false && (await pastOnBoth(rpcs, move.deadline_ms))) again = true;
+          const t = again ? await lowerFinalMs(rpcs) : null;
+          if (again && t !== null) {
+            const next = { nonce: base64.encode(crypto.getRandomValues(new Uint8Array(32))), deadline_ms: t + REFUND_MOVE_MS };
+            // recorded before it is sent: a reload, or a move whose debit is not final yet, never sends it again
+            for (const [id, op] of back) await write(id, "refund_move", legFacts(op, "refund_move", true), { move: next });
+            await deps.refundMove(U, next, signal);
+          }
           fast = true;
-        } else if (!any && read && sent.length > 0) {
-          for (const [id, op] of sent) await write(id, "in_transit", legFacts(op, "in_transit"), { move: undefined });
+        } else if (read && move !== undefined) {
+          // through: U's intents balance reads 0 on both RPCs after the move; its USDC is bound as U's next note
+          for (const [id, op] of back) await write(id, "in_transit", legFacts(op, "in_transit", true), { move: undefined, moved: true });
+          fast = true;
         }
-      } else {
-        for (const [id, op] of open)
-          if (heldOf(op) > 0n && op.follow.delivered === undefined && (RANK[op.stage] !== undefined || op.stage === "refunded")) await write(id, "refunded", legFacts(op, "refunded"));
       }
     }
     // 1Click's status of each open op: the stage shown only, never back, never an end
@@ -653,6 +730,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
       // a send in flight (1Click has it: known, processing, short of the amount, failed and still processing, or delivered)
       if (sent && st.status !== "REFUNDED") fast = true;
       const follow: Partial<FollowRecord> = {};
+      if (op.follow.status !== st.status) follow.status = st.status;
       if (sent && !op.follow.sent) follow.sent = true;
       if (st.status === "SUCCESS" && op.follow.delivered === undefined) follow.delivered = (st.delivered ?? 0n).toString();
       const stage = STATUS_STAGE[st.status];
@@ -683,7 +761,9 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     for (const w of [...waiters]) {
       const op = (await ops.get("ops", w.opId).catch(() => undefined)) as DepositOp | undefined;
       const o = isObj(op) ? await outcomeOf(op, store).catch(() => null) : null;
-      if (o !== null) w.ok(o);
+      // done: with untilFinal, U is still followed (a late delivery, a gift, an older quote's late send are bound) until
+      // the op's quote's deadline is past on both RPCs, when no send to it can come any more
+      if (o !== null && (o.kind === "held" || !deps.untilFinal || op!.follow.final === true)) w.ok(o);
     }
     if (waiters.size === 0) return;
     if (fast) slow = 0;

@@ -7,9 +7,12 @@
 //   secret) and followed at once. Every stage the follow writes reaches the app in state.ops, posted again on each change.
 // - deposit.confirm { deposit_address }: answered with the stage and facts of the op that names that address (no op:
 //   not_allowed), and each later stage goes out as the request's progress; the op is followed if no follow runs for it.
-// - settle(): each signed-in landing resumes every deposit op not at an end (FOLLOW_ENDS: done, held), so a reload or a
-//   closed tab carries on from its stage, and an op past its deadline (expired, refunded, waiting) reads U's balances on
-//   the chain again: anything that reached U since is bound.
+// - settle(): each signed-in landing resumes every deposit op no follow has ended (wallet follow.ts followEnded: held, or
+//   done past its quote's deadline on both RPCs), so a reload or a closed tab carries on from its stage, an op past its
+//   deadline (expired, refunded, waiting) reads U's balances on the chain again, and a done op's U is followed to its
+//   deadline (an older quote's late send to U is bound). The follows run on the wallet store's handle they opened on:
+//   when that connection closes (another tab's upgrade or delete), storeClosed() ends them, which frees U's lock, and
+//   main.ts settles them again once the store is opened next; a settle() that finds another handle ends them first.
 // - One follower per U across tabs: the lock below, held while any op of U is followed; another tab's follow of U waits
 //   for it. One follower per U (the money is U's: two quotes before a payment name one U): one lock per U across tabs,
 //   FOLLOW_LOCK/<network>/<U>, and in the tab every op of U attaches to U's one follower. The wallet's seed lock is taken
@@ -17,7 +20,7 @@
 //   every follow first (signedOut()).
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { DepositFacts, DepositStage, SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { type DepositOp, followDeposit, DepositFollowRefused, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
+import { type DepositOp, followDeposit, DepositFollowRefused, followEnded, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../wallet/src/deposit/account.ts";
 import { type NoteStore, openNoteStore } from "../../wallet/src/notes/store.ts";
 import type { ApiHost, Deferred, KindContext } from "./api.ts";
@@ -26,8 +29,9 @@ type Kinds = NonNullable<ApiHost["kinds"]>;
 
 export const FOLLOW_LOCK = "ct-wallet/deposit-follow/";
 /**
- * The stages no landing or deposit.confirm follows again: the note read on both RPCs, or held (the bind stopped, the
- * money under U for withdraw.open). Every other op, expired and refunded among them, is read again on each landing.
+ * The stages that end an op's follow: the note read on both RPCs (followed on to its quote's deadline, followEnded), or
+ * held (the bind stopped, the money under U for withdraw.open). Every other op, expired and refunded among them, is read
+ * again on each landing.
  */
 export const FOLLOW_ENDS: ReadonlySet<DepositStage> = new Set(["done", "held"]);
 const FACTS = ["refunded", "hold", "held_id", "since_ms", "amount_usd"] as const;
@@ -49,7 +53,8 @@ const isDepositOp = (v: unknown): v is DepositOp =>
   typeof v === "object" && v !== null && (v as DepositOp).kind === "deposit" && typeof (v as DepositOp).follow === "object" && (v as DepositOp).follow !== null;
 
 export function depositFollows(h: FollowHost) {
-  const running = new Map<string, Promise<void>>();
+  // each op's follow and the signal it runs under: one that is stopping (a sign out, a closed store) is never handed back
+  const running = new Map<string, { p: Promise<void>; signal: AbortSignal }>();
   const listeners = new Map<string, Set<(s: DepositStage) => void>>();
   let abort = new AbortController();
   const rpcs = h.rpcs ?? (() => [followRpc(NEAR_NETWORKS[h.network()].fastnear[0]), followRpc(NEAR_NETWORKS[h.network()].drpc)] as const);
@@ -58,25 +63,42 @@ export function depositFollows(h: FollowHost) {
   // One body per U in this tab, under FOLLOW_LOCK/<network>/<U> across tabs: it opens U's note store once and keeps it
   // while any op of U is followed; each op's followDeposit attaches to U's one follower (wallet follow.ts). No seed
   // lock while it polls: the wallet's seed lock is taken shared only around a bind phase, while the seed is open.
-  type UBody = { pending: Set<Promise<void>>; ready: Promise<NoteStore>; drained: () => void };
+  // dead: its note store never opened (the wallet store would not open); the next follow of U opens a new one
+  type UBody = { pending: Set<Promise<void>>; ready: Promise<NoteStore>; drained: () => void; signal: AbortSignal; dead?: true };
   const bodies = new Map<string, UBody>();
-  const sleep = h.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  // the wallet store handle the follows run on: another one means that connection closed (main.ts reopens the store)
+  let on: WalletStore | null = null;
+  const restart = () => {
+    abort.abort(new Error("the store closed"));
+    abort = new AbortController();
+    on = null;
+  };
+  const sleep0 = h.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  // a pause the follow's signal ends: a stopped follow lets U's lock go at once, not after its pause
+  const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+    new Promise<void>((ok) => {
+      const done = () => (signal.removeEventListener("abort", done), ok());
+      signal.addEventListener("abort", done, { once: true });
+      sleep0(ms).then(done, done);
+    });
   const follow = (id: string, f: FollowRecord): Promise<void> => {
     const had = running.get(id);
-    if (had) return had;
+    if (had && !had.signal.aborted) return had.p;
     const signal = abort.signal;
     const key = `${f.network}/${f.u}`;
     let ub = bodies.get(key);
-    if (ub === undefined) {
+    if (ub === undefined || ub.signal.aborted || ub.dead) {
       let opened!: (n: NoteStore) => void;
       let failed!: (e: unknown) => void;
       const ready = new Promise<NoteStore>((ok, no) => ((opened = ok), (failed = no)));
       ready.catch(() => {});
       let drained!: () => void;
       const empty = new Promise<void>((ok) => (drained = ok));
-      const body: UBody = { pending: new Set(), ready, drained };
+      const body: UBody = { pending: new Set(), ready, drained, signal };
       const hold = async () => {
-        const notes = await openNoteStore(await h.store());
+        const w = await h.store();
+        on ??= w;
+        const notes = await openNoteStore(w);
         opened(notes);
         try {
           await empty;
@@ -92,14 +114,24 @@ export function depositFollows(h: FollowHost) {
     const lm = locks();
     const seedLock = <T,>(fn: () => Promise<T>): Promise<T> => (lm ? (lm.request(WALLET_SEED_LOCK, { mode: "shared", signal }, fn) as Promise<T>) : fn());
     // a throw that is no refusal (the store, a read) pauses and runs again; only the sign out's signal ends it
+    let again = false;
     const one = async () => {
       for (let wait = 1_000; ; wait = Math.min(wait * 2, 60_000)) {
         if (signal.aborted) return;
         try {
-          const notes = await u.ready;
+          let notes: NoteStore;
+          try {
+            notes = await u.ready;
+          } catch {
+            // U's note store did not open: after a pause the op is followed again on a new one (finally below)
+            u.dead = true;
+            again = true;
+            await sleep(wait, signal);
+            return;
+          }
           const ops = await h.store();
           const now = await ops.get("ops", id);
-          if (!isDepositOp(now) || FOLLOW_ENDS.has(now.stage)) return;
+          if (!isDepositOp(now) || followEnded(now)) return;
           await followDeposit({ opId: id, network: f.network, s: BigInt(f.s), i: f.i, u: f.u, address: f.address, deadline_ms: f.deadline_ms, origin: f.origin, min_out: f.min_out }, {
             ops,
             store: notes,
@@ -107,6 +139,7 @@ export function depositFollows(h: FollowHost) {
             seed64: () => h.seed64(),
             seedLock,
             signal,
+            untilFinal: true,
             ...(h.fetch ? { fetchFn: h.fetch } : {}),
             ...(h.sleep ? { sleep: h.sleep } : {}),
             ...(h.now ? { now: h.now } : {}),
@@ -115,20 +148,21 @@ export function depositFollows(h: FollowHost) {
           return;
         } catch (e) {
           if (signal.aborted || e instanceof DepositFollowRefused) return;
-          await sleep(wait).catch(() => {});
+          await sleep(wait, signal);
         }
       }
     };
     const p: Promise<void> = one().finally(() => {
-      running.delete(id);
+      if (running.get(id)?.p === p) running.delete(id);
       u.pending.delete(p);
       if (u.pending.size === 0) {
         if (bodies.get(key) === u) bodies.delete(key);
         u.drained();
       }
+      if (again && !signal.aborted) void follow(id, f);
     });
     u.pending.add(p);
-    running.set(id, p);
+    running.set(id, { p, signal });
     return p;
   };
 
@@ -168,7 +202,7 @@ export function depositFollows(h: FollowHost) {
         const facts: DepositFacts = {};
         for (const k of FACTS) if (found.op[k] !== undefined) (facts as Record<string, unknown>)[k] = found.op[k];
         out = { result: { stage: found.op.stage, ...facts } };
-        if (FOLLOW_ENDS.has(found.op.stage)) return;
+        if (followEnded(found.op)) return;
         let set = listeners.get(found.id);
         if (!set) listeners.set(found.id, (set = new Set()));
         const fn = (s: DepositStage) => ctx.progress(s);
@@ -177,13 +211,19 @@ export function depositFollows(h: FollowHost) {
       })().catch(() => {});
       return { after, answer: () => out };
     },
-    /** Each signed-in landing: every deposit op not at an end is followed again. */
+    /** Each signed-in landing: every deposit op no follow has ended is followed again, on the store open now. */
     async settle(): Promise<void> {
       const ops = await h.store();
+      if (on !== null && on !== ops) restart();
       for (const k of await ops.keys("ops")) {
         const v = await ops.get("ops", k).catch(() => undefined);
-        if (isDepositOp(v) && v.follow.network === h.network() && !FOLLOW_ENDS.has(v.stage)) void follow(k, v.follow);
+        if (isDepositOp(v) && v.follow.network === h.network() && !followEnded(v)) void follow(k, v.follow);
       }
+    },
+    /** The wallet store's connection closed (main.ts onEvent "closed"): every follow ends, U's lock with it; main.ts
+     * calls settle() once the store is opened again. */
+    storeClosed(): void {
+      restart();
     },
     /** This tab's sign out: every follow stops first. */
     signedOut(): void {
@@ -191,7 +231,7 @@ export function depositFollows(h: FollowHost) {
       abort = new AbortController();
     },
     /** Tests: the follows running now. */
-    idle: (): Promise<unknown> => Promise.all(running.values()),
+    idle: (): Promise<unknown> => Promise.all([...running.values()].map((r) => r.p)),
     /** The shell's kinds with deposit.confirm answered here (deposit.quote's op is written by its host's `checked`). */
     withFollow(kinds: Kinds): Kinds {
       return { ...kinds, "deposit.confirm": (p, ctx) => api.kind(p, ctx) };
