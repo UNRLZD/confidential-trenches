@@ -1196,3 +1196,24 @@ test("resume-safe unread: a run whose sweep receipt the first RPC lags on keeps 
   assert.deepEqual(folders(m.keys), [], "removed once the receipt is read" + why(c));
   assert.equal(JSON.parse(readFileSync(m.out, "utf8")).txs.length, Number(c.nonce.get(c.deployer)), "the record lists the sweep" + why(c));
 });
+
+test("resume-safe unread: a removal read that fails on one RPC keeps the key; once both RPCs answer, --sweep-kept removes it", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let down = true;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (down && u === BASE.rpcs[1] && method === "eth_getBalance" && params[1] !== "latest") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "header not found" } }) };
+    return fetch0(u, init);
+  };
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /its rest was not read on https:\/\/base-rpc\.publicnode\.com: .*header not found/.test(w)), j.keys.why.join("; "));
+  down = false;
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.deepEqual(folders(m.keys), [], why(c));
+});
