@@ -13,7 +13,8 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
 import { evmPoolScopeOf, type EvmPoolEvent } from "../src/pool/evm.ts";
-import { SECOND_GAP, evmClaimTaken, evmNextNote, evmRestore } from "../src/pool/evm-restore.ts";
+import { EvmNotFinalError, SECOND_GAP, evmClaimTaken, evmNextNote, evmRestore } from "../src/pool/evm-restore.ts";
+import { jOf } from "../src/pool/queue.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const SCOPE = evmPoolScopeOf("0x00000000000000000000000000000000b1f1f001", 84532n);
@@ -167,4 +168,46 @@ test("evmClaimTaken: a landed note held at another leaf than the taken one is re
   await ns.add({ ref: RET, scope: SCOPE, precommitment: P(RET), state: "UNSPENT", leaf: { value: RUNG, label, commitment: noteCommitment(RUNG, label, P(RET)), leafIndex: 9n } });
   const events = pool([{ pre: P(RET), value: MIN_DEPOSIT }]);
   await assert.rejects(evmClaimTaken(ns, evmNextNote(SEED, SCOPE, events, RET, FINAL).taken), /another leaf/);
+});
+
+test("both wait-for-finality refusals of evmNextNote are an EvmNotFinalError (a not now); a forged commitment or label, or a note no deposit or sell signs on, is a plain Error", () => {
+  const notFinal = (f: () => unknown): boolean => {
+    try {
+      f();
+    } catch (e) {
+      return e instanceof EvmNotFinalError && e.name === "EvmNotFinalError";
+    }
+    assert.fail("no refusal");
+  };
+  // the deposit note taken in a block not final yet
+  assert.ok(notFinal(() => evmNextNote(SEED, SCOPE, poolAt([{ pre: P(U0), value: MIN_DEPOSIT, block: 20n }]), U0, 15n)));
+  // SECOND_GAP pending takes in a row
+  const takes = poolAt([{ pre: P(U0), value: RUNG, block: 10n }, ...Array.from({ length: SECOND_GAP }, (_, n) => ({ pre: P(U0n(n)), value: MIN_DEPOSIT, block: 20n }))]);
+  assert.ok(notFinal(() => evmNextNote(SEED, SCOPE, takes, U0, 15n)));
+  const forged = pool([{ pre: P(U0), value: MIN_DEPOSIT }]);
+  forged[0] = { ...forged[0]!, value: RUNG };
+  const relabeled = pool([{ pre: P(U0), value: MIN_DEPOSIT }]);
+  relabeled[0] = { ...relabeled[0]!, label: 5n };
+  for (const f of [() => evmNextNote(SEED, SCOPE, forged, U0, FINAL), () => evmNextNote(SEED, SCOPE, relabeled, U0, FINAL), () => evmNextNote(SEED, SCOPE, [], { kind: "change", l: L, j: 0 }, FINAL), () => evmNextNote(SEED, SCOPE, [], RET, -1n)])
+    assert.equal(notFinal(f), false);
+});
+
+test("the restore reads past empty notes on U, V and R only (the chains evmNextNote signs on); the A walk stops at its first miss, as the Solana walk does", () => {
+  // U 0's deposit, spent whole to its W; then a note of the seed's at n = 1 of A, V and R under (l, j), each n = 0 empty
+  const l = vaultLabelOf(keccak_256, SCOPE, 1n);
+  const j = jOf(U0);
+  const second = (id: "A" | "V" | "R", n: number): NoteRef => ({ kind: "second", id: id === "R" ? { id, c: "evm", l, j } : { id, l, j }, n });
+  const dep = (k: number, pre: bigint, block: bigint): EvmPoolEvent => {
+    const label = vaultLabelOf(keccak_256, SCOPE, BigInt(k));
+    return { block, blockHash: `0x${"ab".repeat(32)}`, logIndex: 0n, bytes: "", kind: "deposit", state: noteCommitment(RUNG, label, pre), label, value: RUNG, precommitment: pre, nullifier: null, recipient: null, token: null };
+  };
+  const release: EvmPoolEvent = { block: 11n, blockHash: `0x${"ab".repeat(32)}`, logIndex: 0n, bytes: "", kind: "withdraw", state: noteCommitment(0n, l, P({ kind: "change", l, j })), label: null, value: RUNG, precommitment: null, nullifier: noteSecrets(SEED, U0).nullifierHash, recipient: d.freshWallet(SEED, "evm", l, j).address.toLowerCase(), token: null };
+  const events = [dep(1, P(U0), 10n), release, dep(2, P(second("A", 1)), 12n), dep(3, P(second("V", 1)), 13n), dep(4, P(second("R", 1)), 14n)];
+  const got = restored(events);
+  assert.ok(got.includes(refKey(second("V", 1))), "V reads past an empty note");
+  assert.ok(got.includes(refKey(second("R", 1))), "R reads past an empty note");
+  assert.equal(got.includes(refKey(second("A", 1))), false, "A n = 1 behind an empty A n = 0 is not read");
+  // an A note right after the last one found is still found
+  const a0 = [dep(1, P(U0), 10n), release, dep(2, P(second("A", 0)), 12n)];
+  assert.ok(restored(a0).includes(refKey(second("A", 0))));
 });
