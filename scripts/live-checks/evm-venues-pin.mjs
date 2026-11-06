@@ -25,7 +25,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { CHAINS, EIP1967, deploymentFile, gettersOf, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+import { CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-venues-pin";
 const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
@@ -40,10 +40,12 @@ const PINS = [
 // the sell delegate's redeploys alone, newest first: card evm-selldelegate-exact-debit's, then card evm-sell-v4's
 const SELL_KEYS = ["evm-selldelegate-exact-debit", "evm-sell-v4"];
 const sellFile = (k, c) => path.join(path.dirname(fileURLToPath(import.meta.url)), `${k}.${c}.json`);
-/** pool-evm-deploy's record of `chain`, its SellDelegate the newest redeploy's where one has a record */
-export function recordOf(chain) {
-  if (!existsSync(deploymentFile(chain))) return null;
-  const d = JSON.parse(readFileSync(deploymentFile(chain), "utf8"));
+/** pool-evm-deploy's record of `chain`, its SellDelegate the newest redeploy's where one has a record; a mainnet's
+ * (card pool-evm-deploy-mainnet: the owner's paste, contracts/pool-evm/deployments/<chain>.json) only from a real run */
+export function recordOf(chain, file = deploymentFile(chain)) {
+  if (!existsSync(file)) return null;
+  const d = JSON.parse(readFileSync(file, "utf8"));
+  if (Object.hasOwn(MAINNETS, chain) && (d.chain !== chain || d.dryRun !== false)) throw new Error(`${file} is not ${chain}'s real run`);
   const f = SELL_KEYS.map((k) => sellFile(k, chain)).find(existsSync);
   if (!f) return d;
   const s = JSON.parse(readFileSync(f, "utf8"));
@@ -51,19 +53,20 @@ export function recordOf(chain) {
   return { ...d, contracts: { ...d.contracts, SellDelegate: s.contracts.SellDelegate } };
 }
 
-/** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record */
+/** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record: the testnets, then the
+ * mainnets */
 export function deployed(venues = evmPoolVenues(), read = recordOf) {
-  return Object.keys(CHAINS).filter((c) => Object.hasOwn(venues, c)).map((c) => [c, read(c)]).filter(([, d]) => d !== null);
+  return [...Object.keys(CHAINS), ...Object.keys(MAINNETS)].filter((c) => Object.hasOwn(venues, c)).map((c) => [c, read(c)]).filter(([, d]) => d !== null);
 }
 
-export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs = CHAINS[chain].rpcs, sleep }) {
+export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs = chainOf(chain).rpcs, sleep }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
     ok &&= pass;
     lines.push(`${pass ? "PASS" : "FAIL"} ${text}`);
   };
-  const c = CHAINS[chain];
+  const c = chainOf(chain);
   // the pins against the record, and the chain's WETH and routers against pool-evm-deploy's
   say(venue.chainId === Number(BigInt(c.chainId)), `the venue's chain id ${venue.chainId} is ${chain}'s ${BigInt(c.chainId)}`);
   const want = [];
@@ -77,8 +80,10 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
   say(lower(venue.poolManager) === lower(c.poolManager.address), `the PoolManager ${venue.poolManager ?? "(none)"} is pool-evm-deploy's ${c.poolManager.address}`);
   const routers = c.router ? [lower(c.router.address)] : [];
   say(JSON.stringify(venue.routers.map(lower)) === JSON.stringify(routers), `the routers ${JSON.stringify(venue.routers)} are pool-evm-deploy's ${JSON.stringify(routers)}`);
-  say(venue.middles.length === 0, `no middle is listed: ${JSON.stringify(venue.middles)}`);
-  for (const p of operatorProblems(rpcs, { chain })) say(false, p);
+  // a testnet lists no middle; a mainnet's middles (Base's USDC, Robinhood's USDG) are the kit's route list, not a pin
+  if (Object.hasOwn(CHAINS, chain)) say(venue.middles.length === 0, `no middle is listed: ${JSON.stringify(venue.middles)}`);
+  // a dry run's record (an anvil fork, the mainnet rehearsal) is read on loopback only, as pool-evm-deploy reads it
+  for (const p of operatorProblems(rpcs, { chain, dryRun: d.dryRun === true })) say(false, p);
   // the RPCs: the chain's id, then the newest block both have
   const two = rpcs.slice(0, 2);
   const heads = [];

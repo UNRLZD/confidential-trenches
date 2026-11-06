@@ -8,12 +8,12 @@
 //   nothing for 40 min, and a stuck deploy on a chain whose suggested tip is 0 (as Robinhood's is).
 //   node --test contracts/pool-evm/test/deploy-run.test.mjs     (after a forge build: it reads out/)
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { CHAINS, DUST, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { ORDER, createAddress, main } from "../script/deploy.mjs";
+import { CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
+import { MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, addressOf, createAddress, deployedElsewhere, initProblems, main, outflowOf } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
@@ -57,7 +57,7 @@ const parse = (raw) => {
 
 /** A mock chain and a virtual clock. `on` hooks: lose(t) -> true loses that send's answer; afterMine(chain). */
 function chain(on = {}) {
-  const c = { base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
+  const c = { id: on.id ?? "0x14a34", calls: [], base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
   const g = (m, k) => m.get(k.toLowerCase()) ?? 0n;
   const l1Of = (len) => c.l1Scale * (len > 100n ? len : 100n);
   const costOf = (t) => t.gas * t.maxFee + t.value + l1Of(t.len);
@@ -73,14 +73,17 @@ function chain(on = {}) {
       if (t.nonce !== g(c.nonce, c.deployer) || t.maxFee < c.base) break;
       c.pool.shift();
       const used = t.to ? 21000n : (t.gas * 10n) / 12n;
-      const fee = used * (c.base + (t.tip < t.maxFee - c.base ? t.tip : t.maxFee - c.base)) + l1Of(t.len);
+      const price = c.base + (t.tip < t.maxFee - c.base ? t.tip : t.maxFee - c.base);
+      // on.arb: an Arbitrum-shaped receipt, the L1 part paid as gas inside gasUsed (gasUsedForL1), with no l1Fee
+      const l1Gas = on.arb ? (l1Of(t.len) + price - 1n) / price : 0n;
+      const fee = on.arb ? (used + l1Gas) * price : used * price + l1Of(t.len);
       if (g(c.bal, c.deployer) < t.value + fee) continue; // dropped: it cannot pay at execution
       c.bal.set(c.deployer, g(c.bal, c.deployer) - t.value - fee);
       let ca = null;
       if (t.to) c.bal.set(t.to, g(c.bal, t.to) + t.value);
       else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
       c.nonce.set(c.deployer, t.nonce + 1n);
-      c.receipts.set(hash, { status: "0x1", contractAddress: ca, gasUsed: "0x" + used.toString(16), from: c.deployer });
+      c.receipts.set(hash, { status: "0x1", contractAddress: ca, effectiveGasPrice: "0x" + price.toString(16), from: c.deployer, ...(on.arb ? { gasUsed: "0x" + (used + l1Gas).toString(16), gasUsedForL1: "0x" + l1Gas.toString(16) } : { gasUsed: "0x" + used.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16) }) });
       on.afterMine?.(c, t);
     }
   };
@@ -89,8 +92,10 @@ function chain(on = {}) {
   c.fetch = async (url, init) => {
     c.mine();
     const { method, params } = JSON.parse(init.body);
+    c.calls.push({ url, method, params });
+    if (on.limited?.(method, params, c)) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
     switch (method) {
-      case "eth_chainId": return ok("0x14a34");
+      case "eth_chainId": return ok(c.id);
       case "eth_getBlockByNumber": return ok({ baseFeePerGas: "0x" + c.base.toString(16) });
       case "eth_maxPriorityFeePerGas": return ok("0x" + c.tip.toString(16));
       case "eth_estimateGas": return ok(params[0].to ? "0x5208" : "0x" + (600000).toString(16));
@@ -107,6 +112,7 @@ function chain(on = {}) {
       case "eth_sendRawTransaction": {
         const t = parse(params[0]);
         const hash = keccak(params[0]);
+        on.sent?.(params[0], hash, c);
         if (c.pool.some((p) => p.hash === hash)) return err("already known");
         if (t.nonce < g(c.nonce, c.deployer)) return err("nonce too low");
         const at = c.pool.findIndex((p) => p.t.nonce === t.nonce);
@@ -138,7 +144,7 @@ function chain(on = {}) {
 
 /** Runs main() on the mock with the funder sending the printed need `fundDelay` virtual ms after the waiting line;
  * `onLine(line, c)` sees every printed line. Returns the run's outcome and the chain. */
-async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [] } = {}) {
+async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [], head = ["--chain", "base-sepolia", "--rpc", "https://mock.invalid"], io = {}, outArg = true, out: out0 } = {}) {
   const exits = [];
   t.mock.method(process, "exit", (code) => void exits.push(code));
   const realFetch = globalThis.fetch;
@@ -152,11 +158,11 @@ async function run(t, c, { ret = E, fundDelay = 0, onLine, args = [] } = {}) {
   };
   t.mock.method(console, "log", see);
   t.mock.method(console, "error", see);
-  const out = path.join(TMP, `${t.name.replace(/\W+/g, "-")}.json`);
+  const out = out0 ?? path.join(TMP, `${t.name.replace(/\W+/g, "-").slice(0, 80)}.json`);
   let error = null;
   const before = process.exitCode;
   try {
-    await main(["--chain", "base-sepolia", "--return", ret, "--rpc", "https://mock.invalid", "--out", out, "--no-build", ...args], c.io);
+    await main([...head, ...(ret === null ? [] : ["--return", ret]), ...(outArg ? ["--out", out] : []), "--no-build", ...args], { ...c.io, ...io });
   } catch (e) {
     error = e;
   } finally {
@@ -208,6 +214,17 @@ test("an L1 fee that triples while the run waits for funding does not strand the
   const r = await run(t, c, { onLine: (l, ch) => l.startsWith("deploy: waiting for") && (ch.l1Scale *= 3n) });
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   settled(c, r);
+});
+
+test("a funding wait whose balance read meets a burst of 429s keeps waiting: the run is funded, deploys and sweeps (the Solana devnet rehearsal's run ended on one, 5 Nov 18:47Z)", OPTS, async (t) => {
+  let waiting = false;
+  let limited = 0;
+  const c = chain({ limited: (m, p, ch) => waiting && m === "eth_getBalance" && p[0].toLowerCase() === ch.deployer && limited < RPC_TRIES && ++limited });
+  const r = await run(t, c, { onLine: (l) => l.startsWith("deploy: waiting for") && (waiting = true) });
+  assert.equal(limited, RPC_TRIES, "every try of one read was rate-limited" + why(c));
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.ok(c.logs.some((l) => /^deploy: the run key's balance not read \(eth_getBalance: HTTP 429.*\): reading it again/.test(l)), why(c));
 });
 
 test("--return is refused when zero, the run key, of a bad EIP-55 checksum or an account with code; nothing is sent", OPTS, async (t) => {
@@ -302,4 +319,718 @@ test("--only takes the sell delegate alone: any other contract, or none named, i
     assert.match(String(r.error?.message), /--only is one of SellDelegate/, String(only));
     assert.equal(c.deployer, null, "no run key");
   }
+});
+
+// ---- the mainnets (card pool-evm-deploy-mainnet): the owner's paste runs deploy.mjs --mainnet --chain <base|robinhood> ----
+const BASE = MAINNETS.base;
+const MAIN = ["--chain", "base", "--mainnet", "--rpc", BASE.rpcs[0]];
+/** a mainnet chain (Base's id) where the return address E is a wallet in use (it holds ETH); a run's own key folder
+ * and record path in a fresh folder */
+const mainnet = (on = {}) => {
+  const c = chain({ id: BASE.chainId, ...on });
+  c.bal.set(E, 10n ** 15n);
+  c.e0 = 10n ** 15n;
+  return c;
+};
+const room = (t) => {
+  const dir = mkdtempSync(path.join(TMP, "m-"));
+  const out = path.join(dir, "base.json");
+  return { dir, keys: path.join(dir, "keys"), out, journal: path.join(dir, "base.journal.json"), io: { keysBase: path.join(dir, "keys"), recordOf: () => out, deployedElsewhere: async () => null } };
+};
+const folders = (keys) => (existsSync(keys) ? readdirSync(keys) : []);
+
+test("mainnet: --mainnet goes with a mainnet chain on its own first RPC (or a loopback fork with --out); a mainnet id without --mainnet is refused; no key is made", OPTS, async (t) => {
+  for (const [head, re, outArg] of [
+    [["--chain", "base", "--rpc", BASE.rpcs[0]], /--mainnet/, false],
+    [["--chain", "base-sepolia", "--mainnet", "--rpc", BASE.rpcs[0]], /--mainnet is for base, robinhood/, false],
+    [["--chain", "base", "--mainnet", "--rpc", "https://evil.example"], /https:\/\/mainnet\.base\.org/, false],
+    [["--chain", "base", "--mainnet", "--rpc", BASE.rpcs[0]], /--out .*loopback/, true],
+    [["--chain", "base", "--mainnet", "--rpc", "http://127.0.0.1:8545"], /needs --out/, false],
+  ]) {
+    const c = mainnet();
+    const m = room(t);
+    const r = await run(t, c, { head, io: m.io, outArg, out: m.out });
+    assert.match(String(r.error?.message), re, head.join(" ") + why(c));
+    assert.equal(c.deployer, null, "no run key");
+    assert.deepEqual(folders(m.keys), [], "no key folder");
+  }
+});
+
+test("mainnet: --return must be a wallet in use, an account with no code holding ETH on both RPCs; the funding line says to send from it", OPTS, async (t) => {
+  const c = mainnet();
+  c.bal.set(E, 0n);
+  const m = room(t);
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /holds no ETH on https:\/\/mainnet\.base\.org/, why(c));
+  assert.equal(c.deployer, null, "no run key");
+  // held on the first RPC only: the second's answer counts too
+  const c2 = mainnet();
+  const fetch0 = c2.fetch;
+  c2.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_getBalance" && u === BASE.rpcs[1] && params[0] === E) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x0" }) };
+    return fetch0(u, init);
+  };
+  const r2 = await run(t, c2, { head: MAIN, io: room(t).io, outArg: false, out: room(t).out });
+  assert.match(String(r2.error?.message), /holds no ETH on https:\/\/base-rpc\.publicnode\.com/, why(c2));
+  // a wallet in use: the run goes on, and the funding line names it as the sender
+  const c3 = mainnet();
+  const m3 = room(t);
+  const r3 = await run(t, c3, { head: MAIN, io: m3.io, outArg: false, out: m3.out });
+  assert.equal(r3.error, null, String(r3.error?.message) + why(c3));
+  // the need in wei and, exactly, in the chain's own unit (ETH)
+  const line = c3.logs.find((l) => l.startsWith("deploy: send exactly "));
+  const w = String(line).match(/^deploy: send exactly (\d+) wei \((\d+)(?:\.(\d{1,18}))? ETH\) to (0x[0-9a-f]{40}) from (0x[0-9a-f]{40}), the address you passed$/);
+  assert.ok(w, String(line) + why(c3));
+  assert.equal(BigInt(w[1]), c3.fundWei);
+  assert.equal(BigInt(w[2]) * 10n ** 18n + BigInt((w[3] ?? "").padEnd(18, "0")), c3.fundWei, "the ETH figure is the wei figure exactly");
+  assert.deepEqual([w[4], w[5]], [c3.deployer, E]);
+});
+
+test("mainnet: the run key is kept 0700/0600 until swept, every transaction is journaled before its send, the final reads are on both RPCs, then the key and the journal are removed and no key is left in a log or a file", OPTS, async (t) => {
+  const m = room(t);
+  let key = null;
+  const unjournaled = [];
+  const c = mainnet({
+    sent: (raw, hash) => {
+      const j = existsSync(m.journal) ? readFileSync(m.journal, "utf8") : "";
+      if (!j.includes(hash)) unjournaled.push(hash);
+    },
+  });
+  const r = await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (!l.startsWith("deploy: waiting for")) return;
+      const [f] = folders(m.keys);
+      const dir = path.join(m.keys, f);
+      assert.equal(statSync(m.keys).mode & 0o777, 0o700);
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+      assert.equal(statSync(path.join(dir, "key")).mode & 0o777, 0o600);
+      key = readFileSync(path.join(dir, "key"), "utf8").trim();
+      assert.equal(addressOf(bytes(key)), c.deployer, "the kept key is the run key");
+      assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.folder, f, "the journal names the key folder before any funding");
+    },
+  });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.ok(key, "the key was kept during the run");
+  assert.deepEqual(unjournaled, [], "every transaction journaled before its send");
+  for (const u of BASE.rpcs) {
+    for (const n of ORDER) assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getCode" && x.params[0] === r.record.contracts[n].address), `${n}'s code read on ${u}`);
+    assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getBalance" && x.params[0] === c.deployer), `the key's rest read on ${u}`);
+  }
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(existsSync(m.journal), false, "the journal is removed once the record is written and the key is gone");
+  assert.ok(!c.logs.some((l) => l.toLowerCase().includes(key.slice(2).toLowerCase())), "no log line holds the key");
+  for (const f of readdirSync(m.dir)) if (statSync(path.join(m.dir, f)).isFile()) assert.ok(!readFileSync(path.join(m.dir, f), "utf8").includes(key.slice(2)), `${f} holds the key`);
+  assert.ok(c.logs.some((l) => l === `deploy: done. Next: node scripts/live-checks/pool-evm-deploy.mjs --deployment ${path.relative(process.cwd(), m.out)}`), why(c));
+});
+
+test("mainnet: a run whose record exists is refused before any key, naming the live check to run alone", OPTS, async (t) => {
+  const m = room(t);
+  writeFileSync(m.out, "{}\n");
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /exists: the pool is deployed on base: run its live check alone: node scripts\/live-checks\/pool-evm-deploy\.mjs --deployment /, why(c));
+  assert.equal(c.deployer, null, "no run key");
+});
+
+test("mainnet: a stopped run whose key still holds ETH keeps it; a new run is refused until --sweep-kept sends it back to the return address only, read on both RPCs; then a new run moves the journal aside", OPTS, async (t) => {
+  const m = room(t);
+  // stopped during the funding wait; the funding lands after the late-funding watch: the key holds the need
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 120_000, onLine: (l) => l.startsWith("deploy: waiting for") && process.emit("SIGTERM", "SIGTERM") });
+  assert.match(String(r.error?.message), /stopped by SIGTERM/, why(c));
+  assert.equal(c.balanceOf(c.deployer), c.fundWei, "the late funding sits on the key");
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.deepEqual(folders(m.keys), [j.keys.folder]);
+  assert.ok(c.logs.some((l) => l.includes("--sweep-kept")), why(c));
+  // a new run to another address is refused while the key is kept (the same address resumes, the test below)
+  const r2 = await run(t, c, { head: MAIN, ret: "0x2222222222222222222222222222222222222222", io: m.io, outArg: false, out: m.out });
+  assert.match(String(r2.error?.message), /resumes only to the run's return address/, why(c));
+  // --sweep-kept to any other address is refused
+  const other = "0x1111111111111111111111111111111111111111";
+  const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: other, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r3.error?.message), /goes back only to the run's return address/, why(c));
+  // --sweep-kept: the key's ETH back to E, the key folder removed once both RPCs read it at most DUST
+  const e0 = c.balanceOf(E);
+  c.calls.length = 0;
+  const r4 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r4.error, null, String(r4.error?.message) + why(c));
+  assert.ok(c.balanceOf(E) - e0 > (c.fundWei * 9n) / 10n, `E got back ${c.balanceOf(E) - e0} of ${c.fundWei}${why(c)}`);
+  assert.ok(c.balanceOf(c.deployer) <= DUST);
+  for (const u of BASE.rpcs) assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getBalance" && x.params[0] === c.deployer), `the key's rest read on ${u}`);
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "removed");
+  // a new run: the journal (its key removed) is moved aside and the run goes on
+  const c5 = mainnet();
+  const r5 = await run(t, c5, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r5.error, null, String(r5.error?.message) + why(c5));
+  assert.ok(readdirSync(m.dir).some((f) => /^base\.stopped-\d+T?\d*Z?\.journal\.json$/.test(f)), readdirSync(m.dir).join(","));
+});
+
+test("mainnet: each contract's init code is pinned in deploy.mjs (forge's out/ is the pin; one byte off is refused)", OPTS, async () => {
+  assert.deepEqual(Object.keys(MAINNET_INIT), ORDER);
+  for (const n of ORDER) {
+    const code = init(n);
+    assert.equal(initProblems(n, code), null, n);
+    const off = code.slice(0, -2) + (code.endsWith("00") ? "01" : "00");
+    assert.match(String(initProblems(n, off)), new RegExp(`${n}: init code keccak256 .* not the pinned`), n);
+  }
+});
+
+test("mainnet: a run stopped after two deploys keeps its key and writes no record; the same paste resumes with that key, reuses both contracts once read back on both RPCs as the build's, deploys only the rest, and its record lists every transaction", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l) => l.startsWith("deploy: PrivacyPoolSimple ") && process.emit("SIGTERM", "SIGTERM") });
+  assert.match(String(r.error?.message), /stopped by SIGTERM/, why(c));
+  assert.equal(existsSync(m.out), false, "a stopped mainnet run writes no record: the record is the one-deploy guard");
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(c.logs.some((l) => /made 2 of 5 contracts: the same paste resumes with this key/.test(l)), why(c));
+  const made = Object.fromEntries(j.txs.filter((x) => x.contract && x.landed).map((x) => [x.contract, x.address]));
+  assert.deepEqual(Object.keys(made), ["WithdrawalVerifier", "PrivacyPoolSimple"]);
+  const deployer = c.deployer;
+  c.calls.length = 0;
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  settled(c, r2);
+  assert.equal(r2.record.deployer, deployer, "the same key");
+  for (const [n, a] of Object.entries(made)) {
+    assert.equal(r2.record.contracts[n].address, a, `${n} reused`);
+    for (const u of BASE.rpcs) assert.ok(c.calls.some((x) => x.url === u && x.method === "eth_getCode" && x.params[0] === a), `${n} read back on ${u} before its reuse`);
+  }
+  assert.deepEqual(Object.keys(r2.record.contracts), ORDER);
+  for (const n of ORDER) assert.equal(c.created.filter((d) => createdBy(d) === n).length, 1, `${n} made once`);
+  assert.ok(c.logs.some((l) => l.startsWith("deploy: resuming the stopped run with its key: WithdrawalVerifier ") && l.includes("reused")), why(c));
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(existsSync(m.journal), false, "the journal is removed");
+});
+
+// ---- the mainnet paste's review (round 1): each case a way the paste could lose or strand the owner's ETH ----
+const lineOf = (c, re) => c.logs.find((l) => re.test(l));
+/** a run stopped by SIGTERM once the pool is made: its key is kept for the same paste */
+async function stoppedAtPool(t, c, m) {
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l) => l.startsWith("deploy: PrivacyPoolSimple ") && process.emit("SIGTERM", "SIGTERM") });
+  assert.match(String(r.error?.message), /stopped by SIGTERM/, why(c));
+}
+
+test("mainnet review: a resume whose kept key holds the need asks for nothing; one holding part of it asks only for the shortfall", OPTS, async (t) => {
+  for (const part of ["all", "half"]) {
+    const m = room(t);
+    const c = mainnet();
+    await stoppedAtPool(t, c, m);
+    c.logs.length = 0;
+    // as if the stopped run had been killed before its sweep: the key still holds ETH
+    c.bal.set(c.deployer, part === "all" ? 10n ** 16n : 0n);
+    let need = null;
+    const r = await run(t, c, {
+      head: MAIN, io: m.io, outArg: false, out: m.out,
+      onLine: (l, ch) => {
+        const n = l.match(/^deploy: max fee \d+ wei\/gas \(tip \d+\); need (\d+) wei/);
+        if (n && part === "half") (need = BigInt(n[1])), ch.bal.set(ch.deployer, need / 2n);
+      },
+    });
+    assert.equal(r.error, null, String(r.error?.message) + why(c));
+    if (part === "all") {
+      assert.equal(lineOf(c, /^deploy: (send exactly|waiting for)/), undefined, "no transfer asked for" + why(c));
+      assert.ok(lineOf(c, /^deploy: the run key 0x[0-9a-f]{40} holds \d+ wei, at least the need \d+ wei: send nothing$/), why(c));
+    } else {
+      const short = need - need / 2n;
+      assert.ok(lineOf(c, new RegExp(`^deploy: send exactly ${short} wei \\(`)), `the shortfall ${short} of ${need}` + why(c));
+    }
+    assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  }
+});
+
+test("mainnet review: a run killed during its sweep leaves its record; the paste names --sweep-kept, which takes the journal (its key in use), sends the rest back with the return wallet empty, lists every sweep in the record and removes the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let key = null;
+  let folder = null;
+  const r = await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: waiting for")) (folder = folders(m.keys)[0]), (key = readFileSync(path.join(m.keys, folder, "key"), "utf8"));
+      if (l.startsWith("deploy: sweep ") && !snap) snap = { journal: readFileSync(m.journal, "utf8"), record: existsSync(m.out) ? readFileSync(m.out, "utf8") : null };
+    },
+  });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(snap.record, "the record is written before the sweep");
+  // the disk as a hard kill at the sweep leaves it: that journal and record, the key folder
+  writeFileSync(m.journal, snap.journal);
+  writeFileSync(m.out, snap.record);
+  mkdirSync(path.join(m.keys, folder), { recursive: true });
+  writeFileSync(path.join(m.keys, folder, "key"), key);
+  const sweepTx = JSON.parse(snap.journal).txs.find((x) => x.step.startsWith("sweep")).hash;
+  const again = await run(t, mainnet(), { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(again.error?.message), /exists: the pool is deployed on base: .*its run key is still in use: send its rest back: sh contracts\/pool-evm\/script\/mainnet-deploy\.sh base --sweep-kept/);
+  c.bal.set(E, 0n); // the owner's wallet emptied since: --sweep-kept never needs it to hold ETH
+  c.bal.set(c.deployer, c.balanceOf(c.deployer) + 10n ** 15n); // and a late transfer to the key
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
+  assert.ok(c.balanceOf(E) > 0n, "the rest went back to the return address");
+  const rec = JSON.parse(readFileSync(m.out, "utf8"));
+  assert.ok(rec.txs.some((x) => x.hash === sweepTx), "the killed run's sweep is in the record");
+  assert.equal(rec.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+});
+
+test("mainnet review: a run killed mid-deploy (its key in use, no record) is swept by --sweep-kept", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let key = null;
+  let folder = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: waiting for")) (folder = folders(m.keys)[0]), (key = readFileSync(path.join(m.keys, folder, "key"), "utf8"));
+      if (l.startsWith("deploy: PrivacyPoolSimple ") && !snap) snap = readFileSync(m.journal, "utf8");
+    },
+  });
+  rmSync(m.out, { force: true });
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.join(m.keys, folder), { recursive: true });
+  writeFileSync(path.join(m.keys, folder, "key"), key);
+  c.bal.set(c.deployer, c.balanceOf(c.deployer) + 10n ** 15n);
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+});
+
+test("mainnet review: a 61 s throttle window after the funding (every read HTTP 429, as Robinhood's RPC answers) is waited out: the run deploys and sweeps", OPTS, async (t) => {
+  const m = room(t);
+  let from = null;
+  const c = mainnet({ limited: (meth, p, ch) => from !== null && ch.clock < from + 61_000 });
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l, ch) => l === "deploy: funded" && from === null && (from = ch.clock) });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+});
+
+test("mainnet review: a throw before the run's try (the pool's estimate reverts) leaves no key folder and no journal", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_estimateGas" && !params[0].to && createdBy(params[0].data) === "PrivacyPoolSimple") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: 3, message: "execution reverted" } }) };
+    return fetch0(u, init);
+  };
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /execution reverted/);
+  assert.deepEqual(folders(m.keys), [], "no key folder");
+  assert.equal(existsSync(m.journal), false, "no journal");
+});
+
+test("mainnet review: a resume whose landed verifier does not read back on the second RPC is refused before any funding; the pool is never reused without its verifier", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  const v1 = j.txs.find((x) => x.contract === "WithdrawalVerifier" && x.landed).address;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_getCode" && u === BASE.rpcs[1] && params[0] === v1) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x" }) };
+    return fetch0(u, init);
+  };
+  c.logs.length = 0;
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r2.error?.message), /WithdrawalVerifier at 0x[0-9a-f]{40} .* landed, but its code does not read back as the build's on https:\/\/base-rpc\.publicnode\.com: nothing was sent/, why(c));
+  assert.equal(lineOf(c, /^deploy: (send exactly|waiting for)/), undefined, "no funding asked for");
+  assert.equal(c.created.filter((d) => createdBy(d) === "WithdrawalVerifier").length, 1, "no second verifier");
+});
+
+test("mainnet review: a send that gets no answer at all (every try a 502, the transaction in the pool) stays journaled and is waited for: the run completes and the record lists it", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  const fetch0 = c.fetch;
+  let lost = null;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_sendRawTransaction" && (lost === params[0] || (lost === null && !parse(params[0]).to && createdBy(parse(params[0]).data) === "UniswapV4Adapter"))) {
+      if (lost === null) (lost = params[0]), await fetch0(u, init);
+      return { ok: false, status: 502, json: async () => null };
+    }
+    return fetch0(u, init);
+  };
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.ok(r.record.txs.some((x) => x.hash === keccak(lost)), "the unanswered deploy is in the record");
+});
+
+test("mainnet review: the init code sent is the bytes checked against the pin, never read again from disk", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  const file = new URL("SellDelegate.sol/SellDelegate.json", OUT_DIR);
+  const orig = readFileSync(file, "utf8");
+  const swapped = JSON.parse(orig);
+  swapped.bytecode.object = swapped.bytecode.object.slice(0, -2) + (swapped.bytecode.object.endsWith("00") ? "01" : "00");
+  let r;
+  try {
+    r = await run(t, c, {
+      head: MAIN, io: m.io, outArg: false, out: m.out,
+      onLine: (l) => {
+        if (l.startsWith("deploy: run key ")) writeFileSync(file, JSON.stringify(swapped)); // after the pin check
+        if (l.startsWith("deploy: max fee ")) writeFileSync(file, orig);
+      },
+    });
+  } finally {
+    writeFileSync(file, orig);
+  }
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(c.created.some((d) => d.startsWith(init("SellDelegate"))), "the pinned SellDelegate bytes were sent");
+});
+
+test("mainnet review: fees are the lower of both RPCs', and a max fee over the cap is refused before any key", OPTS, async (t) => {
+  {
+    const m = room(t);
+    const c = mainnet();
+    const fetch0 = c.fetch;
+    c.fetch = async (u, init) => {
+      const { method } = JSON.parse(init.body);
+      if (method === "eth_getBlockByNumber" && u === BASE.rpcs[0]) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: { baseFeePerGas: "0x" + (c.base * 10n).toString(16) } }) };
+      return fetch0(u, init);
+    };
+    const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+    assert.equal(r.error, null, String(r.error?.message) + why(c));
+    assert.ok(lineOf(c, new RegExp(`^deploy: max fee ${2n * c.base + c.tip} wei/gas`)), "the second RPC's lower fee" + why(c));
+  }
+  {
+    const m = room(t);
+    const c = mainnet();
+    c.base = MAX_FEE_CAP / 2n + 1n;
+    const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+    assert.match(String(r.error?.message), /is over the cap 2000000000 .*nothing was sent/, why(c));
+    assert.deepEqual(folders(m.keys), [], "no key folder");
+    assert.equal(existsSync(m.journal), false);
+  }
+});
+
+test("mainnet review: a pool deployed beyond this checkout (origin/main's record, or the kit's pin) is refused before any key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, io: { ...m.io, deployedElsewhere: async () => "origin/main holds contracts/pool-evm/deployments/base.json" }, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /the pool is deployed on base already: origin\/main holds contracts\/pool-evm\/deployments\/base\.json/);
+  assert.equal(c.deployer, null, "no run key");
+  assert.deepEqual(folders(m.keys), []);
+});
+
+test("mainnet review: the journal and the record are written whole (a new file renamed over the old), never truncated in place", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  // a hard link (a .hold path) to the file before its rewrite: it keeps the old file's inode in use, so no later file
+  // can be given its number. A rename over the path leaves the hold with the old bytes and inode, and the path with
+  // new bytes and another inode; a write in place (truncate, then write) changes the hold's bytes too
+  const holds = {};
+  const hold = (file) => {
+    const at = `${file}.hold`;
+    linkSync(file, at);
+    holds[file] = { at, bytes: readFileSync(file, "utf8"), ino: statSync(at).ino };
+  };
+  const held = (file, what) => {
+    const h = holds[file];
+    assert.ok(h, `${what} was held before its rewrite`);
+    assert.equal(readFileSync(h.at, "utf8"), h.bytes, `${what}'s old file keeps its bytes: it was not written in place`);
+    assert.equal(statSync(h.at).ino, h.ino);
+    assert.notEqual(readFileSync(file, "utf8"), h.bytes, `${what} was rewritten`);
+    assert.notEqual(statSync(file).ino, h.ino, `${what} is a new file after its rewrite`);
+  };
+  let journalChecked = false;
+  const r = await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: waiting for")) hold(m.journal);
+      if (l.startsWith("deploy: SellDelegate ")) held(m.journal, "the journal"), (journalChecked = true);
+      if (l.startsWith("deploy: sweep ") && !holds[m.out]) hold(m.out);
+    },
+  });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(journalChecked, "the journal's rewrite was checked");
+  held(m.out, "the record");
+  assert.deepEqual(readdirSync(m.dir).filter((f) => f.includes(".tmp-")), [], "no temporary file is left");
+});
+
+// ---- the mainnet paste's review (round 2) ----
+/** a run hard-killed when its sweep is sent: the disk as it is then (journal, record, key folder) */
+async function killedAtSweep(t, m, c) {
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (!keyFile && folders(m.keys).length) (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+      if (l.startsWith("deploy: sweep ") && !snap) snap = { journal: readFileSync(m.journal, "utf8"), record: existsSync(m.out) ? readFileSync(m.out, "utf8") : null };
+    },
+  });
+  writeFileSync(m.journal, snap.journal);
+  if (snap.record) writeFileSync(m.out, snap.record);
+  else rmSync(m.out, { force: true });
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  return snap;
+}
+
+test("mainnet review 2: a resumed run killed during its sweep has a record naming every contract; --sweep-kept keeps each deploy's contract, and the record lists every transaction of the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const snap = await killedAtSweep(t, m, c);
+  assert.deepEqual(Object.keys(JSON.parse(snap.record).contracts), MAINNETS.base.contracts, "the record at the kill names all five");
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  const d = JSON.parse(readFileSync(m.out, "utf8"));
+  assert.deepEqual(Object.keys(d.contracts), MAINNETS.base.contracts);
+  for (const n of MAINNETS.base.contracts) {
+    const tx = d.txs.find((x) => x.step === `deploy ${n}`);
+    assert.equal(tx?.contract, n, `${n}'s deploy names its contract`);
+    assert.equal(c.receipts.get(tx.hash).contractAddress, d.contracts[n].address, n);
+  }
+  assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "every transaction of the key" + why(c));
+  assert.deepEqual(folders(m.keys), []);
+});
+
+test("mainnet review 2: --sweep-kept of a run killed in its funding wait watches the key and keeps it while the asked transfer has not landed; once it lands, --sweep-kept sends it back and removes the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  const j = JSON.parse(snap);
+  assert.equal(j.txs.length, 0, "killed before any transaction");
+  // a chain where the owner's transfer of the need lands 120 s from now, after the watch
+  const c2 = mainnet();
+  c2.deployer = j.deployer;
+  c2.fundAt = 120_000;
+  c2.fundWei = BigInt(j.need);
+  rmSync(m.out, { force: true });
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  const sw = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c2));
+  assert.equal(folders(m.keys).length, 1, "the key is kept while its transfer may land" + why(c2));
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
+  assert.equal(c2.balanceOf(j.deployer), BigInt(j.need), "the transfer landed on a key still kept");
+  const e0 = c2.balanceOf(E);
+  const sw2 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw2.error, null, String(sw2.error?.message) + why(c2));
+  assert.ok(c2.balanceOf(E) - e0 > (BigInt(j.need) * 9n) / 10n, "sent back" + why(c2));
+  assert.ok(c2.balanceOf(j.deployer) <= DUST);
+  assert.deepEqual(folders(m.keys), [], "removed once the transfer was swept");
+});
+
+test("mainnet review 2: a resume whose journaled deploy reads no receipt at a spent nonce is refused before any funding, never redeployed", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const j = JSON.parse(readFileSync(m.journal, "utf8"));
+  const vtx = j.txs.find((x) => x.contract === "WithdrawalVerifier").hash;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_getTransactionReceipt" && params[0] === vtx) return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: null }) };
+    return fetch0(u, init);
+  };
+  c.logs.length = 0;
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /deploy WithdrawalVerifier 0x[0-9a-f]{64} at nonce 0: the nonce is spent but no journaled transaction there has a receipt .*nothing was sent/, why(c));
+  assert.equal(lineOf(c, /^deploy: (send exactly|waiting for)/), undefined, "no funding asked for");
+  assert.equal(c.created.filter((d) => createdBy(d) === "WithdrawalVerifier").length, 1, "no second verifier");
+});
+
+test("mainnet review 2: a failed git fetch is refused as itself, never as a pool deployed already; origin/main with no record and a kit with no pin pass", OPTS, async () => {
+  const ok = { status: 0 };
+  const no = { status: 1 };
+  await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "fetch" ? no : ok) }), (e) => /^git fetch origin main failed, so main's record could not be read: nothing was sent/.test(e.message) && !/deployed/.test(e.message));
+  await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "rev-parse" ? no : ok) }), (e) => /^origin\/main is not in this checkout, so main's record could not be read: nothing was sent/.test(e.message));
+  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok) }), null);
+  assert.equal(await deployedElsewhere("base", { git: () => ok }), "origin/main holds contracts/pool-evm/deployments/base.json");
+});
+
+// ---- the mainnet paste's review (round 3) ----
+test("mainnet review 3: a resumed run stopped in its funding wait is unfunded: --sweep-kept watches the key and keeps it while the shortfall the resume asked for may land", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  // the same paste resumes and asks for the shortfall; stopped in the wait; the owner's transfer is slow
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  const j2 = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(j2.keys.state, "kept");
+  c.logs.length = 0;
+  const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r3.error, null, String(r3.error?.message) + why(c));
+  assert.ok(c.logs.some((l) => /watching .* balance/.test(l)), "the key is watched" + why(c));
+  assert.equal(folders(m.keys).length, 1, "the key is kept");
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
+  assert.notEqual(c.fundAt, null, "the asked transfer is still to land");
+  c.clock = c.fundAt;
+  c.mine();
+  const r4 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r4.error, null, String(r4.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, "once it lands, it is sent back" + why(c));
+});
+
+test("mainnet review 3: a funding-wait key holding part of its need is kept by every --sweep-kept (a sweep it sent is no reading of the need) until the rest lands", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  const j = JSON.parse(snap);
+  const need = BigInt(j.need);
+  const c2 = mainnet();
+  c2.deployer = j.deployer;
+  c2.bal.set(j.deployer.toLowerCase(), need / 2n);
+  c2.fundAt = 1e9;
+  c2.fundWei = need - need / 2n;
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  for (const pass of [1, 2]) {
+    c2.logs.length = 0;
+    const s = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+    assert.equal(s.error, null, String(s.error?.message) + why(c2));
+    assert.ok(c2.logs.some((l) => /watching .* balance/.test(l)), `pass ${pass} watches` + why(c2));
+    assert.equal(folders(m.keys).length, 1, `pass ${pass} keeps the key`);
+  }
+  c2.clock = c2.fundAt;
+  c2.mine();
+  const s3 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(s3.error, null, String(s3.error?.message) + why(c2));
+  assert.ok(c2.balanceOf(j.deployer) <= DUST, "the rest is sent back once it lands" + why(c2));
+  assert.deepEqual(folders(m.keys), [], "once the rest has landed and is swept, the key is removed" + why(c2));
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "removed");
+});
+
+test("mainnet review 3: a settled run's final record reads no receipt over RPC: an outage once its key is removed still leaves a record of every transaction", OPTS, async (t) => {
+  const m = room(t);
+  let raised = false;
+  let down = false;
+  const c = mainnet();
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => (down ? { ok: false, status: 503, json: async () => null } : fetch0(u, init));
+  const r = await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l, ch) => {
+      // the base fee jumps once the first sweep is sent, so a cancel replaces it
+      if (l.startsWith("deploy: sweep ") && !raised) (raised = true), (ch.base *= 10n);
+      if (/its key folder is removed/.test(l)) down = true;
+    },
+  });
+  down = false;
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  const d = JSON.parse(readFileSync(m.out, "utf8"));
+  assert.equal(d.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
+});
+
+const partFunded = async (t, on = {}) => {
+  const m = room(t);
+  const c = mainnet(on);
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  const j = JSON.parse(snap);
+  const need = BigInt(j.need);
+  const c2 = mainnet(on);
+  c2.deployer = j.deployer;
+  c2.bal.set(j.deployer.toLowerCase(), need / 2n);
+  c2.fundAt = 1e9;
+  c2.fundWei = need - need / 2n;
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  // pass 1: the part is sent back; the rest is still to land: kept
+  const s1 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(s1.error, null, String(s1.error?.message) + why(c2));
+  assert.equal(folders(m.keys).length, 1, "pass 1 keeps the key");
+  // the rest lands
+  c2.clock = c2.fundAt;
+  c2.mine();
+  // pass 2: the key's balance and what it sent out reach the need: swept and removed
+  const s2 = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(s2.error, null, String(s2.error?.message) + why(c2));
+  assert.ok(c2.balanceOf(j.deployer) <= DUST, "the rest is sent back" + why(c2));
+  assert.deepEqual(folders(m.keys), [], "the key is removed once the rest has landed and is swept" + why(c2));
+  const jj = JSON.parse(readFileSync(m.journal, "utf8"));
+  assert.equal(jj.keys.state, "removed");
+  assert.equal(jj.funded, true);
+};
+test("mainnet review 4: a funding-wait key that held part of its need and sent it back is removed once the rest lands and is swept, and kept on every pass before", OPTS, (t) => partFunded(t));
+test("mainnet review 5: the same on Arbitrum-shaped receipts (the L1 part inside gasUsed, no l1Fee)", OPTS, (t) => partFunded(t, { arb: true }));
+
+test("mainnet review 5: a stopped run's sweep that lands after the resume read its nonce never counts as sent since the resume's wait: --sweep-kept keeps the key while the asked transfer may land", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  const j1 = JSON.parse(readFileSync(m.journal, "utf8"));
+  const top = j1.txs.reduce((x, s) => (BigInt(s.nonce) + 1n > x ? BigInt(s.nonce) + 1n : x), 0n);
+  const sweep1 = j1.txs.find((s) => s.step.startsWith("sweep"));
+  assert.ok(sweep1 && BigInt(sweep1.nonce) === top - 1n, "the stopped run's last transaction is its sweep");
+  // the resume's latest and pending nonce reads come from a replica a block behind, before that sweep
+  let stale = 2;
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (stale > 0 && method === "eth_getTransactionCount" && params[0].toLowerCase() === c.deployer) {
+      stale--;
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x" + (top - 1n).toString(16) }) };
+    }
+    return fetch0(u, init);
+  };
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  c.fetch = fetch0;
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
+  const r3 = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(r3.error, null, String(r3.error?.message) + why(c));
+  assert.notEqual(c.fundAt, null, "the asked transfer has not landed");
+  assert.equal(folders(m.keys).length, 1, "the key is kept while the asked transfer may land" + why(c));
+});
+
+test("mainnet review 5: outflowOf counts what a receipt says the key paid, on each receipt shape", () => {
+  const me = "0x264c8ff331fe18ae69bb01cc66732e391c1e758d";
+  const other = "0x1da00622b51c37bf321bed40659f56adfa79f828";
+  // Base mainnet's receipt of 0x995a24c2...e754 (read 6 Nov 02:36Z): an OP stack (Jovian) self-send, gasUsed x price + l1Fee
+  const base = { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x4c4b40", l1Fee: "0x280ab79d", daFootprintGasScalar: "0x94", from: me, to: me };
+  const fee = 0x5208n * 0x4c4b40n + 0x280ab79dn;
+  assert.equal(outflowOf({ value: 7n, to: me }, base, me), fee, "a send to itself keeps its value");
+  assert.equal(outflowOf({ value: 7n, to: other }, base, me), fee + 7n);
+  // Robinhood mainnet's receipt of 0x38fc62f4...05c1 (read 6 Nov 02:36Z): Arbitrum, the L1 part inside gasUsed, no l1Fee
+  const arb = { status: "0x1", gasUsed: "0x6866", gasUsedForL1: "0x0", effectiveGasPrice: "0x14b7390", from: me, to: other };
+  assert.equal(outflowOf({ value: 5n, to: other }, arb, me), 0x6866n * 0x14b7390n + 5n);
+  assert.equal(outflowOf({ value: 5n, to: other }, { ...arb, gasUsedForL1: "0x100" }, me), 0x6866n * 0x14b7390n + 5n, "gasUsedForL1 is inside gasUsed, never added");
+  // a failed transaction pays its fee, never its value
+  assert.equal(outflowOf({ value: 9n, to: other }, { ...arb, status: "0x0" }, me), 0x6866n * 0x14b7390n);
+  // OP operator fee: Isthmus (scalar / 1e6) and, once receipts carry daFootprintGasScalar, Jovian (scalar x 100)
+  const op = { status: "0x1", gasUsed: "0x5208", effectiveGasPrice: "0x10", l1Fee: "0x0", operatorFeeScalar: "0x3e8", operatorFeeConstant: "0x5" };
+  assert.equal(outflowOf({ value: 0n, to: other }, op, me), 0x5208n * 0x10n + (0x5208n * 1000n) / 1_000_000n + 5n);
+  assert.equal(outflowOf({ value: 0n, to: other }, { ...op, daFootprintGasScalar: "0x0" }, me), 0x5208n * 0x10n + 0x5208n * 1000n * 100n + 5n);
+  // what the receipt or the journal does not say is no count
+  assert.equal(outflowOf({ value: 1n, to: other }, { ...arb, effectiveGasPrice: undefined }, me), null);
+  assert.equal(outflowOf({ to: other }, arb, me), null);
 });
