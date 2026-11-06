@@ -57,7 +57,7 @@ const parse = (raw) => {
 
 /** A mock chain and a virtual clock. `on` hooks: lose(t) -> true loses that send's answer; afterMine(chain). */
 function chain(on = {}) {
-  const c = { id: on.id ?? "0x14a34", calls: [], base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
+  const c = { id: on.id ?? "0x14a34", calls: [], base: 5_000_000n, tip: on.tip ?? 1_000_000n, l1Scale: 2n, clock: 0, bal: new Map(), nonce: new Map(), code: new Map(), created: [], pool: [], receipts: new Map(), block: 100, seen: new Set(), deployer: null, fundAt: null, fundWei: 0n, logs: [] };
   const g = (m, k) => m.get(k.toLowerCase()) ?? 0n;
   const l1Of = (len) => c.l1Scale * (len > 100n ? len : 100n);
   const costOf = (t) => t.gas * t.maxFee + t.value + l1Of(t.len);
@@ -66,6 +66,7 @@ function chain(on = {}) {
     if (c.fundAt !== null && c.clock >= c.fundAt) {
       c.bal.set(c.deployer, g(c.bal, c.deployer) + c.fundWei);
       c.fundAt = null;
+      c.block++;
     }
     c.pool.sort((a, b) => Number(a.t.nonce - b.t.nonce));
     while (c.pool.length) {
@@ -83,7 +84,8 @@ function chain(on = {}) {
       if (t.to) c.bal.set(t.to, g(c.bal, t.to) + t.value);
       else c.code.set((ca = createAddress(c.deployer, t.nonce)), runtime(createdBy(t.data))), c.created.push(t.data);
       c.nonce.set(c.deployer, t.nonce + 1n);
-      c.receipts.set(hash, { status: "0x1", contractAddress: ca, effectiveGasPrice: "0x" + price.toString(16), from: c.deployer, ...(on.arb ? { gasUsed: "0x" + (used + l1Gas).toString(16), gasUsedForL1: "0x" + l1Gas.toString(16) } : { gasUsed: "0x" + used.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16) }) });
+      c.block++;
+      c.receipts.set(hash, { status: "0x1", blockNumber: "0x" + c.block.toString(16), contractAddress: ca, effectiveGasPrice: "0x" + price.toString(16), from: c.deployer, ...(on.arb ? { gasUsed: "0x" + (used + l1Gas).toString(16), gasUsedForL1: "0x" + l1Gas.toString(16) } : { gasUsed: "0x" + used.toString(16), l1Fee: "0x" + l1Of(t.len).toString(16) }) });
       on.afterMine?.(c, t);
     }
   };
@@ -96,6 +98,7 @@ function chain(on = {}) {
     if (on.limited?.(method, params, c)) return { ok: false, status: 429, json: async () => ({ code: 429, message: "Connection rate limits exceeded" }) };
     switch (method) {
       case "eth_chainId": return ok(c.id);
+      case "eth_blockNumber": return ok("0x" + c.block.toString(16));
       case "eth_getBlockByNumber": return ok({ baseFeePerGas: "0x" + c.base.toString(16) });
       case "eth_maxPriorityFeePerGas": return ok("0x" + c.tip.toString(16));
       case "eth_estimateGas": return ok(params[0].to ? "0x5208" : "0x" + (600000).toString(16));
@@ -579,7 +582,7 @@ test("mainnet review: a run killed during its sweep leaves its record; the paste
   assert.deepEqual(folders(m.keys), [], "the key folder is removed");
 });
 
-test("mainnet review: a run killed mid-deploy (its key in use, no record) is swept by --sweep-kept", OPTS, async (t) => {
+test("mainnet review: a run killed mid-deploy (its key in use, no record) is swept by --sweep-kept, which keeps the key for the resume (it made 2 of 5: card pool-evm-deploy-resume-safe)", OPTS, async (t) => {
   const m = room(t);
   const c = mainnet();
   let snap = null;
@@ -600,7 +603,8 @@ test("mainnet review: a run killed mid-deploy (its key in use, no record) is swe
   const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
   assert.equal(sw.error, null, String(sw.error?.message) + why(c));
   assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
-  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(folders(m.keys).length, 1, "the key folder is kept: the same paste resumes with it");
+  assert.equal(JSON.parse(readFileSync(m.journal, "utf8")).keys.state, "kept");
 });
 
 test("mainnet review: a 61 s throttle window after the funding (every read HTTP 429, as Robinhood's RPC answers) is waited out: the run deploys and sweeps", OPTS, async (t) => {
@@ -1033,4 +1037,143 @@ test("mainnet review 5: outflowOf counts what a receipt says the key paid, on ea
   // what the receipt or the journal does not say is no count
   assert.equal(outflowOf({ value: 1n, to: other }, { ...arb, effectiveGasPrice: undefined }, me), null);
   assert.equal(outflowOf({ to: other }, arb, me), null);
+});
+
+// ---- card pool-evm-deploy-resume-safe: a stop, resume or sweep never deploys a contract twice and never removes a key
+// a transfer can still reach ----
+/** `c.fetch` with `f(u, method, params)` answering first where it returns a value */
+const answer = (c, f) => {
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const v = f(u, method, params);
+    return v === undefined ? fetch0(u, init) : { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: v }) };
+  };
+  return fetch0;
+};
+const journalOf = (m) => JSON.parse(readFileSync(m.journal, "utf8"));
+/** a mainnet run killed in its funding wait (no transaction signed): the disk as it is then */
+async function killedInWait(t, m, c) {
+  let snap = null;
+  let keyFile = null;
+  let key = null;
+  await run(t, c, {
+    head: MAIN, io: m.io, outArg: false, out: m.out,
+    onLine: (l) => {
+      if (l.startsWith("deploy: send exactly") && !snap) (snap = readFileSync(m.journal, "utf8")), (keyFile = path.join(m.keys, folders(m.keys)[0], "key")), (key = readFileSync(keyFile, "utf8"));
+    },
+  });
+  rmSync(m.out, { force: true });
+  writeFileSync(m.journal, snap);
+  mkdirSync(path.dirname(keyFile), { recursive: true });
+  writeFileSync(keyFile, key);
+  return JSON.parse(snap);
+}
+
+test("resume-safe R1: --sweep-kept of a run that made 2 of 5 sends its rest back and keeps its key and journal; the same paste then resumes with that key and makes only the other 3", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  await stoppedAtPool(t, c, m);
+  c.bal.set(c.deployer, c.balanceOf(c.deployer) + 10n ** 15n); // a late transfer to the kept key
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, "its rest went back" + why(c));
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /made 2 of 5 contracts/.test(w)), j.keys.why.join("; "));
+  assert.equal(folders(m.keys).length, 1, "the key folder is kept");
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  for (const n of ORDER) assert.equal(c.created.filter((d) => createdBy(d) === n).length, 1, `${n} made once` + why(c));
+  assert.deepEqual(folders(m.keys), [], "removed once the run is whole and swept");
+});
+
+test("resume-safe R4: a deploy whose receipt the first RPC lags on (its code on both RPCs) counts as made: the key is kept, and once the receipt shows the same paste reuses it", OPTS, async (t) => {
+  const m = room(t);
+  let vh = null;
+  let lag = true;
+  const c = mainnet({ sent: (raw, hash) => !parse(raw).to && createdBy(parse(raw).data) === "WithdrawalVerifier" && (vh ??= hash) });
+  answer(c, (u, method, params) => (lag && method === "eth_getTransactionReceipt" && u === BASE.rpcs[0] && params[0] === vh ? null : undefined));
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.match(String(r.error?.message), /deploy WithdrawalVerifier .*no receipt/, why(c));
+  assert.equal(c.created.length, 1, "the verifier landed");
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /made 1 of 5 contracts/.test(w)), j.keys.why.join("; "));
+  assert.equal(folders(m.keys).length, 1, "the key folder is kept");
+  lag = false;
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  settled(c, r2);
+  for (const n of ORDER) assert.equal(c.created.filter((d) => createdBy(d) === n).length, 1, `${n} made once` + why(c));
+});
+
+test("resume-safe pending transfer: a resume funded by the stopped run's late transfer, while the transfer it asked for is still to land, keeps its key; once that lands, --sweep-kept sends it back and removes the key", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  // run 1 asks for its need and stops in the wait; the owner's transfer is slow
+  await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 1e9, onLine: (l) => l.startsWith("deploy: send exactly") && process.emit("SIGTERM", "SIGTERM") });
+  assert.equal(journalOf(m).keys.state, "kept");
+  const first = c.fundWei;
+  // run 2 resumes and asks again; one transfer lands at once (the mock's funding of run 2's line), the other is still to
+  const r2 = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r2.error, null, String(r2.error?.message) + why(c));
+  assert.deepEqual(Object.keys(r2.record.contracts), ORDER, "deployed");
+  assert.equal(folders(m.keys).length, 1, "the key is kept while a transfer it asked for may still land" + why(c));
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept");
+  assert.ok(j.keys.why.some((w) => /asked for \d+ wei in 2 transfers/.test(w)), j.keys.why.join("; "));
+  // the slow transfer lands on the kept key
+  c.bal.set(c.deployer, c.balanceOf(c.deployer) + first);
+  const e0 = c.balanceOf(E);
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.ok(c.balanceOf(E) - e0 > (first * 9n) / 10n, "sent back" + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST);
+  assert.deepEqual(folders(m.keys), [], "removed once every transfer it asked for has landed" + why(c));
+});
+
+test("resume-safe both RPCs: the funding wait reads the key on both RPCs: a first RPC reading a balance the second does not never counts as funded, and the run deploys once the transfer lands", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let reads = 0;
+  answer(c, (u, method, params) => (method === "eth_getBalance" && u === BASE.rpcs[0] && params[0] === c.deployer && ++reads === 2 ? "0x" + (10n ** 18n).toString(16) : undefined));
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, fundDelay: 30_000 });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.deepEqual(Object.keys(r.record.contracts), ORDER);
+});
+
+test("resume-safe both RPCs: --sweep-kept reads the funding on both RPCs: a first RPC reading the need the second does not keeps the key while the transfer may land", OPTS, async (t) => {
+  const m = room(t);
+  const j = await killedInWait(t, m, mainnet());
+  const c2 = mainnet();
+  c2.deployer = j.deployer;
+  c2.fundAt = 1e9;
+  c2.fundWei = BigInt(j.need);
+  let reads = 0;
+  answer(c2, (u, method, params) => (method === "eth_getBalance" && u === BASE.rpcs[0] && params[0] === j.deployer && ++reads === 1 ? "0x" + BigInt(j.need).toString(16) : undefined));
+  const sw = await run(t, c2, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c2));
+  assert.ok(lineOf(c2, /less than the \d+ wei its run asked for: it is kept/), why(c2));
+  assert.equal(folders(m.keys).length, 1, "the key is kept" + why(c2));
+  assert.equal(journalOf(m).keys.state, "kept");
+});
+
+test("resume-safe block: the key is removed only at a block past every transaction the run saw land: a second RPC whose head is behind the run's sweep keeps it; once it catches up, --sweep-kept removes it", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let behind = true;
+  answer(c, (u, method) => (behind && method === "eth_blockNumber" && u === BASE.rpcs[1] ? "0x64" : undefined));
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /head block 100 on https:\/\/base-rpc\.publicnode\.com is behind block \d+/.test(w)), j.keys.why.join("; "));
+  behind = false;
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.deepEqual(folders(m.keys), [], why(c));
 });
