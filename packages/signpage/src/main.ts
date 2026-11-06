@@ -63,6 +63,7 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
+import { depositFollows } from "./deposit-follow.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -136,6 +137,9 @@ const restore = !framed
       written: () => void testnet?.proofs().catch(() => {}),
     })
   : null;
+// a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):
+// top-level only, as the seed signs U's call; the store and the seed are opened when a follow runs
+const follows = !framed ? depositFollows({ network: () => PAGE_NETWORK, store: () => open(), seed64: () => openSeed64() }) : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
@@ -201,7 +205,8 @@ else {
       told.add(fn);
       testnet?.watch(fn);
     },
-    kinds: {
+    // deposit.quote followed from its answer, deposit.confirm answered where it is (src/deposit-follow.ts)
+    kinds: follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
       "signin.open": (p) => openKind("signin.open", p.way),
@@ -219,7 +224,12 @@ else {
       ...poolKinds(poolDeps),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
-    },
+    }, async () => {
+      // deposit.quote's U: the public record the quote was asked under (src/deposit-wire.ts reads it before and after)
+      const scope = pageScope();
+      const rec = scope === null ? null : await fs.depositRead(scope);
+      return scope === null || !rec?.deposit ? null : { scope, index: rec.deposit.index };
+    }),
   });
   shell.layer.append(root);
 }
@@ -482,6 +492,7 @@ const open = async (): Promise<WalletStore> =>
       openedBy = null;
       void testnet?.signedOut();
       restore?.signedOut();
+      follows?.signedOut();
       show("signed-out");
     },
   }));
@@ -583,6 +594,8 @@ async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
   void testnet?.settle();
+  // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
+  void follows?.settle().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
   void restore?.settle().catch(() => {});
   if (l.screen === "backup") return void showBackup(l.seed);
@@ -674,6 +687,8 @@ async function signOut(): Promise<void> {
   const s = await open();
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
+  // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
+  follows?.signedOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
