@@ -17,7 +17,7 @@ import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import {
-  EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
+  EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
   EvmUnansweredError, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
@@ -767,8 +767,10 @@ test("F3b a provider's cap shrinks the page (its real words, thousands separator
   const sizes = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1).map((h) => Number(BigInt(h)))).map(([f, t]) => t! - f! + 1);
   assert.ok(sizes(la).every((n) => n <= 10000) && sizes(la).includes(5000) && !sizes(la).some((n) => n < 2500), `a: ${sizes(la)}`);
   assert.ok(sizes(lb).includes(1250) && !sizes(lb).some((n) => n < 1250), `b: ${sizes(lb)}`);
-  // a refused size is not asked again in that read: 10,000, 5,000 and 2,500 refused once each
-  assert.equal(sizes(lb).filter((n) => n > 2000).length, 3, `b: ${sizes(lb)}`);
+  // 10,000, 5,000 and 2,500 refused once each, then one probe past the ceiling at most every EVM_LOG_CEILING_PAGES
+  // full pages under it (card notes-per-pool-evm-base-hang)
+  const under = sizes(lb).filter((n) => n === 1250).length;
+  assert.ok(sizes(lb).filter((n) => n > 2000).length <= 3 + Math.ceil(under / EVM_LOG_CEILING_PAGES), `b: ${sizes(lb)}`);
   // a page shrunk by a cap since lifted grows back: after a full page reads, the next is twice as large
   const c2 = chain([...deps(PP, [10, 12, 15])], 3000, 2990);
   let capped = true;
@@ -781,6 +783,27 @@ test("F3b a provider's cap shrinks the page (its real words, thousands separator
   await s2.trees(after(20));
   const grown = sizes(l2);
   assert.ok(grown.length < 12 && grown[1]! === 2 * grown[0]!, `pages after the cap is lifted: ${grown}`);
+});
+
+test("F3c a refusal under the cap (no answer in time) never halves the rest of the pool sync's read: the ceiling it set expires after EVM_LOG_CEILING_PAGES full pages", async () => {
+  // card notes-per-pool-evm-base-hang, as B1 in pool-evm-restore.test.ts for a W's read: a 200,000-block read, no cap on
+  // either RPC, one page of RPC b with no answer in time. Held for the whole read, that page's ceiling (10,000) kept b at
+  // 5,000-block pages to the end, twice the clean read's pages.
+  const c = { ...chain([...deps(PP, [10, 120_000, 199_000])], 200_000, 199_990), hashOf: (n: number) => `0x${w64(BigInt(n) + 1n)}` };
+  const pages = async (slow: number | null) => {
+    const la: string[] = [], lb: string[] = [];
+    let n = 0;
+    const late = { log: lb, getLogs: () => { if (++n === slow) throw new DOMException("The operation timed out.", "TimeoutError"); } };
+    const r = await sync(pair(c, c, { log: la }, late)).events();
+    assert.equal(r.events.length, 3);
+    return lb.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1).map((h) => Number(BigInt(h)))).map(([f, t]) => t! - f! + 1);
+  };
+  const clean = await pages(null);
+  assert.equal(clean.length, 20, `clean: ${clean}`);
+  const late = await pages(2);
+  // the refused call, EVM_LOG_CEILING_PAGES pages at half size, then the clean read's size again
+  assert.ok(late.length <= clean.length + 1 + EVM_LOG_CEILING_PAGES / 2 + 1, `${late.length} pages, the clean read's ${clean.length}: ${late}`);
+  assert.deepEqual(late.slice(-4), [10_000, 10_000, 10_000, 10_000], `the last pages: ${late.slice(-12)}`);
 });
 
 test("F4 one RPC's logs past the finalized block a moment behind the other's is a retry; a finalized log missing is refused", async () => {
@@ -1088,9 +1111,10 @@ test("EVM_TRANSFER_RPCS: the testnets only (a Base or Robinhood W is read on the
     // thirdweb's keyless quota runs out for the day on every chain at once (5 Nov 16:28Z): a spare, never a seat
     assert.ok(urls.slice(0, 2).every((u) => operator(u) !== "thirdweb.com"), `${net}: thirdweb seated`);
   }
-  // the exceptions, each the doc comment's: Robinhood testnet's own and dRPC (no other keyless operator answers every
-  // read there: Pocket and Tenderly have no Robinhood testnet, PublicNode refuses a filter with no address)
-  const shared: Record<string, string[]> = { "base-sepolia": [], "robinhood-testnet": ["drpc.org", "robinhood.com"] };
+  // the exceptions, each the doc comment's: Robinhood testnet's own (no other keyless operator answers every read there:
+  // Pocket and Tenderly have no Robinhood testnet, PublicNode refuses a filter with no address), and Base Sepolia's
+  // Pocket, of the pool's pair that pages its logs wide (card notes-per-pool-evm-base-hang)
+  const shared: Record<string, string[]> = { "base-sepolia": ["pocket.network"], "robinhood-testnet": ["robinhood.com"] };
   for (const chain of Object.keys(EVM_TRANSFER_RPCS) as (keyof typeof EVM_TRANSFER_RPCS)[]) {
     const kit = evmPoolVenues()[chain].providers ?? assert.fail(`${chain}: the kit pins no providers`);
     const both = EVM_TRANSFER_RPCS[chain].map(operator).filter((o) => kit.some((p) => operator(p) === o));
