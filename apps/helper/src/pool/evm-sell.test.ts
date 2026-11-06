@@ -913,10 +913,12 @@ test("withdraws still go while sales answer 429: the sell sender's whole budget 
 
 test("the sell sender: its own key and nonce lane, never the withdraw sender's; no sell key is 503 not_configured with nothing read", async () => {
   const calls: Calls = [];
-  const none = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY }, [rpc(calls), rpc(calls)], () => NOW);
+  // a collector set, so the sell key alone is what refuses (card helper-sender-fee-proof: no collector refuses too)
+  const none = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeCollector: COLLECTOR }, [rpc(calls), rpc(calls)], () => NOW);
   assert.equal(none.sellSender, null);
   const a = await none.sell(body());
   assert.deepEqual([a.status, code(a)], [503, "not_configured"]);
+  assert.ok(detail(a).includes("no sell key"), detail(a));
   assert.equal(calls.length, 0);
   assert.throws(() => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: KEY }, [rpc([]), rpc([])], () => NOW), /sell key/);
   // the sale's pending nonce is read for the sell sender's address and its sim runs from it

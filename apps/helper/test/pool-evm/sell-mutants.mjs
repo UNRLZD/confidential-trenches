@@ -148,7 +148,8 @@ export const MUTANTS = [
   // fold 1, M3 (b): one provider refusing the send still sends, and the next sale takes nonce + 1
   [EVM, "    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", "    if (why.length > 0) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", T, "one provider refusing the send:"],
   // the fee answer
-  [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, epoch_ms", "fee_recipient: feeRecipient, sell_sender: sender, epoch_ms", T, "the fee answer names"],
+  [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector", "fee_recipient: feeRecipient, sell_sender: sender, fee_collector", T, "the fee answer names"],
+  [EVM, "fee_collector: feeCollector ?? null, epoch_ms", "fee_collector: feeRecipient, epoch_ms", T, "the fee answer names"],
   // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
   [EVM, '    if (status.includes("0x0")) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
   [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "a sale that reverted or was dropped"],
@@ -324,7 +325,7 @@ export const MUTANTS = [
   [EVM, "        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);", "        return landed(seen[0] ?? seen[1]!, seen[1] ?? seen[0]!);", T, "one provider's receipt never clears a charge"],
   [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = ca;", T, "the cost is the higher of the two receipts'"],
   [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = cb;", T, "the cost is the higher of the two receipts'"],
-  [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee }, held.wei);", T, "a paid landing is one in the window"],
+  [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee }, held.wei);", T, "the same sale proven on both providers holds nothing"],
   [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (evmRpcHex(address) !== collector ||", T, "each part of the Paid log is checked"],
   [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (removed === true ||", T, "each part of the Paid log is checked"],
   [EVM, " || !Array.isArray(topics) || topics.length !== 2) return false;", " || !Array.isArray(topics)) return false;", T, "each part of the Paid log is checked"],
