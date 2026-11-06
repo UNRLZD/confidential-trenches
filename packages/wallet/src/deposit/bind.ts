@@ -125,6 +125,8 @@ export interface BindDeps {
   sleep?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
   pollMs?: number;
+  /** Told each time the bind waits on a code it reads again after (a halt among them: "halted", "token_halted"). */
+  onWait?: (code: string) => Promise<void> | void;
 }
 
 export type BindOutcome =
@@ -528,7 +530,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       try {
         return await f();
       } catch (e) {
-        if (e instanceof DepositAccountRefused && WAIT_READ.has(e.code)) return null;
+        if (e instanceof DepositAccountRefused && WAIT_READ.has(e.code)) return (await deps.onWait?.(e.code), null);
         if (e instanceof DepositBindRefused && (e.code === "early" || e.code === "nonce")) return null;
         throw e;
       }
@@ -670,6 +672,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         const again: SignedDepositDelegate | null = await signing(() => resignDeposit(seed, own.s, own.i, call, out, "resign_needed", rpcs));
         step = again === null ? await settle(out) : await commit(again);
       } else if (answer.code === "prepay_open" || RETRY.has(answer.code)) {
+        await deps.onWait?.(answer.code);
         if (answer.code === "prepay_open") {
           // R2: wait until the pages hold U's previous P (U's first note has none: the relayer has no earlier P of U)
           if (previousP === null) return { kind: "refused", code: answer.code };

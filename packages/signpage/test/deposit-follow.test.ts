@@ -3,13 +3,14 @@
 // packages/kit/test/fixtures/oneclick-quotes.json, with this test's U): deposit.quote's checked answer writes the op
 // and starts the follow with no tap; a refused quote writes none; deposit.confirm answers the op's stage and facts as
 // the kit reads them and each later stage as its progress; an unknown address is not_allowed; settle() resumes every
-// op not at an end and leaves done, refunded and held; a sign out stops the follows.
+// op not at an end (expired and refunded among them) and leaves done and held; the seed opens only for a bind; a sign
+// out waits for the follows under the seed lock.
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { type DepositRecord, openWalletStore, WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { depositAccount, NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
@@ -17,12 +18,17 @@ import type { FollowRpc } from "../../wallet/src/deposit/follow.ts";
 import * as d from "../../wallet/src/derive/index.ts";
 import type { KindContext } from "../src/api.ts";
 import { depositFollows, FOLLOW_ENDS } from "../src/deposit-follow.ts";
+import { type DepositPublic, depositQuoteHost } from "../src/deposit-wire.ts";
+import { ADDRESS as MOCK_ADDRESS, h1c, NOW as MOCK_NOW, SOL_USDC, U as MOCK_U } from "./oneclick-mock.ts";
+
+const SAVED: DepositPublic = { status: { source: "code", code_saved: true }, deposit: { v: 1, scope: "7", index: 3, id: MOCK_U } };
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const LIVE = JSON.parse(readFileSync(new URL("../../kit/test/fixtures/oneclick-quotes.json", import.meta.url), "utf8")).live.answer;
 const ADDR = LIVE.quote.depositAddress as string;
 const U = depositAccount(SEED, 1n, 0).account;
-const RESULT = { deposit_address: ADDR, origin_asset: "nep141:wrap.near", amount_in: "452500000000000000000000", min_amount_out: "1983085", deadline: LIVE.quote.deadline, time_estimate_s: 20 };
+const RESULT = { deposit_address: ADDR, origin_asset: "nep141:wrap.near", amount_in: "452500000000000000000000", min_amount_out: "1.983085", deadline: LIVE.quote.deadline, time_estimate_s: 20 };
+const FOLLOW = { network: "testnet", s: "1", i: 0, u: U, address: ADDR, deadline_ms: Date.parse(LIVE.quote.deadline), origin: "nep141:wrap.near", min_out: "1983085" };
 
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
@@ -31,13 +37,13 @@ const status = (s: string) => {
   q.quoteRequest.recipient = q.quoteRequest.refundTo = U;
   return Response.json({ correlationId: "x", quoteResponse: q, status: s, swapDetails: {}, updatedAt: "2026-10-31T21:06:00.000Z" });
 };
-// no chain read is reached on these stages; a block read says the deadline is far
+// the chain reads (U's USDC) answer nothing on both RPCs: no credit, so no bind; a block read says the deadline is far
 const RPCS = (): readonly [FollowRpc, FollowRpc] => {
   const one = (name: string): FollowRpc => ({ name, query: async () => ({}), tx: async () => ({}), block: async () => ({ result: { header: { timestamp_nanosec: "1" } } }) });
   return [one(NEAR_NETWORKS.testnet.fastnear[0]), one(NEAR_NETWORKS.testnet.drpc)];
 };
 
-async function world(script: string[]) {
+async function world(script: string[], o: { seed64?: () => Promise<Uint8Array>; locks?: () => LockManager | null } = {}) {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
   let reads = 0;
@@ -47,52 +53,58 @@ async function world(script: string[]) {
   const f = depositFollows({
     network: () => "testnet",
     store: async () => w,
-    seed64: async () => Uint8Array.from(SEED),
+    seed64: o.seed64 ?? (async () => Uint8Array.from(SEED)),
     rpcs: RPCS,
     fetch: counted,
     sleep: async () => (tick(), await new Promise<void>((ok) => setImmediate(ok))),
-    locks: () => null,
+    locks: o.locks ?? (() => null),
     now: () => 1_762_400_000_000,
   });
   return { w, f, reads: () => reads, onTick: (fn: () => void) => (tick = fn) };
 }
 const ctxOf = (id: string, seen: Stage[]): KindContext => ({ id, sha: "0".repeat(64), progress: (s) => void seen.push(s) });
 
-test("a checked deposit.quote answer writes the op and follows it with no tap; a refused one writes nothing", async () => {
+test("a checked quote writes the op from that quote and its record, and follows it with no tap; an op of another deposit refuses", async () => {
   const t = await world(["PROCESSING"]);
   let n = 0;
   t.onTick(() => ++n >= 3 && t.f.signedOut());
-  const kinds = t.f.withFollow({ "deposit.quote": () => ({ after: Promise.resolve(), answer: () => ({ result: RESULT }) }) }, async () => ({ scope: 1n, index: 0 }));
-  const d = (kinds["deposit.quote"] as (p: unknown, c: KindContext) => { after: Promise<unknown>; answer: () => unknown })({}, ctxOf("dq-1", []));
-  await d.after;
-  assert.deepEqual(d.answer(), { result: RESULT }, "the answer is the quote's, unchanged");
+  await t.f.quoted("dq-1", RESULT, { scope: 1n, index: 0, u: U });
   await t.f.idle();
   const op = (await t.w.get("ops", "dq-1")) as Record<string, any>;
   assert.equal(op.kind, "deposit");
   assert.equal(op.stage, "in_transit", "followed with no tap: 1Click's PROCESSING read");
-  assert.deepEqual(op.follow, { network: "testnet", s: "1", i: 0, address: ADDR, deadline_ms: Date.parse(LIVE.quote.deadline) });
-
-  const r = await world(["PROCESSING"]);
-  const refused = r.f.withFollow({ "deposit.quote": () => ({ after: Promise.resolve(), answer: () => ({ error: "quote_check_failed" as const }) }) }, async () => ({ scope: 1n, index: 0 }));
-  await (refused["deposit.quote"] as (p: unknown, c: KindContext) => { after: Promise<unknown> })({}, ctxOf("dq-2", [])).after;
-  assert.deepEqual(await r.w.keys("ops"), []);
-  assert.equal(r.reads(), 0);
+  assert.deepEqual(op.follow, FOLLOW, "min_amount_out in USDC base units");
+  await assert.rejects(t.f.quoted("dq-1", { ...RESULT, deposit_address: "f".repeat(64) }, { scope: 1n, index: 0, u: U }), /another deposit/);
+  await assert.rejects(t.f.quoted("dq-3", { ...RESULT, min_amount_out: "1.0000001" }, { scope: 1n, index: 0, u: U }), /min_amount_out/);
+  assert.deepEqual((await t.w.keys("ops")).sort(), ["dq-1"]);
 });
 
-test("a Running deposit.quote stays Running through the wrapper", async () => {
-  const t = await world(["PENDING_DEPOSIT"]);
-  const kinds = t.f.withFollow({ "deposit.quote": () => ({ running: true, after: Promise.resolve(), answer: () => ({ error: "busy" }) }) as never }, async () => null);
-  const d = (kinds["deposit.quote"] as (p: unknown, c: KindContext) => Record<string, unknown>)({}, ctxOf("dq-1", []));
-  assert.equal(d.running, true);
+test("the quote host hands the follow U from the record its rule checked, never a later read", async () => {
+  // reads: before the rule, after it (the same record), then a moved one any later read would see
+  const moved: DepositRecord = { v: 1, scope: "7", index: 4, id: "b".repeat(64) };
+  const reads = [SAVED, SAVED, { ...SAVED, deposit: moved }];
+  let r = 0;
+  const got: unknown[] = [];
+  const host = depositQuoteHost({ scope: () => 7n, read: async () => reads[Math.min(r++, 2)]!, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async (id, res, u) => void got.push({ id, address: res.deposit_address, u }) });
+  const d = host({ origin_asset: SOL_USDC, amount: "25" }, { id: "dq-9" });
+  await d.after;
+  assert.ok("result" in (d.answer() as object));
+  assert.deepEqual(got, [{ id: "dq-9", address: MOCK_ADDRESS, u: { scope: 7n, index: 3, u: MOCK_U } }]);
+  assert.equal(r, 2, "two reads, as the rule makes them; no third");
+  // the follow's write throws: the answer is down, never an address nothing follows
+  const down = depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => { throw new Error("no store"); } });
+  const e = down({ origin_asset: SOL_USDC, amount: "25" }, { id: "dq-10" });
+  await e.after;
+  assert.deepEqual(e.answer(), { error: "down" });
 });
 
 test("deposit.confirm answers the op's stage and facts as the kit reads them, then each later stage as progress; an unknown address is not_allowed", async () => {
   const t = await world(["KNOWN_DEPOSIT_TX", "PROCESSING", "INCOMPLETE_DEPOSIT"]);
-  await t.w.put("ops", "dq-1", { kind: "deposit", stage: "quote_checked", txs: [], created_ms: 1, follow: { network: "testnet", s: "1", i: 0, address: ADDR, deadline_ms: Date.parse(LIVE.quote.deadline) } });
+  await t.w.put("ops", "dq-1", { kind: "deposit", stage: "quote_checked", txs: [], created_ms: 1, follow: FOLLOW });
   let n = 0;
   t.onTick(() => ++n >= 4 && t.f.signedOut());
   const seen: Stage[] = [];
-  const kinds = t.f.withFollow({}, async () => null);
+  const kinds = t.f.withFollow({});
   const confirm = kinds["deposit.confirm"] as (p: unknown, c: KindContext) => { after: Promise<unknown>; answer: () => any };
   const d = confirm({ deposit_address: ADDR }, ctxOf("dc-1", seen));
   await d.after;
@@ -111,16 +123,49 @@ test("deposit.confirm answers the op's stage and facts as the kit reads them, th
   assert.deepEqual(none.answer(), { error: "not_allowed" });
 });
 
-test("settle() resumes every deposit op not at an end; done, refunded and held stay as they are", async () => {
+test("settle() resumes every deposit op not at an end, expired and refunded too; done and held stay as they are", async () => {
   const t = await world(["PROCESSING"]);
-  const f = { network: "testnet", s: "1", i: 0, address: ADDR, deadline_ms: Date.parse(LIVE.quote.deadline) };
+  const f = FOLLOW;
   await t.w.put("ops", "open", { kind: "deposit", stage: "waiting", txs: [], created_ms: 1, since_ms: 5, follow: f });
+  for (const stage of ["expired", "refunded"]) await t.w.put("ops", `late-${stage}`, { kind: "deposit", stage, txs: [], created_ms: 1, ...(stage === "refunded" ? { held_id: U, since_ms: 5 } : {}), follow: { ...f, address: stage.padEnd(64, "0") } });
+  assert.deepEqual([...FOLLOW_ENDS].sort(), ["done", "held"]);
   for (const stage of FOLLOW_ENDS) await t.w.put("ops", `end-${stage}`, { kind: "deposit", stage, txs: [], created_ms: 1, follow: { ...f, address: `${stage}`.padEnd(64, "0") } });
   let n = 0;
-  t.onTick(() => ++n >= 2 && t.f.signedOut());
+  t.onTick(() => ++n >= 3 && t.f.signedOut());
   await t.f.settle();
   await t.f.idle();
   assert.equal(((await t.w.get("ops", "open")) as { stage: string }).stage, "in_transit");
   for (const stage of FOLLOW_ENDS) assert.equal(((await t.w.get("ops", `end-${stage}`)) as { stage: string }).stage, stage);
-  assert.equal(t.reads(), 2, "only the open op read 1Click's status");
+  assert.ok(t.reads() >= 3, "the open, expired and refunded ops each read again");
+});
+
+test("the seed is never opened without a credit to bind; a follow holds the seed lock shared, so a sign out waits for it", async () => {
+  let opened = 0;
+  const t = await world(["PROCESSING"], { seed64: async () => (opened++, Uint8Array.from(SEED)) });
+  let n = 0;
+  t.onTick(() => ++n >= 3 && t.f.signedOut());
+  await t.f.quoted("dq-1", RESULT, { scope: 1n, index: 0, u: U });
+  await t.f.idle();
+  assert.equal(opened, 0, "status and balance reads need only U");
+
+  // the seed lock: a follow holds it shared, so an exclusive request (the store's sign out) waits until it stops
+  const held: string[] = [];
+  const order: string[] = [];
+  const lm = {
+    request: async (name: string, opts: { mode: string }, fn: () => Promise<unknown>) => {
+      held.push(`${name}:${opts.mode}`);
+      try {
+        return await fn();
+      } finally {
+        order.push(`release ${name}`);
+      }
+    },
+  } as unknown as LockManager;
+  const s = await world(["PROCESSING"], { locks: () => lm });
+  let m = 0;
+  s.onTick(() => ++m >= 3 && s.f.signedOut());
+  await s.f.quoted("dq-2", RESULT, { scope: 1n, index: 0, u: U });
+  await s.f.idle();
+  assert.deepEqual(held, ["ct-wallet/deposit-follow/dq-2:exclusive", `${WALLET_SEED_LOCK}:shared`]);
+  assert.deepEqual(order, [`release ${WALLET_SEED_LOCK}`, "release ct-wallet/deposit-follow/dq-2"]);
 });

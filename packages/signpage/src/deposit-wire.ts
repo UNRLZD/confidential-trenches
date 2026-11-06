@@ -40,6 +40,12 @@ export interface DepositWireDeps {
   priced?: DepositQuoteKindContext["priced"];
   fetch?: typeof fetch;
   now?: () => number;
+  /**
+   * The quote checked under request `id`, before its answer goes out (src/deposit-follow.ts quoted): U named by the
+   * deposit record the rule checked it under, never a fresh read. A throw answers "down", so no address goes out
+   * that nothing follows.
+   */
+  checked?(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string }): Promise<void>;
 }
 
 type Usable = { status: Status; deposit: DepositRecord };
@@ -55,8 +61,8 @@ function usable(p: DepositPublic | null, scope: bigint | null): Usable | null {
 const same = (a: DepositRecord, b: DepositRecord): boolean => a.scope === b.scope && a.index === b.index && a.id === b.id;
 
 /** The deposit.quote handler for ApiHost.kinds: a Deferred answered once the rule, and the read after it, are done. */
-export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string, unknown>) => Deferred<"deposit.quote"> {
-  return (params) => {
+export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string, unknown>, ctx?: { id: string }) => Deferred<"deposit.quote"> {
+  return (params, ctx) => {
     let out: HostAnswer<"deposit.quote"> | HostRefusal = { error: "not_allowed" };
     const after = (async () => {
       await deps.named?.().catch(() => {});
@@ -75,6 +81,7 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       // the address stands only while the records are the ones it was asked under
       const now = usable(await deps.read(scope), deps.scope());
       if (!now || !same(now.deposit, before.deposit)) return;
+      if (deps.checked && ctx) await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
       out = { result: got.result };
     })().catch(() => {
       // a read that threw (the records not answering) is no rule's refusal: "not now" (card pool-read-down), which

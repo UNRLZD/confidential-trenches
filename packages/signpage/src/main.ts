@@ -205,7 +205,7 @@ else {
       told.add(fn);
       testnet?.watch(fn);
     },
-    // deposit.quote followed from its answer, deposit.confirm answered where it is (src/deposit-follow.ts)
+    // deposit.quote's checked answer followed (its host's `checked`), deposit.confirm answered where it is (src/deposit-follow.ts)
     kinds: follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
@@ -215,7 +215,7 @@ else {
       // the form withdraws from the vault's notes; a one-time id's way out (from_id) is not built yet
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named() }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts(),
       buy: trades,
@@ -226,11 +226,6 @@ else {
       ...poolKinds(poolDeps),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
-    }, async () => {
-      // deposit.quote's U: the public record the quote was asked under (src/deposit-wire.ts reads it before and after)
-      const scope = pageScope();
-      const rec = scope === null ? null : await fs.depositRead(scope);
-      return scope === null || !rec?.deposit ? null : { scope, index: rec.deposit.index };
     }),
   });
   shell.layer.append(root);

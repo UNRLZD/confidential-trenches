@@ -1,19 +1,22 @@
 // The deposit's follow on SIGN_HOST's top-level page (card wallet-deposit-follow): once a deposit.quote shows a checked
 // address, the page carries the deposit to its note with no tap (../../wallet/src/deposit/follow.ts), and deposit.confirm
 // answers where it is.
-// - quoted(): deposit.quote's answer went out with a checked address. Its op is written under the request's id (src/
-//   state.ts op contract: { kind: "deposit", stage: "quote_checked", txs, created_ms } and the follow's resume fields,
-//   nothing secret) and followed at once. Every stage the follow writes reaches the app in state.ops, posted again on
-//   each change.
+// - quoted(): deposit.quote's rule checked an address under U's deposit record (src/deposit-wire.ts checked, before its
+//   answer goes out). Its op is written under the request's id (src/state.ts op contract: { kind: "deposit", stage:
+//   "quote_checked", txs, created_ms } and the follow's resume fields from that checked quote and that record, nothing
+//   secret) and followed at once. Every stage the follow writes reaches the app in state.ops, posted again on each change.
 // - deposit.confirm { deposit_address }: answered with the stage and facts of the op that names that address (no op:
 //   not_allowed), and each later stage goes out as the request's progress; the op is followed if no follow runs for it.
-// - settle(): each signed-in landing resumes every deposit op not at an end (FOLLOW_ENDS), so a reload or a closed tab
-//   carries on from its stage.
+// - settle(): each signed-in landing resumes every deposit op not at an end (FOLLOW_ENDS: done, held), so a reload or a
+//   closed tab carries on from its stage, and an op past its deadline (expired, refunded, waiting) reads U's balances on
+//   the chain again: anything that reached U since is bound.
 // - One follower per op across tabs: FOLLOW_LOCK/<op id>, held while it runs; another tab's follow of the same op waits
-//   for it. The seed is opened per follow and zeroed by it; a sign out stops every follow first.
-import type { WalletStore } from "@blindfill/wallet/store";
+//   for it. Inside it the wallet's seed lock is held shared for the whole follow, as the restore does, so a sign out
+//   (which takes it exclusive) waits for every follow's reads and writes to stop; signedOut() aborts them first. The seed
+//   itself is opened only for a bind phase (followDeposit's seed64), and zeroed by it.
+import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { DepositFacts, DepositStage, SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { type DepositOp, followDeposit, type FollowRecord, followRpc, type FollowRpc } from "../../wallet/src/deposit/follow.ts";
+import { type DepositOp, followDeposit, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../wallet/src/deposit/account.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import type { ApiHost, Deferred, KindContext } from "./api.ts";
@@ -22,11 +25,10 @@ type Kinds = NonNullable<ApiHost["kinds"]>;
 
 export const FOLLOW_LOCK = "ct-wallet/deposit-follow/";
 /**
- * The stages no landing or deposit.confirm follows again: the note read, the money waiting under U (refunded with no
- * refund move yet, held), or the address past its signed deadline on both RPCs with nothing sent (a follow running
- * then keeps reading 1Click's status while its page lives, so a send 1Click saw late still shows).
+ * The stages no landing or deposit.confirm follows again: the note read on both RPCs, or held (the bind stopped, the
+ * money under U for withdraw.open). Every other op, expired and refunded among them, is read again on each landing.
  */
-export const FOLLOW_ENDS: ReadonlySet<DepositStage> = new Set(["done", "refunded", "held", "expired"]);
+export const FOLLOW_ENDS: ReadonlySet<DepositStage> = new Set(["done", "held"]);
 const FACTS = ["refunded", "hold", "held_id", "since_ms", "amount_usd"] as const;
 
 export interface FollowHost {
@@ -62,12 +64,12 @@ export function depositFollows(h: FollowHost) {
       const now = await ops.get("ops", id);
       if (!isDepositOp(now) || FOLLOW_ENDS.has(now.stage)) return;
       const notes = await openNoteStore(ops);
-      const seed = await h.seed64();
       try {
-        await followDeposit(seed, { opId: id, network: f.network, s: BigInt(f.s), i: f.i, address: f.address, deadline_ms: f.deadline_ms }, {
+        await followDeposit({ opId: id, network: f.network, s: BigInt(f.s), i: f.i, u: f.u, address: f.address, deadline_ms: f.deadline_ms, origin: f.origin, min_out: f.min_out }, {
           ops,
           store: notes,
           rpcs: rpcs(),
+          seed64: () => h.seed64(),
           signal,
           ...(h.fetch ? { fetchFn: h.fetch } : {}),
           ...(h.sleep ? { sleep: h.sleep } : {}),
@@ -75,12 +77,12 @@ export function depositFollows(h: FollowHost) {
           onStage: (s) => listeners.get(id)?.forEach((fn) => fn(s)),
         });
       } finally {
-        seed.fill(0);
         notes.close();
       }
     };
     const lm = locks();
-    const p = (lm ? lm.request(`${FOLLOW_LOCK}${id}`, { mode: "exclusive", signal }, body) : body())
+    // the op's lock, then the seed's (shared): a sign out waits for this follow to stop
+    const p = (lm ? lm.request(`${FOLLOW_LOCK}${id}`, { mode: "exclusive", signal }, () => lm.request(WALLET_SEED_LOCK, { mode: "shared", signal }, body)) : body())
       // a follow that stops (a sign out, a read that threw) leaves the op at its stage: the next landing resumes it
       .catch(() => {})
       .finally(() => running.delete(id));
@@ -98,14 +100,21 @@ export function depositFollows(h: FollowHost) {
   };
 
   const api = {
-    /** deposit.quote answered `result` under request `id`, for U_{scope,index}: the op is written and followed. */
-    async quoted(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number }): Promise<void> {
+    /**
+     * deposit.quote checked `result` under request `id`, for U_{scope,index} (`u.u`, the deposit record's id): the op is
+     * written and followed. Throws when the op cannot be written, so no address goes out that nothing follows.
+     */
+    async quoted(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string }): Promise<void> {
       const deadline = Date.parse(result.deadline);
-      if (!Number.isSafeInteger(deadline)) return;
-      const f: FollowRecord = { network: h.network(), s: u.scope.toString(), i: u.index, address: result.deposit_address, deadline_ms: deadline };
+      if (!Number.isSafeInteger(deadline)) throw new Error("the quote's deadline is not a time");
+      const minOut = usdcUnits(result.min_amount_out);
+      if (minOut === null) throw new Error("the quote's min_amount_out is not a USDC amount");
+      const f: FollowRecord = { network: h.network(), s: u.scope.toString(), i: u.index, u: u.u, address: result.deposit_address, deadline_ms: deadline, origin: result.origin_asset, min_out: minOut.toString() };
       const ops = await h.store();
       // a retry of the same request (the same id) keeps the op it made
       await ops.update("ops", id, (v) => (v === undefined ? { kind: "deposit", stage: "quote_checked", txs: [], created_ms: (h.now ?? Date.now)(), follow: f } : undefined));
+      const op = await ops.get("ops", id);
+      if (!isDepositOp(op) || (Object.keys(f) as (keyof FollowRecord)[]).some((k) => op.follow[k] !== f[k])) throw new Error("the request's op names another deposit");
       void follow(id, f);
     },
     /** deposit.confirm: the stage and facts of the op naming the address, its later stages as progress. */
@@ -141,24 +150,9 @@ export function depositFollows(h: FollowHost) {
     },
     /** Tests: the follows running now. */
     idle: (): Promise<unknown> => Promise.all(running.values()),
-    /**
-     * The shell's kinds with deposit.quote followed from its answer and deposit.confirm answered here. `named` reads
-     * U's public record (scope and index) the quote was asked under; deposit.quote's own wire checks it did not move.
-     */
-    withFollow(kinds: Kinds, named: () => Promise<{ scope: bigint; index: number } | null>): Kinds {
-      const quote = kinds["deposit.quote"];
-      const wrapped: Kinds["deposit.quote"] = (p, ctx) => {
-        const d = quote!(p, ctx);
-        if (d === null || typeof d !== "object" || !("after" in d)) return d;
-        const after = d.after.then(async () => {
-          const a = d.answer();
-          if (a === null || !("result" in a)) return;
-          const u = await named().catch(() => null);
-          if (u !== null) await api.quoted(ctx.id, a.result, u).catch(() => {});
-        });
-        return { ...d, after }; // a Running answer stays Running
-      };
-      return { ...kinds, ...(quote ? { "deposit.quote": wrapped } : {}), "deposit.confirm": (p, ctx) => api.kind(p, ctx) };
+    /** The shell's kinds with deposit.confirm answered here (deposit.quote's op is written by its host's `checked`). */
+    withFollow(kinds: Kinds): Kinds {
+      return { ...kinds, "deposit.confirm": (p, ctx) => api.kind(p, ctx) };
     },
   };
   return api;
