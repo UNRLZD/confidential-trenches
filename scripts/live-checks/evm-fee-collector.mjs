@@ -4,7 +4,8 @@
 // FeeCollector) on Base Sepolia and Robinhood testnet, its sink the network's server sell sender, and a real sell that
 // paid it.
 // For each chain's record (evm-fee-collector.<chain>.json), on two RPCs of two operators, each answering the chain's id:
-//   - the collector's code is the FeeCollector build pinned to its address (pool-evm-deploy.build.json, pinnedBuild):
+//   - the collector's code is the current FeeCollector build (pool-evm-deploy.build.json `contracts`), never one the
+//     build file froze (card evm-testnet-delegate-review3):
 //     the same length and, with its one immutable's bytes zeroed, the same keccak256; the immutable holds one word, the
 //     record's sink; and the record's sink is the sell sender the kit pins for the chain (evmPoolVenues().sellSender)
 //     and has no code (an EIP-7702 delegation there would run inside every sell, and the sink cannot change);
@@ -31,7 +32,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { CHAINS, DUST, EIP1967, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf, selector } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, DUST, EIP1967, keccak, operatorProblems, recorder, rpc, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 export const KEY = "evm-fee-collector";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -84,7 +85,9 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep, venue
   say(ADDRESS.test(sink) && sink === pin, `the record's sink ${sink || "(none)"} is the sell sender the kit pins on ${d.chain}: ${pin || "none"}`);
   const txs = d.txs ?? [];
   say(txs.filter((t) => t.contract).length === 1 && txs.some((t) => t.contract === "FeeCollector"), `the record lists the run's transactions, one deploy, FeeCollector's: ${txs.map((t) => t.step).join(", ") || "none"}`);
-  const b = pinnedBuild(d.chain, "FeeCollector", a);
+  // the current build, never one the build file froze at this address: the kit pins this collector, and the device's
+  // code pays it today (card evm-testnet-delegate-review3)
+  const b = BUILD.contracts.FeeCollector;
   say(!!b && b.immutables?.length === 1, `the build file pins FeeCollector with one immutable: ${b ? `${b.immutables?.length} immutable(s)` : "no entry"}`);
   for (const url of rpcs.slice(0, 2)) {
     const on = `on ${url}`;

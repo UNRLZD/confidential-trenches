@@ -14,6 +14,7 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import * as kit from "../src/index.ts";
 import { evmPoolVenues, type EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSimSellUnpinned, evmPoolSignSellUnpinned, evmPoolSignSimSellUnpinned, evmSellCallData, pinnedBuildSell, pinnedSignSimSell } from "../src/trade/evm/sell-unpinned.ts";
+import { evmQuotedSell } from "../src/trade/evm/quoted.ts";
 import { AMOUNT, BOUGHT, NATIVE, TOKEN, V3_POOL, WALLET, flat, provider, req, sell, sellQuoteWith, verdict, type Pool, type Seen } from "./evm-sell-quote-fx.ts";
 
 const keccak = (t: string) => keccak_256(new TextEncoder().encode(t));
@@ -54,7 +55,7 @@ test("planted: a server's route is never taken: a request with a route is refuse
   const route = { venue: "uniswap-v4", hops: [{ currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
   assert.deepEqual(await verdict(sell({ price: flat }, "base", { route })), { accepted: false, code: "bad_request" });
   assert.deepEqual(await verdict(sell({ price: flat }, "base", { route: undefined })), { accepted: false, code: "bad_request" });
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const code = (f: () => unknown) => {
     try {
       f();
@@ -93,7 +94,7 @@ test("planted: a stale quote is refused, when quoted (a head 31 s old) and when 
   const old = Math.floor(Date.now() / 1000) - 31;
   assert.deepEqual(await verdict(sell({ price: flat, headSec: old })), { accepted: false, code: "stale_quote" });
   const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat }), provider({ price: flat })], Date.now());
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   const later = Number(q.block.timestamp) * 1000 + 30_001;
   enableTimers(mock.timers, { apis: ["Date"], now: later });
   try {
@@ -249,7 +250,7 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", { ...s, pool: evmPoolVenues()["base-sepolia"].pool! }, ts, now)), "not_built");
   // the sell signer never signs a sim, the sim signer never a real sell
   assert.equal(code(() => evmPoolSignSellUnpinned(key, "base-sepolia", s)), "not_built");
-  const real = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: { venue: "uniswap-v4", hops: [{ ...hops[0]!, hooks: NATIVE }] }, minOut: 2n, precommitment: 1n, feeCap: 1n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 120), nonce: 3n });
+  const real = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: { venue: "uniswap-v4", hops: [{ ...hops[0]!, hooks: NATIVE }] }, minOut: 2n, precommitment: 1n, feeCap: 1n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 120), nonce: 3n });
   assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", real as never, ts, now)), "not_built");
   // a key not W's; a chain with no pinned sell delegate
   assert.equal(code(() => evmPoolSignSimSellUnpinned(new Uint8Array(32).fill(7), "base-sepolia", s, ts, now)), "bad_key");
@@ -266,7 +267,7 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
       return (e as { code?: string }).code ?? String(e);
     }
   };
-  const f = { precommitment: 0x5e11n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
   // 2 x EVM_POOL_SELL_GAS (1,000,000) x (the block's base fee + the sale's tip: Base's 1,000,000 wei, Robinhood's 0),
   // rounded up to the 1e13 wei step, at least one step
   const cases: [EvmPoolChain, bigint, bigint][] = [
@@ -278,9 +279,11 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
   for (const [chain, baseFee, want] of cases) {
     const q = await sellQuoteWith(req(chain), [provider({ price: flat, baseFee }), provider({ price: flat, baseFee })], Date.now());
     assert.equal((q as { feeMax?: bigint }).feeMax, want, `${chain} at ${baseFee}`);
+    // the fee recipient is the chain's FeeCollector pin (card evm-testnet-delegate-review3)
+    const f = { ...fields, feeRecipient: evmPoolVenues()[chain].feeCollector! };
     // no cap named: the rule's; the rule's own or a lower one: as named; above it: refused
     assert.equal(kit.evmPoolBuildSell(q, f).feeCap, want);
-    // the fee recipient is the caller's (its pin's), checked by the builder (card pool-review-3, L-1)
+    // the fee recipient is checked by the builder (card pool-review-3, L-1): never W or zero (bad_fee)
     assert.equal(kit.evmPoolBuildSell(q, f).feeRecipient, f.feeRecipient);
     assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: q.w })), "bad_fee");
     assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: "0x0000000000000000000000000000000000000000" })), "bad_fee");
@@ -291,6 +294,33 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
   }
   // a block that names no base fee caps nothing: no quote
   assert.deepEqual(await verdict(sell({ price: flat, baseFee: null })), { accepted: false, code: "rpc_error" });
+});
+
+// card evm-testnet-delegate-review3: the helper sends only a Sell paying the network's FeeCollector (its Paid log proves
+// the fee), so the device's quoted sell pays the kit's collector pin and no other address
+test("card evm-testnet-delegate-review3: a quoted sell pays its fee only to the chain's FeeCollector pin: another recipient is refused not_pinned, a venue list with no collector not_deployed", async () => {
+  const code = (f: () => unknown) => {
+    try {
+      f();
+      return "built";
+    } catch (e) {
+      return (e as { code?: string }).code ?? String(e);
+    }
+  };
+  // the withdraw relayer's fee recipient a release pins (signpage test/pools-testnet.test.ts), and any other address
+  const RELAYER = "0x49f2425b7f33f3a10912de8add6839226ce663a2";
+  for (const chain of ["base-sepolia", "robinhood-testnet"] as EvmPoolChain[]) {
+    const collector = evmPoolVenues()[chain].feeCollector!;
+    const q = await sellQuoteWith(req(chain), [provider({ price: flat }), provider({ price: flat })], Date.now());
+    const f = { precommitment: 0x5e11n, feeRecipient: collector, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+    assert.equal(kit.evmPoolBuildSell(q, f).feeRecipient, collector, chain);
+    assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: RELAYER })), "not_pinned", chain);
+    assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: "0x000000000000000000000000000000000000fee1" })), "not_pinned", chain);
+    // the same quote through a venue list whose chain pins no collector
+    const { feeCollector: _c, ...rest } = evmPoolVenues()[chain];
+    const bare = Object.freeze({ ...evmPoolVenues(), [chain]: Object.freeze(rest) });
+    assert.equal(code(() => evmQuotedSell(bare, q, f, Date.now())), "not_deployed", chain);
+  }
 });
 
 test("L1 the sender's fee cap counts the chain fee read at the agreed block on both providers: Base's L1 fee bound and operator fee, Robinhood's L1 base fee", async () => {

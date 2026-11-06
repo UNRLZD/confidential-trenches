@@ -109,7 +109,7 @@ const { recorder } = await import(`${root}/scripts/live-checks/pool-evm-deploy.m
 const { evmPoolVenues } = await import(`${root}/packages/kit/src/index.ts`);
 const port = { base: pb, robinhood: pr };
 const records = Object.fromEntries(["base", "robinhood"].map((c) => [c, JSON.parse(readFileSync(`${out}/${c}.json`, "utf8"))]));
-const pins = Object.fromEntries(Object.entries(records).map(([c, d]) => [c, { pool: d.contracts.PrivacyPoolSimple.address, adapters: { v3: d.contracts.UniswapV3Adapter.address, v4: d.contracts.UniswapV4Adapter.address }, sellDelegate: d.contracts.SellDelegate.address }]));
+const pins = Object.fromEntries(Object.entries(records).map(([c, d]) => [c, { pool: d.contracts.PrivacyPoolSimple.address, adapters: { v3: d.contracts.UniswapV3Adapter.address, v4: d.contracts.UniswapV4Adapter.address }, sellDelegate: d.contracts.SellDelegate.address, feeCollector: d.contracts.FeeCollector.address }]));
 const rpcs = Object.fromEntries(Object.keys(port).map((c) => [c, [`http://127.0.0.1:${port[c]}`, `http://localhost:${port[c]}`]]));
 const rec = recorder();
 const r = await checkMainnets({ read: (c) => records[c], venues: Object.fromEntries(Object.keys(pins).map((c) => [c, { ...evmPoolVenues()[c], ...pins[c] }])), rpcsOf: (c) => rpcs[c], fetchFn: rec.fetchFn });

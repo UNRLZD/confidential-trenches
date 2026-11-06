@@ -1,6 +1,6 @@
 {
   "notes": [
-    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04, and for pool review round 2 (R-3: WETH is read only for a route that can pay in it) on 2026-11-05."
+    "Each contract's runtime as forge builds it (solc 0.8.28, contracts/pool-evm/foundry.toml): its length, the keccak256 of the runtime with every immutable's 32 bytes zeroed, and each immutable's start offsets. Written by contracts/pool-evm/script/deploy.mjs --write-build; test/deploy.test.mjs fails when forge's output differs; CI runs it after its forge test, with the forge CI installs (1.7.1). Forge 1.7.1 and 1.8.6 both build these bytes (solc 0.8.28 does the compiling): the test passed on 1.7.1 and the dry run, whose deploy.mjs refuses a build that differs, ran on 1.8.6, 2026-11-03. SellDelegate rebuilt for card evm-sell-v4 (constructor(IWETH, IPoolManager)) with forge 1.7.1, the version CI installs, on 2026-11-04, and again for card evm-selldelegate-exact-debit (W's balance of the token falls by exactly the amount) with forge 1.7.1 on 2026-11-04, and for pool review round 2 (R-3: WETH is read only for a route that can pay in it) on 2026-11-05. A contract with a sell method records its selector (`sell`, from forge's methodIdentifiers); each frozen SellDelegate records the one its deployed code dispatches (the ten-field sell's PUSH4 in eth_getCode at every frozen address on both testnets, base-sepolia-rpc.publicnode.com and robinhood-sepolia-rpc.publicnode.com, 2026-11-06)."
   ],
   "contracts": {
     "WithdrawalVerifier": {
@@ -87,7 +87,8 @@
           4926,
           6003
         ]
-      ]
+      ],
+      "sell": "0x0c2cb9ca"
     },
     "FeeCollector": {
       "length": 246,
@@ -112,6 +113,7 @@
           1608
         ]
       ],
+      "sell": "0xbea5695c",
       "at": {
         "base-sepolia": "0x23ad5aabcc139650597f8dc79e9def8bd817ef88",
         "robinhood-testnet": "0x0ec8c6627939624aeaac3b2f0276136e6e289e23"
@@ -142,6 +144,7 @@
           3086
         ]
       ],
+      "sell": "0xbea5695c",
       "at": {
         "base-sepolia": "0xfa1442419b6984b8e3aa8933c690f80f063b6adf",
         "robinhood-testnet": "0xaafb86fed9b651933773a0750d5dba22ca8b8a02"
@@ -172,6 +175,7 @@
           3244
         ]
       ],
+      "sell": "0xbea5695c",
       "at": {
         "base-sepolia": "0xe39f1b9934810792c090d8ab8f555b9955527260",
         "robinhood-testnet": "0x9909a660c8a55829335dd4d894c8375bfcfcd65b"
