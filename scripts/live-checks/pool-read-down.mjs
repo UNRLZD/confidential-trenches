@@ -29,13 +29,24 @@ const KINDS = new RegExp(`Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`);
 const FLOWS = new RegExp(`instanceof [\\w$]+(\\?|\\)return)\\{error:${Q}down${Q}\\}`, "g");
 const WIRE = new RegExp(`\\.catch\\(\\(\\)=>\\{[\\w$]+=\\{error:${Q}down${Q}\\}\\}\\)`);
 const REFERENCE = /a reference must never rest on one provider's word/g;
+const SENT = new RegExp(`if\\([\\w$]+\\.length\\)return\\{stage:${Q}part_filled${Q},txs:[\\w$]+\\};if\\([\\w$]+\\.length\\)return\\{stage:${Q}sent${Q},txs:[\\w$]+\\}`);
+const TRADE = new RegExp(`[\\w$]+&&![\\w$]+\\?${Q}down${Q}:`, "g");
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), kinds: KINDS.test(js), flows: (js.match(FLOWS) ?? []).length, wire: WIRE.test(js), references: (js.match(REFERENCE) ?? []).length };
+  return {
+    index,
+    sha384: sha384(js),
+    kinds: KINDS.test(js),
+    flows: (js.match(FLOWS) ?? []).length,
+    wire: WIRE.test(js),
+    references: (js.match(REFERENCE) ?? []).length,
+    sent: SENT.test(js),
+    trade: (js.match(TRADE) ?? []).length,
+  };
 }
 
-/** The verdict on an answer { index, sha384, kinds, flows, wire, references }. */
+/** The verdict on an answer { index, sha384, kinds, flows, wire, references, sent, trade }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -46,6 +57,8 @@ export function judge(a) {
   if (!(Number.isInteger(a?.flows) && a.flows >= 3)) bad("a pool buy, sell or deposit whose provider read fails before signing is not answered down: the app takes it as a no");
   if (a?.wire !== true) bad("a deposit quote whose read throws is refused not_allowed: the app takes it as a no");
   if (!(Number.isInteger(a?.references) && a.references >= 2)) bad("a pool trade's reference read that fails is answered quote_check_failed: a provider's outage shows as a price check");
+  if (a?.sent !== true) bad("a pool deposit whose read fails after its send is answered failed: the app shows a deposit that may land as failed");
+  if (!(Number.isInteger(a?.trade) && a.trade >= 2)) bad("a vault buy whose reference read fails before signing is not answered down: the app takes it as a no");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
