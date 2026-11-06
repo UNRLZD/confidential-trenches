@@ -16,6 +16,7 @@ import type { DepositStage } from "@blindfill/kit";
 import { base58 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
 import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
+import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { type BindOutcome, bindDeposit, resetBindSession } from "../src/deposit/bind.ts";
 import { RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
@@ -161,7 +162,8 @@ async function setup(script: (OneClickStatus | { raw: unknown; http?: number })[
     fetchFn: oc.fetchFn,
     sleep: async () => (chain.tick(), onTick.fn(++ticks), await turn()),
     signal: AbortSignal.timeout(20_000),
-    onStage: (s) => stages.push(s),
+    // every stage as SIGN_HOST answers it must be one the kit's client reads (kit schema.ts depositConfirm)
+    onStage: (s, f) => (assert.ok(SIGNPAGE_RESULT_SCHEMAS["deposit.confirm"]({ stage: s, ...f }), `the kit refuses ${JSON.stringify({ stage: s, ...f })}`), stages.push(s)),
     bind,
     relayerAccount: RELAYER,
     now: () => 1_762_400_000_000,
@@ -269,7 +271,7 @@ test("short, failed and expired come only from 1Click's status or both RPCs' blo
     if (n === 60) ac.abort(new Error("stop"));
   };
   const at: [DepositStage, number][] = [];
-  await assert.rejects(followDeposit(SEED, t.args, { ...t.deps, fetchFn, signal: ac.signal, onStage: (s) => at.push([s, t.ticks()]) }), /stop/);
+  await assert.rejects(followDeposit(SEED, t.args, { ...t.deps, fetchFn, signal: ac.signal, onStage: (s, f) => (t.deps.onStage!(s, f), at.push([s, t.ticks()])) }), /stop/);
   assert.deepEqual(at.map(([s]) => s), ["expired", "waiting", "short", "failed", "in_transit"]);
   assert.equal(at[0]![1], 40, "expired only once both RPCs' block time is past the deadline");
   const op = await opOf(t.w);
@@ -290,7 +292,7 @@ test("REFUNDED: refunded under U, never done; with the refund move, refund_move 
   assert.deepEqual(await followDeposit(SEED, t.args, t.deps), { kind: "refunded" });
   assert.deepEqual(t.stages, ["in_transit", "refunded"]);
   let op = await opOf(t.w);
-  assert.equal(op.refunded, true);
+  assert.equal(op.stage, "refunded");
   assert.equal(op.held_id, t.u);
   assert.equal(t.binds.length, 0);
 
@@ -303,7 +305,7 @@ test("REFUNDED: refunded under U, never done; with the refund move, refund_move 
   };
   const spy = t.deps.bind!;
   const bind: typeof bindDeposit = async (...a) => (order.push("bind"), spy(...a));
-  const out = await followDeposit(SEED, t.args, { ...t.deps, refundMove, bind, onStage: (s) => (t.stages.push(s), order.push(s)) });
+  const out = await followDeposit(SEED, t.args, { ...t.deps, refundMove, bind, onStage: (s, f) => (t.deps.onStage!(s, f), order.push(s)) });
   assert.equal(out.kind, "done");
   assert.deepEqual(order, ["refund_move", "move", "in_transit", "into_vault", "bind", "done"]);
   op = await opOf(t.w);

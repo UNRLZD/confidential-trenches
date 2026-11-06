@@ -25,7 +25,7 @@
 //   its stage and facts, and under `follow` what a reload needs (network, U's scope and index, the address, the signed
 //   deadline, then the amount and which of U's notes). Nothing secret: no key, words, note secret or signed payload.
 // Nothing here logs. The status read names the deposit address only; each chain read names U, the token or the vault.
-import { type DepositFacts, type DepositHold, type DepositStage, HELPER_FETCH_INIT, HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
+import { DEPOSIT_REFUNDED_STAGES, type DepositFacts, type DepositStage, HELPER_FETCH_INIT, HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
@@ -300,11 +300,14 @@ export async function followDeposit(seed64: Uint8Array, args: FollowArgs, deps: 
       if (changed) deps.onStage?.(stage, facts);
     };
     const since = (): number => op!.since_ms ?? now();
-    const refunded = (): boolean => op!.refunded === true;
-    // the legs after a refund carry refunded (and the stages that hold money under an id, U as held_id)
+    // refunded: the op is at the refunded stage, or a leg after it carries the fact (the refunded stage itself does
+    // not: the kit's DEPOSIT_REFUNDED_STAGES are the legs after it)
+    const refunded = (): boolean => op!.refunded === true || op!.stage === "refunded";
+    // each fact only on the stages it belongs to (kit schema.ts depositFactsFit): refunded on the legs after a refund,
+    // U as held_id on the stages that hold the money under it
     const legFacts = (stage: DepositStage): DepositFacts => {
       const out: DepositFacts = { since_ms: since() };
-      if (refunded()) out.refunded = true;
+      if (refunded() && DEPOSIT_REFUNDED_STAGES.includes(stage)) out.refunded = true;
       if (stage === "refunded" || stage === "refund_move" || stage === "held" || stage === "halted") out.held_id = U;
       return out;
     };
@@ -355,7 +358,7 @@ export async function followDeposit(seed64: Uint8Array, args: FollowArgs, deps: 
             // only moves on, so expired stays); a stage past the address is never taken back by a stale answer
             if (op!.stage === "quote_checked" && (await pastOnBoth(rpcs, args.deadline_ms))) await write("expired", {});
           } else if (st === "REFUNDED") {
-            await write("refunded", { ...legFacts("refunded"), refunded: true, held_id: U });
+            await write("refunded", legFacts("refunded"));
             return "refunded";
           } else if (st === "SUCCESS") {
             const c = await readCredit(U, token, rpcs);
