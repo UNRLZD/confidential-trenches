@@ -1,0 +1,124 @@
+{
+ "good": {
+  "source": "local: this checkout's committed packages/signpage build",
+  "at": "2026-11-06T04:42:48.641Z",
+  "browser": "Chrome 157.0.8103.38, sandbox on",
+  "steps": {
+   "signedOut": {
+    "answer": {
+     "v": 1,
+     "id": "30c85d41-f1b4-4535-8e9d-a666e4c79f80",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "signedIn": {
+    "signed_in": true,
+    "way": "words"
+   },
+   "auto": {
+    "state": {
+     "ops": [
+      {
+       "id": "5952d8ad-3e85-4705-a635-9b246d1355f3",
+       "kind": "restore",
+       "stage": "done",
+       "txs": []
+      }
+     ]
+    }
+   },
+   "asked": {
+    "answer": {
+     "v": 1,
+     "id": "3dbef10f-8681-4571-badf-8fd3be68e5de",
+     "ok": true,
+     "result": {
+      "stage": "started"
+     }
+    },
+    "stages": [
+     "reading",
+     "done"
+    ]
+   }
+  },
+  "requests": [
+   {
+    "host": "sign.confidential.unrealized.trade",
+    "path": "/portfolio"
+   },
+   {
+    "host": "sign.confidential.unrealized.trade",
+    "path": "/app.js"
+   },
+   {
+    "host": "confidential.unrealized.trade",
+    "path": "/portfolio"
+   },
+   {
+    "host": "confidential.unrealized.trade",
+    "path": "/portfolio"
+   }
+  ],
+  "errors": []
+ },
+ "bad": {
+  "source": "live https://sign.confidential.unrealized.trade",
+  "at": "2026-11-06T04:12:33.341Z",
+  "browser": "Chrome 157.0.8103.38, sandbox on",
+  "steps": {
+   "signedOut": {
+    "answer": {
+     "v": 1,
+     "id": "a77536a3-6d83-4960-89e0-0cad13951de4",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "signedIn": {
+    "signed_in": true,
+    "way": "words"
+   },
+   "auto": {
+    "state": {
+     "ops": []
+    }
+   },
+   "asked": {
+    "answer": {
+     "v": 1,
+     "id": "9cfc3062-8d93-4dcc-9d92-ef10029b7106",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    },
+    "stages": []
+   }
+  },
+  "requests": [
+   {
+    "host": "sign.confidential.unrealized.trade",
+    "path": "/portfolio"
+   },
+   {
+    "host": "sign.confidential.unrealized.trade",
+    "path": "/app.js"
+   },
+   {
+    "host": "confidential.unrealized.trade",
+    "path": "/portfolio"
+   },
+   {
+    "host": "confidential.unrealized.trade",
+    "path": "/portfolio"
+   }
+  ],
+  "errors": []
+ }
+}
