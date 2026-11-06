@@ -221,6 +221,9 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     paid_out(&h, &o, "fee_bounces", 0, 7_000_000)?;
     // the failed payout receipt's attachment (register_deposit and the two transfers' yocto) comes back as the runtime's refund
     assert_eq!(transferred(&h, &o.tx_hash, relayer.id().as_str(), "system", h.vault.as_str()).await?, REGISTER + 2, "the registration NEAR did not come back into the vault");
+    // and none of it from the token: its storage_deposit refund was in the failed batch, so it is dropped with it
+    // (nearcore runtime lib.rs l.489: a failed receipt's new receipts are not sent)
+    assert_eq!(transferred(&h, &o.tx_hash, relayer.id().as_str(), h.token.as_str(), h.vault.as_str()).await?, 0, "the token sent NEAR back from a failed payout");
     assert_eq!((h.token_balance(newcomer.id()).await?, h.token_balance(relayer.id()).await?), (0, 0), "a payout that failed moved tokens");
 
     // 2. an unregistered recipient with register_deposit 0

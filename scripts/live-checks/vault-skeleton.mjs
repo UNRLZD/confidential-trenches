@@ -2,7 +2,7 @@
 // Live check of card vault-skeleton: the vault skeleton on NEAR testnet, with no keys. On two testnet RPCs it reads:
 //   - view_access_key_list of the vault: keys [] (vault.md 2.8, "Read back after every deploy");
 //   - view_code: its sha256 equals contracts/vault/deployments/testnet-skeleton.json's wasm_sha256;
-//   - the wasm's imports: none of vault.md 2.8's banned actions, and its promise imports a subset of the seven allowed;
+//   - the wasm's imports: none of vault.md 2.8's banned actions, and its promise imports a subset of the six allowed;
 //   - the wasm's function exports: nothing outside vault.md 2.5.7's list (no init, no setter, no __contract_abi), and
 //     never withdraw without on_payout (a build that spends a note but cannot pay it out);
 //   - the wasm's bytes: not VT-S17's out-of-gas test build (TEST_BUILD_MARK: every payout callback of that build fails);
@@ -50,15 +50,25 @@ const BANNED = [
   "promise_batch_action_add_gas_key_*",
   "promise_batch_action_transfer_to_gas_key",
 ];
-// vault.md 2.8: its promise imports are at most these seven
+// vault.md 2.8: its promise imports are at most these six. promise_and is not one since card vault-review-fixes-1
+// (review A-01): a payout is one receipt, so nothing joins two, and a build that still joins a recipient's transfer and
+// a fee's as two receipts (which can land apart) imports it and is refused here and by deploy.mjs.
 export const PROMISE_ALLOWED = new Set([
   "promise_batch_create",
   "promise_batch_then",
-  "promise_and",
   "promise_batch_action_function_call_weight",
   "promise_batch_action_transfer",
   "promise_results_count",
   "promise_result",
+]);
+// The vaults deployed before card vault-review-fixes-1, the only builds that may import promise_and: their payout is
+// two receipts joined by promise_and (review A-01), and they are keyless, so their code can never change. Each entry is
+// the deployed wasm's full sha256, the account it is deployed on and its record; an exception holds only for those bytes
+// on that account, and only in a check of an already-deployed vault (`deployedAs`). Never add an entry for a new deploy:
+// a new build imports at most PROMISE_ALLOWED's six, and deploy.mjs refuses any other.
+export const DEPLOYED_BEFORE_ONE_RECEIPT = Object.freeze([
+  Object.freeze({ sha256: "ab4ac612ce0d3257ceafee26f7010c6d1b635e865ff545db3074ed5cc11944d7", account: "vault.bf-vt-20261102t071444.testnet", record: "contracts/vault/deployments/testnet-v1.json" }),
+  Object.freeze({ sha256: "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a", account: "vault-test.confidential.unrlzd.near", record: "contracts/vault/deployments/mainnet-test.json" }),
 ]);
 // vault.md 2.5.7: the only function exports, the methods, the views of 2.5.6 and near-sdk's contract_source_metadata
 export const EXPORTS_ALLOWED = new Set([
@@ -172,13 +182,18 @@ export const TEST_BUILD_MARK = "blindfill-vault test build: on_payout runs out o
 // the names out of line). withdrawWithoutPayout names `withdraw` when the wasm exports it without `on_payout`: a build
 // that spends a note but cannot pay it out (2.5.2 rows 13-15, 2.5.4), which must never be deployed. testBuild names
 // TEST_BUILD_MARK when the bytes hold it: VT-S17's build, whose every payout callback fails, must never be deployed.
-export function wasmProblems(buf) {
+// `deployedAs` (a check of a vault already deployed, vault-testnet-t01.mjs readVault, names the account it read): when
+// these bytes and that account are one DEPLOYED_BEFORE_ONE_RECEIPT entry, promise_and is not counted. Without it, as
+// deploy.mjs calls it, every build is held to PROMISE_ALLOWED's six.
+export function wasmProblems(buf, { deployedAs } = {}) {
   const { imports, exports } = wasmLists(buf);
   const names = imports.filter((i) => i.kind === 0).map((i) => i.name);
   const fns = exports.filter((e) => e.kind === 0).map((e) => e.name);
+  const sha = createHash("sha256").update(Buffer.from(buf)).digest("hex");
+  const old = deployedAs !== undefined && DEPLOYED_BEFORE_ONE_RECEIPT.some((d) => d.sha256 === sha && d.account === deployedAs);
   return {
     banned: names.filter(banned),
-    promises: names.filter((n) => n.startsWith("promise_") && !PROMISE_ALLOWED.has(n)),
+    promises: names.filter((n) => n.startsWith("promise_") && !PROMISE_ALLOWED.has(n) && !(old && n === "promise_and")),
     exports: exports.filter((e) => e.kind === 0 && !EXPORTS_ALLOWED.has(e.name)).map((e) => e.name),
     withdrawWithoutPayout: fns.includes("withdraw") && !fns.includes("on_payout") ? ["withdraw"] : [],
     testBuild: Buffer.from(buf).includes(TEST_BUILD_MARK) ? [TEST_BUILD_MARK] : [],
@@ -224,7 +239,7 @@ export async function check({ deployment, account = deployment.account_id, fetch
       say(sha === deployment.wasm_sha256, `code sha256 ${sha} equals the deployment's ${deployment.wasm_sha256} ${at} (${code.length} B)`);
       const w = wasmProblems(code);
       say(w.banned.length === 0, `no banned import ${at}: ${w.banned.length ? w.banned.join(", ") : "none"}`);
-      say(w.promises.length === 0, `promise imports are a subset of the seven ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
+      say(w.promises.length === 0, `promise imports are a subset of the six ${at}: [${w.promiseImports.join(", ")}]${w.promises.length ? `, not allowed: ${w.promises.join(", ")}` : ""}`);
       say(w.exports.length === 0, `function exports are inside vault.md 2.5.7's list ${at}: [${w.functionExports.join(", ")}]${w.exports.length ? `, not allowed: ${w.exports.join(", ")}` : ""}`);
       say(w.withdrawWithoutPayout.length === 0, `withdraw is exported only with on_payout ${at}: ${w.withdrawWithoutPayout.length ? "withdraw without on_payout" : "yes"}`);
       say(w.testBuild.length === 0, `not the out-of-gas test build ${at}: ${w.testBuild.length ? `holds "${w.testBuild[0]}"` : "no test mark"}`);

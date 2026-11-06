@@ -18,8 +18,8 @@
 //!   receipt's, else it panics before any read of state or any write. The result is read by name as Successful (its
 //!   content never read: an empty result, or one too long to read at `max_len` 0) or Failed; anything else panics
 //!   (`promise::payout_result`). The amounts are the spend record's, never the arguments' (review A-04): the
-//!   arguments must equal the record's split (`to_recipient = withdrawn - fee`, `fee`), else `PayoutMismatch` before
-//!   any write. Successful: the record is `paid`. Failed: nothing moved, neither the recipient's amount nor the fee
+//!   arguments stay for the kit's frozen `VaultOnPayoutArgs` and are not read, so no argument can change what is
+//!   counted, and none can strand the spend `in_flight` either (review F-3). Successful: the record is `paid`. Failed: nothing moved, neither the recipient's amount nor the fee
 //!   (one receipt, all or none: review A-01), so `refund_value = withdrawn`, the record `refund_pending` and
 //!   `totals.returned += withdrawn`; event `payout`.
 //!
@@ -130,17 +130,16 @@ impl Vault {
 #[near]
 impl Vault {
     /// 2.5.4: what the payout delivered. The vault's own promise is its only caller (`#[private]`). The amounts are
-    /// the spend record's; the arguments, the kit's `VaultOnPayoutArgs`, must match them (review A-04).
+    /// the spend record's (review A-04); `to_recipient` and `fee` are the kit's frozen `VaultOnPayoutArgs`, kept in the
+    /// call and never read (a refusal on them could only strand the spend `in_flight`, review F-3).
     #[private]
     pub fn on_payout(&mut self, spend_index: u64, to_recipient: U128, fee: U128) {
+        let _ = (to_recipient, fee);
         // the count, then the result by name: any panic here comes before any read of state or write
         let ran = promise::payout_result();
         let mut s = self.spends.get(spend_index).unwrap_or_else(|| env::panic_str("UnknownSpend"));
         if s.status != Status::InFlight {
             env::panic_str("SpendNotInFlight");
-        }
-        if s.withdrawn.checked_sub(s.fee) != Some(to_recipient.0) || s.fee != fee.0 {
-            env::panic_str("PayoutMismatch: on_payout's amounts are not the spend record's");
         }
         let (delivered, returned) = outcome(s.withdrawn, ran);
         let total = self.totals.returned.0.checked_add(returned).unwrap_or_else(|| env::panic_str("InvalidPoolState"));
@@ -330,33 +329,34 @@ mod tests {
         }
     }
 
-    /// A-04 (review vault-review-opus-async): the amounts are the spend record's. Arguments that differ from the
-    /// record's split are refused with nothing written, so no later edit of the promise can over-count a refund (an
-    /// over-count would pay a refund note from other users' notes and underflow row 9's `spent - returned`).
+    /// A-04 (review vault-review-opus-async) and F-3 (review of vault-review-fixes-1): the amounts are the spend
+    /// record's. Arguments that differ from the record's split change nothing: the record lands `refund_pending` with
+    /// exactly its own withdrawn amount (no over-count paid from other users' notes, no underflow of row 9's
+    /// `spent - returned`), and the call never panics on them (a panic would strand the spend `in_flight`).
     #[test]
-    fn on_payout_refuses_amounts_that_are_not_the_records() {
+    fn on_payout_takes_the_amounts_from_the_record_whatever_its_arguments() {
         // (the record's withdrawn and fee, on_payout's to_recipient and fee); the first is the review's scratch case
         for (withdrawn, record_fee, to_recipient, fee) in [
             (1_000_000, 0, 1_000_000_000, 0),
             (1_000_000, 0, 999_999, 0),
             (2_000_000, 500_000, 1_000_000_000, 500_000),
             (2_000_000, 500_000, 1_500_000, 0),
-            (2_000_000, 500_000, 1_500_001, 500_000),
             (2_000_000, 500_000, 2_000_000, 0),
             (2_000_000, 500_000, 1_000_000, 1_000_000),
+            (2_000_000, 500_000, u128::MAX, u128::MAX),
         ] {
-            let mut v = in_flight(withdrawn, record_fee);
-            let (before, struct_before) = (raw_then(vec![PromiseResult::Failed]), near_sdk::borsh::to_vec(&v).unwrap());
-            let e = catch_unwind(AssertUnwindSafe(|| v.on_payout(0, U128(to_recipient), U128(fee))))
-                .map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
-                .unwrap_err();
-            assert!(e.contains("PayoutMismatch"), "({to_recipient}, {fee}): {e}");
-            assert_eq!(get_logs(), Vec::<String>::new(), "({to_recipient}, {fee}): logged");
-            assert!(raw_then(vec![]) == before, "({to_recipient}, {fee}): a record changed");
-            assert_eq!(near_sdk::borsh::to_vec(&v).unwrap(), struct_before, "({to_recipient}, {fee}): the struct changed");
+            for (ran, want_returned) in [(false, withdrawn), (true, 0)] {
+                let mut v = in_flight(withdrawn, record_fee);
+                let result = if ran { ok(b"") } else { PromiseResult::Failed };
+                on_payout(&mut v, vec![result], to_recipient, fee).unwrap_or_else(|e| panic!("({to_recipient}, {fee}): {e}"));
+                let s = v.spends.get(0).unwrap();
+                let want_status = if ran { Status::Paid } else { Status::RefundPending };
+                assert_eq!((s.status, s.refund_value), (want_status, want_returned), "({to_recipient}, {fee}, ran {ran})");
+                assert_eq!(v.totals.returned.0, want_returned, "({to_recipient}, {fee}, ran {ran})");
+                assert_eq!(get_logs(), vec![payout_log(withdrawn - want_returned, want_returned)], "({to_recipient}, {fee}, ran {ran})");
+                assert_eq!((s.withdrawn, s.fee), (withdrawn, record_fee));
+            }
         }
-        // the record's own split lands, and the refund is the record's withdrawn
-        lands(vec![PromiseResult::Failed], 2_000_000, 500_000, 2_000_000);
     }
 
     /// `#[private]` is checked by the exported wrapper, which a unit test does not run: tests/payouts.rs calls it as a
