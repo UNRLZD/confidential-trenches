@@ -1,0 +1,1810 @@
+{
+ "notes": [
+  "bad_deployed: HELPER_HOST (https://api.confidential.unrealized.trade) read 2026-11-06T14:35:52.731Z by node scripts/live-checks/helper-sender-fee-proof.mjs --record, at commit acdb5470a2739237c927daf2f311dab306dfbf95 (this card with card evm-fee-collector at de75d5f2 merged, before its merge and redeploy): its fee answers name no fee_collector and X-Helper-Commit f21d4be2cd160f6971170913178961f5674fd38e; each collector's RPC answers (rpc) are that run's real reads on both RPCs of each testnet, the sink's code among them, every one of evm-fee-collector's check lines ok.",
+  "made: NOT a read. bad_deployed with each fee answer's fee_collector set to the kit's pin and X-Helper-Commit set to the run's commit, the base the planted cases are made from (each plant breaks one thing). The good answer is recorded on HELPER_HOST after this card's merge is redeployed with POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA and POOL_EVM_FEE_COLLECTOR_ROBINHOOD_TESTNET set to the pins."
+ ],
+ "bad_deployed": {
+  "commit": "acdb5470a2739237c927daf2f311dab306dfbf95",
+  "base": "https://api.confidential.unrealized.trade",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "fee": {
+     "readAt": "2026-11-06T14:35:52.731Z",
+     "status": 200,
+     "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "327",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Fri, 06 Nov 2026 14:35:52 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"epoch_ms\":60000,\"epoch_start_ms\":1793975700000,\"block\":\"0x34b5724\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "fee": {
+     "readAt": "2026-11-06T14:35:57.000Z",
+     "status": 200,
+     "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "332",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Fri, 06 Nov 2026 14:35:56 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"epoch_ms\":60000,\"epoch_start_ms\":1793975700000,\"block\":\"0x8ea3a7f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    }
+   }
+  ],
+  "rpc": {
+   "base-sepolia": [
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x14a34"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getCode",
+     "params": [
+      "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getCode",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d378cda68babba6a9dc1d52335bb76ca9e6a755373ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted"
+      }
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0xa4eb0",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3",
+       "transactionIndex": "0x3",
+       "blockHash": "0x690c10839bf6e69129ca71b7b847dd6884ab03618c7f7f8c781cea6c7f2f0860",
+       "blockNumber": "0x34adb09",
+       "gasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0x224ca",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": null,
+       "contractAddress": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x13b6",
+       "l1Fee": "0x129",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0x1823b",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a",
+       "transactionIndex": "0x2",
+       "blockHash": "0x838fb3f95c30305b3c29c31c200171f62552c84a5aaf1ab7414b5b2cd107e38d",
+       "blockNumber": "0x34adb1c",
+       "gasUsed": "0x5208",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0xae38",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "contractAddress": null,
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x640",
+       "l1Fee": "0x5e",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getCode",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getBalance",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x233438e912"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "result": "0x14a34",
+      "id": 1
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d378cda68babba6a9dc1d52335bb76ca9e6a755373ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted"
+      }
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0xa4eb0",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3",
+       "transactionIndex": "0x3",
+       "blockHash": "0x690c10839bf6e69129ca71b7b847dd6884ab03618c7f7f8c781cea6c7f2f0860",
+       "blockNumber": "0x34adb09",
+       "gasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0x224ca",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": null,
+       "contractAddress": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x13b6",
+       "l1Fee": "0x129",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0x1823b",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a",
+       "transactionIndex": "0x2",
+       "blockHash": "0x838fb3f95c30305b3c29c31c200171f62552c84a5aaf1ab7414b5b2cd107e38d",
+       "blockNumber": "0x34adb1c",
+       "gasUsed": "0x5208",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0xae38",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "contractAddress": null,
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x640",
+       "l1Fee": "0x5e",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getBalance",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x233438e912"
+     }
+    }
+   ],
+   "robinhood-testnet": [
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0xb626"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xd12d83097671d731df2db731e973ad9a07673607",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d12d83097671d731df2db731e973ad9a0767360773ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted",
+       "data": "0x"
+      }
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0xd2e0f4ecf02387e1d993bd48e87191192bb78df11b52cc8a497faa6282ce7359",
+       "blockNumber": "0x8e9ab62",
+       "contractAddress": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "cumulativeGasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x1a8ac",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467c",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": null,
+       "transactionHash": "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0x1d2b690ba4281e1b5433f5ff2fb03cb57fc4f2e291799d926670d3e2365c96b3",
+       "blockNumber": "0x8e9ab7d",
+       "contractAddress": null,
+       "cumulativeGasUsed": "0x5208",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x5208",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467d",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "transactionHash": "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getCode",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getBalance",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x4473c3fc00"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "result": "0xb626",
+      "id": 1
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xd12d83097671d731df2db731e973ad9a07673607",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d12d83097671d731df2db731e973ad9a0767360773ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted",
+       "data": "0x"
+      }
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0xd2e0f4ecf02387e1d993bd48e87191192bb78df11b52cc8a497faa6282ce7359",
+       "blockNumber": "0x8e9ab62",
+       "contractAddress": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "cumulativeGasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x1a8ac",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467c",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": null,
+       "transactionHash": "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0x1d2b690ba4281e1b5433f5ff2fb03cb57fc4f2e291799d926670d3e2365c96b3",
+       "blockNumber": "0x8e9ab7d",
+       "contractAddress": null,
+       "cumulativeGasUsed": "0x5208",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x5208",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467d",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "transactionHash": "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getBalance",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x4473c3fc00"
+     }
+    }
+   ]
+  }
+ },
+ "made": {
+  "commit": "acdb5470a2739237c927daf2f311dab306dfbf95",
+  "base": "https://api.confidential.unrealized.trade",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "fee": {
+     "readAt": "2026-11-06T14:35:52.731Z",
+     "status": 200,
+     "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "327",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Fri, 06 Nov 2026 14:35:52 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "acdb5470a2739237c927daf2f311dab306dfbf95"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1793975700000,\"block\":\"0x34b5724\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "fee": {
+     "readAt": "2026-11-06T14:35:57.000Z",
+     "status": 200,
+     "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "332",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Fri, 06 Nov 2026 14:35:56 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "acdb5470a2739237c927daf2f311dab306dfbf95"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1793975700000,\"block\":\"0x8ea3a7f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    }
+   }
+  ],
+  "rpc": {
+   "base-sepolia": [
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x14a34"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getCode",
+     "params": [
+      "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getCode",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d378cda68babba6a9dc1d52335bb76ca9e6a755373ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted"
+      }
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0xa4eb0",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3",
+       "transactionIndex": "0x3",
+       "blockHash": "0x690c10839bf6e69129ca71b7b847dd6884ab03618c7f7f8c781cea6c7f2f0860",
+       "blockNumber": "0x34adb09",
+       "gasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0x224ca",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": null,
+       "contractAddress": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x13b6",
+       "l1Fee": "0x129",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0x1823b",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a",
+       "transactionIndex": "0x2",
+       "blockHash": "0x838fb3f95c30305b3c29c31c200171f62552c84a5aaf1ab7414b5b2cd107e38d",
+       "blockNumber": "0x34adb1c",
+       "gasUsed": "0x5208",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0xae38",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "contractAddress": null,
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x640",
+       "l1Fee": "0x5e",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getCode",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://sepolia.base.org",
+     "method": "eth_getBalance",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x233438e912"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "result": "0x14a34",
+      "id": 1
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d378cda68babba6a9dc1d52335bb76ca9e6a755373ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted"
+      }
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0xa4eb0",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3",
+       "transactionIndex": "0x3",
+       "blockHash": "0x690c10839bf6e69129ca71b7b847dd6884ab03618c7f7f8c781cea6c7f2f0860",
+       "blockNumber": "0x34adb09",
+       "gasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0x224ca",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": null,
+       "contractAddress": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x13b6",
+       "l1Fee": "0x129",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "type": "0x2",
+       "status": "0x1",
+       "cumulativeGasUsed": "0x1823b",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "transactionHash": "0x39894a739039fdf103c36176ccfee7c293d2f0e5dff76f02a2d38cba5d76480a",
+       "transactionIndex": "0x2",
+       "blockHash": "0x838fb3f95c30305b3c29c31c200171f62552c84a5aaf1ab7414b5b2cd107e38d",
+       "blockNumber": "0x34adb1c",
+       "gasUsed": "0x5208",
+       "effectiveGasPrice": "0x5b8d80",
+       "blobGasUsed": "0xae38",
+       "from": "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "contractAddress": null,
+       "l1GasPrice": "0x10",
+       "l1GasUsed": "0x640",
+       "l1Fee": "0x5e",
+       "l1BaseFeeScalar": "0x44d",
+       "l1BlobBaseFee": "0x1",
+       "l1BlobBaseFeeScalar": "0xa118b",
+       "daFootprintGasScalar": "0x1be"
+      }
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "method": "eth_getBalance",
+     "params": [
+      "0xa143f5664d6a270eca4bcc6cc0872e602c9a32a8",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x233438e912"
+     }
+    }
+   ],
+   "robinhood-testnet": [
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0xb626"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xd12d83097671d731df2db731e973ad9a07673607",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d12d83097671d731df2db731e973ad9a0767360773ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted",
+       "data": "0x"
+      }
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0xd2e0f4ecf02387e1d993bd48e87191192bb78df11b52cc8a497faa6282ce7359",
+       "blockNumber": "0x8e9ab62",
+       "contractAddress": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "cumulativeGasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x1a8ac",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467c",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": null,
+       "transactionHash": "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0x1d2b690ba4281e1b5433f5ff2fb03cb57fc4f2e291799d926670d3e2365c96b3",
+       "blockNumber": "0x8e9ab7d",
+       "contractAddress": null,
+       "cumulativeGasUsed": "0x5208",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x5208",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467d",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "transactionHash": "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getCode",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "method": "eth_getBalance",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x4473c3fc00"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_chainId",
+     "params": [],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "result": "0xb626",
+      "id": 1
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xd12d83097671d731df2db731e973ad9a07673607",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x60806040523660f25760405134815233907f737c69225d647e5994eab1a6c301bf6d9232beb2759ae1e27a8966b4732bc4899060200160405180910390a25f7f000000000000000000000000d12d83097671d731df2db731e973ad9a0767360773ffffffffffffffffffffffffffffffffffffffff16346040515f6040518083038185875af1925050503d805f811460b1576040519150601f19603f3d011682016040523d82523d5f602084013e60b6565b606091505b505090508060f0576040517f096dc0e100000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b005b5f5ffd"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getStorageAt",
+     "params": [
+      "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+      "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_call",
+     "params": [
+      {
+       "to": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "data": "0x8da5cb5b"
+      },
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+       "code": 3,
+       "message": "execution reverted",
+       "data": "0x"
+      }
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0xd2e0f4ecf02387e1d993bd48e87191192bb78df11b52cc8a497faa6282ce7359",
+       "blockNumber": "0x8e9ab62",
+       "contractAddress": "0xb174f0e859f00a7b593baca38394327e3d6bf638",
+       "cumulativeGasUsed": "0x1a8ac",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x1a8ac",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467c",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": null,
+       "transactionHash": "0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionReceipt",
+     "params": [
+      "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+       "blockHash": "0x1d2b690ba4281e1b5433f5ff2fb03cb57fc4f2e291799d926670d3e2365c96b3",
+       "blockNumber": "0x8e9ab7d",
+       "contractAddress": null,
+       "cumulativeGasUsed": "0x5208",
+       "effectiveGasPrice": "0x989680",
+       "from": "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+       "gasUsed": "0x5208",
+       "gasUsedForL1": "0x0",
+       "l1BlockNumber": "0xb8467d",
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "to": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+       "transactionHash": "0xdc30f6589fa6a8469bd7768780bdbd8e18ec1009ee091f252f4ccde14e3429ce",
+       "transactionIndex": "0x1",
+       "type": "0x2"
+      }
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getCode",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getTransactionCount",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x2"
+     }
+    },
+    {
+     "url": "https://robinhood-sepolia-rpc.publicnode.com",
+     "method": "eth_getBalance",
+     "params": [
+      "0x5a9ce486f0a33063c0835ec4ca5c5113b6c7894c",
+      "latest"
+     ],
+     "status": 200,
+     "json": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x4473c3fc00"
+     }
+    }
+   ]
+  }
+ }
+}

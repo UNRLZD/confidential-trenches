@@ -44,8 +44,10 @@
 // kit's pinned SellDelegate, and the sender sends ONE type-4 transaction to W carrying both, as the device's reference
 // sell that landed on both testnets does (contracts/pool-evm/script/testnet-run.mjs sellOf, testnet-run-lib.mjs
 // signTx7702). SellDelegate pays `fee` (at most Sell.feeCap) to Sell.feeRecipient, never to msg.sender (pool review
-// round 3, L-1), and deposits the rest; the sender sends only a Sell whose feeRecipient is this release's fee recipient
-// (the fee answer's fee_recipient, the one a withdraw pays), so the sender's gas comes back through the fee recipient.
+// round 3, L-1), and deposits the rest; the sender sends only a Sell whose feeRecipient is this network's fee collector
+// (card helper-sender-fee-proof: POOL_EVM_FEE_COLLECTOR_<NETWORK>, card evm-fee-collector's keyless FeeCollector,
+// whose receive() emits Paid(from, value) and forwards it to the sell sender), so a sale's fee is proven by a log only a
+// real payment makes, and the sender's gas comes back through it.
 // The body: { "pool", "w", "data", "authorization": { chainId, address, nonce, yParity, r, s } }, hex strings as
 // testnet-run-lib.mjs authJson writes them. Checks, each a refusal before any send (422 unless named), every static one
 // before any RPC call:
@@ -54,7 +56,7 @@
 //                    length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
 //                    EVM_SELL_DATA_MAX (2,048 bytes);
 //   not_pool         the Sell's pool is not this sender's;
-//   fee_recipient    the Sell pays its fee to anyone but this release's fee recipient (as a withdraw's);
+//   fee_recipient    the Sell pays its fee to anyone but this network's fee collector;
 //   fee_over_cap     the fee is over the Sell's feeCap, or the feeCap is not under minOut (the deposit holds nothing);
 //   bad_authorization the authorization's chainId is not the venue's (the kit's evmPoolVenues(), never 0), its address
 //                    not the kit's pinned sell delegate for this network (none pinned: every sell refused), yParity not
@@ -73,7 +75,8 @@
 //   deadline_near    the deadline (unix seconds) is under now + EVM_POOL_SEND_MARGIN_MS, checked again after the
 //                    queue's wait (a withdraw's deadlineMs too);
 //   deadline_far     it is over now + the kit's EVM_POOL_SELL_DEADLINE_MAX_S (a deadline written in ms lands here);
-//   not_configured (503) no sell key is set for the network (POOL_EVM_SELL_KEY_<NETWORK>): every sell, nothing read;
+//   not_configured (503) no sell key is set for the network (POOL_EVM_SELL_KEY_<NETWORK>), or no fee collector
+//                    (POOL_EVM_FEE_COLLECTOR_<NETWORK>): every sell, nothing read;
 //   auth_nonce       W's account nonce at pending, on either provider, is not the authorization's: the chain would skip
 //                    the authorization and the sender would pay for a call to W with no code;
 //   fee_low          the fee is under EVM_POOL_SELL_GAS x (the higher latest base fee of the two providers + the kit's
@@ -101,7 +104,12 @@
 // eth_estimateGas or eth_maxPriorityFeePerGas), maxFeePerGas min(2 x base + tip, (fee - the chain fee) / gas), so the
 // sender's worst cost, gas x maxFeePerGas + the chain fee, is within the fee. That worst cost is held against
 // the caps from the send; the sale's receipt, read in the background on both providers, turns it into what went
-// unpaid: all of gasUsed x effectiveGasPrice + l1Fee on a revert, that less the fee on a sale that paid less, else 0.
+// unpaid (card helper-sender-fee-proof): a sale is proven only when both providers return its receipt with status 1
+// and each carries the fee collector's Paid log, from the collector, `from` W and `value` at least the Sell's fee (the
+// call to W runs whatever code W holds then: a status 1 alone proves nothing, and any log W's own code can emit, the
+// pool's public Deposited among them, proves nothing either); a proven sale's unpaid is its cost (the higher of the
+// two receipts' gasUsed x effectiveGasPrice + l1Fee) less the fee, at least 0; any other receipt pair is charged its whole cost; one provider's receipt alone changes
+// nothing, so the worst stays held.
 // Once per (W, Sell nonce): a repeat gets the first hash and sends nothing, unless that sale ended without landing on
 // the providers' own reads (a receipt with status 0 on either, or once now is past its deadline plus
 // EVM_SELL_DROP_MARGIN_MS no transaction on either): then (W, nonce) is free for a new send, as often as W's unpaid cap
@@ -340,7 +348,7 @@ export const EVM_BUSY_RETRY_S = 2;
 export const EVM_SELL_DROP_MARGIN_MS = 60_000;
 /**
  * The sell sender pays gas for each call W signs; SellDelegate pays the fee, out of the proceeds and only when the sale
- * lands, to the Sell's feeRecipient, this release's fee recipient, never to the sell sender. The ledger counts what the
+ * lands, to the Sell's feeRecipient, this network's fee collector, which forwards it to the sell sender. The ledger counts what the
  * release does not get back, not the sell key's balance, which falls by every sale's cost. Each sale's worst cost (gas x maxFeePerGas + the L1 data fee bound) is held against W, the client,
  * the token and the sender's whole sell budget from its send; its receipt, read in the background, turns that into what
  * went unpaid (all of the cost on a revert, cost - fee when a landed sale paid less). In any EVM_SELL_UNPAID_WINDOW_MS
@@ -383,6 +391,51 @@ export const EVM_LANE_SENT_WINDOW_MS = 10_000;
 const EVM_LANE_PRIOR_MAX = 8;
 /** A 0-value transfer's gas: 21,000 (OP Stack, Base); on Arbitrum (Robinhood) the L1 poster's gas is added to it. */
 export const EVM_SELF_TRANSFER_GAS = 21_000n;
+/** FeeCollector's Paid(address indexed from, uint256 value) (card evm-fee-collector), its topic 0. */
+export const PAID_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Paid(address,uint256)")))}`;
+/**
+ * Whether the receipt `r` (a provider's answer, read as hostile) carries the fee collector's Paid log of this sale: from
+ * `collector`, not removed, its two topics Paid's and W's address, its data one word, at least `fee`. The collector emits
+ * it only in receive(), for ETH it was sent, so no code W runs can make one without paying.
+ */
+export function evmSalePaid(r: unknown, collector: string, w: string, fee: bigint): boolean {
+  const logs = (r as { logs?: unknown } | null)?.logs;
+  if (!Array.isArray(logs)) return false;
+  const from = `0x${w.slice(2).toLowerCase().padStart(64, "0")}`;
+  return logs.some((l) => {
+    if (typeof l !== "object" || l === null) return false;
+    const { address, topics, data, removed } = l as { address?: unknown; topics?: unknown; data?: unknown; removed?: unknown };
+    if (removed === true || evmRpcHex(address) !== collector || !Array.isArray(topics) || topics.length !== 2) return false;
+    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;
+    const d = evmRpcHex(data);
+    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;
+  });
+}
+/**
+ * What a landed sale left unpaid, from its two receipts, one per provider, read as hostile (card
+ * helper-sender-fee-proof): proven only when both read status 1 and each carries the fee collector's Paid log of the
+ * sale (evmSalePaid: the call to W runs whatever code W holds then, so a status 1 alone proves nothing). A proven sale's
+ * unpaid is its cost less the fee, at least 0, and it paid when its cost is at most the fee; any other pair is charged its
+ * whole cost and paid nothing. The cost is the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee, each part
+ * held to what the sale can cost (one provider's answer is hostile, and the higher one counts): gasUsed at most the gas
+ * the sale is sent with (EVM_POOL_SELL_GAS), effectiveGasPrice at most its maxFeePerGas, and l1Fee at most `worst`, the
+ * whole worst cost held at its send (so a lying provider charges one sale under twice its worst, never an hour of
+ * sells); a receipt whose cost cannot be read counts `worst`.
+ */
+export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, unknown>, sale: { collector: string; w: string; fee: bigint; maxFeePerGas: bigint }, worst: bigint): { proven: boolean; paid: boolean; unpaid: bigint } {
+  const most = (v: bigint, cap: bigint) => (v < cap ? v : cap);
+  const costOf = (r: Record<string, unknown>): bigint => {
+    try {
+      return most(qty(r.gasUsed), EVM_POOL_SELL_GAS) * most(qty(r.effectiveGasPrice), sale.maxFeePerGas) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : most(qty(r.l1Fee), worst));
+    } catch {
+      return worst;
+    }
+  };
+  const [ca, cb] = [costOf(ra), costOf(rb)];
+  const cost = ca > cb ? ca : cb;
+  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmSalePaid(r, sale.collector, sale.w, sale.fee));
+  return { proven: ok, paid: ok && cost <= sale.fee, unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };
+}
 /** The first wait before a sent transaction's receipt is read, doubling each read up to EVM_RECEIPT_POLL_BACKOFF times
  *  it (400 ms to 30 s), until its deadline plus the send margin [design: two of Base's 200 ms blocks (2 s, one block,
  *  before block 53556127), then a few reads a minute up to the same 30 s]. */
@@ -438,9 +491,11 @@ export type PoolEvmCode =
  *  Retry-After. */
 export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } }; retryAfterS?: number };
 /** `sell_sender`: the sell sender's address, which every sale is sent from and the device's sim runs from (the kit pins
- *  it), or null where no sell key is set (every sell refused not_configured). A sale's fee is paid to `fee_recipient`,
- *  never to the sell sender (SellDelegate.sol, pool review round 3, L-1). */
-export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; sell_sender: string | null; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
+ *  it), or null where no sell key is set (every sell refused not_configured). `fee_collector`: the address every Sell
+ *  must pay its fee to (SellDelegate.sol, pool review round 3, L-1), the network's FeeCollector, whose Paid log proves a
+ *  sale's fee (card helper-sender-fee-proof), or null where none is set (every sell refused not_configured); never the
+ *  withdraw's `fee_recipient`. A device takes it from its own pin, never from this answer. */
+export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; sell_sender: string | null; fee_collector: string | null; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 export type EvmPoolSender = {
   readonly network: string;
@@ -511,7 +566,7 @@ const failedInExecution = (e: unknown): boolean => {
  * each takes the next nonce; one per nullifier.
  */
 export function evmPoolSender(
-  cfg: { network: string; pool: string; senderKey: Uint8Array; sellKey?: Uint8Array; feeRecipient?: string; memory?: number; venues?: Readonly<Partial<Record<string, EvmPoolVenue>>>; receiptPollMs?: number; log?: (line: string) => void },
+  cfg: { network: string; pool: string; senderKey: Uint8Array; sellKey?: Uint8Array; feeRecipient?: string; feeCollector?: string; memory?: number; venues?: Readonly<Partial<Record<string, EvmPoolVenue>>>; receiptPollMs?: number; log?: (line: string) => void },
   providers: readonly [EvmRpc, EvmRpc],
   now: () => number = Date.now,
 ): EvmPoolSender {
@@ -525,6 +580,9 @@ export function evmPoolSender(
   // the sell sender: its own key, so a sale's unpaid gas never drains the withdraw sender, and its own nonce lane
   const sellSender = cfg.sellKey === undefined ? null : evmAddressOf(cfg.sellKey);
   if (sellSender === sender) throw new Error("the sell key must not be the withdraw sender's key");
+  // the fee collector a Sell must pay (card helper-sender-fee-proof): none set, every sell is refused
+  const feeCollector = cfg.feeCollector === undefined ? undefined : cfg.feeCollector.toLowerCase();
+  if (feeCollector !== undefined && (!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)) throw new Error("the fee collector must be an address, not the pool's, a sender's or the fee recipient's");
   const [a, b] = providers;
   let chainId: Promise<bigint> | null = null;
   // one lane per key: its queue (each send waits for the one before it), its next nonce, and each of its own sends not
@@ -790,7 +848,9 @@ export function evmPoolSender(
   /** POST /v1/pool/evm/sell: the static checks, none of which reads a provider, then one send per (W, Sell nonce). */
   const sellHeld = async (body: unknown, client: string | undefined): Promise<PoolEvmAnswer> => {
     if (cfg.sellKey === undefined || sellSender === null) return no(503, "not_configured", `no sell key is set for ${cfg.network}`);
+    if (feeCollector === undefined) return no(503, "not_configured", `no fee collector is set for ${cfg.network}`);
     const sellKey = cfg.sellKey;
+    const collector = feeCollector;
     if (typeof body !== "object" || body === null || Array.isArray(body) || !sameKeys(body, SELL_KEYS)) return no(400, "bad_shape");
     const { pool: p, w: wIn, data, authorization: au } = body as Record<string, unknown>;
     if (p !== pool || typeof wIn !== "string" || !ANY_ADDRESS.test(wIn) || typeof data !== "string" || data.length > 2 + 2 * EVM_SELL_DATA_MAX || !HEX.test(data)) return no(400, "bad_shape");
@@ -807,8 +867,9 @@ export function evmPoolSender(
       return no(400, "bad_shape", (e as Error).message);
     }
     if (s.pool !== pool) return no(422, "not_pool");
-    // the fee goes only to the Sell's feeRecipient (SellDelegate.sol, L-1): this release's, as a withdraw's relay data
-    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not ${feeRecipient}`);
+    // the fee goes only to the Sell's feeRecipient (SellDelegate.sol, L-1): this network's fee collector, whose Paid log
+    // is the one proof of the fee (card helper-sender-fee-proof)
+    if (s.feeRecipient !== collector) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not the fee collector ${collector}`);
     if (s.fee > s.feeCap) return no(422, "fee_over_cap", `fee ${s.fee}, cap ${s.feeCap}`);
     if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);
     // W's authorization: of the kit's pinned delegate, on this chain's own id, in its one low-s form, signed by W
@@ -1137,49 +1198,55 @@ export function evmPoolSender(
   /**
    * Reads a lane's send's receipt on both providers in the background, first after cfg.receiptPollMs
    * (EVM_SELL_RECEIPT_POLL_MS), the wait doubling to EVM_RECEIPT_POLL_BACKOFF times it. A receipt ends it (`landed` reads
-   * it) and drops the send's record; another send taking its nonce (a replacement) ends it; its record's bound (`until` +
+   * it) and drops the send's record; a watch with `landed` (a sale's) reads on until both providers have returned the
+   * receipt, each provider's latest kept, and only then calls `landed` with the two (card helper-sender-fee-proof: one
+   * provider's receipt never clears a charge; past the bound with one only, `landed` is never called); another send
+   * taking its nonce (a replacement) ends it; its record's bound (`until` +
    * EVM_LANE_WATCH_MS, or the bound a replacement kept from the send it replaced) ends it, with one log line from the
    * watch that saw the bound come (one started past it, a held answer's tend, ends without). A send unmined past the
    * margin has its lane tended at each read (a hole behind it is filled, it is replaced past `until`).
    */
-  function watch(lane: Lane, nonce: bigint, hash: string, until: number, landed?: (r: Record<string, unknown>) => void): void {
+  function watch(lane: Lane, nonce: bigint, hash: string, until: number, landed?: (ra: Record<string, unknown>, rb: Record<string, unknown>) => void): void {
     const first = cfg.receiptPollMs ?? EVM_SELL_RECEIPT_POLL_MS;
     const sent = now();
     const mine = lane.sent.get(nonce);
     const bound = mine?.bound ?? until + EVM_LANE_WATCH_MS;
     let every = first;
+    // each provider's receipt, its latest answer: a sale's watch reads on until both have one
+    const seen: [Record<string, unknown> | null, Record<string, unknown> | null] = [null, null];
+    let used = false;
     const tick = async (): Promise<void> => {
       const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);
-      const got = rc.flatMap((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? [x.value as Record<string, unknown>] : []));
-      if (got.length > 0) {
-        lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used
-        landed?.(got.find((x) => evmRpcHex(x.status) === "0x0") ?? got[0]!);
-        return;
+      rc.forEach((x, i) => {
+        if (x.status === "fulfilled" && x.value !== null && typeof x.value === "object") seen[i] = x.value as Record<string, unknown>;
+      });
+      if (seen[0] !== null || seen[1] !== null) {
+        if (!used) lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used
+        used = true;
+        if (landed === undefined) return;
+        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);
+        // one provider's receipt only: read on until the other returns it, never past the bound
+        if (now() > bound) return;
+      } else {
+        if (mine === undefined || lane.sent.get(nonce) !== mine) return;
+        if (now() > bound) {
+          if (sent <= bound) log(`evm ${cfg.network}: ${lane.from}'s nonce ${nonce} (${hash}) is unmined past its watch; new sends wait for it`);
+          return;
+        }
+        if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);
       }
-      if (mine === undefined || lane.sent.get(nonce) !== mine) return;
-      if (now() > bound) {
-        if (sent <= bound) log(`evm ${cfg.network}: ${lane.from}'s nonce ${nonce} (${hash}) is unmined past its watch; new sends wait for it`);
-        return;
-      }
-      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);
       every = Math.min(every * 2, first * EVM_RECEIPT_POLL_BACKOFF);
       setTimeout(() => void tick(), every).unref?.();
     };
     setTimeout(() => void tick(), every).unref?.();
   }
-  /** A sale's receipt turns its held worst cost into what went unpaid: all of its cost on a revert, its cost less the fee
-   *  on a sale that paid less, else 0, and a sale that landed and paid marks its W and client. A sale never seen landed
+  /** A sale's two receipts, one per provider, turn its held worst cost into what went unpaid (evmSaleUnpaid), and a
+   *  sale proven paid marks its W and client; any other marks nothing. A sale whose receipt both providers never return
    *  keeps its worst cost held for the window. */
-  const landedSale = (held: Charge, fee: bigint, keys: readonly string[]) => (r: Record<string, unknown>): void => {
-    let cost: bigint;
-    try {
-      cost = qty(r.gasUsed) * qty(r.effectiveGasPrice) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : qty(r.l1Fee));
-    } catch {
-      cost = held.wei; // a receipt whose cost cannot be read: the worst stays held
-    }
-    const ok = evmRpcHex(r.status) === "0x1";
-    held.wei = ok ? (cost > fee ? cost - fee : 0n) : cost;
-    if (!ok || cost > fee) return;
+  const landedSale = (held: Charge, s: EvmSell, w: string, maxFeePerGas: bigint, keys: readonly string[]) => (ra: Record<string, unknown>, rb: Record<string, unknown>): void => {
+    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);
+    held.wei = r.unpaid;
+    if (!r.paid) return;
     for (const k of keys) {
       if (!k.startsWith("w:") && !k.startsWith("c:")) continue;
       paid.delete(k);
@@ -1255,7 +1322,7 @@ export function evmPoolSender(
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(s.deadline) * 1000 + EVM_POOL_SEND_MARGIN_MS;
     sentAt(sellLane, nonce, until, maxFeePerGas, tip, hash, false);
-    watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s.fee, keys));
+    watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s, w, maxFeePerGas, keys));
     return { status: 200, body: { hash } };
   }
   return {
@@ -1270,7 +1337,7 @@ export function evmPoolSender(
       if (epoch > t || epoch < t - POOL_LIFE_MAX_MS) return null;
       const f = await feeOf(epoch);
       if (f === null) return null;
-      return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, sell_sender: sellSender, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
+      return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector: feeCollector ?? null, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
     },
     carry,
     sell,
@@ -1345,6 +1412,17 @@ export const POOL_EVM_SELL_ENV = {
 } as const;
 
 /**
+ * Per network: the fee collector every Sell must pay (card helper-sender-fee-proof; card evm-fee-collector's keyless
+ * FeeCollector, its Paid log the proof of a sale's fee). Unset: that network's sells answer 503 not_configured.
+ */
+export const POOL_EVM_COLLECTOR_ENV = {
+  base: "POOL_EVM_FEE_COLLECTOR_BASE",
+  robinhood: "POOL_EVM_FEE_COLLECTOR_ROBINHOOD",
+  "base-sepolia": "POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA",
+  "robinhood-testnet": "POOL_EVM_FEE_COLLECTOR_ROBINHOOD_TESTNET",
+} as const;
+
+/**
  * The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off (a
  * sell key set alone is refused). A network whose venue in the kit (`venues`, the kit's own list) pins a sell sender
  * starts only with that sell key: the device sims each sale as sent from the pin (the kit's checks/evm/quote.ts
@@ -1357,10 +1435,14 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     const [pool, key, fee, feeTo, rpcs] = names.map((n) => env[n] ?? "");
     const sellName = POOL_EVM_SELL_ENV[network as keyof typeof POOL_EVM_SELL_ENV];
     const sellKey = env[sellName] ?? "";
+    const collectorName = POOL_EVM_COLLECTOR_ENV[network as keyof typeof POOL_EVM_COLLECTOR_ENV];
+    const collector = env[collectorName] ?? "";
     if (pool === "" && key === "" && fee === "" && feeTo === "" && rpcs === "") {
       if (sellKey !== "") throw new Error(`${sellName} is set but ${network}'s pool is not`);
+      if (collector !== "") throw new Error(`${collectorName} is set but ${network}'s pool is not`);
       continue;
     }
+    if (collector !== "" && !/^0x[0-9a-fA-F]{40}$/.test(collector)) throw new Error(`${collectorName} must be an address`);
     if (!/^0x[0-9a-fA-F]{40}$/.test(pool!)) throw new Error(`${names[0]} must be an address`);
     if (!/^0x[0-9a-f]{64}$/.test(key!)) throw new Error(`${names[1]} must be 0x and 64 lowercase hex`);
     if (sellKey !== "" && !/^0x[0-9a-f]{64}$/.test(sellKey)) throw new Error(`${sellName} must be 0x and 64 lowercase hex`);
@@ -1381,11 +1463,16 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     // sales go only from the pin: a chain with none starts with sales off, never with an unpinned key
     const sells = sellKey !== "" && pin !== undefined;
-    const s0 = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), ...(sells ? { sellKey: unhex(sellKey.slice(2)) } : {}), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }), venues }, providers);
+    const s0 = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), ...(sells ? { sellKey: unhex(sellKey.slice(2)) } : {}), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }), ...(collector === "" ? {} : { feeCollector: collector }), venues }, providers);
     // the start's refusal names the variable and the host whose provider cannot answer the fee's reads: the host only,
     // since a provider's URL may carry its key in the path or the query (Alchemy's /v2/<key>, Infura's /v3/<key>)
     const s: EvmPoolSender = { ...s0, ready: (sleep) => s0.ready(sleep).catch((e: Error) => Promise.reject(new Error(`${names[4]}: ${e.message.replace(/^rpc ([12]):/, (_, k: string) => `${new URL(urls[Number(k) - 1]!).host}:`)}`))) };
     if (pin !== undefined && s.sellSender !== null && pin.toLowerCase() !== s.sellSender) throw new Error(`${sellName} is not the key of the kit's pinned sell sender for ${network} (${pin})`);
+    // the collector is the kit's pin or unset (card helper-sender-fee-proof, review M1): a sale is counted paid by the
+    // Paid log of the collector set here, so any other address would let every sale read as paid while the sell sender
+    // pays its gas; a chain whose venue pins none (the mainnets until their collectors deploy) takes no collector
+    const collectorPin = v !== undefined && Object.hasOwn(v, "feeCollector") ? v.feeCollector : undefined;
+    if (collector !== "" && (collectorPin === undefined || collector.toLowerCase() !== collectorPin.toLowerCase())) throw new Error(`${collectorName} is not the kit's pinned fee collector for ${network} (${collectorPin ?? "none pinned"})`);
     out.set(s.pool, s);
   }
   return out;
