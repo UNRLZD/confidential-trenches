@@ -1,9 +1,9 @@
 {
- "about": "good: the chain reads are real (both RPCs per testnet, 2026-11-06T14:46:21.035Z); the helper answers are constructed, from evmPoolSender().carry of this branch at 99334f1d run in-process with providers that throw (--in-process), since the fix is not deployed. bad: a real run against the deployed helper https://api.confidential.unrealized.trade (2026-11-06T14:46:17.667Z), X-Helper-Commit f21d4be2, which still carries the three-argument withdraw: it refuses the landed withdraw as bad_shape and takes the three-argument form to epoch_off.",
+ "about": "good: the chain reads are real (both RPCs per testnet, 2026-11-06T15:28:33.179Z); the helper answers are constructed, from evmPoolSender() of this branch at 593805c7 run in-process (--in-process: fee() on the kit feeProviders, carry() of the three bodies), with the deployed host fee_recipient (feeRecipientFrom), since the fix is not deployed; replace it with the host real run once deployed. bad: a real run against the deployed helper https://api.confidential.unrealized.trade (2026-11-06T15:28:21.289Z), X-Helper-Commit f1d5298f8201ed9c5adb4d13526dc1e95f579dcb, which still carries the three-argument withdraw: it refuses the landed withdraw as bad_shape and takes the three-argument form to epoch_off.",
  "good": {
-  "base": "in-process apps/helper/src/pool/evm.ts at 99334f1dba0e25c7048628e15d8e19b0a7ab1ca9 (constructed: not the deployed host)",
+  "base": "in-process apps/helper/src/pool/evm.ts at 593805c7102f6f8c55bb4d7d456aa321e9c5cfdf (constructed: not the deployed host)",
   "constructed": true,
-  "at": "2026-11-06T14:46:21.035Z",
+  "at": "2026-11-06T15:28:33.179Z",
   "pools": [
    {
     "network": "base-sepolia",
@@ -25,15 +25,15 @@
       "asked": "fee",
       "status": 200,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
-      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"epoch_ms\":60000,\"epoch_start_ms\":1793976360000,\"block\":\"0x34b6408\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1793978880000,\"block\":\"0x34b9540\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
      },
      {
       "asked": "landed_withdraw",
       "status": 422,
       "headers": {
-       "x-helper-commit": "99334f1dba0e25c7048628e15d8e19b0a7ab1ca9"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
       "body": "{\"error\":{\"code\":\"epoch_off\"}}"
      },
@@ -41,7 +41,7 @@
       "asked": "three_argument",
       "status": 400,
       "headers": {
-       "x-helper-commit": "99334f1dba0e25c7048628e15d8e19b0a7ab1ca9"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not withdraw's calldata\"}}"
      },
@@ -49,7 +49,7 @@
       "asked": "trailing_byte",
       "status": 400,
       "headers": {
-       "x-helper-commit": "99334f1dba0e25c7048628e15d8e19b0a7ab1ca9"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not withdraw's calldata\"}}"
      }
@@ -70,6 +70,14 @@
        "status": "0x1"
       }
      ]
+    },
+    "feeRecipientFrom": {
+     "base": "https://api.confidential.unrealized.trade",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1793978880000,\"block\":\"0x34b9540\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
     }
    },
    {
@@ -92,15 +100,15 @@
       "asked": "fee",
       "status": 200,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
-      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"epoch_ms\":60000,\"epoch_start_ms\":1793976360000,\"block\":\"0x8ea4b9b\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1793978880000,\"block\":\"0x8ea8a11\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
      },
      {
       "asked": "landed_withdraw",
       "status": 422,
       "headers": {
-       "x-helper-commit": "99334f1dba0e25c7048628e15d8e19b0a7ab1ca9"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
       "body": "{\"error\":{\"code\":\"epoch_off\"}}"
      },
@@ -108,7 +116,7 @@
       "asked": "three_argument",
       "status": 400,
       "headers": {
-       "x-helper-commit": "99334f1dba0e25c7048628e15d8e19b0a7ab1ca9"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not withdraw's calldata\"}}"
      },
@@ -116,7 +124,7 @@
       "asked": "trailing_byte",
       "status": 400,
       "headers": {
-       "x-helper-commit": "99334f1dba0e25c7048628e15d8e19b0a7ab1ca9"
+       "x-helper-commit": "593805c7102f6f8c55bb4d7d456aa321e9c5cfdf"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not withdraw's calldata\"}}"
      }
@@ -137,13 +145,21 @@
        "status": "0x1"
       }
      ]
+    },
+    "feeRecipientFrom": {
+     "base": "https://api.confidential.unrealized.trade",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1793978880000,\"block\":\"0x8ea8a11\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
     }
    }
   ]
  },
  "bad": {
   "base": "https://api.confidential.unrealized.trade",
-  "at": "2026-11-06T14:46:17.667Z",
+  "at": "2026-11-06T15:28:21.289Z",
   "pools": [
    {
     "network": "base-sepolia",
@@ -165,15 +181,15 @@
       "asked": "fee",
       "status": 200,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
-      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"epoch_ms\":60000,\"epoch_start_ms\":1793976360000,\"block\":\"0x34b6408\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1793978880000,\"block\":\"0x34b9540\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
      },
      {
       "asked": "landed_withdraw",
       "status": 400,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\"}}"
      },
@@ -181,7 +197,7 @@
       "asked": "three_argument",
       "status": 422,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
       "body": "{\"error\":{\"code\":\"epoch_off\"}}"
      },
@@ -189,7 +205,7 @@
       "asked": "trailing_byte",
       "status": 400,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\"}}"
      }
@@ -232,15 +248,15 @@
       "asked": "fee",
       "status": 200,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
-      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"epoch_ms\":60000,\"epoch_start_ms\":1793976360000,\"block\":\"0x8ea4b9b\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1793978880000,\"block\":\"0x8ea8a11\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
      },
      {
       "asked": "landed_withdraw",
       "status": 400,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\"}}"
      },
@@ -248,7 +264,7 @@
       "asked": "three_argument",
       "status": 422,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
       "body": "{\"error\":{\"code\":\"epoch_off\"}}"
      },
@@ -256,7 +272,7 @@
       "asked": "trailing_byte",
       "status": 400,
       "headers": {
-       "x-helper-commit": "f21d4be2cd160f6971170913178961f5674fd38e"
+       "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
       },
       "body": "{\"error\":{\"code\":\"bad_shape\"}}"
      }
