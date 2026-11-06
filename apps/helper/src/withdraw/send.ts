@@ -17,7 +17,8 @@
 //        is_blocklisted(fee_recipient) exactly false at check 7's block on both RPCs, else 503 relayer_low, its log line
 //        "relayer fee account not ready". The vault pays the fee in the same receipt as the recipient's amount (card
 //        vault-review-fixes-1, review A-01), so a fee account the token refuses fails every payout whole into
-//        refund_pending; read again in the queue right before signing, at a fresh agreed block, as check 10 is.
+//        refund_pending. Asked after check 10 (a halted token answers token_halted first), and read again in the queue
+//        right before signing, after check 10's hold, at a fresh agreed block.
 //   8.   recipient and fee_recipient are neither the vault nor intents.near, else bad_recipient.
 //   9.   deadline_ms is at least the newest final block's time + 30 s (120 s for a request that funds A, H3.7 item 1),
 //        the time read as header.timestamp_nanosec (a decimal string) / 10^6 on both providers, never header.timestamp
@@ -342,8 +343,8 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
     log(`withdraw 503 relayer_low: ${FEE_ACCOUNT_NOT_READY} (${w.fee_recipient} on ${deps.cfg.token}: ${f === "unread" ? "not read at an agreed block" : `registered ${f.registered}, blocklisted ${f.blocklisted}`})`);
     return no("relayer_low", 503);
   };
+  if (await held(deps)) return no("token_halted", 503); // check 10 first: a halted token holds whatever 7b reads
   if (!feeAccountReady(reads.feeAccount)) return feeHold(reads.feeAccount);
-  if (await held(deps)) return no("token_halted", 503);
 
   const relayer = deps.relayers[turn++ % deps.relayers.length]!;
   const deposit = vaultWithdrawYocto(w.register_deposit, w.relay_fee, true);

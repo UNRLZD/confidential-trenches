@@ -477,6 +477,10 @@ test("check 7b: a fee account unregistered or blocklisted (on either provider) a
     assert.equal(a.status, 503, JSON.stringify(over));
     assert.equal(s.relayer.sent.length, 0, JSON.stringify(over));
   }
+  // check 10 first: a halted token answers token_halted whatever the fee account reads (relayer_withdraw.rs step 2)
+  const both = setup(chain({ feeRegistered: [false, false] }), { status: () => halted });
+  assert.deepEqual(code(await carryWithdraw(req(), both.deps)), "token_halted");
+  assert.equal(both.relayer.sent.length, 0);
   const ok = setup();
   const lines: string[] = [];
   ok.deps.log = (l) => lines.push(l);
