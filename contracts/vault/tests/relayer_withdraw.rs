@@ -238,7 +238,8 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     let v = w.carry(&["ok"], &["same_call"], 0).await?;
     fee_hold(&v, "registered false, blocklisted false)")?;
     assert_eq!(w.key_nonce().await?, n0, "an unregistered fee account signs nothing");
-    let _ = w.h.storage_deposit(&w.relayer, w.relayer.id()).await?;
+    // registered by alice, so the relayer's key signs nothing in this step and its nonce stays the helper's own
+    let _ = w.h.storage_deposit(&w.alice, w.relayer.id()).await?;
     w.h.mock_fail("is_blocklisted", Some(w.relayer.id()), true).await?;
     assert_eq!(w.h.view(&w.h.token, "is_blocklisted", json!({"account_id": w.relayer.id()})).await?, json!(true));
     let v = w.carry(&["ok"], &["same_call"], 0).await?;
@@ -293,7 +294,7 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(w.h.token_balance(w.relayer.id()).await? - fee0, 100_000, "the relayer holds the fee");
 
     let near1 = w.h.near_balance(w.relayer.id()).await?;
-    println!("relayer NEAR: {near0} before, {near1} after ({} spent on three withdrawals, three settles and its registration)", near0 - near1);
+    println!("relayer NEAR: {near0} before, {near1} after ({} spent on three withdrawals and three settles)", near0 - near1);
     w.h.i1().await?;
     Ok(())
 }
