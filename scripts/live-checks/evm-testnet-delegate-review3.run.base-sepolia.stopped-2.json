@@ -1,0 +1,62 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-06T18:47:33.200Z",
+  "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+  "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+  "venues": [],
+  "asked": [
+    "v4"
+  ],
+  "relayer": "0xa25c61ded77b60653a7eedec8d11ca275f68147b",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2065890000016656",
+  "restore": null,
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0x2b4794dbe2a570a720d48f4b7f2b8037df7d5a8bb8928c71c08c91896cb0db06",
+      "from": "0xa25c61ded77b60653a7eedec8d11ca275f68147b",
+      "kind": "deposit",
+      "block": "55344632",
+      "gasUsed": "395090",
+      "commitment": "10456990687789056939833166092786049294556429186634380574936865280929506732025",
+      "label": "8789953104890587861683558630230150454570050242426893346917619370494874213212",
+      "value": "2000000000000000",
+      "precommitment": "19175186146569197815111641529492679867461567061656353548025849772871190153509"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0xca3d3edc5f43fa083c5c63a427ce9167f9b1465fd2f26cdbc4146e0a608e73a5",
+      "from": "0xa25c61ded77b60653a7eedec8d11ca275f68147b",
+      "kind": "withdraw",
+      "w": "0x5d51b70157e2ce0948e0cfb6d51e229ef61e120b",
+      "nullifier": "17476733745032136275891269815266609118705545321341529063829440152750700293524",
+      "value": "2000000000000000",
+      "fee": "10000000000000",
+      "block": "55344875",
+      "gasUsed": "512166",
+      "newCommitment": "8032074036368566074969805726206395478699880444250694768346364233755479297888"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0xed8abbed7df5f9f1ffaaf81110c7333e3158b666c072840114a3746dc37d5147",
+      "from": "0x5d51b70157e2ce0948e0cfb6d51e229ef61e120b",
+      "kind": "sweep",
+      "w": "0x5d51b70157e2ce0948e0cfb6d51e229ef61e120b",
+      "block": "55344892",
+      "gasUsed": "21000"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0xc611651246ff9be3a64ddb3f69304a3f1068f2c4898ba66d74740e8cef5f7d72",
+      "from": "0xa25c61ded77b60653a7eedec8d11ca275f68147b",
+      "kind": "sweep",
+      "block": "55344912",
+      "gasUsed": "21000"
+    }
+  ],
+  "stopped": "Stopped before its buy: the device's v4 buy quote refused (partial_fill: a hookless hop runs out of liquidity, NotEnoughLiquidity) on Base Sepolia's hookless v4 pool; its finally withdrew the deposit note to its W and swept that W and the run key back to E. The next run bought through v3."
+}

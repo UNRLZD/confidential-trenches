@@ -28,7 +28,7 @@
 // Runs: after each helper deploy (scripts/ci/helper-live-checks.mjs): the fee answer is HELPER_HOST's; the rest is
 // chain state that a later deploy cannot change but a kit pin move would
 import "../net-window.mjs";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
@@ -43,6 +43,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const CHAINS = Object.freeze(["base-sepolia", "robinhood-testnet"]);
 export const deployFile = (c) => path.join(HERE, `${KEY}.${c}.json`);
 export const runFile = (c) => path.join(HERE, `${KEY}.run.${c}.json`);
+/** The chain's runs through the helper: the one that sold (runFile), then each stopped one (`.stopped-<n>.json`, its
+ *  record carrying why it stopped), read back the same way */
+export const runFiles = (c) => [runFile(c), ...readdirSync(HERE).filter((f) => f.startsWith(`${KEY}.run.${c}.stopped-`) && f.endsWith(".json")).sort().map((f) => path.join(HERE, f))].filter(existsSync);
 const ANSWERS = path.join(HERE, `${KEY}.answers.json`);
 const RUN_RECORD = path.join(HERE, `${KEY}.md`);
 // FeeCollector's Paid(address indexed from, uint256 value) (contracts/pool-evm/src/FeeCollector.sol)
@@ -85,24 +88,35 @@ export async function check(o) {
   return { ok: ok && pinned, lines: r.lines };
 }
 
-// The fundings of the sell runs' run keys from wallet E, by chain, each read back as succeeded on both RPCs (none
-// until the runs through the helper)
-export const RUN_FUNDINGS = Object.freeze({});
+// The fundings of the sell runs' run keys from wallet E, by run key, each read back as succeeded on both of its
+// chain's RPCs, 6 Nov 18:21-18:51Z
+export const RUN_FUNDINGS = Object.freeze({
+  // robinhood-testnet, the run that sold
+  "0x07aae601c1f2c9178680624134d2b3d928b2631a": "0x76880738426140d5e7f25a81fb61d5f40bf58a91aa0b044fcf5d57860a031c11",
+  // base-sepolia: run 1, its syncs held at sepolia.base.org's 200-block log cap (its own entry when it ends)
+  "0x75cafd9315fcc8a68aa75c8437f381a4dfa51431": "0x43c3add967cbe23d14d26d8150eae4813f079c195b8564a9e49eefac7a4df5b9",
+  // base-sepolia: run 2, stopped (v4 had no liquidity)
+  "0xa25c61ded77b60653a7eedec8d11ca275f68147b": "0xce1abea343de87a3bad0835d52a9bdad65244e29d807bc1ae7e5948064cb8f52",
+  // base-sepolia: run 3, the run that sold (v3)
+  "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a": "0x0047b367037dbf268969919630fb7e8c41f9e5266a8fa8893378a8150289c267",
+});
 const E = "0x49f2425b7f33f3a10912de8add6839226ce663a2";
 
 /** The run record: runRecordFor's (each redeploy's deploy and sweep) and each run's (pool-evm-testnet-run's), with each
  *  run key's funding from E */
-export function runRecord(ds, runs = [], runFundings = RUN_FUNDINGS) {
+export function runRecord(ds, runs = [], runFundings = RUN_FUNDINGS, paid = []) {
   const head = runRecordFor(KEY, ds).split("\n");
   const fund = ds.map((d) => `Tx: ${d.chain} ${FUNDINGS[d.chain]}`);
   const i = head.findIndex((l) => l === "");
   const notes = ds.map((d) => `${d.chain}: the run key ${d.deployer} was funded from the team's testnet wallet E (${E}) by ${FUNDINGS[d.chain]}, read back as succeeded on both RPCs.`);
   if (runs.length === 0) return [...head.slice(0, i), ...fund, ...head.slice(i), ...notes, ""].join("\n");
-  for (const r of runs) if (!/^0x[0-9a-f]{64}$/.test(runFundings[r.chain] ?? "")) throw new Error(`no funding recorded for the ${r.chain} run's key`);
+  const fundOf = (r) => runFundings[String(r.relayer).toLowerCase()];
+  for (const r of runs) if (!/^0x[0-9a-f]{64}$/.test(fundOf(r) ?? "")) throw new Error(`no funding recorded for the ${r.chain} run's key ${r.relayer}`);
   const run = runLinesOf(runs).split("\n");
   const runTx = run.filter((l) => l.startsWith("Tx: "));
-  const runFund = runs.map((r) => `Tx: ${r.chain} ${runFundings[r.chain]}`);
-  const runNotes = runs.map((r) => `${r.chain}: the sell run's key ${r.relayer} was funded from the team's testnet wallet E (${E}) by ${runFundings[r.chain]}, read back as succeeded on both RPCs.`);
+  const runFund = runs.map((r) => `Tx: ${r.chain} ${fundOf(r)}`);
+  const runNotes = runs.map((r) => `${r.chain}: the sell run's key ${r.relayer} was funded from the team's testnet wallet E (${E}) by ${fundOf(r)}, read back as succeeded on both RPCs.`);
+  for (const p of paid) runNotes.push(`${p.chain}: the helper's sell ${p.hash} carries Paid(from ${p.w}, value ${p.value} wei), emitted by the FeeCollector ${p.collector}, the kit's pin, on ${p.urls.join(" and ")}.`);
   return [...head.slice(0, i), ...fund, ...runTx, ...runFund, ...head.slice(i), ...notes, ...runNotes, "", ...run.slice(run.findIndex((l) => l === "") + 1)].join("\n");
 }
 
@@ -138,6 +152,7 @@ export async function checkRuns(runs, transportOf, deployments, senders, venues 
   const s = await checkSells(runs, transportOf, senders);
   const lines = s.lines.map((l) => (l.startsWith("ok ") ? `ok   ${l.slice(3)}` : `FAIL ${l.slice(4)}`));
   let ok = s.ok;
+  const paid = [];
   for (const run of runs) {
     const rec = run.record;
     const collector = lower(venues[rec.chain]?.feeCollector);
@@ -152,7 +167,9 @@ export async function checkRuns(runs, transportOf, deployments, senders, venues 
         const fee = BigInt(`0x${String(tx.result?.input).slice(10 + 64, 10 + 128)}`);
         const rs = await Promise.all(urls.map((u) => transport(u, "eth_getTransactionReceipt", [t.hash])));
         pass = ADDRESS.test(collector) && fee > 0n && rs.every((x) => !("error" in x) && x.result?.status === "0x1" && paidIn(x.result, collector, t.w, fee));
-        said = `fee ${fee}`;
+        const log = pass ? rs[0].result.logs.find((l) => lower(l.address) === collector && lower(l.topics?.[0]) === PAID) : null;
+        if (log) paid.push({ chain: rec.chain, hash: t.hash, collector, w: lower(t.w), value: String(BigInt(log.data)), urls });
+        said = `fee ${fee}${log ? `, Paid value ${BigInt(log.data)}` : ""}`;
       } catch (e) {
         said = String(e.message).split("\n")[0];
       }
@@ -166,7 +183,7 @@ export async function checkRuns(runs, transportOf, deployments, senders, venues 
     lines.push(`${sold ? "ok  " : "FAIL"} ${c}: a run that sold through the helper, after the redeploy of ${lower(d?.contracts?.SellDelegate?.address) || "(none)"}`);
     ok &&= sold;
   }
-  return { ok, lines };
+  return { ok, lines, paid };
 }
 
 /** HELPER_HOST's fee answer for each chain's pool (the kit's pinned pool) */
@@ -203,7 +220,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     for (const l of h.lines) console.log(`live-check ${KEY}: ${l}`);
     ok &&= h.ok;
     const recs = new Map();
-    const runs = CHAINS.filter((c) => existsSync(runFile(c))).map((c) => ({ record: JSON.parse(readFileSync(runFile(c), "utf8")), urls: RUN_RPCS[c] }));
+    const runs = CHAINS.flatMap((c) => runFiles(c).map((f) => ({ record: JSON.parse(readFileSync(f, "utf8")), urls: RUN_RPCS[c] })));
     const r = await checkRuns(runs, (run) => {
       if (!recs.has(run)) recs.set(run, runRecorder());
       return recs.get(run).transport;
@@ -223,7 +240,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
     if (ok && args.includes("--write-record")) {
-      writeFileSync(RUN_RECORD, runRecord(CHAINS.map((c) => out.deployments[c]), runs.map((x) => x.record)));
+      writeFileSync(RUN_RECORD, runRecord(CHAINS.map((c) => out.deployments[c]), runs.map((x) => x.record), RUN_FUNDINGS, r.paid));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RUN_RECORD)}`);
     }
     process.exit(ok ? 0 : 1);

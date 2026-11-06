@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { CHAINS, check, checkHelper, checkRuns, runRecord } from "./evm-testnet-delegate-review3.mjs";
+import { CHAINS, FUNDINGS, RUN_FUNDINGS, check, checkHelper, checkRuns, runRecord } from "./evm-testnet-delegate-review3.mjs";
 import { replayer } from "./notes-per-pool-evm.mjs";
 import { BUILD } from "./pool-evm-deploy.mjs";
 
@@ -97,12 +97,20 @@ test("a kit pin naming another delegate, or none, fails", async () => {
   }
 });
 
-test("the run record names every redeploy transaction and each run key's funding, Money path: yes", () => {
-  const text = runRecord(CHAINS.map((c) => A.deployments[c]));
+test("the run record names every redeploy and run transaction, each run key's funding and each sell's Paid log, Money path: yes", async () => {
+  const runs = A.runs.map((r) => r.record);
+  const { paid } = await checkRuns(runsOf(), (r) => replayer(r.answers), A.deployments, checkHelper(A.helper).senders);
+  const text = runRecord(CHAINS.map((c) => A.deployments[c]), runs, RUN_FUNDINGS, paid);
   assert.match(text, /^CARD evm-testnet-delegate-review3 \/ live: PASS\nMoney path: yes\n/);
   const tx = text.split("\n").filter((l) => l.startsWith("Tx: "));
-  assert.equal(tx.length, 6);
-  for (const c of CHAINS) for (const t of A.deployments[c].txs) assert.ok(tx.includes(`Tx: ${c} ${t.hash}`), t.hash);
+  const want = [
+    ...CHAINS.flatMap((c) => A.deployments[c].txs.map((t) => `Tx: ${c} ${t.hash}`)),
+    ...CHAINS.map((c) => `Tx: ${c} ${FUNDINGS[c]}`),
+    ...runs.flatMap((r) => [...r.txs.map((t) => `Tx: ${r.chain} ${t.hash}`), `Tx: ${r.chain} ${RUN_FUNDINGS[r.relayer]}`]),
+  ];
+  assert.deepEqual([...tx].sort(), [...new Set(want)].sort());
+  assert.equal(tx.length, new Set(tx).size, "each Tx line once");
+  for (const c of CHAINS) assert.ok(paid.some((p) => p.chain === c && p.collector === lower(evmPoolVenues()[c].feeCollector) && BigInt(p.value) > 0n), c);
   assert.equal(text, readFileSync(new URL("./evm-testnet-delegate-review3.md", import.meta.url), "utf8"));
 });
 
@@ -134,7 +142,7 @@ test("no run, or none through the helper, fails on every chain", async () => {
 });
 
 test("the runs through the new delegate pass: each sold through the helper after the redeploy, the collector's Paid log on both RPCs", { skip: NO_RUNS }, async () => {
-  assert.equal(A.runs.length, CHAINS.length);
+  for (const c of CHAINS) assert.ok(A.runs.some((r) => r.record.chain === c && !r.record.stopped), c);
   const r = await runOn(runsOf());
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const c of CHAINS) {
@@ -147,7 +155,7 @@ test("a run's spoiled answers fail; a sell receipt with no Paid log on one RPC, 
   fails(await runOn(runsOf((r) => r.bad)), /run\]/);
   for (const c of CHAINS) {
     const noPaid = runsOf().map((r) => {
-      if (r.record.chain !== c) return r;
+      if (r.record.chain !== c || r.record.stopped) return r;
       const hash = r.record.txs.find((t) => t.kind === "sell" && t.via === "helper").hash;
       const url = r.urls[1];
       return { ...r, answers: r.answers.map((e) => (e.method === "eth_getTransactionReceipt" && e.params[0] === hash && e.url === url && e.result ? { ...e, result: { ...e.result, logs: e.result.logs.filter((l) => lower(l.address) !== lower(evmPoolVenues()[c].feeCollector)) } } : e)) };
