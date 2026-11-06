@@ -23,7 +23,8 @@
 //   HDKey) is only read by the members PINNED names for that type (none signs), called, kept under its own type or
 //   handed on as its own type. A cast, a computed key, a `new`, or a hand-on to another type refuses. A module that
 //   exports a PINNED root, the package itself or a module of ours that re-exports it, is held as a signer's module is
-//   (a literal member read only), and an import() of one refuses. Signing with them is only in the top-level functions
+//   (a literal member read only), each name read off it held as a named import is (a pinned package's export only if
+//   its names hold it: no schnorr), and an import() of one refuses. Signing with them is only in the top-level functions
 //   EXEMPT names (a function nested in another, whatever its name, is not one).
 // - Code from text: eval, Function (by name, or a callee of the type Function, as `.constructor` gives), setTimeout or
 //   setInterval given a string, node:vm, and a call off globalThis, window or self through a cast refuse. The page's
@@ -32,7 +33,8 @@
 // - A pick: a call of evmNextNote, by any name, in an expression or a const/let statement that comes before the site in
 //   a block the site sits in (its own function's, or an enclosing one's; a callback made after the pick runs after it),
 //   and not under an if, a loop, a try, a `?:`, the right of `&&`/`||`/`??`, a `?.` or a function of its own. A pick
-//   at the module's top level runs once, at load: it counts for top-level code only, never for a function. A function
+//   at the module's top level runs once, at load: it counts for top-level code only, never for a function, a class
+//   element or a decorator (a static one, run once at load, is then a false refusal, which fails safe). A function
 //   declaration (hoisted, so callable before) takes no pick from above it. This proves a pick runs first; it does not
 //   prove the pick's note is the one the site signs, nor one pick per sign (one pick before a loop of signs passes),
 //   which is the flow's own test. A pick in a try or in a case clause does not count: a false refusal, which fails
@@ -466,7 +468,10 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
     if (!ps.size) return false;
     let inFunction = false;
     for (let c: ts.Node = n, p = n.parent; p; c = p, p = p.parent) {
-      if (ts.isFunctionLike(p)) inFunction = true;
+      // a class element (a field, a method, a static block, a parameter property) or a decorator runs when its class is
+      // made or used, never only at load: a function for the cutoff (a static one, run once at load, then refuses:
+      // a false refusal, which fails safe)
+      if (ts.isFunctionLike(p) || ts.isClassElement(p) || ts.isDecorator(p)) inFunction = true;
       // a pick at module load runs once: it counts for the module's own code, never for a function it holds
       if ((ts.isSourceFile(p) || ts.isModuleBlock(p)) && inFunction) return false;
       if (!(ts.isBlock(p) || ts.isSourceFile(p) || ts.isModuleBlock(p))) continue;
@@ -502,12 +507,24 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
       needsPick(ref, `calls ${h}`);
     };
     /** A use of `ref`, a module value that exports a signer: only a member read, or a plain destructuring. */
-    const namespace = (ref: ts.Node, m: string) => {
+    /** `mod`, when set, is a module that exports a PINNED root: each name read off it is held as a named import is
+     *  (a root of a pinned package only if its `names` hold it; a name it does not export refuses). */
+    const namespace = (ref: ts.Node, m: string, mod?: ts.Symbol) => {
       const e = outer(ref);
       const p = e.parent;
-      if (p && ts.isPropertyAccessExpression(p) && p.expression === e) return;
-      if (p && ts.isElementAccessExpression(p) && p.expression === e && ts.isStringLiteralLike(p.argumentExpression)) return;
-      if (p && ts.isVariableDeclaration(p) && p.initializer === e && ts.isObjectBindingPattern(p.name) && p.name.elements.every((b) => !b.dotDotDotToken && (!b.propertyName || ts.isIdentifier(b.propertyName) || ts.isStringLiteral(b.propertyName)))) return;
+      const read = (k: string, at_: ts.Node) => {
+        if (!mod) return;
+        const x = checker.getExportsOfModule(real(mod)).find((y) => y.name === k);
+        const pk = x && rootIn(x);
+        if (!x) at(at_, `reads ${k} off a module that exports ${m}, which exports no ${k}`, false);
+        else if (pk && !(pk.names as readonly string[]).includes(real(x).name)) at(at_, `reads ${real(x).name} of ${pk.pkg} off a namespace (a device file imports only ${pk.names.join(", ")})`, false);
+      };
+      if (p && ts.isPropertyAccessExpression(p) && p.expression === e) return read(p.name.text, p);
+      if (p && ts.isElementAccessExpression(p) && p.expression === e && ts.isStringLiteralLike(p.argumentExpression)) return read(p.argumentExpression.text, p);
+      if (p && ts.isVariableDeclaration(p) && p.initializer === e && ts.isObjectBindingPattern(p.name) && p.name.elements.every((b) => !b.dotDotDotToken && (!b.propertyName || ts.isIdentifier(b.propertyName) || ts.isStringLiteral(b.propertyName)))) {
+        for (const b of p.name.elements) read(((b.propertyName ?? b.name) as ts.Identifier | ts.StringLiteral).text, b);
+        return;
+      }
       at(ref, `uses whole, or by a computed key, a module that exports ${m}`, false);
     };
     /** Where `e`, a value of PINNED package `pk`, goes: a member `pk` names, a call, kept or handed on under its own
@@ -596,8 +613,10 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
               if (pk && !ex.curve?.includes(topName(n) ?? "") && !(pk.names as readonly string[]).includes(real(s).name)) at(n, `imports ${real(s).name} of ${pk.pkg} (a device file imports only ${pk.names.join(", ")})`, false);
               pinnedAt(n);
               const ts_ = checker.getTypeAtLocation(n).getSymbol();
-              const m = moduleSigner(s) ?? moduleSigner(ts_) ?? modulePinned(s) ?? modulePinned(ts_);
+              const m = moduleSigner(s) ?? moduleSigner(ts_);
+              const mp = m ? null : modulePinned(s) ? s : modulePinned(ts_) ? ts_ : null;
               if (m) namespace(n, m);
+              else if (mp) namespace(n, modulePinned(mp)!, mp);
             }
           }
         }

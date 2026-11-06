@@ -409,11 +409,17 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
     "k4-hoisted.ts": r(`calls .*${pool}${no}`),
     "k6-closure-before-pick.ts": r(`calls .*${pool}${no}`),
     "p9-subclass.ts": r("hands a value of @scure/bip32 \\(HDKey\\) on as another type", "casts a value of @scure/bip32"),
+    // the review of 1a367f1e: H1c's exact case was refused there by the root-name rule (nc itself); its read off our
+    // re-export (line 12 of h1c-namespace-nonroot.ts) and L1b's field, decorator and static block passed there
+    "h1c-namespace-exact.ts": r("reads schnorr of @noble/curves off a namespace"), // H1c
+    "h1c-namespace-nonroot.ts": r(...Array(4).fill("reads schnorr of @noble/curves off a namespace")), // H1c
+    "l1b-class-field.ts": r(...Array(4).fill(`calls .*${pool}${no}`)), // L1b
   };
   const bad = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "bad")));
   assert.deepEqual(bad.map((f) => f.slice(FIXTURES.length + 5)).sort(), Object.keys(BAD).sort(), "the planted cases were read");
   assert.deepEqual(names(GUARD.unguarded(bad)), names(bad));
   assert.deepEqual(GUARD.sites(join(ROOT, L3_FIXTURE)).map((s) => [s.line, s.ok]), [[5, true], [9, false]], "L3: only the top-level signDigest is exempt");
+  assert.ok(GUARD.sites(join(FIXTURES, "bad/h1c-namespace-nonroot.ts")).some((s) => s.line === 12 && !s.ok && /reads schnorr/.test(s.what)), "H1c: schnorr read off our own re-export");
   for (const f of bad) assert.match(GUARD.sites(f).filter((s) => !s.ok).map((s) => s.what).join("\n"), BAD[f.slice(FIXTURES.length + 5)]!, f);
   // no false refusal: the rule's signer by an alias, with the wallet's evmNextNote by an alias in the same function, is
   // read and passes; a re-export (named, `export *`, a default), types, a predicate, a comment, a local that shares a
