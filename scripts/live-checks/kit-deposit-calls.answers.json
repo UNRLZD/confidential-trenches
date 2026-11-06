@@ -1,7 +1,7 @@
 {
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0nwfjGGOxvPbbtp0ncU6gl7HL6vdcuj5uMp5trROBpYCiJbDetNfUvArDXe+8o0I\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-0nwfjGGOxvPbbtp0ncU6gl7HL6vdcuj5uMp5trROBpYCiJbDetNfUvArDXe+8o0I",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj",
   "stages": [
    [
     "quote_checked",
@@ -36,26 +36,8 @@
   ]
  },
  "bad": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-tg7CEkd7sXKsWKo/WZg6tNrtOguBjJy8MJWmHTa4KAPi1of19LRR72te0otWdkp7\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-tg7CEkd7sXKsWKo/WZg6tNrtOguBjJy8MJWmHTa4KAPi1of19LRR72te0otWdkp7",
-  "stages": [
-   [
-    "quote_checked",
-    "waiting",
-    "in_transit",
-    "into_vault",
-    "done",
-    "refunded",
-    "held",
-    "halted"
-   ]
-  ],
-  "holds": [],
-  "keys": []
- },
- "liveBefore": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-tg7CEkd7sXKsWKo/WZg6tNrtOguBjJy8MJWmHTa4KAPi1of19LRR72te0otWdkp7\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-tg7CEkd7sXKsWKo/WZg6tNrtOguBjJy8MJWmHTa4KAPi1of19LRR72te0otWdkp7",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-YHzbswVwG37+zPOXxkohI/mzHOaAuuf8df1LgPsN4XCTSt0Cuy8xjajiEleNO9zO\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-YHzbswVwG37+zPOXxkohI/mzHOaAuuf8df1LgPsN4XCTSt0Cuy8xjajiEleNO9zO",
   "stages": [
    [
     "quote_checked",

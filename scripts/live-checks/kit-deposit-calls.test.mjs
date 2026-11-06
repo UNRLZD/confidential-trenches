@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/kit-deposit-calls.test.mjs: the live check replays its recorded answers
-// (kit-deposit-calls.answers.json). good: this card's SIGN_HOST build, every deposit stage, the hold reasons and the
-// frame carrying a deposit's facts: PASS. bad: main 116d62aa's build: FAIL. liveBefore: SIGN_HOST before this card's
-// deploy: FAIL. Planted on the good one: another /app.js, no pin, a stage, a hold reason or a fact key missing, a stage
+// (kit-deposit-calls.answers.json). good: release-60's SIGN_HOST build (packages/signpage/index.html and public/app.js
+// as committed), every deposit stage, the hold reasons and the frame carrying a deposit's facts: PASS. bad: SIGN_HOST
+// as served before release-60's deploy (release-59): FAIL. Planted on the good one: another /app.js, no pin, a stage, a hold reason or a fact key missing, a stage
 // list with an extra stage: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -21,7 +21,7 @@ test("recorded good answer: this card's build carries every deposit stage, the h
   assert.deepEqual(v.lines, []);
 });
 
-for (const k of ["bad", "liveBefore"]) {
+for (const k of ["bad"]) {
   test(`recorded bad answer ${k}: FAIL, each missing fact named`, () => {
     const v = judge(ANSWERS[k]);
     assert.equal(v.ok, false);
