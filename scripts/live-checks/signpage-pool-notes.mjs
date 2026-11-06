@@ -18,7 +18,7 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, answerOf, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
 import { PIN, SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
@@ -64,20 +64,21 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
       const tx = await rpc(fetchFn, url, "getTransaction", [run.signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], sleep);
       const keys = tx?.transaction?.message?.accountKeys ?? [];
       say(!!tx && tx.meta?.err === null && keys[0] === run.U && tx.transaction.message.header?.numRequiredSignatures === 1 && keys.includes(prog),
-        `deposit ${run.signature} is finalized with no error, signed and paid by U ${run.U}, calling ${prog} ${at}: ${tx ? `err ${JSON.stringify(tx.meta?.err)}, payer ${keys[0]}` : "not found"}`);
+        `deposit ${run.signature} is finalized with no error, signed and paid by U ${run.U}, calling ${prog} ${at}: ${tx ? `err ${JSON.stringify(tx.meta?.err)}, payer ${keys[0]}` : `not found (${answerOf(fetchFn, "getTransaction", run.signature)})`}`);
       const mk = await account(fetchFn, url, mark.address, sleep);
       const mv = mk && mk.data.length === PRE_MARK_LEN ? [u64At(mk.data, 0), u64At(mk.data, 8), mk.data[16]] : null;
       say(!!mk && mk.owner === prog && !!mv && mv[0] === value && mv[1] === nonce && mv[2] === MARK_TAG,
-        `mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}, the run's ${value} and ${nonce}, tag ${MARK_TAG} ${at}${mk ? "" : ": missing"}`);
+        `mark ${mark.address} reads value ${mv?.[0] ?? "?"} nonce ${mv?.[1] ?? "?"} tag ${mv?.[2] ?? "?"}, the run's ${value} and ${nonce}, tag ${MARK_TAG} ${at}${mk ? "" : `: missing (${answerOf(fetchFn, "getAccountInfo", mark.address)})`}`);
       for (const [tree, i, want, name] of [[1, nonce - 1n, label, "label"], [0, leafIndex, commitment, "state"]]) {
         const pageNo = i / PAGE_ENTRIES;
         const slot = Number(i % PAGE_ENTRIES);
-        const a = await account(fetchFn, url, pageAddress(prog, tree, pageNo).address, sleep);
+        const page = pageAddress(prog, tree, pageNo).address;
+        const a = await account(fetchFn, url, page, sleep);
         const hdr = !!a && a.owner === prog && Buffer.from(a.data.subarray(0, 8)).toString() === "bfpage01" && a.data[8] === tree && (a.data.length - PAGE_HEADER) % PAGE_ENTRY === 0;
         const o = PAGE_HEADER + slot * PAGE_ENTRY;
         const leaf = hdr && a.data.length >= o + PAGE_ENTRY ? a.data.subarray(o, o + 32) : null;
         say(!!leaf && Buffer.from(leaf).equals(Buffer.from(want)) && a.data.subarray(o + 32, o + 64).some((b) => b !== 0),
-          `${name} page ${pageNo} entry ${slot} holds ${name === "label" ? "keccak256(scope, nonce) mod p" : "the note's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : "missing"}`);
+          `${name} page ${pageNo} entry ${slot} holds ${name === "label" ? "keccak256(scope, nonce) mod p" : "the note's commitment"} ${hex(want)} ${at}: ${leaf ? hex(leaf) : a ? "no such entry" : `missing (${answerOf(fetchFn, "getAccountInfo", page)})`}`);
       }
       const b = (await rpc(fetchFn, url, "getBalance", [run.U, { commitment: "finalized" }], sleep))?.value;
       say(b === 0, `U ${run.U} holds 0 lamports ${at}: ${b}`);

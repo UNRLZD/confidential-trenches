@@ -93,3 +93,36 @@ test("card live-check-devnet-pair: the second provider answering 503 moves the r
   const one = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second], sleep: async () => {}, sign: A.good.sign });
   bad(one, "two operators answered: 1");
 });
+
+// card signpage-pool-flow-answers: a null read names the provider's own answer (HTTP status, the null and its slot)
+/** `kinds` of the good run's reads answered null on every provider (so neither stands behind a value): "tx", "mark"
+ * (a 17-byte account), "page" ("bfpage01"). Each planted null's context slot is collected in `slots`. */
+const nulls = (kinds, slots) => (a) => {
+  if (a.method === "getTransaction" && kinds.includes("tx") && a.json?.result) return ((a.json.result = null), a.json);
+  const v = a.json?.result?.value;
+  if (a.method !== "getAccountInfo" || !v) return a.json;
+  const d = Buffer.from(v.data[0], "base64");
+  const kind = d.length === 17 ? "mark" : d.subarray(0, 8).toString() === "bfpage01" ? "page" : null;
+  if (!kinds.includes(kind)) return a.json;
+  slots.add(a.json.result.context.slot);
+  a.json.result.value = null;
+  return a.json;
+};
+const namesNull = (r, start, slots) => {
+  const got = r.lines.filter((l) => l.startsWith(`BAD  ${start}`));
+  assert.ok(got.length >= 2, r.lines.join("\n"));
+  for (const l of got) {
+    const m = slots ? l.match(/: missing \(HTTP 200, null at slot (\d+)\)$/) : l.match(/: not found \(HTTP 200, null\)$/);
+    assert.ok(m && (!slots || slots.has(Number(m[1]))), l);
+  }
+};
+
+test("card signpage-pool-flow-answers, planted on the good answer: the deposit, the mark and both pages answered null name HTTP 200, null at slot N: FAIL", async () => {
+  const slots = new Set();
+  const r = await run(A.good, nulls(["tx", "mark", "page"], slots));
+  assert.equal(r.ok, false);
+  namesNull(r, "deposit ");
+  namesNull(r, "mark ", slots);
+  namesNull(r, "label page ", slots);
+  namesNull(r, "state page ", slots);
+});

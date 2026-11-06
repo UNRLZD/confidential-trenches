@@ -4563,3 +4563,22 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
     assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), `${down.name}: block 5,000,005 not asked of the fourth: ${JSON.stringify(asked)}`);
   }
 });
+
+// card evm-rpc-spare-list, 6 Nov: a provider that does not keep the blocks a read asks (-32002 "keyless requests are
+// served for the most recent 5000 blocks only", rpc-robinhood.blockmachine.io, read 2026-11-05 19:48Z; live run
+// 42206377652) is passed over like one that is down: the quote's reads go on at the next two of the list, and two
+// providers must still answer alike.
+// a new function each time: the quote refuses one provider passed twice (checkAsk)
+const capped = (): EvmRpc => async (calls) => calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only" } }));
+test("SL7 the first two quote providers down and history-capped (-32002 on every call, head reads too): the third and fourth decide, as two honest providers would; with one left, the quote refuses", { timeout: 15_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000ee0f7";
+  const pools = [best(token)];
+  const honest = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW));
+  assert.equal(honest.accepted, true, String((honest as { code?: string }).code));
+  for (const firstTwo of [[down, capped()], [capped(), capped()]]) {
+    assert.deepEqual(await verdict(evmPoolBuyQuoteWith(warmReq(token), [...firstTwo, chain(pools, 0), chain(pools, 1)], NOW)), honest);
+  }
+  // one provider answering is one provider's word: refused, never used alone
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(warmReq(token), [down, capped(), chain(pools, 0)], NOW)), { accepted: false, code: "rpc_error" });
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(warmReq(token), [capped(), capped(), capped(), chain(pools, 1)], NOW)), { accepted: false, code: "rpc_error" });
+});

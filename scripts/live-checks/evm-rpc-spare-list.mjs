@@ -8,8 +8,15 @@
 //     handle this request", bloXroute's answer for 10 minutes on 5 Nov 17:59-18:09Z);
 //   - the helper's caller read (apps/helper/src/rpc/rpc.ts createRpc, /v1/rpc/<chain>, its list the configured
 //     provider then SWAP_RPCS), an eth_getLogs of the chain's PoolManager over the newest 100 blocks, with its first two
-//     held the same ways and a third: "limit" (-32011 "request limit reached", mainnet.base.org's answer to every
-//     eth_getLogs on 5 Nov);
+//     held the same ways and two more: "limit" (-32011 "request limit reached", mainnet.base.org's answer to every
+//     eth_getLogs on 5 Nov) and "history" (-32002 "keyless requests are served for the most recent 5000 blocks only",
+//     rpc-robinhood.blockmachine.io's answer on which a restore's Robinhood read stopped in live run 42206377652,
+//     6 Nov 10:56Z);
+//   - the deployed helper's caller read of the chain's PoolManager logs over 100 blocks HISTORY_BACK blocks back
+//     (HELPER_HOST's POST /v1/rpc/<chain> with the app's Origin): past every keyless provider's history cap;
+//   - the helper's maker read list (apps/helper/src/data/evm/lists.ts MAKER_RPCS): MIN_MAKERS at least, on hosts of
+//     their own, and every one past the first two answers its chain's id and an address filter's eth_getLogs of 100
+//     blocks HISTORY_BACK blocks back (the read the list walks to when the first two are down);
 //   - the helper's caller read of an address-less Transfer filter (eth_getLogs over 1,000 blocks, Transfer's topic and
 //     topic 2 a W, no address: a restore's W read, card evm-transfer-rpc-spares) with nothing held: PublicNode answers it
 //     -32701 "Please specify an address..." at every span over 1 block (read 2026-11-05 20:07Z, and by the wallet lead
@@ -21,7 +28,9 @@
 //   - a warm-up quote ends ok, every held quote ends ok under the bound (60 s), and every held quote asked the third
 //     for logs;
 //   - every held helper read answers 200 with a JSON-RPC result list, from a provider past the first two;
-//   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error.
+//   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
+//   - the deployed helper's read HISTORY_BACK blocks back answers 200 with a result list on each chain;
+//   - each maker list holds MIN_MAKERS on hosts of their own, and each spare past the second answers both reads.
 //   node scripts/live-checks/evm-rpc-spare-list.mjs [--base <url>] [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-rpc-spare-list.answers.json).
 // Reads only: no key, no transaction, no money moves.
@@ -36,7 +45,12 @@ const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 const W_TOPIC = "0x" + "0".repeat(24) + "809286a10000000000000000000000000000078e";
 export const BOUND_MS = 60_000;
 export const MODES = ["refused", "503"];
-export const HELPER_MODES = ["refused", "503", "limit"];
+export const HELPER_MODES = ["refused", "503", "limit", "history"];
+/** Blocks back the history reads go: past blockmachine's 5,000 and blockvectra's about 850 (read 2026-11-06 12:38Z). */
+export const HISTORY_BACK = 50_000n;
+/** The least maker providers a chain lists (card evm-rpc-spare-list: Base seven, Robinhood five). */
+export const MIN_MAKERS = { base: 5, robinhood: 5 };
+const CHAIN_IDS = { base: 8453, robinhood: 4663 };
 export const HELD = 2; // quotes per mode
 export const WARMUP_MS = 240_000;
 /** The wait before each held quote: on Base past maxLag blocks (50 of its 200 ms blocks, 10 s), so the quote's scan
@@ -113,7 +127,58 @@ export function check(run) {
       say(good, `${where === "deployed" ? "deployed helper" : "helper"} ${chain}, an address-less Transfer read of 1,000 blocks: ${r === undefined ? "not run" : `HTTP ${r.status}, ${Number.isInteger(r.results) ? `${r.results} logs` : `error ${r.error ?? "none"}`}`}${r?.answeredBy ? `, answered by ${host(r.answeredBy)}` : ""} (a list wanted)`);
     }
   }
+  for (const chain of ["base", "robinhood"]) {
+    const r = run?.history?.[chain];
+    const good = r !== undefined && r.status === 200 && Number.isInteger(r.results);
+    say(good, `deployed helper ${chain}, the PoolManager's logs of 100 blocks ${HISTORY_BACK} back: ${r === undefined ? "not run" : `HTTP ${r.status}, ${Number.isInteger(r.results) ? `${r.results} logs` : `error ${r.error ?? "none"}`}`}${r?.commit ? ` at ${String(r.commit).slice(0, 7)}` : ""} (a list wanted)`);
+    const m = run?.makers?.[chain];
+    const list = Array.isArray(m?.list) ? m.list : [];
+    const least = MIN_MAKERS[chain];
+    say(list.length >= least && new Set(list.map(host)).size === list.length, `helper ${chain} maker list of ${list.length}, each on its own host: ${list.map(host).join(", ") || "none"} (${least} at least)`);
+    for (const u of list.slice(2)) {
+      const a = m?.spares?.[u];
+      const ok2 = a !== undefined && a.chainId === CHAIN_IDS[chain] && Number.isInteger(a.results);
+      say(ok2, `helper ${chain} maker spare ${host(u)}: ${a === undefined ? "not read" : `chain id ${a.chainId ?? a.idError ?? "none"}, ${Number.isInteger(a.results) ? `${a.results} logs ${HISTORY_BACK} back` : `error ${a.error ?? "none"}`}`} (chain id ${CHAIN_IDS[chain]} and a list wanted)`);
+    }
+  }
   return { ok, lines };
+}
+
+/** One JSON-RPC call to `url`: its result, or an error line. */
+async function rpcCall(url, method, params, headers = {}) {
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
+    const text = await r.text();
+    try {
+      const j = JSON.parse(text);
+      return { status: r.status, result: j.result, error: j.error === undefined ? undefined : `${j.error.code} ${String(j.error.message).slice(0, 80)}`, commit: r.headers.get("x-helper-commit") };
+    } catch {
+      return { status: r.status, error: String(text).slice(0, 80) };
+    }
+  } catch (e) {
+    return { status: 0, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 80) };
+  }
+}
+/** The PoolManager's logs over 100 blocks HISTORY_BACK blocks behind `head`, as eth_getLogs params. */
+const historyParams = (chain, head) => [{ address: evmPoolVenues()[chain].poolManager, fromBlock: "0x" + (head - HISTORY_BACK - 99n).toString(16), toBlock: "0x" + (head - HISTORY_BACK).toString(16) }];
+/** The deployed helper's read HISTORY_BACK blocks back. */
+async function historyRead(chain, base) {
+  const head = await headOf(chain === "base" ? "https://base.gateway.tenderly.co" : "https://robinhood.drpc.org");
+  const r = await rpcCall(`${base}/v1/rpc/${chain}`, "eth_getLogs", historyParams(chain, head), { Origin: APP_ORIGIN });
+  return { status: r.status, results: Array.isArray(r.result) ? r.result.length : null, ...(r.error === undefined ? {} : { error: r.error }), ...(r.commit ? { commit: r.commit } : {}) };
+}
+/** The checkout's maker list, and each spare's chain id and history read. */
+async function makerSpares(chain) {
+  const { MAKER_RPCS } = await import("../../apps/helper/src/data/evm/lists.ts");
+  const list = [...MAKER_RPCS[chain]];
+  const spares = {};
+  for (const u of list.slice(2)) {
+    const id = await rpcCall(u, "eth_chainId", []);
+    const h = await rpcCall(u, "eth_blockNumber", []);
+    const logs = typeof h.result === "string" ? await rpcCall(u, "eth_getLogs", historyParams(chain, BigInt(h.result) - 5n)) : h;
+    spares[u] = { ...(typeof id.result === "string" ? { chainId: Number(id.result) } : { idError: id.error }), results: Array.isArray(logs.result) ? logs.result.length : null, ...(logs.error === undefined ? {} : { error: logs.error }) };
+  }
+  return { list, spares };
 }
 
 /** The 1,000-block address-less Transfer filter up to block `to`, as one JSON-RPC request. */
@@ -180,7 +245,8 @@ const holding = (real, held, mode, n) => async (u, init) => {
   if (mode === "refused") throw new TypeError("Failed to fetch");
   if (mode === "503") return new Response("No server is available to handle this request", { status: 503 });
   const body = bodyOf(init);
-  const answers = body.map((c) => ({ jsonrpc: "2.0", id: c?.id ?? null, error: { code: -32011, message: "request limit reached" } }));
+  const error = mode === "history" ? { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only; block 107541799 is older than that; use an API key for older blocks" } : { code: -32011, message: "request limit reached" };
+  const answers = body.map((c) => ({ jsonrpc: "2.0", id: c?.id ?? null, error }));
   return new Response(JSON.stringify(Array.isArray(JSON.parse(String(init.body))) ? answers : answers[0]), { status: 200, headers: { "content-type": "application/json" } });
 };
 
@@ -239,7 +305,14 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
     // a kit before this card pinned one spare, `spare` (the bad answer's run at 66d7b60)
     scans[c] = s === undefined ? [] : [s.url, ...(s.spares ?? (s.spare === undefined ? [] : [s.spare])).map((x) => x.url)];
   }
-  const run = { recorded: new Date().toISOString(), base, scans, preflight: await preflight(Object.values(scans).flatMap((l) => l.slice(2))), cases: {}, helper: {}, addressless: {} };
+  const run = { recorded: new Date().toISOString(), base, scans, preflight: await preflight(Object.values(scans).flatMap((l) => l.slice(2))), cases: {}, helper: {}, addressless: {}, history: {}, makers: {} };
+  for (const chain of ["base", "robinhood"]) {
+    run.history[chain] = await historyRead(chain, base);
+    const h = run.history[chain];
+    console.log(`deployed helper ${chain} logs ${HISTORY_BACK} back: HTTP ${h.status}, ${h.results ?? `error ${h.error}`}${h.commit ? ` at ${h.commit.slice(0, 7)}` : ""}`);
+    run.makers[chain] = await makerSpares(chain);
+    for (const [u, a] of Object.entries(run.makers[chain].spares)) console.log(`maker spare ${chain} ${host(u)}: chain id ${a.chainId ?? a.idError}, ${a.results ?? `error ${a.error}`}`);
+  }
   for (const chain of ["base", "robinhood"]) {
     run.addressless[chain] = await addressless(chain, base);
     for (const [where, r] of Object.entries(run.addressless[chain])) console.log(`${where} helper ${chain} address-less Transfer read: HTTP ${r.status}, ${r.results ?? `error ${r.error}`}${r.answeredBy ? ` by ${host(r.answeredBy)}` : ""}${r.commit ? ` at ${r.commit.slice(0, 7)}` : ""}`);

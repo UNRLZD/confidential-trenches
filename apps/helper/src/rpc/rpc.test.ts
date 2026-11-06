@@ -832,3 +832,44 @@ test("card evm-rpc-spare-list: with the rest held for longer than the wait, a -3
   assert.equal(a.status, 429, a.body);
   assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test"]);
 });
+
+// -- card evm-rpc-spare-list, 6 Nov: a provider that does not keep the blocks a read asks is out for that read only -----
+// Live run 42206377652 (6 Nov 10:56Z), job wallet-restore-transfer-rpcs: /v1/rpc/robinhood answered a restore's read with
+// rpc-robinhood.blockmachine.io's -32002 "keyless requests are served for the most recent 5000 blocks only", and the
+// read stopped there although the list's next providers keep those blocks.
+
+/** History refusals read live: blockmachine (-32002, its whole message as read 2026-11-06 12:51Z), blockvectra (-32011, 2026-11-04 14:4xZ),
+ *  PublicNode's archive refusal, daybreak's state refusal and blockmachine's (a state read 600 s back, 2026-11-06 12:40Z). */
+const HISTORY_ERRS = [
+  { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only; block 107541799 is older than that; use an API key for older blocks" },
+  { code: -32011, message: "block reference is outside the public history window", data: { reason: "state_window", retryable: false } },
+  { code: -32602, message: "Archive requests require a personal token. Get yours at https://www.allnodes.com/publicnode" },
+  { code: -32000, message: "historical state 475cc231cbd3eb500d20ea718cb62c5432a04bb085fa5dbac39912ae52aa4590 is not available" },
+  { code: -32000, message: "missing trie node" },
+];
+for (const error of HISTORY_ERRS) {
+  test(`card evm-rpc-spare-list: with the configured provider and the first pinned one refusing the read's blocks (${error.code} ${error.message.slice(0, 40)}), the next provider's answer reaches the caller, and neither is held`, async () => {
+    const logs = [{ address: "0x" + "ab".repeat(20), topics: [], data: "0x", blockNumber: "0x200", logIndex: "0x0", transactionHash: "0x" + "cd".repeat(32), removed: false }];
+    const refuse = (b: { id: unknown }) => jsonOk({ jsonrpc: "2.0", id: b.id, error });
+    const { r, asked, holds } = shapeRig({
+      "https://cfg.test/": refuse,
+      "https://p1.test": refuse,
+      "https://p2.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: logs }),
+      "https://p3.test": () => jsonOk({}),
+    });
+    const a = await call(r, "base", TRANSFERS(), JSON_T);
+    assert.equal(a.status, 200, a.body);
+    assert.deepEqual(JSON.parse(a.body).result, logs);
+    assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test"]);
+    assert.equal(holds.heldMs("https://cfg.test/") + holds.heldMs("https://p1.test"), 0, "no hold: each still serves the newest blocks");
+  });
+}
+
+test("card evm-rpc-spare-list: when every provider refuses the read's blocks the caller gets the last such answer, 200 with the error", async () => {
+  const refuse = (b: { id: unknown }) => jsonOk({ jsonrpc: "2.0", id: b.id, error: HISTORY_ERRS[0] });
+  const { r, asked } = shapeRig({ "https://cfg.test/": refuse, "https://p1.test": refuse, "https://p2.test": refuse, "https://p3.test": refuse });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.equal(JSON.parse(a.body).error.code, -32002);
+  assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test", "https://p3.test"]);
+});
