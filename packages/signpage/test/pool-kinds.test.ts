@@ -301,3 +301,17 @@ test("precommit-taken-recover: no device file signs an EVM pool deposit or sell 
   assert.deepEqual(unguarded([{ path: "a.ts", text: "const s = signEvmSell(key, ctx, built);" }, { path: "b.ts", text: 'const sel = "deposit(uint256,uint256)";' }, { path: "c.ts", text: "const b = evmPoolBuildSell(q, f);" }, { path: "f.ts", text: 'const data = "0xE2BBB158" + args;' }, { path: "g.ts", text: 'encodeFunctionData({ abi, functionName: "deposit", args });' }, { path: "h.ts", text: "// evmNextNote(seed, scope, events, first) would go here\nconst s = signEvmSell(key, ctx, built);" }]), ["a.ts", "b.ts", "c.ts", "f.ts", "g.ts", "h.ts"]);
   assert.deepEqual(unguarded([{ path: "d.ts", text: "const { next } = evmNextNote(seed, scope, events, first); const s = signEvmSell(key, ctx, built);" }, { path: "e.ts", text: "export function signEvmSell(k) {}" }]), []);
 });
+
+// card signer-guard-parser: the planted cases in test/fixtures/signer-guard/ (bad/ must each be caught, good/ never),
+// read by the guard above
+const FIXTURES = join(ROOT, "packages/signpage/test/fixtures/signer-guard");
+const fixtureSources = (d: string) => sources(join(FIXTURES, d));
+test("signer-guard-parser: every planted signer and encoder in fixtures/signer-guard/bad is caught, and none in good/", () => {
+  const signers = [...new Set([...SIGNERS, ...signerNames(readFileSync(join(FIXTURES, "defs.ts"), "utf8"))])];
+  const signs = new RegExp(`(?<!function )\\b(?:${signers.join("|")})\\(|deposit\\(uint256,uint256\\)|e2bbb158|functionName:\\s*["']deposit["']`, "i");
+  const caught = (files: { path: string; text: string }[]) => files.filter((f) => signs.test(f.text) && !calls(f.text)).map((f) => f.path.slice(FIXTURES.length + 1));
+  const bad = fixtureSources("bad");
+  assert.equal(bad.length, 12, "the planted cases were read");
+  assert.deepEqual(caught(bad), bad.map((f) => f.path.slice(FIXTURES.length + 1)));
+  assert.deepEqual(caught(fixtureSources("good")), []);
+});

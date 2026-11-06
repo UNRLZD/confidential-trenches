@@ -1,0 +1,3 @@
+// Card signer-guard-parser: a planted signer file the guard reads as one of its SIGNER_DEFS. Its signer is a typed-arrow
+// const, which the name guard's `export const NAME (: type)? =` read stopped short of at the type's `=>`.
+export const fixtureSignSell: (secretKey: Uint8Array, built: { chain: string }) => Uint8Array = (secretKey) => secretKey.slice(0, 1);
