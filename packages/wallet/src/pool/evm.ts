@@ -393,57 +393,82 @@ export const EVM_SPARE_REST_MS = 60_000;
  * with none, to the provider of the largest cap named, whose own refusal goes up so the pager pages at that cap. The
  * capped provider is not rested: it still answers the seat's other reads when a later move seats it. Which two
  * providers sit changes, never that two read and agree: within the agreed reads in flight (both), neither walk ever
- * seats a provider that answered on the other seat, so one provider's answer never stands on both sides of a read
- * paged over many calls; with none left the seat's own error goes up (the pager halves, the read refuses). A seat
- * read alone, outside an agreed read, binds no provider. A seat call
- * asks each provider at most once (review of 8cdf6ee8: two providers naming a cap one under each span walked
- * without end). Read live: the kit's Base list seats blastapi second, which
+ * seats a provider that answered on the other seat or that the other seat has a call open to (an answer still on its
+ * way), so one provider's answer never stands on both sides of a read paged over many calls; with none left the seat's
+ * own error goes up (the pager halves, the read refuses). A seat read alone, outside an agreed read, binds no provider
+ * once its calls end. A seat call asks each provider at most once (review of 8cdf6ee8: two providers naming a cap one
+ * under each span walked without end). With no provider free, rested and wide enough for a page, the seat takes the
+ * one where the page ends first (review of 6e90f580): a rested one of a known cap under it, at its pages times its last
+ * call's time, or a resting one that answered a page, after its rest (its Retry-After, else EVM_SPARE_REST_MS), when
+ * the seat waits for it with that provider's own throttle; so a seat whose wide provider throttled waits for it rather
+ * than page blastapi's 10 blocks, and takes a narrow spare for a page it ends sooner. A seat on a provider of a known
+ * cap moves back to a free one wider than it once that one's rest ends; a provider that answers is no longer resting.
+ * A pair passed in again (evmPool's to evmTreeSync, the restore's) is that pair, so its reads bind its own seats. Read live: the kit's Base list seats blastapi second, which
  * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
  * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
  */
 export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
+  // a pair passed in is read as it is: one pair object per read, so its agreed reads bind its own seats (review of
+  // 6e90f580, HIGH: evmPool's pair, wrapped again by evmTreeSync, walked in an inner pair that no read bound); a seat in
+  // any other list would be that same fault again, so it is refused
+  const own = SEATS.get(list[0]!);
+  if (own !== undefined && list.length === 2 && list[0] === own.pair[0] && list[1] === own.pair[1]) return own.pair;
+  if (list.some((r) => SEATS.has(r))) throw new Error(`${what}: a pair's seat in another list`);
   for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (solanaSameProvider(list[i]!, list[j]!)) throw new Error(`${what}: one provider twice is one read`);
   const restUntil = list.map(() => 0);
-  // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess)
+  // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess), and the throttle that rested it
   const named = list.map(() => false);
+  const restErr: unknown[] = list.map(() => null);
   const at = [0, 1];
-  // the providers that answered on each seat in the reads in flight (review of 8cdf6ee8, HIGH): a seat never moves to one
-  // that answered on the other seat, so one provider's answer never stands on both sides of one agreed read; cleared
-  // when the last read in flight ends (both)
+  // within the agreed reads in flight (both), the providers that answered on each seat (review of 8cdf6ee8, HIGH),
+  // cleared when the last one ends; and on each seat the calls open to each provider, counted from the ask (review of
+  // 6e90f580, MEDIUM: an answer still on its way stands as one that came). A seat never moves to a provider the other
+  // seat holds either way, so no provider's answer stands on both sides of one agreed read
   const sides: [Set<number>, Set<number>] = [new Set(), new Set()];
+  const open: [number[], number[]] = [list.map(() => 0), list.map(() => 0)];
   let inflight = 0;
-  // whether provider i may take seat k: not the other seat's provider, nor one that answered on the other seat
-  const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i);
-  // the provider seat k moves to: a resting-free one after its own in list order, never one asked in this call
-  // (`asked`), else (`soonest`) the one whose rest ends first; only one free for seat k
-  const next = (k: number, soonest: boolean, asked: ReadonlyMap<number, unknown>): number | null => {
-    let best: number | null = null;
-    for (let s = 1; s < list.length; s++) {
-      const i = (at[k]! + s) % list.length;
-      if (!free(k, i)) continue;
-      if (restUntil[i]! <= Date.now() && !asked.has(i)) return i;
-      if (soonest && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
-    }
-    return best !== null && restUntil[best]! <= restUntil[at[k]!]! ? best : null;
-  };
-  // each provider's eth_getLogs cap as its last refusal named it (null: none known), and the widest span it answered
+  const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i) && open[1 - k]![i] === 0;
+  const rested = (i: number) => restUntil[i]! <= Date.now();
+  // each provider's eth_getLogs cap as its last refusal named it (null: none known), the widest span it answered, and
+  // how long its last call took (ms: a page's cost there)
   const capOf: (bigint | null)[] = list.map(() => null);
   const answered: (bigint | null)[] = list.map(() => null);
-  // the provider a capped seat k moves to for a page of `span` blocks: the next one in list order free for seat k, not
-  // resting and not asked in this call, with no cap known under `span`; else the one free for seat k (its own too) with
-  // the largest cap named
-  const wider = (k: number, span: bigint, asked: ReadonlyMap<number, unknown>): number => {
-    let best = at[k]!;
+  const took = list.map(() => 0);
+  // a provider whose known cap is under `span` (more pages than one for it)
+  const narrow = (i: number, span: bigint | null) => span !== null && capOf[i] !== null && capOf[i]! < span;
+  // the provider seat k moves to: the next one in list order after its own, free for it, rested, not asked in this
+  // call, and with no cap known under `span`
+  const next = (k: number, span: bigint | null, asked: ReadonlyMap<number, unknown>): number | null => {
     for (let s = 1; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (!free(k, i) || restUntil[i]! > Date.now()) continue;
-      const c = capOf[i]!;
-      if (!asked.has(i) && (c === null || c >= span)) return i;
-      if (c !== null && c > (capOf[best] ?? 0n)) best = i;
+      if (free(k, i) && rested(i) && !asked.has(i) && !narrow(i, span)) return i;
+    }
+    return null;
+  };
+  // the resting provider free for seat k whose rest ends first
+  const soonest = (k: number): number | null => {
+    let best: number | null = null;
+    for (let i = 0; i < list.length; i++) if (free(k, i) && !rested(i) && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
+    return best;
+  };
+  // a page of `span` blocks on provider i (ms): its rest left, then its pages for the span at its last call's time
+  const costOf = (i: number, span: bigint): number =>
+    Math.max(0, restUntil[i]! - Date.now()) + (capOf[i] === null || capOf[i]! >= span ? 1 : Number((span + capOf[i]! - 1n) / capOf[i]!)) * took[i]!;
+  // with no provider free, rested and wide enough: the one free for seat k where a page of `span` ends first, a rested
+  // one of a known cap under it (more pages) or a resting one that answered a page (its rest, then its pages); its own
+  // first on a tie
+  const cheapest = (k: number, span: bigint): number | null => {
+    let best: number | null = null;
+    for (let s = 0; s < list.length; s++) {
+      const i = (at[k]! + s) % list.length;
+      if (!free(k, i) || (rested(i) ? !narrow(i, span) : answered[i] === null)) continue;
+      if (best === null || costOf(i, span) < costOf(best, span)) best = i;
     }
     return best;
   };
+  // provider j's own Retry-After left (none when it named none): the read's wait for it
+  const afterOf = (j: number) => (named[j] ? Math.max(0, restUntil[j]! - Date.now()) : null);
   const spanOf = (params: readonly unknown[]): bigint | null => {
     const f = params[0] as { fromBlock?: unknown; toBlock?: unknown } | null;
     if (typeof f?.fromBlock !== "string" || typeof f.toBlock !== "string") return null;
@@ -459,59 +484,87 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
       // each provider asked at most once in one call, its error kept (review of 8cdf6ee8, MEDIUM: as the helper's
       // callEvm): a call ends after at most one ask of each provider in the list
       const asked = new Map<number, unknown>();
+      // a seat on a resting provider, or on one of a known cap with a wider one free and rested (back from a narrow
+      // provider once the wide one's rest ends), moves at once
+      const c = capOf[at[k]!]!;
+      if (!rested(at[k]!)) at[k] = next(k, span, asked) ?? at[k]!;
+      else if (span !== null && c !== null) at[k] = next(k, c + 1n, asked) ?? at[k]!;
       for (;;) {
-        if (restUntil[at[k]!]! > Date.now()) at[k] = next(k, true, asked) ?? at[k]!;
         const i = at[k]!;
         if (asked.has(i)) throw asked.get(i);
+        open[k]![i]!++;
+        const t0 = Date.now();
+        let r: unknown;
         try {
-          const r = await list[i]!(method, params);
-          // bound only inside an agreed read: a seat read alone compares nothing, so it binds no provider
-          if (inflight > 0) sides[k]!.add(i);
-          if (span !== null && (answered[i] === null || span > answered[i]!)) answered[i] = span;
-          if (span !== null && capOf[i] !== null && span > capOf[i]!) capOf[i] = null;
-          return r;
+          r = await list[i]!(method, params);
         } catch (e) {
+          open[k]![i]!--;
+          took[i] = Date.now() - t0;
           asked.set(i, e);
           const t = throttled(e);
           const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
           if (span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!)) {
             capOf[i] = cap;
-            if (at[k] !== i) continue; // another call on this seat moved it already
-            const n = wider(k, span, asked);
-            if (n === i) throw e;
-            // the largest cap's provider: its own refusal goes up from its seat, asked again only if not yet in this call
+            restUntil[i] = 0; // it answers: no longer resting
+          }
+          else if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
+          else {
+            restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
+            named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
+            restErr[i] = e;
+          }
+          if (at[k] !== i) continue; // another call on this seat moved it already
+          // a free provider, rested and wide enough: the call again there at once
+          const n = next(k, span, asked);
+          if (n !== null) {
             at[k] = n;
             continue;
           }
-          if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
-          restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
-          named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
-          if (at[k] !== i) continue; // another call on this seat moved it already
-          const n = next(k, false, asked);
-          if (n === null) {
-            at[k] = next(k, true, asked) ?? i;
-            // the read's wait is for the provider now seated: its own Retry-After, else the read's backoff
-            const j = at[k]!;
-            if (j === i) throw e;
-            throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: named[j] ? Math.max(0, restUntil[j]! - Date.now()) : null });
+          // none: a narrower one (more pages) or a wait for a wider one of its own (review of 6e90f580, MEDIUM),
+          // whichever ends this page first
+          const x = span === null ? null : cheapest(k, span);
+          if (x !== null) {
+            at[k] = x;
+            if (x === i) throw e;
+            // the narrow one asked here at once (asked already in this call: its own refusal goes up, so the pager
+            // pages at its cap)
+            if (rested(x)) continue;
+            // the read waits for its own provider's throttle, a throttle to the read whatever this call's refusal was
+            const c = restErr[x];
+            throw Object.assign(new Error(String((c as Error)?.message ?? c), { cause: c }), { name: "EvmRestingError", afterMs: afterOf(x) });
           }
-          at[k] = n;
+          // nothing free: the provider whose rest ends first, and the read's wait is for it
+          const s = soonest(k) ?? i;
+          at[k] = s;
+          if (s === i) throw e;
+          throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: afterOf(s) });
         }
+        open[k]![i]!--;
+        took[i] = Date.now() - t0;
+        // bound only inside an agreed read: a seat read alone compares nothing, so it binds no provider
+        if (inflight > 0) sides[k]!.add(i);
+        restUntil[i] = 0; // it answers: no longer resting
+        if (span !== null && (answered[i] === null || span > answered[i]!)) answered[i] = span;
+        if (span !== null && capOf[i] !== null && span > capOf[i]!) capOf[i] = null;
+        return r;
       }
     };
     return Object.defineProperty(call, "url", { get: () => list[at[k]!]!.url, enumerable: true }) as EvmRpc;
   };
   const pair: Rpcs = [seat(0), seat(1)];
-  READS.set(pair[0], {
+  const read = {
+    pair,
     begin: () => void inflight++,
     end: () => {
       if (--inflight === 0) sides[0].clear(), sides[1].clear();
     },
-  });
+  };
+  SEATS.set(pair[0], read);
+  SEATS.set(pair[1], read);
   return pair;
 }
-/** A pair's reads in flight (evmPair), by its first seat: both() opens one around each agreed read. */
-const READS = new WeakMap<EvmRpc, { begin(): void; end(): void }>();
+/** Each pair's seats (evmPair), to its reads in flight: both() opens one around each agreed read. */
+const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; begin(): void; end(): void }>();
 /** both(), an agreed read on a pair's two seats: for the tests (not in the index). */
 export const evmAgreedRead = <T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> => both(rpcs, f, signal);
 
@@ -521,7 +574,8 @@ export const evmAgreedRead = <T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal:
  */
 async function both<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   signal?.throwIfAborted();
-  const read = READS.get(rpcs[0]);
+  const s = SEATS.get(rpcs[0]);
+  const read = s !== undefined && SEATS.get(rpcs[1]) === s ? s : undefined;
   read?.begin();
   try {
     return await bothIn(rpcs, f, signal);
@@ -687,6 +741,8 @@ const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | n
   const t = e as { name?: unknown; afterMs?: unknown; message?: unknown; fault?: unknown } | null;
   if (t?.name === "EvmUnansweredError") return null;
   const afterMs = typeof t?.afterMs === "number" ? t.afterMs : null;
+  // a seat waiting for its own provider's rest (evmPair): a throttle, whatever rested it
+  if (t?.name === "EvmRestingError") return { kind: "throttle", afterMs };
   if (t?.name === "SolanaRpcTransportError") return { kind: t.fault === "timeout" ? "slow" : "throttle", afterMs };
   const m = String(t?.message ?? e);
   if ((e as Error)?.name === "TimeoutError" || SLOW_WORDS.test(m)) return { kind: "slow", afterMs: null };
