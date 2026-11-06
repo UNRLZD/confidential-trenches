@@ -37,6 +37,7 @@ export const CHANGED = [
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
   "scripts/live-checks/evm-buy-hookdata-fee.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
+  "scripts/live-checks/evm-mainnet-senders.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
   "scripts/live-checks/evm-quote-warm-round.mjs",
   "scripts/live-checks/evm-rpc-spare-list.mjs",

@@ -369,6 +369,26 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [503, "not_configured"]);
 });
 
+// card evm-mainnet-senders: the kit pins each mainnet's sell sender (the helper box's own key, made by the research
+// repo's scripts/deploy/evm-sender-key.mjs), so a mainnet sell key off that pin is refused at start against the kit's own
+// list (evmPoolSendersFromEnv's pin check), naming the name and the pin, never a key; the pin's own key starts
+test("a Base or Robinhood mainnet sell key that is not the kit's pinned sell sender is refused at start", () => {
+  const kit = evmPoolVenues();
+  const SELL_KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_MAINNET_SELL_SENDER").digest());
+  const hexOf = (k: Uint8Array) => "0x" + Buffer.from(k).toString("hex");
+  for (const [chain, net] of [["base", "BASE"], ["robinhood", "ROBINHOOD"]] as const) {
+    const pin = kit[chain].sellSender;
+    assert.match(String(pin), /^0x[0-9a-f]{40}$/, `the kit pins ${chain}'s sell sender`);
+    const env = { [`POOL_EVM_ADDRESS_${net}`]: POOL, [`POOL_EVM_SENDER_KEY_${net}`]: hexOf(KEY), [`POOL_EVM_SELL_KEY_${net}`]: hexOf(SELL_KEY) };
+    assert.throws(
+      () => evmPoolSendersFromEnv(env),
+      (e: Error) => e.message === `POOL_EVM_SELL_KEY_${net} is not the key of the kit's pinned sell sender for ${chain} (${pin})` && !e.message.includes(hexOf(KEY).slice(2)) && !e.message.includes(hexOf(SELL_KEY).slice(2)),
+    );
+    const own = evmAddressOf(SELL_KEY);
+    assert.equal(evmPoolSendersFromEnv(env, { ...kit, [chain]: { ...kit[chain], sellSender: own } }).get(POOL)!.sellSender, own, `${chain}: the pin's own key starts`);
+  }
+});
+
 test("the withdraw's deadline again after the queue's wait: a carry whose deadline came within the margin while it waited is deadline_near, nothing sent", async () => {
   let clock = NOW;
   let open: () => void = () => {};
