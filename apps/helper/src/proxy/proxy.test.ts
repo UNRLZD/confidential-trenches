@@ -635,7 +635,7 @@ function windowJupiter(c: { now: () => number }, cap = 10, ms = 10_000) {
 }
 const search = (p: ReturnType<typeof createProxy>, q: string, waitMs = 5_000) => p.handle("jupiter", "/tokens/v2/search", `query=${q}`, "", undefined, true, waitMs, true);
 const listRead = (p: ReturnType<typeof createProxy>, path: string, waitMs?: number) => p.handle("jupiter", path, "limit=100", "", undefined, true, waitMs);
-test("card helper-page-jup-429 (a): a list refresh and a page search asked at once both go at once while the window has room; with the window full, the search goes first", async () => {
+test("card helper-page-jup-429 (a): a list refresh and a page search asked at once both go at once while the window has room; with the own reads' part of the window full (card jupiter-build-budget-503: BUILD_ROOM left to builds), the search goes first", async () => {
   const c = virtualTime();
   const j = windowJupiter(c);
   const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
@@ -643,15 +643,17 @@ test("card helper-page-jup-429 (a): a list refresh and a page search asked at on
   const [list, page] = await c.run(Promise.all([listRead(p, "/tokens/v2/recent"), search(p, "a")]));
   assert.deepEqual([list.status, page.status, j.refused()], [200, 200, 0]);
   assert.deepEqual(j.sent.map((s) => s.at - t0), [0, 0], "both at once: no turn to wait");
-  // the window full of the helper's own reads: the page's search and a list both wait for it, the search first
+  // the own reads' part of the window (Free's 10 less BUILD_ROOM 4) full of pages' searches: the page's search and a
+  // list both wait for it, the search first
   const c2 = virtualTime();
   const k = windowJupiter(c2);
   const q = createProxy(ENV, { fetch: k.fetch, now: c2.now, sleep: c2.sleep, log: () => {} });
   const t1 = c2.now();
-  await c2.run(Promise.all(Array.from({ length: 10 }, (_, n) => search(q, `fill${n}`, 15_000).then(() => undefined, () => undefined)).concat([])));
+  await c2.run(Promise.all(Array.from({ length: 6 }, (_, n) => search(q, `fill${n}`, 15_000).then(() => undefined, () => undefined)).concat([])));
+  assert.deepEqual(k.sent.map((s) => s.at - t1), Array(6).fill(0), "six at once: the window less the builds' BUILD_ROOM");
   const [l2, s2] = await c2.run(Promise.all([listRead(q, "/tokens/v2/recent", 15_000), search(q, "b", 15_000)]));
   assert.deepEqual([l2.status, s2.status, k.refused()], [200, 200, 0]);
-  assert.deepEqual(k.sent.slice(10).map((s) => [s.path, s.q, s.at - t1]), [["/tokens/v2/search", "?query=b", 10_000], ["/tokens/v2/recent", "?limit=100", 10_000]], "the page's search first, as the window frees");
+  assert.deepEqual(k.sent.slice(6).map((s) => [s.path, s.q, s.at - t1]), [["/tokens/v2/search", "?query=b", 10_000], ["/tokens/v2/recent", "?limit=100", 10_000]], "the page's search first, as the window frees");
 });
 test("card helper-page-jup-429 (b): nine builds at once (one device's legs) go in order with no 429: 7 at once (the window less a page's 1 and the other devices' 2), the rest as the window frees; past the wait refused before any draw", async () => {
   const c = virtualTime();
@@ -692,7 +694,9 @@ test("card helper-page-jup-429 (c): a crowd of builds never holds a page, and th
 // live run 42155164828 (03:13Z, da57ecaa), the seconds the cold page waited: six legs' builds at once
 // (solana-legs-share-wait), a build of solana-jupiter-build, helper-token-page-cold's pair of cold searches, a list
 // refresh, then helper-page-jup-429's build, then its cold page: at da57ecaa the page's jup-turn was 1915 ms
-test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, two cold pages, a list) never holds a cold page past 1000 ms, Jupiter never 429s, and each send logs its turn", async () => {
+// card jupiter-build-budget-503: the builds go first, so the cold page asked into a window the builds filled waits for
+// the next window (its page is answered within JUP_PAGE_WAIT_MS, named on chain, token.ts), never a build behind it
+test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, two cold pages, a list): every build is served, the late one at once, a cold page within one window, Jupiter never 429s, and each send logs its turn", async () => {
   const c = virtualTime();
   const j = windowJupiter(c);
   const lines: string[] = [];
@@ -703,14 +707,19 @@ test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, 
   const other = p.handle("jupiter", "/swap/v2/build", "check=build", "", "198.51.100.2");
   const pair = [search(p, "pairA"), search(p, "pairB")];
   const list = listRead(p, "/tokens/v2/recent");
-  const later = at(1_200).then(() => p.handle("jupiter", "/swap/v2/build", "check=page", "", "198.51.100.3"));
+  let builtAsk = 0;
+  const later = at(1_200).then(() => ((builtAsk = c.now()), p.handle("jupiter", "/swap/v2/build", "check=page", "", "198.51.100.3")));
   let asked = 0;
-  const page = at(2_400).then(() => ((asked = c.now()), search(p, "thepage")));
+  // the search's own wait, token.ts SEARCH_HOLD_WAIT_MS (one window)
+  const page = at(2_400).then(() => ((asked = c.now()), search(p, "thepage", 10_000)));
   const answers = await c.run(Promise.all([...legs, other, ...pair, list, later, page]));
   assert.equal(j.refused(), 0, "Jupiter never answered 429");
   for (const a of answers) assert.ok(a.status === 200 || (a.status === 503 && causeIn(a) === "budget" && Number(a.headers["Retry-After"]) >= 1), `${a.status} ${a.timing}`);
+  for (const a of answers.slice(0, 7)) assert.equal(a.status, 200, `a build: ${a.status} ${a.timing}`);
+  assert.equal((await later).status, 200);
+  assert.equal(j.sent.find((s) => s.q === "?check=page")!.at - builtAsk, 0, "the late build at once, ahead of the pages waiting");
   const sentAt = j.sent.find((s) => s.q === "?query=thepage")!.at;
-  assert.ok(sentAt - asked < 1_000, `the cold page's search waited ${sentAt - asked} ms (at most 1000)`);
+  assert.ok(sentAt - asked <= 10_000, `the cold page's search waited ${sentAt - asked} ms (at most one window)`);
   assert.equal((await page).status, 200);
   assert.ok(j.sent.filter((s) => s.at > sentAt - 10_000 && s.at <= sentAt).length <= 10, "the window held");
   // one line a send: the lane, the wait, the window, the answer; never a path, query or client

@@ -9,7 +9,8 @@
 //     plan, check, live and browser-e2e jobs; the check job's run is the check its matrix names (a file in
 //     scripts/live-checks), its artifact step runs `if: always()`, and the verdict job runs `if: always()`; no run line
 //     names a check that does not exist; the plan job runs on a dispatch alone; no step installs Playwright's own
-//     Chromium (a browser starts only as the installed Chrome, scripts/browsers.mjs);
+//     Chromium (a browser starts only as the installed Chrome, scripts/browsers.mjs); the check job's summary grep keeps
+//     every verdict line a check prints (SUMMARY_LINES: card jupiter-build-budget-503, an INCONCLUSIVE line it dropped);
 //   - every check each host's plan runs exists, with its test and its recorded answers, and none reads the
 //     environment (a check that needs a secret is listed SKIPPED, never run); each run gives every flag its check's
 //     usage line needs (live-plan's planFor refuses a run that lacks one).
@@ -55,6 +56,19 @@ export function fileProblems(file, text) {
   return p;
 }
 
+/** Lines a check prints that the run's summary must keep (live.yml's "the lines that matter" grep): a BAD or WARN
+ *  line, each verdict a check ends on (PASS, FAIL, INCONCLUSIVE, ERROR) and the INCONCLUSIVE line that says why
+ *  (solana-jupiter-build, solana-mint-supply-moves). */
+export const SUMMARY_LINES = [
+  "BAD S-1 buy, a token with no route at 40: upstream",
+  "WARN a warning",
+  "live-check k: PASS (x)",
+  "live-check k: FAIL (x)",
+  "live-check k: INCONCLUSIVE (x)",
+  "INCONCLUSIVE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among 48 candidates",
+  "live-check k: ERROR: x",
+];
+
 /** The problems with live.yml's own shape. */
 export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => existsSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`))) {
   const file = ".github/workflows/live.yml";
@@ -74,6 +88,15 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   want(/^  live:\n(?:.*\n)*?    if: always\(\)/m.test(jobText("live") || ""), "the live job does not run `if: always()`");
   want(/node "scripts\/live-checks\/\$KEY\.mjs"/.test(jobText("check")), "the check job does not run the check its matrix names");
   want(/KEY: \$\{\{ matrix\.key \}\}/.test(jobText("check")), "the check job's key is not the matrix's");
+  const grep = /grep -E '([^']+)' "\$log"/.exec(jobText("check"))?.[1];
+  let keeps = null;
+  try {
+    keeps = grep === undefined ? null : new RegExp(grep);
+  } catch {
+    keeps = null;
+  }
+  if (keeps === null) p.push(`${file}: the check job's summary has no grep -E of the check's log`);
+  else for (const l of SUMMARY_LINES) if (!keeps.test(l)) p.push(`${file}: the check job's summary grep drops the line "${l}"`);
   for (const [n, l] of uncommented(text)) {
     for (const m of l.matchAll(/scripts\/live-checks\/([\w.-]+?)\.mjs/g)) if (!exists(m[1])) p.push(`${file}:${n}: runs ${m[1]}, which is no file in scripts/live-checks`);
     if (/playwright\s+install\b.*\bchromium\b/.test(l)) p.push(`${file}:${n}: installs Playwright's own Chromium; a browser starts only as the installed Chrome (scripts/browsers.mjs)`);

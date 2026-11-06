@@ -52,9 +52,16 @@ export const QUEUE_WAIT_MS = 3_000;
 export const PACED: ReadonlySet<VendorName> = new Set(["jupiter"]);
 /** The short window a PACED vendor's limiter counts (see PACED). */
 export const BURST_MS = 10_000;
-/** Of a PACED vendor's window, the sends a device's call and a background read each leave to a page a caller waits for
- *  (a cold page's search): no crowd of builds or of refreshes holds a page's turn. */
+/** Of a PACED vendor's window, the sends the devices' calls leave to a page a caller waits for (a cold page's search)
+ *  until a page has had them in the window: however many builds wait, a page's search still goes once a window. */
 export const OWN_ROOM = 1;
+/** Card jupiter-build-budget-503: of a PACED vendor's window, the sends the helper's own reads (pages, searches, fills,
+ *  the lists) leave free for the devices' calls (a buy's or sell's build): they go only while BUILD_ROOM stay free (a
+ *  page also on the OWN_ROOM the devices leave it), so a build that arrives after a crowd of them still goes at once.
+ *  [design: 4, a device's share (PROXY_BUDGETS.jupiter.perClient): a one-leg trade's cap search and its floor rebuild;
+ *  the own reads keep 6 of Free's 10 a window, 36 a minute, above their PROXY_RESERVE 34. Live run 42178532918
+ *  attempt 1 (job 127762604763): S-1's build refused before its draw, its turn 5 s off, the window spent by reads.] */
+export const BUILD_ROOM = 4;
 /** Of a PACED vendor's window, the sends one device leaves to the other devices: Free's window of 10, less a page's 1
  *  (OWN_ROOM) and these 2, lets one device's trade send 7 builds at once; another device arriving after them still
  *  sends its first leg's build and its quote at once. A trade of more legs (up to 64, each up to 4 builds at once,
@@ -273,12 +280,16 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
 
   /**
    * Card helper-page-jup-429: a PACED vendor's sends are counted over BURST_MS, at most burstOf(vendor) in any window
-   * (Free: 10), every send counted. The calls waiting for a turn go callers first (a device's call, a page a caller
-   * waits for), then the helper's background reads (the lists, a held page's refresh, each waiting up to a window), each
-   * lane in order and each in its room (freeAt): a build and a background read leave the window's last OWN_ROOM to a
-   * page, and one device leaves the other devices OTHER_DEVICES_ROOM, so no crowd of builds holds a page or another
-   * device's first leg (fold 4) and none makes Discover stale (fold 5). A background read whose wait would end before the next turn
-   * takes a caller's, never two turns running. A call whose turn would come past its `by` goes not ready, nothing sent. Each send
+   * (Free: 10), every send counted. Card jupiter-build-budget-503: the calls waiting for a turn go in three lanes, in
+   * order (laneOf): a device's call (a build), then a page a caller waits for (a cold page's search), then the helper's
+   * background reads (the lists, a held page's refresh, each waiting up to a window); a lane goes only when no lane
+   * before it has a call with room. Each lane has its room (freeAt): the devices leave a page OWN_ROOM of the window
+   * until a page has had it, and one device leaves the other devices OTHER_DEVICES_ROOM, so no crowd of builds holds a
+   * page past a window or another device's first leg (fold 4); the own reads go only while they leave BUILD_ROOM free
+   * for builds (a page also on its OWN_ROOM), so no crowd of pages, searches, fills or lists holds a build, and the
+   * lists still have the own reads' part of each window (fold 5). Among the devices, the one with the fewest sends in the window goes first, so one device's legs never hold
+   * another device's first build. A background read whose wait would end before a page's next turn takes that page's
+   * turn, never two turns running. A call whose turn would come past its `by` goes not ready, nothing sent. Each send
    * logs one line (logTurn).
    */
   /** `go(waitS)`: 0 when the turn is this call's, else the seconds until a turn would come (the queue ahead of it). */
@@ -286,6 +297,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const queues = new Map<VendorName, Waiter[]>();
   /** Each paced vendor's newest sends, burstOf(vendor) at most, dated by the clock as read when each turn was given. */
   const sent = new Map<VendorName, number[]>();
+  /** Of them, the pages' (a search a caller waits for), so a page takes the window's last send only once a window. */
+  const sentPage = new Map<VendorName, number[]>();
   /** Each device's sends in the window, so one device leaves the others OTHER_DEVICES_ROOM (fold 4). */
   const sentByClient = new Map<VendorName, Map<string, number[]>>();
   /** When each paced vendor's pending wake (pump's sleep) ends: a call that arrives meanwhile still gets its turn at once
@@ -297,30 +310,68 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const lastWasCaller = new Map<VendorName, boolean>();
   const burstOf = (name: VendorName): number => Math.max(1, Math.floor((limits[name].total * burstMs) / VENDOR_WINDOW_MS));
   type Lane = { caller: boolean; own: boolean; client?: string };
-  /** The calls that go before a call in its own room: a device's, a page's search, a background read's alike. */
-  const sameLane = (a: Lane, b: Lane): boolean => a.caller === b.caller && a.own === b.own;
+  /** The lane a call waits in, served in this order: 0 a device's call, 1 a page a caller waits for, 2 a background read. */
+  const laneOf = (w: Lane): 0 | 1 | 2 => (w.caller && !w.own ? 0 : w.caller ? 1 : 2);
+  /** A device's sends in the BURST_MS to `t`. */
+  const sendsOf = (name: VendorName, client: string | undefined, t: number): number => (client === undefined ? 0 : (sentByClient.get(name)?.get(client) ?? []).filter((x) => x > t - burstMs).length);
+  /** The turns that go before `q[i]`'s, [all of them, of them its own device's]: in an own read's lane the ones queued
+   *  ahead of it in its lane (a device's call takes no turn an own read has room for); among the devices pump's fair
+   *  order: its device's calls queued ahead of it, and each other device's while that device has fewer sends in the
+   *  window (one more on a tie, when it queued first). */
+  function aheadOf(name: VendorName, q: readonly Lane[], i: number, t: number): [number, number] {
+    const w = q[i]!;
+    const lane = laneOf(w);
+    if (lane !== 0) return [q.slice(0, i).filter((x) => laneOf(x) === lane).length, 0];
+    const j = q.slice(0, i).filter((x) => laneOf(x) === 0 && x.client === w.client).length;
+    const mine = sendsOf(name, w.client, t) + j;
+    const others = new Map<string | undefined, { n: number; first: boolean }>();
+    for (let k = 0; k < q.length; k++) {
+      const x = q[k]!;
+      if (k === i || laneOf(x) !== 0 || x.client === w.client) continue;
+      const o = others.get(x.client) ?? { n: 0, first: k < i };
+      o.n++;
+      others.set(x.client, o);
+    }
+    let n = j;
+    for (const [c, o] of others) n += Math.min(o.n, Math.max(0, mine - sendsOf(name, c, t) + (o.first ? 1 : 0)));
+    return [n, j];
+  }
   /** When the turn `k` turns from now (0: the next) is free for a lane at a PACED vendor: the first moment at or after
-   *  `t`, after the vendor's hold, with room in the BURST_MS before it, the turns before it counted as sent. A page a
-   *  caller waits for may fill the window; a background read and a device's call leave it OWN_ROOM, and one device's
-   *  calls leave the other devices OTHER_DEVICES_ROOM. */
-  function freeAt(name: VendorName, t: number, w: Lane, k = 0): number {
+   *  `t`, after the vendor's hold, with room for the lane in the BURST_MS before it, the turns before it counted as sent
+   *  (`kMine` of them its own device's). The window, Free's 10: the devices' calls may take all but its last OWN_ROOM
+   *  until a page has had it in the window, then all, one device's leaving the other devices OTHER_DEVICES_ROOM; the
+   *  own reads go only while BUILD_ROOM stay free; and a page with no page sent in the window also takes the last
+   *  OWN_ROOM the devices leave. So the builds always keep BUILD_ROOM less a page's OWN_ROOM (3 of Free's 10), and take
+   *  what the own reads leave. */
+  function freeAt(name: VendorName, t: number, w: Lane, k = 0, kMine = k): number {
+    const burst = burstOf(name);
     const times = [...(sent.get(name) ?? [])];
-    const room = w.own && w.caller ? burstOf(name) : Math.max(1, burstOf(name) - OWN_ROOM);
+    const pages = (sentPage.get(name) ?? []).filter((x) => x > t - burstMs);
+    const lane = laneOf(w);
+    // the first moment `list` holds fewer than `room` sends in the window (Infinity: no room ever); a vendor counted
+    // over its minute alone (burstMs 0) has room at once
+    const roomIn = (list: readonly number[], room: number): number => (burstMs === 0 ? t : room <= 0 ? Infinity : list.length < room ? t : list[list.length - room]! + burstMs);
     // one device's sends keep OTHER_DEVICES_ROOM of the window for the other devices (fold 4)
-    const mine = w.own || w.client === undefined ? null : [...(sentByClient.get(name)?.get(w.client) ?? [])];
-    const cap = Math.max(1, burstOf(name) - OWN_ROOM - OTHER_DEVICES_ROOM);
+    const mine = lane !== 0 || w.client === undefined ? null : [...(sentByClient.get(name)?.get(w.client) ?? [])];
+    const cap = Math.max(1, burst - OWN_ROOM - OTHER_DEVICES_ROOM);
     let f = t;
     for (let i = 0; i <= k; i++) {
-      f = Math.max(t, budget.heldUntil(name), times.length < room ? t : times[times.length - room]! + burstMs);
+      // the devices leave a page OWN_ROOM until a page has had it in the window; an own read has the room BUILD_ROOM
+      // leaves, and a page also the last OWN_ROOM
+      const shared = roomIn(times, burst - BUILD_ROOM);
+      const room = lane === 0 ? roomIn(times, Math.max(1, burst - Math.max(0, OWN_ROOM - pages.length))) : lane === 1 ? Math.min(shared, Math.max(roomIn(pages, OWN_ROOM), roomIn(times, burst))) : shared;
+      f = Math.max(t, budget.heldUntil(name), room);
       if (mine !== null && mine.length >= cap) f = Math.max(f, mine[mine.length - cap]! + burstMs);
-      if (f < (recoverUntil.get(name) ?? -Infinity) && times.length > 0) f = Math.max(f, times.at(-1)! + burstMs / burstOf(name));
+      if (f < (recoverUntil.get(name) ?? -Infinity) && times.length > 0) f = Math.max(f, times.at(-1)! + burstMs / burst);
       times.push(f);
-      mine?.push(f);
+      if (lane === 1) pages.push(f);
+      if (i < kMine) mine?.push(f);
     }
     return f;
   }
-  /** Gives each free turn to the first caller waiting, else the first background read; `reached`: the time a wait was
-   *  for, so a clock that does not move still reaches it. */
+  /** Gives each free turn by lane (laneOf): a device's call with room, the device with the fewest sends in the window
+   *  first; else the first page with room; else the first background read; `reached`: the time a wait was for, so a
+   *  clock that does not move still reaches it. */
   function pump(name: VendorName, reached = -Infinity): void {
     const q = queues.get(name);
     if (q === undefined) return;
@@ -330,23 +381,30 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       const read = now();
       const t = Math.max(read, reached);
       // a call whose turn would come past its wait goes not ready, told the seconds until it would come
-      const ahead = q.map((w, i) => q.slice(0, i).filter((x) => sameLane(x, w)).length);
+      const ahead = q.map((_, i) => aheadOf(name, q, i, t));
       for (let i = q.length - 1; i >= 0; i--) {
-        const at = freeAt(name, t, q[i]!, ahead[i]);
+        const at = freeAt(name, t, q[i]!, ...ahead[i]!);
         if (q[i]!.by < at) q.splice(i, 1)[0]!.go(Math.max(1, Math.ceil((at - t) / 1000)));
       }
       if (q.length === 0) return;
-      // the first caller whose lane has room now (a device's may wait while a page's search goes), else the first
-      // background read; a background read whose wait would end before the next turn takes a caller's, unless the last
-      // turn was a background read's too
-      const c = q.findIndex((w) => w.caller && freeAt(name, t, w) <= t);
-      const b = q.findIndex((w) => !w.caller);
+      // a device's call whose room has a turn now, of the device with the fewest sends in the window (the first queued
+      // on a tie); else the first page with room; else the first background read. A background read whose wait would end
+      // before a page's next turn takes the page's, unless the last turn was a background read's too
+      let d = -1;
+      for (let k = 0; k < q.length; k++) {
+        const w = q[k]!;
+        if (laneOf(w) !== 0 || freeAt(name, t, w) > t) continue;
+        if (d === -1 || sendsOf(name, w.client, t) < sendsOf(name, q[d]!.client, t)) d = k;
+      }
+      const c = q.findIndex((w) => laneOf(w) === 1 && freeAt(name, t, w) <= t);
+      const b = q.findIndex((w) => laneOf(w) === 2);
       const backFree = b === -1 ? Infinity : freeAt(name, t, q[b]!);
       const starving = b !== -1 && c !== -1 && q[b]!.by < freeAt(name, t, q[c]!, 1) && lastWasCaller.get(name) !== false;
-      const i = c !== -1 ? (starving ? b : c) : backFree <= t ? b : -1;
+      const i = d !== -1 ? d : c !== -1 ? (starving ? b : c) : backFree <= t ? b : -1;
       if (i !== -1) {
         lastWasCaller.set(name, q[i]!.caller);
         sent.set(name, [...(sent.get(name) ?? []), read].slice(-burstOf(name)));
+        if (laneOf(q[i]!) === 1) sentPage.set(name, [...(sentPage.get(name) ?? []), read].slice(-burstOf(name)));
         const who = q[i]!.client;
         if (who !== undefined && !q[i]!.own) {
           const byClient = sentByClient.get(name) ?? new Map<string, number[]>();
@@ -368,12 +426,13 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       return;
     }
   }
-  /** When a call asking now would have its turn at a PACED vendor: after every call of its lane queued ahead of it, so a call whose turn would come past its wait is refused before it draws
-   *  the budget, never drawing for a send it will not make (a drawn call counts in the vendor's minute whether it goes
-   *  or not). */
+  /** When a call asking now would have its turn at a PACED vendor: after the calls queued that go before it (aheadOf),
+   *  so a call whose turn would come past its wait is refused before it draws the budget, never drawing for a send it
+   *  will not make (a drawn call counts in the vendor's minute whether it goes or not). */
   function turnAt(name: VendorName, caller: boolean, own: boolean, client?: string): number {
-    const ahead = (queues.get(name) ?? []).filter((w) => sameLane(w, { caller, own })).length;
-    return freeAt(name, now(), { caller, own, client }, ahead);
+    const w = { caller, own, client };
+    const q = [...(queues.get(name) ?? []), w];
+    return freeAt(name, now(), w, ...aheadOf(name, q, q.length - 1, now()));
   }
   /** The PACED vendor's sends in the BURST_MS to now, for the turn's log line. */
   const inWindow = (name: VendorName): number => (sent.get(name) ?? []).filter((x) => x > now() - burstMs).length;

@@ -5,7 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
+import { SUMMARY_LINES, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
 import { HOSTS, ROOT, commitProblem, enginesFor, listOf, missingFor, planFor, reachesLauncher, usagesOf } from "./live-plan.mjs";
 
 const LIVE = readFileSync(path.join(ROOT, ".github/workflows/live.yml"), "utf8");
@@ -59,6 +59,15 @@ test("planted: a run that names a check that does not exist, an artifact step th
   assert.ok(has(liveProblems(LIVE.replace("    if: always() && needs.plan.result != 'skipped'", "    if: needs.plan.result != 'skipped'")), /live job does not run `if: always\(\)`/));
   assert.ok(has(liveProblems(LIVE.replace('node "scripts/live-checks/$KEY.mjs" $ARGS', "node scripts/live-checks/app-shell.mjs")), /does not run the check its matrix names/));
   assert.ok(has(liveProblems(LIVE.replace("  browser-e2e:", "  other-e2e:")), /no browser-e2e job/));
+});
+
+test("planted (card jupiter-build-budget-503): a summary grep that drops a verdict line, an INCONCLUSIVE one included, or no grep at all, is refused", () => {
+  const grep = "grep -E '^(BAD|WARN)|PASS|FAIL|INCONCLUSIVE|ERROR|[Ee]rror' \"$log\"";
+  assert.ok(LIVE.includes(grep), "live.yml's summary grep as the card left it");
+  const without = liveProblems(LIVE.replace(grep, "grep -E '^(BAD|WARN)|PASS|FAIL|ERROR|[Ee]rror' \"$log\""));
+  assert.deepEqual(without.filter((l) => /summary grep drops/.test(l)).map((l) => /drops the line "(.*)"$/.exec(l)[1]), SUMMARY_LINES.filter((l) => l.includes("INCONCLUSIVE")), "the verdict line and the line that says why");
+  assert.ok(has(liveProblems(LIVE.replace(grep, "grep -E '^BAD' \"$log\"")), /summary grep drops the line "live-check k: PASS/));
+  assert.ok(has(liveProblems(LIVE.replace(grep, "cat \"$log\"")), /summary has no grep -E/));
 });
 
 test("planted: a step that installs Playwright's own Chromium is refused", () => {
