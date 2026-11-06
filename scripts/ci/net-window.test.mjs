@@ -78,6 +78,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-ready-no-flicker.mjs",
   "scripts/live-checks/pool-sol-deploy-sweep.mjs",
   "scripts/live-checks/pool-sol-deploy.mjs",
+  "scripts/live-checks/precommit-taken-recover.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
   "scripts/live-checks/relayer-withdraw-send.mjs",
   "scripts/live-checks/signpage-buy-own-spend.mjs",

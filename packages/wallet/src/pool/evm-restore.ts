@@ -54,7 +54,7 @@ import { vaultLabelOf } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
-import { refKey, type Leaf } from "../notes/store.ts";
+import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
 import { evmHelperRpc } from "./buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LOG_PAGE_BLOCKS, EvmLagError, evmHoldsAnchor, evmLatestHigh, evmPair, evmPoolScopeOf, evmRetryLag, evmTokensSentTo, evmTokensSentToOne, evmTreeSync, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "./evm.ts";
@@ -84,9 +84,9 @@ export type EvmRestoreArgs = {
   gap?: number;
 };
 
-export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] } {
-  const { seed64, scope, events } = a;
-  // every event adds one state leaf (src/PrivacyPool.sol:101, 263), and each Deposited one label: its place is the index
+type Deposits = { byPre: Map<bigint, { at: number; nonce: bigint }>; byNull: Map<bigint, number> };
+// every event adds one state leaf (src/PrivacyPool.sol:101, 263), and each Deposited one label: its place is the index
+function indexEvents(events: readonly EvmPoolEvent[]): Deposits {
   const leaves = new Set<bigint>();
   const byPre = new Map<bigint, { at: number; nonce: bigint }>();
   const byNull = new Map<bigint, number>();
@@ -103,6 +103,35 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
       byNull.set(e.nullifier!, at);
     }
   });
+  return { byPre, byNull };
+}
+
+// the leaf of the Deposited naming P, its label and commitment checked, at the value the pool hashed; null when none
+function depositLeaf(scope: bigint, events: readonly EvmPoolEvent[], ix: Deposits, P: bigint, what: string): Leaf | null {
+  const d = ix.byPre.get(P);
+  if (d === undefined) return null;
+  const e = events[d.at]!;
+  if (e.label !== vaultLabelOf(keccak_256, scope, d.nonce)) throw new Error(`deposit of ${what}: its label is not the label of nonce ${d.nonce}`);
+  if (e.value === 0n || noteCommitment(e.value, e.label, P) !== e.state) throw new Error(`deposit of ${what}: its commitment is not Poseidon(value, label, precommitment)`);
+  return { value: e.value, label: e.label, commitment: e.state, leafIndex: BigInt(d.at) };
+}
+
+/**
+ * Empty notes in a row a second-arrival walk reads past before it stops: the address gap limit of BIP-44, 20. A
+ * second arrival can be empty while a later one holds the user's deposit only through evmNextNote below, which names
+ * the next note past a take whose block is not final yet; if a reorg then drops that take, its note stays empty. So
+ * evmNextNote never names a note more than SECOND_GAP - 1 past the last note that is final, and this walk reads past up
+ * to SECOND_GAP - 1 empty notes, so a restore from the words finds every note the device signed. Solana's chains have
+ * no such gap: the page passes a taken note only once its mark is read at finalized on both RPCs (signpage
+ * pool-deposit.ts and pool-sell.ts markOf), and the store plans a second arrival only once the one before it has
+ * landed (../notes/store.ts addLocked).
+ */
+export const SECOND_GAP = 20;
+
+export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] } {
+  const { seed64, scope, events } = a;
+  const ix = indexEvents(events);
+  const { byPre, byNull } = ix;
 
   const notes: EvmRestoredNote[] = [];
   const spends: EvmRestoredSpend[] = [];
@@ -117,16 +146,14 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
   // a note the pool holds as a deposit: its Deposited event, its label and commitment checked
   const asDeposit = (ref: NoteRef): boolean => {
     const P = noteSecrets(seed64, ref).precommitment;
-    const d = byPre.get(P);
-    if (d === undefined) return false;
-    const e = events[d.at]!;
-    if (e.label !== vaultLabelOf(keccak_256, scope, d.nonce)) throw new Error(`deposit of ${refKey(ref)}: its label is not the label of nonce ${d.nonce}`);
-    if (e.value === 0n || noteCommitment(e.value, e.label, P) !== e.state) throw new Error(`deposit of ${refKey(ref)}: its commitment is not Poseidon(value, label, precommitment)`);
-    put(ref, P, { value: e.value, label: e.label, commitment: e.state, leafIndex: BigInt(d.at) });
+    const leaf = depositLeaf(scope, events, ix, P, refKey(ref));
+    if (leaf === null) return false;
+    put(ref, P, leaf);
     return true;
   };
+  // up to SECOND_GAP - 1 empty notes in a row read past: a pending take evmNextNote passed over, then reorged out
   const seconds = (id: SecondId): void => {
-    for (let n = 0; n <= U32 && asDeposit({ kind: "second", id, n }); n++);
+    for (let n = 0, miss = 0; n <= U32 && miss < SECOND_GAP; n++) miss = asDeposit({ kind: "second", id, n }) ? 0 : miss + 1;
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++)
@@ -167,6 +194,83 @@ export function evmRestore(a: EvmRestoreArgs): { notes: EvmRestoredNote[]; spend
     }
   }
   return { notes, spends, elsewhere };
+}
+
+/**
+ * A deposit or a sell whose precommitment another deposit took first (card precommit-taken-recover; pool-review-3 L-2).
+ * Anyone who sees a pending deposit or W's signed Sell can deposit MIN_DEPOSIT with its precommitment and land first:
+ * the pool keeps the first (contracts/pool-evm/src/PrivacyPool.sol:90-93) and the real one reverts
+ * PrecommitmentAlreadyUsed, a sell whole (SellDelegate.sol: the deposit is its last step, so W keeps its token and its
+ * Sell nonce). That deposit is the user's note all the same: only the seed gives the precommitment's secrets.
+ *
+ * The chain of notes a deposit or a sell signs on, from `first`: a deposit's U note then U's second arrivals, a sell's
+ * return note (c, l, j) then R's, a move's V. Read against the pool's events as evmTreeSync's events() gives them (both
+ * RPCs byte for byte, the trees checked against the pool's views), every note of the chain a Deposited already names
+ * is `taken`, with its leaf at the value that deposit carried (MIN_DEPOSIT or any other), and `next` is the first one
+ * none names: the one to sign. Called before each signature and again after a revert, so the device never signs a
+ * precommitment the pool already holds, and a sell signed in advance whose deposit reverted is signed again on `next`.
+ * Only a Deposited at or below `finalBlock` (the round's finalized anchor, evmTreeSync's `fin`) is `taken`, so a note
+ * is stored only from a block that never moves; one in the tail above it is `pending`: passed over for `next`, never
+ * written, and taken at a later round once its block is final (a reorg that drops it leaves the note as it was). If
+ * that reorg drops it and nothing else lands on its precommitment, the chain holds an empty note before the one signed
+ * next: evmRestore's second-arrival walk reads past SECOND_GAP - 1 of them, and this refuses to name a note past
+ * SECOND_GAP pending takes in a row (the next round, with those blocks final, names it), so a restore from the words
+ * never misses a signed note. The device also names that empty note as `next` at its next call, which fills the gap.
+ */
+export function evmNextNote(seed64: Uint8Array, scope: bigint, events: readonly EvmPoolEvent[], first: NoteRef, finalBlock: bigint): { taken: EvmRestoredNote[]; pending: NoteRef[]; next: { ref: NoteRef; precommitment: bigint } } {
+  if (typeof finalBlock !== "bigint" || finalBlock < 0n) throw new Error("finalBlock: the round's finalized block number");
+  if (first.kind === "deposit" && first.s !== scope) throw new Error("a deposit note's scope is its s");
+  const id: SecondId =
+    first.kind === "deposit" ? { id: "U", s: first.s, i: first.i }
+    : first.kind === "return" ? { id: "R", c: first.c, l: first.l, j: first.j }
+    : first.kind === "move" ? { id: "V", l: first.l, j: first.j }
+    : (() => { throw new Error(`a deposit or a sell signs on a deposit, return or move note, not ${String(first?.kind)}`); })();
+  const ix = indexEvents(events);
+  const taken: EvmRestoredNote[] = [];
+  const pending: NoteRef[] = [];
+  let run = 0; // pending takes in a row: each may yet be dropped, an empty note before `next`
+  for (let n = -1; n <= U32; n++) {
+    const ref: NoteRef = n < 0 ? first : { kind: "second", id, n };
+    const precommitment = noteSecrets(seed64, ref).precommitment;
+    const leaf = depositLeaf(scope, events, ix, precommitment, refKey(ref));
+    if (leaf === null) {
+      if (run >= SECOND_GAP) throw new Error(`${refKey(ref)}: ${run} pending takes in a row before it, past the restore's gap of ${SECOND_GAP}: signed once they are final`);
+      return { taken, pending, next: { ref, precommitment } };
+    }
+    if (events[Number(leaf.leafIndex)]!.block > finalBlock) {
+      // a deposit index is found by its deposit note alone (walkLane), so an empty deposit note hides its whole chain:
+      // the one take never passed over while pending
+      if (n < 0 && first.kind === "deposit") throw new Error(`${refKey(ref)}: taken in a block not final yet; the deposit index is found by this note alone, so its chain is signed once that block is final`);
+      pending.push(ref);
+      run++;
+    } else {
+      taken.push({ ref, scope, precommitment, leaf, state: "UNSPENT" });
+      run = 0;
+    }
+  }
+  throw new Error("no second arrival left on this id");
+}
+
+/**
+ * Writes evmNextNote's taken notes as the user's own, in order: one the store does not hold is added UNSPENT with its
+ * leaf; one it holds PLANNED or INCOMING (a deposit or sell signed on it, which reverted or never will land) goes
+ * UNSPENT with that leaf; one it holds landed is kept when its leaf is the taken one's. A held note whose precommitment
+ * or scope, or a landed one whose leaf, is not the taken one's is refused. Returns the notes written, each for the proof
+ * queue's next pass.
+ */
+export async function evmClaimTaken(store: NoteStore, taken: readonly EvmRestoredNote[]): Promise<NoteRecord[]> {
+  const held = new Map((await store.list()).map((n) => [refKey(n.ref), n]));
+  const out: NoteRecord[] = [];
+  for (const t of taken) {
+    const h = held.get(refKey(t.ref));
+    if (h !== undefined && (h.precommitment !== t.precommitment || h.scope !== t.scope)) throw new Error(`${refKey(t.ref)}: the store holds another note on this ref`);
+    if (h === undefined) out.push(await store.add({ ref: t.ref, scope: t.scope, precommitment: t.precommitment, state: "UNSPENT", leaf: t.leaf }));
+    else if (h.state === "PLANNED" || h.state === "INCOMING") {
+      const incoming = h.state === "PLANNED" ? await store.move(h.id, "PLANNED", "INCOMING") : h;
+      out.push(await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf: t.leaf }));
+    } else if (h.leaf !== undefined && (h.leaf.commitment !== t.leaf.commitment || h.leaf.leafIndex !== t.leaf.leafIndex)) throw new Error(`${refKey(t.ref)}: the store holds this note at another leaf`);
+  }
+  return out;
 }
 
 /** An unread W's error: a provider's words cut to their JSON-RPC code or HTTP status; the device's own words kept. */
