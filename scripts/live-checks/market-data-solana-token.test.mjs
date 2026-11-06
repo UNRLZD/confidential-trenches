@@ -51,7 +51,8 @@ const edit = (k, fn, headers) => {
 test("the pinned lists are 06b's, the Row is the terminal's, and the helper serves exactly them", () => {
   assert.deepEqual(ROW, [...TERMINAL_FIELDS]);
   assert.deepEqual(ROW, [...HELPER_ROW]);
-  assert.deepEqual(PAGE, [...PAGE_FIELDS]);
+  // the helper's list is 06b's then `filling` (card token-page-fills-after)
+  assert.deepEqual([...PAGE, "filling"], [...PAGE_FIELDS]);
   assert.deepEqual(RISK, [...RISK_FIELDS]);
   assert.deepEqual(HOLDERS, [...HOLDERS_FIELDS]);
   assert.deepEqual(CANDLES, [...CANDLES_FIELDS]);
@@ -62,6 +63,15 @@ test("recorded good answer: the page, holders and candles of one live mint in ex
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.length, 21);
   assert.ok(JSON.parse(A.good.reads.candles.body).candles.length > 0);
+});
+
+test("card token-page-fills-after: a page with filling false passes; filling not a boolean, or true on a Jupiter row, FAILs", async () => {
+  assert.equal((await run(edit("token", (b) => (b.filling = false)))).ok, true);
+  for (const [v, re] of [["yes", /filling "yes"/], [true, /filling true on a "jupiter" row/]]) {
+    const r = await run(edit("token", (b) => (b.filling = v)));
+    assert.equal(r.ok, false, String(v));
+    assert.ok(bad(r).some((l) => re.test(l)), bad(r).join("\n"));
+  }
 });
 
 test("recorded bad answer: the deployed helper before this card, 404 on all three: FAIL", async () => {
