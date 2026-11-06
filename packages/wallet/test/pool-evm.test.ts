@@ -833,6 +833,26 @@ test("card evm-pool-sync-wide-pages: a 13M-block span on two providers with caps
   assert.ok(b.length <= Math.ceil(span / 100_000) + 10, `the 100,000 cap: ${b.length} pages`);
 });
 
+test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a 200 range\" pages the pool sync at 200 at once, never under it: 1.5M blocks in ceil(span/200) pages and a few probes", async () => {
+  // sepolia.base.org's answer to eth_getLogs over 2,000 and 10,000 blocks: HTTP 413, -32614 "eth_getLogs is limited to
+  // a 200 range"; 200 blocks answered in 0.33 s (read 6 Nov 18:45Z and 18:51Z), as the kit's client throws it (the status,
+  // then the body's error); publicnode's 50,000 cap on the other seat
+  const span = 1_500_000;
+  const c = longChain([...deps(PP, [10, 700_000, 1_499_000])], span);
+  const la: string[] = [], lb: string[] = [];
+  const capA = { log: la, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 50_000) throw new Error("RPC error -32701: exceed maximum block range: 50000"); } };
+  const capB = { log: lb, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 200) throw new Error("HTTP 413: RPC error -32614: eth_getLogs is limited to a 200 range"); } };
+  const r = await sync(pair(c, c, capA, capB)).events();
+  assert.equal(r.events.length, 3);
+  const b = pageSizes(lb);
+  // the first page refused, then 200 at once (halving went 100,000 to 195 in 9 refusals and paged at 195: 7,693 pages)
+  assert.deepEqual(b.slice(0, 9), [100_000, ...Array(8).fill(200)], `b: ${b.slice(0, 12)}`);
+  const answered = b.filter((n) => n <= 200);
+  assert.ok(answered.slice(0, -1).every((n) => n === 200), `b's pages under the cap: ${[...new Set(answered)]}`);
+  assert.ok(b.length <= Math.ceil(span / 200) + 10, `the 200 cap: ${b.length} pages`);
+  assert.ok(pageSizes(la).length <= Math.ceil(span / 50_000) + 10, `the 50,000 cap: ${pageSizes(la).length} pages`);
+});
+
 test("card evm-pool-sync-wide-pages: a refusal halves only that provider's page; a 429 or no answer in time halves none, and a spare in a seat pages at its own size", async () => {
   const c = longChain([...deps(PP, [10, 400_000, 990_000])], 1_000_000);
   const la: string[] = [], lb: string[] = [];
