@@ -45,6 +45,16 @@ export type BindSender = {
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
 /** A device polls its status: the answers that change nothing are not logged. */
 const QUIET: ReadonlySet<string> = new Set(["delivery_used", "exists", "no_delivery", "under_min"]);
+/**
+ * A creation's log line: its code and our Transfer's hash only. Never its why, an RPC error's text or the network's
+ * start error: they can name the id (withdraw/send.ts accountAt, send.ts RpcError), and the log keeps no deposit's id
+ * or address. null: not logged.
+ */
+export function createLine(a: { code: string; tx_hash?: string } | null): string | null {
+  if (a === null || QUIET.has(a.code)) return null;
+  return `helper: create ${a.code}${typeof a.tx_hash === "string" && /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(a.tx_hash) ? ` ${a.tx_hash}` : ""}`;
+}
+export const CREATE_START_FAILED = "helper: create start_failed";
 /** The route's own answers, before the carry: check 1's and check 5's codes, and upstream (a start that failed). */
 export type BindRouteAnswer = { status: number; body: Answer["body"] | { error: { code: "bad_shape" | "token_not_accepted" | "upstream" } } };
 const no = (code: "bad_shape" | "token_not_accepted" | "upstream"): BindRouteAnswer => ({ status: STATUS[code] ?? 400, body: { error: { code } } });
@@ -184,9 +194,8 @@ export function bindSenderFromEnv(
     delivered(body) {
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
       void onStatusAnswer(body, nets).then(
-        // the outcome only: no id, no address
-        (a) => a !== null && !QUIET.has(a.code) && console.log(`helper: create ${a.code}${a.tx_hash ? ` ${a.tx_hash}` : ""}${a.why ? ` (${a.why})` : ""}`),
-        (e: unknown) => console.error(`helper: create failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`),
+        (a) => ((l) => l !== null && console.log(l))(createLine(a)),
+        () => console.error(CREATE_START_FAILED),
       );
     },
     stop: () => {

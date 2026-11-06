@@ -6,12 +6,16 @@
 // - a hook that throws or never ends changes no answer;
 // - only a 200 of oneclick /v0/status reaches it: another path, another vendor or a refused call does not.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createPrivateKey, createPublicKey } from "node:crypto";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { BindSender } from "./bind/env.ts";
+import { base58 } from "./bind/checks.ts";
+import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
+import { createFileStore } from "./bind/send.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { start } from "./server.ts";
 
@@ -37,12 +41,12 @@ const turns = async (n = 20) => {
 };
 
 /** A helper whose 1Click answers `upstream` (status, body) to every call, with `bind` handed in. */
-async function helper(bind: BindSender, upstream: (url: string) => { status: number; body: string } = () => ({ status: 200, body: UPSTREAM })): Promise<{ port: number; close(): Promise<void> }> {
+async function helper(bind: BindSender, upstream: (url: string) => { status: number; body: string } = () => ({ status: 200, body: UPSTREAM }), senders: Promise<unknown> = Promise.resolve()): Promise<{ port: number; close(): Promise<void> }> {
   const fetchFn = async (url: string) => {
     const u = upstream(url);
     return new Response(u.body, { status: u.status, headers: { "content-type": "application/json" } });
   };
-  const s: Server = start(COMMIT, 0, createProxy(ENV, { fetch: fetchFn }), undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  const s: Server = start(COMMIT, 0, createProxy(ENV, { fetch: fetchFn }), undefined, undefined, undefined, undefined, undefined, undefined, bind, undefined, undefined, undefined, undefined, senders);
   await new Promise<void>((ok) => s.on("listening", () => ok()));
   return {
     port: (s.address() as AddressInfo).port,
@@ -106,4 +110,58 @@ test("only a 200 of oneclick /v0/status reaches the hook: a quote, another vendo
   }
   await turns();
   assert.deepEqual(seen, []);
+});
+
+test("fold 5: during the senders' handover the hook waits (nothing opens the deposit store the old helper holds), the event loop never stalls past 50 ms, and it runs once they are this helper's", async (t) => {
+  const seed = Buffer.alloc(32, 5);
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+  const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+  const dir = mkdtempSync(join(tmpdir(), "handover-"));
+  const old = createFileStore(join(dir, "bind-mainnet")); // the helper being replaced holds the mainnet deposit store
+  let oldOpen = true;
+  t.after(() => oldOpen && old.close());
+  const reads: string[] = [];
+  // the providers answer the start's block and config reads, so a start that ran during the handover would reach the
+  // store's lock (a 321 ms stall, measured with the lock held), then fail its next read, so this one is logged and ends
+  const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+  const near = (async (_u: string, init: { body: string }) => {
+    const { method, params } = JSON.parse(init.body) as { method: string; params: Record<string, unknown> };
+    reads.push(method);
+    const at = { block_height: 1000, block_hash: "3".repeat(43) };
+    let result: unknown;
+    if (method === "block") result = { header: { height: 1000, hash: at.block_hash, prev_height: 999, gas_price: "100000000", timestamp_nanosec: (BigInt(Date.now()) * 1_000_000n).toString() } };
+    else if (method === "query" && params.method_name === "config") result = { result: [...Buffer.from(JSON.stringify({ asset: USDC }))], logs: [], ...at };
+    else throw new Error("provider down");
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", result }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
+  const errors: string[] = [];
+  t.mock.method(console, "error", (l: string) => void errors.push(l));
+  const bind = bindSenderFromEnv(env, {}, near);
+  t.after(() => bind.stop());
+  let handOver: () => void = () => undefined;
+  const senders = new Promise<void>((ok) => (handOver = ok));
+  const h = await helper(bind, undefined, senders);
+  t.after(() => h.close());
+  let last = performance.now();
+  let worst = 0;
+  const tick = setInterval(() => {
+    const now = performance.now();
+    worst = Math.max(worst, now - last);
+    last = now;
+  }, 5);
+  t.after(() => clearInterval(tick));
+  for (let i = 0; i < 3; i++) {
+    const r = await call(h.port, STATUS_PATH);
+    assert.deepEqual([r.status, r.body], [200, UPSTREAM]);
+  }
+  await new Promise((ok) => setTimeout(ok, 300));
+  assert.deepEqual(reads, [], "nothing started while the senders are the old helper's");
+  // the handover: the old helper stops, its locks go with it
+  old.close();
+  oldOpen = false;
+  handOver();
+  for (let i = 0; i < 100 && errors.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
+  assert.ok(reads.length > 0, "the hook ran once the senders were this helper's");
+  assert.ok(worst < 50, `worst event-loop gap ${Math.round(worst)} ms`);
 });

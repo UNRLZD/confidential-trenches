@@ -498,15 +498,21 @@ export function handler(
           .then((a) => {
             reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...a.headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a);
             // card helper-create-u: a 1Click status the device was just answered goes to the deposit's creation, after
-            // the answer and off its path (bind/env.ts delivered); nothing it does reaches this call
-            if (a.status === 200 && rest === ONECLICK_STATUS) {
+            // the answer and off its path (bind/env.ts delivered); nothing it does reaches this call. It waits for the
+            // senders as /v1/bind does: the deposit store is the senders' holder's, and opening its lock while the
+            // helper this one replaces still holds it would stall the event loop. Not held in time: dropped (the
+            // device polls again).
+            if (a.status === 200 && rest === ONECLICK_STATUS && bind.delivered !== undefined) {
               const body = a.body;
-              setImmediate(() => {
-                try {
-                  bind.delivered?.(body);
-                } catch {
-                  // the answer went; a failed hook changes nothing
-                }
+              void heldWithin(senders).then((held) => {
+                if (!held) return;
+                setImmediate(() => {
+                  try {
+                    bind.delivered?.(body);
+                  } catch {
+                    // the answer went; a failed hook changes nothing
+                  }
+                });
               });
             }
           })

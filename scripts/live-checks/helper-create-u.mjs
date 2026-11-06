@@ -13,9 +13,15 @@
 //      recipient and USDC;
 //   3. after at least WAIT_MS, the same reads: the recipient as before (a Transfer would create it) and every nonce as
 //      before.
+// It counts only on a helper that can create: before anything, it reads the deployed commit (GET /v1/health) and that
+// commit's own files in this checkout (the hook and createOnDelivery's caller), and whether mainnet deposits are carried
+// (POST /v1/bind with a delegate on mainnet USDC that decodes and is refused before any read: token_not_accepted means
+// not carried), and it needs the mainnet gas account pinned below. Short of any of the three it stops (exit 2), so it
+// joins scripts/ci/helper-live-checks.mjs only once mainnet deposits are carried (card vault-mainnet-deploy).
 // The creation itself lands with the first real mainnet deposit, and its record goes in helper-create-u.md.
 //   node scripts/live-checks/helper-create-u.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 export const BASE = "https://api.confidential.unrealized.trade";
@@ -67,8 +73,62 @@ export async function readState(recipient, relayer, fetchFn = fetch, urls = RPCS
   );
 }
 
+/** Whether `commit`'s own files in this checkout hold this card's code: the route's hook and the status answer's reader. */
+export function commitHasCode(commit) {
+  if (!SHA.test(commit ?? "")) return false;
+  try {
+    const show = (f) => execFileSync("git", ["show", `${commit}:${f}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return show("apps/helper/src/server.ts").includes("bind.delivered?.(body)") && show("apps/helper/src/bind/create.ts").includes("export async function onStatusAnswer");
+  } catch {
+    return false;
+  }
+}
+
+/** A SignedDelegateAction on mainnet USDC that decodes (bind/checks.ts decodeSignedDelegate) with no action and a zero
+ *  signature: the carry refuses it before any read, and an uncarried network answers token_not_accepted. */
+export function bindProbe() {
+  const str = (t) => {
+    const b = Buffer.from(t, "utf8");
+    const n = Buffer.alloc(4);
+    n.writeUInt32LE(b.length);
+    return Buffer.concat([n, b]);
+  };
+  const bytes = Buffer.concat([str("probe.near"), str(USDC), Buffer.alloc(4), Buffer.alloc(8), Buffer.alloc(8), Buffer.alloc(33), Buffer.alloc(65)]);
+  return JSON.stringify({ signed_delegate: bytes.toString("base64") });
+}
+
+/** What the check needs of the deployed helper before it counts. */
+export async function preflight(base = BASE, fetchFn = fetch, hasCode = commitHasCode) {
+  const root = base.replace(/\/$/, "");
+  const h = await fetchFn(`${root}/v1/health`, { headers: { origin: APP }, redirect: "manual" });
+  const commit = (await h.json().catch(() => ({})))?.commit ?? null;
+  const b = await fetchFn(`${root}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: bindProbe() });
+  const text = (await b.text()).slice(0, 1024);
+  let code = null;
+  try {
+    code = JSON.parse(text)?.error?.code ?? null;
+  } catch {
+    code = null;
+  }
+  return { readAt: new Date().toISOString(), commit, has_code: hasCode(commit), bind: { status: b.status, code }, relayer: BIND_RELAYER_MAINNET };
+}
+
+/** Why the check cannot count on this helper, or null when it can. */
+export function refusal(p) {
+  const why = [];
+  if (!p.has_code) why.push(`the deployed commit ${p.commit} does not hold this card's code`);
+  // carried: the carry refused it on its own terms (bad_shape at check 1, or relayer_low / token_halted before it);
+  // token_not_accepted is no carried network, upstream a network that did not start
+  if (typeof p.bind.code !== "string" || ["token_not_accepted", "upstream"].includes(p.bind.code)) why.push(`mainnet deposits are not carried (POST /v1/bind: ${p.bind.status} ${p.bind.code})`);
+  if (p.relayer === null) why.push("no mainnet deposit gas account is pinned (BIND_RELAYER_MAINNET)");
+  return why.length === 0 ? null : why.join("; ");
+}
+
 /** One run: before, the proxy's answer, after. */
 export async function read(base = BASE, fetchFn = fetch, wait = WAIT_MS) {
+  const pre = await preflight(base, fetchFn);
+  const no = refusal(pre);
+  if (no !== null) throw new Error(`not counted on this helper: ${no}`);
   const before = await readState(RECIPIENT, BIND_RELAYER_MAINNET, fetchFn);
   for (const s of before) if (!(typeof s.usdc === "string" && /^[0-9]+$/.test(s.usdc) && BigInt(s.usdc) < MIN_DEPOSIT)) throw new Error(`${s.url}: the recipient's USDC reads ${s.usdc}, not under MIN_DEPOSIT: a run could pay for a creation, so nothing is sent`);
   const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/proxy/oneclick/v0/status?depositAddress=${ADDRESS}`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: "" });

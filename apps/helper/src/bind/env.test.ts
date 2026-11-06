@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { base58 } from "./checks.ts";
-import { BIND_ENV, bindSenderFromEnv, MARGIN_K_ENV } from "./env.ts";
+import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV } from "./env.ts";
 
 const keyOf = (fill: number) => {
   const seed = Buffer.alloc(32, fill);
@@ -95,6 +95,26 @@ test("delivered (card helper-create-u): the recorded 1Click SUCCESS on mainnet U
   assert.equal(s.delivered(JSON.stringify(recorded.answers.success_usdc)), undefined);
   for (let i = 0; i < 100 && logged.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
   assert.ok(reads.length > 0, "mainnet's start read its providers");
-  assert.match(logged.join("\n"), /^helper: create failed: /m);
+  assert.deepEqual([...new Set(logged)], ["helper: create start_failed"]);
   s.stop();
+});
+
+test("fold 4: a creation's log line names its code and our Transfer's hash only: no id, no address, no why or RPC text, for every code", () => {
+  const id = "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8";
+  const address = "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f";
+  const tx = "4Kb2sUpEofHZao7aRzhjNPvzxgLHoaG75Vg1BNM3mwnY";
+  const whys = [`view_account ${id}: the two providers disagree`, `RpcError query: UNKNOWN_ACCOUNT ${id} at ${address}`, `fetch failed ${address}`];
+  const lines: string[] = [];
+  for (const code of ["not_implicit", "no_delivery", "under_min", "exists", "created", "in_flight", "create_failed", "relayer_low", "unread", "delivery_used"]) {
+    for (const why of whys) for (const tx_hash of [tx, undefined, id, `${tx} ${id}`]) {
+      const l = createLine({ code, why, ...(tx_hash === undefined ? {} : { tx_hash }) } as { code: string; tx_hash?: string });
+      if (l !== null) lines.push(l);
+    }
+  }
+  assert.ok(lines.includes(`helper: create created ${tx}`) && lines.includes("helper: create unread") && lines.includes(`helper: create relayer_low`));
+  for (const l of lines) {
+    assert.ok(!l.includes(id) && !l.includes(address) && !/disagree|RpcError|fetch|UNKNOWN/.test(l), l);
+    assert.match(l, /^helper: create [a-z_]+( [1-9A-HJ-NP-Za-km-z]{43,44})?$/);
+  }
+  assert.equal(createLine(null), null);
 });

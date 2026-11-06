@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { CREATE_YOCTO, createOnDelivery, deliveryOf, deliveryReads, onStatusAnswer, STATUS_ANSWER_MAX, type CreateDeps } from "./create.ts";
+import { CREATE_YOCTO, createOnDelivery, deliveryKey, deliveryOf, deliveryReads, onStatusAnswer, REREAD_MS, STATUS_ANSWER_MAX, type CreateDeps } from "./create.ts";
 import { MIN_DEPOSIT, base58 } from "./checks.ts";
 import { RELAYER_FLOOR_YOCTO, RpcError, createFileStore, encodeAction, type DepositStore, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "./send.ts";
 import { hashOf } from "../../test/token-status/near.ts";
@@ -127,12 +127,13 @@ function setup(over: Partial<World> = {}, o: Parameters<typeof fakeRelayer>[1] =
   let store: DepositStore = createFileStore(dir);
   const relayer = fakeRelayer(w, o);
   const delivery = deliveryReads([provider(w, 0, () => id), provider(w, 1, () => id)], TOKEN, () => NOW);
-  const deps = (): CreateDeps => ({ token: TOKEN, delivery, store, relayer });
+  const clock = { t: NOW };
+  const deps = (): CreateDeps => ({ token: TOKEN, delivery, store, relayer, now: () => clock.t });
   const reopen = () => {
     store.close();
     store = createFileStore(dir);
   };
-  return { w, id, relayer, deps, reopen, store: () => store };
+  return { w, id, relayer, deps, reopen, store: () => store, clock };
 }
 
 // ---- The card's five cases ----
@@ -186,9 +187,9 @@ test("one delivery: exactly one Transfer, of CREATE_YOCTO to the id, under eight
   assert.deepEqual(s.relayer.sent[0]!.action, { kind: "transfer", receiver: s.id, amount: CREATE_YOCTO });
   for (const a of answers) assert.deepEqual(a, { code: "created", tx_hash: s.relayer.sent[0]!.tx.tx_hash });
   const rec = s.store().creation(s.id)!;
-  assert.equal(rec.last.state, "landed");
+  assert.equal(rec.last!.state, "landed");
   // the record keeps the Transfer as signed (its b0 height, nonce and bytes, which a read-back resends and judges by)
-  const { state: _s, landed_at: _l, ...signed } = rec.last;
+  const { state: _s, landed_at: _l, delivery: _d, ...signed } = rec.last!;
   assert.deepEqual(signed, s.relayer.sent[0]!.tx);
   // later calls read the id as existing
   assert.deepEqual(await createOnDelivery(s.id, s.deps()), { code: "exists" });
@@ -206,8 +207,8 @@ test("a Transfer whose outcome is not read: every later call reads it back (its 
   assert.equal(first.code, "in_flight");
   assert.equal(s.relayer.sent.length, 1);
   const rec = s.store().creation(s.id)!;
-  assert.equal(rec.last.state, "pending");
-  assert.equal(rec.last.tx_hash, first.tx_hash);
+  assert.equal(rec.last!.state, "pending");
+  assert.equal(rec.last!.tx_hash, first.tx_hash);
   // the chain still shows the id absent and delivered: nothing new goes out while ours may land
   for (let i = 0; i < 3; i++) assert.deepEqual(await createOnDelivery(s.id, s.deps()), { code: "in_flight", tx_hash: first.tx_hash });
   s.reopen();
@@ -223,7 +224,7 @@ test("a Transfer whose outcome is not read: every later call reads it back (its 
 test("a Transfer whose outcome a lookup never gives, while the id exists: exists, nothing resolved or sent", async () => {
   const s = setup({}, { outcome: () => "unknown" });
   assert.equal((await createOnDelivery(s.id, s.deps())).code, "in_flight");
-  assert.equal(s.store().creation(s.id)!.last.state, "pending");
+  assert.equal(s.store().creation(s.id)!.last!.state, "pending");
   s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
   const n = s.relayer.resolved.length;
   assert.deepEqual(await createOnDelivery(s.id, s.deps()), { code: "exists", tx_hash: s.relayer.sent[0]!.tx.tx_hash });
@@ -239,7 +240,7 @@ test("a Transfer proved never applied (dropped): the next call reads the gate ag
   let kind: TxOutcome["kind"] = "dropped";
   const s = setup({}, { outcome: () => kind });
   assert.equal((await createOnDelivery(s.id, s.deps())).code, "in_flight");
-  assert.equal(s.store().creation(s.id)!.last.state, "dropped");
+  assert.equal(s.store().creation(s.id)!.last!.state, "dropped");
   kind = "final";
   assert.equal((await createOnDelivery(s.id, s.deps())).code, "created");
   assert.equal(s.relayer.sent.length, 2);
@@ -248,7 +249,7 @@ test("a Transfer proved never applied (dropped): the next call reads the gate ag
 test("reads that lag a landed Transfer of ours never count: absent below its receipt's height sends nothing", async () => {
   const s = setup();
   assert.equal((await createOnDelivery(s.id, s.deps())).code, "created");
-  const landed = BigInt(s.store().creation(s.id)!.last.landed_at!);
+  const landed = BigInt(s.store().creation(s.id)!.last!.landed_at!);
   // the providers answer an older final, where the id was still absent
   s.w.height = Number(landed) - 2;
   s.w.account = ["absent", "absent"];
@@ -295,13 +296,14 @@ const STATUS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/onecl
 type Answer = { status: string; swapDetails: Record<string, unknown>; quoteResponse: { quoteRequest: Record<string, unknown>; quote: Record<string, unknown> } };
 const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 /** The recorded USDC delivery, its recipient, token and address set for a test (the fake chain decides what they hold). */
-function answer(edit: { id?: string; token?: string; address?: string; status?: string; req?: Record<string, unknown>; out?: unknown } = {}): string {
+function answer(edit: { id?: string; token?: string; address?: string; status?: string; req?: Record<string, unknown>; out?: unknown; memo?: unknown } = {}): string {
   const a = structuredClone(STATUS.answers.success_usdc);
   if (edit.status !== undefined) a.status = edit.status;
   if (edit.id !== undefined) a.quoteResponse.quoteRequest.recipient = edit.id;
   if (edit.token !== undefined) a.quoteResponse.quoteRequest.destinationAsset = `nep141:${edit.token}`;
   if (edit.address !== undefined) a.quoteResponse.quote.depositAddress = edit.address;
   if ("out" in edit) a.swapDetails.amountOut = edit.out;
+  if ("memo" in edit) a.quoteResponse.quote.depositMemo = edit.memo;
   Object.assign(a.quoteResponse.quoteRequest, edit.req ?? {});
   return JSON.stringify(a);
 }
@@ -309,7 +311,7 @@ const nets = (deps: () => CreateDeps, token = TOKEN) => new Map([[token, async (
 
 test("deliveryOf on the recorded answers: the USDC delivery names its 64-hex recipient, token and deposit address; the SOL one (a Solana recipient, another token) names none", () => {
   const usdc = JSON.stringify(STATUS.answers.success_usdc);
-  assert.deepEqual(deliveryOf(usdc, new Set([USDC])), { id: "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8", token: USDC, address: "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f" });
+  assert.deepEqual(deliveryOf(usdc, new Set([USDC])), { id: "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8", token: USDC, key: "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f#" });
   assert.equal(deliveryOf(usdc, new Set([TOKEN])), null, "a token no carried network holds");
   const sol = JSON.stringify(STATUS.answers.success_sol);
   assert.equal(deliveryOf(sol, new Set([USDC, "sol.omft.near"])), null, "a recipient that is no 64-hex id");
@@ -398,4 +400,133 @@ test("hook: a delivery whose Transfer is still open reads it back, never sends a
 test("hook: a network that cannot start rejects (env.ts logs it); the answer was already sent", async () => {
   const body = answer({ id: "cd".repeat(32), token: TOKEN });
   await assert.rejects(onStatusAnswer(body, new Map([[TOKEN, async () => { throw new Error("rpc down"); }]])), /rpc down/);
+});
+
+// ---- The review's folds ----
+
+/** Counts the relayer's queue turns (send() calls, whatever the guard answers). */
+function counted(r: ReturnType<typeof fakeRelayer>) {
+  let turns = 0;
+  const send = r.send.bind(r);
+  r.send = (async (...args: Parameters<typeof send>) => (turns++, send(...args))) as typeof r.send;
+  return { turns: () => turns };
+}
+
+test("fold 1: 50 polls of a SUCCESS that cannot create take no queue turn; exists spends the delivery for good, no_delivery, under_min and unread read again at most every REREAD_MS", async () => {
+  for (const [code, over] of [
+    ["exists", { account: [{ keys: ["ed25519:k"] }, { keys: ["ed25519:k"] }] }],
+    ["under_min", { balance: ["5", "5"] }],
+    ["no_delivery", { balance: ["0", "0"] }],
+    ["unread", { down: [false, true] }],
+  ] as const) {
+    const s = setup(over as Partial<World>);
+    const c = counted(s.relayer);
+    const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+    const first = await onStatusAnswer(body, nets(s.deps));
+    const one = s.w.reads;
+    assert.ok(one > 0, `${code}: the first poll reads at once`);
+    const all = [first, ...(await Promise.all(Array.from({ length: 25 }, () => onStatusAnswer(body, nets(s.deps)))))];
+    for (let i = 0; i < 24; i++) all.push(await onStatusAnswer(body, nets(s.deps)));
+    assert.equal(all.length, 50);
+    assert.equal(first?.code, code);
+    assert.ok(all.slice(1).every((a) => a?.code === (code === "exists" ? "delivery_used" : code)), `${code}: ${JSON.stringify(all.slice(0, 3))}`);
+    assert.equal(c.turns(), 0, `${code}: no queue turn`);
+    assert.equal(s.w.reads, one, `${code}: one read for 50 polls`);
+    s.clock.t += REREAD_MS;
+    await onStatusAnswer(body, nets(s.deps));
+    assert.equal(s.w.reads, code === "exists" ? one : 2 * one, `${code}: after REREAD_MS`);
+    if (code === "exists") assert.deepEqual(s.store().creation(s.id)!.used, [deliveryKey(`dep-${s.id}`, "")]);
+    assert.equal(s.relayer.sent.length + c.turns(), 0);
+  }
+});
+
+test("fold 1: a delivery that may create takes one queue turn and re-reads the gate inside it; a fresh delivery is read at once while another is paced", async () => {
+  const s = setup({ balance: ["5", "5"] });
+  const c = counted(s.relayer);
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `a-${s.id}` }), nets(s.deps)))?.code, "under_min");
+  s.w.balance = [MIN_DEPOSIT.toString(), MIN_DEPOSIT.toString()];
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `a-${s.id}` }), nets(s.deps)))?.code, "under_min", "paced: its answer kept");
+  const one = s.w.reads; // one gate read: the first poll's (the second was paced)
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `b-${s.id}` }), nets(s.deps)))?.code, "created", "a fresh delivery is never delayed");
+  assert.equal(c.turns(), 1);
+  assert.equal(s.w.reads - one, 2 * one, "the gate read outside the queue, then again inside it");
+});
+
+test("fold 1: the gate inside the queue still holds: an id that appears between the two reads is never sent to, and spends the delivery", async () => {
+  const s = setup();
+  const send = s.relayer.send.bind(s.relayer);
+  s.relayer.send = (async (...args: Parameters<typeof send>) => {
+    s.w.account = [{ keys: ["ed25519:k"] }, { keys: ["ed25519:k"] }];
+    return send(...args);
+  }) as typeof s.relayer.send;
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  assert.equal((await onStatusAnswer(body, nets(s.deps)))?.code, "exists");
+  assert.equal(s.relayer.sent.length, 0);
+  assert.deepEqual(s.store().creation(s.id)!.used, [deliveryKey(`dep-${s.id}`, "")]);
+});
+
+test("fold 2: a crash after the record's write and before the broadcast, the stored bytes landing, then DeleteAccount, then the same SUCCESS: no second Transfer", async () => {
+  let kind: TxOutcome["kind"] = "unknown";
+  const s = setup({}, { outcome: () => kind });
+  const real = s.store();
+  let crash = true;
+  const pendingWrites: string[] = [];
+  const store: CreateDeps["store"] = {
+    creation: (id) => real.creation(id),
+    putCreation(rec) {
+      real.putCreation(rec);
+      if (rec.last?.state === "pending") pendingWrites.push(rec.last.tx_hash);
+      if (crash && rec.last?.state === "pending") {
+        crash = false;
+        throw new Error("the process dies here");
+      }
+    },
+  };
+  const deps = (): CreateDeps => ({ ...s.deps(), store });
+  const body = answer({ id: s.id, token: TOKEN, address: `dep-${s.id}` });
+  await assert.rejects(onStatusAnswer(body, nets(deps)), /dies here/);
+  assert.equal(s.relayer.sent.length, 0, "never broadcast");
+  assert.equal(real.creation(s.id)!.last!.delivery, deliveryKey(`dep-${s.id}`, ""), "the record names its delivery");
+  // the restart's read-back resends the stored bytes and they land
+  kind = "final";
+  assert.equal((await onStatusAnswer(body, nets(deps)))?.code, "created");
+  s.w.account = [{ keys: ["ed25519:own"] }, { keys: ["ed25519:own"] }];
+  s.w.height += 3;
+  // the holder deletes the id (DeleteAccount); its token stays with the token contract
+  s.w.account = ["absent", "absent"];
+  s.w.height += 10;
+  for (let i = 0; i < 3; i++) assert.equal((await onStatusAnswer(body, nets(deps)))?.code, "delivery_used");
+  assert.equal(pendingWrites.length, 1, "one Transfer signed for one delivery");
+  assert.equal(s.relayer.sent.length, 0);
+});
+
+test("fold 3: MEMO deposits share one address: two memos to two ids are two deliveries and two creations; a MEMO answer with no memo, or a SIMPLE one with a memo, names none", async () => {
+  const a = setup();
+  const b = setup();
+  const memo = { req: { depositMode: "MEMO" } };
+  const shared = "shared-address-1";
+  assert.equal((await onStatusAnswer(answer({ id: a.id, token: TOKEN, address: shared, memo: "1001", ...memo }), nets(a.deps)))?.code, "created");
+  assert.equal((await onStatusAnswer(answer({ id: b.id, token: TOKEN, address: shared, memo: "1002", ...memo }), nets(b.deps)))?.code, "created");
+  assert.equal(a.relayer.sent.length + b.relayer.sent.length, 2);
+  assert.deepEqual(a.store().creation(a.id)!.used, [deliveryKey(shared, "1001")]);
+  const t = new Set([TOKEN]);
+  assert.deepEqual(deliveryOf(answer({ id: a.id, token: TOKEN, address: shared, memo: "1001", ...memo }), t)?.key, `${shared}#1001`);
+  for (const m of [undefined, "", 7, "a b", "x".repeat(129)]) assert.equal(deliveryOf(answer({ id: a.id, token: TOKEN, address: shared, memo: m, ...memo }), t), null, `MEMO with ${JSON.stringify(m)}`);
+  assert.equal(deliveryOf(answer({ id: a.id, token: TOKEN, memo: "1001" }), t), null, "SIMPLE with a memo");
+  assert.equal(deliveryOf(answer({ id: a.id, token: TOKEN, req: { depositMode: "OTHER" } }), t), null);
+  assert.notEqual(deliveryOf(answer({ id: a.id, token: TOKEN, memo: null }), t), null, "SIMPLE, memo null");
+});
+
+test("fold 6: the lag guard is the receipt's height, not the signing height: a read between the two is held", async () => {
+  const s = setup();
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `a-${s.id}` }), nets(s.deps)))?.code, "created");
+  const last = s.store().creation(s.id)!.last!;
+  const signed = BigInt(last.height);
+  const landed = BigInt(last.landed_at!);
+  assert.ok(landed > signed + 1n, `${signed} < ${landed}`);
+  // the providers answer a final between the two, where the id still reads absent
+  s.w.account = ["absent", "absent"];
+  s.w.height = Number(signed) + 1;
+  assert.equal((await onStatusAnswer(answer({ id: s.id, token: TOKEN, address: `b-${s.id}` }), nets(s.deps)))?.code, "in_flight");
+  assert.equal(s.relayer.sent.length, 1);
 });
