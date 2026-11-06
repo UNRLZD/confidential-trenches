@@ -1,0 +1,31 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 347ec372, release-49",
+  "bad": "main 2e7ec335's build (mainnet): a failed provider read answers not_allowed, failed or quote_check_failed: FAIL",
+  "liveBefore": "SIGN_HOST read 2026-11-06T00:53Z, before this card's deploy (release-46): FAIL"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-LF/8KxtOQ51VbcHmPg7SoWRfv6raqYSduLCems/hysLFiMk7+IZGyG9CTXekG8uf\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-LF/8KxtOQ51VbcHmPg7SoWRfv6raqYSduLCems/hysLFiMk7+IZGyG9CTXekG8uf",
+  "kinds": true,
+  "flows": 3,
+  "wire": true,
+  "references": 2
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY",
+  "kinds": false,
+  "flows": 0,
+  "wire": false,
+  "references": 1
+ },
+ "liveBefore": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY",
+  "kinds": false,
+  "flows": 0,
+  "wire": false,
+  "references": 1
+ }
+}
