@@ -11,7 +11,7 @@
 //! - AddKey, DeleteAccount and DeployContract on the vault, each sent by the parent and by a stranger, are each
 //!   refused with `ActorNoPermission` (NC `actions.rs` l.776-813), and afterwards the keys are still `[]`, the code
 //!   hash and the balance unchanged;
-//! - the wasm's imports hold none of 2.8's banned actions; its promise imports equal 2.8's seven less NOT_YET_PROMISES
+//! - the wasm's imports hold none of 2.8's banned actions; its promise imports equal 2.8's six less NOT_YET_PROMISES
 //!   and its function exports equal 2.5.7's list less NOT_YET_EXPORTS (every method of 2.5.7 has landed, so both sets
 //!   are empty, and a build that gains or loses a name fails this equality); its outgoing method names `storage_deposit`,
 //!   `ft_transfer` and `on_payout` are in its bytes while none of the token's other mutating methods is.
@@ -41,11 +41,11 @@ const BANNED: [&str; 12] = [
     "promise_batch_action_add_gas_key_*",
     "promise_batch_action_transfer_to_gas_key",
 ];
-/// vault.md 2.8: its promise imports are exactly these.
-const PROMISES: [&str; 7] = [
+/// vault.md 2.8: its promise imports are exactly these. `promise_and` is gone since review A-01: a payout is one
+/// receipt, so nothing joins two.
+const PROMISES: [&str; 6] = [
     "promise_batch_create",
     "promise_batch_then",
-    "promise_and",
     "promise_batch_action_function_call_weight",
     "promise_batch_action_transfer",
     "promise_results_count",
@@ -72,7 +72,7 @@ const EXPORTS: [&str; 17] = [
     "contract_source_metadata",
 ];
 /// What the build does not hold yet, by name: nothing. ragequit (2.5.3) and settle (2.5.5) have landed, and with settle
-/// the plain NEAR Transfer (src/promise.rs `transfer_near`), so the build holds all seven promise imports and every
+/// the plain NEAR Transfer (src/promise.rs `transfer_near`), so the build holds all six promise imports and every
 /// export of 2.5.7. Each set is compared for equality, so a build that gains or loses any one name fails here.
 const NOT_YET_PROMISES: [&str; 0] = [];
 const NOT_YET_EXPORTS: [&str; 0] = [];
@@ -226,10 +226,10 @@ async fn nobody_holds_a_key_to_the_vault() -> R<()> {
     assert!(banned.is_empty(), "banned imports: {banned:?}");
     // Equal to 2.8's and 2.5.7's lists less what has not landed yet (NOT_YET_PROMISES, NOT_YET_EXPORTS).
     let promises: BTreeSet<&str> = funcs.iter().copied().filter(|n| n.starts_with("promise_")).collect();
-    let seven: BTreeSet<&str> = PROMISES.into_iter().collect();
-    let want_promises: BTreeSet<&str> = seven.difference(&NOT_YET_PROMISES.into_iter().collect()).copied().collect();
-    println!("promise imports {promises:?}; want 2.8's seven less NOT_YET_PROMISES: {want_promises:?}");
-    assert_eq!(promises, want_promises, "promise imports are not 2.8's seven less NOT_YET_PROMISES");
+    let six: BTreeSet<&str> = PROMISES.into_iter().collect();
+    let want_promises: BTreeSet<&str> = six.difference(&NOT_YET_PROMISES.into_iter().collect()).copied().collect();
+    println!("promise imports {promises:?}; want 2.8's six less NOT_YET_PROMISES: {want_promises:?}");
+    assert_eq!(promises, want_promises, "promise imports are not 2.8's six less NOT_YET_PROMISES");
     let exported: BTreeSet<&str> = exports.iter().filter(|e| e.1 == 0).map(|e| e.0.as_str()).collect();
     let listed: BTreeSet<&str> = EXPORTS.into_iter().collect();
     let want_exports: BTreeSet<&str> = listed.difference(&NOT_YET_EXPORTS.into_iter().collect()).copied().collect();

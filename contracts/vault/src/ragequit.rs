@@ -22,8 +22,8 @@
 //!   VT-S19), the caller's `refund_precommitment` (the device names Poseidon(refundMaster, l, j), wallet.md 2.3
 //!   Secrets); `totals.spent += value`.
 //! - Row 6: storage as 2.5.2 row 14 (`InsufficientStorageDeposit`, the last refusal; the reserve kept in the record),
-//!   then `value` paid to the depositor as part 0 of 2.5.2 row 15 (with `register_deposit`) and `on_payout(spend_index,
-//!   value, 0)`, which turns a bounced payout into a refund note's amount (2.5.4).
+//!   then `value` paid to the depositor in 2.5.2 row 15's one payout receipt (with `register_deposit`, no fee's
+//!   transfer) and `on_payout(spend_index, value, 0)`, which turns a bounced payout into a refund note's amount (2.5.4).
 //!
 //! Event, after the promises: `ragequit {ragequitter, commitment, label, value}`. Like PP it has no root or label-tree
 //! check.

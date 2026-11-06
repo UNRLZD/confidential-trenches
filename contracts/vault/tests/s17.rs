@@ -57,8 +57,9 @@ const MARGIN: u64 = 6;
 const MARK: &str = "blindfill-vault test build: on_payout runs out of gas";
 /// nearcore's text for a function call that ran out of its gas.
 const OUT_OF_GAS: &str = "Exceeded the prepaid gas";
-/// (name, the part that bounces in units, the part delivered) of each payout, in the order they run.
-const PAYOUTS: [(&str, u128, u128); 2] = [("fee_bounces", 100_000, 6_900_000), ("recipient_bounces", 1_500_000, 500_000)];
+/// (name, what comes back in units, what is delivered) of each payout, in the order they run: one payout receipt, so a
+/// failed transfer returns the whole withdrawal and delivers nothing (review A-01).
+const PAYOUTS: [(&str, u128, u128); 2] = [("fee_bounces", 7_000_000, 0), ("recipient_bounces", 2_000_000, 0)];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Build {
@@ -164,11 +165,11 @@ async fn pay_both(h: &Harness, relayer: &Account, alice: &Account) -> R<Vec<Outc
     let _ = h.storage_deposit(&h.root, newcomer.id()).await?;
     let need = row14_need(relayer.id().as_str(), newcomer.id().as_str(), REGISTER, 2);
     let fb = h.call_outcome(relayer, &h.vault, "withdraw", args("fee_bounces"), NearToken::from_yoctonear(need), Gas::from_tgas(300)).await?;
-    assert_eq!((h.token_balance(newcomer.id()).await?, h.token_balance(relayer.id()).await?), (6_900_000, 0), "fee_bounces' parts");
+    assert_eq!((h.token_balance(newcomer.id()).await?, h.token_balance(relayer.id()).await?), (0, 0), "fee_bounces' payout moved tokens");
     let _ = h.storage_deposit(&h.root, relayer.id()).await?;
     let need = row14_need(relayer.id().as_str(), alice.id().as_str(), 0, 2);
     let rb = h.call_outcome(relayer, &h.vault, "withdraw", args("recipient_bounces"), NearToken::from_yoctonear(need), Gas::from_tgas(300)).await?;
-    assert_eq!((h.token_balance(alice.id()).await?, h.token_balance(relayer.id()).await?), (0, 500_000), "recipient_bounces' parts");
+    assert_eq!((h.token_balance(alice.id()).await?, h.token_balance(relayer.id()).await?), (0, 0), "recipient_bounces' payout moved tokens");
     Ok(vec![fb, rb])
 }
 
@@ -194,7 +195,7 @@ async fn release(kind: TokenKind) -> R<u64> {
         assert_eq!((r["status"].as_str(), r["refund_value"].as_str()), (Some("refund_pending"), Some(bounced.to_string().as_str())), "{name}: {r}");
         burns.push(cb.gas_burnt);
     }
-    assert_eq!(h.view(&h.vault, "totals", json!({})).await?, json!({"deposited": "31000000", "spent": "9000000", "returned": "1600000"}));
+    assert_eq!(h.view(&h.vault, "totals", json!({})).await?, json!({"deposited": "31000000", "spent": "9000000", "returned": "9000000"}));
     h.i1().await?;
     let max = *burns.iter().max().unwrap();
     println!("{kind:?} release build: on_payout burnt {} Tgas (fee_bounces, recipient_bounces)", burns.iter().map(|b| format!("{:.3}", *b as f64 / TGAS)).collect::<Vec<_>>().join(", "));
@@ -234,9 +235,9 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
     let lt = h.view(&h.vault, "label_tree", json!({})).await?;
     assert_eq!(lt["size"].as_u64(), Some(6), "{lt}");
     assert_eq!(h.view(&h.vault, "leaves", json!({"from": 0, "limit": 6})).await?, fixture["leaves"], "the deposits' leaves moved");
-    // the bounced parts are in the vault with no note: its balance is what the notes hold plus 1,600,000
+    // the failed payouts are in the vault with no note: its balance is what the notes hold plus 9,000,000
     let held = h.token_balance(&h.vault).await?;
-    assert_eq!(held, 31_000_000 - 6_900_000 - 500_000);
+    assert_eq!(held, 31_000_000);
     println!("{kind:?} test build: the vault holds {held}, the notes {}, stranded with no note {}", 31_000_000 - 9_000_000, held - 22_000_000);
 
     // settle is refused with SpendInFlight, with the attachment a growing tree would need, and changes nothing
@@ -254,7 +255,7 @@ async fn out_of_gas(kind: TokenKind) -> R<()> {
     // no one else can run the callback: on_payout is #[private]
     let (name, bounced, delivered) = PAYOUTS[1];
     let o = h
-        .call_outcome(&stranger, &h.vault, "on_payout", json!({"spend_index": 1, "to_recipient": bounced.to_string(), "fee": delivered.to_string()}), NearToken::from_yoctonear(0), Gas::from_tgas(100))
+        .call_outcome(&stranger, &h.vault, "on_payout", json!({"spend_index": 1, "to_recipient": (bounced - 500_000).to_string(), "fee": (delivered + 500_000).to_string()}), NearToken::from_yoctonear(0), Gas::from_tgas(100))
         .await?;
     let r = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
     let f = r.failure().ok_or_else(|| format!("a stranger ran on_payout: {}", r.line()))?;

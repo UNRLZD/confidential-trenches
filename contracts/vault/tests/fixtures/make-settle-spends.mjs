@@ -6,11 +6,12 @@
 // TOKEN, the same secrets, leaves and labels (this script checks them against that file). Then, in the order
 // tests/settle.rs runs them:
 //   1. fee_bounces: note 5 (7,000,000) whole, relay_fee 100,000, to newcomer.test.near (already registered) with a
-//      register_deposit of 0.00125 NEAR, the fee recipient unregistered: the fee part bounces, refund 100,000;
+//      register_deposit of 0.00125 NEAR, the fee recipient unregistered: the fee's transfer fails the one payout
+//      receipt, so nothing moves (review A-01), refund 7,000,000;
 //   2. recipient_bounces: note 1 (2,000,000) whole, relay_fee 500,000, to alice.test.near (unregistered), register 0:
-//      the recipient part bounces, refund 1,500,000;
+//      the recipient's transfer fails the payout receipt, refund 2,000,000;
 //   3. settle fee_bounces, then settle recipient_bounces: refund notes with labels of nonces 7 and 8;
-//   4. refund_note: the device spends fee_bounces' refund note (100,000, label of nonce 7) whole to alice.test.near,
+//   4. refund_note: the device spends fee_bounces' refund note (7,000,000, label of nonce 7) whole to alice.test.near,
 //      against the trees as step 3 leaves them (10 leaves, 8 labels).
 // Each withdrawal's refund_precommitment is Poseidon(nullifier, secret) of a refund note the test knows, as the
 // device's is (wallet.md 2.3 Secrets: the refund note of change note j of label l takes its secrets from refundMaster).
@@ -121,8 +122,8 @@ leaves.push(BigInt(recipientBounces.public_signals[0]));
 
 // 3: settle writes each refund note with the next nonce's label
 const refunds = [
-  { of: feeBounces, value: 100_000n, nonce: 7n },
-  { of: recipientBounces, value: 1_500_000n, nonce: 8n },
+  { of: feeBounces, value: 7_000_000n, nonce: 7n },
+  { of: recipientBounces, value: 2_000_000n, nonce: 8n },
 ].map(({ of, value, nonce }) => {
   const label = vaultLabelOf(keccak_256, scope, nonce);
   const r = refundOf(of.name);

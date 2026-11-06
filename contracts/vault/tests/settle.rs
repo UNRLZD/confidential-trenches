@@ -6,18 +6,20 @@
 //! From the six deposits of tests/fixtures/withdraw-spends.json, made through `ft_on_transfer`, and the proofs of
 //! tests/fixtures/settle-spends.json, whose refund precommitments are notes the test can spend:
 //! 1. fee_bounces: relayed, to a recipient already registered with a `register_deposit` > 0, the fee recipient not
-//!    registered: the payout is delivered, the registration NEAR comes back into the vault, the fee part bounces
-//!    (refund_pending 100,000). The relayer attaches exactly row 14's requirement, so the reserve is 389 B' worth.
-//! 2. recipient_bounces: relayed, to an unregistered recipient with `register_deposit` 0: the recipient part bounces
-//!    (refund_pending 1,500,000). The relayer attaches row 14's requirement and SURPLUS.
+//!    registered: the fee's transfer fails the one payout receipt, so nothing moves (review A-01), the registration
+//!    NEAR and the yocto come back into the vault as the runtime's refund, and the whole withdrawal is refund_pending
+//!    (7,000,000). The relayer attaches exactly row 14's requirement, so the reserve is 389 B' worth.
+//! 2. recipient_bounces: relayed, to an unregistered recipient with `register_deposit` 0: the recipient's transfer
+//!    fails the payout receipt (refund_pending 2,000,000, no fee kept). The relayer attaches row 14's requirement and
+//!    SURPLUS.
 //! 3. A stranger settles fee_bounces. Its refund note is the state tree's 9th leaf, so the tree grows a level and
 //!    settle writes 389 + 74 B: one yocto short of the shortfall is refused with no state byte, no storage use, no
-//!    log and no NEAR moved; then the shortfall and EXTRA lands, the refund note is exactly 100,000 on its precommitment
+//!    log and no NEAR moved; then the shortfall and EXTRA lands, the refund note is exactly 7,000,000 on its precommitment
 //!    with the label of nonce 7, the stranger gets EXTRA back, the payer nothing. A second settle is refused. Then
-//!    recipient_bounces: a note of exactly 1,500,000, and the payer's balance rises by exactly SURPLUS. `totals`, so
+//!    recipient_bounces: a note of exactly 2,000,000, and the payer's balance rises by exactly SURPLUS. `totals`, so
 //!    row 9's held value, never moves in a settle.
 //! 4. The device spends fee_bounces' refund note (a proof against both trees as step 3 left them): the recipient is
-//!    paid 100,000. Settling that paid spend returns its whole reserve to the payer, read on the payer's balance.
+//!    paid 7,000,000. Settling that paid spend returns its whole reserve to the payer, read on the payer's balance.
 //! 5. An unknown nullifier is refused. (`in_flight` cannot be held in the sandbox, since the callback runs in the
 //!    next blocks: the lib tests in src/settle.rs refuse it, and VT-S17 records a failed callback's state.)
 //!
@@ -216,23 +218,27 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     // 1. a registered recipient with register_deposit > 0, the fee recipient not registered
     let need_fb = row14_need(relayer.id().as_str(), newcomer.id().as_str(), REGISTER, 2);
     let o = withdraw(&h, &relayer, "fee_bounces", need_fb).await?;
-    paid_out(&h, &o, "fee_bounces", 6_900_000, 100_000)?;
-    assert_eq!(transferred(&h, &o.tx_hash, relayer.id().as_str(), h.token.as_str(), h.vault.as_str()).await?, REGISTER, "the registration NEAR did not come back into the vault");
-    assert_eq!((h.token_balance(newcomer.id()).await?, h.token_balance(relayer.id()).await?), (6_900_000, 0));
+    paid_out(&h, &o, "fee_bounces", 0, 7_000_000)?;
+    // the failed payout receipt's attachment (register_deposit and the two transfers' yocto) comes back as the runtime's refund
+    assert_eq!(transferred(&h, &o.tx_hash, relayer.id().as_str(), "system", h.vault.as_str()).await?, REGISTER + 2, "the registration NEAR did not come back into the vault");
+    // and none of it from the token: its storage_deposit refund was in the failed batch, so it is dropped with it
+    // (nearcore runtime lib.rs l.489: a failed receipt's new receipts are not sent)
+    assert_eq!(transferred(&h, &o.tx_hash, relayer.id().as_str(), h.token.as_str(), h.vault.as_str()).await?, 0, "the token sent NEAR back from a failed payout");
+    assert_eq!((h.token_balance(newcomer.id()).await?, h.token_balance(relayer.id()).await?), (0, 0), "a payout that failed moved tokens");
 
     // 2. an unregistered recipient with register_deposit 0
     let _ = h.storage_deposit(&h.root, relayer.id()).await?;
     let need_rb = row14_need(relayer.id().as_str(), alice.id().as_str(), 0, 2);
     let o = withdraw(&h, &relayer, "recipient_bounces", need_rb + SURPLUS).await?;
-    paid_out(&h, &o, "recipient_bounces", 500_000, 1_500_000)?;
-    assert_eq!((h.token_balance(alice.id()).await?, h.token_balance(relayer.id()).await?), (0, 500_000));
+    paid_out(&h, &o, "recipient_bounces", 0, 2_000_000)?;
+    assert_eq!((h.token_balance(alice.id()).await?, h.token_balance(relayer.id()).await?), (0, 0), "the relayer kept a fee for a payout that failed");
     let reserve = REFUND_RESERVE_BYTES * YOCTO_PER_BYTE;
-    for (name, refund, want) in [("fee_bounces", "100000", reserve), ("recipient_bounces", "1500000", reserve + SURPLUS)] {
+    for (name, refund, want) in [("fee_bounces", "7000000", reserve), ("recipient_bounces", "2000000", reserve + SURPLUS)] {
         let r = spend_row(&h, name).await?;
         assert_eq!((r["status"].as_str(), r["refund_value"].as_str(), r["reserve"].clone()), (Some("refund_pending"), Some(refund), json!(want.to_string())), "{r}");
     }
     let totals = h.view(&h.vault, "totals", json!({})).await?;
-    assert_eq!(totals, json!({"deposited": "31000000", "spent": "9000000", "returned": "1600000"}));
+    assert_eq!(totals, json!({"deposited": "31000000", "spent": "9000000", "returned": "9000000"}));
 
     // 3. a stranger settles fee_bounces: the 9th state leaf grows the tree a level, so the reserve is short 74 B
     let st = h.view(&h.vault, "state_tree", json!({})).await?;
@@ -250,7 +256,7 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     let r = spend_row(&h, "fee_bounces").await?;
     assert_eq!(
         (r["status"].as_str(), r["reserve"].as_str(), r["refund_value"].as_str(), &r["refund_label"], r["refund_leaf_index"].as_u64()),
-        (Some("settled"), Some("0"), Some("100000"), &f["refunds"][0]["label"], Some(8)),
+        (Some("settled"), Some("0"), Some("7000000"), &f["refunds"][0]["label"], Some(8)),
         "{r}"
     );
     assert_eq!(h.view(&h.vault, "totals", json!({})).await?, totals, "settle moved totals (row 9)");
@@ -269,16 +275,16 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     assert_eq!(h.view(&h.vault, "totals", json!({})).await?, totals, "settle moved totals (row 9)");
     assert_eq!(h.view(&h.vault, "leaves", json!({"from": 0, "limit": 20})).await?, f["leaves"], "the state tree is not the fixture's");
     assert_eq!(h.view(&h.vault, "labels", json!({"from": 0, "limit": 20})).await?, f["labels"], "the label tree is not the fixture's");
-    assert_eq!(h.token_balance(&h.vault).await?, 31_000_000 - 6_900_000 - 500_000, "settle moved tokens");
+    assert_eq!(h.token_balance(&h.vault).await?, 31_000_000, "settle moved tokens");
 
     // 4. the device spends fee_bounces' refund note, relayed with no fee
     let _ = h.storage_deposit(&h.root, alice.id()).await?;
     let need_rn = row14_need(relayer.id().as_str(), alice.id().as_str(), 0, 1);
     let o = withdraw(&h, &relayer, "refund_note", need_rn).await?;
-    paid_out(&h, &o, "refund_note", 100_000, 0)?;
-    assert_eq!(h.token_balance(alice.id()).await?, 100_000, "the refund note did not pay");
+    paid_out(&h, &o, "refund_note", 7_000_000, 0)?;
+    assert_eq!(h.token_balance(alice.id()).await?, 7_000_000, "the refund note did not pay");
     let t = h.view(&h.vault, "totals", json!({})).await?;
-    assert_eq!(t, json!({"deposited": "31000000", "spent": "9100000", "returned": "1600000"}), "{t}");
+    assert_eq!(t, json!({"deposited": "31000000", "spent": "16000000", "returned": "9000000"}), "{t}");
     // its spend was paid: settle sends the whole reserve to the payer and writes no note
     let payer0 = h.near_balance(relayer.id()).await?;
     let used = storage_usage(&h).await?;

@@ -2,7 +2,7 @@
 //! The vault's only way to act outside its own state (vault.md 2.5, 2.5.2 row 15, 2.5.3 row 6, 2.5.4, 2.5.5 step 3).
 //!
 //! Every promise is made here with near-sdk's low-level `env::promise_batch_create`, `promise_batch_then`,
-//! `promise_and`, `promise_batch_action_function_call_weight` and `promise_batch_action_transfer`, and results are read
+//! `promise_batch_action_function_call_weight` and `promise_batch_action_transfer`, and results are read
 //! with `env::promise_results_count` and `env::promise_result_checked`. Never the `Promise` type or `#[ext_contract]`:
 //! their shared `PromiseAction::add` links every action host function, key and deploy actions included (vault.md 2.5),
 //! which the import check of 2.8 refuses.
@@ -12,7 +12,8 @@
 //! never `storage_unregister` (vault.md 2.5.7, 2.8).
 //!
 //! Ported from Privacy Pools v1.3.0's `_push` (`PrivacyPoolComplex.sol:64-67`) and the fee split's two transfers
-//! (`Entrypoint.sol:167-169`), Copyright 2025 0XBOW LTD, Apache-2.0, as NEAR promises (Dev 4).
+//! (`Entrypoint.sol:167-169`), Copyright 2025 0XBOW LTD, Apache-2.0, as NEAR promises (Dev 4): the two transfers are
+//! two actions of one receipt, so, as in one EVM transaction, they land together or not at all.
 
 use crate::constants::{GAS_FT_TRANSFER_TGAS, GAS_ON_PAYOUT_TGAS, GAS_STORAGE_DEPOSIT_TGAS, TOKEN};
 use near_sdk::json_types::U128;
@@ -58,30 +59,17 @@ fn token() -> AccountId {
     TOKEN.parse().unwrap_or_else(|_| env::abort())
 }
 
-/// One payout part: a receipt to TOKEN holding `[storage_deposit(account, registration_only) with register_deposit
-/// when it is > 0, ft_transfer(account, amount) with 1 yocto]`. A receipt's actions fail together, so the part either
-/// moves the whole amount or nothing (vault.md 2.5.4).
-fn part(account: &AccountId, amount: u128, register_deposit: u128) -> PromiseIndex {
-    let p = env::promise_batch_create(&token());
-    if register_deposit > 0 {
-        let args = json(&StorageDeposit { account_id: account, registration_only: true });
-        env::promise_batch_action_function_call_weight(
-            p,
-            "storage_deposit",
-            &args,
-            NearToken::from_yoctonear(register_deposit),
-            GAS_STORAGE_DEPOSIT,
-            WEIGHT,
-        );
-    }
-    let args = json(&FtTransfer { receiver_id: account, amount: U128(amount) });
-    env::promise_batch_action_function_call_weight(p, "ft_transfer", &args, ONE_YOCTO, GAS_FT_TRANSFER, WEIGHT);
-    p
+/// One function call on the payout receipt `p`, its static gas plus a share of the unused gas by `WEIGHT`.
+fn call(p: PromiseIndex, method: &str, args: &[u8], deposit: NearToken, gas: Gas) {
+    env::promise_batch_action_function_call_weight(p, method, args, deposit, gas, WEIGHT);
 }
 
-/// The payouts of a spend (vault.md 2.5.2 row 15; ragequit's with `fee = 0`, 2.5.3 row 6): part 0 pays `to_recipient`
-/// to `recipient`, with `register_deposit` for its registration; part 1, only when `fee > 0`, pays `fee` to
-/// `fee_recipient`; `promise_and` of the parts, then `on_payout(spend_index, to_recipient, fee)` on the vault. Every
+/// The payout of a spend (vault.md 2.5.2 row 15; ragequit's with `fee = 0`, 2.5.3 row 6): ONE receipt to TOKEN holding
+/// `[storage_deposit(recipient, registration_only) with register_deposit, only when it is > 0; ft_transfer(recipient,
+/// to_recipient) with 1 yocto; ft_transfer(fee_recipient, fee) with 1 yocto, only when fee > 0]`, then
+/// `on_payout(spend_index, to_recipient, fee)` on the vault. A receipt's actions apply all or none, so the recipient's
+/// amount and the relayer's fee both move or neither does: Privacy Pools' relay, whose two transfers
+/// (`Entrypoint.sol:167-169`) revert together in one EVM transaction (review A-01, vault-review-opus-async). Every
 /// state write comes before this call (vault.md 2.5).
 pub fn pay_then_on_payout(
     spend_index: u64,
@@ -91,27 +79,28 @@ pub fn pay_then_on_payout(
     fee_recipient: &AccountId,
     fee: u128,
 ) -> PromiseIndex {
-    let p0 = part(recipient, to_recipient, register_deposit);
-    let after = if fee > 0 { env::promise_and(&[p0, part(fee_recipient, fee, 0)]) } else { p0 };
-    let cb = env::promise_batch_then(after, &env::current_account_id());
+    let p = env::promise_batch_create(&token());
+    if register_deposit > 0 {
+        let args = json(&StorageDeposit { account_id: recipient, registration_only: true });
+        call(p, "storage_deposit", &args, NearToken::from_yoctonear(register_deposit), GAS_STORAGE_DEPOSIT);
+    }
+    let args = json(&FtTransfer { receiver_id: recipient, amount: U128(to_recipient) });
+    call(p, "ft_transfer", &args, ONE_YOCTO, GAS_FT_TRANSFER);
+    if fee > 0 {
+        let args = json(&FtTransfer { receiver_id: fee_recipient, amount: U128(fee) });
+        call(p, "ft_transfer", &args, ONE_YOCTO, GAS_FT_TRANSFER);
+    }
+    let cb = env::promise_batch_then(p, &env::current_account_id());
     let args = json(&OnPayout { spend_index, to_recipient: U128(to_recipient), fee: U128(fee) });
-    env::promise_batch_action_function_call_weight(
-        cb,
-        "on_payout",
-        &args,
-        NearToken::from_yoctonear(0),
-        GAS_ON_PAYOUT,
-        WEIGHT,
-    );
+    call(cb, "on_payout", &args, NearToken::from_yoctonear(0), GAS_ON_PAYOUT);
     cb
 }
 
-/// `on_payout`'s results (vault.md 2.5.4): whether the recipient part and the fee part delivered. The count must be 1
-/// when `fee == 0` and 2 otherwise, else it panics before anything is written. Each part is read only as Successful
-/// or Failed: its content is never read (`max_len` 0), so a result too long to read counts as Successful. With no fee
-/// part, the second is `true` (nothing to return).
-pub fn payout_results(fee: u128) -> (bool, bool) {
-    read_parts(env::promise_results_count(), fee, part_ran)
+/// `on_payout`'s result (vault.md 2.5.4): whether the payout receipt delivered, all of it, or nothing. The count must be
+/// exactly 1, else it panics before anything is written. The result is read only as Successful or Failed: its content
+/// is never read (`max_len` 0), so a result too long to read counts as Successful.
+pub fn payout_result() -> bool {
+    read_result(env::promise_results_count(), part_ran)
 }
 
 /// Whether result `i` is Successful, its content never read: each outcome by name, and any other panics (fails
@@ -128,13 +117,12 @@ fn part_ran(i: u64) -> bool {
     }
 }
 
-/// `payout_results` with the host reads passed in, so the rule is tested apart from the mocked host.
-fn read_parts(count: u64, fee: u128, ran: impl Fn(u64) -> bool) -> (bool, bool) {
-    let want = if fee > 0 { 2 } else { 1 };
-    if count != want {
-        env::panic_str("PayoutResults: want 1 result without a fee, 2 with one");
+/// `payout_result` with the host reads passed in, so the rule is tested apart from the mocked host.
+fn read_result(count: u64, ran: impl Fn(u64) -> bool) -> bool {
+    if count != 1 {
+        env::panic_str("PayoutResults: want exactly 1 result, the one payout receipt's");
     }
-    (ran(0), fee == 0 || ran(1))
+    ran(0)
 }
 
 /// A plain NEAR Transfer (vault.md 2.5.5 step 3: the reserve's rest to the payer, the caller's unused attachment back
@@ -187,14 +175,16 @@ mod tests {
         (m.to_string(), args.to_string(), deposit, tgas, 1)
     }
 
+    /// A-01 (review vault-review-opus-async): a relayed withdrawal's registration, recipient transfer and fee transfer
+    /// are three actions of ONE receipt to TOKEN, so they apply all or none, and the callback waits on that one
+    /// receipt. Each action keeps its own static gas and weight 1, and each ft_transfer its 1 yocto.
     #[test]
-    fn relayed_withdrawal_with_registration_and_fee() {
+    fn relayed_withdrawal_with_registration_and_fee_is_one_receipt() {
         at_vault();
         let (bob, relayer) = (acct("bob.near"), acct("relayer.confidential.unrlzd.near"));
         pay_then_on_payout(7, &bob, 970_000, 1_250_000_000_000_000_000_000, &relayer, 30_000);
         let r = get_created_receipts();
-        assert_eq!(r.len(), 3, "{r:?}");
-        // part 0: the recipient, registration then transfer, in one receipt
+        assert_eq!(r.len(), 2, "{r:?}");
         assert_eq!(r[0].receiver_id.as_str(), TOKEN);
         assert!(r[0].receipt_indices.is_empty());
         let a0: Vec<_> = r[0].actions.iter().map(call).collect();
@@ -208,23 +198,32 @@ mod tests {
                     10
                 ),
                 c("ft_transfer", r#"{"receiver_id":"bob.near","amount":"970000"}"#, 1, 15),
+                c("ft_transfer", r#"{"receiver_id":"relayer.confidential.unrlzd.near","amount":"30000"}"#, 1, 15),
             ]
         );
-        // part 1: the fee
-        assert_eq!(r[1].receiver_id.as_str(), TOKEN);
-        assert!(r[1].receipt_indices.is_empty());
+        // the callback on the vault, after the one payout receipt (entry 0 of the mock's action log)
+        assert_eq!(r[1].receiver_id.as_str(), VAULT);
+        assert_eq!(r[1].receipt_indices, vec![0]);
         let a1: Vec<_> = r[1].actions.iter().map(call).collect();
+        assert_eq!(a1, vec![c("on_payout", r#"{"spend_index":7,"to_recipient":"970000","fee":"30000"}"#, 0, 30)]);
+    }
+
+    #[test]
+    fn a_fee_without_registration_is_two_transfers_in_one_receipt() {
+        at_vault();
+        let (bob, relayer) = (acct("bob.near"), acct("relayer.near"));
+        pay_then_on_payout(3, &bob, 1_500_000, 0, &relayer, 500_000);
+        let r = get_created_receipts();
+        assert_eq!(r.len(), 2, "{r:?}");
+        let a0: Vec<_> = r[0].actions.iter().map(call).collect();
         assert_eq!(
-            a1,
-            vec![c("ft_transfer", r#"{"receiver_id":"relayer.confidential.unrlzd.near","amount":"30000"}"#, 1, 15)]
+            a0,
+            vec![
+                c("ft_transfer", r#"{"receiver_id":"bob.near","amount":"1500000"}"#, 1, 15),
+                c("ft_transfer", r#"{"receiver_id":"relayer.near","amount":"500000"}"#, 1, 15),
+            ]
         );
-        // the callback on the vault, after both parts, in the order [part 0, part 1]. The mock numbers a receipt by its
-        // place in its action log (near-vm-runner 0.37.4 mock_external.rs l.241): part 0 is entry 0, its two calls
-        // entries 1-2, part 1 entry 3.
-        assert_eq!(r[2].receiver_id.as_str(), VAULT);
-        assert_eq!(r[2].receipt_indices, vec![0, 3]);
-        let a2: Vec<_> = r[2].actions.iter().map(call).collect();
-        assert_eq!(a2, vec![c("on_payout", r#"{"spend_index":7,"to_recipient":"970000","fee":"30000"}"#, 0, 30)]);
+        assert_eq!(r[1].receipt_indices, vec![0]);
     }
 
     #[test]
@@ -295,52 +294,40 @@ mod tests {
         );
     }
 
-    // The host read with one result here, the two-part rule through read_parts; src/payout.rs's tests run on_payout
-    // on two mocked results (testing_env! with near_sdk::RuntimeFeesConfig::test()).
+    // The host read with one result here, the count rule through read_result; src/payout.rs's tests run on_payout on
+    // mocked results (testing_env! with near_sdk::RuntimeFeesConfig::test()).
 
     #[test]
-    fn payout_results_reads_one_result_as_success_or_failure_only() {
+    fn payout_result_reads_one_result_as_success_or_failure_only() {
         with_result(PromiseResult::Successful(b"\"x\"".to_vec()));
-        assert_eq!(payout_results(0), (true, true));
+        assert!(payout_result());
         with_result(PromiseResult::Failed);
-        assert_eq!(payout_results(0), (false, true));
+        assert!(!payout_result());
         // a long result is not read, and counts as Successful
         with_result(PromiseResult::Successful(vec![b'7'; 100_000]));
-        assert_eq!(payout_results(0), (true, true));
+        assert!(payout_result());
         with_result(PromiseResult::Successful(Vec::new()));
-        assert_eq!(payout_results(0), (true, true));
+        assert!(payout_result());
+    }
+
+    #[test]
+    fn exactly_one_result_is_read() {
+        at_vault();
+        assert!(read_result(1, |i| if i == 0 { true } else { panic!("read result {i}") }));
+        assert!(!read_result(1, |_| false));
     }
 
     #[test]
     #[should_panic(expected = "PayoutResults")]
-    fn one_result_with_a_fee_panics() {
-        with_result(PromiseResult::Successful(Vec::new()));
-        payout_results(1);
-    }
-
-    #[test]
-    fn two_parts_are_read_in_order_recipient_then_fee() {
-        let from = |r: [bool; 2]| move |i: u64| r[i as usize];
+    fn two_results_panic() {
         at_vault();
-        assert_eq!(read_parts(2, 5, from([true, true])), (true, true));
-        assert_eq!(read_parts(2, 5, from([false, true])), (false, true));
-        assert_eq!(read_parts(2, 5, from([true, false])), (true, false));
-        assert_eq!(read_parts(2, 5, from([false, false])), (false, false));
-        // without a fee the second result is never read
-        assert_eq!(read_parts(1, 0, |i| if i == 0 { true } else { panic!("read result {i}") }), (true, true));
-    }
-
-    #[test]
-    #[should_panic(expected = "PayoutResults")]
-    fn two_results_without_a_fee_panic() {
-        at_vault();
-        read_parts(2, 0, |_| true);
+        read_result(2, |_| true);
     }
 
     #[test]
     #[should_panic(expected = "PayoutResults")]
     fn no_result_panics() {
         at_vault();
-        read_parts(0, 0, |_| true);
+        read_result(0, |_| true);
     }
 }
