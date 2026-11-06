@@ -386,7 +386,7 @@ test("mainnet: --return must be a wallet in use, an account with no code holding
   assert.equal(r3.error, null, String(r3.error?.message) + why(c3));
   // the need in wei and, exactly, in the chain's own unit (ETH)
   const line = c3.logs.find((l) => l.startsWith("deploy: send exactly "));
-  const w = String(line).match(/^deploy: send exactly (\d+) wei \((\d+)(?:\.(\d{1,18}))? ETH\) to (0x[0-9a-f]{40}) from (0x[0-9a-f]{40}), the address you passed, in one transfer$/);
+  const w = String(line).match(/^deploy: send exactly (\d+) wei \((\d+)(?:\.(\d{1,18}))? ETH\) to (0x[0-9a-f]{40}) on base only, from (0x[0-9a-f]{40}), the address you passed, in one transfer$/);
   assert.ok(w, String(line) + why(c3));
   assert.equal(BigInt(w[1]), c3.fundWei);
   assert.equal(BigInt(w[2]) * 10n ** 18n + BigInt((w[3] ?? "").padEnd(18, "0")), c3.fundWei, "the ETH figure is the wei figure exactly");
@@ -1366,4 +1366,33 @@ test("review: the floor is the higher block either RPC puts the key's transactio
   const j = journalOf(m);
   assert.equal(j.keys.state, "kept", why(c));
   assert.ok(j.keys.why.some((w) => /its safe block \d+ on https:\/\/base-rpc\.publicnode\.com is behind block \d+/.test(w)), j.keys.why.join("; "));
+});
+
+test("REVIEW2 head: ETH that lands on the key after its sweep, in a block past the safe block, is on the key at the head: is the key removed?", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let safe = null;
+  c.safeOf = () => safe ?? c.block;
+  const extra = 10n ** 15n;
+  // the mock's balance read honours a block tag for this one transfer: before its block, the key does not hold it yet
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "eth_getBalance" && safe !== null && params[0].toLowerCase() === c.deployer && /^0x/.test(params[1]) && BigInt(params[1]) <= BigInt(safe)) {
+      await fetch0(u, init);
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x" + (c.balanceOf(c.deployer) - extra).toString(16) }) };
+    }
+    return fetch0(u, init);
+  };
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out, onLine: (l, ch) => {
+    // the sweep is done (its last balance read): a second transfer lands in the next block, not yet safe
+    if (/^deploy: run key keeps \d+ wei, less than two sweeps' fee bound/.test(l) && safe === null) {
+      safe = ch.block;
+      ch.block++;
+      ch.bal.set(ch.deployer, ch.balanceOf(ch.deployer) + extra);
+    }
+  } });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  const removedLine = c.logs.find((l) => /its key folder is removed/.test(l));
+  assert.equal(folders(m.keys).length, 1, `the key holds ${c.balanceOf(c.deployer)} wei at the head (safe ${safe}, head ${c.block}): kept? ${removedLine}`);
 });

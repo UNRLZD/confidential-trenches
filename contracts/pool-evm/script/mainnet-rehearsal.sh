@@ -47,7 +47,7 @@ for chain in base robinhood; do
   line=$(grep "^deploy: waiting for" "$log")
   need=$(awk '{print $4}' <<<"$line")
   key=$(awk '{print $9}' <<<"$line")
-  grep -q "^deploy: send exactly $need wei (.* ETH) to $key from $STANDIN, the address you passed, in one transfer$" "$log"
+  grep -q "^deploy: send exactly $need wei (.* ETH) to $key on $chain only, from $STANDIN, the address you passed, in one transfer$" "$log"
   sb=$(cast balance "$STANDIN" --rpc-url "$url")
   cast send --unlocked --from "$STANDIN" "$key" --value "$need" --rpc-url "$url" >/dev/null
   echo "rehearsal [$chain]: funded $key with exactly $need wei from the stand-in"

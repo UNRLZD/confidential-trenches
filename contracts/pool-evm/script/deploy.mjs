@@ -834,7 +834,7 @@ async function run(args, io = {}) {
         asked.push(short);
         writeJournal();
         console.log(`deploy: waiting for ${short} wei (${eth(short)}) at ${deployer} on ${chainName}${held0 > 0n ? `: the need ${need} wei less the ${held0} it holds` : ""}`);
-        if (mainnet) console.log(`deploy: send exactly ${short} wei (${ethExact(short)}) to ${deployer} from ${ret}, the address you passed, in one transfer`);
+        if (mainnet) console.log(`deploy: send exactly ${short} wei (${ethExact(short)}) to ${deployer} on ${chainName} only, from ${ret}, the address you passed, in one transfer`);
       }
       // a read that fails (its five tries all rate-limited or reset) is read again at the next poll: a run that ended
       // here would leave the owner's transfer to a run that is gone (the Solana devnet rehearsal's run, 5 Nov 18:47Z)
@@ -952,6 +952,8 @@ async function run(args, io = {}) {
               const block = big((await call("eth_getBlockByNumber", ["safe", false], u)).number);
               const tag = "0x" + block.toString(16);
               const v = { block, bal: big(await call("eth_getBalance", [deployer, tag], u)), nonce: big(await call("eth_getTransactionCount", [deployer, tag], u)), made: [] };
+              // and at the head: a transfer that landed after the floor but is not yet safe is on the key there
+              v.head = big(await call("eth_getBalance", [deployer, "latest"], u));
               for (const a of deploys) if ((await call("eth_getCode", [a, tag], u)) !== "0x") v.made.push(a);
               return v;
             } catch (e) {
@@ -973,7 +975,7 @@ async function run(args, io = {}) {
           }
           const { out, floor: last } = await ledger();
           floor = last;
-          const left = await onBoth(readAt, (v) => !v.err && v.block >= floor && v.bal <= DUST && v.nonce >= top);
+          const left = await onBoth(readAt, (v) => !v.err && v.block >= floor && v.bal <= DUST && v.head <= DUST && v.nonce >= top);
           for (const [u, v] of left) {
             if (v.err) {
               why.push(`its rest was not read on ${u}: ${v.err}`);
@@ -981,6 +983,7 @@ async function run(args, io = {}) {
             }
             if (v.block < floor) why.push(`its safe block ${v.block} on ${u} is behind block ${floor}, the last the run saw: run --sweep-kept again once it is safe`);
             if (v.bal > DUST) why.push(`it holds ${v.bal} wei on ${u}`);
+            if (v.head > DUST) why.push(`it holds ${v.head} wei at the head on ${u} (a transfer not yet safe): run --sweep-kept to send it back`);
             if (v.nonce < top) why.push(`its nonce ${v.nonce} on ${u} is below the ${top} it signed`);
             for (const a of v.made) made.add(a);
             if (out !== null && v.bal + out + DUST < askedAll) {
