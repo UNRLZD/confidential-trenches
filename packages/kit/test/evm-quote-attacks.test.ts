@@ -1187,13 +1187,14 @@ test("A1 64 narrow-range pools that outranked the real pool by liquidity no long
   });
 });
 
-test("B1 USDG on Robinhood: its standard ETH pool quotes, though twenty currencies paired with it have no market and report deep pools", async () => {
+test("B1 USDG on Robinhood: its standard ETH pool quotes, though 120 currencies paired with it have no market and report deep pools", async () => {
   // USDG's shape on Robinhood (2026-11-04 05:5xZ): the hookless ETH/USDG 0.01% pool, thousands of pools of other
-  // currencies, a few with a market of their own (JITC's, tiny), most with none
+  // currencies, a few with a market of their own (JITC's, tiny), most with none. More than 100 currencies: their scan is
+  // asked as ORs at the provider's OR span, fewer requests than one a currency (card rh-cold-quote)
   const token = USDG;
   const eth: ModelPool = { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a) => 3000n * a, state: pricedAt(3000n) };
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 100, tickSpacing: 1, hooks: NATIVE, hookData: "0x" }] };
-  const lonely = Array.from({ length: 20 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x800 + i), 0x800000, 8, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] }));
+  const lonely = Array.from({ length: 120 }, (_, i): ModelPool => ({ key: keyOf(token, xAt(0x800 + i), 0x800000, 8, NATIVE), give: (a) => a, state: [DEEP_PRICE, 10n ** 24n] }));
   const jitc = xAt(0x8ff);
   const jitcPool: ModelPool = { key: keyOf(token, jitc, 3000, 60, NATIVE), give: (a) => a / 5n, state: [DEEP_PRICE, 10n ** 15n] };
   const jitcMarket: ModelPool = { key: keyOf(jitc, NATIVE, 2500, 50, NATIVE), give: (a) => a };
