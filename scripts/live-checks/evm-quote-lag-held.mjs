@@ -14,7 +14,9 @@
 // asks) to <file>, for the test's replay (evm-quote-lag-held.answers.json).
 // Reads only: no key, no transaction, no money moves.
 import "../net-window.mjs";
+import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { EvmQuoteError, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
 
 export const N = 10;
@@ -85,12 +87,31 @@ export function lagging(real, host, lag, count) {
 }
 
 /** A cold quote and N warm ones of each case, 1.5 s apart, through the kit's public evmPoolBuyQuote with the case's
- *  provider lagging from the cold quote on. */
+ *  provider lagging from the cold quote on. Each case runs in a process of its own (card base-rpc-list-fix): the kit
+ *  keeps what a quote learned (each provider's speed, the token's scan and reads) for the module's life, so a second
+ *  case of the same chain and token began warm, its lagger ranked out of the pair by the case before, and asked it 0
+ *  times (base-blastapi-50, live run 42135737951 attempt 1, 2026-11-06 00:1xZ). */
 export async function measure(n = N) {
+  const run = { recorded: new Date().toISOString(), cases: {} };
+  for (const [name] of CASES) {
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--case", name, "--n", String(n)], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 1 << 24 });
+    const out = String(r.stdout ?? "").trim().split("\n");
+    for (const l of out.slice(0, -1)) console.log(l);
+    try {
+      run.cases[name] = JSON.parse(out.at(-1) ?? "").cases[name];
+    } catch {
+      throw new Error(`case ${name} answered no run (exit ${r.status})`);
+    }
+  }
+  return run;
+}
+
+/** The cases named `only`, in this process. */
+export async function measureHere(n = N, only = CASES.map(([name]) => name)) {
   const run = { recorded: new Date().toISOString(), cases: {} };
   const real = globalThis.fetch;
   try {
-    for (const [name, req, host, lag] of CASES) {
+    for (const [name, req, host, lag] of CASES.filter(([name]) => only.includes(name))) {
       const quotes = [];
       let heads = 0;
       globalThis.fetch = lagging(real, host, lag, () => heads++);
@@ -118,7 +139,12 @@ export async function measure(n = N) {
   return run;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--case")) {
+  // one case, its run as the last line of stdout, for measure()
+  const run = await measureHere(Number(process.argv[process.argv.indexOf("--n") + 1] ?? N), [process.argv[process.argv.indexOf("--case") + 1]]);
+  console.log(JSON.stringify(run));
+  process.exit(0);
+} else if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const run = await measure();
     const at = process.argv.indexOf("--record");

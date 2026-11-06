@@ -1,62 +1,61 @@
 {
  "good": {
-  "recorded": "2026-11-05T21:03:30.521Z",
+  "recorded": "2026-11-06T00:56:55.100Z",
   "cases": {
    "robinhood-publicnode-100": {
     "cold": {
-     "ms": 60154,
-     "code": "rpc_error",
-     "lagHeads": 19,
-     "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms"
+     "ms": 59850,
+     "code": "ok",
+     "lagHeads": 20
     },
     "quotes": [
      {
-      "ms": 3395,
-      "code": "ok",
-      "lagHeads": 1
-     },
-     {
-      "ms": 2084,
+      "ms": 2562,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1445,
+      "ms": 1248,
       "code": "ok",
       "lagHeads": 1
      },
      {
-      "ms": 1955,
+      "ms": 1693,
       "code": "ok",
       "lagHeads": 2
      },
      {
-      "ms": 1719,
-      "code": "ok",
-      "lagHeads": 2
-     },
-     {
-      "ms": 1337,
+      "ms": 1367,
       "code": "ok",
       "lagHeads": 1
      },
      {
-      "ms": 1569,
+      "ms": 1362,
       "code": "ok",
       "lagHeads": 2
      },
      {
-      "ms": 1369,
+      "ms": 1161,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 1602,
+      "ms": 1172,
       "code": "ok",
       "lagHeads": 1
      },
      {
-      "ms": 1734,
+      "ms": 1370,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1258,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1731,
       "code": "ok",
       "lagHeads": 2
      }
@@ -64,58 +63,58 @@
    },
    "base-blastapi-5": {
     "cold": {
-     "ms": 9135,
+     "ms": 7194,
      "code": "ok",
      "lagHeads": 2
     },
     "quotes": [
      {
-      "ms": 650,
+      "ms": 564,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 718,
+      "ms": 643,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 599,
+      "ms": 508,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 594,
+      "ms": 508,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 596,
+      "ms": 464,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 598,
+      "ms": 471,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 598,
+      "ms": 876,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 682,
+      "ms": 453,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 509,
+      "ms": 478,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 595,
+      "ms": 471,
       "code": "ok",
       "lagHeads": 0
      }
@@ -123,65 +122,65 @@
    },
    "base-blastapi-50": {
     "cold": {
-     "ms": 1227,
+     "ms": 19904,
      "code": "ok",
-     "lagHeads": 1
+     "lagHeads": 2
     },
     "quotes": [
      {
-      "ms": 581,
+      "ms": 849,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 567,
+      "ms": 471,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 589,
+      "ms": 450,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 546,
+      "ms": 564,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 604,
+      "ms": 472,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 577,
+      "ms": 508,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 616,
+      "ms": 456,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 520,
+      "ms": 459,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 592,
+      "ms": 491,
       "code": "ok",
       "lagHeads": 0
      },
      {
-      "ms": 598,
+      "ms": 455,
       "code": "ok",
       "lagHeads": 0
      }
     ]
    }
   },
-  "at": "f746056f (card base-200ms-blocks, Base maxLag 50) with the 50-block case, this Mac"
+  "where": "this Mac, kit at card/evm-quote-cold-scan-fast (aab7d859 and the lag-held change), each case in a process of its own: the check's own --record"
  },
  "bad": {
   "recorded": "2026-11-05T10:05:57.776Z",
@@ -500,5 +499,189 @@
    }
   },
   "at": "origin/main 3ad4abf6, the kit before card base-200ms-blocks (Base maxLag 5), with the 50-block case, this Mac: the provider 50 back never pairs"
+ },
+ "bad_shared": {
+  "recorded": "2026-11-06T01:01:21.835Z",
+  "cases": {
+   "robinhood-publicnode-100": {
+    "cold": {
+     "ms": 42683,
+     "code": "rpc_error",
+     "lagHeads": 22,
+     "message": "rpc_error: provider 1 answered the multicall with an error: historical state 064300a96e9a8ea8d7adc70a1847f049ce6a5a9feb7cb3f7c4857b7b9d95edd3 is not available"
+    },
+    "quotes": [
+     {
+      "ms": 28569,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1519,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1428,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1220,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1583,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1417,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 1146,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 2495,
+      "code": "ok",
+      "lagHeads": 1
+     },
+     {
+      "ms": 1691,
+      "code": "ok",
+      "lagHeads": 2
+     },
+     {
+      "ms": 1388,
+      "code": "ok",
+      "lagHeads": 2
+     }
+    ]
+   },
+   "base-blastapi-5": {
+    "cold": {
+     "ms": 9855,
+     "code": "ok",
+     "lagHeads": 2
+    },
+    "quotes": [
+     {
+      "ms": 512,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 619,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 592,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 491,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 462,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 498,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 471,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 464,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 516,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 465,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   },
+   "base-blastapi-50": {
+    "cold": {
+     "ms": 1237,
+     "code": "ok",
+     "lagHeads": 0
+    },
+    "quotes": [
+     {
+      "ms": 529,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 557,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 545,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 555,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 588,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 481,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 597,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 482,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 491,
+      "code": "ok",
+      "lagHeads": 0
+     },
+     {
+      "ms": 479,
+      "code": "ok",
+      "lagHeads": 0
+     }
+    ]
+   }
+  },
+  "where": "this Mac, main 2e7ec335 (every case in one process), the check's own --record"
  }
 }
