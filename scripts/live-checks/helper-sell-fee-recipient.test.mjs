@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/helper-sell-fee-recipient.test.mjs: the live check replays recorded runs
 // (helper-sell-fee-recipient.answers.json). good: a local helper at card helper-sender-fee-proof's commit with both EVM
-// testnet pools and a fee collector stand-in: PASS. bad_fee_recipient: card helper-sell-fee-recipient's own good run (a
+// testnet pools and the kit's pinned fee collectors (the deployed FeeCollectors): PASS. bad_fee_recipient: card helper-sell-fee-recipient's own good run (a
 // local helper at feb84e3a), which lets a Sell paying the withdraw's fee recipient through and names no collector: FAIL.
 // bad_deployed: HELPER_HOST before the redeploy, which reads the 10-field Sell (400 bad_shape on each sell): FAIL.
 // Made from the good run: a sell paying the wrong address accepted (auth_nonce, or sent with a hash), the collector's
@@ -13,7 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
-import { evmPoolRecords, randomKey } from "./helper-evm-sender.mjs";
+import { evmPoolRecords, feeCollectors, randomKey } from "./helper-evm-sender.mjs";
 import { judge, OTHER, read, SELLS, sellsOf } from "./helper-sell-fee-recipient.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -74,6 +74,27 @@ test("the fee answer: not 200, no fee recipient, no sell sender, or one address 
   }
   for (const p of g.pools) assert.equal(judge({ ...g, pools: g.pools.filter((x) => x.network !== p.network) }).ok, false, `${p.network} not read`);
   assert.equal(judge({ ...g, pools: [] }).ok, false);
+});
+
+// card helper-sender-fee-proof, review M1: nothing tied the fee answer's collector to the real FeeCollector, so a wrong
+// POOL_EVM_FEE_COLLECTOR_<NETWORK> would read every sale as paid
+test("the fee collector: the kit's pin, which is evm-fee-collector's record; a stand-in, the other testnet's, a pin off the record, a record off the pin or no pin: each FAIL", () => {
+  const g = A.good;
+  const c = feeCollectors();
+  assert.deepEqual(Object.fromEntries(Object.entries(c).map(([n, x]) => [n, x.pin])), { "base-sepolia": "0x9cc4788af51677aaa7770d78277c41fb864b35e1", "robinhood-testnet": "0xb174f0e859f00a7b593baca38394327e3d6bf638" });
+  for (const [n, x] of Object.entries(c)) assert.equal(x.recorded, x.pin, `${n}: the pin is the record's FeeCollector`);
+  const line = (r, n) => bad(r).some((l) => l.startsWith(`BAD [${n} fee] fee_collector`));
+  for (const n of Object.keys(c)) {
+    const other = Object.keys(c).find((x) => x !== n);
+    for (const coll of ["0x00000000000000000000000000000000c011ec70", c[other].pin]) {
+      const r = judge(edit(g, "fee", (x) => body(x, (b) => ({ ...b, fee_collector: coll })), n));
+      assert.ok(!r.ok && line(r, n), `${n} ${coll}: ${bad(r).join("\n")}`);
+    }
+    for (const [why, cs] of [["a record off the pin", { ...c, [n]: { ...c[n], recorded: "0x00000000000000000000000000000000c011ec70" } }], ["no record", { ...c, [n]: { ...c[n], recorded: null } }], ["no pin", { ...c, [n]: { ...c[n], pin: null } }]]) {
+      const r = judge(g, undefined, cs);
+      assert.ok(!r.ok && line(r, n), `${n} ${why}: ${bad(r).join("\n")}`);
+    }
+  }
 });
 
 // ---- The sells against the helper's own checks ----
