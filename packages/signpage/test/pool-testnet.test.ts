@@ -14,6 +14,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
+import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -53,7 +54,10 @@ test("the testnet build's providers: two devnet RPCs, and each EVM testnet's two
   const urls = (c: "solana" | "base" | "robinhood") => deps.rpcs(c)!.map((r) => (r as unknown as { url: string }).url);
   // card pool-buy-send-fast: the second is the helper's devnet route, as mainnet's second is its /v1/rpc/solana
   assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet"]);
-  assert.deepEqual(urls("base"), ["https://sepolia.base.org/", "https://base-sepolia-rpc.publicnode.com/"]);
+  // card notes-per-pool-evm-base-hang: the kit's pool pair, never sepolia.base.org's 200-block log pages
+  assert.deepEqual(urls("base"), ["https://base-sepolia-rpc.publicnode.com/", "https://base-testnet.api.pocket.network/"]);
+  assert.deepEqual(TESTNET_RPCS.base, evmPoolVenues()["base-sepolia"].providers);
+  assert.deepEqual(TESTNET_RPCS.robinhood, evmPoolVenues()["robinhood-testnet"].providers);
   assert.deepEqual(urls("robinhood"), ["https://rpc.testnet.chain.robinhood.com/", "https://robinhood-sepolia-rpc.publicnode.com/"]);
   for (const c of ["solana", "base", "robinhood"] as const) assert.notEqual(new URL(TESTNET_RPCS[c][0]).host, new URL(TESTNET_RPCS[c][1]).host, `${c}: two operators`);
 });
