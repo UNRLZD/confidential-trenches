@@ -308,10 +308,12 @@ test("short and failed come only from 1Click; expired only from both RPCs' block
   e.onTick.fn = (n) => {
     if (n === 2) clock = DEADLINE + 1; // the device's clock alone: no stage
     if (n === 4) e.chain.a.timeMs = DEADLINE + 1; // one RPC
-    if (n === 6) e.chain.b.timeMs = DEADLINE + 1; // both
+    if (n === 6) (oneSide = e.stages.length), (e.chain.b.timeMs = DEADLINE + 1); // both
   };
+  let oneSide = -1;
   await assert.rejects(followDeposit(e.args, { ...e.deps, now: () => clock, signal: stop(e, 12) }), /stop/);
   assert.deepEqual(e.stages, ["expired"]);
+  assert.equal(oneSide, 0, "past the deadline on one RPC's block time only: no expired");
   const at = e.oc.urls.length;
   assert.ok(at <= 7, "no status read once past the deadline on both RPCs with no send seen");
   assert.ok(e.sleeps.slice(-3).every((ms) => ms >= 15_000), "chain-only rounds go on, slowly");
@@ -507,6 +509,13 @@ test("F4: USDC's code hash moves mid-deposit: held with code_hash, U as held_id;
   t.chain.codeHash = null;
   const never: typeof bindDeposit = async () => assert.fail("a held op bound again");
   assert.deepEqual(await followDeposit(t.args, { ...t.deps, bind: never }), { kind: "held", why: "code_hash" });
+  // a later quote on the same U is followed; the held op is no open op of it: never written, never counted
+  const before = JSON.stringify(await opOf(t.w));
+  const B = { ...t.args, opId: "dq-B", address: "b".repeat(64) };
+  // 1Click still answers SUCCESS for A's address: a held op's status is never read again nor its money counted
+  const fetchFn = perAddress(t.u, { [ADDR]: [["SUCCESS", CREDIT]], ["b".repeat(64)]: ["PROCESSING"] }).fetchFn;
+  await assert.rejects(followDeposit(B, { ...t.deps, fetchFn, signal: stop(t, t.ticks() + 4) }), /stop/);
+  assert.equal(JSON.stringify(await opOf(t.w)), before, "held stays an end for U's next follower too");
 });
 
 /** Two RPCs whose ft_balance_of answers by block from `hist`, each naming its own final height. */
@@ -671,7 +680,8 @@ test("the seed opens only for a bind phase, each copy zeroed after it, under dep
 
 test("E9: halted while the bind waits on a halt and cleared with it; a wait that is no halt ends the bind phase for the next round", async () => {
   const t = await setup(["SUCCESS"]);
-  t.onTick.fn = (n) => n === 1 && t.chain.credit(CREDIT);
+  const between: (string | undefined)[] = [];
+  t.onTick.fn = (n) => (between.push(t.stages.at(-1)), n === 1 && t.chain.credit(CREDIT));
   const spy = t.deps.bind!;
   let calls = 0;
   const bind: typeof bindDeposit = async (s, a, dps) => {
@@ -687,6 +697,7 @@ test("E9: halted while the bind waits on a halt and cleared with it; a wait that
   assert.equal(out.kind, "done");
   assert.equal(calls, 2, "bound again on the next round");
   assert.deepEqual(t.stages, ["in_transit", "into_vault", "halted", "into_vault", "done"]);
+  assert.ok(!between.includes("halted"), "halted cleared in the round the halt lifted, not left for the next bind");
 });
 
 test("the seed's U is checked against the op's U before any bind", async () => {
