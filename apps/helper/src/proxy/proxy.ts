@@ -354,14 +354,24 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     // one device's sends keep OTHER_DEVICES_ROOM of the window for the other devices (fold 4)
     const mine = lane !== 0 || w.client === undefined ? null : [...(sentByClient.get(name)?.get(w.client) ?? [])];
     const cap = Math.max(1, burst - OWN_ROOM - OTHER_DEVICES_ROOM);
+    // the most sends any other device has in the window
+    let mostOthers = 0;
+    if (mine !== null) for (const [c, v] of sentByClient.get(name) ?? []) if (c !== w.client) mostOthers = Math.max(mostOthers, v.filter((x) => x > t - burstMs).length);
     let f = t;
     for (let i = 0; i <= k; i++) {
       // the devices leave a page OWN_ROOM until a page has had it in the window; an own read has the room BUILD_ROOM
       // leaves, and a page also the last OWN_ROOM
       const shared = roomIn(times, burst - BUILD_ROOM);
-      const room = lane === 0 ? roomIn(times, Math.max(1, burst - Math.max(0, OWN_ROOM - pages.length))) : lane === 1 ? Math.min(shared, Math.max(roomIn(pages, OWN_ROOM), roomIn(times, burst))) : shared;
+      const devices = Math.max(1, burst - Math.max(0, OWN_ROOM - pages.length));
+      const room = lane === 0 ? roomIn(times, devices) : lane === 1 ? Math.min(shared, Math.max(roomIn(pages, OWN_ROOM), roomIn(times, burst))) : shared;
       f = Math.max(t, budget.heldUntil(name), room);
       if (mine !== null && mine.length >= cap) f = Math.max(f, mine[mine.length - cap]! + burstMs);
+      // card jupiter-build-budget-503: the device with the most sends in the window, past its first OTHER_DEVICES_ROOM,
+      // sends only while it leaves OTHER_DEVICES_ROOM of what the window still holds for the other devices (with the own
+      // reads holding their part, one device's legs took the builds' whole room: live runs 42207995804 and 42210110244,
+      // S-1 refused before its send, its turn 4 s off); a lighter device is never held for the heavy one's room
+      const mineIn = mine === null ? 0 : mine.filter((x) => x > f - burstMs).length;
+      if (mine !== null && mineIn >= OTHER_DEVICES_ROOM && mineIn >= mostOthers) f = Math.max(f, roomIn(times, devices - OTHER_DEVICES_ROOM));
       if (f < (recoverUntil.get(name) ?? -Infinity) && times.length > 0) f = Math.max(f, times.at(-1)! + burstMs / burst);
       times.push(f);
       if (lane === 1) pages.push(f);
