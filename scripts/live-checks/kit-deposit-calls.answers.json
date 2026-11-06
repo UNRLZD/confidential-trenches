@@ -1,0 +1,56 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-3AiaXoHZZZPztfVU6l2AM+6GVfeK5xynH7RgNbaxwpY8EpHpJ+BcZgqTFpPRSfFj",
+  "stages": [
+   [
+    "quote_checked",
+    "waiting",
+    "in_transit",
+    "into_vault",
+    "done",
+    "refunded",
+    "held",
+    "halted",
+    "failed",
+    "short",
+    "expired",
+    "refund_move"
+   ]
+  ],
+  "holds": [
+   [
+    "halted",
+    "not_caught_up",
+    "vault_blocked"
+   ]
+  ],
+  "keys": [
+   [
+    "refunded",
+    "hold",
+    "held_id",
+    "since_ms",
+    "amount_usd"
+   ]
+  ]
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-YHzbswVwG37+zPOXxkohI/mzHOaAuuf8df1LgPsN4XCTSt0Cuy8xjajiEleNO9zO\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-YHzbswVwG37+zPOXxkohI/mzHOaAuuf8df1LgPsN4XCTSt0Cuy8xjajiEleNO9zO",
+  "stages": [
+   [
+    "quote_checked",
+    "waiting",
+    "in_transit",
+    "into_vault",
+    "done",
+    "refunded",
+    "held",
+    "halted"
+   ]
+  ],
+  "holds": [],
+  "keys": []
+ }
+}
