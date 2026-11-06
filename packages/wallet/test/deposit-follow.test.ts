@@ -118,7 +118,7 @@ function oneClick(u: string, script: (OneClickStatus | { raw: unknown; http?: nu
   const urls: string[] = [];
   const fetchFn = (async (url: string, init?: RequestInit) => {
     urls.push(url);
-    assert.equal(init?.method, "GET");
+    assert.equal(init?.method, "POST"); // the helper's proxy route (a GET answers 405, read live 6 Nov 15:45Z)
     assert.equal(init?.credentials, "omit");
     assert.equal(init?.body, undefined); // nothing leaves but the address in the URL
     const next = script.length > 1 ? script.shift()! : script[0]!;

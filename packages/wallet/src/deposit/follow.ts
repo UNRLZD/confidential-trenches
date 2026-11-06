@@ -33,7 +33,7 @@ import type { WalletStore } from "../store/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
 import { type BindDeps, bindDeposit, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, POLL_MS } from "./bind.ts";
 
-/** The helper's 1Click proxy for status (apps/helper/src/proxy/vendors.ts: oneclick, GET /v0/status). */
+/** The helper's 1Click proxy for status (apps/helper/src/proxy/vendors.ts: oneclick, /v0/status read upstream by GET). */
 export const DEPOSIT_STATUS_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/status";
 export const DEPOSIT_STATUS_TIMEOUT_MS = 10_000;
 /** A status answer is the quote and a few hashes: a few KB. */
@@ -69,7 +69,9 @@ export async function readDepositStatus(address: string, u: string, fetchFn: typ
     const res = await fetchFn(`${DEPOSIT_STATUS_URL}?depositAddress=${encodeURIComponent(address)}`, {
       ...HELPER_FETCH_INIT,
       redirect: "error",
-      method: "GET",
+      // the helper's proxy route is POST /v1/proxy/{vendor}/{path} for every entry (the kit's helper/v1.ts routes); a
+      // GET there answers 405. The helper reads 1Click with GET (vendors.ts), with this query and no body
+      method: "POST",
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (res.status !== 200) return null;
