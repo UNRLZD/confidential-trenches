@@ -18,7 +18,7 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { RPCS, MARK_TAG, PRE_MARK_LEN, account, be32, hex, labelOf, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
 import { PIN, SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
@@ -39,14 +39,15 @@ export async function readSignFlow(fetchFn = fetch) {
 }
 
 /** The verdict for the run `run` (with `precommitment` in its place when given), read through `fetchFn`, and SIGN_HOST's read `sign`. */
-export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = RPCS, sleep, sign } = {}) {
+export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign } = {}) {
   const lines = [];
   const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
   say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0,
     `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}], deposit flow ${sign.flow}` : "not read"}`);
   say(run.cluster === "devnet" && run.program === PIN.program && run.pool === PIN.pool, `the run is on the pinned devnet pool: ${run.cluster}, ${run.program}, ${run.pool}`);
   say(precommitment === run.precommitment, `the precommitment read is the run's: ${precommitment}`);
-  say(new Set(rpcs.slice(0, 2).map((u) => new URL(u).hostname)).size === 2, `two RPCs: ${rpcs.slice(0, 2).join(", ")}`);
+  const problems = operatorProblems(rpcs, "devnet");
+  say(problems.length === 0, `two devnet operators or more, in order: ${rpcs.join(", ")}${problems.length ? `: ${problems.join("; ")}` : ""}`);
   const prog = run.program;
   const scope = scopeOf(prog, poolAddress(prog).address);
   const value = BigInt(run.value);
@@ -56,7 +57,8 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
   const commitment = be32(vaultCommitment(value, BigInt(`0x${hex(label)}`), BigInt(`0x${precommitment}`)));
   say(hex(commitment) === run.commitment, `the run's recorded commitment is Poseidon(value, label, precommitment): ${run.commitment}`);
   const mark = preMarkAddress(prog, Buffer.from(precommitment, "hex"));
-  for (const url of rpcs.slice(0, 2)) {
+  // on the first two devnet operators that answer (onTwoOperators): one that is out moves the read to the next
+  const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, "devnet"), fetchFn, async (url, say, fetchFn) => {
     const at = `on ${url}`;
     try {
       const tx = await rpc(fetchFn, url, "getTransaction", [run.signature, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }], sleep);
@@ -80,9 +82,11 @@ export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), preco
       const b = (await rpc(fetchFn, url, "getBalance", [run.U, { commitment: "finalized" }], sleep))?.value;
       say(b === 0, `U ${run.U} holds 0 lamports ${at}: ${b}`);
     } catch (e) {
+      if (e?.transient) throw e;
       say(false, `read ${at}: ${String(e.message).split("\n")[0]}`);
     }
-  }
+  });
+  for (const [pass, text] of walk.lines) pass === null ? lines.push(`info ${text}`) : say(pass, text);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
@@ -97,7 +101,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const sign = await readSignFlow();
     const precommitment = opt("--precommitment") ?? run.precommitment;
     const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ precommitment, rpcs: RPCS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);

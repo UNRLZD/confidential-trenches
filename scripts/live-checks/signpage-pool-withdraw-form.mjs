@@ -16,7 +16,7 @@ import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { RPCS, rpc } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, onTwoOperators, operatorOf, rpc } from "./pool-sol-deploy.mjs";
 
 const KEY = "signpage-pool-withdraw-form";
 export const SIGN = "https://sign.confidential.unrealized.trade";
@@ -141,14 +141,15 @@ export function judge(a) {
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
-/** Reads SIGN_HOST and the run's transactions on both RPCs. */
-export async function read(run = RUN, fetchFn = fetch) {
+/** Reads SIGN_HOST and the run's transactions on the first two devnet operators that answer (onTwoOperators: one that
+ *  is out moves the read to the next; fewer than two answering leaves fewer than two reads, which judge refuses). */
+export async function read(run = RUN, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep) {
   const index = await (await fetchFn(`${SIGN}/`)).text();
   const js = await (await fetchFn(`${SIGN}/app.js`)).text();
-  const tx = async (signature) => ({
-    signature,
-    reads: await Promise.all(RPCS.map((u) => rpc(fetchFn, u, "getTransaction", [signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]))),
-  });
+  const tx = async (signature) => {
+    const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, "devnet"), fetchFn, (u, _say, fetchFn) => rpc(fetchFn, u, "getTransaction", [signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }], ...(sleep ? [sleep] : [])));
+    return { signature, on: walk.urls, reads: walk.values };
+  };
   const parts = [];
   for (const p of run) parts.push({ part: String(p.part), release: await tx(p.release), onward: await tx(p.onward) });
   return { sign: { index, sha384: sha384(js) }, run: parts };

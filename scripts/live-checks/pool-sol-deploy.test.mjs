@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { check, operatorProblems, preMarkAddress, pageAddress, RPCS, DEVNET_GENESIS } from "./pool-sol-deploy.mjs";
+import { check, operatorOf, operatorProblems, preMarkAddress, pageAddress, DEVNET_PROVIDERS, RPCS, DEVNET_GENESIS } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-sol-deploy.answers.json", import.meta.url), "utf8"));
 const D = A.deployment;
@@ -102,7 +102,10 @@ test("a leaf that disagrees with its mark fails: the state leaf, the label leaf"
 });
 
 test("a devnet record needs devnet's genesis on two devnet operators", async () => {
-  fails(await run(A.good, { ...D, cluster: "devnet" }), /genesis \S+ is devnet's/);
+  // the local recording served on two devnet operators' URLs: their genesis is not devnet's
+  const [lo0, lo1] = A.rpcs;
+  const onDevnet = A.good.map((x) => ({ ...x, url: x.url === lo0 ? RPCS[0] : x.url === lo1 ? RPCS[1] : x.url }));
+  fails(await run(onDevnet, { ...D, cluster: "devnet" }, RPCS), /genesis \S+ is devnet's on https:\/\/api\.devnet\.solana\.com/);
   assert.deepEqual(operatorProblems(RPCS, "devnet"), []);
   assert.match(operatorProblems(["https://api.devnet.solana.com", "https://api.devnet.solana.com"], "devnet")[0], /only 1 known devnet operator/);
   assert.match(operatorProblems(A.rpcs, "devnet")[0], /only 0 known devnet operator/);
@@ -118,4 +121,64 @@ test("a funder holding one lamport fails, on either RPC; a record with no funder
     fails(await run(out), new RegExp(`funder ${D.funders[0]} holds 0 lamports on ${url.replace(/[.[\]]/g, "\\$&")}: 1$`, "m"));
   }
   fails(await run(A.good, { ...D, funders: [], funder: undefined }), /names the run's funders: 0/);
+});
+
+// card live-check-devnet-pair: the ordered list of operators. A provider that is out (a 503 through every try, a refusal,
+// or an answer with no result, as OnFinality answered on GitHub's runners on 6 Nov) moves the read to the next operator;
+// a provider's own word (an answer that disagrees) is never moved past, and fewer than two operators answering FAILs.
+const [L0, L1] = A.rpcs;
+const DOWN = "http://127.0.0.1:1";
+const SPARE = "http://[::1]:39752";
+// the recording, `as` copies of `from`'s answers served on another URL, and `down` URLs answering `answer` to every call
+function withDown(answers, { down = {}, as = {} } = {}) {
+  const served = [...answers, ...Object.entries(as).flatMap(([url, from]) => answers.filter((x) => x.url === from).map((x) => ({ ...x, url })))];
+  const inner = replay(served);
+  return async (url, init) => (url in down ? down[url]() : inner(url, init));
+}
+const http = (status, json) => () => ({ ok: status >= 200 && status < 300, status, json: async () => json });
+const walk = (fetchFn, rpcs) => check({ deployment: D, fetchFn, rpcs, sleep: async () => {} });
+
+test("card live-check-devnet-pair: the second provider answering 503 moves the read to the next operator, which passes", async () => {
+  const r = await walk(withDown(A.good, { down: { [DOWN]: http(503, null) } }), [L0, DOWN, L1]);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.match(r.lines.join("\n"), /^info http:\/\/127\.0\.0\.1:1 is out, the read moves to the next operator: getGenesisHash: HTTP 503/m);
+  assert.equal(r.lines.filter((l) => / on http/.test(l) && l.startsWith("ok")).length, 2 * (9 + 1 + D.funders.length));
+  assert.deepEqual(r.urls, [L0, L1]);
+});
+
+test("card live-check-devnet-pair: a refusal or an answer with no result moves the read on too", async () => {
+  for (const answer of [http(403, { error: { code: 403, message: "Access forbidden" } }), http(200, { jsonrpc: "2.0", id: 1 }), http(200, "Backend error, StatusCode: 503")]) {
+    const r = await walk(withDown(A.good, { down: { [DOWN]: answer } }), [L0, DOWN, L1]);
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    assert.deepEqual(r.urls, [L0, L1]);
+  }
+});
+
+test("card live-check-devnet-pair: only one operator answering still FAILs", async () => {
+  const other = "http://localhost:2";
+  fails(await walk(withDown(A.good, { down: { [DOWN]: http(503, null), [other]: http(200, { jsonrpc: "2.0", id: 1 }) } }), [L0, DOWN, other]), /two operators answered: 1 \(http:\/\/127\.0\.0\.1:39752\)/);
+  fails(await walk(withDown(A.good, { down: { [DOWN]: http(503, null) } }), [L0, DOWN]), /two operators answered: 1/);
+});
+
+test("card live-check-devnet-pair: a provider's own answer that disagrees FAILs, never moved past to a spare", async () => {
+  const bad = mutate(D.programdata, (d) => (d[12] = 1, d.fill(7, 13, 45))).filter((x) => x.url === L1);
+  const r = await walk(withDown([...A.good.filter((x) => x.url !== L1), ...bad, ...A.good.filter((x) => x.url === L1).map((x) => ({ ...x, url: SPARE }))]), [L0, L1, SPARE]);
+  fails(r, /upgrade authority is none on http:\/\/localhost:39752: [1-9A-HJ-NP-Za-km-z]{32,44}$/m);
+  assert.deepEqual(r.urls, [L0, L1]);
+});
+
+test("card live-check-devnet-pair: the checks' devnet list is solana's first, onfinality never the second, every provider a known operator", async () => {
+  const P = DEVNET_PROVIDERS;
+  assert.equal(P[0], "https://api.devnet.solana.com");
+  assert.ok(P.length >= 3 && !/onfinality/.test(P[1]), P.join(", "));
+  assert.deepEqual(operatorProblems(P, "devnet"), []);
+  assert.equal(new Set(P.map((u) => operatorOf(u, "devnet"))).size, P.length);
+  // devnet.rpcpool.com is api.devnet.solana.com's own node (x-rpc-node sg140, 6 Nov): never a second operator
+  assert.match(operatorProblems([...P, "https://devnet.rpcpool.com"], "devnet").join("\n"), /devnet\.rpcpool\.com is no known devnet operator's/);
+  // every devnet check reads this list by default
+  for (const f of ["pool-sol-deploy", "pool-sol-deploy-sweep", "precommit-taken-recover", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form"]) {
+    const src = readFileSync(new URL(`./${f}.mjs`, import.meta.url), "utf8");
+    assert.match(src, /DEVNET_PROVIDERS/, f);
+    assert.match(src, /onTwoOperators\(/, f);
+  }
 });

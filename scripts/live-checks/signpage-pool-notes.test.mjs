@@ -77,3 +77,19 @@ test("planted: a record naming another deposit's leaf (the deploy run's, state l
   bad(r, "the run's recorded commitment");
   bad(r, "state page 0 entry 0");
 });
+
+// card live-check-devnet-pair: the second provider answering 503 (OnFinality on GitHub's runners, sign live run
+// 42201131294) moves the reads to the next operator on the list, here the helper's route serving the same answers: PASS;
+// with no other operator answering, two stay required: FAIL.
+test("card live-check-devnet-pair: the second provider answering 503 moves the read to the next operator: PASS; one operator answering: FAIL", async () => {
+  const [solana, second] = A.good.rpcs;
+  const helper = "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet";
+  const answers = [...A.good.answers.filter((a) => a.url === solana), ...A.good.answers.filter((a) => a.url === second).map((a) => ({ ...a, url: helper }))];
+  const down = (inner = replay(answers)) => async (url, init) => (url === second ? { ok: false, status: 503, json: async () => null } : inner(url, init));
+  const r = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second, helper], sleep: async () => {}, sign: A.good.sign });
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`info ${second} is out`)), r.lines.join("\n"));
+  for (const s of ["deposit ", "mark ", "label page ", "state page ", "U "]) assert.equal(r.lines.filter((l) => l.startsWith(`ok   ${s}`)).length, 2, s);
+  const one = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second], sleep: async () => {}, sign: A.good.sign });
+  bad(one, "two operators answered: 1");
+});
