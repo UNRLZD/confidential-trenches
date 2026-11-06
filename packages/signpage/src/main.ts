@@ -740,6 +740,7 @@ if (framed) {
     listen: (fn) => window.addEventListener("message", fn),
     state: fs.state,
     watch: fs.watch,
-    kinds: { "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead }), ...depositReadHosts() },
+    // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
+    kinds: { ...depositReadHosts() },
   });
 }

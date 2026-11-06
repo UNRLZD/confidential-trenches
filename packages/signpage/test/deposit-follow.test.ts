@@ -17,7 +17,7 @@ import { depositAccount, NEAR_NETWORKS } from "../../wallet/src/deposit/account.
 import type { FollowRpc } from "../../wallet/src/deposit/follow.ts";
 import * as d from "../../wallet/src/derive/index.ts";
 import type { KindContext } from "../src/api.ts";
-import { depositFollows, FOLLOW_ENDS } from "../src/deposit-follow.ts";
+import { depositFollows, FOLLOW_ENDS, FOLLOW_LOCK } from "../src/deposit-follow.ts";
 import { type DepositPublic, depositQuoteHost } from "../src/deposit-wire.ts";
 import { ADDRESS as MOCK_ADDRESS, h1c, NOW as MOCK_NOW, SOL_USDC, U as MOCK_U } from "./oneclick-mock.ts";
 
@@ -73,7 +73,7 @@ test("a checked quote writes the op from that quote and its record, and follows 
   const op = (await t.w.get("ops", "dq-1")) as Record<string, any>;
   assert.equal(op.kind, "deposit");
   assert.equal(op.stage, "in_transit", "followed with no tap: 1Click's PROCESSING read");
-  assert.deepEqual(op.follow, FOLLOW, "min_amount_out in USDC base units");
+  assert.deepEqual(op.follow, { ...FOLLOW, sent: true }, "min_amount_out in USDC base units; 1Click has seen a send");
   await assert.rejects(t.f.quoted("dq-1", { ...RESULT, deposit_address: "f".repeat(64) }, { scope: 1n, index: 0, u: U }), /another deposit/);
   await assert.rejects(t.f.quoted("dq-3", { ...RESULT, min_amount_out: "1.0000001" }, { scope: 1n, index: 0, u: U }), /min_amount_out/);
   assert.deepEqual((await t.w.keys("ops")).sort(), ["dq-1"]);
@@ -139,7 +139,7 @@ test("settle() resumes every deposit op not at an end, expired and refunded too;
   assert.ok(t.reads() >= 3, "the open, expired and refunded ops each read again");
 });
 
-test("the seed is never opened without a credit to bind; a follow holds the seed lock shared, so a sign out waits for it", async () => {
+test("the seed is never opened without a credit to bind", async () => {
   let opened = 0;
   const t = await world(["PROCESSING"], { seed64: async () => (opened++, Uint8Array.from(SEED)) });
   let n = 0;
@@ -147,25 +147,49 @@ test("the seed is never opened without a credit to bind; a follow holds the seed
   await t.f.quoted("dq-1", RESULT, { scope: 1n, index: 0, u: U });
   await t.f.idle();
   assert.equal(opened, 0, "status and balance reads need only U");
+});
 
-  // the seed lock: a follow holds it shared, so an exclusive request (the store's sign out) waits until it stops
-  const held: string[] = [];
-  const order: string[] = [];
-  const lm = {
-    request: async (name: string, opts: { mode: string }, fn: () => Promise<unknown>) => {
-      held.push(`${name}:${opts.mode}`);
-      try {
-        return await fn();
-      } finally {
-        order.push(`release ${name}`);
-      }
-    },
-  } as unknown as LockManager;
-  const s = await world(["PROCESSING"], { locks: () => lm });
-  let m = 0;
-  s.onTick(() => ++m >= 3 && s.f.signedOut());
-  await s.f.quoted("dq-2", RESULT, { scope: 1n, index: 0, u: U });
-  await s.f.idle();
-  assert.deepEqual(held, ["ct-wallet/deposit-follow/dq-2:exclusive", `${WALLET_SEED_LOCK}:shared`]);
-  assert.deepEqual(order, [`release ${WALLET_SEED_LOCK}`, "release ct-wallet/deposit-follow/dq-2"]);
+test("N1 and E2: a live follow never holds the seed lock while it polls: an exclusive (nameDeposit, setCodeSaved, a sign out) and a trade's shared request go at once; U's own lock is held", async () => {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(() => w.close());
+  const f = depositFollows({
+    network: () => "testnet",
+    store: async () => w,
+    seed64: async () => Uint8Array.from(SEED),
+    rpcs: RPCS,
+    fetch: (async () => status("PENDING_DEPOSIT")) as unknown as typeof fetch,
+    sleep: () => new Promise<void>((ok) => setTimeout(ok, 5)),
+    locks: () => navigator.locks, // the real Web Locks (Node 24), which queue
+    now: () => 1_762_400_000_000,
+  });
+  await f.quoted("dq-1", RESULT, { scope: 1n, index: 0, u: U });
+  await new Promise((ok) => setTimeout(ok, 50));
+  let exclusive = false;
+  let shared = false;
+  const ex = navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, async () => void (exclusive = true));
+  const sh = navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => void (shared = true));
+  await Promise.race([Promise.all([ex, sh]), new Promise((ok) => setTimeout(ok, 400))]);
+  const q = await navigator.locks.query();
+  assert.ok(exclusive && shared, "neither waited on the follow");
+  assert.ok(q.held!.some((l) => l.name === `${FOLLOW_LOCK}testnet/${U}` && l.mode === "exclusive"), "U's lock is held while it follows");
+  assert.ok(!q.held!.some((l) => l.name === WALLET_SEED_LOCK));
+  f.signedOut();
+  await f.idle();
+});
+
+test("two ops on one U in one tab: one note store, one follower; each op's stages reach its own deposit.confirm", async () => {
+  const t = await world(["PROCESSING"]);
+  let n = 0;
+  t.onTick(() => ++n >= 6 && t.f.signedOut());
+  await t.f.quoted("dq-1", RESULT, { scope: 1n, index: 0, u: U });
+  await t.f.quoted("dq-2", { ...RESULT, deposit_address: "c".repeat(64) }, { scope: 1n, index: 0, u: U });
+  await t.f.idle();
+  assert.equal(((await t.w.get("ops", "dq-1")) as { stage: string }).stage, "in_transit");
+});
+
+test("E7: deposit.quote with no request id to follow it answers no address", async () => {
+  const host = depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: h1c({}).fetch, now: () => MOCK_NOW, checked: async () => assert.fail("no op to follow") });
+  const d = host({ origin_asset: SOL_USDC, amount: "25" });
+  await d.after;
+  assert.deepEqual(d.answer(), { error: "not_allowed" });
 });

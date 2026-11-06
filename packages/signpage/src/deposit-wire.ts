@@ -45,7 +45,7 @@ export interface DepositWireDeps {
    * deposit record the rule checked it under, never a fresh read. A throw answers "down", so no address goes out
    * that nothing follows.
    */
-  checked?(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string }): Promise<void>;
+  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string }): Promise<void>;
 }
 
 type Usable = { status: Status; deposit: DepositRecord };
@@ -81,7 +81,9 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       // the address stands only while the records are the ones it was asked under
       const now = usable(await deps.read(scope), deps.scope());
       if (!now || !same(now.deposit, before.deposit)) return;
-      if (deps.checked && ctx) await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
+      // no request id, no follow: no address goes out
+      if (ctx === undefined) return;
+      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
       out = { result: got.result };
     })().catch(() => {
       // a read that threw (the records not answering) is no rule's refusal: "not now" (card pool-read-down), which

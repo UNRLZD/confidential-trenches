@@ -32,6 +32,7 @@ function page(o: { reads?: (DepositPublic | null)[]; mocks?: Mock[]; scope?: big
     named: o.named,
     fetch: fetchFn,
     now: () => NOW,
+    checked: async () => {}, // the follow's op write (src/deposit-follow.ts quoted): ./deposit-follow.test.ts
   };
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
@@ -166,6 +167,7 @@ test("card pool-read-down: a records read that throws answers down, not kept for
   let throws = true;
   let reads = 0;
   const deps: DepositWireDeps = {
+    checked: async () => {},
     scope: () => SCOPE,
     read: async () => {
       reads++;

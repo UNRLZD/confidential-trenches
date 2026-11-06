@@ -306,7 +306,7 @@ function quotePage(fetchFn: typeof fetch) {
   const parent = { postMessage: (msg: unknown) => void posted.push(msg) };
   let listener: ((e: IncomingMessage) => void) | null = null;
   const api = startApi({ parent, listen: (fn) => (listener = fn), state: () => signedOutState(),
-    kinds: { "deposit.quote": depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: fetchFn, now: () => NOW }) } });
+    kinds: { "deposit.quote": depositQuoteHost({ scope: () => 7n, read: async () => SAVED, fetch: fetchFn, now: () => NOW, checked: async () => {} }) } });
   return async (amount: string) => {
     const id = crypto.randomUUID();
     listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "deposit.quote", origin_asset: SOL_USDC, amount } });

@@ -10,15 +10,16 @@
 // - settle(): each signed-in landing resumes every deposit op not at an end (FOLLOW_ENDS: done, held), so a reload or a
 //   closed tab carries on from its stage, and an op past its deadline (expired, refunded, waiting) reads U's balances on
 //   the chain again: anything that reached U since is bound.
-// - One follower per op across tabs: FOLLOW_LOCK/<op id>, held while it runs; another tab's follow of the same op waits
-//   for it. Inside it the wallet's seed lock is held shared for the whole follow, as the restore does, so a sign out
-//   (which takes it exclusive) waits for every follow's reads and writes to stop; signedOut() aborts them first. The seed
-//   itself is opened only for a bind phase (followDeposit's seed64), and zeroed by it.
+// - One follower per U across tabs: the lock below, held while any op of U is followed; another tab's follow of U waits
+//   for it. One follower per U (the money is U's: two quotes before a payment name one U): one lock per U across tabs,
+//   FOLLOW_LOCK/<network>/<U>, and in the tab every op of U attaches to U's one follower. The wallet's seed lock is taken
+//   shared only around a bind phase, while the seed is open (followDeposit's seedLock and seed64); a sign out aborts
+//   every follow first (signedOut()).
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { DepositFacts, DepositStage, SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { type DepositOp, followDeposit, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
+import { type DepositOp, followDeposit, DepositFollowRefused, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../wallet/src/deposit/account.ts";
-import { openNoteStore } from "../../wallet/src/notes/store.ts";
+import { type NoteStore, openNoteStore } from "../../wallet/src/notes/store.ts";
 import type { ApiHost, Deferred, KindContext } from "./api.ts";
 
 type Kinds = NonNullable<ApiHost["kinds"]>;
@@ -54,38 +55,79 @@ export function depositFollows(h: FollowHost) {
   const rpcs = h.rpcs ?? (() => [followRpc(NEAR_NETWORKS[h.network()].fastnear[0]), followRpc(NEAR_NETWORKS[h.network()].drpc)] as const);
   const locks = h.locks ?? (() => (typeof navigator !== "undefined" ? (navigator.locks ?? null) : null));
 
+  // One body per U in this tab, under FOLLOW_LOCK/<network>/<U> across tabs: it opens U's note store once and keeps it
+  // while any op of U is followed; each op's followDeposit attaches to U's one follower (wallet follow.ts). No seed
+  // lock while it polls: the wallet's seed lock is taken shared only around a bind phase, while the seed is open.
+  type UBody = { pending: Set<Promise<void>>; ready: Promise<NoteStore>; drained: () => void };
+  const bodies = new Map<string, UBody>();
+  const sleep = h.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const follow = (id: string, f: FollowRecord): Promise<void> => {
     const had = running.get(id);
     if (had) return had;
     const signal = abort.signal;
-    const body = async () => {
-      signal.throwIfAborted();
-      const ops = await h.store();
-      const now = await ops.get("ops", id);
-      if (!isDepositOp(now) || FOLLOW_ENDS.has(now.stage)) return;
-      const notes = await openNoteStore(ops);
-      try {
-        await followDeposit({ opId: id, network: f.network, s: BigInt(f.s), i: f.i, u: f.u, address: f.address, deadline_ms: f.deadline_ms, origin: f.origin, min_out: f.min_out }, {
-          ops,
-          store: notes,
-          rpcs: rpcs(),
-          seed64: () => h.seed64(),
-          signal,
-          ...(h.fetch ? { fetchFn: h.fetch } : {}),
-          ...(h.sleep ? { sleep: h.sleep } : {}),
-          ...(h.now ? { now: h.now } : {}),
-          onStage: (s) => listeners.get(id)?.forEach((fn) => fn(s)),
-        });
-      } finally {
-        notes.close();
+    const key = `${f.network}/${f.u}`;
+    let ub = bodies.get(key);
+    if (ub === undefined) {
+      let opened!: (n: NoteStore) => void;
+      let failed!: (e: unknown) => void;
+      const ready = new Promise<NoteStore>((ok, no) => ((opened = ok), (failed = no)));
+      ready.catch(() => {});
+      let drained!: () => void;
+      const empty = new Promise<void>((ok) => (drained = ok));
+      const body: UBody = { pending: new Set(), ready, drained };
+      const hold = async () => {
+        const notes = await openNoteStore(await h.store());
+        opened(notes);
+        try {
+          await empty;
+        } finally {
+          notes.close();
+        }
+      };
+      const lm = locks();
+      void (lm ? lm.request(`${FOLLOW_LOCK}${key}`, { mode: "exclusive", signal }, hold) : hold()).catch(failed);
+      bodies.set(key, (ub = body));
+    }
+    const u = ub;
+    const lm = locks();
+    const seedLock = <T,>(fn: () => Promise<T>): Promise<T> => (lm ? (lm.request(WALLET_SEED_LOCK, { mode: "shared", signal }, fn) as Promise<T>) : fn());
+    // a throw that is no refusal (the store, a read) pauses and runs again; only the sign out's signal ends it
+    const one = async () => {
+      for (let wait = 1_000; ; wait = Math.min(wait * 2, 60_000)) {
+        if (signal.aborted) return;
+        try {
+          const notes = await u.ready;
+          const ops = await h.store();
+          const now = await ops.get("ops", id);
+          if (!isDepositOp(now) || FOLLOW_ENDS.has(now.stage)) return;
+          await followDeposit({ opId: id, network: f.network, s: BigInt(f.s), i: f.i, u: f.u, address: f.address, deadline_ms: f.deadline_ms, origin: f.origin, min_out: f.min_out }, {
+            ops,
+            store: notes,
+            rpcs: rpcs(),
+            seed64: () => h.seed64(),
+            seedLock,
+            signal,
+            ...(h.fetch ? { fetchFn: h.fetch } : {}),
+            ...(h.sleep ? { sleep: h.sleep } : {}),
+            ...(h.now ? { now: h.now } : {}),
+            onStage: (s, _f, opId) => listeners.get(opId)?.forEach((fn) => fn(s)),
+          });
+          return;
+        } catch (e) {
+          if (signal.aborted || e instanceof DepositFollowRefused) return;
+          await sleep(wait).catch(() => {});
+        }
       }
     };
-    const lm = locks();
-    // the op's lock, then the seed's (shared): a sign out waits for this follow to stop
-    const p = (lm ? lm.request(`${FOLLOW_LOCK}${id}`, { mode: "exclusive", signal }, () => lm.request(WALLET_SEED_LOCK, { mode: "shared", signal }, body)) : body())
-      // a follow that stops (a sign out, a read that threw) leaves the op at its stage: the next landing resumes it
-      .catch(() => {})
-      .finally(() => running.delete(id));
+    const p: Promise<void> = one().finally(() => {
+      running.delete(id);
+      u.pending.delete(p);
+      if (u.pending.size === 0) {
+        if (bodies.get(key) === u) bodies.delete(key);
+        u.drained();
+      }
+    });
+    u.pending.add(p);
     running.set(id, p);
     return p;
   };
