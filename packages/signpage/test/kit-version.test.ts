@@ -293,3 +293,18 @@ test("no hello: a state with no pools and no deposit wallets is still mapped (ev
   assert.ok(reads(V14, p.answer(id), "state"));
   assert.deepEqual(p.answer(id).result, FULL_V1_4);
 });
+
+test("no hello: the deployed shape today (pools and deposit_wallets, kit-v1.4's stages only, no facts) passes kit-v1.4's schema", async () => {
+  // what SIGN_HOST already sends a signed-in device with pool notes and deposit wallets before card kit-deposit-calls'
+  // stages are written: kit-v1.4 refuses it whole for the two fields alone
+  const old = OPS.filter((o) => !("refunded" in o) && (o.kind !== "deposit" || ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted"].includes(o.stage)))
+    .map((o) => (o.kind === "deposit" ? { id: o.id, kind: o.kind, stage: o.stage, txs: o.txs } : o));
+  const deployed = { ...FULL, ops: old as SignpageState["ops"] };
+  assert.equal(V14.SIGNPAGE_RESULT_SCHEMAS.state(deployed), false, "kit-v1.4 refuses the state for pools and deposit_wallets alone");
+  const p = page();
+  p.set(deployed);
+  const id = await p.ask();
+  assert.ok(reads(V14, p.answer(id), "state"), "kit-v1.4 reads it now");
+  const { pools: _a, deposit_wallets: _b, ...rest } = deployed;
+  assert.deepEqual(p.answer(id).result, rest, "the two fields left out, every other field and op as it is");
+});
