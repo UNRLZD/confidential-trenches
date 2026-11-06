@@ -337,7 +337,7 @@ test("kit-deposit-calls: a deposit op's stage and facts reach the app through th
     assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true, `the kit's client takes it: ${JSON.stringify(facts)}`);
   }
   await t.put("ops", "x2", { kind: "deposit", stage: "expired", txs: [], created_ms: 4 });
-  assert.deepEqual((await p.event((st) => (st.ops as unknown[]).length === 2)).ops.at(-1), { id: "x2", kind: "deposit", stage: "expired", txs: [] });
+  assert.deepEqual(((await p.event((st) => (st.ops as unknown[]).length === 2)).ops as unknown[]).at(-1), { id: "x2", kind: "deposit", stage: "expired", txs: [] });
 });
 
 test("kit-deposit-calls: a deposit record with a fact on the wrong stage, or a fact on another kind, is left out", () => {
