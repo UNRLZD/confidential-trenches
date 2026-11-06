@@ -100,28 +100,28 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
       quoters: bare({ v3: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", v4: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" }),
-      // Keyless, of five operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
+      // Keyless, of four operators, timed on one warm quote's six eth_call batches (109 kB) at each one's newest block
       // hash, 10 rounds each, every answer equal to publicnode's (card evm-quote-warm-round, 2026-11-04 16:4xZ from this
       // Mac): publicnode (Allnodes) p50/p95 146/207 ms; Blast 315/476, served by Alchemy (its answers carry
       // x-alchemy-trace-id, 18:56Z); mainnet.base.org (Coinbase) 863/1,380, behind QuickNode's request filter (eth_nope:
       // -32611 "rejected due to request filter settings", 18:56Z); BlockPI 816/1,549. All four sit behind Cloudflare
-      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com does not (no cf-ray, its
-      // own edge) and passes the quote's own reads (18:56Z: reth like the rest, 6 batches of 20 eth_calls at a block hash
-      // at once, 5 rounds, 255-273 ms warm, every answer publicnode's; a state override; eth_getLogs over 10 blocks; the
-      // browser's CORS preflight from the app's origin, 204 with access-control-allow-origin *). It replaces
-      // base-public.nodies.app, which the device never reaches: its preflight answers no access-control-allow-origin
-      // (review of bc189de, L-5; the live check evm-quote-warm-round preflights every listed provider). Passed over:
+      // (server: cloudflare and cf-ray on every answer, 18:55Z). bloXroute's base.rpc.blxrbdn.com left the list (card
+      // base-rpc-list-fix): its preflight answers 204 with access-control-allow-origin *, but its POST carries none (live
+      // check evm-quote-warm-round, run 42114981904, 2026-11-05 21:42-21:50Z; its POST from the app's origin answered HTTP
+      // 503 with none, 2026-11-06 00:44Z), so a browser quote that reaches it fails, as base-public.nodies.app's would
+      // (its preflight names no allow-origin; review of bc189de, L-5); the live check evm-quote-warm-round preflights and
+      // POSTs every listed provider. Passed over:
       // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
       // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
       // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
       // third-party proxies of unknown operators are not listed.
       // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
-      // is used only where more than half of these five gave it (review of bc189de, M-1). Left, as the device has always
+      // is used only where more than half of these four gave it (review of bc189de, M-1). Left, as the device has always
       // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
       // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
       // Q10).
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.rpc.blxrbdn.com", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
-      // all five kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
       feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
@@ -176,12 +176,28 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (-32011 "request limit reached" on its first getLogs, 18:08Z), 1rpc (50 blocks), meowrpc (no eth_getLogs), ankr
       // (a key), llamarpc (525, 18:08Z), omniatech (521), lava (410). No keyless one carries a cold 1M-block scan within
       // the bound alone: it carries what the first left, and a warm scan whole.
+      // The fourth: Sentio (rpc.sentio.xyz/base; card base-rpc-list-fix, 2026-11-06 00:34-00:41Z from this Mac), so a
+      // third that answers no logs still leaves another (evm-rpc-spare-list on GitHub's runner, run 42135737951: Pocket
+      // answered a held quote's request with no logs in 570 ms, and it was the last). Its preflight answers 200 with
+      // allow-origin the app's origin and content-type allowed, and its POST the same; getLogs up to 1,000 blocks
+      // (HTTP 429 code 8 "public eth_getLogs is limited to 1000 blocks" past it), 1.5M blocks back; a range past its head
+      // answers -32602 "block range extends beyond current head block", a block past it null; the scan's own 4-call
+      // batch answered; at 3 at once, 164 of 164 batches of 1,000 blocks answered with the block in 15.3 s (p50 249 ms,
+      // p95 395 ms, 10,715 blocks/s). Passed over at the same reads: BlockPI's base.public.blockpi.network (5,000
+      // blocks, then 429 and a Cloudflare block after 24 batches at 4 at once, and a quote provider above, whose reads
+      // its limit would cut), thirdweb (1,000 blocks, 4 of 1,000 answered at 3 at once, the rest 429), dRPC (-32602
+      // "ranges over 10000 blocks are not supported on free plan" at 1,000), tatum (100 blocks, 5 requests a minute),
+      // zan and onfinality (429), base.publicnode.com (the first's operator), Envio's HyperRPC (a token).
       scan: bare({
         url: "https://base-rpc.publicnode.com",
         span: 10_000,
         depth: 1_000_000,
         parallel: 20,
-        spares: Object.freeze([bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }), bare({ url: "https://base.api.pocket.network", span: 500, parallel: 4 })]),
+        spares: Object.freeze([
+          bare({ url: "https://base.gateway.tenderly.co", span: 1_000, parallel: 3 }),
+          bare({ url: "https://base.api.pocket.network", span: 500, parallel: 4 }),
+          bare({ url: "https://rpc.sentio.xyz/base", span: 1_000, parallel: 3 }),
+        ]),
       }),
     }),
     robinhood: bare({

@@ -26,7 +26,7 @@ test("the recorded good run passes: on every list with any one provider out the 
       if (m[5] === undefined) assert.ok(m[2] !== m[3] && m[2] !== m[4], c);
     }
   }
-  // Base's and Robinhood's pool lists hold five providers: no case of theirs is skipped
+  // Base's pool list holds four providers and Robinhood's five: no case of theirs is skipped
   assert.ok(r.lines.filter((x) => /^(base|robinhood) pool, /.test(x)).every((x) => !/skipped/.test(x)), r.lines.join("\n"));
 });
 
