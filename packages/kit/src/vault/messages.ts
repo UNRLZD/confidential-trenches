@@ -96,10 +96,11 @@ export type VaultStoragePrepay = {
 
 /**
  * storage_prepay(precommitment) on the vault, attaching `bytes` × VAULT_STORAGE_BYTE_COST. The precommitment is written
- * as the deposit message writes it. bytes is a positive whole number; the vault refuses under min_bytes on a new record.
+ * as the deposit message writes it, in 1..p-1 as the vault takes it (0 refused, vault review R-01). bytes is a positive
+ * whole number; the vault refuses under min_bytes on a new record.
  */
 export function vaultStoragePrepay(vault: string, precommitment: bigint, bytes: number): VaultStoragePrepay {
-  if (typeof precommitment !== "bigint" || precommitment < 0n || precommitment >= VAULT_FIELD_P) throw new Error("precommitment: not below p");
+  if (typeof precommitment !== "bigint" || precommitment <= 0n || precommitment >= VAULT_FIELD_P) throw new Error("precommitment: not in 1..p-1");
   if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("bytes: not a positive whole number");
   return {
     receiver_id: vaultAccountId(vault, "vault"),

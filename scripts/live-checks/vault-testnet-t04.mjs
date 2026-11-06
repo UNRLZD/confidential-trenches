@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RPCS, operatorProblems, query, recorder } from "./vault-skeleton.mjs";
+import { VAULT_SYNC_PAGE } from "../../packages/kit/src/index.ts";
 import { wait } from "../ci/rpc-wait.mjs";
 
 const KEY = "vault-testnet-t04";
@@ -29,7 +30,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUN = path.join(HERE, "../../contracts/vault/deployments/testnet-t04-run.json");
 export const VAULT = "vault.bf-vt-20261102t071444.testnet"; // contracts/vault/deployments/testnet-v1.json
 export const TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
-const PAGE = 1000; // the vault's PAGE_MAX
 
 // read through vault-skeleton.mjs's query: a rate limit is waited out as the money gate waits it, never an answer
 async function view(fetchFn, url, account_id, method_name, args, sleep = wait) {
@@ -40,9 +40,12 @@ async function view(fetchFn, url, account_id, method_name, args, sleep = wait) {
 async function all(fetchFn, url, method, sleep) {
   const rows = [];
   for (;;) {
-    const page = await view(fetchFn, url, VAULT, method, { from: rows.length, limit: PAGE }, sleep);
+    // the kit's page for this list (VAULT_SYNC_PAGE, about 125 Tgas a view, vault review R-03), so the read holds on a
+    // vault with more rows than one public RPC's view cap can carry at the vault's PAGE_MAX of 1,000
+    const limit = VAULT_SYNC_PAGE[method];
+    const page = await view(fetchFn, url, VAULT, method, { from: rows.length, limit }, sleep);
     rows.push(...page);
-    if (page.length < PAGE) return rows;
+    if (page.length < limit) return rows;
   }
 }
 

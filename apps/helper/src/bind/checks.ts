@@ -195,7 +195,8 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   if (amount < MIN_DEPOSIT) return no("amount_too_low", "amount: under MIN_DEPOSIT");
   if (amount > BIND_DEPOSIT_CAP) return no("amount_above_cap", "amount: over the $1,000 beta cap");
   if (amount > (await reads.ftBalance(u))) return no("amount_above_balance", "amount: over the sender's balance");
-  // The vault's row 2 and 2.10 (e): exactly the two fields, at most 1,024 bytes, P below p, depositor valid, not the vault.
+  // The vault's row 2 and 2.10 (e): exactly the two fields, at most 1,024 bytes, P in 1..p-1 (the vault refuses 0, review
+  // R-01, as the kit's vaultDepositMessage does), depositor valid, not the vault.
   const msg = args.msg;
   if (Buffer.byteLength(msg, "utf8") > DEPOSIT_MESSAGE_MAX_BYTES) return no("bad_msg", "msg: over 1,024 bytes");
   let m: unknown;
@@ -211,7 +212,7 @@ export async function checkBindDeposit(request: unknown, cfg: BindConfig, reads:
   if (JSON.stringify({ precommitment: ps, depositor }) !== msg) return no("bad_msg", "msg: not written as the kit writes it");
   if (typeof ps !== "string" || !/^(0|[1-9][0-9]{0,77})$/.test(ps)) return no("bad_msg", "msg.precommitment: not one canonical decimal");
   const p = BigInt(ps);
-  if (p >= FIELD_P) return no("bad_msg", "msg.precommitment: not below p");
+  if (p === 0n || p >= FIELD_P) return no("bad_msg", "msg.precommitment: not in 1..p-1");
   if (!isAccountId(depositor)) return no("bad_msg", "msg.depositor: not a NEAR account id");
   if (depositor === cfg.vault) return no("bad_msg", "msg.depositor: the vault");
   // The depositor is the moving id itself in every flow (kit shapes.ts VaultDepositMessage; wallet.md WM-11; review round 3).
