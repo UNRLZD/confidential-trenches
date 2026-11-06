@@ -12,7 +12,7 @@ import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey } from "../../wallet/src/notes/store.ts";
 import type { RestoredNote } from "../../wallet/src/notes/restore.ts";
 import { APP_ORIGIN, startApi } from "../src/api.ts";
-import { pagePools, poolRestore, RESTORE_BEAT_MS, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
+import { pagePools, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
 
 const SOL_SCOPE = 11n;
 const EVM_SCOPE = 22n;
@@ -31,9 +31,8 @@ const notesOf = (scope: bigint, label: bigint, base: bigint): RestoredNote[] => 
 };
 const POOLS: readonly RestorePool[] = [
   { chain: "solana", program: "Prog111", rpcs: () => [async () => null, async () => null] },
-  { chain: "evm", pin: { network: "base-sepolia", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, rpcs: () => [async () => null, async () => null], walletRpcs: () => [] },
+  { chain: "evm", pin: { network: "base-sepolia", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, rpcs: () => [async () => null, async () => null] },
 ];
-const locks = { request: (async (_n: string, _o: unknown, f: () => unknown) => f()) as unknown as LockManager["request"] };
 
 let db = 0;
 const closers: (() => void)[] = [];
@@ -52,9 +51,8 @@ async function world(over: Partial<PoolRestoreHost> = {}) {
     },
     signedIn: async () => true,
     pools: () => POOLS,
-    locks,
     solana: (async (a: { program: string }) => (seen.push(`solana ${a.program}`), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
-    evm: (async (a: { pin: { network: string } }) => (seen.push(`evm ${a.pin.network}`), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
+    evm: (async (a: { pin: { network: string }; wallets?: unknown; walletRpcs?: unknown; helper?: unknown }) => (seen.push(`evm ${a.pin.network} wallets ${String(a.wallets)} ${"walletRpcs" in a || "helper" in a ? "with W reads" : "no W reads"}`), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
     ...over,
   };
   return { store, host, seeds, seen, r: poolRestore(host) };
@@ -98,7 +96,8 @@ test("restore: answered started at once; every pinned pool read; the notes writt
   const mine = a.posted.filter((m) => m.id === id);
   assert.deepEqual(mine[0], { v: 1, id, ok: true, result: { stage: "started" } });
   assert.deepEqual(mine.slice(1).map((m) => m.stage), ["reading", "done"]);
-  assert.deepEqual(w.seen.sort(), ["evm base-sepolia", "solana Prog111"]);
+  // the EVM restore reads the notes alone: no W named to any provider (review L2)
+  assert.deepEqual(w.seen.sort(), ["evm base-sepolia wallets false no W reads", "solana Prog111"]);
   await until("op done", async () => (await opOf(w.store, id))?.stage === "done");
   assert.deepEqual(await opOf(w.store, id).then((o) => o && { kind: o.kind, stage: o.stage, txs: o.txs }), { kind: "restore", stage: "done", txs: [] });
   const want = [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((n) => `${refKey(n.ref)} ${n.state}`).sort();
@@ -193,4 +192,55 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
 
 test("pagePools: the mainnet build pins no pool today, so a restore there reads nothing and ends done", () => {
   assert.deepEqual(pagePools(), []);
+});
+
+// review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so
+// the app offers Retry; a record whose run still lives (its lock held, in any tab) is left as it is
+test("settle: a restore record left started or reading by a dead run is written stalled; a live run's is not; other ops are untouched", async () => {
+  const w = await world();
+  await w.store.put("ops", "dead-1", { kind: "restore", stage: "reading", txs: [], created_ms: 1 });
+  await w.store.put("ops", "dead-2", { kind: "restore", stage: "started", txs: [], created_ms: 1 });
+  await w.store.put("ops", "ended", { kind: "restore", stage: "done", txs: [], created_ms: 1 });
+  await w.store.put("ops", "sell", { kind: "sell", stage: "sent", txs: [], created_ms: 1 });
+  // another tab's live run: it holds its op's lock
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await w.store.put("ops", "live", { kind: "restore", stage: "reading", txs: [], created_ms: 1 });
+  void navigator.locks.request(`${RESTORE_LOCK}/live`, { mode: "exclusive" }, () => held);
+  await until("held", async () => ((await navigator.locks.query()).held ?? []).some((l) => l.name === `${RESTORE_LOCK}/live`));
+  await w.r.settle();
+  const stage = async (k: string) => ((await w.store.get("ops", k)) as { stage?: string } | undefined)?.stage;
+  assert.deepEqual([await stage("dead-1"), await stage("dead-2"), await stage("ended"), await stage("sell"), await stage("live")], ["stalled", "stalled", "done", "sent", "reading"]);
+  release();
+  // this tab's own run in flight is not settled either
+  let go: () => void = () => {};
+  const slow = new Promise<void>((r) => (go = r));
+  const x = await world({ solana: (async () => (await slow, { notes: [], spends: [] })) as never });
+  const run = x.r.auto();
+  await until("op written", async () => (await x.store.keys("ops")).length === 1);
+  await x.r.settle();
+  const [k] = await x.store.keys("ops");
+  assert.notEqual(((await x.store.get("ops", k!)) as { stage?: string }).stage, "stalled");
+  go();
+  assert.equal(await run, "done");
+});
+
+// review L4: a deposit index this page named ahead (a PLANNED note, no money) does not make the store look restored
+test("auto: a store holding only PLANNED notes is empty; one with a landed note is not", async () => {
+  const w = await world();
+  const ns = await openNoteStore(w.store);
+  await ns.planDeposit(SOL_SCOPE, () => 77n);
+  ns.close();
+  assert.equal(await w.r.auto(), "done");
+  assert.equal(w.seen.length, 2);
+});
+
+// review L1: two tabs' runs take the restore lock in turn, so their writes never race on one note
+test("two pages' runs on one store take turns: both end done, each note written once", async () => {
+  const w = await world();
+  const other = poolRestore(w.host);
+  const [a, b] = await Promise.all([w.r.auto(), other.auto()]);
+  assert.deepEqual([a, b].sort(), ["done", "done"]);
+  const want = [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((n) => `${refKey(n.ref)} ${n.state}`).sort();
+  assert.deepEqual(await listed(w.store), want);
 });

@@ -76,7 +76,11 @@ const runFlow = (flow: Flow, ask: PoolAsk, ctx: KindContext): ReturnType<Flow> |
     if (!(e instanceof EvmNotFinalError)) throw e;
     notFinal = true;
   });
-  const answer = () => (notFinal ? BUSY : got.answer());
+  // busy only while the run has no result of its own: a run that sent something answers with what it sent
+  const answer = () => {
+    const own = got.answer();
+    return notFinal && !(own !== null && "result" in own) ? BUSY : own;
+  };
   return "running" in got ? { running: true, after, answer } : { after, answer };
 };
 

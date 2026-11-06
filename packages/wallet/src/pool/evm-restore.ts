@@ -320,6 +320,9 @@ export type EvmRestoreNotesArgs = {
    * each W's Transfer logs, on those of them that are no provider of `rpcs`, two or more. Each call names one W. */
   walletRpcs?: readonly EvmRpc[];
   signal?: AbortSignal;
+  /** false: the notes only. No W is read or named to any provider, `helper` and `walletRpcs` are not asked for, and
+   * `wallets` comes back empty (the signing page's restore, which keeps the notes alone: pool-restore.ts). */
+  wallets?: false;
   /** tests only: RESTORE_GAP, the wait between lag retries, and the Ws' order (a random index below n) */
   gap?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -342,7 +345,8 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   // the Transfer reads name Ws: on mainnet only on the helper's route, never a provider the device reaches itself; on a
   // testnet never on a provider of the pool's list
   let reads: { holds: () => Promise<unknown>; tokens: (w: string, from: bigint) => Promise<string[]>; name: string };
-  if (net === "base" || net === "robinhood") {
+  if (a.wallets === false) reads = { holds: async () => {}, tokens: async () => [], name: "none" };
+  else if (net === "base" || net === "robinhood") {
     if (a.walletRpcs !== undefined) throw new Error(`walletRpcs: a ${net} W is read on the helper's route only`);
     if (typeof a.helper !== "string") throw new Error(`helper: a ${net} W is read on the helper's route`);
     const reader = evmHelperRpc(a.helper, net);
@@ -365,6 +369,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     return r;
   }, sleep, a.signal);
   const { notes, spends, elsewhere } = evmRestore({ seed64: a.seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+  if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {
     const x = pick(i + 1);

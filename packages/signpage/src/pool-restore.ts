@@ -10,27 +10,37 @@
 // - A sign-in with the words (or a passkey that opens an existing account) on a note store with no note runs it once
 //   with no tap (src/main.ts), under an op id of its own, so the app's sign-in sheet shows it (S19).
 // - It runs on every pool the page's network pins (pagePools): the Solana pool through the wallet's solanaRestoreNotes
-//   on the page's Solana pair, each EVM pool through evmRestoreNotes on its pool list and, on a testnet, the Transfer
-//   list (EVM_TRANSFER_RPCS; on mainnet the helper's route). A pin with no reads on this page is a failed pool, never
-//   skipped: the run ends stalled, so "done" always means every pinned pool was read.
+//   on the page's Solana pair, each EVM pool through evmRestoreNotes on its pool list, notes only (wallets: false: no W
+//   is named to any provider, since the page keeps no W record). A pin with no reads on this page (an EVM pin on
+//   mainnet, which has no EVM pool list yet) is a failed pool, never skipped: the run ends stalled, so "done" always
+//   means every pinned pool was read.
 // - What they find goes to the note store through the wallet's writeRestored (parents first; a note the store holds in
 //   flight is left as it is), the pools' notes together. A pool that fails leaves the others' notes written.
 // - No request names a note: each restore reads its pool's whole public set and finds the seed's own notes on the
 //   device (solana-restore.ts, evm-restore.ts headers). The seed is read under the store's seed lock, shared (a sign out
 //   waits for the run), and zeroed at its end; this tab's sign out aborts the run first.
-// - One run at a time on the page: a request while one runs is answered "started" and follows that run.
+// - One run at a time on the page: a request while one runs is answered "started" and follows that run. Across tabs,
+//   runs take RESTORE_LOCK in turn, so two tabs' writes never race on one note.
+// - A run's op records stay "started" or "reading" only while it lives: each follower holds RESTORE_LOCK/<op id> for
+//   the run's life, and settle() (each signed-in load, src/main.ts landed) writes "stalled" on any record still
+//   running whose lock no tab holds (its page was closed or reloaded mid-run), so the app offers Retry, never a scan
+//   that never ends.
+// - "Empty" for the run with no tap: no note but PLANNED ones (a deposit index this page named ahead, src/deposit-name.ts,
+//   holds no money until it lands).
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { RestoreStage } from "../../kit/src/signpage/messages.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { writeRestored, type RestoredNote } from "../../wallet/src/notes/restore.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
-import { EVM_POOLS, EVM_TRANSFER_RPCS, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_POOLS, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaRestoreNotes } from "../../wallet/src/pool/solana-restore.ts";
 import type { Deferred, KindContext } from "./api.ts";
 import { PAGE_SOL_PIN, TESTNET_RPCS, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
-import { TRADE_HELPER } from "./trade.ts";
+
+/** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
+export const RESTORE_LOCK = "ct-pool/restore";
 
 /** The gap between two "reading" progress events: within the 10 s the kit's client names. */
 export const RESTORE_BEAT_MS = 5_000;
@@ -38,7 +48,7 @@ export const RESTORE_BEAT_MS = 5_000;
 /** One pinned pool to restore, with its reads (null when this page has none for it: the run ends stalled). */
 export type RestorePool =
   | { chain: "solana"; program: string; rpcs: (() => readonly [SolanaRpc, SolanaRpc]) | null }
-  | { chain: "evm"; pin: EvmPoolPin; rpcs: (() => readonly EvmRpc[]) | null; walletRpcs?: () => readonly EvmRpc[]; helper?: string };
+  | { chain: "evm"; pin: EvmPoolPin; rpcs: (() => readonly EvmRpc[]) | null };
 
 const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNET ? { base: "base-sepolia", robinhood: "robinhood-testnet" } : { base: "base", robinhood: "robinhood" };
 
@@ -52,10 +62,10 @@ export function pagePools(): RestorePool[] {
     const net = pin.network;
     // the testnet lists sit behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them
     if (POOL_TESTNET && (net === "base-sepolia" || net === "robinhood-testnet"))
-      out.push({ chain: "evm", pin, rpcs: () => TESTNET_RPCS[chain].map((u) => testnetRpc(u)), walletRpcs: () => EVM_TRANSFER_RPCS[net].map((u) => testnetRpc(u)) });
+      out.push({ chain: "evm", pin, rpcs: () => TESTNET_RPCS[chain].map((u) => testnetRpc(u)) });
     // mainnet: the page has no EVM pool list yet (src/pool-testnet.ts testnetPoolDeps answers null), so a pin there is
     // read by no one until its list lands, and the run says so (stalled), never done
-    else out.push({ chain: "evm", pin, rpcs: null, helper: TRADE_HELPER });
+    else out.push({ chain: "evm", pin, rpcs: null });
   }
   return out;
 }
@@ -69,7 +79,7 @@ export type PoolRestoreHost = {
   /** The pools to read (pagePools unless given). */
   pools?: () => readonly RestorePool[];
   /** Web Locks (navigator.locks otherwise). */
-  locks?: Pick<LockManager, "request">;
+  locks?: Pick<LockManager, "request" | "query">;
   /** After the notes are written: the page's proof queue's pass, so a restored note can pay the next buy. */
   written?: () => void;
   /** Tests only: the beat, the clock and the two restores (the wallet's otherwise). */
@@ -88,12 +98,14 @@ export type PoolRestore = {
   auto(): Promise<RestoreStage | null>;
   /** This tab signed out: the run in flight stops. */
   signedOut(): void;
+  /** A signed-in load: every restore op still running whose run no tab holds is written stalled. */
+  settle(): Promise<void>;
 };
 
 export function poolRestore(h: PoolRestoreHost): PoolRestore {
   const beat = h.beatMs ?? RESTORE_BEAT_MS;
   const now = h.now ?? Date.now;
-  const locks = (): Pick<LockManager, "request"> => h.locks ?? navigator.locks;
+  const locks = (): Pick<LockManager, "request" | "query"> => h.locks ?? navigator.locks;
   let run: Run | null = null;
   let abort: AbortController | null = null;
 
@@ -101,7 +113,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     const pools = (h.pools ?? pagePools)();
     const solana = h.solana ?? solanaRestoreNotes;
     const evm = h.evm ?? evmRestoreNotes;
-    return locks().request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+    // the restore lock, then the seed's (shared): a sign out waits only for the run that holds the seed
+    return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, () => locks().request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
       const seed64 = await h.seed64();
       const found: RestoredNote[] = [];
       let failed = false;
@@ -110,7 +123,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         const reads = pools.map(async (p): Promise<RestoredNote[]> => {
           if (p.rpcs === null) throw new Error(`${p.chain === "solana" ? "solana" : p.pin.network}: no reads on this page`);
           if (p.chain === "solana") return (await solana({ seed64, program: p.program, rpcs: p.rpcs(), signal })).notes;
-          return (await evm({ seed64, pin: p.pin, rpcs: p.rpcs(), signal, ...(p.walletRpcs ? { walletRpcs: p.walletRpcs() } : {}), ...(p.helper !== undefined ? { helper: p.helper } : {}) })).notes;
+          // the notes only: no W is read or named to a provider for a record the page keeps none of
+          return (await evm({ seed64, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false })).notes;
         });
         for (const r of await Promise.allSettled(reads)) {
           if (r.status === "fulfilled") found.push(...r.value);
@@ -130,7 +144,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         h.written?.();
       }
       return failed ? "stalled" : "done";
-    });
+    }));
   };
 
   const start = (): Run => {
@@ -165,6 +179,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       follow: (id, progress) => {
         const f = { id, created: now(), writes: Promise.resolve(), ...(progress ? { progress } : {}) };
         followers.push(f);
+        // held for the run's life: a record whose lock no tab holds is a dead run's (settle)
+        void locks().request(`${RESTORE_LOCK}/${id}`, { mode: "exclusive" }, () => done.catch(() => {}));
         write(f, "started");
         write(f, "reading");
         progress?.("reading");
@@ -188,7 +204,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       const notes = await openNoteStore(await h.store());
       let empty: boolean;
       try {
-        empty = (await notes.list()).length === 0;
+        empty = (await notes.list()).every((n) => n.state === "PLANNED");
       } finally {
         notes.close();
       }
@@ -198,5 +214,17 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       return r.done;
     },
     signedOut: () => abort?.abort(),
+    settle: async () => {
+      const ops = await h.store();
+      const q = await locks().query();
+      const alive = new Set([...(q.held ?? []), ...(q.pending ?? [])].map((l) => l.name));
+      for (const k of await ops.keys("ops")) {
+        if (alive.has(`${RESTORE_LOCK}/${k}`)) continue;
+        await ops.update("ops", k, (v) => {
+          const r = v as { kind?: unknown; stage?: unknown } | undefined;
+          return r?.kind === "restore" && (r.stage === "started" || r.stage === "reading") ? { ...r, stage: "stalled" } : undefined;
+        });
+      }
+    },
   };
 }

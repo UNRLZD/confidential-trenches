@@ -238,6 +238,15 @@ test("card pool-restore-wired: a flow that fails with EvmNotFinalError is answer
   const ran = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => rejects(plain()) });
   assert.deepEqual(await code("pool.buy", ran, BUY), { code: "failed" });
   assert.deepEqual(await code("pool.sell", ran, SELL), { code: "failed" });
+  // review I1: a run that sent something before its wait rejected answers with what it sent, never busy (busy is not
+  // kept, so the same id would run again)
+  const sent = { result: { stage: "sent", txs: [{ chain: "base", hash: "0xab" }] } };
+  const after = Promise.reject(notFinal());
+  after.catch(() => {});
+  const part = poolKinds({ pinned: () => true, rpcs: () => sol.pair, flow: () => ({ running: true, after, answer: () => sent }) as never });
+  const got = (await throughApi("pool.buy", part["pool.buy"] as never, BUY)).answer as { ok?: boolean; result?: unknown };
+  assert.equal(got.ok, true);
+  assert.deepEqual(got.result, sent.result);
 });
 
 // card precommit-taken-recover: an EVM pool deposit or sell signs on a precommitment anyone who sees it pending can take

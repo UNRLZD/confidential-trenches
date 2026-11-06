@@ -583,6 +583,8 @@ async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
   void testnet?.settle();
+  // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
+  void restore?.settle().catch(() => {});
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }

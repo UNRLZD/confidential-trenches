@@ -296,18 +296,24 @@ test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so 
 // own: answered started, then its progress to done; on the page's mainnet no pool is pinned, so it reads nothing.
 // Signed in again here (the test above ended signed out), as a sign-in from another tab
 test("main.ts wires the restore kind: answered started, its progress reading then done, no fetch on a network with no pin", async () => {
+  // its own wait, 15 s: a loaded machine runs the store's open, the locks and the run slower than until's 3 s
+  const long = async (what: string, ok: () => Promise<boolean>) => {
+    for (let t = 0; t < 1500; t++) if (await ok()) return;
+    else await new Promise((r) => setTimeout(r, 10));
+    throw new Error(`never: ${what}`);
+  };
   const w = await openWalletStore({});
   if (!(await w.get("meta", "seed"))) await w.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 3 });
-  await until("signed in", async () => (await askState()).signed_in);
+  await long("signed in", async () => (await askState()).signed_in);
   const id = crypto.randomUUID();
   const from = asked.length;
   const e = new Event("message");
   Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "restore" } } });
   win.dispatchEvent(e);
   const mine = () => (posted as { id?: string; ok?: boolean; result?: unknown; error?: { code: string }; stage?: string }[]).filter((m) => m.id === id);
-  await until("restore answered", async () => mine().length > 0);
+  await long("restore answered", async () => mine().length > 0);
   assert.deepEqual(mine()[0], { v: 1, id, ok: true, result: { stage: "started" } });
-  await until("restore done", async () => mine().some((m) => m.stage === "done"));
+  await long("restore done", async () => mine().some((m) => m.stage === "done"));
   assert.deepEqual(mine().slice(1).map((m) => m.stage), ["reading", "done"]);
   assert.equal(asked.length - from, 0);
   assert.equal(((await w.get("ops", id)) as { kind?: string; stage?: string } | undefined)?.stage, "done");
