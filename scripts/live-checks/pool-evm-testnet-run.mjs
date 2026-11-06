@@ -41,7 +41,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { recorder } from "./notes-per-pool-evm.mjs";
-import { CHAINS as DEPLOYED } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS as DEPLOYED, pinnedBuild } from "./pool-evm-deploy.mjs";
 
 const KEY = "pool-evm-testnet-run";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -93,8 +93,7 @@ const pinsOf = (chain, at) => {
   return {
     pool: d.contracts.PrivacyPoolSimple.address.toLowerCase(),
     sellDelegate: s.contracts.SellDelegate.address.toLowerCase(),
-    // the sell that delegate dispatches: the 11-field one from card evm-testnet-delegate-review3's redeploy on
-    sellSelector: s.key === "evm-testnet-delegate-review3" ? SELL_SELECTOR : SELL_SELECTOR_10,
+    sellSelector: sellSelectorOf(chain, s.contracts.SellDelegate.address),
     poolManager: c.poolManager.address.toLowerCase(),
     router: c.router?.address ? c.router.address.toLowerCase() : null,
   };
@@ -113,6 +112,10 @@ const word = (x) => BigInt(x).toString(16).padStart(64, "0");
 // before it, which the runs before card evm-testnet-delegate-review3 went through (pool-evm-testnet-run.<chain>.json,
 // e.g. Base Sepolia 0x32bb0d25..., input 0xbea5695c on sepolia.base.org and base-sepolia-rpc.publicnode.com)
 export const SELL_SELECTOR = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)");
+/** The sell the SellDelegate at `address` on `chain` dispatches, from the build its code must be: the current build's
+ *  11-field sell, or the 10-field one of a build the build file froze at that address (evm-sell-v4's and
+ *  evm-selldelegate-exact-debit's delegates) */
+export const sellSelectorOf = (chain, address) => (pinnedBuild(chain, "SellDelegate", address) === BUILD.contracts.SellDelegate ? SELL_SELECTOR : SELL_SELECTOR_10);
 export const SELL_SELECTOR_10 = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)");
 /** The target W signed, from a SellDelegate.sell call's input (the Sell tuple's third word, in both shapes), or null
  *  when the input is not a call of `selector`, the sell the run's delegate dispatches. */

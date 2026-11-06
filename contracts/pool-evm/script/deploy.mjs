@@ -463,6 +463,10 @@ async function run(args, io = {}) {
     // against the journal's deployer when it is read
     if (!j0.keys?.state || j0.keys.state === "removed") throw new Error(`${rel(journalFile)}: its run key is ${j0.keys?.state ?? "unknown"}: nothing to sweep`);
     if (opt("--return") !== undefined && returnAddress(opt("--return")) !== j0.return) throw new Error(`--sweep-kept goes back only to the run's return address ${j0.return}, not ${opt("--return")}`);
+  } else if (!mainnet && !dryRun) {
+    // a testnet run writes its record over nothing: a record already there is a deployment a card's live check and the
+    // money gate read (an --only run's is its card's, ALONE), and a rerun would overwrite it with another address
+    if (existsSync(out)) throw new Error(`${rel(out)} exists: ${only ?? "the pool"} is deployed on ${chainName} by that record: run its live check alone: ${liveCheck}; a new deployment is a new card's record (ALONE, or --out <a new file>): nothing was read or sent`);
   } else if (mainnet) {
     if (existsSync(out)) {
       const j = existsSync(journalFile) ? JSON.parse(readFileSync(journalFile, "utf8")) : null;

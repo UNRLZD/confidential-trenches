@@ -471,7 +471,8 @@ test("M370 a pinned sell pays only into the chain's pinned pool", () => {
   assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", evmPoolBuildSell("base", req({ pool: "0xBADBADBADBADBADBADBADBADBADBADBADBADBAD0" })))), "not_pinned");
   assert.equal(code(() => pinnedSignSell(PINNED, W_KEY, "base", { ...built })), "not_built");
   assert.equal(hex(pinnedSignSell(PINNED, W_KEY, "base", built)), hex(evmPoolSignSell(W_KEY, "base", built)));
-  const noPool = Object.freeze({ ...PINNED, base: Object.freeze({ ...B, sellDelegate: PIN_DELEGATE }) });
+  // no pool, every other pin there: the pool's own refusal, not the collector's
+  const noPool = Object.freeze({ ...PINNED, base: Object.freeze({ ...B, sellDelegate: PIN_DELEGATE, feeCollector: PIN_COLLECTOR }) });
   assert.equal(code(() => pinnedBuildSell(noPool, "base", pinnedReq)), "not_deployed");
   assert.equal(code(() => pinnedSignSell(noPool, W_KEY, "base", built)), "not_deployed");
   assert.equal(code(() => pinnedBuildSell(PINNED, "ethereum" as EvmPoolChain, pinnedReq)), "bad_route");

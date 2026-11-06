@@ -475,7 +475,10 @@ export async function main(args, io = {}) {
       }
       if (amount !== BigInt(b.out)) throw new Error(`W ${W.address} holds ${amount} of the token, not the ${b.out} its buy paid, after 60 s`);
       const ref = { kind: "return", c: "evm", l: b.l, j: b.j };
-      // the kit's pin, never a server's answer: the kit's builder refuses any other recipient
+      // the kit's pin, never a server's answer: evmPoolBuildSell builds through the kit's pinned builder, which refuses
+      // any other recipient (sell-unpinned.ts pinnedBuildSell, not_pinned; the unpinned builder under it refuses only
+      // zero, W and the pool), and in --sell-helper mode the helper sends only a Sell paying it (apps/helper
+      // src/pool/evm.ts, fee_recipient)
       const feeTo = lower(kit.evmPoolVenues()[chain].feeCollector ?? "");
       const { q, built } = await fresh(
         // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the

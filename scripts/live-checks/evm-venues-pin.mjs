@@ -5,8 +5,11 @@
 //   - the pins are the record's: the pool is PrivacyPoolSimple, the v3 and v4 adapters UniswapV3Adapter and
 //     UniswapV4Adapter (a record without one, a venue without that pin), the sell delegate SellDelegate, which card
 //     evm-sell-v4 deployed again to sell through the v4 PoolManager, card evm-selldelegate-exact-debit again with the
-//     exact-debit check and card evm-testnet-delegate-review3 again at the pool-review-3 build: the newest of their records (<key>.<chain>.json), where there is one, names the SellDelegate in
-//     place of pool-evm-deploy's;
+//     exact-debit check and card evm-testnet-delegate-review3 again at the pool-review-3 build: the newest of their
+//     records (<key>.<chain>.json), where there is one, names the SellDelegate in place of pool-evm-deploy's; and the
+//     fee collector FeeCollector, which a testnet's set deployed beside it (card evm-fee-collector,
+//     evm-fee-collector.<chain>.json) and a mainnet's set holds, its one immutable the sell sender the kit pins (the
+//     record's sink);
 //   - the chain's WETH, PoolManager and routers are the ones pool-evm-deploy pinned (CHAINS: WETH; the PoolManager; the
 //     v3 router, or none), and no middle is listed;
 //   - on the chain's two RPCs of two operators (the money gate's), each answering the chain's id: at the newest block
@@ -14,8 +17,9 @@
 //     same on both and is the current build's (pool-evm-deploy.build.json `contracts`: the same length and, with the
 //     immutables' bytes zeroed, the same keccak256), never a build the file froze: a frozen build is an older
 //     contract's, which the device's code no longer calls (main's pins at the exact-debit delegates dispatched the
-//     10-field sell while the kit built the 11-field one; card evm-testnet-delegate-review3), and its immutables hold exactly the words pool-evm-deploy's getters must return
-//     (gettersOf: the pool's verifier, asset and scope, the adapters' PoolManager, router and WETH, the delegate's WETH);
+//     10-field sell while the kit built the 11-field one; card evm-testnet-delegate-review3), and its immutables hold
+//     exactly the words pool-evm-deploy's getters must return (gettersOf: the pool's verifier, asset and scope, the
+//     adapters' PoolManager, router and WETH, the delegate's WETH and PoolManager), the fee collector's its sink;
 //     the record's verifier is the build's; the PoolManager's, WETH's and each router's code hash is the one CHAINS
 //     pins, and where WETH is a proxy (Robinhood testnet), its implementation slot and that implementation's code hash,
 //     both read at each RPC's latest block (the one value here an upgrade can change).
@@ -37,6 +41,7 @@ const PINS = [
   ["v3 adapter", (v) => v.adapters?.v3, "UniswapV3Adapter"],
   ["v4 adapter", (v) => v.adapters?.v4, "UniswapV4Adapter"],
   ["sell delegate", (v) => v.sellDelegate, "SellDelegate"],
+  ["fee collector", (v) => v.feeCollector, "FeeCollector"],
 ];
 
 // the sell delegate's redeploys alone, newest first: card evm-testnet-delegate-review3's, card
@@ -49,11 +54,15 @@ export function recordOf(chain, file = deploymentFile(chain)) {
   if (!existsSync(file)) return null;
   const d = JSON.parse(readFileSync(file, "utf8"));
   if (Object.hasOwn(MAINNETS, chain) && (d.chain !== chain || d.dryRun !== false)) throw new Error(`${file} is not ${chain}'s real run`);
+  const alone = (f, name) => {
+    const s = JSON.parse(readFileSync(f, "utf8"));
+    if (s.chain !== chain || s.dryRun !== false) throw new Error(`${f} is not ${chain}'s real run`);
+    return { [name]: s.contracts[name] };
+  };
   const f = SELL_KEYS.map((k) => sellFile(k, chain)).find(existsSync);
-  if (!f) return d;
-  const s = JSON.parse(readFileSync(f, "utf8"));
-  if (s.chain !== chain || s.dryRun !== false) throw new Error(`${f} is not ${chain}'s real run`);
-  return { ...d, contracts: { ...d.contracts, SellDelegate: s.contracts.SellDelegate } };
+  // a testnet's fee collector, deployed beside its set (a mainnet's set holds its own)
+  const fc = Object.hasOwn(MAINNETS, chain) ? undefined : sellFile("evm-fee-collector", chain);
+  return { ...d, contracts: { ...d.contracts, ...(f ? alone(f, "SellDelegate") : {}), ...(fc && existsSync(fc) ? alone(fc, "FeeCollector") : {}) } };
 }
 
 /** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record: the testnets, then the
@@ -107,6 +116,12 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
     return out;
   };
   const getters = gettersOf(d);
+  // the fee collector's one immutable, its sink: the record's, and the sell sender the kit pins (it has no getter)
+  if (want.some(([, , n]) => n === "FeeCollector")) {
+    const sink = lower(d.contracts.FeeCollector.sink ?? "");
+    say(/^0x[0-9a-f]{40}$/.test(sink) && sink === lower(venue.sellSender ?? ""), `the record's FeeCollector sink ${sink || "(none)"} is the sell sender the kit pins: ${venue.sellSender ?? "none"}`);
+    getters.FeeCollector = [["(sink)", "0x" + sink.replace(/^0x/, "").padStart(64, "0")]];
+  }
   try {
     for (const [role, pin, name] of [...want, ["verifier", d.contracts?.WithdrawalVerifier?.address ?? "0x", "WithdrawalVerifier"]]) {
       const [a, b] = await codeAt(pin);

@@ -75,7 +75,7 @@ export type EvmPoolSellErrorCode =
   | "not_built" // W signs only a sell evmPoolBuildSellUnpinned returned, for the chain it was built for
   | "bad_key" // W's key is not a key, or not W's
   | "not_deployed" // the chain has no pinned pool or sell delegate yet (pool-evm-deploy)
-  | "not_pinned"; // a pool other than the chain's pinned one
+  | "not_pinned"; // a pool, or a sell's fee recipient, other than the chain's pinned one
 export class EvmPoolSellError extends Error {
   readonly code: EvmPoolSellErrorCode;
   constructor(code: EvmPoolSellErrorCode, message: string) {

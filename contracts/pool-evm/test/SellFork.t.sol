@@ -33,6 +33,11 @@ abstract contract SellForkBase is SellBase {
   function _route() internal pure virtual returns (address _router, address _quoter, address _weth, address _token, uint24 _fee);
   /// The chain's v4 PoolManager, the delegate's pin (test/BuyV4Fork.t.sol reads its code on chain)
   function _poolManager() internal pure virtual returns (address);
+  /// Who the Sell pays the fee to: the forge tests' SENDER here, a chain's pinned FeeCollector where the kit signs with
+  /// its own pins (card evm-testnet-delegate-review3: the kit's pinned builder pays only that collector)
+  function _feeTo() internal view virtual returns (address) {
+    return SENDER;
+  }
 
   function setUp() public {
     (string memory _rpc, uint256 _block) = _chain();
@@ -91,7 +96,7 @@ abstract contract SellForkBase is SellBase {
       pool: address(pool),
       precommitment: PRE,
       feeCap: FEE,
-      feeRecipient: SENDER,
+      feeRecipient: _feeTo(),
       deadline: block.timestamp + 60,
       nonce: 0
     });
@@ -127,7 +132,7 @@ abstract contract SellForkBase is SellBase {
     assertEq(_pre, PRE);
     assertEq(_c, PoseidonT4.hash([_quoted - FEE, _label, PRE]), 'the commitment, by the chain own Poseidon');
     assertEq(address(pool).balance, _poolBefore + _quoted - FEE);
-    assertEq(SENDER.balance, FEE, 'the helper is paid the fee');
+    assertEq(_feeTo().balance, FEE, 'the fee recipient W signed is paid the fee');
     assertEq(W.code, abi.encodePacked(hex'ef0100', address(delegate)), 'W is delegated by the same transaction');
     assertEq(IERC20Balance(_token).balanceOf(W), 0, 'W sold every token');
     assertEq(IERC20Allowance(_token).allowance(W, _s.target), 0, 'the approval ends at 0');
@@ -186,7 +191,7 @@ abstract contract SellForkBase is SellBase {
     assertGe(_value, _minOut - FEE, 'the leaf holds at least minOut less the fee');
     assertEq(_pre, PRE);
     assertEq(address(pool).balance, _poolBefore + _value);
-    assertEq(SENDER.balance, FEE);
+    assertEq(_feeTo().balance, FEE, 'the fee recipient the kit signed is paid the fee');
     assertEq(IERC20Balance(_token).balanceOf(W), 0);
     assertEq(SellDelegate(payable(W)).nonce(), 1);
   }
@@ -264,6 +269,13 @@ contract SellForkBaseSepoliaPinsTest is SellForkBaseTest {
   address internal constant PIN_POOL = 0xB239A38Af69B68E6C5C305df64985F283b5d5Fe5;
   address internal constant PIN_DELEGATE = 0x7a034461193CC6B1a7d5D0F5FE4A36b34E7EbC12;
   address internal constant PIN_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
+  /// Base Sepolia's FeeCollector (card evm-fee-collector), the kit's feeCollector pin: the one fee recipient its pinned
+  /// builder signs (card evm-testnet-delegate-review3)
+  address internal constant PIN_COLLECTOR = 0x9cc4788af51677AAA7770D78277c41FB864b35E1;
+
+  function _feeTo() internal view override returns (address) {
+    return PIN_COLLECTOR;
+  }
 
   function _route() internal pure override returns (address, address, address, address, uint24) {
     (, address _quoter, address _weth, address _token, uint24 _fee) = super._route();
