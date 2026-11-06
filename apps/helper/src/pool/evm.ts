@@ -43,15 +43,18 @@
 // nothing: the device sends W's EIP-712 Sell inside SellDelegate.sell's calldata and W's EIP-7702 authorization of the
 // kit's pinned SellDelegate, and the sender sends ONE type-4 transaction to W carrying both, as the device's reference
 // sell that landed on both testnets does (contracts/pool-evm/script/testnet-run.mjs sellOf, testnet-run-lib.mjs
-// signTx7702). SellDelegate pays `fee` (at most Sell.feeCap) to msg.sender, the sender, and deposits the rest.
+// signTx7702). SellDelegate pays `fee` (at most Sell.feeCap) to Sell.feeRecipient, never to msg.sender (pool review
+// round 3, L-1), and deposits the rest; the sender sends only a Sell whose feeRecipient is this release's fee recipient
+// (the fee answer's fee_recipient, the one a withdraw pays), so the sender's gas comes back through the fee recipient.
 // The body: { "pool", "w", "data", "authorization": { chainId, address, nonce, yParity, r, s } }, hex strings as
 // testnet-run-lib.mjs authJson writes them. Checks, each a refusal before any send (422 unless named), every static one
 // before any RPC call:
 //   bad_shape        a body of any other key or shape, or data not sell((address,uint256,address,bytes,uint256,address,
-//                    uint256,uint256,uint256,uint256),uint256,bytes) in its one canonical ABI encoding (every offset,
+//                    uint256,uint256,address,uint256,uint256),uint256,bytes) in its one canonical ABI encoding (every offset,
 //                    length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
 //                    EVM_SELL_DATA_MAX (2,048 bytes);
 //   not_pool         the Sell's pool is not this sender's;
+//   fee_recipient    the Sell pays its fee to anyone but this release's fee recipient (as a withdraw's);
 //   fee_over_cap     the fee is over the Sell's feeCap, or the feeCap is not under minOut (the deposit holds nothing);
 //   bad_authorization the authorization's chainId is not the venue's (the kit's evmPoolVenues(), never 0), its address
 //                    not the kit's pinned sell delegate for this network (none pinned: every sell refused), yParity not
@@ -242,19 +245,19 @@ export function evmAddressOf(key: Uint8Array): string {
 
 // ---- The sell's calldata (card helper-evm-sender) ----
 
-export const SELL_SIGNATURE = "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)";
+export const SELL_SIGNATURE = "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)";
 export const SELL_SELECTOR = selectorOf(SELL_SIGNATURE);
 /**
- * The sell's calldata limit, bytes, and POST /v1/pool/evm/sell's body limit: the calldata is 580 bytes plus the swap
+ * The sell's calldata limit, bytes, and POST /v1/pool/evm/sell's body limit: the calldata is 612 bytes plus the swap
  * data padded; the longest route the kit builds (EVM_POOL_MAX_HOPS 4 v4 hops with empty hook data, abi.encode(PathKey[]))
- * is 960 bytes of swap data, so 1,540 bytes [design: about 1.3x that].
+ * is 960 bytes of swap data, so 1,572 bytes [design: about 1.3x that].
  */
 export const EVM_SELL_DATA_MAX = 2_048;
 export const POOL_EVM_SELL_BODY_MAX = 8_192;
 const SELL_HEAD = 3; // the tuple's offset, the fee, the signature's offset
-const SELL_TUPLE = 10; // token, amount, target, the data's offset, minOut, pool, precommitment, feeCap, deadline, nonce
+const SELL_TUPLE = 11; // token, amount, target, the data's offset, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce
 
-export type EvmSell = { token: string; amount: bigint; target: string; data: string; minOut: bigint; pool: string; precommitment: bigint; feeCap: bigint; deadline: bigint; nonce: bigint; fee: bigint; signature: Uint8Array };
+export type EvmSell = { token: string; amount: bigint; target: string; data: string; minOut: bigint; pool: string; precommitment: bigint; feeCap: bigint; feeRecipient: string; deadline: bigint; nonce: bigint; fee: bigint; signature: Uint8Array };
 
 /** A sell's calldata read back; throws unless it is exactly the one canonical encoding. */
 export function evmReadSell(d: Uint8Array): EvmSell {
@@ -263,7 +266,7 @@ export function evmReadSell(d: Uint8Array): EvmSell {
   if (word(d, 0) !== BigInt(32 * SELL_HEAD)) throw new Error("the sell's offset");
   const t = (i: number) => word(d, SELL_HEAD + i);
   if (t(3) !== BigInt(32 * SELL_TUPLE)) throw new Error("the swap data's offset");
-  if (![t(0), t(2), t(5)].every(isAddressWord)) throw new Error("an address's padding");
+  if (![t(0), t(2), t(5), t(8)].every(isAddressWord)) throw new Error("an address's padding");
   const len = t(SELL_TUPLE);
   if (len > BigInt(d.length)) throw new Error("the swap data's length");
   const padded = Math.ceil(Number(len) / 32);
@@ -276,19 +279,21 @@ export function evmReadSell(d: Uint8Array): EvmSell {
   if (d.subarray(dataAt + Number(len), dataAt + 32 * padded).some((b) => b !== 0) || d.subarray(sigBytes + 65, sigBytes + 96).some((b) => b !== 0)) throw new Error("the padding");
   return {
     token: addr(t(0)), amount: t(1), target: addr(t(2)), data: `0x${hex(d.subarray(dataAt, dataAt + Number(len)))}`, minOut: t(4), pool: addr(t(5)),
-    precommitment: t(6), feeCap: t(7), deadline: t(8), nonce: t(9), fee: word(d, 1), signature: d.slice(sigBytes, sigBytes + 65),
+    precommitment: t(6), feeCap: t(7), feeRecipient: addr(t(8)), deadline: t(9), nonce: t(10), fee: word(d, 1), signature: d.slice(sigBytes, sigBytes + 65),
   };
 }
 
 const utf8 = (t: string) => new TextEncoder().encode(t);
 const w32 = (n: bigint) => unhex(n.toString(16).padStart(64, "0"));
 const DOMAIN_TYPE = keccak_256(utf8("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
-const SELL_TYPE = keccak_256(utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)"));
+/** SellDelegate.sol's SELL_TYPEHASH, its string held to the contract's own text by contracts/pool-evm/test/sell-type-helper.test.mjs.
+ *  The string sits in this one declaration, the one the signing page's signer guard lets the helper hold it in. */
+const SELL_TYPE = keccak_256(utf8("Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"));
 /** SellDelegate._sellDigest (contracts/pool-evm/src/SellDelegate.sol) of `s` under W's own address on chain `chainId`. */
 export function evmSellDigest(chainId: bigint, w: string, s: EvmSell): Uint8Array {
   const domain = keccak_256(Uint8Array.from([...DOMAIN_TYPE, ...keccak_256(utf8("Blindfill")), ...keccak_256(utf8("1")), ...w32(chainId), ...w32(BigInt(w))]));
   const fields = [BigInt(s.token), s.amount, BigInt(s.target)].map(w32);
-  const rest = [s.minOut, BigInt(s.pool), s.precommitment, s.feeCap, s.deadline, s.nonce].map(w32);
+  const rest = [s.minOut, BigInt(s.pool), s.precommitment, s.feeCap, BigInt(s.feeRecipient), s.deadline, s.nonce].map(w32);
   const struct = keccak_256(Uint8Array.from([...SELL_TYPE, ...fields.flatMap((x) => [...x]), ...keccak_256(unhex(s.data.slice(2))), ...rest.flatMap((x) => [...x])]));
   return keccak_256(Uint8Array.from([0x19, 0x01, ...domain, ...struct]));
 }
@@ -334,8 +339,9 @@ export const EVM_BUSY_RETRY_S = 2;
  */
 export const EVM_SELL_DROP_MARGIN_MS = 60_000;
 /**
- * The sell sender pays gas for each call W signs and is paid only when the sale lands (SellDelegate pays the fee out of
- * the proceeds). Each sale's worst cost (gas x maxFeePerGas + the L1 data fee bound) is held against W, the client,
+ * The sell sender pays gas for each call W signs; SellDelegate pays the fee, out of the proceeds and only when the sale
+ * lands, to the Sell's feeRecipient, this release's fee recipient, never to the sell sender. The ledger counts what the
+ * release does not get back, not the sell key's balance, which falls by every sale's cost. Each sale's worst cost (gas x maxFeePerGas + the L1 data fee bound) is held against W, the client,
  * the token and the sender's whole sell budget from its send; its receipt, read in the background, turns that into what
  * went unpaid (all of the cost on a revert, cost - fee when a landed sale paid less). In any EVM_SELL_UNPAID_WINDOW_MS
  * the unpaid and held wei stay under EVM_SELL_UNPAID_CAP_WEI per W, client or token and EVM_SELL_UNPAID_BUDGET_WEI in
@@ -431,8 +437,9 @@ export type PoolEvmCode =
 /** `retryAfterS` on a 429, and on the 503 of a lane held behind an unmined send: the whole seconds the route names in
  *  Retry-After. */
 export type PoolEvmAnswer = { status: number; body: { hash: string } | { error: { code: PoolEvmCode; detail?: string } }; retryAfterS?: number };
-/** `sell_sender`: the sell sender's address, which a sale's fee is paid to and the device's sim runs from (the kit pins
- *  it), or null where no sell key is set (every sell refused not_configured). */
+/** `sell_sender`: the sell sender's address, which every sale is sent from and the device's sim runs from (the kit pins
+ *  it), or null where no sell key is set (every sell refused not_configured). A sale's fee is paid to `fee_recipient`,
+ *  never to the sell sender (SellDelegate.sol, pool review round 3, L-1). */
 export type EvmFeeAnswer = { chain: "evm"; network: string; pool: string; fee_recipient: string; sell_sender: string | null; epoch_ms: number; epoch_start_ms: number; block: string; fee: string; step: string };
 
 export type EvmPoolSender = {
@@ -800,6 +807,8 @@ export function evmPoolSender(
       return no(400, "bad_shape", (e as Error).message);
     }
     if (s.pool !== pool) return no(422, "not_pool");
+    // the fee goes only to the Sell's feeRecipient (SellDelegate.sol, L-1): this release's, as a withdraw's relay data
+    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not ${feeRecipient}`);
     if (s.fee > s.feeCap) return no(422, "fee_over_cap", `fee ${s.fee}, cap ${s.feeCap}`);
     if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);
     // W's authorization: of the kit's pinned delegate, on this chain's own id, in its one low-s form, signed by W
