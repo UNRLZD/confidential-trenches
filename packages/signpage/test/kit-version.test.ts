@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { APP_ORIGIN, startApi, type ApiHost, type IncomingMessage } from "../src/api.ts";
 import * as NOW from "../../kit/src/signpage/schema.ts";
 import * as V14 from "./fixtures/kit-v1.4/signpage/schema.ts";
-import type { DepositStage, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
+import { SIGNPAGE_KIT_VERSION, type DepositStage, type SignpageState, type Stage } from "../../kit/src/signpage/messages.ts";
 
 const TAG_FILES = {
   "signpage/schema.ts": "6efa19805b2856212bdfbb2e3c5ae56ecd5ad24189553ced229ec3eea9415092",
@@ -53,6 +53,8 @@ const OPS = [
   dep("d-move", "refund_move", { refunded: true, held_id: "v.near", since_ms: 1 }),
   dep("d-move-transit", "in_transit", { refunded: true, since_ms: 1 }),
   dep("d-move-done", "done", { refunded: true, since_ms: 1, amount_usd: "9" }),
+  dep("d-move-vault", "into_vault", { refunded: true, since_ms: 1 }),
+  dep("d-move-held", "held", { refunded: true, held_id: "v.near", since_ms: 1 }),
   { id: "w", kind: "withdraw" as const, stage: "sent" as const, txs: tx },
   { id: "b", kind: "buy" as const, stage: "refused" as const, txs: [], code: "price_moved" },
   { id: "s", kind: "sell" as const, stage: "filled" as const, txs: tx },
@@ -60,13 +62,15 @@ const OPS = [
   { id: "r", kind: "return" as const, stage: "done" as const, txs: tx },
   { id: "x", kind: "restore" as const, stage: "reading" as const, txs: [] },
 ];
-/** What kit-v1.4 is sent of OPS, in order: each deposit's stage mapped, its facts left out; every other op as it is. */
-const OPS_V1_4 = [
-  ["d-quote", "quote_checked"], ["d-wait", "waiting"], ["d-transit", "in_transit"], ["d-vault", "into_vault"],
-  ["d-done", "done"], ["d-refunded", "refunded"], ["d-held", "held"], ["d-halted", "halted"],
-  ["d-failed", "halted"], ["d-short", "halted"], ["d-expired", "quote_checked"], ["d-move", "refunded"],
-  ["d-move-transit", "in_transit"], ["d-move-done", "done"],
-].map(([id, stage]) => ({ id, kind: "deposit", stage, txs: tx })).concat(OPS.slice(14) as never[]);
+/** What kit-v1.4 is sent of each deposit in OPS: its stage mapped (a refund's leg on its way read as refunded), its facts
+ *  left out; every other op as it is. */
+const DEPOSIT_V1_4: Record<string, string> = {
+  "d-quote": "quote_checked", "d-wait": "waiting", "d-transit": "in_transit", "d-vault": "into_vault",
+  "d-done": "done", "d-refunded": "refunded", "d-held": "held", "d-halted": "halted",
+  "d-failed": "in_transit", "d-short": "in_transit", "d-expired": "quote_checked", "d-move": "refunded",
+  "d-move-transit": "refunded", "d-move-done": "done", "d-move-vault": "refunded", "d-move-held": "held",
+};
+const OPS_V1_4 = OPS.map((o) => (o.kind === "deposit" ? { id: o.id, kind: "deposit", stage: DEPOSIT_V1_4[o.id], txs: o.txs } : o));
 
 const FULL: SignpageState = {
   release: "release-test",
@@ -92,7 +96,7 @@ const confirmOf = (address: string) => {
   return rest;
 };
 /** The deposit stages after kit-v1.4, and what kit-v1.4 reads for each. */
-const MAPPED: [DepositStage, string][] = [["failed", "halted"], ["short", "halted"], ["expired", "quote_checked"], ["refund_move", "refunded"]];
+const MAPPED: [DepositStage, string][] = [["failed", "in_transit"], ["short", "in_transit"], ["expired", "quote_checked"], ["refund_move", "refunded"]];
 
 /** A page on a fake parent whose state is FULL, deposit.confirm answered from OPS with a progress stage, and a change. */
 function page(opts: { readyOnLoad?: boolean } = {}) {
@@ -177,8 +181,21 @@ test("no hello: each later deposit stage maps to the one that tells where the mo
     assert.deepEqual(p.answer(cid).result, { stage: to }, `deposit.confirm at ${from}`);
     assert.deepEqual(p.posted.slice(before).find((m) => (m as { type?: string }).type === "progress"), { v: 1, type: "progress", id: cid, stage: to }, `progress ${from}`);
   }
-  // a refund move never reads as done while it moves; the refund's own legs keep their stage
+  // a refund move never reads as done while it moves
   assert.equal(ops.find((o) => o.id === "d-move")?.stage, "refunded");
+  // a failed or short deposit is 1Click's still: never halted, the held screen with a withdraw from an id it is not under
+  for (const id of ["d-failed", "d-short"]) assert.equal(ops.find((o) => o.id === id)?.stage, "in_transit", id);
+});
+
+test("no hello: a refund's later legs on their way read as refunded, never as a new deposit; where it landed keeps its stage", async () => {
+  const p = page();
+  const id = await p.ask();
+  const ops = (p.answer(id).result as unknown as SignpageState).ops;
+  for (const [op, want] of [["d-move-transit", "refunded"], ["d-move-vault", "refunded"], ["d-move-done", "done"], ["d-move-held", "held"], ["d-transit", "in_transit"], ["d-vault", "into_vault"]]) {
+    assert.equal(ops.find((o) => o.id === op)?.stage, want, `the op ${op}`);
+    const cid = await p.confirm(op!);
+    assert.deepEqual(p.answer(cid).result, { stage: want }, `deposit.confirm ${op}`);
+  }
 });
 
 test("no hello: a state event after a change passes kit-v1.4's schema; a change it cannot see posts no event", async () => {
@@ -250,6 +267,35 @@ test("a hello gets no answer; a later or higher version reads everything, an old
     const id = await p.ask();
     assert.deepEqual(p.answer(id).result, full ? FULL : FULL_V1_4, JSON.stringify(msg));
     if (!("id" in msg)) assert.equal(after, before, `${JSON.stringify(msg)}: no answer`);
+  }
+});
+
+test("in the shell's order (hello, a 1.5 answer, the next document's ready, a store change): no state event before that document's own answer", async () => {
+  const p = page({ readyOnLoad: true });
+  p.api.ready();
+  p.send(hello("1.5"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL);
+  p.api.ready();
+  p.set({ ...FULL, vault_balance: "99" });
+  await p.api.idle();
+  assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "state").length, 0, "no event in any shape to the new document before it asks");
+  p.send(hello("1.5"));
+  const id2 = await p.ask();
+  assert.deepEqual(p.answer(id2).result, { ...FULL, vault_balance: "99" });
+  p.set({ ...FULL, vault_balance: "100" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "100" } }], "events again after its answer, in its own shape");
+});
+
+test("the version the page reads every kit at from 1.5 on is the kit's own SIGNPAGE_KIT_VERSION", async () => {
+  const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
+  for (const [kit, full] of [[SIGNPAGE_KIT_VERSION, true], [`${major}.${minor - 1}`, false], [`${major}.${minor + 1}`, true]] as const) {
+    const p = page();
+    p.send(hello(kit));
+    const id = await p.ask();
+    assert.deepEqual(p.answer(id).result, full ? FULL : FULL_V1_4, kit);
   }
 });
 

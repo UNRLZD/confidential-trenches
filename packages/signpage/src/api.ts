@@ -359,10 +359,14 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const data = e.data;
     queue = queue.then(() => handle(data)).catch(() => {});
   });
-  // each ready starts a new app document, read as kit-v1.4 until its hello; in the queue, so a hello its document
-  // posted before is read first and the new one's after
+  // each ready starts a new app document, read as kit-v1.4 until its hello, and sent no state event before its own first
+  // `state` answer (its client asks one at once, after its hello); in the queue, so a hello its document posted before
+  // is read first and the new one's after
   const ready = (): void => {
-    queue = queue.then(() => void (level = KIT_DEFAULT));
+    queue = queue.then(() => {
+      level = KIT_DEFAULT;
+      sent = null;
+    });
     post({ v: 1, type: "ready", release: RELEASE, api: API });
   };
   if (!host.readyOnLoad) ready();

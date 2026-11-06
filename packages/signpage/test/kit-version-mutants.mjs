@@ -1,7 +1,7 @@
 // Weakens what the page sends a kit-v1.4 client (card kit-frame-version: src/kit-version.ts and its use in src/api.ts),
 // one mutant at a time, and runs test/kit-version.test.ts on each: it passes on the code as it is and fails on every
 // mutant. Each later deposit stage's mapping is mutated to every other kit-v1.4 stage, so a mapping that tells an older
-// app another place for its money (a refund move read as done, a failed deposit read as moving) is caught. A mutant is
+// app another place for its money (a refund move read as done, a failed deposit read as held) is caught. A mutant is
 // written to a copy of src/api.ts and src/kit-version.ts in packages/.kit-version-mutant-<pid>/src/ (the same depth, so
 // their ../../kit/src imports resolve), run by a copy of the test and its kit-v1.4 fixture beside it, all removed after,
 // so the sources are never changed and a test run beside the sweep never reads a mutant. Exits 1 when the test fails on
@@ -18,7 +18,7 @@ const FILES = { api: "src/api.ts", kit: "src/kit-version.ts" };
 const TEST = "test/kit-version.test.ts";
 
 const V1_4 = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted"];
-const MAPPED = { failed: "halted", short: "halted", expired: "quote_checked", refund_move: "refunded" };
+const MAPPED = { failed: "in_transit", short: "in_transit", expired: "quote_checked", refund_move: "refunded" };
 
 // [file, text, replacement]
 export const MUTANTS = [
@@ -31,7 +31,14 @@ export const MUTANTS = [
   ["kit", '  halted: "halted",', '  halted: "held",'],
   // a client with no hello read as current, and a version before 1.5 read as current
   ["kit", 'export const KIT_DEFAULT: KitLevel = "1.4";', 'export const KIT_DEFAULT: KitLevel = "current";'],
-  ["kit", "const CURRENT_FROM = [1, 5] as const;", "const CURRENT_FROM = [1, 4] as const;"],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 4] as [number, number];"],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 6] as [number, number];"],
+  // a refund's later leg read as a new deposit's, or a landed refund read as still moving
+  ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', "return stage;"],
+  ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', 'return d.refunded === true && stage === "in_transit" ? "refunded" : stage;'],
+  ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', 'return d.refunded === true ? "refunded" : stage;'],
+  // a new document sent events before its own first answer
+  ["api", "      sent = null;\n", ""],
   ["kit", "minor >= CURRENT_FROM[1]", "minor > CURRENT_FROM[1]"],
   ["kit", 'if (!v) return KIT_DEFAULT;', 'if (!v) return "current";'],
   // the hello's exact shape
@@ -43,8 +50,8 @@ export const MUTANTS = [
   ["kit", '"orders", "held", "ops"]);', '"orders", "held", "ops", "deposit_wallets"]);'],
   ["kit", 'out[k] = k === "ops" ? s.ops.map(opV1_4).filter((o) => o !== null) : s[k as keyof SignpageState];', "out[k] = s[k as keyof SignpageState];"],
   ['kit', 'if (V1_4_STATE_KEYS.has(k)) out[k]', 'if (k !== "pools") out[k]'],
-  ["kit", 'return { id: op.id, kind: "deposit", stage: V1_4_DEPOSIT_STAGE[op.stage], txs: op.txs };', 'return { ...op, stage: V1_4_DEPOSIT_STAGE[op.stage] };'],
-  ["kit", "if (kind === \"deposit.confirm\") return { stage: V1_4_DEPOSIT_STAGE[(result as { stage: DepositStage }).stage] };", "if (kind === \"deposit.confirm\") return { ...(result as object), stage: V1_4_DEPOSIT_STAGE[(result as { stage: DepositStage }).stage] };"],
+  ["kit", 'return stage === null ? null : { id: op.id, kind: "deposit", stage, txs: op.txs };', "return stage === null ? null : { ...op, stage };"],
+  ["kit", "return stage === null ? result : { stage };", "return stage === null ? result : { ...(result as object), stage };"],
   // an op it cannot read sent anyway
   ["kit", "!V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;", "false) return null;"],
   // a progress stage not mapped, a route event sent
@@ -52,7 +59,7 @@ export const MUTANTS = [
   ["api", 'if (!("stage" in msg)) return level === "current" ? msg : null;', 'if (!("stage" in msg)) return msg;'],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void (level = kitLevel(kit));", "if (kit !== null) return;"],
-  ["api", "    queue = queue.then(() => void (level = KIT_DEFAULT));\n", ""],
+  ["api", "      level = KIT_DEFAULT;\n", ""],
   ["api", "    post(answer, kind);", "    post(answer);"],
   ["api", "first.answer ? post(first.answer, first.kind)", "first.answer ? post(first.answer)"],
   ["api", "    sent = JSON.stringify(stateFor(level, s));", "    sent = JSON.stringify(s);"],
