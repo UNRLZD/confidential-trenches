@@ -1,8 +1,8 @@
 {
  "good": {
-  "note": "this card's SIGN_HOST build (packages/signpage/index.html and public/app.js at the card's branch) and the helper's live POST answer, read 2026-11-06T16:52:23.079Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-s6K6Yym9Y/YQOXlfvLMjV6hbFOGBRfa1EhfazAwTbKqE+NtUreGJtnUUuKK9/ROm\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-s6K6Yym9Y/YQOXlfvLMjV6hbFOGBRfa1EhfazAwTbKqE+NtUreGJtnUUuKK9/ROm",
+  "note": "this card's SIGN_HOST build (packages/signpage/index.html and public/app.js at the card's branch) and the helper's live POST answer, read 2026-11-06T18:35:25.825Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lyZE7+M/roEJz8KaN2xbItNVLhwwgcaSl+xxvS7h4aFM3svqU594YOk8K3X5fQXJ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-lyZE7+M/roEJz8KaN2xbItNVLhwwgcaSl+xxvS7h4aFM3svqU594YOk8K3X5fQXJ",
   "status_url": true,
   "lock": true,
   "helper": {
@@ -15,7 +15,7 @@
   }
  },
  "bad": {
-  "note": "SIGN_HOST as served before the card (read 2026-11-06T16:52:23.079Z) and the helper asked by GET, the device's first build's read, read 2026-11-06T16:52:23.079Z",
+  "note": "SIGN_HOST as served before the card (read 2026-11-06T18:35:25.825Z) and the helper asked by GET, the device's first build's read, read 2026-11-06T18:35:25.825Z",
   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "sha384": "sha384-WZEESmLR1IK+1UdhFfnR0VIN63auvdkZC+Lk6jsl7li6C19VR8OXEZmRkEJV03yB",
   "status_url": false,
