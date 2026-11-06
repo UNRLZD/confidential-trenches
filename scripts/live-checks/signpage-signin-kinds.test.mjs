@@ -17,7 +17,7 @@
 //   APP_HOST's frame-src 'none'; badLoadedReported (edited): SIGN_HOST loaded though a refusal was reported;
 //   badPressNeverLanded (edited): the early click never landed, which the old check read as ok.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -171,4 +171,17 @@ test("planted on the good answer: a recorded 429 names its resource's origin and
     assert.ok(r.lines.some((l) => l === `BAD no page error or CSP violation (1): ${want}`), r.lines.join("\n"));
     assert.ok(!r.lines.some((l) => l.includes("id=abc")), "no query in a line");
   }
+});
+
+test("every live check's harness serves SIGN_HOST as live does: a path with no file is the index, never a 404 (card sign-harness-like-live)", () => {
+  // live SIGN_HOST answers /favicon.ico, /_headers and any other path with no file 200 with its index.html (curl 6 Nov
+  // 13:20Z); a harness that answers 404 there reports a console error live never has
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const maps = [];
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".mjs") && !x.endsWith(".test.mjs"))) {
+    const text = readFileSync(path.join(dir, f), "utf8");
+    for (const m of text.matchAll(/startServer\(\{[^\n]*\bsites: \{([^\n]*)\} \}\)/g)) if (m[1].includes("[SIGN_HOST]")) maps.push([f, m[1]]);
+  }
+  assert.ok(maps.length >= 2, `the harness host maps: ${maps.map(([f]) => f).join(", ")}`);
+  for (const [f, m] of maps) assert.match(m, /\[SIGN_HOST\]: \{ root(?:: [\w.]+)?, spa: true \}/, `${f}: SIGN_HOST served without spa: true`);
 });
