@@ -2,7 +2,8 @@
 // RPCs) through the live check: the recorded good answers pass; the same recording with one thing changed fails: the
 // evm-sell-v4 delegate's code (the build before the exact-debit check) at the new address, one byte of the code
 // flipped, a record naming an address the build file froze to another build (the evm-sell-v4 one) or to no older
-// build (the current build, since pool review round 2 moved it on), and a kit pin naming another delegate;
+// build (the current build, since pool review round 2 moved it on) (the kit's pin moved on with card
+// evm-testnet-delegate-review3, whose check holds it);
 // and the runs through it: each run's recorded answers pass and its spoiled ones (a spent nullifier the pool never
 // marked) fail, a chain whose only runs stopped fails, and so does a run from before the redeploy.
 //   node --test scripts/live-checks/evm-selldelegate-exact-debit.test.mjs
@@ -29,8 +30,8 @@ function replay(answers) {
     return { ok: a.status === 200, status: a.status, json: async () => a.json };
   };
 }
-const run = (chain, answers = A.good[chain], d = A.deployments[chain], venues) =>
-  check({ deployment: d, fetchFn: replay(answers), rpcs: A.rpcs[chain], sleep: async () => {}, ...(venues ? { venues } : {}) });
+const run = (chain, answers = A.good[chain], d = A.deployments[chain]) =>
+  check({ deployment: d, fetchFn: replay(answers), rpcs: A.rpcs[chain], sleep: async () => {} });
 const del = (chain) => A.deployments[chain].contracts.SellDelegate.address;
 const isCode = (addr) => (a) => a.method === "eth_getCode" && lower(a.params[0]) === lower(addr);
 /** the chain's recording with every answer `pick(a)` selects changed by `f(a.json)`, on the first RPC only */
@@ -46,14 +47,13 @@ const fails = (r, re) => {
   assert.match(r.lines.filter((l) => l.startsWith("FAIL")).join("\n"), re);
 };
 
-test("the recorded good answers pass on both chains: the exact-debit build frozen to its address, at the kit's pin", async () => {
+test("the recorded good answers pass on both chains: the exact-debit build frozen to its address", async () => {
   assert.deepEqual(Object.keys(A.deployments).sort(), CHAIN_NAMES.slice().sort());
   for (const chain of CHAIN_NAMES) {
     const r = await run(chain);
     assert.equal(r.ok, true, r.lines.join("\n"));
     assert.ok(r.lines.some((l) => l.startsWith("ok   SellDelegate") && l.includes("code is the build pinned to it:")), chain);
     assert.ok(r.lines.some((l) => l.startsWith("ok   SellDelegate") && l.endsWith("is pinned to the exact-debit build the build file froze")), chain);
-    assert.ok(r.lines.some((l) => l.startsWith("ok   the kit pins SellDelegate")), chain);
   }
 });
 
@@ -72,15 +72,8 @@ test("a record naming another address fails: one the build file froze to the evm
   for (const at of [BUILD.frozen["SellDelegate.v4"].at[chain], "0x" + "ab".repeat(20)]) {
     const d = structuredClone(A.deployments[chain]);
     d.contracts.SellDelegate.address = at;
-    const r = await check({ deployment: d, fetchFn: async () => { throw new Error("no read"); }, rpcs: A.rpcs[chain], sleep: async () => {}, venues: { [chain]: { sellDelegate: at } } });
+    const r = await check({ deployment: d, fetchFn: async () => { throw new Error("no read"); }, rpcs: A.rpcs[chain], sleep: async () => {} });
     fails(r, /SellDelegate \S+ is pinned to the exact-debit build the build file froze/);
-  }
-});
-
-test("a kit pin naming another delegate fails", async () => {
-  for (const chain of CHAIN_NAMES) {
-    fails(await run(chain, undefined, undefined, { [chain]: { sellDelegate: "0x" + "ba".repeat(20) } }), /the kit pins SellDelegate/);
-    fails(await run(chain, undefined, undefined, {}), /the kit pins SellDelegate .*: none/);
   }
 });
 

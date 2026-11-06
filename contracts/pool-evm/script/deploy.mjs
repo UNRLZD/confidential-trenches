@@ -14,8 +14,9 @@
 //
 // --only SellDelegate (card evm-sell-v4) deploys the sell delegate alone, constructed with the chain's WETH and v4
 // PoolManager, with every step below the same (a fresh run key at nonce 0, so the delegate is CREATE(key, 0)); its
-// record goes to scripts/live-checks/evm-selldelegate-exact-debit.<chain>.json (or --out), and its live check is
-// evm-selldelegate-exact-debit.mjs (card evm-selldelegate-exact-debit's redeploy; evm-sell-v4's records keep theirs).
+// record goes to scripts/live-checks/evm-testnet-delegate-review3.<chain>.json (or --out), and its live check is
+// evm-testnet-delegate-review3.mjs (card evm-testnet-delegate-review3's redeploy at the pool-review-3 build;
+// evm-sell-v4's and evm-selldelegate-exact-debit's records keep theirs).
 // --only FeeCollector (card evm-fee-collector) deploys the fee collector alone, beside the chain's set (the testnets'
 // 3 Nov sets predate it; the mainnet sets end with it), constructed with its sink: the sell sender the kit pins for the
 // chain (evmPoolVenues() sellSender) as origin/main has it (sinkOf: a checkout whose KIT_PIN_FILE differs from main's
@@ -85,7 +86,7 @@
 //     counts). A sweep at a nonce with something pending (after a settle that ran out) is priced the same way. Then the sweep: the key's balance, less the transfer's fee bound (the L1 fee bound
 //     read on each pass, doubled), goes to --return, again while what is left is more than two such bounds; a failed
 //     pass is retried with backoff over WAITS.sweep. Every hash is printed.
-//  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, evm-selldelegate-exact-debit.<chain>.json with
+//  7. Writes the deployment record (scripts/live-checks/pool-evm-deploy.<chain>.json, evm-testnet-delegate-review3.<chain>.json with
 //     --only SellDelegate, or --out) with every
 //     transaction that landed, in nonce order, and prints the live check to run next.
 import "../../../scripts/net-window.mjs";
@@ -117,10 +118,10 @@ const argsOf = (name, chain, addrs, sink) => ({
   FeeCollector: [sink],
 })[name];
 // The contracts a run may deploy alone (--only): the sell delegate, whose constructor needs no other contract of the run
-// (card evm-selldelegate-exact-debit; evm-sell-v4's records stay under their own key)
+// (card evm-testnet-delegate-review3; evm-sell-v4's and evm-selldelegate-exact-debit's records stay under their own keys)
 // The fee collector (card evm-fee-collector) is deployed alone beside a testnet's set (`beside`): its constructor takes
 // only the chain's sell sender, and the testnets' sets were deployed before it existed (the mainnet sets hold it)
-export const ALONE = Object.freeze({ SellDelegate: { key: "evm-selldelegate-exact-debit" }, FeeCollector: { key: "evm-fee-collector", beside: true } });
+export const ALONE = Object.freeze({ SellDelegate: { key: "evm-testnet-delegate-review3" }, FeeCollector: { key: "evm-fee-collector", beside: true } });
 // Every contract the build file pins: the chain sets' (ORDER), then those deployed only beside them
 export const BUILT = Object.freeze([...ORDER, ...Object.keys(ALONE).filter((n) => !ORDER.includes(n))]);
 // The kit's file whose evmPoolVenues() holds each chain's sell sender pin; it imports no other file of the kit's, so

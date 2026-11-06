@@ -324,7 +324,7 @@ test("--only SellDelegate deploys the delegate alone at nonce 0, constructed wit
   assert.deepEqual(r.record.txs.map((x) => x.step), ["deploy SellDelegate", "sweep (the run key's rest back)"]);
   const word = (a) => a.slice(2).padStart(64, "0");
   assert.deepEqual(c.created, [init("SellDelegate") + word(CHAINS["base-sepolia"].weth.address) + word(CHAINS["base-sepolia"].poolManager.address)]);
-  assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-selldelegate-exact-debit\.mjs --deployment /.test(l)), why(c));
+  assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-testnet-delegate-review3\.mjs --deployment /.test(l)), why(c));
 });
 
 // git as sinkOf runs it, faked: origin/main fetched and present, and the checkout's kit sell-sender file the same as

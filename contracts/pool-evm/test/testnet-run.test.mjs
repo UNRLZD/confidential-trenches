@@ -225,18 +225,15 @@ test("main takes its fee providers, its bind seconds and the device's arguments 
   assert.doesNotMatch(body, /\b(feeProviders|bindEpoch|evmPool)\(|bindFromS|--rpc"|--bind-from-s"/, "no second source of the fee's providers, the bind seconds or the device");
 });
 
-test("--sell-fee-to names each sell's fee recipient (card evm-fee-collector): lowercased, and refused when zero, not an address, or with --sell-helper", () => {
+test("every sell signs the chain's FeeCollector, the kit's feeCollector pin, as its fee recipient, never the helper's fee answer; --sell-fee-to is gone (card evm-testnet-delegate-review3)", () => {
   const base = ["--chain", "base-sepolia", "--return", "0x00000000000000000000000000000000000a11ce"];
   const io = { fetchFn: async () => new Response("{}"), sleep: async () => {} };
-  assert.equal(run.wiringOf(base, io).sellFeeTo, undefined, "none named: the run key, as before");
-  assert.equal(run.wiringOf([...base, "--sell-fee-to", "0x00000000000000000000000000000000000FEE01"], io).sellFeeTo, "0x00000000000000000000000000000000000fee01");
-  for (const bad of [["--sell-fee-to", "0x0000000000000000000000000000000000000000"], ["--sell-fee-to", "0x1234"], ["--sell-fee-to"], ["--sell-fee-to", "0x00000000000000000000000000000000000fee01", "--sell-helper", "https://h.example"]]) {
-    assert.throws(() => run.wiringOf([...base, ...bad], io), /--sell-fee-to: a non-zero address, and not with --sell-helper/, bad.join(" "));
-  }
-  // the sell signs it, and its row names it
-  assert.match(RUN, /: \(sellFeeTo \?\? relayer\);\n/);
+  assert.equal(run.wiringOf(base, io).sellFeeTo, undefined);
+  assert.doesNotMatch(RUN, /--sell-fee-to|sellFeeTo|fee_recipient\)/);
+  assert.doesNotMatch(RUN, /\/v1\/pool\/fee\?pool=/, "the run reads no fee recipient from the helper");
+  assert.match(RUN, /const feeTo = lower\(kit\.evmPoolVenues\(\)\[chain\]\.feeCollector \?\? ""\);\n/);
   assert.match(RUN, /kit\.evmPoolBuildSell\(q, \{ feeRecipient: feeTo,/);
-  assert.match(RUN, /\.\.\.\(sellFeeTo \? \{ feeTo \} : \{\}\)/);
+  assert.match(RUN, /coin: token, feeTo \};/);
 });
 
 test("the run's restore reads each W's Transfers on the wallet's own EVM_TRANSFER_RPCS, never a provider of the run's pool pair: one in both lists is dropped from the W reads, two or more left (cards wallet-restore-transfer-rpcs, evm-transfer-rpc-spares)", async () => {
