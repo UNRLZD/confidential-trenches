@@ -245,7 +245,7 @@ test("card helper-token-page-cold: callers ahead of refreshes: a refresh leaves 
 test("card helper-token-page-cold: page searches at their limit leave a swap build's call unblocked (the real proxy and its budget)", async (t) => {
   clock(t);
   const searches: number[] = [];
-  const proxy = createProxy({}, {
+  const proxy = createProxy({}, { burstMs: 0,
     now: () => Date.now(),
     fetch: (async (url: string) => {
       const u = new URL(url);

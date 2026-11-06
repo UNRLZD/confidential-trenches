@@ -86,7 +86,7 @@ function fakeGecko(opts: { status?: number; headers?: Record<string, string> } =
 
 test("fold 6 (R5c): Jupiter's batched search draws on the helper's own reserve, so a page is served with every caller's part of Jupiter spent", async () => {
   const searched: string[] = [];
-  const proxy = createProxy({}, {
+  const proxy = createProxy({}, { burstMs: 0,
     now: () => NOW,
     sleep: async () => {}, // the clock is frozen: a refused build's bounded queue wait ends on its rounds, not 3 s of real time
     fetch: (async (url: string) => {

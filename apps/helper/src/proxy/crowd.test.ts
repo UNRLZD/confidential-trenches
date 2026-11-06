@@ -33,12 +33,21 @@ function jupiterFree() {
   return { fetch, clock, stats: () => ({ throttled, peak }) };
 }
 
-test("card helper-crowd-429: one device's 8 builds inside 10 s (two trades back to back) are all served while Jupiter's budget sits idle", async () => {
+// card helper-page-jup-429: Jupiter Free counts 10 sends in any 10 s (proxy.ts PACED), and a device past its share
+// leaves a share of them to the other devices (fold 4), so its second trade inside the same 10 s waits for the window:
+// a 503 naming the seconds, nothing sent, then served (the kit waits a Retry-After out)
+test("card helper-crowd-429: one device's 8 builds inside 10 s (two trades back to back): its share and one more at once, the rest served once the window has room, never a 429", async () => {
   const j = jupiterFree();
   const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: j.clock.sleep });
   const answers = [];
   for (let i = 0; i < 8; i++) {
-    answers.push(await p.handle("jupiter", BUILD, `n=${i}`, "", "198.51.100.7"));
+    let a = await p.handle("jupiter", BUILD, `n=${i}`, "", "198.51.100.7");
+    if (a.status === 503) {
+      assert.ok(Number(a.headers["Retry-After"]) >= 1 && /cause;desc="budget"/.test(String(a.timing)), `${a.why} ${a.timing}`);
+      j.clock.add(Number(a.headers["Retry-After"]) * 1000);
+      a = await p.handle("jupiter", BUILD, `n=${i}`, "", "198.51.100.7");
+    }
+    answers.push(a);
     j.clock.add(1_100); // one build a second, as solana-jupiter-build and a device's retries go
   }
   assert.deepEqual(answers.map((a) => a.status), Array(8).fill(200), answers.map((a) => `${a.status} ${a.why ?? ""}`).join(", "));
@@ -98,8 +107,8 @@ test("card helper-crowd-429 fold 3: two heavy devices drawing Jupiter as fast as
       if (ms < from || (ms - from) % 60_000 >= 4 * 200) continue;
       const p0 = polls;
       const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
-      // card helper-page-jup-429: Jupiter's calls go one a second (proxy.ts PACED), so a build beside a heavy device's
-      // waits its one turn (one sleep here, the still clock); any wait past it is the budget's queue
+      // card helper-page-jup-429: a build beside a heavy device's goes at once in the window (proxy.ts PACED), at most one
+      // sleep here (the still clock); any wait past it is the budget's queue
       if (a.status !== 200 || polls - p0 > 1) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
     }
     j.clock.add(200);
@@ -127,8 +136,8 @@ test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as 
       if (ms < from || (ms - from) % every >= 4 * 200 || (every === Infinity && ms - from >= 4 * 200)) continue;
       const p0 = polls;
       const a = await p.handle("jupiter", BUILD, `l=${ip}-${ms}`, "", ip);
-      // card helper-page-jup-429: Jupiter's calls go one a second (proxy.ts PACED), so a build beside a heavy device's
-      // waits its one turn (one sleep here, the still clock); any wait past it is the budget's queue
+      // card helper-page-jup-429: a build beside a heavy device's goes at once in the window (proxy.ts PACED), at most one
+      // sleep here (the still clock); any wait past it is the budget's queue
       if (a.status !== 200 || polls - p0 > 1) refused.push(`${ip} at ${ms} ms: ${a.status} ${a.why ?? ""} after ${polls - p0} queue polls`);
     }
     j.clock.add(200);

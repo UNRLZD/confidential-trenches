@@ -229,7 +229,7 @@ test("each vendor is one budget callers draw from fairly: a heavy caller is lent
   const c = clock();
   const f = vendor(() => json({ ok: 1 }));
   // a refused caller's wait (card helper-crowd-429) passes no time here
-  const p = createProxy({ ...ENV, ...WIDE }, { fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: async () => {} });
+  const p = createProxy({ ...ENV, ...WIDE }, { burstMs: 0, fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: async () => {} });
   // past its share the heavy caller is lent from the idle total (lend) while a share stays free for the next caller
   const part = PROXY_VENDOR_MAX - PROXY_BUDGETS.jupiter!.reserve!;
   const lent = part - LEND_NEW_SHARES * PROXY_CLIENT_MAX; // fold 4: three shares stay free for callers not seen yet
@@ -277,7 +277,7 @@ test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per cli
   assert.throws(() => createProxy({ PROXY_BUDGET_LIFI: "secret-ish" }), (e: Error) => !e.message.includes("secret-ish"));
   let t = 1_800_000_000_000;
   const f = vendor(() => json({ ok: 1 }));
-  const p = createProxy({ PROXY_BUDGET_RELAY: "3,2" }, { fetch: f.fetch, now: () => (t += 1), sleep: async () => {} });
+  const p = createProxy({ PROXY_BUDGET_RELAY: "3,2" }, { burstMs: 0, fetch: f.fetch, now: () => (t += 1), sleep: async () => {} });
   for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "a");
   assert.equal(f.seen.length, 2, "the share from the environment");
   for (let i = 0; i < 3; i++) await p.handle("relay", "/quote/v2", "", "{}", "b");
@@ -303,7 +303,7 @@ test("review F-D (proxy): at each vendor's published limit, no set of callers ca
       calls.push(t);
       return json({ ok: 1 });
     };
-    const p = createProxy(env, { fetch: f, now: () => (t += 1), sleep: async () => {} });
+    const p = createProxy(env, { burstMs: 0, fetch: f, now: () => (t += 1), sleep: async () => {} });
     const path = { jupiter: "/swap/v2/build", relay: "/quote/v2", lifi: "/v1/quote", oneclick: "/v0/quote" }[v];
     const body = v === "relay" || v === "oneclick" ? "{}" : "";
     // the helper's own Jupiter reads (search at most 15 a minute, Discover's lists 15), here 5, drawn from its reserve
@@ -376,7 +376,7 @@ test("re-check F-D (sustained): at Jupiter Free's 60 a sliding minute, the helpe
 test("fold 5: the own-read reserve holds at any plan: a Developer key's 600 leaves callers 566 and the helper's own reads their 34; at Free 26 and 34", async () => {
   for (const [env, total] of [[{ PROXY_BUDGET_JUPITER: "600,4" }, 600], [{}, 60]] as const) {
     const f = vendor(() => json({ ok: 1 }));
-    const p = createProxy(env, { fetch: f.fetch, now: () => 1_800_000_000_000, sleep: async () => {} });
+    const p = createProxy(env, { burstMs: 0, fetch: f.fetch, now: () => 1_800_000_000_000, sleep: async () => {} });
     let callers = 0;
     for (let a = 0; a < 200; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
     assert.equal(callers, total - 34, `callers' part at ${total}`);
@@ -404,7 +404,7 @@ test("re-check F-D: a call joining one in flight reaches no vendor, so it draws 
   let release!: () => void;
   const gate = new Promise<void>((ok) => (release = ok));
   const f = vendor(async () => (await gate, json({ list: [] })));
-  const p = createProxy({ PROXY_BUDGET_JUPITER: "36,1" }, { fetch: f.fetch, now: c.now, sleep: c.sleep }); // callers' part: 36 - 34 = 2
+  const p = createProxy({ PROXY_BUDGET_JUPITER: "36,1" }, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: c.sleep }); // callers' part: 36 - 34 = 2
   const a = p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", "a");
   const b = p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", "b");
   release();
@@ -418,7 +418,7 @@ test("fold 6 (R5h): a reserved own read's retry after a vendor's short reset sti
   const c = clock();
   const f = vendor((_c, n) => (n === 27 ? json({ e: "slow" }, 429, { "retry-after": "0" }) : json({ ok: 1 })));
   // a refused caller's wait (card helper-crowd-429) passes no time here, so the callers' part stays full
-  const p = createProxy({}, { fetch: f.fetch, now: c.now, sleep: async (ms) => (ms === QUEUE_POLL_MS ? undefined : c.sleep(ms)) });
+  const p = createProxy({}, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: async (ms) => (ms === QUEUE_POLL_MS ? undefined : c.sleep(ms)) });
   let callers = 0;
   for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await p.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
   assert.equal(callers, 60 - 34, "the callers' part is full");
@@ -450,7 +450,7 @@ test("reset headers: seconds, an epoch in s or ms, an HTTP date; none means 1 s"
 test("cache: a public list is read once per TTL and shared, with its first X-Fetched-At; a quote never", async () => {
   const c = clock();
   const f = vendor((_, n) => json([{ n }]));
-  const p = createProxy(ENV, { fetch: f.fetch, now: c.now });
+  const p = createProxy(ENV, { burstMs: 0, fetch: f.fetch, now: c.now });
   const a = await p.handle("oneclick", "/v0/tokens", "", "");
   c.add(4_000);
   const b = await p.handle("oneclick", "/v0/tokens", "", "");
@@ -516,7 +516,7 @@ test("card helper-crowd-429 fold 6: identical GETs in flight share one vendor ca
 test("a caller inside its share meets a vendor's total with no room: 503 upstream with a Retry-After of the seconds to its room", async () => {
   const c = clock();
   const f = vendor(() => json({ ok: 1 }));
-  const p = createProxy({ ...ENV, PROXY_BUDGET_JUPITER: "40,4" }, { fetch: f.fetch, now: c.now, sleep: async (ms: number) => c.add(ms) });
+  const p = createProxy({ ...ENV, PROXY_BUDGET_JUPITER: "40,4" }, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: async (ms: number) => c.add(ms) });
   // the callers' part is 40 - 34 = 6: three callers draw two each, inside their shares
   for (const who of ["a", "b", "c"]) for (let i = 0; i < 2; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${who}${i}`, "", who)).status, 200, `${who} ${i}`);
   const d = await p.handle("jupiter", "/swap/v2/build", "n=d", "", "d");
@@ -592,10 +592,10 @@ test("card helper-page-jup-429: a draw the vendor's total refuses past the wait 
   assert.deepEqual([b.status, causeIn(b)], [503, "budget"]);
 });
 
-// card helper-page-jup-429 (pacing): Jupiter Free is one call a second (owner decision "Stay on Free"); at c1525df5 a
-// call with nothing to wait for went at once, so the lists' three reads, a page's search and a build in one second drew
-// Jupiter's 429 and a 1-4 s reset that held a cold page (live run 42137763380). Every Jupiter call now takes a turn, one
-// a second, callers ahead of the helper's background reads.
+// card helper-page-jup-429 (window): Jupiter's limiter counts a 10 s window that takes a burst (keyless: 5 at once, its
+// reset 10 s after them; Free's resets 1 and 4 s ahead, live run 41943005189), so Free is 10 in any 10 s. At da57ecaa
+// every call went one a second, and a crowd's burst queued a cold page behind it (live run 42155164828: jup-turn 1915 ms
+// behind six legs' builds). A burst now goes at once while the window has room; devices keep to their part of it.
 /** Virtual time (as legs-wait.test.ts): sleep parks until the clock reaches it; run() moves the clock to the next timer
  *  whenever every task is parked, so a call granted a turn sends before the next turn's wait begins. */
 function virtualTime(t0 = 1_800_000_000_000) {
@@ -618,62 +618,115 @@ function virtualTime(t0 = 1_800_000_000_000) {
   }
   return { now: () => t, sleep, run };
 }
-/** A fake Jupiter Free that answers 429 to a call within 1 s of the one before, and keeps each call's time and path. */
-function onePerSecond(c: { now: () => number }) {
+/** A fake Jupiter with the limiter read live: at most `cap` calls in any `ms`, a 429 past it naming x-ratelimit-reset
+ *  (epoch seconds, the oldest call's age-out), the 429 not counted; it keeps each call's time and path. */
+function windowJupiter(c: { now: () => number }, cap = 10, ms = 10_000) {
   const sent: { at: number; path: string; q: string }[] = [];
   let refused = 0;
   const fetch = async (url: string) => {
     const u = new URL(url);
-    const last = sent.at(-1);
+    const inside = sent.filter((x) => x.at > c.now() - ms);
+    if (inside.length >= cap) return (refused++, json({ e: "slow" }, 429, { "x-ratelimit-reset": String(Math.ceil((inside[0]!.at + ms) / 1000)) }));
     sent.push({ at: c.now(), path: u.pathname, q: u.search });
-    if (last !== undefined && c.now() - last.at < 1_000) return (refused++, json({ e: "slow" }, 429, { "retry-after": "4" }));
     return json([]);
   };
   return { fetch, sent, refused: () => refused };
 }
-test("card helper-page-jup-429 (a): a list refresh and a page search asked in the same second send Jupiter one call that second, the search first", async () => {
+const search = (p: ReturnType<typeof createProxy>, q: string, waitMs = 5_000) => p.handle("jupiter", "/tokens/v2/search", `query=${q}`, "", undefined, true, waitMs, true);
+const listRead = (p: ReturnType<typeof createProxy>, path: string, waitMs?: number) => p.handle("jupiter", path, "limit=100", "", undefined, true, waitMs);
+test("card helper-page-jup-429 (a): a list refresh and a page search asked at once both go at once while the window has room; with the window full, the search goes first", async () => {
   const c = virtualTime();
-  const j = onePerSecond(c);
-  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep });
-  assert.equal((await c.run(p.handle("jupiter", "/tokens/v2/toptrending/1h", "limit=100", "", undefined, true))).status, 200, "a list read just went");
-  const t0 = j.sent[0]!.at;
-  const [list, search] = await c.run(Promise.all([
-    p.handle("jupiter", "/tokens/v2/recent", "limit=100", "", undefined, true),
-    p.handle("jupiter", "/tokens/v2/search", "query=a", "", undefined, true, 5_000, true),
-  ]));
-  assert.deepEqual([list.status, search.status, j.refused()], [200, 200, 0], JSON.stringify(j.sent.map((s) => [s.path, s.at - t0])) + list.timing + search.timing);
-  assert.deepEqual(j.sent.map((s) => [s.path, s.at - t0]), [["/tokens/v2/toptrending/1h", 0], ["/tokens/v2/search", 1_000], ["/tokens/v2/recent", 2_000]], "one a second, the caller's search ahead of the list");
-});
-test("card helper-page-jup-429 (b): a burst of 5 caller builds goes in order, one a second, with no 429; past the wait a build is refused before it draws, naming its turn", async () => {
-  const c = virtualTime();
-  const j = onePerSecond(c);
-  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep });
-  const all = await c.run(Promise.all([0, 1, 2, 3, 4].map((i) => p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", `198.51.100.${i}`, false, 5_000))));
-  assert.deepEqual(all.map((a) => a.status), [200, 200, 200, 200, 200]);
-  assert.equal(j.refused(), 0, "Jupiter never answered 429");
-  assert.deepEqual(j.sent.map((s) => s.q), ["?n=0", "?n=1", "?n=2", "?n=3", "?n=4"], "in order");
-  assert.deepEqual(j.sent.slice(1).map((s, i) => s.at - j.sent[i]!.at), [1_000, 1_000, 1_000, 1_000]);
-  // the device route's own wait (QUEUE_WAIT_MS 3 s): the turns past it answer 503 naming the turn's seconds, and send nothing
+  const j = windowJupiter(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
+  const t0 = c.now();
+  const [list, page] = await c.run(Promise.all([listRead(p, "/tokens/v2/recent"), search(p, "a")]));
+  assert.deepEqual([list.status, page.status, j.refused()], [200, 200, 0]);
+  assert.deepEqual(j.sent.map((s) => s.at - t0), [0, 0], "both at once: no turn to wait");
+  // the window full of the helper's own reads: the page's search and a list both wait for it, the search first
   const c2 = virtualTime();
-  const k = onePerSecond(c2);
-  const q = createProxy(ENV, { fetch: k.fetch, now: c2.now, sleep: c2.sleep });
-  const some = await c2.run(Promise.all([0, 1, 2, 3, 4, 5].map((i) => q.handle("jupiter", "/swap/v2/build", `n=${i}`, "", `198.51.100.${i}`))));
-  const late = some.filter((a) => a.status === 503);
-  assert.ok(late.length > 0 && late.every((a) => causeIn(a) === "budget" && Number(a.headers["Retry-After"]) >= 1), some.map((a) => `${a.status} ${a.timing}`).join(" | "));
-  assert.equal(k.sent.length, some.filter((a) => a.status === 200).length, "a refused turn sent nothing");
-  assert.equal(k.refused(), 0);
+  const k = windowJupiter(c2);
+  const q = createProxy(ENV, { fetch: k.fetch, now: c2.now, sleep: c2.sleep, log: () => {} });
+  const t1 = c2.now();
+  await c2.run(Promise.all(Array.from({ length: 10 }, (_, n) => search(q, `fill${n}`, 15_000).then(() => undefined, () => undefined)).concat([])));
+  const [l2, s2] = await c2.run(Promise.all([listRead(q, "/tokens/v2/recent", 15_000), search(q, "b", 15_000)]));
+  assert.deepEqual([l2.status, s2.status, k.refused()], [200, 200, 0]);
+  assert.deepEqual(k.sent.slice(10).map((s) => [s.path, s.q, s.at - t1]), [["/tokens/v2/search", "?query=b", 10_000], ["/tokens/v2/recent", "?limit=100", 10_000]], "the page's search first, as the window frees");
 });
-test("card helper-page-jup-429 (c): a background read never delays a caller past one turn, and the background reads still go", async () => {
+test("card helper-page-jup-429 (b): six builds at once (one device's legs) go in order with no 429: its share and one more at once, the rest as the window frees; past the wait refused before any draw", async () => {
   const c = virtualTime();
-  const j = onePerSecond(c);
-  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep });
-  const bg = ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"].map((l) => p.handle("jupiter", l, "limit=100", "", undefined, true));
-  const caller = p.handle("jupiter", "/swap/v2/build", "n=device", "", "198.51.100.9");
-  const answers = await c.run(Promise.all([...bg, caller]));
-  assert.deepEqual(answers.map((a) => a.status), [200, 200, 200, 200]);
+  const j = windowJupiter(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
+  const t0 = c.now();
+  const all = await c.run(Promise.all([0, 1, 2, 3, 4, 5].map((i) => p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "198.51.100.1", false, 15_000))));
+  assert.deepEqual(all.map((a) => a.status), [200, 200, 200, 200, 200, 200]);
+  assert.equal(j.refused(), 0, "Jupiter never answered 429");
+  assert.deepEqual(j.sent.map((s) => s.q), ["?n=0", "?n=1", "?n=2", "?n=3", "?n=4", "?n=5"], "in order");
+  assert.deepEqual(j.sent.map((s) => s.at - t0), [0, 0, 0, 0, 0, 10_000], "Free's 10 in 10 s: past its share (4) a device leaves the others a share and the pages one");
+  // the device route's own wait (QUEUE_WAIT_MS 3 s): the builds past it answer 503 naming the wait, and send nothing
+  const c2 = virtualTime();
+  const k = windowJupiter(c2);
+  const q = createProxy(ENV, { fetch: k.fetch, now: c2.now, sleep: c2.sleep, log: () => {} });
+  const some = await c2.run(Promise.all([0, 1, 2, 3, 4, 5].map((i) => q.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "198.51.100.1"))));
+  assert.deepEqual(some.map((a) => a.status), [200, 200, 200, 200, 200, 503]);
+  const late = some[5]!;
+  assert.ok(causeIn(late) === "budget" && Number(late.headers["Retry-After"]) >= 1, `${late.timing} ${JSON.stringify(late.headers)}`);
+  assert.equal(k.sent.length, 5, "a refused turn sent nothing");
+});
+test("card helper-page-jup-429 (c): a crowd of builds never holds a page, and the background reads still go (fold 5)", async () => {
+  const c = virtualTime();
+  const j = windowJupiter(c);
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: () => {} });
+  const t0 = c.now();
+  const builds = Array.from({ length: 12 }, (_, i) => p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", `198.51.100.${i}`, false, 30_000));
+  const lists = ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"].map((l) => listRead(p, l));
+  const page = search(p, "cold");
+  const answers = await c.run(Promise.all([...builds, ...lists, page]));
+  assert.ok(answers.every((a) => a.status === 200), answers.map((a) => `${a.status} ${a.why ?? ""} ${a.timing ?? ""}`).join(" | "));
   assert.equal(j.refused(), 0);
-  const order = j.sent.map((s) => s.path);
-  assert.deepEqual(order, ["/tokens/v2/recent", "/swap/v2/build", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"], "the caller's build ahead of the two queued lists");
-  const at = (path: string) => j.sent.find((s) => s.path === path)!.at;
-  assert.ok(at("/swap/v2/build") - at("/tokens/v2/recent") <= 1_000, "one turn behind the list already out, no more");
+  const at = (q: string) => j.sent.find((s) => s.q === q)!.at - t0;
+  assert.equal(at("?query=cold"), 0, "the page's search at once, past the builds queued");
+  for (const l of ["/tokens/v2/recent", "/tokens/v2/toptrending/5m", "/tokens/v2/toptrending/1h"]) assert.ok(j.sent.find((s) => s.path === l)!.at - t0 <= 10_000, `${l} inside its wait`);
+  assert.deepEqual(j.sent.filter((s) => s.path === "/swap/v2/build").map((s) => s.q), Array.from({ length: 12 }, (_, i) => `?n=${i}`), "the builds in order");
+  assert.ok(j.sent.filter((s) => s.path === "/swap/v2/build" && s.at === t0).length <= 9, "the builds leave the window's last send to a page");
+});
+// live run 42155164828 (03:13Z, da57ecaa), the seconds the cold page waited: six legs' builds at once
+// (solana-legs-share-wait), a build of solana-jupiter-build, helper-token-page-cold's pair of cold searches, a list
+// refresh, then helper-page-jup-429's build, then its cold page: at da57ecaa the page's jup-turn was 1915 ms
+test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, two cold pages, a list) never holds a cold page past 1000 ms, Jupiter never 429s, and each send logs its turn", async () => {
+  const c = virtualTime();
+  const j = windowJupiter(c);
+  const lines: string[] = [];
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: (l) => lines.push(l) });
+  const t0 = c.now();
+  const at = (ms: number) => c.sleep(ms);
+  const legs = [0, 1, 2, 3, 4, 5].map((i) => p.handle("jupiter", "/swap/v2/build", `leg=${i}`, "", "198.51.100.1"));
+  const other = p.handle("jupiter", "/swap/v2/build", "check=build", "", "198.51.100.2");
+  const pair = [search(p, "pairA"), search(p, "pairB")];
+  const list = listRead(p, "/tokens/v2/recent");
+  const later = at(1_200).then(() => p.handle("jupiter", "/swap/v2/build", "check=page", "", "198.51.100.3"));
+  let asked = 0;
+  const page = at(2_400).then(() => ((asked = c.now()), search(p, "thepage")));
+  const answers = await c.run(Promise.all([...legs, other, ...pair, list, later, page]));
+  assert.equal(j.refused(), 0, "Jupiter never answered 429");
+  for (const a of answers) assert.ok(a.status === 200 || (a.status === 503 && causeIn(a) === "budget" && Number(a.headers["Retry-After"]) >= 1), `${a.status} ${a.timing}`);
+  const sentAt = j.sent.find((s) => s.q === "?query=thepage")!.at;
+  assert.ok(sentAt - asked < 1_000, `the cold page's search waited ${sentAt - asked} ms (at most 1000)`);
+  assert.equal((await page).status, 200);
+  assert.ok(j.sent.filter((s) => s.at > sentAt - 10_000 && s.at <= sentAt).length <= 10, "the window held");
+  // one line a send: the lane, the wait, the window, the answer; never a path, query or client
+  assert.equal(lines.length, j.sent.length);
+  assert.ok(lines.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), lines.join("\n"));
+  assert.ok(lines.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  void t0;
+});
+test("card helper-page-jup-429: a turn's log line keeps only whole numbers of the vendor's own count (hostile headers)", async () => {
+  const lines: string[] = [];
+  const t = 1_800_000_000_000;
+  const f = async () => json([], 200, { "x-ratelimit-remaining": "7", "x-ratelimit-reset": String(t / 1000 + 4) });
+  const p = createProxy(ENV, { fetch: f, now: () => t, sleep: async () => {}, log: (l) => lines.push(l) });
+  await search(p, "x");
+  const g = async () => json([], 200, { "x-ratelimit-remaining": "7; drop", "x-ratelimit-reset": "soon helper: forged" });
+  const q = createProxy(ENV, { fetch: g, now: () => t, sleep: async () => {}, log: (l) => lines.push(l) });
+  await search(q, "y");
+  assert.deepEqual(lines, ["jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 0 ms, vendor remaining 7, reset in 4 s", "jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 0 ms"]);
 });
