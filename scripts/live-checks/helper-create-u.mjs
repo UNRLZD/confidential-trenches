@@ -20,7 +20,9 @@
 // joins scripts/ci/helper-live-checks.mjs only once mainnet deposits are carried (card vault-mainnet-deploy).
 // The creation itself is proven by a real mainnet deposit, and its record goes in helper-create-u.md.
 //   node scripts/live-checks/helper-create-u.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
+// Runs: pending vault-mainnet-deploy, it refuses (exit 2) on every helper until mainnet deposits are carried, so a list would undo each deploy
 import "../net-window.mjs";
+import { operatorOf } from "../ci/near-rpc-operators.mjs";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
@@ -38,7 +40,6 @@ export const MIN_DEPOSIT = 1_000_000n;
 export const BIND_RELAYER_MAINNET = null;
 /** Two operators: FastNEAR and dRPC. */
 export const RPCS = ["https://free.rpc.fastnear.com", "https://near.drpc.org"];
-const OPERATOR = { "free.rpc.fastnear.com": "fastnear", "archival-rpc.mainnet.fastnear.com": "fastnear", "archival-rpc.testnet.fastnear.com": "fastnear", "archival-rpc.testnet.near.org": "fastnear", "near.drpc.org": "drpc" };
 /** Between the proxy's answer and the after reads: the hook runs at once, a Transfer is final within a few seconds. */
 export const WAIT_MS = 15_000;
 const SHA = /^[0-9a-f]{40}$/;
@@ -162,7 +163,7 @@ export function judge(run) {
   say(body?.status === "SUCCESS" && body?.quoteResponse?.quote?.depositAddress === ADDRESS && req?.recipient === RECIPIENT && req?.destinationAsset === `nep141:${USDC}`, `proxy: SUCCESS for ${ADDRESS.slice(0, 8)}… to ${RECIPIENT.slice(0, 8)}… on USDC (${body?.status ?? "no body"})`);
   for (const [name, side] of [["before", run.before], ["after", run.after]]) {
     const reads = side?.reads ?? [];
-    const ops = new Set(reads.map((s) => OPERATOR[new URL(s.url).host] ?? s.url));
+    const ops = new Set(reads.map((s) => operatorOf(s.url) ?? s.url));
     say(reads.length === 2 && ops.size === 2, `${name}: two operators (${[...ops].join(", ")})`);
     say(reads.length === 2 && reads[0].height === reads[1].height && reads[0].hash !== null && reads[0].hash === reads[1].hash, `${name}: one block on both (${reads.map((s) => `${s.height} ${s.hash}`).join(" / ")})`);
     say(reads.length === 2 && same(reads[0].recipient, reads[1].recipient) && same(reads[0].nonces, reads[1].nonces), `${name}: both providers read the same`);
