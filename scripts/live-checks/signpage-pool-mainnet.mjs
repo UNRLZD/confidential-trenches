@@ -105,8 +105,9 @@ function serveDir(dir) {
   const h = headersOf(readFileSync(path.join(dir, "_headers"), "utf8"));
   return (r) => {
     const p = new URL(r.request().url()).pathname;
-    const file = path.join(dir, p === "/" ? "index.html" : p);
-    if (!file.startsWith(dir + path.sep) || !existsSync(file) || p === "/_headers") return r.fulfill({ status: 404, headers: h, body: "" });
+    let file = path.join(dir, p === "/" ? "index.html" : p);
+    // a path with no file is the index, as SIGN_HOST answers it (Pages with no 404.html), /_headers included
+    if (!file.startsWith(dir + path.sep) || !existsSync(file) || p === "/_headers") file = path.join(dir, "index.html");
     return r.fulfill({ status: 200, headers: { ...h, "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }, body: readFileSync(file) });
   };
 }

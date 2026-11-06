@@ -45,6 +45,12 @@ export type EvmPoolVenue = {
    *  read from the helper; the helper refuses to start a sender whose key is not the pin (evmPoolSendersFromEnv). A
    *  chain with none sims no sale ("keep-min"): the testnets pin theirs, the mainnets none until their sell keys. */
   readonly sellSender?: string;
+  /** The network's FeeCollector (contracts/pool-evm/src/FeeCollector.sol, card evm-fee-collector), which every Sell pays
+   *  its fee to and whose Paid log proves the fee (card helper-sender-fee-proof); its one immutable, the sink, is the
+   *  chain's sellSender. A kit pin, never read from the helper; the helper refuses to start with any other collector
+   *  (evmPoolSendersFromEnv). A chain with none takes no sale: the testnets pin theirs, the mainnets none until their
+   *  collectors deploy. */
+  readonly feeCollector?: string;
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
   readonly quoters?: Readonly<{ v3?: string; v4?: string }>;
@@ -296,6 +302,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // scripts/deploy/evm-sender-key.mjs, which printed only this address; 0.001 ETH read on sepolia.base.org and
       // base-sepolia-rpc.publicnode.com, 4 Nov 17:33Z); the helper does not start with any other sell key
       sellSender: "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+      // the FeeCollector every Sell pays, its sink the sell sender above (card evm-fee-collector: scripts/live-checks/
+      // evm-fee-collector.base-sepolia.json, deploy tx 0xdb1410a4cdcb78051e5b2ffbce2e25ed68800147d007b904f0385746d9019fe3,
+      // its code the build's with that sink, read on two RPCs by that card's check and the review, 6 Nov)
+      feeCollector: "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
       // Uniswap v4's PoolManager (pool-evm-deploy.mjs CHAINS, its code hash pinned there), the target of a v4 sell
       poolManager: "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
       // Uniswap's QuoterV2 and V4Quoter (developers.uniswap.org's Base Sepolia deployments); eth_getCode on
@@ -337,6 +347,10 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // the helper's sell sender (POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET, made as on Base Sepolia; 0.001 ETH read on
       // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov 17:33Z)
       sellSender: "0xd12d83097671d731df2db731e973ad9a07673607",
+      // the FeeCollector every Sell pays, its sink the sell sender above (card evm-fee-collector: scripts/live-checks/
+      // evm-fee-collector.robinhood-testnet.json, deploy tx 0x810cc53624006d64c210a2a8a546e039e53990105be4e69f804509afd36f5df7,
+      // its code the build's with that sink, read on two RPCs by that card's check and the review, 6 Nov)
+      feeCollector: "0xb174f0e859f00a7b593baca38394327e3d6bf638",
       poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
       // Uniswap's V4Quoter at mainnet's address with mainnet's code (testnet-run.mjs NETS); eth_getCode on
       // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, the same on both (2026-11-04 09:55Z):

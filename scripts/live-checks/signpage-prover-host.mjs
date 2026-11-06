@@ -174,7 +174,8 @@ export async function judge(rec, want = expected()) {
 // ------------------------------------------------------------------------------------------------ the read
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm", ".txt": "text/plain; charset=utf-8" };
 
-/** Pages' reading of a build folder: its files under its own _headers (every rule that matches, joined), 404 for none. */
+/** Pages' reading of a build folder: its files under its own _headers (every rule that matches, joined), index.html for
+ *  a path with no file (SIGN_HOST's build has no 404.html), as SIGN_HOST answers it. */
 export async function siteServer(root) {
   const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
   const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
@@ -182,9 +183,9 @@ export async function siteServer(root) {
   if (parsed.problems.length) throw new Error(`${root}/_headers: ${parsed.problems.join("; ")}`);
   return (urlPath) => {
     const p = urlPath === "/" ? "/index.html" : urlPath;
-    const file = path.join(root, p);
+    let file = path.join(root, p);
     const headers = Object.fromEntries(headersFor(parsed.rules, urlPath));
-    if (!file.startsWith(root + path.sep) || path.basename(file) === "_headers" || !existsSync(file) || statSync(file).isDirectory()) return { status: 404, headers, body: Buffer.alloc(0) };
+    if (!file.startsWith(root + path.sep) || path.basename(file) === "_headers" || !existsSync(file) || statSync(file).isDirectory()) file = path.join(root, "index.html");
     headers["content-type"] = TYPES[path.extname(file)] ?? "application/octet-stream";
     return { status: 200, headers, body: readFileSync(file) };
   };

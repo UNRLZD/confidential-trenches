@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { BUILD_FILE, CHAINS } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { ORDER, addressOf, buildOf, createAddress, main, signTx } from "../script/deploy.mjs";
+import { BUILT, ORDER, addressOf, buildOf, createAddress, main, signTx } from "../script/deploy.mjs";
 
 // The secret key 1: a published test vector (its address 0x7E5F...5Bdf is in every secp256k1 test suite), never money.
 const KEY_ONE = new Uint8Array(32);
@@ -13,7 +13,7 @@ KEY_ONE[31] = 1;
 
 test("forge's build is the one pool-evm-deploy.build.json pins: lengths, runtimes with immutables zeroed, immutable offsets", () => {
   const pinned = JSON.parse(readFileSync(BUILD_FILE, "utf8")).contracts;
-  assert.deepEqual(Object.keys(pinned), ORDER);
+  assert.deepEqual(Object.keys(pinned), BUILT);
   assert.deepEqual(buildOf(), pinned, "rebuild the pin: node contracts/pool-evm/script/deploy.mjs --write-build");
   // the verifier's code is the one the pool's constructor accepts (State.sol WITHDRAWAL_VERIFIER_CODEHASH)
   const state = readFileSync(new URL("../src/State.sol", import.meta.url), "utf8");

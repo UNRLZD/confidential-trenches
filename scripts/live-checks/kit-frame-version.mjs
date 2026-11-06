@@ -7,6 +7,10 @@
 //     request handler sets the page's level from the hello's version (`let c=zc(i);if(c!==null)return void(r=Bc(c))`),
 //     the one shaper reads that level for every answer's result and every state event, and the one post sends what the
 //     shaper returns (`a=(t,n)=>{let r=i(t,n);r!==null&&e.parent.postMessage(r,...)`);
+//   - that post is the bundle's only `parent.postMessage(`, so nothing reaches the app past the shaper, and the shaper
+//     sends a progress event through the stage map at that level (stageFor: kit-v1.4 is sent a later stage as MAP has it,
+//     a stage it has no reading for and a route event not at all, `if(e.type!==`progress`)return e;...`), its stage
+//     function reading the same map as MAP;
 //   - its deposit stage map for kit-v1.4 is exactly MAP: the eight stages kit-v1.4 has as they are, failed and short as
 //     in_transit (1Click is still on them; halted would be the held screen), expired as quote_checked, refund_move as
 //     refunded (never done: a refund still moving is not in the vault), every value one of kit-v1.4's eight;
@@ -44,8 +48,12 @@ const READER = /function ([\w$]+)\([\w$]+\)\{[^{}]{0,200}?\.type!==`hello`[^{}]{
 /** The level of a version: kit-v1.4 for a malformed one, current from the threshold on. */
 const LEVEL = /function ([\w$]+)\(([\w$]+)\)\{let ([\w$]+)=[\w$]+\.exec\(\2\);if\(!\3\)return`1\.4`;[^{}]{0,200}?`current`:`1\.4`\}/;
 
+/** The pairs of a `key:\`value\`` object literal, as an object. */
+const pairsOf = (src) => Object.fromEntries(src.split(",").map((p) => p.split(":").map((x) => x.replace(/`/g, ""))));
+
 /** The hello's path, as minified: the handler setting the level from a hello, the shaper reading it, the post sending
- *  the shaper's output; each the matched code or null. */
+ *  the shaper's output, each the matched code or null; and the shaper's progress branch right after its state branch
+ *  with the stage function it calls (the matched code or null) and that function's stage map (its pairs or null). */
 function helloPath(js) {
   const reader = READER.exec(js)?.[1];
   const level = LEVEL.exec(js)?.[1];
@@ -53,22 +61,45 @@ function helloPath(js) {
   const v = assign ? esc(assign[2]) : null;
   const shaper = v ? new RegExp(`([\\w$]+)=\\(([\\w$]+),([\\w$]+)\\)=>\\{if\\(\`ok\`in \\2\\)return \\2\\.ok&&\\3!==void 0\\?\\{\\.\\.\\.\\2,result:[\\w$]+\\(${v},\\3,\\2\\.result\\)\\}:\\2;if\\(\\2\\.type===\`state\`\\)return\\{\\.\\.\\.\\2,state:[\\w$]+\\(${v},\\2\\.state\\)\\};`).exec(js) : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
-  return { assign: assign?.[0] ?? null, shaper: shaper?.[0] ?? null, post: post?.[0] ?? null };
+  // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent only at
+  // the current level, a stage through the stage function at the level, dropped when it gives null
+  let branch = null;
+  if (shaper) {
+    const m = esc(shaper[2]);
+    const re = new RegExp(`if\\(${m}\\.type!==\`progress\`\\)return ${m};if\\(!\\(\`stage\`in ${m}\\)\\)return ${v}===\`current\`\\?${m}:null;let ([\\w$]+)=([\\w$]+)\\(${v},${m}\\.stage\\);return \\1===null\\?null:\\1===${m}\\.stage\\?${m}:\\{\\.\\.\\.${m},stage:\\1\\}\\}`, "y");
+    re.lastIndex = shaper.index + shaper[0].length;
+    branch = re.exec(js);
+  }
+  // the stage function: the current level and a stage kit-v1.4 has pass as they are, else the map's stage, else null
+  const stage = branch ? new RegExp(`function ${esc(branch[2])}\\(([\\w$]+),([\\w$]+)\\)\\{return \\1===\`current\`\\|\\|[\\w$]+\\.has\\(\\2\\)\\?\\2:[\\w$]+\\(([\\w$]+),\\2\\)\\?\\3\\[\\2\\]:null\\}`).exec(js) : null;
+  const map = stage ? new RegExp(`(?:^|[^\\w$])${esc(stage[3])}=Object\\.freeze\\(\\{((?:[a-z_]+:\`[a-z_]+\`,)+[a-z_]+:\`[a-z_]+\`)\\}\\)`).exec(js) : null;
+  return {
+    assign: assign?.[0] ?? null,
+    shaper: shaper?.[0] ?? null,
+    post: post?.[0] ?? null,
+    progress: branch && stage ? `${branch[0]} ${stage[0]}` : null,
+    progressMap: map ? pairsOf(map[1]) : null,
+  };
 }
 
+/** Every post to the frame's parent, as written or as minified: the one through the shaper is the only one there may be. */
+const POSTS = /parent\.postMessage\(/g;
+
 /** What the check keeps of the reads: the index, the served bundle's sha384, the stage maps, the key lists, the hello's
- *  path. */
+ *  path, the count of posts to the parent. */
 export function facts(index, js) {
   const maps = [...js.matchAll(PAIRS)]
-    .map((m) => Object.fromEntries(m[1].split(",").map((p) => p.split(":").map((s) => s.replace(/`/g, "")))))
+    .map((m) => pairsOf(m[1]))
     .filter((o) => Object.hasOwn(o, "quote_checked") && Object.hasOwn(o, "halted"));
   const keys = [...js.matchAll(ARRAYS)].map((m) => m[1].split(",").map((s) => s.slice(1, -1))).filter((l) => l[0] === "release" && l.includes("ops"));
-  return { index, sha384: sha384(js), maps, keys, hello: helloPath(js) };
+  return { index, sha384: sha384(js), maps, keys, hello: helloPath(js), posts: (js.match(POSTS) ?? []).length };
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** The same stage map in any key order. */
+const sameMap = (m, want) => !!m && typeof m === "object" && same(Object.keys(m).sort(), Object.keys(want).sort()) && Object.entries(want).every(([k, v]) => m[k] === v);
 
-/** The verdict on an answer { index, sha384, maps, keys, hello }. */
+/** The verdict on an answer { index, sha384, maps, keys, hello, posts }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -78,6 +109,12 @@ export function judge(a) {
   const h = a?.hello;
   if (typeof h?.assign !== "string" || typeof h?.shaper !== "string" || typeof h?.post !== "string")
     bad("the bundle reads no kit hello: an app on any kit is sent everything, which kit-v1.4 refuses whole");
+  // the progress branch is the shaper's: read only where a shaper was found, else the line above names it
+  else if (typeof h?.progress !== "string")
+    bad("progress and route events do not go through the shaper's stage map: an app on kit-v1.4 is sent a stage or a route event it cannot read");
+  else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
+  if (a?.posts !== 1)
+    bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);
   const maps = a?.maps ?? [];
   const map = maps.find((m) => same(Object.keys(m).sort(), Object.keys(MAP).sort()));
   if (!map) bad("the bundle has no kit-v1.4 deposit stage map over every deposit stage");
