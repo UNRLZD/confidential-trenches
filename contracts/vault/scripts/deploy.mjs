@@ -295,6 +295,14 @@ export function sourceProblems({ cwd = CRATE, commit, clean = true } = {}) {
   return p;
 }
 
+// The exit code of a run whose hashes disagree: the two clean builds differ, or a record rebuilds to a hash other than
+// its own. Every other failure exits 1 (or 128 + the signal). vault-build.yml runs --build-only and --verify-records
+// under scripts/ci/retry.sh with RETRY_FINAL=3, so a failure before any hash exists (a crates.io blip, the image) is
+// tried again and a disagreement never is: a build that is reproducible only some of the time cannot pass on its second
+// try. scripts/ci/download-retry.mjs refuses a vault-build step that does not name this code.
+export const EXIT_HASH_DISAGREE = 3;
+const disagreement = (message) => Object.assign(new Error(message), { exitCode: EXIT_HASH_DISAGREE });
+
 // The pinned tools, read before any build: rustc of the pinned toolchain and exactly CARGO_NEAR. Returns their version
 // lines, or throws naming what is not pinned.
 export function toolVersions() {
@@ -370,7 +378,7 @@ export async function reproducibleBuild({ flavor, buildDir, crate = CRATE, log =
       out.push({ wasm, sha: sha256(wasm) });
       log(`build ${name}: ${wasm.length} B sha256 ${out.at(-1).sha}`);
     }
-    if (out[0].sha !== out[1].sha) throw new Error(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
+    if (out[0].sha !== out[1].sha) throw disagreement(`the two clean builds differ: ${out[0].sha} (${out[0].wasm.length} B) and ${out[1].sha} (${out[1].wasm.length} B); nothing was sent`);
     const mp = metadataProblems(out[0].wasm, { commit, flavor });
     if (mp.length) throw new Error(`${mp.join("; ")}; nothing was sent`);
     writeFileSync(file, out[0].wasm);
@@ -425,7 +433,7 @@ export async function verifyRecords({ dir, buildDir, log = console.log }) {
       execFileSync("git", ["-C", src, "checkout", "--quiet", "--detach", record.source_commit], { stdio: ["ignore", "pipe", "pipe"] });
       const flavor = record.network === "mainnet" ? "mainnet" : "testnet";
       const b = await reproducibleBuild({ flavor, buildDir: path.join(buildDir, name), crate: path.join(src, CONTRACT_PATH), log });
-      if (b.sha !== record.wasm_sha256) throw new Error(`${name}: the rebuild of ${record.source_commit} is sha256 ${b.sha}, the record's is ${record.wasm_sha256} (code hash ${record.code_hash})`);
+      if (b.sha !== record.wasm_sha256) throw disagreement(`${name}: the rebuild of ${record.source_commit} is sha256 ${b.sha}, the record's is ${record.wasm_sha256} (code hash ${record.code_hash})`);
       log(`${name}: the rebuild of ${record.source_commit} is sha256 ${b.sha}, the record's code hash ${record.code_hash}`);
       done.push({ name, sha: b.sha });
     } finally {
@@ -910,6 +918,6 @@ async function main() {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((e) => {
     console.error(`deploy: ERROR: ${String(e.message)}`);
-    process.exit(e.signal ? 128 + os.constants.signals[e.signal] : 1);
+    process.exit(e.signal ? 128 + os.constants.signals[e.signal] : (e.exitCode ?? 1));
   });
 }

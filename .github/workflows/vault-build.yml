@@ -12,7 +12,15 @@
 # record naming that commit, its sha256 and MAINNET_PINS' pin. The checkout is the full history, for the records'
 # commits.
 # The paths are every file the build and pin steps read: contracts/vault/ and deploy.mjs's imports
-# (contracts/vault/scripts/deploy.test.mjs holds the list against them), scripts/ci/retry.sh and scripts/ci/fetch.sh.
+# (contracts/vault/scripts/deploy.test.mjs holds the list against them), scripts/ci/retry.sh, scripts/ci/fetch.sh and
+# scripts/ci/fresh-dir.sh.
+# The two builds run in cargo-near's container, which fetches the crates there: no fetch from the runner reaches them, so a
+# bad read from crates.io is met by running each build again, 3 tries through scripts/ci/retry.sh, each into an emptied
+# build dir (scripts/ci/fresh-dir.sh), as scripts/ci/download-retry.mjs requires (card ci-cargo-fetch-retry). Only a
+# failure before any hash exists is tried again: deploy.mjs ends with exit 3 (EXIT_HASH_DISAGREE) when the two builds
+# differ or a record rebuilds to another hash, and RETRY_FINAL=3 stops retry.sh at once on it, so a build that is
+# reproducible only some of the time is red on its first try. The command built is deploy.mjs's own and unchanged, so
+# a commit's code hash is the one it was.
 # No secret and no token beyond the read-only one GitHub gives every run. Actions pinned by commit sha as ci.yml has
 # them (actions/checkout v7.0.1, actions/setup-node v7.1.0, actions/upload-artifact v7.0.2, actions/cache/restore and
 # actions/cache/save v6.1.0).
@@ -30,6 +38,7 @@ on:
       - "scripts/ci/rpc-wait.mjs"
       - "scripts/ci/retry.sh"
       - "scripts/ci/fetch.sh"
+      - "scripts/ci/fresh-dir.sh"
   workflow_dispatch:
 
 permissions:
@@ -74,14 +83,14 @@ jobs:
           key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: two clean mainnet builds that must agree
         run: |
-          node contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet --build-dir "$RUNNER_TEMP/vault-mainnet" 2>&1 | tee "$RUNNER_TEMP/build.log"
+          RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$RUNNER_TEMP/vault-mainnet" node contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet --build-dir "$RUNNER_TEMP/vault-mainnet" 2>&1 | tee "$RUNNER_TEMP/build.log"
           test "${PIPESTATUS[0]}" = 0
           cd "$RUNNER_TEMP/vault-mainnet"
           sha256sum blindfill_vault.wasm | tee blindfill_vault.wasm.sha256
           cp "$RUNNER_TEMP/build.log" build.log
       # each vault deploy record rebuilt at its own commit to its code hash; a non_reproducible record is a NOTE
       - name: every vault deploy record rebuilds to its code hash
-        run: node contracts/vault/scripts/deploy.mjs --verify-records --build-dir "$RUNNER_TEMP/vault-records"
+        run: RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$RUNNER_TEMP/vault-records" node contracts/vault/scripts/deploy.mjs --verify-records --build-dir "$RUNNER_TEMP/vault-records"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vault-mainnet-wasm
