@@ -1378,11 +1378,117 @@ const rcFetch = (inner: EvmRpc, instead: (calls: EvmRpcCall[]) => Response | nul
 const rcErr = (at: number, over: number, message: string) => (inner: EvmRpc): EvmRpc => async (calls, s) => {
   const out = await inner(calls, s);
   return out.map((o, i) => {
-    const f = calls[i]!.params[0] as { fromBlock?: string; toBlock?: string };
+    if (calls[i]!.method !== "eth_getLogs") return o;
+    const f = calls[i]!.params[0] as { fromBlock: string; toBlock: string };
     const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
-    return calls[i]!.method === "eth_getLogs" && a <= at && b >= at && b - a + 1 > over ? { jsonrpc: "2.0", id: i, error: { code: -32005, message } } : o;
+    return a <= at && b >= at && b - a + 1 > over ? { jsonrpc: "2.0", id: i, error: { code: -32005, message } } : o;
   });
 };
+// the token's pools made up beside its real one: `n` native pools behind hooks no chain holds, `per` to a block from
+// block `at` on, which the state reads find uninitialized
+const rcJunk = (coin: string, n: number, per: number, at: number) =>
+  Array.from({ length: n }, (_, i) => ({ key: keyOf(coin, NATIVE, 3000, 60, "0x" + (0xa000000 + i).toString(16).padStart(40, "0")), at: at + Math.floor(i / per) }));
+// a first that answers `error` for any getLogs whose logs pass the cap of 10,000 (as Robinhood's, publicnode's and
+// Tenderly's do, each in its own words); `asked` keeps each range it was asked
+const rcCapped = (error: object, asked: [number, number][]) => (inner: EvmRpc): EvmRpc => async (calls, s) => {
+  const out = await inner(calls, s);
+  return out.map((o, i) => {
+    if (calls[i]!.method !== "eth_getLogs") return o;
+    const f = calls[i]!.params[0] as { fromBlock: string; toBlock: string };
+    asked.push([Number(f.fromBlock), Number(f.toBlock)]);
+    return ((o as { result?: unknown[] }).result ?? []).length > 10_000 ? { jsonrpc: "2.0", id: i, error } : o;
+  });
+};
+const rcFlood = (coin: string, junk: { key: EvmPoolKey; at: number }[], error: object) => {
+  const real: ModelPool = { key: keyOf(coin, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const pools = [seeded(coin), real];
+  const firstAsked: [number, number][] = [];
+  const spareAsked: [number, number][] = [];
+  const inner = scanner(RC_HEAD, [{ key: real.key, at: RC_HEAD - 500_000 }, ...junk]);
+  const req = { chain: "robinhood" as const, token: coin, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(coin) };
+  const spared = () => [...new Set(spareAsked.map(String))].map((r) => r.split(",").map(Number)).reduce((n, [a, b]) => n + b! - a! + 1, 0);
+  return { firstAsked, spared, run: () => evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [rcCapped(error, firstAsked)(inner), scanner(RC_HEAD, [], spareAsked)]) };
+};
+const atReal = (e: unknown) => e instanceof EvmQuoteError && e.code === "below_reference" && e.reference!.amountOut === AMOUNT;
+
+// the three providers' words for a request past their cap on logs, read 2026-11-06: each answer is asked as its halves
+// of the first, and the spare reads none of its blocks (review of 1277e8af, MEDIUM-A)
+for (const [name, error, coin] of [
+  ["rpc.mainnet.chain.robinhood.com", { code: -32000, message: "logs matched by query exceeds limit of 10000" }, "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f10"],
+  ["publicnode", { code: -32602, message: "query exceeds max results 20000, retry with the range 49501000-49501001" }, "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f11"],
+  ["Tenderly (its cause in data alone)", { code: -32602, message: "invalid params", data: "query returned more than 10000 results" }, "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f12"],
+] as const) {
+  test(`card rh-cold-quote: 12,000 made-up pools past the first's cap, answered in ${name}'s words, are asked as halves of the first: the real price holds, the spare reads none`, { timeout: 60_000 }, async () => {
+    const c = rcFlood(coin, rcJunk(coin, 12_000, 4_000, RC_HEAD - 500_000 + 1_000), error);
+    await assert.rejects(c.run(), atReal);
+    assert.equal(c.spared(), 0);
+    // halved on the first down to spans of a few blocks, where its 4,000 pools a block are under its cap
+    const least = Math.min(...c.firstAsked.map(([a, b]) => b - a + 1));
+    assert.ok(least <= 16, `the first's least span ${least}`);
+  });
+}
+
+test("card rh-cold-quote: 20,000 made-up pools packed 9,999 to a block from the block after the real pool's quote at the real price, within the bound (review of 1277e8af, MEDIUM-C)", { timeout: 60_000 }, async () => {
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f20";
+  const c = rcFlood(coin, rcJunk(coin, 20_000, 9_999, RC_HEAD - 500_000 + 1), { code: -32000, message: "logs matched by query exceeds limit of 10000" });
+  const t = performance.now();
+  await assert.rejects(c.run(), atReal);
+  const ms = Math.round(performance.now() - t);
+  console.log(`20,000 made-up pools: ${c.firstAsked.length} getLogs on the first, ${ms} ms`);
+  assert.ok(ms < 60_000);
+  assert.equal(c.spared(), 0);
+});
+
+test("card rh-cold-quote: a first that answers HTTP 413 to a request holding the real pool's block is asked its halves, never the spare: the seeded route is refused", { timeout: 60_000 }, async () => {
+  const at = RC_HEAD - 500_000;
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f13", (inner) =>
+    evmJsonRpc("https://first.example", rcFetch(inner, (calls) => {
+      const f = calls.find((x) => x.method === "eth_getLogs")?.params[0] as { fromBlock: string; toBlock: string } | undefined;
+      return f !== undefined && Number(f.fromBlock) <= at && Number(f.toBlock) >= at && Number(f.toBlock) - Number(f.fromBlock) + 1 > 10 ? new Response("", { status: 413 }) : null;
+    }), 16 << 20));
+  assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" });
+  assert.equal(c.spared(), 0);
+});
+
+test("card rh-cold-quote: one block holding more pools than the first answers refuses too_many_pools, never the spare's word", { timeout: 60_000 }, async () => {
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f21";
+  // in Tenderly's words, its cause in data alone
+  const c = rcFlood(coin, rcJunk(coin, 10_001, 10_001, RC_HEAD - 500_000 + 7), { code: -32602, message: "invalid params", data: "query returned more than 10000 results" });
+  await assert.rejects(c.run(), (e: unknown) => e instanceof EvmQuoteError && e.code === "too_many_pools");
+  assert.equal(c.spared(), 0);
+});
+
+// a cached scan 500,000 blocks old (the real pool made since), then the first fails once in transport: the spare reads
+// at most its own span of the newest blocks (review of 1277e8af, MEDIUM-B)
+const rcGap = async (coin: string, first: (inner: EvmRpc) => EvmRpc) => {
+  const H1 = RC_HEAD - 500_000;
+  const real: ModelPool = { key: keyOf(coin, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const pools = [seeded(coin), real];
+  const req = { chain: "robinhood" as const, token: coin, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(coin) };
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, H1), chain(pools, 1, H1)], NOW, [scanner(H1, []), scanner(H1, [])])), { accepted: true, amountOut: AMOUNT / 10n, minOut: (AMOUNT / 10n) * 99n / 100n, block: BigInt(H1) });
+  const spareAsked: [number, number][] = [];
+  const v = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [first(scanner(RC_HEAD, [{ key: real.key, at: H1 + 100_000 }])), scanner(RC_HEAD, [], spareAsked)]));
+  return { v, spared: [...new Set(spareAsked.map(String))].map((r) => r.split(",").map(Number)).reduce((k, [a, b]) => k + b! - a! + 1, 0) };
+};
+
+test("card rh-cold-quote: a cached scan's 500,000-block gap with one 503 on the first: its halves stay on the first, the real pool is read", async () => {
+  let n = 0;
+  const g = await rcGap("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f22", (inner) => async (calls, s) => {
+    if (calls.some((x) => x.method === "eth_getLogs") && n++ === 0) throw new Error("the provider answered HTTP 503");
+    return inner(calls, s);
+  });
+  assert.equal((g.v as { code?: string }).code, "below_reference");
+  assert.ok(g.spared <= 2_000, String(g.spared));
+});
+
+test("card rh-cold-quote: a cached scan's 500,000-block gap on a first a block behind its head: the spare reads its 2,000 newest blocks alone, the real pool is read", async () => {
+  const g = await rcGap("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f23", (inner) => async (calls, s) => {
+    const out = await inner(calls, s);
+    return out.map((o, i) => (calls[i]!.method === "eth_getBlockByNumber" && Number(calls[i]!.params[0]) === RC_HEAD ? { ...(o as object), result: null } : o));
+  });
+  assert.equal((g.v as { code?: string }).code, "below_reference");
+  assert.ok(g.spared <= 2_000, String(g.spared));
+});
 
 test("card rh-cold-quote: a cold scan's first throttled past the quote's bound (one 429, Retry-After 120 s) refuses rpc_error, never hands the spare its depth", async () => {
   let n = 0;
@@ -4122,16 +4228,36 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
   assert.equal(second.length, 0, "the second read a cold scan's blocks");
 });
 
-test("SP3 a first scan provider that answers no logs, or no logs from behind the head: the second's answer counts", { timeout: 30_000 }, async () => {
+test("SP3 a first scan provider that answers no logs from behind the head: the second's answer counts; one that answers an error for blocks it holds: never the second's", { timeout: 30_000 }, async () => {
   // base-rpc.publicnode.com's answer to a range past the backend's head (-32602 on blastapi's and bloXroute's: "block
-  // range extends beyond current head block", 2026-11-05 16:13Z), the warm quote's "answered no logs" in 193 ms
+  // range extends beyond current head block", 2026-11-05 16:13Z), the warm quote's "answered no logs" in 193 ms, with
+  // no block at the head in the same batch: a lag
   const token = "0x00000000000000000000000000000000005c4505";
   const refusing = scanner(5_000_000, realAt(token, 4_999_999));
+  const pastHead = { code: -32602, message: "block range extends beyond current head block" };
   const noLogs: EvmRpc = async (calls) => {
     const out = await refusing(calls);
-    return out.map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: { code: -32602, message: "block range extends beyond current head block" } } : o));
+    return out.map((o, i) => {
+      const c = calls[i]!;
+      if (c.method === "eth_getLogs" && Number((c.params[0] as { toBlock: string }).toBlock) >= 4_999_990) return { jsonrpc: "2.0", id: i, error: pastHead };
+      if (c.method === "eth_getBlockByNumber" && Number(c.params[0]) >= 4_999_990) return { jsonrpc: "2.0", id: i, error: pastHead };
+      return o;
+    });
   };
   assert.deepEqual((await pairQuote(token, noLogs, scanner(5_000_000, realAt(token, 4_999_999)))).v, below);
+  // the same error where the first holds the request's last block is its answer: its halves are asked of it, never of
+  // the second (review of 1277e8af), so a first that answers every range so ends at the quote's bound, rpc_error
+  const token1 = "0x00000000000000000000000000000000005c45a5";
+  const holding = scanner(5_000_000, realAt(token1, 4_999_999));
+  const errs: EvmRpc = async (calls) => (await holding(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { jsonrpc: "2.0", id: i, error: pastHead } : o));
+  const secondAsked: [number, number][] = [];
+  evmScanBound?.(1_500);
+  try {
+    assert.deepEqual((await pairQuote(token1, errs, scanner(5_000_000, realAt(token1, 4_999_999), secondAsked))).v, { accepted: false, code: "rpc_error" });
+  } finally {
+    evmScanBound?.();
+  }
+  assert.deepEqual(secondAsked, []);
   // a backend behind the head: its getLogs answer no logs and no error, and it holds no block at the head
   // (rpc.mainnet.chain.robinhood.com's answer past its head; publicnode and bloXroute answer -32602, daybreak -32000:
   // the reads of the review of 22e29c9, 2026-11-05 17:42-17:44Z)
