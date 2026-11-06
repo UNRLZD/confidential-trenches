@@ -1,8 +1,8 @@
 {
- "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on the PC box (heavy.sh): good = this card's build (--harness --build apps/terminal/dist, branch card/token-page-fills-after on a7e7300e), bad = the deployed APP_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (first the chain-named row, then the recorded answer).",
+ "_note": "Recorded 6 Nov by token-page-fills-after.mjs --record on the PC box (heavy.sh): good = this card's build (--harness --build apps/terminal/dist, branch card/token-page-fills-after at a1194b88), bad = the deployed APP_HOST before this card; both framed by the stand-in shell signed out, the token reads answered by the check (first the chain-named row, then the recorded answer).",
  "good": {
   "check": "token-page-fills-after",
-  "at": "2026-11-06T05:17:32.561Z",
+  "at": "2026-11-06T05:25:26.718Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell, the token reads answered by the check",
   "browser": "156.0.8078.79",
   "runs": [
@@ -25,7 +25,7 @@
     },
     "readsAt": [
      0,
-     5007
+     5006
     ],
     "errors": [],
     "shots": {
@@ -52,7 +52,7 @@
     },
     "readsAt": [
      0,
-     5008
+     5007
     ],
     "errors": [],
     "shots": {
