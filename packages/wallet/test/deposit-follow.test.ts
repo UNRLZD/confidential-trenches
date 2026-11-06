@@ -1225,3 +1225,60 @@ test("D4b: with untilFinal, final is never written while a note's call is out (U
   assert.ok(notes.every((n) => n.leaf !== undefined), `a note still in flight: ${notes.filter((n) => n.leaf === undefined).map((n) => n.state)}`);
   assert.equal(op.amount_usd, usdOf(CREDIT + LATE));
 });
+
+test("P1: with untilFinal, final is never written while U's USDC reads on one RPC only (a credit unread)", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  const LATE = 1_500_000n;
+  let doneAt = 0;
+  t.onTick.fn = (n) => {
+    if (doneAt === 0 && t.stages.at(-1) === "done") {
+      doneAt = n;
+      t.chain.credit(LATE, "a"); // the late credit reads on one RPC; the other is behind
+      t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
+    }
+    if (doneAt !== 0 && n === doneAt + 4) t.chain.credit(LATE, "b"); // the other RPC catches up
+  };
+  const out = await followDeposit(t.args, { ...t.deps, untilFinal: true, signal: stop(t, 40) });
+  const op = await opOf(t.w);
+  assert.equal(out.kind, "done");
+  assert.equal(op.follow.final, true);
+  assert.equal(t.chain.a.balance + t.chain.b.balance, 0n, `the follow ended final with U's credit unbound (a ${t.chain.a.balance}, b ${t.chain.b.balance})`);
+  assert.deepEqual(t.binds.map((x) => x.amount), [CREDIT, LATE]);
+});
+
+test("P2: with untilFinal, final is never written while a landed note's pages read unsure (one RPC behind)", async () => {
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  const LATE = 1_500_000n;
+  const spy = t.deps.bind!;
+  let calls = 0;
+  let lagged: { p: bigint; at: number } | null = null;
+  // the late credit's call lands, but only one RPC's pages hold its row for a few rounds
+  const bind: typeof bindDeposit = async (s, a, dps) => {
+    if (++calls !== 2) return spy(s, a, dps);
+    t.binds.push({ noteId: a.noteId, amount: a.amount });
+    const n = (await t.store.get(a.noteId))!;
+    t.chain.addRow(n.precommitment, { value: a.amount, side: "a" });
+    t.chain.credit(0n);
+    if (n.state === "PLANNED") await t.store.move(a.noteId, "PLANNED", "INCOMING");
+    const r = t.chain.a.rows.at(-1)!;
+    const leaf = { value: a.amount, label: BigInt(r.label), commitment: noteCommitment(a.amount, BigInt(r.label), n.precommitment), leafIndex: BigInt(r.leaf_index) };
+    lagged = { p: n.precommitment, at: t.ticks() };
+    return { kind: "deposited", note: await t.store.move(a.noteId, "INCOMING", "UNSPENT", { leaf }) } as BindOutcome;
+  };
+  let doneAt = 0;
+  t.onTick.fn = (n) => {
+    if (doneAt === 0 && t.stages.at(-1) === "done") {
+      doneAt = n;
+      t.chain.credit(LATE);
+      t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
+    }
+    if (lagged !== null && n === lagged.at + 5) t.chain.addRow(lagged.p, { value: LATE, side: "b" }); // the other RPC catches up
+  };
+  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40) });
+  const op = await opOf(t.w);
+  assert.equal(out.kind, "done");
+  assert.equal(op.follow.final, true);
+  assert.equal(op.amount_usd, usdOf(CREDIT + LATE), `the follow ended final showing ${op.amount_usd}, the late note uncounted`);
+});
