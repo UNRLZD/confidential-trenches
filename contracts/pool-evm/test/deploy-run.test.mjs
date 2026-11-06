@@ -1344,3 +1344,25 @@ test("review: one run per chain at a time: a lock held by a live process refuses
   assert.equal(held, String(process.pid), "taken over by this run");
   assert.equal(existsSync(lock), false, "removed when the run ends");
 });
+
+test("review: the floor is the higher block either RPC puts the key's transactions in: a second RPC whose receipt names a later block than its safe block keeps the key", OPTS, async (t) => {
+  const m = room(t);
+  let sh = null;
+  const c = mainnet({ sent: (raw, hash) => parse(raw).to === E && (sh ??= hash) });
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const res = await fetch0(u, init);
+    if (method === "eth_getTransactionReceipt" && u === BASE.rpcs[1] && params[0] === sh) {
+      const j = await res.json();
+      if (j.result) j.result = { ...j.result, blockNumber: "0x" + (BigInt(j.result.blockNumber) + 5n).toString(16) };
+      return { ok: true, status: 200, json: async () => j };
+    }
+    return res;
+  };
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /its safe block \d+ on https:\/\/base-rpc\.publicnode\.com is behind block \d+/.test(w)), j.keys.why.join("; "));
+});
