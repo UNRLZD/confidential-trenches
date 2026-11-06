@@ -27,7 +27,7 @@
 //   would need N calls), so every page is a range that ends at or below the newest anchor; a log in either anchor's
 //   block must carry that anchor's hash, and both RPCs' lists must agree byte for byte (every field
 //   the device reads). Each RPC pages on its own: any refusal of a page over one block but a head lag halves that
-//   RPC's page and tries again, down to one block, and a full page read doubles it again, so no provider's cap, in any
+//   RPC's page (or takes it to the span the refusal names, CAP_SPANS) and tries again, down to one block, and a full page read doubles it again, so no provider's cap, in any
 //   words (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 05:35Z; Tenderly's 1,000 as "invalid
 //   params", 5 Nov), is a limit on the pool. A page of one block refused is that provider's true failure. A log in the
 //   finalized anchor's block must carry its hash; one in the newest anchor's block that names another hash goes to the
@@ -146,7 +146,7 @@ export const EVM_POOL_LOG_PAGE_MAX_BLOCKS = 800_000n;
 export const EVM_LOG_REFUSED_AGAIN = 2;
 /** A log read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the page
  * may double past it once more: a W's Transfer read (card restore-check-bounded; evmTokensSentTo, evmTokensSentToOne)
- * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words, so a refusal under a provider's
+ * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words but a span named (CAP_SPANS), so a refusal under a provider's
  * cap (no answer in time, a spare's own error behind the helper's route) sets a ceiling as a cap does; held for the
  * whole read, each one halved the rest of it: the helper's Base route, capped at 1,000 blocks, ended CI's W reads of
  * 50,000 blocks at 312, 78 and 624-block pages against the Mac's 625 (live runs 42125976095, 42143211092 and
@@ -526,7 +526,7 @@ const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | 
 /** A JSON-RPC error that says the node does not know the block yet (a lag, not a lie). */
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
 // A provider's cap on one eth_getLogs call (its range, its number of results or its answer's size) has no standard
-// code or words, so the pager reads none of them: any refusal of a page over one block but a head lag (HEAD_LAG) halves
+// code or words, so the pager needs none of them: any refusal of a page over one block but a head lag (HEAD_LAG) halves
 // that RPC's page (readLogs). The caps' words read live, each one a refusal the pager meets this way:
 // - 3 Nov 04:21-07:05Z: sepolia.base.org "-32614: eth_getLogs is limited to a 200 range"; base-sepolia-rpc.publicnode.com
 //   and robinhood-sepolia-rpc.publicnode.com "-32701: exceed maximum block range: 50000"; base.drpc.org code 35 "ranges
@@ -557,6 +557,33 @@ const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15
 const SLOW_WORDS = /no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
 const LIMIT_32005 = /(RPC error |"code":\s*)-32005\b/;
 const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
+/** The span a cap's words name, in each provider's own form (card helper-evm-range-cap-walk; the reads above, and
+ *  base-pokt.nodies.app's -32001 "maximum allowed is 50 blocks on your current plan", 6 Nov 15:19Z and 15:58Z), held to
+ *  the helper's (apps/helper/src/rpc/rpc.ts CAP_SPANS) by their tests. Robinhood's names the asked span first, so each
+ *  form is its own. A refusal that names a span under the page refused pages at it at once; one naming none, or one no
+ *  smaller, halves the page as any refusal does. */
+const CAP_SPANS: readonly RegExp[] = [
+  /maximum allowed is (\d{1,12}) blocks/i,
+  /limited to 0 ?- ?(\d{1,12}) blocks/i,
+  /limited to a (\d{1,12}) range/i,
+  /ranges over (\d{1,12}) blocks/i,
+  /max(?:imum)? block range:? (\d{1,12})/i,
+  /block range exceeds maximum (?:allowed \(max=)?(\d{1,12})/i,
+  /maximum (\d{1,12}) blocks/i,
+  /but only (\d{1,12}) are allowed/i,
+  /up to a (\d{1,12}) block range/i,
+  /requested blocks is (\d{1,12})/i,
+  /\bmax (\d{1,12}) blocks/i,
+];
+/** The span a refusal's words name (CAP_SPANS, in its first 1,000 characters), or null. */
+const capSpanOf = (m: string): bigint | null => {
+  const w = m.slice(0, 1_000);
+  for (const f of CAP_SPANS) {
+    const x = f.exec(w);
+    if (x !== null) return BigInt(x[1]!);
+  }
+  return null;
+};
 /** A provider out, never a word on the read (card evm-transfer-rpc-spares): an HTTP error with no JSON-RPC answer in it
  * (the kit's client: "HTTP 410", where a refusal reads "HTTP 400: RPC error 35: ..."), an answer to another request
  * (the client's "answer id null is not request id 6") and a standard method the provider says it lacks (-32601). Read
@@ -732,7 +759,8 @@ export function evmPoolLogPager(): EvmLogPager {
  * EVM_LOG_THROTTLE_TRIES tries, then the read's failure (unread, never an empty list). No answer in time on a page over
  * one block halves it where the rules say so (slowHalves); where not, it is a throttle too, but on a page wider than
  * the provider ever answered in full, which takes the page back to that width (the read's ceiling), never below it.
- * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page, but one no wider
+ * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page (or, naming a span
+ * under it and no smaller than the provider answered in full, takes it to that span, CAP_SPANS), but one no wider
  * than the provider answered in full, asked again at once first (EVM_LOG_REFUSED_AGAIN); after a full page
  * reads, the page doubles again, up to the rules' max and below the smallest size refused in this read until the
  * rules' ceilingPages full pages in a row have read under it (doubled while its probe meets that same size), so a
@@ -784,6 +812,15 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       if (end > at && p.answered !== null && end - at + 1n <= p.answered && ++again <= EVM_LOG_REFUSED_AGAIN) continue;
       if (end > at) {
         again = 0;
+        // a cap that names its span under this page: that span at once, held as the read's ceiling just past it (card
+        // helper-evm-range-cap-walk: halving 10,000 to a named 50 took 8 refusals and paged at 39); never under a page
+        // this provider answered in full, where the words are one backend's, not its cap (Pocket's, 6 Nov 07:44Z)
+        const named = capSpanOf(m);
+        if (named !== null && named >= 1n && named < end - at + 1n && (p.answered === null || named >= p.answered)) {
+          ceiling(named + 1n);
+          p.size = named;
+          continue;
+        }
         ceiling(end - at + 1n);
         p.size = (end - at + 1n) / 2n;
         continue;

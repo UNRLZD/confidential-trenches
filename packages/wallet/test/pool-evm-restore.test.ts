@@ -1113,3 +1113,61 @@ test("B1 refusals under the cap (no answer in time, an unknown error) never shri
     assert.ok(last.length > 0 && last.every((n) => n >= 624), `${name}: the last pages ${sizes.slice(-12)}`);
   }
 });
+
+// ---- card helper-evm-range-cap-walk: a refusal that names its cap pages at that cap, never under it ----
+
+/** A W's Transfer read (evmTokensSentToOne) over `span` blocks on a provider that caps a page at `cap` blocks in `words`
+ *  (its message as the kit's client throws it): each eth_getLogs page's size and whether it was refused. */
+async function readCapped(span: bigint, cap: number, words: string) {
+  const head = 1_050_000n, from = head - span + 1n;
+  const block = { number: q(head), hash: h32("head"), timestamp: q(T0) };
+  const pages: [number, boolean][] = [];
+  const rpc: EvmRpc = async (method, params) => {
+    if (method === "eth_getBlockByNumber") return block;
+    if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
+    const f = params[0] as { fromBlock: string; toBlock: string };
+    const size = Number(BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n);
+    pages.push([size, size > cap]);
+    if (size > cap) throw new Error(words);
+    return [];
+  };
+  const anchor = { number: head, hash: block.hash, timestamp: T0, baseFeePerGas: null };
+  assert.deepEqual(await evmTokensSentToOne(rpc, W(0n, 0), from, { fin: anchor, anchor }, [EVM_LOG_PAGE_BLOCKS], undefined, async () => {}), []);
+  return pages;
+}
+
+test("card helper-evm-range-cap-walk: a cap's named span is the page at once (base-pokt.nodies.app's 50 blocks, live run 42241935061), never halved under it; its probes past it are few", async () => {
+  for (const [cap, words] of [
+    [50, "RPC error -32001: Block range too large: maximum allowed is 50 blocks on your current plan. Upgrade your subscription at https://nodies.app"],
+    [50, "RPC error -32602: eth_getLogs is limited to 0 - 50 blocks range"],
+    // Robinhood's own form (its read named 30000, past this read's widest page of 10,000): the asked span named first
+    [3_000, "RPC error -32602: query spans 10000 blocks (from 0x1 to 0x2710), but only 3000 are allowed"],
+    [1_000, "RPC error -32005: Log response size exceeded. Maximum allowed number of requested blocks is 1000"],
+    [500, "HTTP 400: RPC error -32602: invalid argument 0: block range exceeds maximum 500"],
+  ] as const) {
+    const span = BigInt(cap) * 100n;
+    const pages = await readCapped(span, cap, words);
+    const answered = pages.filter(([, refused]) => !refused).map(([n]) => n);
+    assert.equal(answered.reduce((a, n) => a + n, 0), Number(span), `${words}: the span tiled`);
+    assert.ok(answered.every((n) => n === cap), `${words}: every page at the cap ${cap}: ${[...new Set(answered)]}`);
+    const refused = pages.filter(([, r]) => r).length;
+    assert.ok(refused <= 6, `${words}: ${refused} refused pages (the first, then a probe past the cap at most every 8, 16, 32 pages)`);
+  }
+});
+
+test("card helper-evm-range-cap-walk: a named span no smaller than the page refused, or none, halves it as before", async () => {
+  // a provider that names 20,000 while refusing 10,000 (a lie, or a cap on something else): halved, not grown
+  const pages = await readCapped(5_000n, 1_000, "RPC error -32000: query exceeds max block range 20000");
+  assert.deepEqual(pages.slice(0, 4).map(([n]) => n), [5_000, 2_500, 1_250, 625]);
+  const none = await readCapped(5_000n, 1_000, "RPC error -32602: invalid params");
+  assert.deepEqual(none.slice(0, 4).map(([n]) => n), [5_000, 2_500, 1_250, 625]);
+});
+
+test("card helper-evm-range-cap-walk: the pager's cap forms are the helper's, word for word (apps/helper/src/rpc/rpc.ts CAP_SPANS, which picks the largest span when every provider caps)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const forms = (text: string) => /const CAP_SPANS: readonly RegExp\[\] = \[\n([\s\S]*?)\n\];/.exec(text)?.[1];
+  const wallet = forms(readFileSync(new URL("../src/pool/evm.ts", import.meta.url), "utf8"));
+  const helper = forms(readFileSync(new URL("../../../apps/helper/src/rpc/rpc.ts", import.meta.url), "utf8"));
+  assert.ok(wallet !== undefined && wallet.split("\n").length >= 11, "the pager's forms read");
+  assert.equal(helper, wallet);
+});
