@@ -382,8 +382,10 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     const h = d.slice(8);
     const w = (i: number) => BigInt("0x" + h.slice(64 * i, 64 * i + 64));
     const t = Number(w(0)) / 32; // the tuple's first word
-    const [token, amount, minOut, pool, deadline] = ["0x" + W(w(t)).slice(24), w(t + 1), w(t + 4), "0x" + W(w(t + 5)).slice(24), w(t + 8)];
+    // the 11-field Sell (card pool-review-3): feeRecipient at 8, deadline at 9
+    const [token, amount, minOut, pool, feeRecipient, deadline] = ["0x" + W(w(t)).slice(24), w(t + 1), w(t + 4), "0x" + W(w(t + 5)).slice(24), "0x" + W(w(t + 8)).slice(24), w(t + 9)];
     assert.equal(pool, sellMod.EVM_SELL_SIM, "a sim's pool is EVM_SELL_SIM");
+    assert.equal(feeRecipient, sellMod.EVM_SELL_SIM, "a sim's fee recipient is EVM_SELL_SIM");
     assert.ok(o[sellMod.EVM_SELL_SIM] !== undefined && deadline === BigInt(T), "into the sim pool, at the block's own time");
     const at = t + Number(w(t + 3)) / 32 + 1; // the route's bytes: abi.encode(PathKey[])
     const n = Number(w(at + 1));
@@ -420,7 +422,7 @@ function simCtx(a: CallArgs, o: Record<string, { balance?: string }>, balances: 
   if ((set !== undefined ? BigInt(set) : (balances[from] ?? 0n)) < gas * maxFee) return "insufficient funds for gas * price + value";
   return { origin: from, sender: from, gas, gasPrice };
 }
-const SEL_SELL = Buffer.from(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)"))).toString("hex").slice(0, 8);
+const SEL_SELL = Buffer.from(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)"))).toString("hex").slice(0, 8);
 /** The scan provider: its head, and the Initialize logs of `pools` at `at`; `asked` keeps each getLogs range. */
 /** `orSpan`: the most blocks a request with more than one value in a topic position may span, as Robinhood's RPC
  *  answers (-32602 "only 100000 are allowed for this request"). */

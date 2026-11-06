@@ -290,6 +290,7 @@ contract HostileSellTest is SellBase {
       pool: address(pool),
       precommitment: PRE + _nonce,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: _nonce
     });
@@ -442,7 +443,7 @@ contract HostileSellTest is SellBase {
     assertEq(W.balance, 1 ether, "W's prior ether stays");
   }
 
-  // ---- 5. the fee call to msg.sender ----
+  // ---- 5. the fee call to the fee recipient ----
 
   /// A contract sender's fee callback tries to re-enter W with another signed sell: refused (and swallowed by the
   /// sender), the outer sell lands, only one nonce is used
@@ -451,6 +452,7 @@ contract HostileSellTest is SellBase {
     SellDelegate.Sell memory _s1 = _good(1);
     _h.set(W, abi.encodeCall(SellDelegate.sell, (_s1, 0, _signed(_s1))), 0);
     SellDelegate.Sell memory _s0 = _good(0);
+    _s0.feeRecipient = address(_h); // the fee callback reaches the recipient W signed
     _h.send(_w(), _s0, FEE, _signed(_s0));
     assertFalse(_h.lastOk(), 're-entry refused');
     assertEq(bytes4(_h.lastRet()), SellDelegate.Reentrancy.selector);
@@ -464,6 +466,7 @@ contract HostileSellTest is SellBase {
     HostileSender _h = new HostileSender();
     vm.deal(address(_h), 1 ether);
     SellDelegate.Sell memory _s0 = _good(0);
+    _s0.feeRecipient = address(_h); // the fee callback reaches the recipient W signed
     _h.set(address(pool), abi.encodeCall(IPrivacyPool.deposit, (0.0001 ether, _s0.precommitment)), 0.0001 ether);
     bytes memory _sig = _signed(_s0);
     vm.expectRevert(IPrivacyPool.PrecommitmentAlreadyUsed.selector);
@@ -528,7 +531,8 @@ contract HostileSellTest is SellBase {
     vm.prank(address(0xF00D)); // not the helper
     _w().sell(_s, FEE, _sig);
     assertEq(_w().nonce(), 1);
-    assertEq(address(0xF00D).balance, FEE, 'whoever sends it takes the fee');
+    assertEq(address(0xF00D).balance, 0, 'whoever sends it, the fee goes to the recipient W signed');
+    assertEq(SENDER.balance, FEE);
   }
 
   /// W re-delegated to another contract and back: the nonce at the ERC-7201 slot survives; and a second SellDelegate

@@ -250,34 +250,45 @@ export type EvmNetwork = "base" | "robinhood" | "base-sepolia" | "robinhood-test
 /** Each network's chain id (eth_chainId), as the money gate pins them (scripts/ci/money-gate.mjs CHAIN_ID). */
 export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n });
 /**
- * Each network's two Transfer RPCs, the restore's walletRpcs (./evm-restore.ts evmRestoreNotes): keyless, two operators,
- * neither one of the testnet run's pool pair (contracts/pool-evm/script/testnet-run.mjs NETS, which takes these), each
- * answering a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
- * 2,000,000 blocks back. None is an operator of the kit's providers (evmPoolVenues) but two, each named by the
- * independence test: Robinhood's own rpc.mainnet.chain.robinhood.com, the kit's too, since no keyless third operator
- * answers every read on Robinhood (below); and robinhood-testnet.drpc.org, the kit's testnet pair's, since Robinhood
- * testnet has none either. Robinhood's own is also the money gate's Robinhood pair (scripts/ci/rpc-operators.mjs): a
- * Robinhood pool pinned with it would be refused as walletRpcs' provider by evmRestoreNotes, so its pool pair is chosen
- * without it. Read live 5 Nov 12:20-12:28Z at 1,000, 10,000 and 100,000 blocks: base-sepolia.gateway.tenderly.co every
- * size (250,000 too); base-testnet.api.pocket.network every size (another backend capped 10,001);
- * base.gateway.tenderly.co 1,000 ("invalid params" above); 8453.rpc.thirdweb.com 1,000 (HTTP 429 and -32005 after
- * about 4 calls, Retry-After up to 9 s: a throttle, waited out, never a cap); robinhood.daybreak-rpc.network 1,000
- * (-32602 "query exceeds max block range 2000"); 46630.rpc.thirdweb.com 1,000; robinhood-testnet.drpc.org 101 (code 35
- * above); and 13:32Z rpc.mainnet.chain.robinhood.com 30,000 (-32602 "only 30000 are allowed" at 100,000). Not taken:
- * robinhood.api.pocket.network (review, 5 Nov: -32602 "missing required field 'address' for log filter" from 20 to 30%
- * of its backends at every page size, one block too, so a day-old W's read fails), base-sepolia.drpc.org (code 19
- * "Temporary internal error" at 10 to 101 blocks, 35 above: two of three Ws unread in the evm-buy-hookdata-fee run,
- * 4 Nov), publicnode on every chain ("Please specify an address": no read without one), the chains' own RPCs but
- * Robinhood mainnet's, and sepolia.base.org (the pool pairs), mainnet.base.org (-32011 "request limit reached"), nodies (50 blocks), blastapi (10),
- * 1rpc (50), blockreq and blockmachine (recent blocks only), zan, onfinality and routeme (keys or rate limits),
- * blockvectra (refused), tatum (100), blxrbdn and therpc (403), llamarpc and omniatech (down). Robinhood testnet has no
- * keyless third: chainid.network and chainlist list only these two besides the pool pair and blockvectra.
+ * Each testnet's Transfer RPCs, the restore's walletRpcs there (./evm-restore.ts evmRestoreNotes): a pinned list of
+ * keyless providers of three operators, read as a pair with spares (evmPair, card evm-transfer-rpc-spares): the first
+ * two are the seats, the third takes the place of one that throttles or is out. On Base and Robinhood a W is read on the
+ * helper's route only (decision M359: holdings are display, one reader, the helper's keyed provider and its fallbacks),
+ * so no mainnet W is ever named to a provider the device reaches itself, and there is no mainnet list. The testnets have
+ * no helper route. thirdweb is the last spare: its keyless quota runs out for the day on every chain at once (below),
+ * and neither testnet has a fourth keyless operator that answers a W's read from the browser (below), so there a second
+ * provider out leaves one.
+ * Each answers a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
+ * 2,000,000 blocks back, and a CORS preflight from https://sign.confidential.unrealized.trade (POST, content-type)
+ * with 204 or 200 and that origin or *. testnet-run takes these too; evmRestoreNotes never names a W to a provider of
+ * the pool's own list, so one that is (Robinhood testnet's own, below) is dropped from the W reads there. None is an
+ * operator of the kit's providers (evmPoolVenues) but two, each named by the independence test:
+ * rpc.testnet.chain.robinhood.com and robinhood-testnet.drpc.org, since no other keyless operator answers every read on
+ * Robinhood testnet (below).
+ * The reads, 5 Nov 17:29-17:33Z (W 0x809286a1…078e; 1,000 blocks at the head and 2,000,000 back, then 20 pages):
+ * - base-sepolia: base-sepolia.gateway.tenderly.co 1,000 blocks 338 and 447 ms, CORS 204 *;
+ *   base-testnet.api.pocket.network 1,000 blocks 190 and 288 ms, 20 x 1,000 p50 213 ms all answered, CORS 204 the origin.
+ * - robinhood-testnet: robinhood-testnet.drpc.org code 35 at 1,000 blocks, 20 x 100 p50 311 ms all answered (101 is its
+ *   page, 5 Nov 12:28Z), CORS 204 the origin; rpc.testnet.chain.robinhood.com 20 x 10,000 blocks, 8 answered and then
+ *   HTTP 429 (a throttle, waited out or swapped), CORS 204 *.
+ * - thirdweb, the spare (84532 and 46630.rpc.thirdweb.com): 1,000 blocks on 5 Nov 12:20-12:28Z (-32005 "Log response
+ *   size exceeded" above, HTTP 429 after about 4 calls with Retry-After up to 9 s); at 16:28Z and again 17:29-17:30Z
+ *   every chain answered eth_chainId HTTP 429 -32005 "Rate limit exceeded" (its keyless daily quota, Retry-After
+ *   26,741,000 ms): a spare that rests, never a seat; CORS 204 *.
+ * Not taken (17:29-17:31Z unless dated): on Robinhood testnet robinhood-sepolia-rpc.publicnode.com (-32701 "Please
+ * specify an address"), robinhood-testnet.gateway.tenderly.co and robinhood-testnet.api.pocket.network (HTTP 404):
+ * Robinhood testnet has no other keyless operator. On Base Sepolia base-sepolia-public.nodies.app (10 x 50 blocks p50
+ * 336 ms, 17:48Z, but its CORS preflight answers no Access-Control-Allow-Origin, so no browser reads it),
+ * base-sepolia.drpc.org (code 19 "Temporary internal error" at 10 to 101 blocks, 4 Nov), base-sepolia.api.onfinality.io
+ * (-32029 at once), base-sepolia.public.blastapi.io (HTTP 403, closed), sepolia.base.org (the pool's, 200 blocks),
+ * publicnode ("Please specify an address"), rpc.ankr.com (a key), and the kit's providers' operators.
  */
-export const EVM_TRANSFER_RPCS: Readonly<Record<EvmNetwork, readonly [string, string]>> = Object.freeze({
-  base: Object.freeze(["https://base.gateway.tenderly.co", "https://8453.rpc.thirdweb.com"] as const),
-  robinhood: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.daybreak-rpc.network"] as const),
-  "base-sepolia": Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network"] as const),
-  "robinhood-testnet": Object.freeze(["https://46630.rpc.thirdweb.com", "https://robinhood-testnet.drpc.org"] as const),
+// The freezes are marked pure, so SIGN_HOST's build, which reads none of these yet, drops them whole
+// (packages/signpage/scripts/build-network.test.mjs refuses a testnet provider in it).
+export type EvmTestnet = "base-sepolia" | "robinhood-testnet";
+export const EVM_TRANSFER_RPCS: Readonly<Record<EvmTestnet, readonly string[]>> = /* @__PURE__ */ Object.freeze({
+  "base-sepolia": /* @__PURE__ */ Object.freeze(["https://base-sepolia.gateway.tenderly.co", "https://base-testnet.api.pocket.network", "https://84532.rpc.thirdweb.com"]),
+  "robinhood-testnet": /* @__PURE__ */ Object.freeze(["https://robinhood-testnet.drpc.org", "https://rpc.testnet.chain.robinhood.com", "https://46630.rpc.thirdweb.com"]),
 });
 
 /** A network's pool, pinned on the device: the pool, the relayer's fee recipient every proof binds, and the pool's
@@ -306,6 +317,73 @@ type Rpcs = readonly [EvmRpc, EvmRpc];
 export function checkEvmRpcs(rpcs: unknown): asserts rpcs is Rpcs {
   if (!Array.isArray(rpcs) || rpcs.length !== 2 || typeof rpcs[0] !== "function" || typeof rpcs[1] !== "function") throw new Error("rpcs: two");
   if (solanaSameProvider(rpcs[0], rpcs[1])) throw new Error("rpcs: one provider twice is one read");
+}
+
+/** How long a provider rests after a throttle or no connection that names no longer Retry-After: Robinhood's own RPC's
+ * one-minute window (HTTP 429 with no Retry-After after 189 eth_getLogs in 59 s, read 5 Nov 13:55Z). */
+export const EVM_SPARE_REST_MS = 60_000;
+
+/**
+ * A pinned list of providers (two or more, no provider twice: the kit's solanaSameProvider) read as one pair of seats
+ * (card evm-transfer-rpc-spares). Seat 0 starts on the list's first provider and seat 1 on its second; the rest are
+ * spares. A seat's call that the provider throttles or cannot carry (`throttled`: HTTP 429, a throttle code, a
+ * transport fault, and no answer in time on any call but an eth_getLogs page, whose pager halves it instead; and a provider
+ * out, OUT_WORDS) rests that
+ * provider for its Retry-After, at least EVM_SPARE_REST_MS, and is made again at once on the next spare: never a wait
+ * while a spare is free. With none free the seat takes the provider whose rest ends first and the error goes up with
+ * that provider's own Retry-After (none when it named none), so the read's own waits and bound apply as on a fixed
+ * pair, never another provider's hours. The two seats never hold one provider, so the pair always reads
+ * on two. thirdweb's keyless daily quota answered every chain HTTP 429 with Retry-After 26,741,000 ms (5 Nov 16:28Z):
+ * the kit's client ends that call at once, and with no spare it was the pair's failure. A seat's `url` is its
+ * provider's now.
+ */
+export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
+  if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (solanaSameProvider(list[i]!, list[j]!)) throw new Error(`${what}: one provider twice is one read`);
+  const restUntil = list.map(() => 0);
+  // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess)
+  const named = list.map(() => false);
+  const at = [0, 1];
+  // the provider seat k moves to: a resting-free one after its own in list order, else (`soonest`) the one whose rest
+  // ends first; never the other seat's
+  const next = (k: number, soonest: boolean): number | null => {
+    let best: number | null = null;
+    for (let s = 1; s < list.length; s++) {
+      const i = (at[k]! + s) % list.length;
+      if (i === at[1 - k]) continue;
+      if (restUntil[i]! <= Date.now()) return i;
+      if (soonest && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
+    }
+    return best !== null && restUntil[best]! <= restUntil[at[k]!]! ? best : null;
+  };
+  const seat = (k: number): EvmRpc => {
+    const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+      for (;;) {
+        if (restUntil[at[k]!]! > Date.now()) at[k] = next(k, true) ?? at[k]!;
+        const i = at[k]!;
+        try {
+          return await list[i]!(method, params);
+        } catch (e) {
+          const t = throttled(e);
+          if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
+          restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
+          named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
+          if (at[k] !== i) continue; // another call on this seat moved it already
+          const n = next(k, false);
+          if (n === null) {
+            at[k] = next(k, true) ?? i;
+            // the read's wait is for the provider now seated: its own Retry-After, else the read's backoff
+            const j = at[k]!;
+            if (j === i) throw e;
+            throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: named[j] ? Math.max(0, restUntil[j]! - Date.now()) : null });
+          }
+          at[k] = n;
+        }
+      }
+    };
+    return Object.defineProperty(call, "url", { get: () => list[at[k]!]!.url, enumerable: true }) as EvmRpc;
+  };
+  return [seat(0), seat(1)];
 }
 
 /**
@@ -429,6 +507,17 @@ const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15
 const SLOW_WORDS = /no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
 const LIMIT_32005 = /(RPC error |"code":\s*)-32005\b/;
 const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
+/** A provider out, never a word on the read (card evm-transfer-rpc-spares): an HTTP error with no JSON-RPC answer in it
+ * (the kit's client: "HTTP 410", where a refusal reads "HTTP 400: RPC error 35: ..."), an answer to another request
+ * (the client's "answer id null is not request id 6") and a standard method the provider says it lacks (-32601). Read
+ * 5 Nov 18:00-18:05Z on a restore's W reads: 1rpc.io/base HTTP 410, then "answer id null" on 7 pages in a row;
+ * robinhood-testnet.drpc.org -32601 "the method eth_getBlockByNumber does not exist/is not available" from one of its
+ * backends; base.api.pocket.network -32602 "missing required field 'address' for log filter" to 2 of 30 W pages (17:59Z),
+ * one backend's, as Robinhood's Pocket (5 Nov). And a provider that refuses a read for want of a key, HTTP 401 or 403
+ * whatever its words: robinhood-rpc.publicnode.com, the kit's first Robinhood provider, answered a pool-shaped log read
+ * 2,000 blocks back HTTP 403 -32602 "Archive requests require a personal token" (5 Nov 18:55Z); a cap is a 400, never
+ * these. A throttle: the same read again, on a spare at once when the list has one free. */
+const OUT_WORDS = /^HTTP \d{3}$|^HTTP 40[13]\b|^answer id \S+ is not request id |(RPC error |"code":\s*)-32601\b|missing required field 'address'/;
 const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | null } | null => {
   const t = e as { name?: unknown; afterMs?: unknown; message?: unknown; fault?: unknown } | null;
   if (t?.name === "EvmUnansweredError") return null;
@@ -436,7 +525,7 @@ const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | n
   if (t?.name === "SolanaRpcTransportError") return { kind: t.fault === "timeout" ? "slow" : "throttle", afterMs };
   const m = String(t?.message ?? e);
   if ((e as Error)?.name === "TimeoutError" || SLOW_WORDS.test(m)) return { kind: "slow", afterMs: null };
-  if (THROTTLE_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { kind: "throttle", afterMs: null };
+  if (THROTTLE_WORDS.test(m) || OUT_WORDS.test(m) || (LIMIT_32005.test(m) && !CAP_WORDS.test(m))) return { kind: "throttle", afterMs: null };
   return null;
 };
 /** A page past the provider's own head (its log index behind its block headers): a lag, never a smaller page. */
@@ -686,6 +775,30 @@ export async function evmHoldsAnchor(rpcs: readonly [EvmRpc, EvmRpc], chainId: b
   if (bs.some((b) => b === null || b.hash !== anchor.hash)) lag(`an RPC does not hold block ${anchor.number} as ${anchor.hash}`);
 }
 
+/**
+ * Every token a W was sent from block `from` up to the newest anchor, on one reader: the helper's route on mainnet
+ * (./evm-restore.ts, decision M359: a W's holdings are display, read on the helper's keyed provider, never named to a
+ * provider the device reaches itself). The anchor's height must hold the anchor's hash on it first (another hash, or
+ * none yet, is a lag: a retry), which also holds it to the pool's chain, since the route answers no eth_chainId; then
+ * the Transfer logs to W (eth_getLogs, topic 2 = W, no address), paged under its cap (`page[0]`, kept across Ws), each
+ * log in the finalized or the newest anchor's block of that block's hash (the newest's another hash is a lag). Each
+ * call names this one W and nothing else of the user's. No second provider compares them: they gate no signature.
+ */
+export async function evmTokensSentToOne(rpc: EvmRpc, w: string, from: bigint, { fin, anchor }: EvmAnchors, page: bigint[], signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<string[]> {
+  addr20(w, "W");
+  const to = lower(w);
+  if (typeof from !== "bigint" || from < 0n) throw new Error("from: a block number");
+  const b = await evmAnswered(() => getBlock(rpc, tag(anchor.number), `block ${anchor.number}`), signal, sleep);
+  if (b === null || b.hash !== anchor.hash) lag(`the reader does not hold block ${anchor.number} as ${anchor.hash}`);
+  if (from > anchor.number) return [];
+  const logs = await readLogs(rpc, 0, { topics: [EVM_TRANSFER_TOPIC, null, `0x${to.slice(2).padStart(64, "0")}`] }, (raw, f, t, what) => decodeTransfer(raw, to, f, t, what), from, anchor.number, page, signal, sleep);
+  for (const e of logs) {
+    if (e.block === fin.number && e.blockHash !== fin.hash) throw new Error(`a log of block ${e.block} is not of the anchor ${fin.hash}`);
+    if (e.block === anchor.number && e.blockHash !== anchor.hash) lag(`a log of block ${e.block} is not of the anchor ${anchor.hash}`);
+  }
+  return [...new Set(logs.map((l) => l.token))].sort();
+}
+
 /** What a trees() call may ask beyond the cut: a deposit's own note's newest root, read like every other read. */
 export type EvmTreesOpts = { newest?: boolean };
 
@@ -705,7 +818,8 @@ export type EvmTreeSync = {
 };
 
 export type EvmSyncArgs = {
-  rpcs: readonly [EvmRpc, EvmRpc];
+  /** A pinned list of two or more providers on the pool's network, read as a pair with spares (evmPair). */
+  rpcs: readonly EvmRpc[];
   pin: EvmPoolPin;
   /** tests only: the wait between lag retries */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -762,8 +876,7 @@ const depthOf = (size: number): number => {
  * tail past the finalized block is read again on every round and never kept. Rounds run one at a time.
  */
 export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
-  checkEvmRpcs(a.rpcs);
-  const rpcs = a.rpcs;
+  const rpcs = evmPair(a.rpcs);
   const pool = lower(a.pin.pool);
   addr20(pool, "pool");
   const chainId = EVM_CHAIN_IDS[a.pin.network];
@@ -988,8 +1101,9 @@ export type EvmEpochFeeRule = (at: { block: bigint; baseFeePerGas: bigint; depth
 export type EvmPoolArgs = {
   /** The network's pin (EVM_POOLS[network]): the pool, the fee recipient and the deploy block, never the helper's word. */
   pin: EvmPoolPin;
-  /** Two RPCs of different operators on the pool's network. */
-  rpcs: readonly [EvmRpc, EvmRpc];
+  /** A pinned list of two or more providers of different operators on the pool's network, read as a pair with spares
+   * (evmPair). */
+  rpcs: readonly EvmRpc[];
   /**
    * The two RPCs bind reads the chain fee on, at the epoch's first block's hash, always given (never `rpcs` in their
    * place: card evm-buy-hookdata-fee, fold 4 LOW-1): each must keep
@@ -999,7 +1113,7 @@ export type EvmPoolArgs = {
    * testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of state and
    * pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old logs).
    */
-  feeRpcs: readonly [EvmRpc, EvmRpc];
+  feeRpcs: readonly EvmRpc[];
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -1011,19 +1125,14 @@ export type EvmPoolArgs = {
 };
 
 export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
-  checkEvmRpcs(a.rpcs);
-  const feeRpcs = a.feeRpcs;
-  try {
-    checkEvmRpcs(feeRpcs);
-  } catch (e) {
-    throw new Error(`feeRpcs: ${(e as Error).message}`);
-  }
+  const rpcs = evmPair(a.rpcs);
+  const feeRpcs = evmPair(a.feeRpcs, "feeRpcs");
   if (typeof a.epochFee !== "function" || typeof a.relayFee !== "function") throw new Error("epochFee and relayFee: functions");
   const pool = lower(a.pin.pool);
   const feeRecipient = lower(a.pin.feeRecipient);
   addr20(feeRecipient, "feeRecipient");
   if (feeRecipient === pool || BigInt(feeRecipient) === 0n) throw new Error("feeRecipient: the pool or the zero address");
-  const sync = evmTreeSync({ rpcs: a.rpcs, pin: a.pin, ...(a.sleep ? { sleep: a.sleep } : {}) });
+  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
   return {
@@ -1035,7 +1144,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
     lifeMs: EVM_LIFE_MS,
     sendMarginMs: EVM_SEND_MARGIN_MS,
     // an agreed read: a moment's fork at the newest height is a retry here, as in every other agreed read
-    now: (signal) => evmRetryLag(() => evmNow(a.rpcs, signal, sleep), sleep, signal),
+    now: (signal) => evmRetryLag(() => evmNow(rpcs, signal, sleep), sleep, signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
     async bind({ chunk, wallet, refundPrecommitment, epochStartMs, deadlineMs }, signal) {
       if (!(wallet?.publicKey instanceof Uint8Array) || typeof wallet.address !== "string" || wallet.address !== evmAddress(wallet.publicKey))
@@ -1046,14 +1155,14 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
       if (typeof refundPrecommitment !== "bigint" || refundPrecommitment < 0n || refundPrecommitment >= VAULT_FIELD_P) throw new Error("refundPrecommitment: not a field element");
       if (typeof epochStartMs !== "bigint" || epochStartMs <= 0n || epochStartMs % EVM_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
       // the higher of the two latest times: one RPC's lie can only make this refuse
-      const nowMs = await evmLatestHigh(a.rpcs, signal, sleep);
+      const nowMs = await evmLatestHigh(rpcs, signal, sleep);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + EVM_LIFE_MS || deadlineMs > U64 || deadlineMs <= nowMs + EVM_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs
       // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
       // and the chain fee there (the L1 data fee, and Base's operator fee), the same on both RPCs
       const { block, depth, chainFee } = await evmRetryLag(async () => {
-        const block = await evmEpochBlock(a.rpcs, epochStartMs, signal, sleep);
+        const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
         const depth = await sync.depthAt(block.number, signal, block.hash);
         const reads = evmPoolChainFeeReads(a.pin.network, evmPoolGas(depth));
         const [x, y] = await both(feeRpcs, (rpc, k, sig) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${k} chain fee`, sig, sleep))), signal);
