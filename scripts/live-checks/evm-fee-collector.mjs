@@ -13,7 +13,9 @@
 //   - the deployer has no code, a nonce equal to the transactions it sent, and at most DUST wei left.
 // And each sell in evm-fee-collector.sells.json ({ sells: [{ chain, hash, w, fee }] }), on the same two RPCs: the
 // transaction is a type 4 sell sent to W, its receipt succeeded and carries exactly one Paid(W, value) from the chain's
-// collector, with value at least the sell's fee. At least one sell must be listed.
+// collector, with value at least the sell's fee. None listed is "0 sells listed", ok: no EVM sell lands until the
+// testnets run the 11-field SellDelegate (card evm-testnet-delegate-review3, which lists the first real sells and makes
+// one per chain required).
 //   node scripts/live-checks/evm-fee-collector.mjs [--deployment <file>[,<file>]] [--rpc <url>,<url>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2. With no --deployment it reads both chains' records; --rpc applies to a
 //     single record (a dry run's loopback fork), and its sells are read there too.
@@ -109,7 +111,7 @@ export async function checkSells({ sells, collectors, fetchFn = fetch, rpcsOf = 
     ok &&= pass;
     lines.push(`${pass ? "ok  " : "FAIL"} ${text}`);
   };
-  say(Array.isArray(sells) && sells.length > 0, `sells listed: ${Array.isArray(sells) ? sells.length : "none"}`);
+  say(Array.isArray(sells), `${Array.isArray(sells) ? sells.length : "no list of"} sells listed`);
   for (const s of Array.isArray(sells) ? sells : []) {
     const at = lower(collectors[s.chain]);
     const w = lower(s.w);
