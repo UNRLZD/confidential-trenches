@@ -54,6 +54,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-robinhood-capacity.mjs",
   "scripts/live-checks/helper-robinhood-search-ahead.mjs",
   "scripts/live-checks/helper-sell-fee-recipient.mjs",
+  "scripts/live-checks/helper-sender-fee-proof.mjs",
   "scripts/live-checks/helper-v4-hook-liquidity.mjs",
   "scripts/live-checks/helper-tape-4337-trader.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
