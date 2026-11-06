@@ -41,20 +41,23 @@
 // ANSWER_MAX bytes or not JSON is a failure. A tick that cannot agree changes nothing; the book keeps serving what it
 // holds, dated by its last read, and a read asked of a book STALE_MS old starts one (card helper-live-bars-no-503).
 //
-// Block times on Base come from its fixed clock (BLOCK_CLOCK, lists.ts): checked against each tick's newest block on both
-// providers, and a tick whose block disagrees with the clock reads nothing. Robinhood has no fixed clock (it put 10 or
-// more blocks in one second): a swap is timed by its log's `blockTimestamp`, part of what two providers must answer
-// alike, never 0 and never before an earlier swap's.
+// Block times: a swap is timed by its log's `blockTimestamp`, part of what two providers must answer alike, never 0 and
+// never before an earlier swap's, on every chain. No clock is assumed: Base's block time went from 2 s to 200 ms at block
+// 53556127 (2026-11-05 18:00:01Z, lists.ts BLOCK_CLOCK), and a read that checked each head against the 2 s clock
+// answered 503 for every Base token from then (card helper-ready-page-warm); Robinhood puts 10 or more blocks in one
+// second. Base's providers fill `blockTimestamp` (base-rpc.publicnode.com, base.gateway.tenderly.co and base.drpc.org
+// on all 124 v4 swaps of 100 blocks, read 2026-11-05 19:0xZ).
 //
 // Display only: nothing here feeds a signature. Every provider value is hostile input: a log counts only when its
 // emitter, topic0, topic count and data length match the venue exactly; an amount must fit its type and its legs have
 // opposite signs; counts, ranges and the books are bounded.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
-import { CALLER_ROOM, evmThrottleS, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
-import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
+import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -154,7 +157,7 @@ export type Venues = {
   pons: readonly string[];
   /** The most blocks one `eth_getLogs` asks (the smallest the chain's providers take). */
   span: number;
-  /** The blocks a token's first read and its discovery may go back: COLD_S of the chain's measured block time. */
+  /** The blocks a token's first read and its discovery may go back (about five minutes of the chain's blocks). */
   cold: number;
   /** The blocks one round of that walk reads, newest first: an active token's swaps are found in the first. */
   step: number;
@@ -163,12 +166,6 @@ export type Venues = {
   /** A provider this many blocks behind the other is passed over for the third. */
   lagMax: number;
 };
-/** How far back a token's discovery and first read may walk: 20 minutes on every chain, Base's window before
- *  (600 blocks of 2 s), so a token quiet for a few minutes still has its pool, tape and bars (card app-console-429: at
- *  Robinhood's 3,000 blocks, 306 s, a v4 token with $36.6k of 5-minute volume had no transfer and answered an empty
- *  chart, 2026-11-04 12:59Z). */
-export const COLD_S = 1_200;
-const coldOf = (blockMs: number) => Math.ceil((COLD_S * 1000) / blockMs);
 export const VENUES: Readonly<Record<EvmChain, Venues>> = {
   base: {
     poolManager: BASE_VENUES.poolManager,
@@ -185,11 +182,17 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: REF_POOL_ID,
     pons: [],
     span: 1_000,
-    // Base's clock: one block every 2 s (lists.ts BLOCK_CLOCK)
-    cold: coldOf(2_000),
-    step: 600,
-    refBack: 1_400,
-    lagMax: 10,
+    // one block every 200 ms from block 53556127 (lists.ts BLOCK_CLOCK). The window is Robinhood's five minutes, one
+    // step, 1,500 blocks, two calls a filter (at 2 s it was 20 minutes, 600 blocks, one call; at 200 ms 20 minutes is
+    // 6,000 blocks, and a quiet token's walk of it on the three providers left took their bursts' 429s, no
+    // pair, 503, read live 2026-11-05 19:2xZ); a token quiet longer has GeckoTerminal's bars of its top pool, as on
+    // Robinhood. The ETH price is read 1,000 blocks (200 s) before a book's first, its pool's longest gap 374 blocks (88 swaps in
+    // 5,000 blocks read 2026-11-05 19:1xZ on base-rpc.publicnode.com); a provider 50 blocks (10 s) behind is passed
+    // over (four heads read at once five times, 2026-11-05 19:1xZ, were at most 2 blocks apart)
+    cold: 1_500,
+    step: 1_500,
+    refBack: 1_000,
+    lagMax: 50,
   },
   // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
   // its last five minutes (600, one minute, found no pool for a v4 token with 213 swaps in the 2,000 blocks before, read
@@ -210,7 +213,7 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     refPoolId: ROBINHOOD_REF_POOL_ID,
     pons: [ROBINHOOD_VENUES.ponsV2],
     span: 100,
-    // one step, not COLD_S (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
+    // one step, not 20 minutes (card helper-robinhood-swaps): 20 minutes of 102 ms blocks is 118 spans of 100 blocks a
     // filter a provider, and under it every keyless provider answered 429, -32005, code 30 or a timeout and the swaps
     // routes 503 (2026-11-04 14:36-15:16Z reads, a soak at 15:13Z still 503 after 195 s); a token quiet longer than the
     // step's five minutes has GeckoTerminal's bars of its top pool, as a token with no pool found
@@ -225,8 +228,20 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
  *  blocks answered by base-rpc.publicnode.com (457 ms) and base.gateway.tenderly.co (582 ms); base.drpc.org up to 10,000
  *  blocks but batches of 3; mainnet.base.org "request limit reached"; base-mainnet.public.blastapi.io at most 10 blocks;
  *  1rpc.io 50 blocks. */
+//
+// Read again 2026-11-05 19:0x-19:2xZ from the Mac (card helper-ready-page-warm), after Base went to 200 ms blocks: one
+// 1,000-block `eth_getLogs` answered by base-rpc.publicnode.com (130-300 ms; 429 past about 6 a second),
+// base.gateway.tenderly.co (350-600 ms, 2.5 a second sequential none refused) and base.public.blockpi.network's public
+// endpoint (380-1,200 ms, 3.6 a second none refused), each log with its blockTimestamp; base.drpc.org now refuses 250
+// blocks and more (code 35 "ranges over 10000 blocks are not supported on free plan") and 429s bursts; base-pokt.nodies.app
+// takes 50 blocks at most (-32001) and 429s bursts; 1rpc.io, base.meowrpc.com, base.llamarpc.com, base.lava.build,
+// base.api.onfinality.io, api.zan.top, endpoints.omniatech.io and base.blockpi.network (no key) refused or failed every read.
 export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
-  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.drpc.org", "https://base-pokt.nodies.app"],
+  // base.drpc.org is left out: it answers none of the reads' ranges (250 blocks and more) and 429s about one a second.
+  // mainnet.base.org, Base's own, answers the heads, calls and the traders' lookups (20 eth_getTransactionByHash a
+  // second none refused, 19:3xZ) and is sent no log read (limits.ts LOGS_REFUSED): with the three above alone a cold
+  // tape's 50 lookups waited on their paces and its traders answered null (index-evm-swaps on a local build, 19:30Z)
+  base: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co", "https://base.public.blockpi.network/v1/rpc/public", "https://base-pokt.nodies.app", "https://mainnet.base.org"],
   // Robinhood, 2026-11-03 19:2xZ, `eth_getLogs` of the v4 PoolManager: robinhood.daybreak-rpc.network up to 2,000 blocks
   // (batches of 10), robinhood.drpc.org up to 101 blocks (batches of 3), api.blockvectra.com up to 100 blocks (no
   // batches); each of the three fills a log's `blockTimestamp`. rpc.mainnet.chain.robinhood.com answers 5,000 blocks but
@@ -296,8 +311,16 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
 };
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
- *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ). */
-const BATCH_SIZE: Readonly<Record<string, number>> = { ...BATCH_MAX, "https://base.gateway.tenderly.co": 4, "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1 };
+ *  Tenderly's gateway 4 (a batch of 10 `eth_call` answered HTTP 429 -32005 "rate limit exceeded", 2026-11-03 17:2xZ);
+ *  a paced provider's at most its burst (limits.ts PROVIDER_PACE), so a batch never asks more than its bucket holds
+ *  (publicnode 6, Tenderly 3, blockpi 4: its public endpoint refused batches of 5, 2026-11-05 19:2xZ). */
+const BATCH_SIZE: Readonly<Record<string, number>> = {
+  ...BATCH_MAX,
+  "https://base-rpc.publicnode.com": 6,
+  "https://base.gateway.tenderly.co": 3,
+  "https://base.public.blockpi.network/v1/rpc/public": 4,
+  "https://api.blockvectra.com/v1/robinhood_mainnet/public": 1,
+};
 
 /** Requests out to one provider at once (swaps.ts batchTo). */
 export const INFLIGHT_MAX = 4;
@@ -483,8 +506,8 @@ export function parseLogs(result: unknown): Log[] | null {
 }
 
 const key = (l: Log, withTime: boolean) => `${l.block}:${l.index}:${l.tx}:${l.address}:${l.topics.join(",")}:${l.data}${withTime ? `:${l.t ?? "-"}` : ""}`;
-/** Whether two providers' answers for one filter are the same logs; `withTime`: with the same block times too (a chain
- *  with no fixed block clock, whose swaps are timed by them). */
+/** Whether two providers' answers for one filter are the same logs; `withTime`: with the same block times too (the
+ *  swaps' reads, which are timed by them). */
 export const sameLogs = (a: Log[], b: Log[], withTime = false): boolean => a.length === b.length && a.every((l, i) => key(l, withTime) === key(b[i]!, withTime));
 
 const word = (data: string, i: number): string => data.slice(2 + 64 * i, 2 + 64 * (i + 1));
@@ -752,10 +775,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
   const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
-  // Base's fixed clock times its blocks; a chain with none (Robinhood) is timed by each log's own block time, which two
-  // providers must give alike
-  const clock = BLOCK_CLOCK[chain];
-  const timeOf = (l: Log): number | null => (clock !== null ? clock.genesisS + clock.blockS * l.block : typeof l.t === "number" && l.t > 0 ? l.t : null);
+  // a swap is timed by its log's own block time, which two providers must give alike (sameLogs with times)
+  const timeOf = (l: Log): number | null => (typeof l.t === "number" && l.t > 0 ? l.t : null);
   /** Blocks `from` to `to` in spans of at most V.span. */
   const spans = (from: number, to: number): [number, number][] => {
     const out: [number, number][] = [];
@@ -765,12 +786,67 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // each provider's hold, shared with every other path of the helper that reads it (limits.ts providerHolds)
   const holds = deps.holds ?? providerHolds(now);
 
+  // Two lanes on every provider's pace and in-flight queue (card helper-deploy-reads-fast): a read a caller waits on (a
+  // candles or trades read's open: its pool, its first read, its traders) is foreground; the helper's own reads (the open
+  // books' ticks, the lists' pool search ahead, the index) are background. Foreground goes first in each provider's
+  // in-flight queue and may draw the CALLER_ROOM background leaves free (limits.ts providerHolds take), so a user's read
+  // never waits behind the helper's own: after a deploy every tape is cold, the live checks and the app open dozens at
+  // once, and each open book ticks every TICK_MS (live run 42122733397 attempt 1: Base first reads 2.3 to 5.6 s, a v4
+  // tape 503 at OPEN_BOUND_MS, and index-evm-swaps BAD). Work a caller joins that another started (a pool search, the
+  // shared head, the ETH price read) is lifted to foreground by the join (join), the standard priority inheritance.
+  // A lane also counts the ms its reads waited for a pace or a queue, for the answer's Server-Timing (laneTiming).
+  type Lane = { fg: boolean; paceMs: number; slotMs: number; posts: number; joined?: Set<Lane> };
+  const lanes = new AsyncLocalStorage<Lane>();
+  const newLane = (fg: boolean): Lane => ({ fg, paceMs: 0, slotMs: 0, posts: 0 });
+  /** The lane a read runs in now: none set is background. */
+  const fgNow = (): boolean => lanes.getStore()?.fg === true;
+  /** Work that callers may share, started now: a lane of its own, foreground when its starter is. */
+  const sharedLane = (): Lane => newLane(fgNow());
+  /** A caller joins shared work: a foreground one lifts it to foreground, and counts its waits as its own. */
+  const join = (l: Lane): void => {
+    const me = lanes.getStore();
+    if (me === undefined || !me.fg || me === l) return;
+    l.fg = true;
+    (me.joined ??= new Set()).add(l);
+  };
+  /** The time `ms` one post of the lane now waited for a provider's pace or its in-flight queue (`slot`). */
+  const waited = (ms: number, slot = false): void => {
+    const l = lanes.getStore();
+    if (l === undefined || ms <= 0) return;
+    if (slot) l.slotMs += ms;
+    else l.paceMs += ms;
+    l.posts++;
+  };
+  /** A foreground answer's Server-Timing: the ms its reads (and the shared reads it joined) waited for a provider's pace
+   *  or in-flight queue, and how many posts waited; the open's whole time beside it. */
+  const laneTiming = (l: Lane, openMs: number): string => {
+    let pace = 0;
+    let slot = 0;
+    let posts = 0;
+    const seen = new Set<Lane>();
+    const walk = (x: Lane): void => {
+      if (seen.has(x)) return;
+      seen.add(x);
+      pace += x.paceMs;
+      slot += x.slotMs;
+      posts += x.posts;
+      for (const y of x.joined ?? []) walk(y);
+    };
+    walk(l);
+    return `evm-open;dur=${Math.round(openMs)}, evm-queue;dur=${Math.round(pace + slot)};desc="${posts} posts: pace ${Math.round(pace)} ms, in flight ${Math.round(slot)} ms"`;
+  };
+
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
   async function batchTo(url: string, calls: Call[], patient = false): Promise<Reply[] | null> {
     const max = BATCH_SIZE[url] ?? 10;
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
-    const got = await Promise.all(parts.map((part) => slot(url, part.length, patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS, () => one(url, part, patient))));
+    // a part waits for its units of the provider's pace inside its place in the in-flight queue; a background part waits
+    // for them before it takes a place, so it never holds one asleep (card helper-deploy-reads-fast: background posts
+    // asleep on the pace in the places held a caller's read 2.6 s in the queue behind them)
+    const wait = patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS;
+    const send = (part: Call[]) => async () => ((await paceFor(url, part.length, patient)) ? one(url, part) : null);
+    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceFor(url, part.length, patient)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
     // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
     // its requests are asked of the next provider
     if (got.every((g) => g === GAVE_UP)) return null;
@@ -782,7 +858,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // did not (card helper-chart-fresh, 2026-11-04 14:49Z)
   // (`calls`: the calls out or queued to it, by which free counts its budget; `queue`: each queued post's calls, by
   // which waitOf counts the units it will take)
-  const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number }[] }>();
+  const inflight = new Map<string, { n: number; calls: number; queue: { go: () => void; calls: number; fg: boolean }[] }>();
   // a post queued past `maxWaitMs` is another provider's, as a read past its pace's wait is (one): GAVE_UP, counted in
   // `paced` so agreed's patient round may ask it again (fold 4: at c780282 a cold dozen's reads waited 68.7 s in all in
   // daybreak's queue, and the slowest tape took 16.7 s)
@@ -792,9 +868,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     q.calls += calls;
     if (q.n >= (holds.paceOf(url)?.inflight ?? INFLIGHT_MAX)) {
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const fg = fgNow();
+      const queuedAt = performance.now();
       const sent = await new Promise<boolean>((go) => {
-        const entry = { go: () => go(true), calls };
-        q.queue.push(entry);
+        const entry = { go: () => go(true), calls, fg };
+        // a foreground post goes ahead of every background one queued (card helper-deploy-reads-fast), behind the
+        // foreground ones before it
+        const at = fg ? q.queue.findIndex((x) => !x.fg) : -1;
+        if (at < 0) q.queue.push(entry);
+        else q.queue.splice(at, 0, entry);
         timer = setTimeout(() => {
           // handed a slot meanwhile (shifted out and resolved true): nothing to take back
           const i = q.queue.indexOf(entry);
@@ -804,6 +886,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }, maxWaitMs);
       });
       clearTimeout(timer);
+      waited(performance.now() - queuedAt, true);
       if (!sent) return (q.calls -= calls), paced.set(url, (paced.get(url) ?? 0) + 1), GAVE_UP;
     } else q.n++;
     try {
@@ -831,17 +914,25 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const o = out.get(u);
     return o === undefined || o.size === 0 ? ewma : Math.max(ewma, performance.now() - Math.min(...o));
   };
-  async function one(url: string, part: Call[], patient = false): Promise<Reply[] | null> {
-    if (holds.heldFor(url) > 0) return null;
-    // the provider's pace, which every path of the helper draws from (limits.ts providerHolds take): a background read
-    // waits for its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's,
-    // past PACE_PATIENT_MS when no other provider answered it (agreed's last round)
-    for (let w = holds.take(url, part.length, true), slept = 0; w > 0; w = holds.take(url, part.length, true)) {
-      if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (paced.set(url, (paced.get(url) ?? 0) + 1), null);
+  /** The provider's pace, which every path of the helper draws from (limits.ts providerHolds take): a read waits for
+   *  its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's, past
+   *  PACE_PATIENT_MS when no other provider answered it (agreed's last round). False when it is not to be sent here. A
+   *  foreground read (a caller's, card helper-deploy-reads-fast) also draws the CALLER_ROOM background leaves. */
+  async function paceFor(url: string, calls: number, patient: boolean): Promise<boolean> {
+    if (holds.heldFor(url) > 0) return false;
+    const bg = !fgNow();
+    let slept = 0;
+    for (let w = holds.take(url, calls, bg); w > 0; w = holds.take(url, calls, bg)) {
+      if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (waited(slept), paced.set(url, (paced.get(url) ?? 0) + 1), false);
       await new Promise((go) => setTimeout(go, w));
       slept += w;
-      if (holds.heldFor(url) > 0) return null;
+      if (holds.heldFor(url) > 0) return (waited(slept), false);
     }
+    waited(slept);
+    return true;
+  }
+  async function one(url: string, part: Call[]): Promise<Reply[] | null> {
+    if (holds.heldFor(url) > 0) return null;
     const sent = performance.now();
     const o = out.get(url) ?? new Set<number>();
     out.set(url, o);
@@ -926,11 +1017,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const q = inflight.get(u);
     const p = holds.paceOf(u);
     const cap = p?.inflight ?? INFLIGHT_MAX;
-    const ahead = (q?.n ?? 0) + (q?.queue.length ?? 0);
+    // a foreground read waits behind the posts out and the foreground ones queued only (slot)
+    const fg = fgNow();
+    const before = (q?.queue ?? []).filter((x) => !fg || x.fg);
+    const ahead = (q?.n ?? 0) + before.length;
     const lat = latencyOf(u);
     const queued = Math.floor((ahead + posts - 1) / cap) * lat;
     if (p === undefined) return queued + lat;
-    const units = (q?.queue ?? []).reduce((a, x) => a + (p.unit === "post" ? 1 : x.calls), 0) + (p.unit === "post" ? posts : Math.max(calls, 1) * (headers ? 2 : 1));
+    const units = before.reduce((a, x) => a + (p.unit === "post" ? 1 : x.calls), 0) + (p.unit === "post" ? posts : Math.max(calls, 1) * (headers ? 2 : 1));
     const short = units - Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM);
     return Math.max(queued, short > 0 ? (short * 1000) / p.perS : 0) + lat;
   };
@@ -949,7 +1043,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const span = wideFirst ? Math.max(WIDE_SPAN[u] ?? V.span, V.span) : V.span;
       return [
         wideFirst && span > V.span ? 1 : 0,
-        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && clock === null && headerTimed.has(u)) / WAIT_GRAIN_MS),
+        -Math.round(waitOf(u, Math.ceil(calls / Math.floor(span / V.span)), wideFirst && headerTimed.has(u)) / WAIT_GRAIN_MS),
         Math.round(free(u)),
         -((i - (t % n) + n) % n),
       ];
@@ -965,11 +1059,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // one agreed head per HEAD_SHARE_MS, shared by every first read and discovery of the chain that asks within it (card
   // helper-robinhood-capacity fold 3: a dozen cold tapes read a dozen heads, two or three providers each); a tick
   // (`fresh`) always reads its own, the newest, and leaves it for them
-  let headShared: { at: number; p: Promise<{ n: number; t: number; with: string[] } | null> } | null = null;
+  let headShared: { at: number; p: Promise<{ n: number; t: number; with: string[] } | null>; lane: Lane } | null = null;
   function agreedHead(fresh = false): Promise<{ n: number; t: number; with: string[] } | null> {
-    if (!fresh && headShared !== null && now() - headShared.at < HEAD_SHARE_MS) return headShared.p;
-    const p = agreedHeadNow();
-    const mine = { at: now(), p };
+    if (!fresh && headShared !== null && now() - headShared.at < HEAD_SHARE_MS) return join(headShared.lane), headShared.p;
+    const lane = sharedLane();
+    const p = lanes.run(lane, agreedHeadNow);
+    const mine = { at: now(), p, lane };
     headShared = mine;
     // a head not read is not kept: the next asks again
     void p.then((h) => {
@@ -994,36 +1089,43 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // read out is waited for (each bounded by TIMEOUT_MS), so its answer still counts
     const reads: Promise<void>[] = [];
     const go = (urls: string[]) => (reads.push(read(urls)), hedged(reads.at(-1)!, urls));
+    // two heads within V.lagMax of each other are in hand
+    const pair = (): boolean => {
+      const ns = [...heads.values()].map((h) => h.n).sort((a, b) => b - a);
+      return ns.some((n, i) => i > 0 && ns[i - 1]! - n <= V.lagMax);
+    };
     await go(ok.slice(0, 2));
-    const first = [...heads.values()];
-    if (ok.length > 2 && (first.length < 2 || Math.abs(first[0]!.n - first[1]!.n) > V.lagMax)) await go(ok.slice(2, 3));
+    // the whole ranked list is walked, one more at a time, until a pair is in hand or the list is spent (card
+    // evm-rpc-spare-list: with Base's first two providers down the third answered, the patient round asked the first two
+    // again and the fourth never, so no head was read and every read of the chain stopped)
+    for (let i = 2; i < ok.length && !pair(); i++) await go(ok.slice(i, i + 1));
     if (heads.size < 2) await Promise.all(reads);
-    // no two heads within the pace's wait: the providers not read yet, and those that passed, read patiently
+    // no two heads within the pace's wait, the whole list asked: those that passed a read at their pace's wait read again,
+    // patiently (a provider not yet asked has been, above)
     if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
     const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
     const withIt = sorted.filter(([, h]) => h.n >= agreed).map(([u]) => u);
-    if (clock === null) return { n: agreed, t: sorted[1]![1].t, with: withIt };
-    // every provider's head block must sit on the chain's clock
-    for (const [, h] of sorted) if (h.t !== clock.genesisS + clock.blockS * h.n) return null;
-    return { n: agreed, t: clock.genesisS + clock.blockS * agreed, with: withIt };
+    return { n: agreed, t: sorted[1]![1].t, with: withIt };
   }
 
   /** The providers to ask, in order (ranked): those of `urls` not held, then any other of ours alike (a provider held
-   *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. */
-  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1, only = false): string[] => {
-    const have = ranked(usable(urls), wideFirst, calls);
-    return only ? have : [...new Set([...have, ...ranked(usable(rpcs).filter((u) => !have.includes(u)), wideFirst, calls)])];
+   *  since the head was read, or lags, is made up for by the next); agreed stops at PROVIDERS_MAX that answered. None
+   *  in `skip` (a log read's: LOGS_REFUSED). */
+  const askOrder = (urls: readonly string[], wideFirst: boolean, calls = 1, only = false, skip?: ReadonlySet<string>): string[] => {
+    const can = (u: string) => skip === undefined || !skip.has(u);
+    const have = ranked(usable(urls).filter(can), wideFirst, calls);
+    return only ? have : [...new Set([...have, ...ranked(usable(rpcs).filter((u) => can(u) && !have.includes(u)), wideFirst, calls)])];
   };
 
   /** Asks `urls` the same `n` requests, two at once and then one more at a time while some answer has no two alike.
    *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. Each next one,
    *  of the rest and the wide ones (WIDE_SPAN) of the first two (a read past its pace's or queue's wait or held answers
    *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false): Promise<(A | null)[]> {
-    // `only`: none but `urls` (the index's chain-wide read, which the others refuse)
-    const order = askOrder(urls, wideFirst, n, only);
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false, skip?: ReadonlySet<string>): Promise<(A | null)[]> {
+    // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these
+    const order = askOrder(urls, wideFirst, n, only, skip);
     const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     const got: A[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
@@ -1111,11 +1213,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       filters.length,
       async (u, idx, patient) => {
         const got = await logsOf(u, idx.map((i) => filters[i]!), patient);
-        return clock === null && headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
+        return headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
       },
-      (a, b) => sameLogs(a, b, clock === null),
+      (a, b) => sameLogs(a, b, true),
       true,
       only,
+      LOGS_REFUSED,
     );
   }
 
@@ -1214,6 +1317,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   for (const [t, f] of deps.pools ?? []) pools.set(t, { found: f, at: now() });
   const NONE_MS = 300_000; // a token with no pool read is looked for again after this
   const resolving = new Map<string, Promise<Found | null>>();
+  /** Each pool search's lane, which a foreground open that joins it lifts (join). */
+  const resolvingLane = new Map<string, Lane>();
   const pad32 = (a: string) => a.slice(2).padStart(64, "0");
 
   const wordAddr = (r: string | undefined, i = 0): string | null => (r !== undefined && /^0x([0-9a-f]{64})+$/.test(r) && r.length >= 2 + 64 * (i + 1) ? `0x${r.slice(2 + 64 * i + 24, 2 + 64 * (i + 1))}` : null);
@@ -1444,13 +1549,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (!(await deps.listed(token))) return "unlisted";
     if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
     let p = resolving.get(token);
-    if (p === undefined) {
+    if (p !== undefined) join(resolvingLane.get(token)!);
+    else {
       // the list's pool, checked on chain, else the discovery a token in no list has
-      p = (async () => {
-        const hint = (await deps.hint?.(token)) ?? null;
-        return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token);
-      })().finally(() => resolving.delete(token));
+      const lane = sharedLane();
+      p = lanes
+        .run(lane, async () => {
+          const hint = (await deps.hint?.(token)) ?? null;
+          return (hint !== null ? await fromHint(token, hint) : null) ?? findPool(token);
+        })
+        .finally(() => (resolving.delete(token), resolvingLane.delete(token)));
       resolving.set(token, p);
+      resolvingLane.set(token, lane);
     }
     const found = await p;
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
@@ -1473,7 +1583,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const AHEAD_AT_ONCE = 2;
   const AHEAD_ROOM = 0.75;
   const AHEAD_WAIT_MS = 500;
-  const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => holds.room(u) >= AHEAD_ROOM).length >= 2;
+  const roomy = (): boolean => single(usable(rpcs), 2).filter((u) => !LOGS_REFUSED.has(u) && holds.room(u) >= AHEAD_ROOM).length >= 2;
   const aheadQueue = new Set<string>();
   let aheadRun: Promise<void> | null = null;
   let opening = 0;
@@ -1502,7 +1612,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (!known(t)) await mainPool(t).catch(() => undefined);
         }
       };
-      aheadRun = Promise.all(Array.from({ length: AHEAD_AT_ONCE }, one)).then(() => undefined).finally(() => (aheadRun = null));
+      // the helper's own search: background, whatever lane asked for it (a lists answer built inside a caller's read)
+      aheadRun = lanes.run(newLane(false), () => Promise.all(Array.from({ length: AHEAD_AT_ONCE }, one))).then(() => undefined).finally(() => (aheadRun = null));
     }
     return aheadRun ?? Promise.resolve();
   }
@@ -1550,9 +1661,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** Reads the ETH price pool's swaps up to `to`, and back to refBack before `need` (the earliest block a book reads:
    *  a book walked back further than any before has the blocks before what is held read first). One read at a time. */
+  // the ETH price read running or queued last: a foreground caller behind it lifts it (join), so its own read never
+  // waits behind a tick's at the background's pace
+  let refLane: Lane | null = null;
   function readRef(urls: readonly string[], to: number, need = to - V.step + 1, fresh = false): Promise<boolean> {
-    const run = refLock.then(() => readRefNow(urls, to, need, fresh));
-    refLock = run.catch(() => undefined);
+    if (refLane !== null) join(refLane);
+    const lane = sharedLane();
+    const run = refLock.then(() => lanes.run(lane, () => readRefNow(urls, to, need, fresh)));
+    refLane = lane;
+    refLock = run.catch(() => undefined).finally(() => {
+      if (refLane === lane) refLane = null;
+    });
     return run;
   }
   async function readRefNow(urls: readonly string[], to: number, need: number, fresh: boolean): Promise<boolean> {
@@ -1689,8 +1808,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     await refReady;
   }
   function start(): Promise<void> {
+    // a tick is the helper's own read, background whoever starts it (an open whose first read failed, a stale book)
     if (!running)
-      running = tick()
+      running = lanes.run(newLane(false), tick)
         .catch(() => undefined)
         .finally(() => {
           running = null;
@@ -1764,6 +1884,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   const err = (status: number, code: string): DataAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
+  /** An answer with the lane's Server-Timing entries before its own (a 429 carries none: it is the limit's answer). */
+  const withTiming = (a: DataAnswer, timing: string): DataAnswer => (a.status === 429 ? a : { ...a, timing: a.timing === undefined ? timing : `${timing}, ${a.timing}` });
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
   const limited = (s: number, why: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s, why });
@@ -2001,11 +2123,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
-      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS)
-      const e = await within(open(t), OPEN_BOUND_MS);
-      if (e === LATE) return UPSTREAM;
-      if (e === "none") return noneCandles(t, tf as Tf, to, limit);
-      if (!("book" in e)) return e;
+      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); its reads are a caller's, in the
+      // foreground lane, and the answer names their wait (Server-Timing)
+      const lane = newLane(true);
+      const began = performance.now();
+      const e = await within(lanes.run(lane, () => open(t)), OPEN_BOUND_MS);
+      const openMs = performance.now() - began;
+      const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
+      if (e === LATE) return timed(UPSTREAM);
+      if (e === "none") return timed(await noneCandles(t, tf as Tf, to, limit));
+      if (!("book" in e)) return timed(e);
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
       let bars: Candle[] = own;
@@ -2026,7 +2153,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
       body.as_of_ms = at;
-      return { status: 200, body: JSON.stringify(body), src, asOfMs: at };
+      return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },
     /** 06b Trades: the newest `limit` swaps, newest first. */
     async trades(token: string, limit: number): Promise<DataAnswer> {
@@ -2035,15 +2162,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); the traders are looked up within
       // what is left of it, and one not read by then is null this time, asked again the next
       const until = performance.now() + OPEN_BOUND_MS;
-      const e = await within(open(t), OPEN_BOUND_MS);
-      if (e === LATE) return UPSTREAM;
-      if (e === "none") return empty({ trades: [] });
-      if (!("book" in e)) return e;
+      // a caller's reads, in the foreground lane, their wait named in the answer (as candles)
+      const lane = newLane(true);
+      const began = performance.now();
+      const e = await within(lanes.run(lane, () => open(t)), OPEN_BOUND_MS);
+      const openMs = performance.now() - began;
+      // the queue wait counts the traders' lookups below too: the answer waits on them
+      const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
+      if (e === LATE) return timed(UPSTREAM);
+      if (e === "none") return timed(empty({ trades: [] }));
+      if (!("book" in e)) return timed(e);
       const rows = e.book.tape(limit);
-      await within(tradersOf(rows.map((r) => r.tx)), Math.max(0, until - performance.now()));
+      await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
-      return { status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      return timed({ status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
     },
   };
 }

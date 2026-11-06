@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { COLD_MIN, helperMs, judge, LIMIT_MS, pct, read } from "./helper-token-page-cold.mjs";
+import { COLD_MIN, helperMs, judge, LIMIT_MS, pct, read, slow } from "./helper-token-page-cold.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-token-page-cold.answers.json"), "utf8"));
@@ -41,6 +41,9 @@ test("planted on the good answer: a slow read past p95, a 429, warm reads, a mis
   assert.ok(bad(r).some((l) => l.startsWith("BAD cold page reads")), r.lines.join("\n"));
   r = edit((run) => Object.assign(run.reads[3], { status: 429, retryAfter: "5" }));
   assert.ok(bad(r).some((l) => / did not: 429 Retry-After 5/.test(l)), r.lines.join("\n"));
+  // card helper-ready-page-warm: a not-ready page's cause, its Server-Timing, is on the FAIL line
+  r = edit((run) => Object.assign(run.reads[4], { status: 503, timing: 'search-held;desc="jupiter held"' }));
+  assert.ok(bad(r).some((l) => / did not: 503 Server-Timing search-held;desc="jupiter held"/.test(l)), r.lines.join("\n"));
   // a read whose Jupiter row is older than its send was served from what the helper held: not cold
   r = edit((run) => run.reads.slice(0, run.reads.length - COLD_MIN + 1).forEach((x) => (x.jupAt = x.sentAt - 60_000)));
   assert.ok(bad(r).some((l) => /read cold/.test(l)), r.lines.join("\n"));
@@ -51,6 +54,22 @@ test("planted on the good answer: a slow read past p95, a 429, warm reads, a mis
   assert.equal(r.ok, true, r.lines.join("\n"));
   r = edit((run) => Object.assign(run, { lists: { status: 503, size: 0 } }));
   assert.ok(bad(r).some((l) => l.startsWith("BAD GET /v1/market/lists")), r.lines.join("\n"));
+});
+
+test("card helper-ready-page-warm: every read over 1 s is named with its offset from the start and the helper's Server-Timing, and the verdict is unchanged", () => {
+  // the recorded good run passes with one read over the limit (#27, 2807 ms at +147.0 s, before Server-Timing)
+  assert.deepEqual(slow(A.good).map((l) => l.split(" ")[3]), ["#27"]);
+  const run = structuredClone(A.good);
+  const start = Date.parse(run.at);
+  Object.assign(run.reads[1], { ms: 2_900, rttMs: 116, sentAt: start + 12_300, timing: 'lists;dur=0, rpc-wait;dur=1800, rpc;dur=40;desc="solana", jup-wait;dur=0, jup;dur=90, launch;dur=1, read;dur=1843, total;dur=1845' });
+  Object.assign(run.reads[4], { ms: 1_700, rttMs: 100, timing: null });
+  const w = slow(run).filter((l) => !l.includes(" #27 "));
+  assert.equal(w.length, 2, w.join("\n"));
+  assert.match(w[0], /^WARN slow read #1 \(pair 0, second\) \S+: helper 2784 ms at \+12\.3 s; Server-Timing: lists;dur=0, rpc-wait;dur=1800, /);
+  assert.match(w[1], /^WARN slow read #4 .*helper 1600 ms .*Server-Timing: none$/);
+  assert.equal(judge(run).ok, judge(structuredClone(run)).ok, "the WARN lines are not the verdict");
+  assert.ok(judge(run).lines.every((l) => !l.startsWith("WARN")), "judge's lines stay ok/BAD");
+  assert.ok(slow(A.bad_pre_card).length > 0, "the recorded bad run's slow reads are named");
 });
 
 test("read() draws distinct mints off the helper's lists, reads them in pairs, and keeps no body", async () => {

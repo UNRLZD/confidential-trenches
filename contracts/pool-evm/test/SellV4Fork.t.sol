@@ -93,6 +93,7 @@ abstract contract SellV4ForkBase is SellBase {
       pool: address(pool),
       precommitment: PRE,
       feeCap: FEE,
+      feeRecipient: SENDER,
       deadline: block.timestamp + 60,
       nonce: 0
     });

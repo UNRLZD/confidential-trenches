@@ -33,6 +33,9 @@ function key(): Uint8Array {
 const W = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const POOL = "0x2e234DAe75C793f67A35089C9d99245E1C58470b";
 const DELEGATE = "0xF62849F9A0B5Bf2913b396098F7c7019b51A820a";
+// who SellDelegate pays the fee to (card pool-review-3, L-1): the forge tests' SENDER (test/Sell.t.sol SellBase), not W,
+// not the pool; SellFork.t.sol holds the fixture's Sell equal to its own field for field
+const FEE_TO = "0x0000000000000000000000000000000000005E4D";
 const FORK = {
   base: { sells: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", fee: 500, amount: 903370169n, quote: 399600103610838585n, ts: 1793669347, wNonce: 3442025n },
   robinhood: { sells: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", fee: 100, amount: 903193966n, quote: 399920003955851420n, ts: 1793669311, wNonce: 1885n },
@@ -73,12 +76,12 @@ for (const [chain, f, k] of SELLS) {
   const minOut = (f.quote * 99n) / 100n;
   const built = at(f.ts, () => k.build(chain, {
     w: W, token: f.sells, amount: f.amount, target: v.routers[0]!, route: { venue: "uniswap-v3", tokens: [f.sells, v.weth], fees: [f.fee] },
-    minOut, precommitment: 0x5e11n, feeCap: 5n * 10n ** 14n, deadline: BigInt(f.ts + 300), nonce: 0n,
+    minOut, precommitment: 0x5e11n, feeCap: 5n * 10n ** 14n, feeRecipient: FEE_TO, deadline: BigInt(f.ts + 300), nonce: 0n,
   }));
   const a = k.auth(W_KEY, chain, f.wNonce);
   out[chain] = {
     sells: built.token, amount: built.amount.toString(), target: built.target, data: built.data, minOut: built.minOut.toString(), pool: built.pool,
-    precommitment: built.precommitment.toString(), feeCap: built.feeCap.toString(), deadline: built.deadline.toString(), nonce: built.nonce.toString(),
+    precommitment: built.precommitment.toString(), feeCap: built.feeCap.toString(), feeRecipient: built.feeRecipient, deadline: built.deadline.toString(), nonce: built.nonce.toString(),
     signature: hex(k.sign(W_KEY, chain, built)),
     authorization: { chainId: a.chainId, delegate: a.address, nonce: a.nonce.toString(), yParity: a.yParity, r: a.r, s: a.s },
   };

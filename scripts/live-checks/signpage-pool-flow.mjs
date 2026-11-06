@@ -47,7 +47,7 @@ export const HELPER = "https://api.confidential.unrealized.trade";
 
 export const SIGN = "https://sign.confidential.unrealized.trade";
 /** What only the testnet build carries: the devnet pins and the testnet RPC hosts (src/pool-testnet.ts). */
-export const TESTNET_ONLY = Object.freeze([PIN.program, PIN.feePayer, PIN.table, "api.devnet.solana.com", "solana-devnet.api.onfinality.io", "sepolia.base.org", "base-sepolia-rpc.publicnode.com", "rpc.testnet.chain.robinhood.com", "robinhood-sepolia-rpc.publicnode.com"]);
+export const TESTNET_ONLY = Object.freeze([PIN.program, PIN.feePayer, PIN.table, "api.devnet.solana.com", "/v1/rpc/solana-devnet", "sepolia.base.org", "base-sepolia-rpc.publicnode.com", "rpc.testnet.chain.robinhood.com", "robinhood-sepolia-rpc.publicnode.com"]);
 
 /** SIGN_HOST's /app.js: its status and which of TESTNET_ONLY it carries. */
 export async function readSign(fetchFn = fetch) {

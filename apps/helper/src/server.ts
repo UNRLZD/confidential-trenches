@@ -31,6 +31,7 @@ import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+import { callsFiles } from "./proxy/shared-calls.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -46,6 +47,7 @@ import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
+import { randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
 
@@ -441,6 +443,7 @@ export function handler(
         const mint = one("token");
         const swaps = chain !== null && Object.hasOwn(evmSwaps, chain) ? evmSwaps[chain as EvmChain | "solana"] : undefined;
         if (mint === null || (path === MARKET_TRADES ? swaps === undefined : path === MARKET_CANDLES ? chain !== "solana" && swaps === undefined : chain !== "solana")) return send(404, { error: { code: "not_found" } }, cors(req));
+        const began = performance.now();
         let read: Promise<DataAnswer>;
         if (path === MARKET_TRADES) {
           const limit = most("limit");
@@ -458,8 +461,15 @@ export function handler(
         void read
           .then((a) => {
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1, undefined, a.why));
+            // card helper-ready-page-warm: a not-ready answer that names its cause is counted in the refusal log
+            if (a.status === 503 && a.why !== undefined) refusals.count(route, a.why);
+            // card helper-ready-page-warm: a not-ready answer tells its caller why, in the standard Server-Timing header
+            if (a.status === 503 && a.timing !== undefined) return send(a.status, JSON.parse(a.body), { ...cors(req), "Server-Timing": a.timing });
             if (a.status !== 200 || a.asOfMs === undefined) return send(a.status, JSON.parse(a.body), cors(req));
-            const h: Headers = { [HELPER_SOURCE_HEADER]: a.src ?? "", [HELPER_FETCHED_AT_HEADER]: new Date(a.asOfMs).toISOString() };
+            // card helper-ready-page-warm: the standard Server-Timing header, each upstream the read waited on and the
+            // helper's whole time, so a slow answer names its wait (a hold, a pace, a fallback, the search's turn)
+            const timing = `${a.timing === undefined ? "" : `${a.timing}, `}total;dur=${Math.round(performance.now() - began)}`;
+            const h: Headers = { [HELPER_SOURCE_HEADER]: a.src ?? "", [HELPER_FETCHED_AT_HEADER]: new Date(a.asOfMs).toISOString(), "Server-Timing": timing };
             reply({ status: 200, headers: h, body: a.body }); // node sends no body on a HEAD
           })
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
@@ -684,26 +694,66 @@ type Ready = { lists: Pick<Lists, "get">; evmLists: Record<string, Pick<ReturnTy
 /** How often the warm-up asks again while not ready. */
 export const READY_EVERY_MS = 2_000;
 /**
- * Whether this helper is ready (card helper-ready-gate): the Solana list and every EVM chain's lists answer 200, and a
- * Solana token page and its holders answer 200 for a token on the Solana list. Each read is the one a caller makes (and
+ * Whether this helper is ready (card helper-ready-gate): the Solana list and every EVM chain's lists answer 200, each
+ * EVM chain's with at most half its listed tokens unsettled (settled, card helper-ready-page-warm; while `settle`, for
+ * READY_SETTLE_MAX_MS from the warm-up's start, warmUntilReady), and a Solana token
+ * page and its holders answer 200 for a token on the Solana list. Each read is the one a caller makes (and
  * stays cached for them).
  */
-export async function isReady(p: Ready): Promise<boolean> {
+export async function isReady(p: Ready, settle = true): Promise<boolean> {
   const sol = await p.lists.get();
   if (sol.status !== 200) return false;
-  for (const l of Object.values(p.evmLists)) if ((await l.get()).status !== 200) return false;
+  for (const l of Object.values(p.evmLists)) {
+    const a = await l.get();
+    if (a.status !== 200 || (settle && !settled(a.body))) return false;
+  }
   const snap = JSON.parse(sol.body) as { lists?: Record<string, { token?: unknown }[]> };
   const mint = Object.values(snap.lists ?? {}).flat().find((r) => typeof r?.token === "string")?.token as string | undefined;
   if (mint === undefined) return false;
   const [page, holders] = await Promise.all([p.token.page(mint, READY_CLIENT), p.token.holders(mint, READY_CLIENT)]);
   return page.status === 200 && holders.status === 200;
 }
+/** Whether an EVM chain's lists have at most half their listed tokens unsettled (their maker not read yet), the rule
+ *  market-data-evm reads (card helper-ready-page-warm): a swap's lists are as tagged as the old helper's, never a list of
+ *  untagged rows that settles over the next ticks. A snapshot that names no unsettled list is not read as settled. */
+export function settled(body: string): boolean {
+  const c = unsettledOf(body);
+  return c !== null && c.open * 2 <= c.listed;
+}
+/** An EVM snapshot's unsettled and listed token counts, or null when it names no unsettled list. */
+function unsettledOf(body: string): { open: number; listed: number } | null {
+  try {
+    const s = JSON.parse(body) as { lists?: Record<string, { token?: unknown }[]>; unsettled?: unknown };
+    const listed = new Set(Object.values(s.lists ?? {}).flatMap((rows) => (Array.isArray(rows) ? rows.map((r) => r?.token) : [])).filter((t) => typeof t === "string"));
+    return Array.isArray(s.unsettled) ? { open: s.unsettled.length, listed: listed.size } : null;
+  } catch {
+    return null;
+  }
+}
+/** How long from the warm-up's start the settle rule holds ready (card helper-ready-page-warm): past it, the EVM lists
+ *  answering 200 are enough and one line names each chain still unsettled, so a maker-RPC outage never blocks a deploy,
+ *  a security fix included. [design: 240 s, under redeploy.sh's REDEPLOY_READY_S default of 300 s; a fresh start with
+ *  no warm file settles Base's about 44 listed tokens at MAKER_PER_TICK a TICK_MS in about a minute.] */
+export const READY_SETTLE_MAX_MS = 240_000;
 /** The client the warm-up's token reads draw as (a caller's share, the callers' room). */
 const READY_CLIENT = "helper-ready";
 /** Asks isReady every READY_EVERY_MS until it is true, then resolves. */
 export async function warmUntilReady(p: Ready, everyMs = READY_EVERY_MS): Promise<void> {
+  const started = Date.now();
   for (;;) {
-    if (await isReady(p).catch(() => false)) return;
+    const settle = Date.now() - started < READY_SETTLE_MAX_MS;
+    if (await isReady(p, settle).catch(() => false)) {
+      if (!settle) {
+        // past the bound: name each chain still unsettled, once (never a token, never a provider)
+        const open: string[] = [];
+        for (const [chain, l] of Object.entries(p.evmLists)) {
+          const c = unsettledOf((await l.get().catch(() => ({ body: "" }))).body);
+          if (c === null || c.open * 2 > c.listed) open.push(c === null ? `${chain} unread` : `${chain} ${c.open} of ${c.listed}`);
+        }
+        if (open.length > 0) console.log(`helper: ready past ${READY_SETTLE_MAX_MS / 1000} s with the EVM lists unsettled: ${open.join(", ")}`);
+      }
+      return;
+    }
     await new Promise((ok) => setTimeout(ok, everyMs));
   }
 }
@@ -800,7 +850,8 @@ if (import.meta.main) {
   let drain = () => undefined as void;
   try {
     checkVendorPlans(process.env);
-    const proxy = createProxy(process.env);
+    // card helper-deploy-reads-fast: a deploy's two helpers draw on one key per vendor, so each counts the other's calls
+    const proxy = createProxy(process.env, { peers: callsFiles(storeDir, randomUUID()) });
     // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
     // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
     const holds = providerHolds();

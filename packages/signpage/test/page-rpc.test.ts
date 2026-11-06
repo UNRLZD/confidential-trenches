@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
-import { TESTNET_RPCS, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
+import { readFileSync } from "node:fs";
+import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
 
 /** globalThis.fetch for one test: each URL answers 429 (Retry-After 0) on its first call, then the call's result. */
 async function withThrottledOnce(run: (seen: Map<string, number>) => Promise<void>): Promise<void> {
@@ -27,15 +29,35 @@ async function withThrottledOnce(run: (seen: Map<string, number>) => Promise<voi
   }
 }
 
-test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {
+// the testnet build's pool RPCs read through a 429 once in test/pool-testnet.test.ts, which runs as that build
+test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): Solana's pair, provider A and the helper's route, reads through a 429 once; Base and Robinhood have no pair yet", async () => {
   await withThrottledOnce(async (seen) => {
     const deps = testnetPoolDeps();
-    for (const chain of ["solana", "base", "robinhood"] as const) {
-      const rpcs = deps.rpcs(chain)!;
-      for (const r of rpcs) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
-      for (const u of TESTNET_RPCS[chain]) assert.equal(seen.get(u), 2, u);
-    }
+    for (const r of deps.rpcs("solana")!) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
+    assert.equal(seen.get(SOLANA_PROVIDER_A), 2);
+    assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
+    assert.equal(deps.rpcs("base"), null);
+    assert.equal(deps.rpcs("robinhood"), null);
   });
+});
+
+// The Solana pool path's files: every read it makes goes to both of the page's providers, and the second is the
+// helper's /v1/rpc/solana (main.ts) or /v1/rpc/solana-devnet (TESTNET_RPCS), which forwards only HELPER_RPC_METHODS.solana
+const POOL_PATH = [
+  "../src/pool-buy.ts", "../src/pool-deposit.ts", "../src/pool-sell.ts", "../src/pool-spend.ts", "../src/pool-withdraw.ts", "../src/pool-price.ts", "../src/pool-kinds.ts", "../src/pool-testnet.ts",
+  "../../wallet/src/pool/solana.ts", "../../wallet/src/pool/solana-restore.ts", "../../wallet/src/pool/buy-wallets.ts", "../../wallet/src/pool/queue.ts", "../../wallet/src/pool/pool.ts", "../../wallet/src/pool/balances.ts",
+  "../../kit/src/trade/solana/pool.ts", "../../kit/src/trade/solana/pool-buy.ts", "../../kit/src/trade/solana/send.ts",
+];
+/** Every Solana JSON-RPC method named in a file: a quoted get*, is*, simulate*, send* or request* name. */
+const solanaMethodsIn = (src: string): string[] => [...src.matchAll(/["'`]((?:get|is|simulate|send|request)[A-Z][A-Za-z]+)["'`]/g)].map((m) => m[1]!);
+const SOLANA_RPC = /^(get(AccountInfo|Balance|Block|BlockHeight|BlockTime|FeeForMessage|LatestBlockhash|MinimumBalanceForRentExemption|MultipleAccounts|ProgramAccounts|SignatureStatuses|SignaturesForAddress|Slot|TokenAccountsByOwner|TokenLargestAccounts|Transaction|Health|Version|GenesisHash|EpochInfo|RecentPrioritizationFees)|isBlockhashValid|simulateTransaction|sendTransaction|requestAirdrop)$/;
+
+test("card pool-buy-send-fast: every Solana read the pool path makes is on the helper's list, so the page's second provider never refuses one (getSlot, getSignaturesForAddress, getFeeForMessage, getBlockTime, getProgramAccounts were refused 400)", () => {
+  const used = new Map<string, string>();
+  for (const f of POOL_PATH) for (const m of solanaMethodsIn(readFileSync(new URL(f, import.meta.url), "utf8"))) if (SOLANA_RPC.test(m)) used.set(m, f);
+  for (const m of ["getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getProgramAccounts", "getAccountInfo", "getTransaction"]) assert.ok(used.has(m), `the scan finds ${m}`);
+  const off = [...used].filter(([m]) => !(HELPER_RPC_METHODS.solana as readonly string[]).includes(m));
+  assert.deepEqual(off, [], `read by the pool path, refused by the helper: ${off.map(([m, f]) => `${m} (${f})`).join(", ")}`);
 });
 
 test("the page's direct and helper RPCs (the mainnet pool reads) read through a 429 once", async () => {

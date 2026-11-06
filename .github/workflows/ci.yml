@@ -7,7 +7,8 @@
 #   Swatinem/rust-cache v2.9.3 (d1527c8, released 2026-10-20) and actions/download-artifact v8.0.2 (9000827, released
 #   2026-10-07) read from their repos on 2026-11-04 at 07:20Z.
 # The five job ids are the required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test.
-# The sixth, vault-sandbox, and the seventh, pool-solana, join them when the owner adds them to the ruleset.
+# The sixth, vault-sandbox, and the seventh, pool-solana, join them when the owner adds them to the ruleset. The
+# eighth, slither, is advisory and stays out of it.
 name: ci
 
 on:
@@ -700,3 +701,48 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the deploy script's dry run, every stop giving back every lamport
         run: bash contracts/pool-solana/scripts/dry-run.sh
+
+  # Slither on the EVM pool (card pool-review-3), advisory: not a required check. slither-analyzer 0.11.6 (uploaded to
+  # PyPI 2026-07-28) and its dependencies install only here, from contracts/pool-evm/slither/requirements.txt, each at
+  # one version with its sha256s (pip --require-hashes), nothing in it uploaded after 2026-10-23. Slither builds the pool
+  # with the Foundry the test job uses (v1.7.1) and reads src/ and lean-imt, not forge-std or the tests.
+  # scripts/ci/slither-gate.mjs fails the job on a High or Medium hit that contracts/pool-evm/slither/triage.json does
+  # not list (printing the entry to add) and on a listed entry Slither no longer reports.
+  slither:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the EVM pool's forge-std
+        run: bash scripts/ci/retry.sh git submodule update --init contracts/pool-evm/lib/forge-std
+      - id: foundry
+        continue-on-error: true
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.7.1
+      - name: a pause after a failed Foundry install
+        if: steps.foundry.outcome == 'failure'
+        run: sleep 30
+      - name: Foundry once more
+        if: steps.foundry.outcome == 'failure'
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.7.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: slither-analyzer 0.11.6, hash-pinned, in its own venv
+        run: |
+          python3 -m venv "$RUNNER_TEMP/slither-venv"
+          bash scripts/ci/retry.sh "$RUNNER_TEMP/slither-venv/bin/pip" install --require-hashes --no-deps -r contracts/pool-evm/slither/requirements.txt
+          echo "$RUNNER_TEMP/slither-venv/bin" >> "$GITHUB_PATH"
+      - name: Slither on contracts/pool-evm
+        working-directory: contracts/pool-evm
+        run: |
+          slither --version
+          slither . --json "$RUNNER_TEMP/slither.json" --fail-none --filter-paths 'lib/forge-std/|test/|script/'
+      - name: every High and Medium hit triaged
+        run: node scripts/ci/slither-gate.mjs "$RUNNER_TEMP/slither.json" contracts/pool-evm/slither/triage.json

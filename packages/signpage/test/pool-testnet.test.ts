@@ -24,7 +24,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, devnetRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -51,7 +51,8 @@ test("the testnet build pins the devnet pool of the deployment record and the he
 test("the testnet build's providers: two devnet RPCs, and each EVM testnet's two from its pins", () => {
   const deps = testnetPoolDeps();
   const urls = (c: "solana" | "base" | "robinhood") => deps.rpcs(c)!.map((r) => (r as unknown as { url: string }).url);
-  assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://solana-devnet.api.onfinality.io/public"]);
+  // card pool-buy-send-fast: the second is the helper's devnet route, as mainnet's second is its /v1/rpc/solana
+  assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet"]);
   assert.deepEqual(urls("base"), ["https://sepolia.base.org/", "https://base-sepolia-rpc.publicnode.com/"]);
   assert.deepEqual(urls("robinhood"), ["https://rpc.testnet.chain.robinhood.com/", "https://robinhood-sepolia-rpc.publicnode.com/"]);
   for (const c of ["solana", "base", "robinhood"] as const) assert.notEqual(new URL(TESTNET_RPCS[c][0]).host, new URL(TESTNET_RPCS[c][1]).host, `${c}: two operators`);
@@ -206,14 +207,14 @@ test("card signpage-pool-pins: a page that loads with the pool's notes landed op
   const proves = () => prover.log.filter((x) => x.startsWith("prove")).length;
   // no note of the pool: a state read opens no queue
   await t.stateRead();
-  assert.equal(await t.ready(), undefined, "no queue open: no ready list, so state.pools has no ready");
+  assert.equal((await t.readyWith(async () => null)).ready, undefined, "no queue open: no ready list, so state.pools has no ready");
   assert.equal(proves(), 0);
   // a note landed before this page loaded (UNSPENT, no landing hook here): the state read opens the queue and proves it
   await land(ns, await incoming(ns, null, 9));
   await t.stateRead();
   await t.proofs(); // passes run one after another: this one waits for the state read's
   assert.equal(proves(), 1);
-  const ready = await t.ready();
+  const { ready } = await t.readyWith(async () => null);
   assert.equal(ready?.length, 1);
   assert.equal(ready![0]!.poolId, pool.id);
   assert.equal(heard, 1, "the pass that made the proof is heard; the empty pass after it is not");
@@ -229,7 +230,55 @@ test("card signpage-pool-pins: a page that loads with the pool's notes landed op
   await t.proofs();
   assert.equal(proves(), 1, "nothing new to prove in the same epoch");
   await t.signedOut();
-  assert.equal(await t.ready(), undefined, "signed out: no queue, no ready list");
+  assert.equal((await t.readyWith(async () => null)).ready, undefined, "signed out: no queue, no ready list");
+});
+
+test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {
+  const real = globalThis.fetch;
+  const seen = new Map<string, number>();
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const url = String(u);
+    const n = (seen.get(url) ?? 0) + 1;
+    seen.set(url, n);
+    if (n === 1) return new Response("Too Many Requests", { status: 429, headers: { "retry-after": "0" } });
+    const id = (JSON.parse(String(init?.body)) as { id: string }).id;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 42 }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const deps = testnetPoolDeps();
+    for (const chain of ["solana", "base", "robinhood"] as const) {
+      for (const r of deps.rpcs(chain)!) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
+      for (const u of TESTNET_RPCS[chain]) assert.equal(seen.get(u), 2, u);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("card pool-buy-send-fast: the testnet build's second Solana provider is the helper's /v1/rpc/solana-devnet, as mainnet's is its /v1/rpc/solana, read with the kit's HELPER_FETCH_INIT; no 1-request-a-second public provider", async () => {
+  // onfinality's public devnet endpoint (x-ratelimit-limit-sec 1, limit-day 1000, read 5 Nov 15:03Z) held the 5 Nov
+  // 13:50:55Z buy 11.2 s in the page's reads: 26 of its answers were 429
+  const HELPER = "https://api.confidential.unrealized.trade";
+  assert.deepEqual([...TESTNET_RPCS.solana], ["https://api.devnet.solana.com", `${HELPER}/v1/rpc/solana-devnet`]);
+  const real = globalThis.fetch;
+  const inits = new Map<string, RequestInit | undefined>();
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    inits.set(String(u), init);
+    const id = (JSON.parse(String(init?.body)) as { id: string }).id;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 7 }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const [a, b] = testnetPoolDeps().rpcs("solana")! as unknown as ((m: string, p: unknown[]) => Promise<unknown>)[];
+    assert.equal(await a!("getSlot", []), 7);
+    assert.equal(await b!("getSlot", []), 7);
+  } finally {
+    globalThis.fetch = real;
+  }
+  const helper = inits.get(`${HELPER}/v1/rpc/solana-devnet`);
+  assert.ok(helper, "the second read went to the helper's devnet route");
+  assert.equal(helper!.credentials, "omit");
+  assert.equal(helper!.referrerPolicy, "no-referrer");
+  assert.equal(inits.get("https://api.devnet.solana.com")?.credentials, undefined, "the public provider read plainly");
 });
 
 test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool and the epoch; another status or an oversized answer is refused", async () => {
@@ -239,12 +288,12 @@ test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool a
   const answer = { chain: "solana", cluster: "devnet", program: SOL_POOLS.devnet!.program, pool, fee_payer: FEE_PAYER, epoch_ms: 60000, epoch_start_ms: 1800000000000, fee: "1300000", step: "100000" };
   const asked: { url: string; init: RequestInit | undefined }[] = [];
   const fetchOf = (status: number, body: string) => (async (url: string | URL | Request, init?: RequestInit) => (asked.push({ url: String(url), init }), new Response(body, { status }))) as typeof fetch;
-  assert.deepEqual(await devnetRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify(answer))), answer);
+  assert.deepEqual(await poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify(answer))), answer);
   assert.equal(asked[0]!.url, `https://api.confidential.unrealized.trade/v1/pool/fee?cluster=devnet&pool=${pool}&epoch=1800000000000`);
   assert.equal(asked[0]!.init?.credentials, "omit");
   assert.equal(asked[0]!.init?.redirect, "error");
-  await assert.rejects(devnetRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(404, `{"error":{"code":"not_found"}}`)), /HTTP 404/);
-  await assert.rejects(devnetRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify({ ...answer, pad: "x".repeat(1024) }))), /over 1024 B/);
+  await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(404, `{"error":{"code":"not_found"}}`)), /HTTP 404/);
+  await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify({ ...answer, pad: "x".repeat(1024) }))), /over 1024 B/);
 });
 
 test("a state read settles a pool note still INCOMING, one pass at a time; with none open it reads nothing on chain", async () => {

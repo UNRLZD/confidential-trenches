@@ -166,6 +166,15 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *   - rpc.mainnet.chain.robinhood.com, the chain's own and /v1/rpc/robinhood's first: 3.8 posts a second, then 429 (the
  *     same note), and a fourth quick read refused 429 (19:2xZ). Paced at 1, 2 at once: at most 3 in any second.
  * api.blockvectra.com (100 blocks, last) is not paced: its holds keep it, as before.
+ * Base's swap providers, swept from the Mac 2026-11-05 19:2xZ with single 1,000-block eth_getLogs for 6 s (card
+ * helper-ready-page-warm: once Base made 200 ms blocks and base.drpc.org refused 250 blocks and more, the two left took
+ * the walks' bursts and 429'd them, and a quiet token's cold tape found no pair, 503):
+ *   - base-rpc.publicnode.com: 3 a second none refused, 5 a second refused 3 of 30 (-32005, from 1.4 s); 8 at once served.
+ *     Paced at 3 calls a second, 6 at once.
+ *   - base.gateway.tenderly.co: 2 a second none refused, 4 a second refused 2 of 24 at once; batches of 3 a second refused
+ *     1 of 18. Paced at 2 calls a second, 3 at once.
+ *   - base.public.blockpi.network's public endpoint: 4 a second none refused; batches of 5 a second refused 7 of 30
+ *     (-32000 "Max messages exceeded (Limit: 5)"). Paced at 3 calls a second, 4 at once.
  */
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
@@ -173,7 +182,26 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
   "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
   "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
+  "https://base-rpc.publicnode.com": { perS: 3, burst: 6, unit: "call" },
+  "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },
+  "https://base.public.blockpi.network/v1/rpc/public": { perS: 3, burst: 4, unit: "call" },
+  // mainnet.base.org, Base's own and /v1/rpc/base's first: 5 eth_getTransactionByHash posts a second for 5 s and
+  // batches of 10 at 2 a second (20 calls a second) none refused (2026-11-05 19:3xZ, from the Mac). Paced at 10 calls a
+  // second, 20 at once. It refuses every eth_getLogs (LOGS_REFUSED).
+  "https://mainnet.base.org": { perS: 10, burst: 20, unit: "call" },
 };
+/** Providers that refuse every `eth_getLogs` and answer the other reads: no path sends them one (rpc.ts callEvm, the
+ *  swap reads), so a log read never holds the provider for the reads it does answer. mainnet.base.org answered every
+ *  eth_getLogs, of 1 to 1,000 blocks, from the helper box and from the Mac, -32011 "request limit reached" (HTTP 429;
+ *  2026-11-03 and again 2026-11-05 18:5x-19:0xZ), and eth_blockNumber and eth_getTransactionByHash 200; a caller's log
+ *  read sent there held it 1 s about every 3 s on the box (the helper's log, 5 Nov 18:5xZ: 231 holds in 8 min). */
+export const LOGS_REFUSED: ReadonlySet<string> = new Set(["https://mainnet.base.org"]);
+/** How long a caller's draw on a paced provider keeps its refill from background reads (card helper-deploy-reads-fast):
+ *  a caller's read is several posts one after another (the head, then its spans, then the traders), and background
+ *  that drew the refill between them left each post waiting for the bucket from its floor (a planted run: 39 open
+ *  books' ticks held a cold candles read 7.7 s on the paces, at 600 ms an answer). [design: 1 s, about one post's answer
+ *  and the next post's start; background goes again once no caller drew for that long.] */
+export const CALLER_HOLD_MS = 1_000;
 /** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
  *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
 export const CALLER_ROOM = 0.25;
@@ -183,6 +211,12 @@ export const CALLER_ROOM = 0.25;
 export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE): ProviderHolds {
   const until = new Map<string, number>();
   const buckets = new Map<string, { tokens: number; at: number }>();
+  /** Per provider: until when a caller's read that found no room waits for it (card helper-deploy-reads-fast). Background
+   *  draws none of the bucket meanwhile, so the refill it waits for is its own: a background post of fewer units would
+   *  win every refill race against a caller's larger batch (a planted run: 39 open books' ticks held a cold candles read
+   *  6.4 s on the paces alone). Cleared by the caller's draw; a caller that asks another provider instead leaves it to
+   *  end on its own, at most the wait it was named. */
+  const callerWaits = new Map<string, number>();
   const fill = (url: string, p: Pace) => {
     const t = now();
     const b = buckets.get(url) ?? { tokens: p.burst, at: t };
@@ -196,14 +230,22 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const p = pace[url];
       if (p === undefined) return 0;
       const b = fill(url, p);
+      const t = now();
+      const waiting = (callerWaits.get(url) ?? 0) - t;
+      if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
       const floor = background ? p.burst * CALLER_ROOM : 0;
       // a post larger than the bucket waits for a full one
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
+      // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
+      const keep = (ms: number) => callerWaits.set(url, Math.max(callerWaits.get(url) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
         b.tokens -= units;
+        if (!background) keep(CALLER_HOLD_MS);
         return 0;
       }
-      return Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+      const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
+      if (!background) keep(Math.max(w, CALLER_HOLD_MS));
+      return w;
     },
     room(url) {
       const p = pace[url];
@@ -373,6 +415,17 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
    * still count them. */
   const sent = new Map<string, [number, number, number][]>();
+  /** Per key: the draws another helper on the same upstream made (card helper-deploy-reads-fast: the one a deploy runs
+   *  beside this one, proxy/shared-calls.ts), [second, requests, requests], oldest first; counted as every draw is, and replaced
+   *  whole by the next seed of the key, so a file read twice counts once. */
+  const seeded = new Map<string, [number, number, number][]>();
+  /** The key's draws in its window, ours and the seeded ones, oldest first. */
+  const windowOf = (key: string, sec: number, w: number): [number, number, number][] => {
+    const q = sent.get(key) ?? [];
+    while (q.length > 0 && q[0]![0] < sec - w) q.shift();
+    const s = (seeded.get(key) ?? []).filter((b) => b[0] >= sec - w);
+    return s.length === 0 ? q : [...q, ...s].sort((a, b) => a[0] - b[0]);
+  };
   /** Per key (never a client): when the provider's own reset ends, for every draw; and for background draws only. */
   const heldUntil = new Map<string, number>();
   const backgroundHeldUntil = new Map<string, number>();
@@ -395,8 +448,7 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   const totalWait = (key: string, n: number, t: number, lim: BudgetLimits, reserved: boolean, background: boolean): number => {
     const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
     const sec = Math.floor(t / 1000);
-    const q = sent.get(key) ?? [];
-    while (q.length > 0 && q[0]![0] < sec - w) q.shift();
+    const q = windowOf(key, sec, w);
     const until = (i: 1 | 2, cap: number): number => {
       let used = 0;
       for (const b of q) used += b[i];
@@ -487,6 +539,20 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   }
   return {
     takeEach,
+    /** The ms times of this helper's own draws on `key` its upstream may still count (its window and a second), oldest
+     *  first, never the seeded ones: what the other helpers on the same upstream count (card helper-deploy-reads-fast). */
+    calls(key: string): number[] {
+      const lim = limitsOf(key);
+      const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
+      const sec = Math.floor(now() / 1000);
+      return (sent.get(key) ?? []).filter((b) => b[0] >= sec - w).flatMap((b) => Array.from({ length: b[1] }, () => b[0] * 1000));
+    },
+    /** Counts `times` (ms) as draws another helper made on `key`'s upstream, in place of the last seed of the key. */
+    seed(key: string, times: readonly number[]): void {
+      const by = new Map<number, number>();
+      for (const x of times) if (Number.isFinite(x)) by.set(Math.floor(x / 1000), (by.get(Math.floor(x / 1000)) ?? 0) + 1);
+      seeded.set(key, [...by].sort((a, b) => a[0] - b[0]).map(([sec, n]) => [sec, n, n]));
+    },
     /** What refused the last refused draw (read right after it): "<key> held", "<key> share" or "<key> total". */
     refusedBy: (): string => refusedBy,
     /** One key: n requests for `client` (undefined: the helper's own read, which draws from the total only). */

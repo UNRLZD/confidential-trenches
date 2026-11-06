@@ -43,7 +43,7 @@ test("recorded bad run: an open RPC that forwards unlisted methods: FAIL, on eac
   assert.equal(r.ok, false);
   assert.deepEqual(
     bad(r).map((l) => l.slice(0, l.indexOf("]") + 1)),
-    ["BAD [solana getProgramAccounts]", "BAD [base debug_traceTransaction]", "BAD [robinhood eth_accounts]", "BAD [near EXPERIMENTAL_changes]"],
+    ["BAD [solana requestAirdrop]", "BAD [base debug_traceTransaction]", "BAD [robinhood eth_accounts]", "BAD [near EXPERIMENTAL_changes]"],
   );
 });
 

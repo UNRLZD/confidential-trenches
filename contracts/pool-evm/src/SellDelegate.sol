@@ -31,8 +31,8 @@ interface IPoolDeposit {
  *         delegate approves the router exactly the amount, calls it with W's calldata, refuses unless the router took
  *         the whole approval (the approval ends at 0), refuses unless W's balance of the token fell by exactly the
  *         amount (on v4 too, card evm-selldelegate-exact-debit), unwraps the WETH the sale paid W, refuses an ETH gain
- *         under minOut, pays the sender the fee it names (at most W's fee cap), and deposits the rest into the pool
- *         with W's precommitment. A sell whose target is the chain's v4 PoolManager (card evm-sell-v4) goes through it
+ *         under minOut, pays the fee the sender names (at most W's fee cap) to the fee recipient W signed, and
+ *         deposits the rest into the pool with W's precommitment. A sell whose target is the chain's v4 PoolManager (card evm-sell-v4) goes through it
  *         directly instead, as v4-periphery's V4Router does: W unlocks the PoolManager, which calls W's
  *         unlockCallback; that swaps exactly the amount along the signed route (abi.encode(PathKey[]), ending in the
  *         native asset or WETH), settles the token with a transfer from W (no approval at all) and takes the whole
@@ -44,7 +44,9 @@ interface IPoolDeposit {
  *         slot of W's own account, so no other delegate's storage meets it.
  */
 contract SellDelegate {
-  /// @notice One sell, as W signs it
+  /// @notice One sell, as W signs it. `feeRecipient` is the only address the fee is paid to (pool review round 3, L-1:
+  ///         paid to the sender, a front-run with the whole cap took it); `deadline` is unix seconds, against
+  ///         block.timestamp (the pool's own deadlines are in ms)
   struct Sell {
     address token;
     uint256 amount;
@@ -54,6 +56,7 @@ contract SellDelegate {
     address pool;
     uint256 precommitment;
     uint256 feeCap;
+    address feeRecipient;
     uint256 deadline;
     uint256 nonce;
   }
@@ -81,7 +84,7 @@ contract SellDelegate {
   bytes32 internal constant NAME_HASH = keccak256('Blindfill');
   bytes32 internal constant VERSION_HASH = keccak256('1');
   bytes32 internal constant SELL_TYPEHASH = keccak256(
-    'Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,uint256 deadline,uint256 nonce)'
+    'Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)'
   );
   /// @notice secp256k1's n / 2: a signature with a higher s is the other form of a lower one (EIP-2)
   uint256 internal constant HALF_N = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
@@ -107,6 +110,7 @@ contract SellDelegate {
   error PartialFill();
   error TransferFailed();
   error DebitNotExact();
+  error InvalidFeeRecipient();
 
   constructor(IWETH _weth, IPoolManager _poolManager) {
     WETH = _weth;
@@ -127,7 +131,7 @@ contract SellDelegate {
   /**
    * @notice Runs one sell W signed and deposits its ETH, less the fee, into the pool
    * @param _sell The sell
-   * @param _fee What the sender takes from the sale's ETH, at most _sell.feeCap
+   * @param _fee What the sender takes from the sale's ETH, at most _sell.feeCap, paid to _sell.feeRecipient
    * @param _signature W's EIP-712 signature of _sell, 65 bytes
    * @return _commitment The pool's new commitment
    */
@@ -142,6 +146,7 @@ contract SellDelegate {
     if (block.timestamp > _sell.deadline) revert DeadlineExpired();
     if (_fee > _sell.feeCap) revert FeeOverCap();
     if (_sell.minOut == 0) revert InvalidMinOut();
+    if (_sell.feeRecipient == address(0) || _sell.feeRecipient == address(this)) revert InvalidFeeRecipient();
     if (_signer(_sellDigest(_sell), _signature) != address(this)) revert InvalidSignature();
     SellStorage storage $ = _store();
     if (_sell.nonce != $.nonce) revert InvalidNonce();
@@ -185,7 +190,7 @@ contract SellDelegate {
     if (_gained < _sell.minOut) revert MinOutNotMet();
 
     if (_fee != 0) {
-      (bool _sent,) = msg.sender.call{value: _fee}('');
+      (bool _sent,) = _sell.feeRecipient.call{value: _fee}('');
       if (!_sent) revert FailedToSendNativeAsset();
     }
     _commitment = IPoolDeposit(_sell.pool).deposit{value: _gained - _fee}(_gained - _fee, _sell.precommitment);
@@ -276,6 +281,7 @@ contract SellDelegate {
         _sell.pool,
         _sell.precommitment,
         _sell.feeCap,
+        _sell.feeRecipient,
         _sell.deadline,
         _sell.nonce
       )

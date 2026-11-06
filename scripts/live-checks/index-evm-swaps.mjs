@@ -14,34 +14,42 @@
 //     the 1m grid, oldest first, USD decimal strings, high >= open, close >= low, bars from our own reads start at
 //     own_from_s; the trades hold exactly trades, src, as_of_ms, each {t_ms, side, usd, amt, trader, tx}, newest first;
 //   - the newest trades are on chain (RPC: SWAP_RPCS, two providers that agree on every answer): each receipt succeeded,
-//     sits in the block whose Base clock time is the trade's, was sent by the trade's trader, and carries a Transfer of
+//     sits in the block whose Base clock time is the trade's, was sent by the trade's trader (for a bundle sent to an
+//     ERC-4337 EntryPoint, the account of the user operation whose run holds the trade's swap, read from the receipt
+//     here, never the helper's code), and carries a Transfer of
 //     the token for exactly `amt` to the pool (a sell) or from it (a buy), the pool being the emitter of the Swap log
 //     every sampled receipt shares;
-//   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 12 blocks (24 s) behind the
+//   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 120 blocks (24 s) behind the
 //     providers' newest, is on the tape.
 // On Robinhood (--chain robinhood), which has no fixed block clock, a trade's time must be its block's own time and the
 // providers' newest block's time within 20 s of the read, each block time read on two providers that agree; its swaps
 // include the Pons v2 curve's CurveBuy and CurveSell, and its pool's logs are read in the 100-block spans its keyless
 // providers take.
 // With no --chain it checks both chains and passes only when both pass (the deployed helper's run).
+// On FAIL it names each read the helper answered (card helper-deploy-reads-fast): the lists read and every listed token
+// it tried before the one judged, each with its status, its time and the helper's Server-Timing (an EVM read names its
+// open and its wait for the providers' paces and in-flight queues, evm-open and evm-queue), so a late read names its
+// cause (live run 42122733397 attempt 1: the judged token's candles came 23 s after the read, the reads before it named
+// nowhere).
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { BLOCK_CLOCK } from "../../apps/helper/src/data/evm/lists.ts";
+import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "index-evm-swaps";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const SAMPLE = 5;
-/** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base, 6 s on Robinhood. */
-export const MARGIN = { base: 12, robinhood: 60 };
+/** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base (200 ms blocks since block 53556127,
+ *  lists.ts BLOCK_CLOCK), 6 s on Robinhood. */
+export const MARGIN = { base: 120, robinhood: 60 };
 export const MARGIN_BLOCKS = MARGIN.base;
 /** The most blocks one pool-log read asks (the chain's keyless providers' widest), and how far back the read goes. */
 const SPAN = { base: 1000, robinhood: 100 };
-const BACK = { base: 1000, robinhood: 1000 };
-const LAG = { base: 10, robinhood: 50 };
+const BACK = { base: 6000, robinhood: 1000 };
+const LAG = { base: 50, robinhood: 50 };
 const CLOCK = BLOCK_CLOCK.base;
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
@@ -49,6 +57,39 @@ const DEC = /^\d+(\.\d+)?$/;
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
 const SWAP_TOPICS = [TOPIC.swap2, TOPIC.swap3, TOPIC.swap4, TOPIC.curveBuy, TOPIC.curveSell];
+/**
+ * ERC-4337 (card helper-deploy-reads-fast fold): a transaction sent to an EntryPoint is a bundle, whose `from` is the
+ * bundler that paid the gas; each user operation's logs run from the EntryPoint's BeforeExecution, SignatureAggregatorChanged
+ * or previous UserOperationEvent to its own UserOperationEvent, whose second indexed topic is the operation's account
+ * (eth-infinitism/account-abstraction EntryPoint.sol: handleOps emits BeforeExecution, then runs each operation, each
+ * ending in its UserOperationEvent). The EntryPoints v0.6 to v0.9; the topics are keccak-256 of
+ * "UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256)", "BeforeExecution()" and
+ * "SignatureAggregatorChanged(address)", the first two as Base tx 0x672edabc logged them from v0.6 (block 53645984, read
+ * on base-rpc.publicnode.com and mainnet.base.org, 2026-11-05 23:2xZ). Written here on its own, never imported from the
+ * helper: a check that shares the helper's code shares its bug.
+ */
+const ENTRY_POINTS = new Set(["0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789", "0x0000000071727de22e5e9d8baf0edac6f37da032", "0x4337084d9e255ff0702461cf8895ce9e3b5ff108", "0x433709009b8330fda32311df1c2afa402ed8d009"]);
+const USER_OP_EVENT = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f";
+const RUN_STARTS = new Set(["0xbb47ee3e183a558b1a2ff0874b079f3fc5478b7454eacf2bfc5af2ff5878f972", "0x575ff3acadd5ab348fe1855e217e0f3678f8d767d7494c9f9fefbee2e17cca4d"]);
+/** Who sent the swaps `isSwap` picks in receipt `r`: its `from`; for a bundle, each user operation's account whose run
+ *  holds one (none for a swap outside every run). */
+export function swapSenders(r, isSwap) {
+  const ep = typeof r.to === "string" ? r.to.toLowerCase() : null;
+  if (ep === null || !ENTRY_POINTS.has(ep)) return { bundle: false, senders: [r.from] };
+  const logs = r.logs ?? [];
+  const out = new Set();
+  let start = null;
+  for (const [i, l] of logs.entries()) {
+    if (String(l.address).toLowerCase() !== ep) continue;
+    const t0 = l.topics?.[0];
+    if (t0 === USER_OP_EVENT) {
+      const account = topicAddr(l.topics?.[2]);
+      if (start !== null && account !== null && logs.slice(start + 1, i).some(isSwap)) out.add(account);
+      start = i;
+    } else if (RUN_STARTS.has(t0)) start = i;
+  }
+  return { bundle: true, senders: [...out] };
+}
 export const CANDLES_PATH = (t, net = "base") => `/v1/market/candles?chain=${net}&token=${t}&tf=1m&limit=60`;
 export const TRADES_PATH = (t, net = "base") => `/v1/market/trades?chain=${net}&token=${t}&limit=50`;
 const LISTS_PATH = (net) => `/v1/market/lists?chain=${net}`;
@@ -56,8 +97,13 @@ const LISTS_PATH = (net) => `/v1/market/lists?chain=${net}`;
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-const blockTime = (n) => CLOCK.genesisS + CLOCK.blockS * n;
-const blockOf = (s) => Math.floor((s - CLOCK.genesisS) / CLOCK.blockS);
+/** A Base block's time (whole seconds, as its header's) by the clock era it is in, and the newest block at or before a
+ *  time: a block-time change Base makes with no era for it here fails the trades' block times, naming the drift. */
+const blockTime = (n) => {
+  const e = CLOCK.findLast((x) => x.fromBlock <= n);
+  return Math.floor((e.atMs + e.blockMs * (n - e.fromBlock)) / 1000);
+};
+const blockOf = (s) => blockAt("base", s);
 const hex = (n) => `0x${n.toString(16)}`;
 
 /** The first thing wrong with a Candles answer, or null. */
@@ -113,7 +159,7 @@ export function judge(run) {
   // the lists the token is picked from did not answer: nothing else to judge
   if (run.lists !== undefined) {
     say(false, `GET ${run.lists.path ?? `/v1/market/lists?chain=${net}`} answers ${run.lists.status}${run.lists.status === 200 ? " with no lists" : ""} (${net})`);
-    return { ok: false, lines };
+    return withReads(run, lines);
   }
   const readAt = Date.parse(run.readAt);
   const parsed = {};
@@ -141,7 +187,7 @@ export function judge(run) {
     if (f === null) parsed[k] = b;
   }
   const { candles, trades } = parsed;
-  if (candles === undefined || trades === undefined) return { ok: false, lines };
+  if (candles === undefined || trades === undefined) return withReads(run, lines);
 
   const c = run.chain ?? {};
   const heads = Array.isArray(c.heads) ? c.heads : [];
@@ -162,7 +208,6 @@ export function judge(run) {
     say(r.status === "0x1", `${name}: the receipt succeeded`);
     const n = Number.parseInt(r.blockNumber, 16);
     say(Number.isSafeInteger(n) && Number.isSafeInteger(timeOf(n)) && timeOf(n) * 1000 === t.t_ms, `${name}: in block ${n}, whose ${net === "base" ? "Base clock time" : "time on two providers"} ${show(Number.isSafeInteger(n) ? timeOf(n) : null)} is the trade's ${t.t_ms / 1000}`);
-    say(t.trader === r.from, `${name}: sent by ${show(t.trader)}, the receipt's sender ${show(r.from)}`);
     const swaps = (r.logs ?? []).filter((l) => SWAP_TOPICS.includes(l.topics?.[0]));
     keys.push(new Set(swaps.map((l) => poolKey(l, net))));
     const want = Number.isSafeInteger(c.decimals) ? units(t.amt, c.decimals) : null;
@@ -175,6 +220,13 @@ export function judge(run) {
   say(common.length >= 1, `the sampled trades share a pool: ${show(common)}`);
   const pool = common[0];
   const poolAddr = pool === undefined ? null : pool.split(":")[0];
+  // each trade's sender: the receipt's, or for a bundle the account whose operation ran the trade's swap of the pool
+  for (const t of sample) {
+    const r = c.receipts?.[t.tx];
+    if (!isObj(r)) continue;
+    const { bundle, senders } = swapSenders(r, (l) => SWAP_TOPICS.includes(l.topics?.[0]) && (pool === undefined || poolKey(l, net) === pool));
+    say(senders.includes(t.trader), `trade ${t.tx.slice(0, 10)}: sent by ${show(t.trader)}, ${bundle ? `the account of the user operation whose run holds its swap ${show(senders)} (a bundle to ${r.to}, sent by ${r.from})` : `the receipt's sender ${show(r.from)}`}`);
+  }
   for (const t of sample) {
     // a buy: the pool (or the PoolManager) sends the token; a sell: it receives it. The token leg is exactly `amt`.
     const ok = poolAddr !== null && (t.moves ?? []).some(([from, to]) => (t.side === "b" ? from === poolAddr : to === poolAddr));
@@ -201,7 +253,19 @@ export function judge(run) {
     // the tape is full (50) when it covers fewer than 50 swaps on the window: a full tape's oldest rows are cut, not missing
     say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
   }
-  return { ok: lines.every((l) => l.startsWith("ok ") || l.startsWith("-- ")), lines };
+  return withReads(run, lines);
+}
+
+/** The verdict, and on FAIL a line for each read the helper answered: status, time, Server-Timing. */
+function withReads(run, lines) {
+  const ok = lines.every((l) => l.startsWith("ok ") || l.startsWith("-- "));
+  if (!ok) {
+    const st = (r) => `${r?.status ?? "none"} in ${r?.ms ?? "?"} ms, Server-Timing ${show(r?.headers?.["server-timing"])}`;
+    if (run.listsRead !== undefined) lines.push(`--  read: lists ${st(run.listsRead)}`);
+    for (const t of run.tried ?? []) lines.push(`--  read: ${t.token} before it: candles ${st(t.candles)}${t.trades === undefined ? "" : `; trades ${st(t.trades)}`}`);
+    for (const k of ["candles", "trades"]) if (run.reads?.[k] !== undefined) lines.push(`--  read: ${run.coin} ${k} ${st(run.reads[k])}`);
+  }
+  return { ok, lines };
 }
 
 async function get(base, path, fetchFn) {
@@ -244,8 +308,13 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   rpcs ??= SWAP_RPCS[net];
   const readAt = new Date().toISOString();
   let candidates = token === undefined ? [] : [token];
+  /** Each read the helper answered before the judged token's, for the FAIL lines (withReads). */
+  let listsRead;
+  const tried = [];
+  const seen = (r) => ({ status: r.status, ms: r.ms, headers: { "server-timing": r.headers["server-timing"] } });
   if (token === undefined) {
     const l = await get(base, LISTS_PATH(net), fetchFn);
+    listsRead = seen(l);
     let snap;
     try {
       snap = JSON.parse(l.body);
@@ -253,7 +322,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     // a lists answer that is not a 200 with lists (card app-console-429: robinhood's 503 at 11:03:50Z crashed the check
     // with exit 2) is the run's answer, which judge() names as a BAD line with the chain and the status
     if (l.status !== 200 || !isObj(snap) || !isObj(snap.lists) || !Object.values(snap.lists).every(Array.isArray)) {
-      return { base, ...(net === "base" ? {} : { net }), coin: null, readAt, lists: { path: LISTS_PATH(net), status: l.status, body: l.body.slice(0, 500) }, reads: {}, chain: {} };
+      return { base, ...(net === "base" ? {} : { net }), coin: null, readAt, lists: { path: LISTS_PATH(net), status: l.status, body: l.body.slice(0, 500) }, listsRead, reads: {}, chain: {} };
     }
     candidates = [...new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r?.token)).filter((t) => typeof t === "string"))];
   }
@@ -263,7 +332,10 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   let quiet;
   for (const t of candidates.slice(0, 12)) {
     const candles = await get(base, CANDLES_PATH(t, net), fetchFn);
-    if (candles.status !== 200) continue;
+    if (candles.status !== 200) {
+      tried.push({ token: t, candles: seen(candles) });
+      continue;
+    }
     const r = { token: t, candles, trades: await get(base, TRADES_PATH(t, net), fetchFn) };
     let n = 0;
     try {
@@ -273,10 +345,13 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
       reads = r;
       break;
     }
+    tried.push({ token: t, candles: seen(r.candles), trades: seen(r.trades) });
     quiet ??= r;
   }
   reads ??= quiet;
-  const at = net === "base" ? {} : { net };
+  // the reads before the judged one (the quiet token judged is not one of them)
+  const before = tried.filter((x) => x.token !== reads?.token);
+  const at = { ...(net === "base" ? {} : { net }), ...(listsRead === undefined ? {} : { listsRead }), ...(before.length === 0 ? {} : { tried: before }) };
   if (reads === undefined) {
     // the first candidate's answers, so a run that found none shows why
     const t0 = candidates[0];
@@ -342,7 +417,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
 }
 
 /** What the check reads of a receipt, the same on every provider (their extra fields differ). */
-const receiptOf = (r) => ({ status: r.status, blockNumber: r.blockNumber, from: r.from, logs: (r.logs ?? []).map((l) => ({ address: l.address, topics: l.topics, data: l.data })) });
+const receiptOf = (r) => ({ status: r.status, blockNumber: r.blockNumber, from: r.from, to: r.to, logs: (r.logs ?? []).map((l) => ({ address: l.address, topics: l.topics, data: l.data })) });
 
 const pct = (xs, p) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.ceil((p / 100) * xs.length) - 1)];
 

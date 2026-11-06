@@ -110,9 +110,12 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's twenty-three checks (signpage-shell runs four ways, signpage-pool-pins the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's twenty-six checks (signpage-shell runs four ways, sol-buy-rent-back the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 23);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 26);
+  assert.ok(sign.include.some((e) => e.key === "sol-buy-rent-back" && !e.chrome && e.args === ""), "sol-buy-rent-back runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-ready-no-flicker" && !e.chrome && e.args === ""), "pool-ready-no-flicker runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "signpage-pool-mainnet" && e.chrome && e.args === ""), "signpage-pool-mainnet runs after every sign deploy, in Chrome");
   assert.ok(sign.include.some((e) => e.key === "signpage-pool-pins" && !e.chrome && e.args === ""), "signpage-pool-pins runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-renewal-read-bounded" && e.args === ""), "kit-renewal-read-bounded runs after every sign deploy");
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);

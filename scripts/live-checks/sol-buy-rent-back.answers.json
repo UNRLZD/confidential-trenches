@@ -1,0 +1,44 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet) at the second review fold (of eca191d8): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at dadd41cc, release-46",
+    "bad": "main 987fae20's build (mainnet): no teardown rule, no sweep rule (the volume close is the kit's direct trade teardown's): FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-05T20:37Z, before this card's deploy: FAIL; its rents and owed facts are facts() of main 987fae20's bundle, the same bytes (its sha384 equals bad's)",
+    "previous": "this card's build at 0068524a, before the review fold: teardown and sweep, but rents by the device's own formula and no rent back owed: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-GdW3XWQuyGaK2AtqFbDehfVuw/1XJjLn0NDuQaTi2JEKC9IXCaOdoj12KvRQIhwY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-GdW3XWQuyGaK2AtqFbDehfVuw/1XJjLn0NDuQaTi2JEKC9IXCaOdoj12KvRQIhwY",
+    "teardown": true,
+    "volumeClose": true,
+    "sweep": true,
+    "rents": true,
+    "owed": true
+  },
+  "previous": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-4VzIiW6kVcNfyC9BCbPp7lPagzSiCl0hFxffEqjcktces0VABQOXASHdQZQIDfly\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-4VzIiW6kVcNfyC9BCbPp7lPagzSiCl0hFxffEqjcktces0VABQOXASHdQZQIDfly",
+    "teardown": true,
+    "volumeClose": true,
+    "sweep": true,
+    "rents": false,
+    "owed": false
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
+    "teardown": false,
+    "volumeClose": true,
+    "sweep": false,
+    "rents": false,
+    "owed": false
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
+    "teardown": false,
+    "volumeClose": true,
+    "sweep": false,
+    "rents": false,
+    "owed": false
+  }
+}

@@ -51,7 +51,8 @@ test("main's workflows before this card: every download without its retry is ref
   // the curls are fetch.sh's now: its one curl without the flags is refused as a workflow's
   assert.deepEqual(fetchScriptRefusals(readFileSync(FETCH, "utf8").replaceAll(` ${FLAGS}`, "")).map(([, w]) => w.split(": ")[0]), ["a curl without --retry 6 --retry-all-errors"]);
   assert.equal(r.filter((x) => x.includes("rustup toolchain install not run through")).length, 4, r.join("\n"));
-  assert.equal(r.filter((x) => x.includes("git submodule update not run through")).length, 1, r.join("\n"));
+  // the EVM pool's forge-std, in test-scripts and in slither (card pool-review-3)
+  assert.equal(r.filter((x) => x.includes("git submodule update not run through")).length, 2, r.join("\n"));
   assert.ok(r.some((x) => x.includes("a foundry-toolchain step without an id")), r.join("\n"));
 });
 

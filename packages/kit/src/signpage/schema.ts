@@ -309,13 +309,23 @@ const solAddress: SignpageSchema = (v) => {
     return false;
   }
 };
-/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its three shapes. W and the
- *  pool are addresses; the venue is the page's name for it, a free string. */
+/** A Solana transaction signature: base58 of exactly 64 bytes. */
+const solSignature: SignpageSchema = (v) => {
+  if (typeof v !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(v)) return false;
+  try {
+    return base58.decode(v).length === 64;
+  } catch {
+    return false;
+  }
+};
+/** A route event (messages.ts BuyRoute): a progress event with no stage and exactly one of its four shapes. W and the
+ *  pool are addresses; the venue is the page's name for it, a free string; tx a signature. */
 const routeHead = { v: lit(1), type: lit("progress"), id: str };
 const routeWallet = obj({ ...routeHead, wallet: solAddress });
 const routeVenue = obj({ ...routeHead, venue: str, pool: solAddress });
 const routeOut = obj({ ...routeHead, out: routeOutAmount });
-export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v);
+const routeTx = obj({ ...routeHead, tx: solSignature });
+export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v) || routeTx(v);
 
 /** An answer's envelope; the result inside is checked against its kind's schema by the client. */
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
