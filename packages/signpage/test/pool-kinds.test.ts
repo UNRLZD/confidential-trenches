@@ -3,7 +3,7 @@
 // never from the app; a request that passed is handed to its flow, and with no flow it is refused.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { throughApi } from "./api-ends.ts";
 import { ERC20_DECIMALS, poolKinds, readTokenDecimals, type PoolKindsDeps, type PoolRpc } from "../src/pool-kinds.ts";
@@ -11,6 +11,7 @@ import { SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import type { PoolAsk, PoolChain } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
+import { buildEntry, ROOT, SIGNER_DEFS, signerGuard } from "./signer-guard.ts";
 
 const SOL_TOKEN = "So11111111111111111111111111111111111111112";
 const EVM_TOKEN = "0xF111111111111111111111111111111111111111";
@@ -254,64 +255,90 @@ test("card pool-restore-wired: a flow that fails with EvmNotFinalError is answer
 // signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
 // evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
 // (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
-// the deposit's signature, its selector keccak256("deposit(uint256,uint256)")[0..4] = e2bbb158, or an ABI call by name
-// every EVM sell builder and signer, read from the files that define them (the kit's and the rule's, and quoted.ts,
-// whose evmQuotedSell builds the sell a signer signs on the precommitment its fields name), so one added later is
-// guarded too; and every way to encode a pool deposit
-const ROOT = new URL("../../../", import.meta.url).pathname;
-const SIGNER_DEFS = ["packages/kit/src/trade/evm/sell.ts", "packages/kit/src/trade/evm/sell-unpinned.ts", "packages/kit/src/trade/evm/quoted.ts", "packages/signpage/src/rules/pool.ts"];
-// a name defined by `export function` or by `export const NAME =` an arrow or a function expression; a predicate (`Is`
-// before a capital, as evmIsQuotedSell, which only reads quoted.ts's record) builds and signs nothing and is not one
-const SIGNER_NAME = /^(?:\w*(?:Build|Sign|Quoted)\w*Sell\w*|signEvmSell\w*)$/;
-const PREDICATE = /(?:^is|[a-z0-9]Is)[A-Z]/;
-const signerNames = (text: string): string[] =>
-  [...text.matchAll(/export (?:async )?function\*? ?(\w+)\s*[<(]|export const (\w+)\s*(?::[^=]*)?=\s*(?:async\b|function\b|\(|<|\w+\s*=>)/g)]
-    .map((m) => (m[1] ?? m[2])!)
-    .filter((name) => SIGNER_NAME.test(name) && !PREDICATE.test(name));
-const SIGNERS = [...new Set(SIGNER_DEFS.flatMap((f) => signerNames(readFileSync(join(ROOT, f), "utf8"))))];
-const EVM_SIGNS = new RegExp(`(?<!function )\\b(?:${SIGNERS.join("|")})\\(|deposit\\(uint256,uint256\\)|e2bbb158|functionName:\\s*["']deposit["']`, "i");
-// a call of evmNextNote, outside comments: a word in a comment guards nothing
-const calls = (text: string): boolean => /\bevmNextNote\(/.test(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1"));
-const unguarded = (files: readonly { path: string; text: string }[]): string[] =>
-  files.filter((f) => EVM_SIGNS.test(f.text) && !calls(f.text)).map((f) => f.path);
-const sources = (dir: string): { path: string; text: string }[] =>
+// card signer-guard-parser (reviewer L3 of pool-restore-wired): the guard reads code, not names (test/signer-guard.ts):
+// every name is bound to its declaration by the TypeScript compiler, so an alias, a namespace, `.call`/`.apply`, a
+// typed-arrow signer, a const or let that holds one, and an ethers- or viem-style deposit encoder are all caught, and the
+// kit index's re-exports are told apart from a call by their binding. It reads every module the page's build reaches
+// from the build's own entry (scripts/build-app.mjs `input:`), held to the Vite bundle's own module list on both
+// networks, and the device trees besides. The planted cases are files in test/fixtures/signer-guard/.
+const FIXTURES = join(ROOT, "packages/signpage/test/fixtures/signer-guard");
+const FIXTURE_DEFS = "packages/signpage/test/fixtures/signer-guard/defs.ts";
+const TREES = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src", "packages/kit/src", "apps/helper/src"];
+const sources = (dir: string): string[] =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) return sources(path);
-    return /\.(ts|tsx|js|mjs)$/.test(name) ? [{ path, text: readFileSync(path, "utf8") }] : [];
+    return /\.(ts|tsx|js|mjs)$/.test(name) && !/\.d\.ts$/.test(name) ? [path] : [];
   });
+const ENTRY = buildEntry();
+const TREE_FILES = TREES.flatMap((d) => sources(join(ROOT, d))).filter((f) => !/\.test\.(ts|mjs)$/.test(f));
+const FIXTURE_FILES = sources(FIXTURES);
+// one program for all of them; the fixtures' own signer file (defs.ts) only adds a signer no real file reaches
+const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, FIXTURE_DEFS]);
+const names = (files: readonly string[]) => files.map((f) => f.slice(ROOT.length));
 
-test("precommit-taken-recover: no device file signs an EVM pool deposit or sell without picking its note through evmNextNote", () => {
-  const root = ROOT;
-  // the signers' own files and the kit's quote.ts (a quote's simulation, signed by its caller on the note the caller
-  // names) define what is called; every caller is in these trees
-  const own = new Set([...SIGNER_DEFS, "packages/kit/src/checks/evm/quote.ts"].map((f) => join(root, f)));
-  for (const name of ["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSimSell", "evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "pinnedSignSell", "signEvmSell", "signEvmSellSim", "evmQuotedSell"]) assert.ok(SIGNERS.includes(name), `${name} is guarded`);
-  assert.equal(SIGNERS.includes("evmIsQuotedSell"), false, "a predicate signs nothing");
-  // planted: a signer defined as an arrow or a function expression is read; a predicate is not
-  assert.deepEqual(signerNames("export const fooSignSell = (k) => k;\nexport const barBuildSell = function (q) {};\nexport function evmQuotedSell(v) {}"), ["fooSignSell", "barBuildSell", "evmQuotedSell"]);
-  assert.deepEqual(signerNames("export const evmIsQuotedSell = (s) => true;\nexport function isSignedSell(s) {}"), []);
-  const files = ["packages/signpage/src", "apps/terminal/src", "packages/wallet/src", "packages/kit/src", "apps/helper/src"].flatMap((d) => sources(join(root, d))).filter((f) => !own.has(f.path) && !/\.test\.(ts|mjs)$/.test(f.path));
-  assert.ok(files.length > 50, "the trees were read");
-  // planted: a call of each signer without evmNextNote is caught, and with it is not
-  assert.deepEqual(unguarded(SIGNERS.map((name) => ({ path: `${name}.ts`, text: `const s = ${name}(key, ctx, built);` }))), SIGNERS.map((name) => `${name}.ts`));
-  assert.deepEqual(unguarded(SIGNERS.map((name) => ({ path: `${name}.ts`, text: `const { next } = evmNextNote(seed, scope, events, first); const s = ${name}(key, ctx, built);` }))), []);
-  assert.deepEqual(unguarded(files), []);
-  // planted: a flow that signs a sell, or encodes a deposit, without evmNextNote is caught; one that uses it is not
-  assert.deepEqual(unguarded([{ path: "a.ts", text: "const s = signEvmSell(key, ctx, built);" }, { path: "b.ts", text: 'const sel = "deposit(uint256,uint256)";' }, { path: "c.ts", text: "const b = evmPoolBuildSell(q, f);" }, { path: "f.ts", text: 'const data = "0xE2BBB158" + args;' }, { path: "g.ts", text: 'encodeFunctionData({ abi, functionName: "deposit", args });' }, { path: "h.ts", text: "// evmNextNote(seed, scope, events, first) would go here\nconst s = signEvmSell(key, ctx, built);" }]), ["a.ts", "b.ts", "c.ts", "f.ts", "g.ts", "h.ts"]);
-  assert.deepEqual(unguarded([{ path: "d.ts", text: "const { next } = evmNextNote(seed, scope, events, first); const s = signEvmSell(key, ctx, built);" }, { path: "e.ts", text: "export function signEvmSell(k) {}" }]), []);
+test("signer-guard-parser: the guard reads every module the page bundles, from the build's own entry", async () => {
+  assert.equal(ENTRY, join(ROOT, "packages/signpage/src/main.ts"), "build-app.mjs input: join(pkg, \"src/main.ts\")");
+  assert.ok(GUARD.graph.length > 50 && GUARD.graph.includes(ENTRY), "the build's graph was read");
+  assert.deepEqual(GUARD.unresolved, [], "every module of ours binds");
+  const BUILD: string = "../scripts/build-app.mjs"; // plain JavaScript, with no types
+  const { bundle } = (await import(BUILD)) as { bundle: (pkg: undefined, o: { network: string }) => Promise<{ modules: string[] }> };
+  for (const network of ["mainnet", "testnet"]) {
+    const { modules } = await bundle(undefined, { network });
+    const own = modules.filter((m) => !/[\\/]node_modules[\\/]/.test(m) && !m.startsWith("\0")).map((m) => m.split("?")[0]!);
+    assert.ok(own.length > 50, `${network}: the bundle's modules were listed`);
+    assert.deepEqual(own.filter((m) => !GUARD.graph.includes(m)), [], `${network}: every module the bundle holds is read`);
+  }
+  // planted: a name like a signer, a re-export or a type is not a reach; the kit index (export * from sell.ts) has none
+  assert.deepEqual(GUARD.sites(join(ROOT, "packages/kit/src/index.ts")), []);
 });
 
-// card signer-guard-parser: the planted cases in test/fixtures/signer-guard/ (bad/ must each be caught, good/ never),
-// read by the guard above
-const FIXTURES = join(ROOT, "packages/signpage/test/fixtures/signer-guard");
-const fixtureSources = (d: string) => sources(join(FIXTURES, d));
+test("precommit-taken-recover: no device file signs an EVM pool deposit or sell without picking its note through evmNextNote", () => {
+  const signers = GUARD.signers.map((s) => s.slice(s.indexOf("#") + 1));
+  for (const name of ["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSimSell", "evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "pinnedSignSell", "signEvmSell", "signEvmSellSim", "evmQuotedSell", "fixtureSignSell"]) assert.ok(signers.includes(name), `${name} is guarded`);
+  assert.ok(signers.includes("fixtureBuildSell"), "a builder defined as a function expression is guarded");
+  for (const name of ["evmIsQuotedSell", "fixtureIsQuotedSell", "isSignedSell"]) assert.equal(signers.includes(name), false, `${name}: a predicate signs nothing`);
+  assert.equal(signers.includes("EvmSignedSellCall"), false, "a type signs nothing");
+  // the signers' own files and the kit's quote.ts (a quote's simulation, signed by its caller on the note the caller
+  // names) define what is called; every other file the page bundles, and every file of the device trees, is held
+  const own = new Set([...SIGNER_DEFS, "packages/kit/src/checks/evm/quote.ts"].map((f) => join(ROOT, f)));
+  for (const f of own) assert.ok(GUARD.sites(f).length > 0, `${f}: the reader sees the signers in their own files`);
+  const files = [...new Set([...GUARD.graph, ...TREE_FILES])].filter((f) => !own.has(f) && !f.startsWith(FIXTURES));
+  assert.ok(files.length > 50, "the trees were read");
+  assert.deepEqual(names(GUARD.unguarded(files)), [], JSON.stringify(GUARD.unguarded(files).flatMap(GUARD.sites)));
+});
+
 test("signer-guard-parser: every planted signer and encoder in fixtures/signer-guard/bad is caught, and none in good/", () => {
-  const signers = [...new Set([...SIGNERS, ...signerNames(readFileSync(join(FIXTURES, "defs.ts"), "utf8"))])];
-  const signs = new RegExp(`(?<!function )\\b(?:${signers.join("|")})\\(|deposit\\(uint256,uint256\\)|e2bbb158|functionName:\\s*["']deposit["']`, "i");
-  const caught = (files: { path: string; text: string }[]) => files.filter((f) => signs.test(f.text) && !calls(f.text)).map((f) => f.path.slice(FIXTURES.length + 1));
-  const bad = fixtureSources("bad");
-  assert.equal(bad.length, 12, "the planted cases were read");
-  assert.deepEqual(caught(bad), bad.map((f) => f.path.slice(FIXTURES.length + 1)));
-  assert.deepEqual(caught(fixtureSources("good")), []);
+  // each bad file, and what the guard reads in it
+  const BAD: Record<string, RegExp> = {
+    "alias.ts": /names packages\/signpage\/src\/rules\/pool\.ts#signEvmSell/,
+    "namespace.ts": /names packages\/kit\/src\/trade\/evm\/sell\.ts#evmPoolSignSell/,
+    "namespace-whole.ts": /passes a namespace that exports packages\/kit\/src\/trade\/evm\/sell\.ts#/,
+    "call.ts": /names packages\/signpage\/src\/rules\/pool\.ts#signEvmSell/,
+    "apply.ts": /names packages\/kit\/src\/trade\/evm\/sell\.ts#evmPoolSignSell/,
+    "arrow-const.ts": /names packages\/signpage\/test\/fixtures\/signer-guard\/defs\.ts#fixtureSignSell/,
+    "reassign.ts": /names packages\/signpage\/src\/rules\/pool\.ts#signEvmSell/,
+    "reassign-export.ts": /names packages\/signpage\/src\/rules\/pool\.ts#signEvmSell/,
+    "reassign-import.ts": /names packages\/signpage\/src\/rules\/pool\.ts#signEvmSell/,
+    "encoder-ethers.ts": /encodes the deposit with encodeFunctionData/,
+    "encoder-abi.ts": /holds the deposit's ABI entry[\s\S]*encodes the deposit: "deposit\(uint256, uint256\)"/,
+    "fake-guard.ts": /names packages\/signpage\/src\/rules\/pool\.ts#signEvmSell/,
+    "plain.ts": /evmPoolBuildSell[\s\S]*rules\/pool\.ts#signEvmSell[\s\S]*defs\.ts#fixtureBuildSell/,
+    "encoder-viem.ts": /encodes functionName "deposit"[\s\S]*encodes the deposit: "deposit\(uint256,uint256\)"[\s\S]*encodes the deposit: "0xE2BBB158"/,
+    "selector-number.ts": /encodes the deposit selector/,
+  };
+  const bad = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "bad")));
+  assert.deepEqual(bad.map((f) => f.slice(FIXTURES.length + 5)).sort(), Object.keys(BAD).sort(), "the planted cases were read");
+  assert.deepEqual(names(GUARD.unguarded(bad)), names(bad));
+  for (const f of bad) assert.match(GUARD.sites(f).map((s) => s.what).join("\n"), BAD[f.slice(FIXTURES.length + 5)]!, f);
+  // reassign-import.ts reaches the signer only through another file's const: its own call is what is read
+  assert.ok(GUARD.sites(join(FIXTURES, "bad/reassign-import.ts")).some((s) => s.line === 5));
+  // no false refusal: the rule's signer by an alias, with the wallet's evmNextNote by an alias, is read and passes;
+  // re-exports, types, a predicate and a comment, and a local that shares a signer's name, are no reach at all
+  const good = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "good")));
+  assert.equal(good.length, 3);
+  assert.deepEqual(names(GUARD.unguarded(good)), []);
+  assert.ok(GUARD.sites(join(FIXTURES, "good/guarded-alias.ts")).length > 0, "the aliased signer is read");
+  assert.deepEqual(GUARD.sites(join(FIXTURES, "good/reexports.ts")), []);
+  assert.deepEqual(GUARD.sites(join(FIXTURES, "good/shadow.ts")), []);
 });
