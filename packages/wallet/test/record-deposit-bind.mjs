@@ -11,7 +11,8 @@ const params = {
   request_type: "call_function",
   account_id: VAULT,
   method_name: "deposits",
-  args_base64: Buffer.from(JSON.stringify({ from: 0, limit: 1000 })).toString("base64"),
+  // the kit's first deposits page (VAULT_SYNC_PAGE.deposits, review R-03), as the device's scan asks it
+  args_base64: Buffer.from(JSON.stringify({ from: 0, limit: 450 })).toString("base64"),
   finality: "final",
 };
 const out = { recorded_at: new Date().toISOString(), vault: VAULT, params, answers: {} };

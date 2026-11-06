@@ -194,6 +194,10 @@ test("one RPC down stops it: a thrown read, an HTTP 503, a JSON-RPC error, an an
   await refused(checkDepositAccount(rec.good, ONE, "mainnet", [down(MAIN.fastnear[0]), replay("b")]), "rpc", /fastnear.com did not answer/);
   const http = nearRpc(MAIN.drpc, (async () => new Response("busy", { status: 503 })) as typeof fetch);
   await refused(checkDepositAccount(rec.good, ONE, "mainnet", [replay("a"), http]), "rpc", /did not answer/);
+  // R-03: nearRpc gives back dRPC's 408 free-plan timeout body (for the vault's page reads); here it is one RPC not answering
+  const timeout = JSON.stringify({ id: "x", jsonrpc: "2.0", error: { message: "Request timeout on the free plan, please upgrade to paid plan", code: 30 } });
+  const slow = nearRpc(MAIN.drpc, (async () => new Response(timeout, { status: 408 })) as typeof fetch);
+  await refused(checkDepositAccount(rec.good, ONE, "mainnet", [replay("a"), slow]), "rpc", /read failed|did not answer/);
   const err = (r: Read, j: any) => r === "code" && (delete j.result, (j.error = { code: -32000, message: "Server error" }));
   await refused(checkDepositAccount(rec.good, ONE, "mainnet", pair({}, undefined, err)), "rpc", /code read failed/);
   const empty = (r: Read, j: any) => r === "keys" && delete j.result;

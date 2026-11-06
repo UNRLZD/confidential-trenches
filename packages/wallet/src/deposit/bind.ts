@@ -40,7 +40,7 @@
 // the amount again on U's next second-arrival note.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
-import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, VAULT_FIELD_P, VAULT_SYNC_BUSY_WAITS_MS, VAULT_SYNC_PAGE, vaultViewBusy, vaultViewTooHeavy } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
@@ -192,14 +192,39 @@ function row(x: unknown, at: number): DepositRow {
   return r;
 }
 
-/** One RPC's pages from `from` to their end: the rows holding any of `ps`, and the count read up to. */
+/**
+ * One RPC's pages from `from` to their end: the rows holding any of `ps`, and the count read up to. The kit's sync's
+ * paging rule (review R-03): pages start at VAULT_SYNC_PAGE.deposits rows (about 125 Tgas a view); a page the RPC
+ * refuses as too heavy (vaultViewTooHeavy) is read again at half its rows, and one of an eighth of the first refused
+ * throws; a busy answer (vaultViewBusy) is asked again after each of VAULT_SYNC_BUSY_WAITS_MS, then throws.
+ */
 async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: number, signal?: AbortSignal): Promise<{ found: Map<bigint, DepositRow>; end: number }> {
-  const limit = VAULT_CONSTANTS.PAGE_MAX;
+  let limit = VAULT_SYNC_PAGE.deposits;
+  const floor = Math.floor(VAULT_SYNC_PAGE.deposits / 8);
   const found = new Map<bigint, DepositRow>();
-  for (let at = from; ; at += limit) {
+  for (let at = from, busy = 0; ; ) {
     signal?.throwIfAborted();
     const args = base64.encode(new TextEncoder().encode(JSON.stringify({ from: at, limit })));
-    const res = resultOf(await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" }));
+    const answer = await rpc.query({ request_type: "call_function", account_id: vault, method_name: "deposits", args_base64: args, finality: "final" });
+    if (vaultViewBusy(answer)) {
+      const wait = VAULT_SYNC_BUSY_WAITS_MS[busy++];
+      if (wait === undefined) throw new Error(`${rpc.name}: busy ${busy} times`);
+      // the caller's stop ends the wait at once, as it ends the scan between pages (REVIEW K)
+      await new Promise<void>((ok, no) => {
+        const stop = () => (clearTimeout(t), no(signal!.reason));
+        const t = setTimeout(() => (signal?.removeEventListener("abort", stop), ok()), wait);
+        if (signal?.aborted) return stop();
+        signal?.addEventListener("abort", stop, { once: true });
+      });
+      continue;
+    }
+    busy = 0;
+    if (vaultViewTooHeavy(answer)) {
+      if (limit <= floor) throw new Error(`${rpc.name}: a deposits page of ${limit} rows is too heavy`);
+      limit = Math.floor(limit / 2);
+      continue;
+    }
+    const res = resultOf(answer);
     const bytes = res?.result;
     if (!Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) throw new Error("no page");
     const page = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes)));
@@ -207,6 +232,7 @@ async function scan(rpc: NearRpc, vault: string, ps: readonly bigint[], from: nu
     const rows = page.map((x, k) => row(x, at + k));
     for (const r of rows) if (ps.includes(r.precommitment) && !found.has(r.precommitment)) found.set(r.precommitment, r);
     if (rows.length < limit) return { found, end: at + rows.length };
+    at += limit;
   }
 }
 

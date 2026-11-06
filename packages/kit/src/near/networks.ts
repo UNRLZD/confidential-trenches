@@ -67,7 +67,13 @@ export function nearPairRule(network?: NearNetwork): string {
   return `the RPCs must be one of ${nets.map((n) => `${NEAR_NETWORKS[n].fastnear.join(", ")} and ${NEAR_NETWORKS[n].drpc}`).join("; or ")}, exactly`;
 }
 
-/** A provider by URL. A status other than 200, a body that is not JSON or no answer in time throws. */
+/**
+ * A provider by URL. A status other than 200 or 408, a body that is not JSON or no answer in time throws. A 408's JSON
+ * body is given back as the answer: dRPC's free plan answers a view it stopped for time that way, HTTP 408 with
+ * {"error":{"message":"Request timeout on the free plan, please upgrade to paid plan","code":30}} (near.drpc.org and
+ * near-testnet.drpc.org, read 2026-11-06 05:47Z), and the vault's page reads ask for the same page again after a wait
+ * (the kit's vaultViewBusy); to every other reader it is a JSON-RPC error like any other.
+ */
 export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): NearRpc {
   return {
     name: url,
@@ -78,7 +84,7 @@ export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = 
         body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: NEAR_RPC_METHOD, params }),
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      if (res.status !== 200 && res.status !== 408) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     },
   };
