@@ -165,11 +165,12 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         clearInterval(timer);
         run = null;
         if (abort === ctl) abort = null;
-        // a run this tab's sign out stopped writes nothing more: its records went with the store
+        // a run this tab's sign out stopped writes nothing more: its records went with the store. The end is posted
+        // once its record landed, so a reader of the op after the end never reads it behind
         if (!ctl.signal.aborted)
           for (const f of followers) {
-            f.progress?.(stage);
             write(f, stage);
+            f.writes = f.writes.then(() => f.progress?.(stage));
           }
         // the run's end is its records' end: each follower's last write landed (or failed)
         return Promise.all(followers.map((f) => f.writes)).then(() => stage);

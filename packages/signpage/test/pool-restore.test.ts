@@ -229,7 +229,8 @@ test("settle: a restore record left started or reading by a dead run is written 
 test("auto: a store holding only PLANNED notes is empty; one with a landed note is not", async () => {
   const w = await world();
   const ns = await openNoteStore(w.store);
-  await ns.planDeposit(SOL_SCOPE, () => 77n);
+  // its precommitment is the seed's for its index, as the page names one: the restore names the same for that index
+  await ns.planDeposit(SOL_SCOPE, (ref) => (ref.kind === "deposit" && ref.i < 2 ? 1001n + BigInt(ref.i) : 77n));
   ns.close();
   assert.equal(await w.r.auto(), "done");
   assert.equal(w.seen.length, 2);
@@ -243,4 +244,20 @@ test("two pages' runs on one store take turns: both end done, each note written 
   assert.deepEqual([a, b].sort(), ["done", "done"]);
   const want = [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((n) => `${refKey(n.ref)} ${n.state}`).sort();
   assert.deepEqual(await listed(w.store), want);
+});
+
+// the end is posted only once its op record landed: the app reads state.ops after "done" and never reads it behind
+test("restore: the op record says the end before the end is posted, however slow the store's write", async () => {
+  const w = await world();
+  const slow = new Proxy(w.store, {
+    get: (t, k) =>
+      k === "put" ? (...a: Parameters<WalletStore["put"]>) => new Promise((r) => setTimeout(r, 40)).then(() => t.put(...a)) : Reflect.get(t, k, t),
+  }) as WalletStore;
+  const x = await world({ store: async () => slow });
+  const atEnd: Promise<string | undefined>[] = [];
+  const id = crypto.randomUUID();
+  const d = x.r.kind({}, { id, progress: (s: string) => void (s === "done" && atEnd.push(opOf(w.store, id).then((o) => o?.stage))) } as never);
+  await d.after;
+  await until("done posted", () => atEnd.length === 1);
+  assert.equal(await atEnd[0], "done");
 });
