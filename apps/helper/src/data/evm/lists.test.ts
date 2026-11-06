@@ -542,3 +542,19 @@ test("card evm-rpc-spare-list: with the first two maker providers down, the next
   for (const down of [[0, 1], [0, 1, 2]]) assert.equal((await readMakers("robinhood", rhRecords({ down, sparesAs: 2 }).fetch, rh, REC_NOW)).get(gs.address), "pons", `Robinhood providers ${down} down`);
   assert.equal((await readMakers("robinhood", rhRecords({ down: [0, 1, 2, 3], sparesAs: 2 }).fetch, rh, REC_NOW)).size, 0, "Robinhood: only one answers");
 });
+
+test("card evm-spare-list-green: a maker read sends Sentio batches of 5 at most, its own cap: a batch of 10 is its HTTP 429 and every call after it unread", async () => {
+  const url = "https://rpc.sentio.xyz/base";
+  assert.ok((MAKER_RPCS.base as readonly string[]).includes(url), "Sentio is on Base's maker list");
+  const sizes: number[] = [];
+  const f = async (_u: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number }[];
+    sizes.push(reqs.length);
+    // Sentio's answer past 5 (read 2026-11-06 22:45Z)
+    if (reqs.length > 5) return new Response('{"code":8,"message":"JSON-RPC batch exceeds the maximum of 5 requests"}', { status: 429, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, result: "0x1" }))), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const out = await batch(f as never, url, Array.from({ length: 12 }, () => ({ method: "eth_blockNumber", params: [] })));
+  assert.deepEqual(sizes, [5, 5, 2]);
+  assert.deepEqual(out, Array(12).fill("0x1"));
+});

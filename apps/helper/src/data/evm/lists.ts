@@ -126,7 +126,9 @@ async function agreedOnList<T>(urls: readonly string[], n: number, ask: (url: st
 /** daybreak counts each call of a batch as one of the about 4 concurrent requests it takes (a batch of 5 at 4 posts a
  *  second refused at its 4th post with -32005 "too many concurrent requests", 2026-11-04 20:51Z, from the Mac): one call a
  *  post, three posts out at once (limits.ts PROVIDER_PACE). */
-export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1 };
+/** rpc.sentio.xyz/base takes 5 (card evm-spare-list-green: a batch of 10 answered HTTP 429 code 8 "JSON-RPC batch exceeds
+ *  the maximum of 5 requests", batches of 5 answered, 2026-11-06 22:45Z from the Mac). */
+export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1, "https://rpc.sentio.xyz/base": 5 };
 
 /** One stretch of a chain's fixed block clock: from block `fromBlock`, made at `atMs`, a block every `blockMs`. */
 export type ClockEra = { fromBlock: number; atMs: number; blockMs: number };
