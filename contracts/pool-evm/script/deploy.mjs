@@ -165,7 +165,6 @@ export async function deployedElsewhere(chainName, { git = (...a) => spawnSync("
 }
 /** A record's journal: the record's path with .journal.json */
 export const journalOf = (out) => out.replace(/\.json$/, "") + ".journal.json";
-/** The paste's sweep form for a mainnet chain's journal */
 // What one landed transaction took from the run key's balance, from its receipt; null when the receipt or the journal
 // entry does not say. Its fee: gasUsed x effectiveGasPrice (an Arbitrum chain's gasUsed holds its L1 part,
 // gasUsedForL1), plus an OP stack chain's l1Fee and its operator fee, whose receipt fields are left out while both are 0
@@ -183,6 +182,7 @@ export const outflowOf = (tx, r, deployer) => {
   const self = String(tx.to ?? "").toLowerCase() === String(deployer).toLowerCase();
   return fee + (r.status === "0x1" && !self ? BigInt(tx.value) : 0n);
 };
+/** The paste's sweep form for a mainnet chain's journal */
 export const sweepCommand = (chainName) => `sh contracts/pool-evm/script/mainnet-deploy.sh ${chainName} --sweep-kept`;
 /**
  * Where a mainnet run's key folder lives: $XDG_STATE_HOME/pool-evm-deploy, ~/.local/state/pool-evm-deploy by default,
