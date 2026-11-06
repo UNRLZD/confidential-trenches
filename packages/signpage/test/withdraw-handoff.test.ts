@@ -571,16 +571,39 @@ test("settle pass: a RESERVED vault note with no stored request is skipped and l
   assert.equal((await v.ns.get(n!.id))!.state, "RESERVED", "nothing on this page ever frees it");
 });
 
-test("the settle pass: a RESERVED vault note with no stored request is skipped and left RESERVED", async () => {
+
+// the r3 re-check (card signpage-withdraw-handoff)
+const rejections: unknown[] = [];
+process.on("unhandledRejection", (e) => void rejections.push(e));
+
+test("the settle pass: a bad stored request listed after a note whose relay still waits fails alone, its refusal never unhandled meanwhile", async () => {
+  const v = await world([5_000_000n, 6_000_000n]);
+  const req = await leftReserved(v);
+  const other = (await v.ns.list()).find((n) => n.id !== req.noteId && n.ref.kind === "deposit")!;
+  const held = await v.ns.move(other.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "7" });
+  await v.ns.move(other.id, "HELD", "RESERVED", { attempt: held.attempt, request: "{}" }); // JSON, not a request body
+  // the waiting note listed first, the bad one after it
+  const list = async () => {
+    const all = await v.ns.list();
+    return [...all.filter((n) => n.id === req.noteId), ...all.filter((n) => n.id !== req.noteId)];
+  };
+  const ns = new Proxy(v.ns, { get: (t, k) => (k === "list" ? list : (Reflect.get(t, k) as (...a: unknown[]) => unknown)?.bind?.(t) ?? Reflect.get(t, k)) });
+  const p = { ...page(v), notes: async () => ns };
+  const before = rejections.length;
+  const slow: HandoffOver["relay"] = async (_s, r) => (await new Promise((ok) => setTimeout(ok, 50)), expired(v, r));
+  const pass = await withdrawSettle(p, { network: "testnet", rpcs: pair("testnet"), priceRpcs: pair("mainnet"), fetchFn: helper(), relay: slow });
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(pass.outcomes, { [req.noteId]: "expired", [other.id]: "failed" });
+  assert.ok(zeroed(p.opened[0]!));
+  assert.deepEqual(rejections.slice(before), [], "a rejection went unhandled while the first note's relay waited");
+});
+
+test("the settle pass on a ragequit whose SPENT move fails (another tab moved the note first): failed, never spent", async () => {
   const v = await world([5_000_000n]);
-  const [n] = await v.ns.list();
-  const held = await v.ns.move(n!.id, "UNSPENT", "HELD", { deadlineMs: 1n, context: "7" });
-  await v.ns.move(n!.id, "HELD", "RESERVED", { attempt: held.attempt });
-  let called = 0;
-  const p = page(v);
-  const pass = await settleWith(v, async () => { called += 1; throw new Error("x"); }, p);
-  assert.deepEqual(pass.outcomes, {});
-  assert.equal(called, 0);
-  assert.equal(p.opened.length, 0);
-  assert.equal((await v.ns.get(n!.id))!.state, "RESERVED", "nothing on this page ever frees it");
+  const req = await leftReserved(v);
+  const pass = await settleWith(v, async () => {
+    await v.ns.move(req.noteId, "RESERVED", "SPENT"); // another tab's pass got there first
+    return { kind: "unmatched", spend: { context: 0n } as never };
+  });
+  assert.deepEqual(pass.outcomes, { [req.noteId]: "failed" });
 });

@@ -240,6 +240,8 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
   } finally {
     seed.fill(0);
   }
+  // each is awaited in turn below: a later note's refusal waits for its turn with a handler, never unhandled meanwhile
+  for (const [, p] of going) p.catch(() => {});
   for (const [id, p] of going) {
     try {
       const o = await p;
