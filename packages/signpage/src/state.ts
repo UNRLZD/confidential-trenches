@@ -18,7 +18,7 @@
 // - A seed with no status (a database from before it, or a status the frame cannot read) is signed in with code_saved
 //   false, so the Backup dot shows, and no `way`, which the kit's state type leaves optional: the frame does not know it
 //   and says nothing. A status with no seed is signed out: signed_in comes from the seed's key alone.
-// - ops: every record of the store's "ops", keyed by its op id, as { id, kind, stage, txs, code? } (the op contract is
+// - ops: every record of the store's "ops", keyed by its op id, as { id, kind, stage, txs, code? } and a deposit's facts (the op contract is
 //   at readOps). Only those fields are copied (a tx as { chain, hash }), and only when the op passes the kit's own state
 //   schema, the one the client checks every answer against: a record of another shape is left out, never sent, so one
 //   bad record cannot make the client refuse the whole state. Oldest first by created_ms; past the kit's
@@ -35,7 +35,7 @@
 //   change or sign out, also when no database exists yet, and the reader reports its own connection closed by a delete
 //   (versionchange). Each one calls the watchers, and the API posts a state event when the state read then differs. A
 //   sign out or a closed connection drops the reader; the next read opens a new one.
-import type { Operation, SigninWay, SignpageState } from "../../kit/src/signpage/messages.ts";
+import type { DepositFacts, Operation, SigninWay, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { depositKey, depositRecordOf, type WalletEvent, type WalletStoreReader } from "@blindfill/wallet/store";
 import type { DepositPublic } from "./deposit-wire.ts";
@@ -67,12 +67,17 @@ export function stateOf(signedIn: boolean, status: Status | undefined, ops: Oper
   return { ...base, way: WAY[status.source], code_saved: status.code_saved, ...empty, ops };
 }
 
+const DEPOSIT_FACT_KEYS = ["refunded", "hold", "held_id", "since_ms", "amount_usd"] as const satisfies readonly (keyof DepositFacts)[];
+
 /** The op the API may send for the ops record under `id`, or null when the record is not one. */
 export function opOf(id: string, rec: unknown): Operation | null {
   if (!isRecord(rec)) return null;
   const txs = Array.isArray(rec.txs) ? rec.txs.map((t: unknown) => (isRecord(t) ? { chain: t.chain, hash: t.hash } : t)) : rec.txs;
   const op: Record<string, unknown> = { id, kind: rec.kind, stage: rec.stage, txs };
   if ((rec.kind === "buy" || rec.kind === "sell") && rec.code !== undefined) op.code = rec.code;
+  // a deposit's facts (kit messages.ts DepositFacts, card kit-deposit-calls): each copied only when set; the kit's
+  // schema below holds each to its stages
+  if (rec.kind === "deposit") for (const k of DEPOSIT_FACT_KEYS) if (rec[k] !== undefined) op[k] = rec[k];
   const probe = stateOf(true, undefined, [op as Operation]);
   return SIGNPAGE_RESULT_SCHEMAS.state(probe) ? (op as Operation) : null;
 }
@@ -108,8 +113,9 @@ export function pickOps(base: SignpageState, rows: OpRow[]): Operation[] {
 const createdMs = (rec: unknown): number =>
   isRecord(rec) && typeof rec.created_ms === "number" && Number.isFinite(rec.created_ms) ? rec.created_ms : -Infinity;
 
-// The op contract (for every card that writes "ops"): an ops record is keyed by its request's id and holds
-// { kind, stage, txs: [{ chain, hash }], code?, created_ms } and nothing secret: no key, seed, words, note secret,
+// The op contract (for every card that writes "ops"): an ops record is keyed by its request's id (a deposit's, its
+// deposit.quote request's id) and holds { kind, stage, txs: [{ chain, hash }], code?, created_ms }, a deposit's
+// also its facts { refunded?, hold?, held_id?, since_ms?, amount_usd? } (kit messages.ts DepositFacts), and nothing secret: no key, seed, words, note secret,
 // nullifier, context, proof or signed-but-unsent payload. The frame may open these records only because they hold no
 // secret (the frame's rule above); a field that is secret goes in another store, which the frame never reads. The frame
 // copies only the fields above, so a stray field is never sent, but it is still decrypted in the frame's heap.

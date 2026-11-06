@@ -9,7 +9,7 @@ import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords } from "@blindfill/wallet/derive";
 import { openWalletStore, openWalletStoreReader, WALLET_CHANNEL, type WalletStore, type WalletStoreReader } from "@blindfill/wallet/store";
-import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY } from "../../kit/src/signpage/schema.ts";
+import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { APP_ORIGIN, RELEASE, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
 import { ANSWER_ROOM, frameState, opOf, pickOps, stateOf, type ChannelListen, type FrameState, type OpRow } from "../src/state.ts";
 
@@ -308,4 +308,48 @@ test("pickOps: the oldest are dropped until the answer fits SIGNPAGE_MAX_ANSWER_
   assert.ok(answerBytes({ ...base, ops: kept2 }) <= SIGNPAGE_MAX_ANSWER_BYTES, String(answerBytes({ ...base, ops: kept2 })));
   const over = { ...fit, id: `${fit.id}f` };
   assert.equal(pickOps(base, [{ op: over, t: -1 }, ...rows.slice(100 - ops.length)]).length, ops.length, "one byte over: dropped");
+});
+
+// Card kit-deposit-calls: the deposit op carries its facts (kit messages.ts DepositFacts) through the frame, only those
+// fields and only on their stages, under the deposit.quote request's id.
+test("kit-deposit-calls: a deposit op's stage and facts reach the app through the frame, under its quote's request id", async () => {
+  const p = await setup();
+  const t = await p.tab();
+  await signIn(t, "code", true);
+  assert.deepEqual((await p.ask()).ops, []);
+  const id = crypto.randomUUID();
+  const U = "b".repeat(64);
+  const steps: Record<string, unknown>[] = [
+    { stage: "quote_checked" },
+    { stage: "waiting", since_ms: 1762400000000 },
+    { stage: "short", since_ms: 1762400000000 },
+    { stage: "failed", since_ms: 1762400000000 },
+    { stage: "refunded", held_id: U, since_ms: 1762400000000 },
+    { stage: "refund_move", refunded: true, held_id: U, since_ms: 1762400000000 },
+    { stage: "halted", hold: "not_caught_up", held_id: U, since_ms: 1762400000000 },
+    { stage: "done", refunded: true, since_ms: 1762400000000, amount_usd: "73.18" },
+  ];
+  for (const facts of steps) {
+    // a stray field in the record is never copied
+    await t.put("ops", id, { kind: "deposit", txs: [], created_ms: 3, note: "x", ...facts });
+    const s = await p.event((st) => JSON.stringify(st.ops).includes(`"stage":"${facts.stage}"`));
+    assert.deepEqual(s.ops, [{ id, kind: "deposit", txs: [], ...facts }], JSON.stringify(facts));
+    assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true, `the kit's client takes it: ${JSON.stringify(facts)}`);
+  }
+  await t.put("ops", "x2", { kind: "deposit", stage: "expired", txs: [], created_ms: 4 });
+  assert.deepEqual((await p.event((st) => (st.ops as unknown[]).length === 2)).ops.at(-1), { id: "x2", kind: "deposit", stage: "expired", txs: [] });
+});
+
+test("kit-deposit-calls: a deposit record with a fact on the wrong stage, or a fact on another kind, is left out", () => {
+  const id = crypto.randomUUID();
+  for (const bad of [
+    { kind: "deposit", stage: "waiting", txs: [], hold: "halted" },
+    { kind: "deposit", stage: "in_transit", txs: [], amount_usd: "1" },
+    { kind: "deposit", stage: "quote_checked", txs: [], since_ms: 1 },
+    { kind: "deposit", stage: "waiting", txs: [], held_id: "u" },
+    { kind: "deposit", stage: "waiting", txs: [], refunded: true },
+    { kind: "deposit", stage: "halted", txs: [], hold: "frozen" },
+  ]) assert.equal(opOf(id, bad), null, JSON.stringify(bad));
+  // a buy record's since_ms is not copied (no kind but a deposit has facts)
+  assert.deepEqual(opOf(id, { kind: "buy", stage: "filled", txs: [], since_ms: 1 }), { id, kind: "buy", stage: "filled", txs: [] });
 });
