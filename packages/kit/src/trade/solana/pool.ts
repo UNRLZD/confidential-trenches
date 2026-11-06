@@ -53,6 +53,7 @@ import {
   SOLANA_SYSTEM_PROGRAM,
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
+  solanaMintDisagreement,
 } from "../../checks/solana/checks.ts";
 import { solanaSameProvider, type SolanaRpc } from "./send.ts";
 
@@ -480,6 +481,19 @@ function eqMasked(a: Uint8Array, b: Uint8Array, moving: readonly (readonly [numb
 const sameAcc = (a: SolanaPoolAccount | null, b: SolanaPoolAccount | null, moving: readonly (readonly [number, number])[] = []): boolean =>
   a === null || b === null ? a === b : a.owner === b.owner && eqMasked(a.data, b.data, moving);
 
+// The mint on both providers, each read at its own slot: every field but the supply and a fee config's withheld fees
+// the same (solanaMintDisagreement, as S6 and S10 hold it), and the supply, which burns and mints move between two
+// honest reads (card solana-mint-supply-moves), within the reserves' band, since it sets the fee tier (solanaCurveRates on
+// a mayhem curve, solanaPumpSwapRates). Each provider's candidate is priced on its own supply. A string: why not.
+function mints(a: SolanaPoolAccount | null, b: SolanaPoolAccount | null): readonly [{ supply: bigint; program: string }, { supply: bigint; program: string }] | string {
+  if (!a || !b) return "the mint is not read on both providers";
+  const off = solanaMintDisagreement(a, b);
+  if (off) return `the providers disagree on the mint's ${off}`;
+  const m = [solanaDecodeMint(a), solanaDecodeMint(b)] as const;
+  if (!solanaReservesAgree(m[0].supply, m[1].supply)) return `the mint's supply is outside the band (${m[0].supply} / ${m[1].supply})`;
+  return m;
+}
+
 // What one read pair says of one candidate: not a candidate, a disagreement or a malformed account, or agreed.
 type Verdict = { kind: "none" } | { kind: "bad"; why: string } | { kind: "ok"; candidate: SolanaAgreedCandidate };
 /** Indexes into each venue's own read (solanaPoolAddresses curveList and poolList). */
@@ -510,23 +524,25 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
       const curves = [solanaDecodeBondingCurve(ca!), solanaDecodeBondingCurve(cb!)] as const;
       if (curves[0].complete) return { kind: "none" }; // a complete curve is no candidate
       if (!SOL_LIKE.has(curves[0].quoteMint)) return { kind: "none" }; // quoted in another token: not a SOL pool
-      for (const i of [CI.mint, CI.pumpGlobal, CI.pumpFeeConfig]) if (!sameAcc(at(A, i), at(B, i))) return { kind: "bad", why: `account ${i} differs` };
+      for (const i of [CI.pumpGlobal, CI.pumpFeeConfig]) if (!sameAcc(at(A, i), at(B, i))) return { kind: "bad", why: `account ${i} differs` };
+      const ms = mints(at(A, CI.mint), at(B, CI.mint));
+      if (typeof ms === "string") return { kind: "bad", why: ms };
       if (!solanaReservesAgree(curves[0].virtualTokenReserves, curves[1].virtualTokenReserves) || !solanaReservesAgree(curves[0].virtualQuoteReserves, curves[1].virtualQuoteReserves)) {
         return { kind: "bad", why: "the curve's reserves are outside the band" };
       }
-      const mint = solanaDecodeMint(at(A, CI.mint) ?? fail("no mint"));
+      const mint = ms[0];
       // the curve's own token account, under the mint's program: it prices the pool-to-be of a buy that crosses the end
       const baseI = mint.program === SOLANA_TOKEN_PROGRAM ? CI.baseT : CI.baseT22;
       const balances = [heldBy(at(A, baseI), addr.mint, addr.curve, mint.program), heldBy(at(B, baseI), addr.mint, addr.curve, mint.program)] as const;
       if (!solanaReservesAgree(balances[0], balances[1])) return { kind: "bad", why: "the curve's token account is outside the band" };
       const global = solanaDecodePumpGlobal(at(A, CI.pumpGlobal) ?? fail("no pump Global"));
       const feeConfig = solanaDecodeFeeConfig(at(A, CI.pumpFeeConfig) ?? fail("no pump fee config"));
-      const one = (c: SolanaBondingCurve, balance: bigint): SolanaCandidateRead => ({
+      const one = (c: SolanaBondingCurve, balance: bigint, supply: bigint): SolanaCandidateRead => ({
         depth: c.virtualQuoteReserves,
-        ...solanaCurveOut(req.side, req.amount, c, global, feeConfig, mint.supply, balance),
-        outs: amounts.map((x) => solanaCurveOut(req.side, x, c, global, feeConfig, mint.supply, balance).out),
+        ...solanaCurveOut(req.side, req.amount, c, global, feeConfig, supply, balance),
+        outs: amounts.map((x) => solanaCurveOut(req.side, x, c, global, feeConfig, supply, balance).out),
       });
-      return { kind: "ok", candidate: { venue, address: addr.curve, reads: [one(curves[0], balances[0]), one(curves[1], balances[1])] } };
+      return { kind: "ok", candidate: { venue, address: addr.curve, reads: [one(curves[0], balances[0], ms[0].supply), one(curves[1], balances[1], ms[1].supply)] } };
     }
     const pa = at(A, PI.pool);
     const pb = at(B, PI.pool);
@@ -537,8 +553,10 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
     if (pool.index !== 0 || pool.creator !== addr.poolAuthority || pool.baseMint !== addr.mint || pool.quoteMint !== SOLANA_SOL_MINT) {
       return { kind: "bad", why: "the pool is not the mint's canonical pool" };
     }
-    for (const i of [PI.mint, PI.ammGlobalConfig, PI.ammFeeConfig]) if (!sameAcc(at(A, i), at(B, i))) return { kind: "bad", why: `account ${i} differs` };
-    const mint = solanaDecodeMint(at(A, PI.mint) ?? fail("no mint"));
+    for (const i of [PI.ammGlobalConfig, PI.ammFeeConfig]) if (!sameAcc(at(A, i), at(B, i))) return { kind: "bad", why: `account ${i} differs` };
+    const ms = mints(at(A, PI.mint), at(B, PI.mint));
+    if (typeof ms === "string") return { kind: "bad", why: ms };
+    const mint = ms[0];
     const t22 = mint.program !== SOLANA_TOKEN_PROGRAM;
     if (pool.baseVault !== (t22 ? addr.baseVaultToken2022 : addr.baseVaultToken) || pool.quoteVault !== addr.quoteVault) return { kind: "bad", why: "the pool's vaults are not its token accounts" };
     const baseI = t22 ? PI.baseT22 : PI.baseT;
@@ -547,12 +565,12 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
     if (!solanaReservesAgree(bases[0], bases[1]) || !solanaReservesAgree(quotes[0], quotes[1])) return { kind: "bad", why: "the pool's vaults are outside the band" };
     const cfg = solanaDecodePumpSwapConfig(at(A, PI.ammGlobalConfig) ?? fail("no GlobalConfig"));
     const feeConfig = solanaDecodeFeeConfig(at(A, PI.ammFeeConfig) ?? fail("no PumpSwap fee config"));
-    const one = (p: SolanaPumpSwapPool, base: bigint, quote: bigint): SolanaCandidateRead => ({
+    const one = (p: SolanaPumpSwapPool, base: bigint, quote: bigint, supply: bigint): SolanaCandidateRead => ({
       depth: quote + p.virtualQuoteReserves,
-      ...solanaPumpSwapOut(req.side, req.amount, p, cfg, feeConfig, mint.supply, base, quote),
-      outs: amounts.map((x) => solanaPumpSwapOut(req.side, x, p, cfg, feeConfig, mint.supply, base, quote).out),
+      ...solanaPumpSwapOut(req.side, req.amount, p, cfg, feeConfig, supply, base, quote),
+      outs: amounts.map((x) => solanaPumpSwapOut(req.side, x, p, cfg, feeConfig, supply, base, quote).out),
     });
-    return { kind: "ok", candidate: { venue, address: addr.pool, reads: [one(pool, bases[0], quotes[0]), one(poolB, bases[1], quotes[1])] } };
+    return { kind: "ok", candidate: { venue, address: addr.pool, reads: [one(pool, bases[0], quotes[0], ms[0].supply), one(poolB, bases[1], quotes[1], ms[1].supply)] } };
   } catch (e) {
     return { kind: "bad", why: String(e instanceof Error ? e.message : e).slice(0, 200) };
   }

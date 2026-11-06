@@ -6,7 +6,8 @@
 //   - view_access_key_list: keys [] (vault.md 2.8, "Read back after every deploy");
 //   - view_account and view_code: the code hash and the code's sha256 are the record's, the reproducible build's (the
 //     record's two builds agree and its code_hash is the base58 of its wasm_sha256);
-//   - the code's imports: none of 2.8's banned ones (a key, a deploy, a delete), promise imports inside the seven, and
+//   - the code's imports: none of 2.8's banned ones (a key, a deploy, a delete), promise imports inside the six (the seven for a vault deployed before card
+//     vault-review-fixes-1), and
 //     its exports inside 2.5.7's list (vault-skeleton.mjs wasmProblems); it names the network's token and no other;
 //   - config(): it answers, its asset the network's token and its version the network's, both pinned here.
 // Then one write: storage_prepay(P) with exactly the minimum attached (DEPOSIT_STORAGE_BYTES, which config() must

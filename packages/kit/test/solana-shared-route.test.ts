@@ -250,6 +250,15 @@ test("S6 pass: a fee config that charges nothing or a hook with no program passe
   }
 });
 
+test("S6 pass: the providers' reads of the mint differ in supply only (a burn between their slots, card solana-mint-supply-moves)", () => {
+  const burnt = changed(CLEAN, (d) => { new DataView(d.buffer).setBigUint64(36, new DataView(d.buffer).getBigUint64(36, true) - 559_661n, true); });
+  for (const c of T22_CASES) {
+    const v = check(c, viaAuthority(c), undefined, [CLEAN, burnt]);
+    assert.equal(s6(v).ok, true, `${c.name}: S6 ${s6(v).detail}`);
+    assert.equal(result(v, "S10").ok, true, `${c.name}: S10 ${result(v, "S10").detail}`);
+  }
+});
+
 // Each refusal of a Token-2022 side through Jupiter's authority's ATA, a buy's destination and a sell's source: the
 // mint reads in place of the recorded ones, and S6's words.
 const MINT_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?: boolean }[] = [
@@ -270,8 +279,9 @@ const MINT_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?:
   { what: "a zero fee config followed by a hook program", detail: /the mint runs a transfer hook \(TransferHook\)$/, mint: () => both(zeroFeeThenHook()), s10: true },
   { what: "a fee config of 107 bytes", detail: /the mint's transfer fee config is 107 bytes$/, mint: () => both(extLen(feeSlots([0n, 0], [0n, 0]), 1, 107)) },
   { what: "a transfer hook of 63 bytes", detail: /the mint's transfer hook is 63 bytes$/, mint: () => both(extLen(hookOf(0, 0), 14, 63)) },
-  { what: "the providers disagree: B reads a transfer-fee mint", detail: /the providers disagree on the mint$/, mint: () => [CLEAN, mintOf("transferFee")[0]] },
-  { what: "the providers disagree on the owner", detail: /the providers disagree on the mint$/, mint: () => [CLEAN, { owner: SOLANA_TOKEN_PROGRAM, data: CLEAN.data }] },
+  { what: "the providers disagree: B reads a transfer-fee mint", detail: /the providers disagree on the mint's length \(425 \/ 511 bytes\)$/, mint: () => [CLEAN, mintOf("transferFee")[0]] },
+  { what: "the providers disagree on the owner", detail: /the providers disagree on the mint's owner program \(TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb \/ TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA\)$/, mint: () => [CLEAN, { owner: SOLANA_TOKEN_PROGRAM, data: CLEAN.data }] },
+  { what: "the providers disagree on the freeze authority", detail: /the providers disagree on the mint's freeze authority$/, mint: () => [CLEAN, changed(CLEAN, (d) => { d[46] = 1; d.fill(9, 50, 82); })] },
   { what: "the mint not read on provider B", detail: /the mint is not read on both providers$/, mint: () => [CLEAN, null] },
   { what: "no mint account type", detail: /the mint of \d+ bytes has no mint account type$/, mint: () => both(changed(CLEAN, (d) => { d[165] = 2; })) },
   { what: "an extension that runs past the mint", detail: /the mint's extension \d+ runs past it$/, mint: () => both(changed(CLEAN, (d) => { d[168] = 0xff; d[169] = 0xff; })) },

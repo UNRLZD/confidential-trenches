@@ -5,7 +5,9 @@
 //!   transfer happened (Dev 4, in place of PP's `safeTransferFrom` in `Entrypoint.sol:123`).
 //! - Row 2: `msg` is at most 1,024 bytes and is exactly `{"precommitment":"<decimal>","depositor":"<account>"}`, both
 //!   fields required, no third field, no field twice; `precommitment` is one canonical decimal (2.5.2 row 1:
-//!   `InvalidNumber`) below p (`FieldOverflow`); `depositor` is a valid NEAR account id and not this vault. PP takes
+//!   `InvalidNumber`) below p (`FieldOverflow`) and not 0 (`InvalidPrecommitment`: no (nullifier, secret) hashes to 0,
+//!   so a note on 0 could never be spent, as `refund_precommitment` 0 is refused in withdraw and ragequit);
+//!   `depositor` is a valid NEAR account id and not this vault. PP takes
 //!   the value as a typed `uint256` (`Entrypoint.sol:117`); its `ZeroAddress` check (`Entrypoint.sol:348`) becomes the
 //!   account-id type.
 //!
@@ -81,6 +83,9 @@ pub fn deposit_message(msg: &str, vault: &AccountId) -> Result<DepositMessage, S
         .ok_or("InvalidNumber: the precommitment is not a canonical decimal")?;
     if field::ge(&n, &field::P) {
         return Err("FieldOverflow: the precommitment is not below p".into());
+    }
+    if n == [0; 4] {
+        return Err("InvalidPrecommitment: the precommitment is 0".into());
     }
     if m.depositor == *vault {
         return Err("DepositorIsTheVault".into());
@@ -167,7 +172,8 @@ impl Vault {
 impl Vault {
     /// NEP-141's receiver call, made by the token during `ft_transfer_call(vault, amount, msg)`. Refused (a panic, so
     /// the token gives the sender the whole amount back): any caller but `TOKEN` (`NotTheToken`); a message that fails
-    /// row 2 (`MessageTooLong`, `InvalidMessage`, `InvalidNumber`, `FieldOverflow`, `DepositorIsTheVault`); and rows
+    /// row 2 (`MessageTooLong`, `InvalidMessage`, `InvalidNumber`, `FieldOverflow`, `InvalidPrecommitment`,
+    /// `DepositorIsTheVault`); and rows
     /// 3-7 (`PrecommitmentAlreadyUsed`, `MinimumDepositAmount`, `InvalidDepositValue`, `NoPrepay`,
     /// `InsufficientStorageDeposit`) and the tree's own checks (src/tree.rs). Otherwise the deposit lands and the
     /// whole amount is used: returns `"0"`.
@@ -194,7 +200,7 @@ mod tests {
     const P_MINUS_1: &str = "21888242871839275222246405745257275088548364400416034343698204186575808495616";
     /// `vaultDepositMessage(p - 1n, "a".repeat(64))` at kit-v1.2, its bytes as Node 24 printed them.
     const KIT_MSG: &str = r#"{"precommitment":"21888242871839275222246405745257275088548364400416034343698204186575808495616","depositor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
-    /// `vaultDepositMessage(0n, "0123456789abcdef".repeat(4))`.
+    /// `vaultDepositMessage(0n, "0123456789abcdef".repeat(4))`: refused (R-01).
     const KIT_MSG_ZERO: &str = r#"{"precommitment":"0","depositor":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#;
 
     fn vault() -> AccountId {
@@ -235,9 +241,19 @@ mod tests {
     fn the_kits_messages_pass() {
         let m = deposit_message(KIT_MSG, &vault()).unwrap();
         assert_eq!(m, DepositMessage { precommitment: be(P_MINUS_1), depositor: HEX64.parse().unwrap() });
-        let m = deposit_message(KIT_MSG_ZERO, &vault()).unwrap();
-        assert_eq!(m.precommitment, [0u8; 32]);
-        assert_eq!(m.depositor.as_str(), "0123456789abcdef".repeat(4));
+    }
+
+    /// R-01 (review vault-review-opus-contract): no (nullifier, secret) hashes to 0, so a note on precommitment 0 could
+    /// never be spent and its tokens would be locked for good. Row 2 refuses it, so the token refunds the whole amount.
+    #[test]
+    fn precommitment_zero_is_refused() {
+        assert!(refusal(KIT_MSG_ZERO).starts_with("InvalidPrecommitment"), "{}", refusal(KIT_MSG_ZERO));
+        // and from the token, a panic (the token's resolve refunds all), before any prepay is looked up
+        let e = on_transfer(crate::constants::TOKEN, KIT_MSG_ZERO).unwrap_err();
+        assert!(e.contains("InvalidPrecommitment"), "{e}");
+        // 1 is still a precommitment
+        let m = deposit_message(&KIT_MSG_ZERO.replace(r#""0""#, r#""1""#), &vault()).unwrap();
+        assert_eq!(m.precommitment, be("1"));
     }
 
     #[test]

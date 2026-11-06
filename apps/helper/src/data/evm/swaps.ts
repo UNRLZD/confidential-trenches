@@ -1273,7 +1273,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** The same `eth_call`s at block `n`: each result two providers gave alike, else undefined. A call at a mined block
    *  never answers otherwise, so each agreed one is kept by (to, data, block) (`called`, at most CALLED_MAX, oldest out
    *  first) and every tape and tick asks it once (card helper-robinhood-capacity fold 5). */
-  async function callsAgreed(n: number, calls: { to: string; data: string }[]): Promise<(string | undefined)[]> {
+  /** `missed`, when given, is set once a call is not agreed: undefined is both a revert (an answer: the contract has no
+   *  such function) and a call no two providers answered alike (no answer), and a discovery must tell them apart (card
+   *  helper-restart-fresh: a read that fails is never kept as "no pool"). */
+  async function callsAgreed(n: number, calls: { to: string; data: string }[], missed?: { any: boolean }): Promise<(string | undefined)[]> {
     const key = (c: { to: string; data: string }) => `${c.to.toLowerCase()} ${c.data.toLowerCase()} ${n}`;
     const out: (string | undefined)[] = calls.map((c) => called.get(key(c)));
     const ask = [...new Set(calls.filter((_, i) => out[i] === undefined).map(key))].map((k) => calls.find((c) => key(c) === k)!);
@@ -1303,6 +1306,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     });
     return calls.map((c) => {
       const x = called.get(key(c));
+      if (x === undefined && missed !== undefined) missed.any = true;
       return x === REVERTED ? undefined : x;
     });
   }
@@ -1354,9 +1358,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  each candidate's getPool answer, from confirmCall). A factory with no getPool kind of ours names nothing. */
   const confirmed = (cands: ({ pool: Pool } | null)[], named: readonly (string | undefined)[]): (Pool | null)[] => cands.map((c, i) => (c !== null && wordAddr(named[i]) === c.pool.id ? c.pool : null));
   /** callsAgreed of each call given, undefined where none is. */
-  async function callsSome(n: number, calls: ({ to: string; data: string } | null)[]): Promise<(string | undefined)[]> {
+  async function callsSome(n: number, calls: ({ to: string; data: string } | null)[], missed?: { any: boolean }): Promise<(string | undefined)[]> {
     const live = calls.flatMap((c, i) => (c === null ? [] : [i]));
-    const got = await callsAgreed(n, live.map((i) => calls[i]!));
+    const got = await callsAgreed(n, live.map((i) => calls[i]!), missed);
     const out: (string | undefined)[] = calls.map(() => undefined);
     live.forEach((i, k) => (out[i] = got[k]));
     return out;
@@ -1419,12 +1423,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  check every id against its key's hash). Asked of the provider expected to answer first (ranked: its answer time,
    *  queue and pace), never by free budget alone (card robinhood-cold-open-fast: pocket, the biggest bucket, took 3.4 s
    *  and 3.7 s for three receipts while the others answered in 0.3 s). */
-  async function v4Seen(pmTxs: string[]): Promise<Map<string, { fee: number; around: Set<string> }>> {
+  async function v4Seen(pmTxs: string[], missed: { any: boolean }): Promise<Map<string, { fee: number; around: Set<string> }>> {
     const seen = new Map<string, { fee: number; around: Set<string> }>();
     const n = Math.min(pmTxs.length, V4_TXS);
+    // a provider that answers any receipt with an error or none is no answer: the next is asked, and with none read the
+    // discovery sets `missed` (card helper-restart-fresh: the receipts unread, a v4 token was kept as "no pool")
+    let read = false;
     for (const u of single(ranked(usable(rpcs), false, n), n)) {
       const r = await batchTo(u, pmTxs.slice(-V4_TXS).map((t) => ({ method: "eth_getTransactionReceipt", params: [t] })));
-      if (r === null) continue;
+      if (r === null || !r.every((x) => x.ok && Array.isArray(obj(x.result).logs))) continue;
+      read = true;
       for (const x of r) {
         const logs = (Array.isArray(obj(x.ok ? x.result : null).logs) ? (obj((x as { result: unknown }).result).logs as unknown[]) : []).map(parseLog).filter((l): l is Log => l !== null);
         for (const l of logs) {
@@ -1436,6 +1444,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       break;
     }
+    if (!read) missed.any = true;
     return seen;
   }
 
@@ -1471,9 +1480,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // transactions name, from their receipts, read with the factories
     // (the token's decimals and the Pons records with them: asked with the transfers' walk, they made its providers look
     // busy, and drpc, 100 blocks a read, took 45 reads of logs to the wide providers' 100; swaps-pace.test.ts fold 2)
+    // a candidate read that no two providers agreed (or no provider's receipts) leaves the search unfinished: with no
+    // pool found it is no answer, never kept as "no pool" (card helper-restart-fresh: after a restart the providers are
+    // busy with every listed token's search, and a token whose reads failed was served an empty chart and tape for
+    // NONE_MS)
+    const missed = { any: false };
     const [factories, seen, own] = await Promise.all([
-      callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory }))),
-      pmTxs.length > 0 ? v4Seen(pmTxs) : Promise.resolve(new Map<string, { fee: number; around: Set<string> }>()),
+      callsAgreed(head.n, top.map((a) => ({ to: a, data: SEL.factory })), missed),
+      pmTxs.length > 0 ? v4Seen(pmTxs, missed) : Promise.resolve(new Map<string, { fee: number; around: Set<string> }>()),
       callsAgreed(head.n, [{ to: token, data: SEL.decimals }, ...V.pons.map((f) => ({ to: f, data: `${SEL.launched}${pad32(token)}` }))]),
     ]);
     // a record not read is no answer: never kept as "no pool" (a token with none answers the empty record)
@@ -1484,7 +1498,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return f !== null && (V.v2.includes(f) || V.v3.includes(f)) ? [{ a, f: factories[i], kind: V.getPool[f] }] : [];
     });
     const per = ofVenue.map((v) => [SEL.token0, SEL.token1, ...(v.kind === undefined ? [] : [PARAM_SEL[v.kind]])].map((data) => ({ to: v.a, data })));
-    const pairs = await callsAgreed(head.n, per.flat());
+    const pairs = await callsAgreed(head.n, per.flat(), missed);
     let at = 0;
     const paired = ofVenue.map((v, i) => {
       const r = pairs.slice(at, (at += per[i]!.length));
@@ -1494,7 +1508,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // there is one, and a pool made without it (Doppler, Zora) has its key worked out from the swap's own fee and the
     // addresses in its transaction (v4Key). Either way the key must hash to the id. Both read in one round
     const list = [...seen.keys()].slice(0, CANDIDATES_MAX);
-    const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))]);
+    const answers = await callsSome(head.n, [...paired.map(confirmCall), ...list.map((id) => ({ to: V.positionManager, data: `${SEL.poolKeys}${id.slice(2, 2 + 50).padEnd(64, "0")}` }))], missed);
     for (const c of confirmed(paired, answers.slice(0, paired.length))) if (c !== null) cands.push(c);
     const keys = answers.slice(paired.length);
     for (const [i, id] of list.entries()) {
@@ -1508,7 +1522,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     // a Pons curve: the factory's own record of the token names its curve and its quote (zero: native ETH)
     cands.push(...curvePools(token, recs));
-    if (cands.length === 0) return null;
+    if (cands.length === 0) {
+      if (missed.any) throw new Error("pools not read");
+      return null;
+    }
     // the pool with most swaps in the window is the main pool (ties: the lower id); its logs are the book's first read
     const d = own[0];
     const [swaps, refOk] = await Promise.all([
@@ -1517,8 +1534,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     ]);
     const score = cands.map((c, i) => (swaps[i] == null ? -1 : swaps[i]!.filter((l) => decodeSwap(c, l, chain) !== null).length));
     if (score.every((x) => x < 0)) throw new Error("swaps not agreed");
+    // a candidate whose swaps went unread may be the main pool: no "no pool" from the rest
+    if (score.some((x) => x < 0)) missed.any = true;
     const best = cands.map((c, i) => ({ c, i, n: score[i]! })).sort((x, y) => y.n - x.n || (x.c.id < y.c.id ? -1 : 1))[0]!;
-    if (best.n <= 0 && from === head.n - V.cold + 1) return null;
+    // no swap in the window on the pools found: "no pool" only when no candidate went unread
+    if (best.n <= 0 && from === head.n - V.cold + 1) {
+      if (missed.any) throw new Error("pools not read");
+      return null;
+    }
     // a hooked v4 pool reads the token's other v4 pools' swaps with its own (Pool.siblings), so hookTakes counts a
     // sender's swaps of the token in all of them; their swaps already read join the first read's logs
     const siblings = best.c.venue === "v4" && best.c.hook !== undefined ? cands.filter((c) => c.venue === "v4" && c.id !== best.c.id).map((c) => c.id) : [];
@@ -1535,7 +1558,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       n += w.logs.filter((l) => decodeSwap(best.c, l, chain) !== null).length;
       from = w.from;
     }
-    if (n <= 0) return null;
+    if (n <= 0) {
+      if (missed.any) throw new Error("pools not read");
+      return null;
+    }
     const ref = best.c.quote.kind === "eth" ? await readRef(head.with, head.n, from) : true;
     const decimals = decimalsOf(d);
     if (decimals === null) throw new Error("decimals not agreed");

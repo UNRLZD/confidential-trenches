@@ -1,0 +1,91 @@
+{
+  "cluster": "mainnet",
+  "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "rpc": "api.mainnet-beta.solana.com",
+  "program_id": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "programdata": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+  "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+  "so_len": 79088,
+  "so_sha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162",
+  "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 42012187381, pool-solana job 127193696070, commit c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+  "ci_run": "42012187381",
+  "commit": "c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+  "funder": "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB",
+  "return_to": "9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ",
+  "table": "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+  "table_addresses": [
+    "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+    "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+    "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+    "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+    "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+    "11111111111111111111111111111111",
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    "So11111111111111111111111111111111111111112",
+    "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+    "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+    "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+    "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+    "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+    "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+    "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+    "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+    "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+    "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+    "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+    "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+    "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+    "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+  ],
+  "need": "449137520",
+  "need_parts": {
+    "program_account": "833120",
+    "programdata": "402645880",
+    "pool": "11719560",
+    "lookup_table": "4998720",
+    "funder_floor": "650240",
+    "fees": "990000",
+    "priority": "27300000"
+  },
+  "at": "2026-11-06T07:58:41.582Z",
+  "txs": [
+    {
+      "step": "funding (to the funder)",
+      "signature": "5wGExGuraxHFnnnobPR85vr3fBu7mW6BEgrpZWotwMZupKtdRSUj1jBExFbm7wiFeeHR8tqUUbZMAfnH8EM7uQPM"
+    },
+    {
+      "step": "deploy with the upgradeable loader",
+      "signature": "4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU"
+    },
+    {
+      "step": "the upgradeable loader: SetAuthority (to none)",
+      "signature": "5EtRdefacXzZDpWqqaj1TQPpehoBZocvgcq7oKxn3bFvjtRvKkar9mfYH1XKbLkjfcroxGVeCWGsntuD4ZuqpZvg"
+    },
+    {
+      "step": "init (tag 0)",
+      "signature": "2MDSvHYtWpu3ZFguZV4ySxWXHcZWjo6Jc2EYUoV8nWhtN8NQAYc8sdpo6nAuJkEdfphjDCXFivzAN9p5bVVHXtHG"
+    },
+    {
+      "step": "lookup table: create and extend with 25 addresses",
+      "signature": "23QX9RfcjLb271ZPWCStKA6mWoQA86o9HDSoKq727q8qRPpoKYnPiUotGJVQm4azQpBGqTayLB1UjhQpGREVzTEb"
+    },
+    {
+      "step": "lookup table: freeze (authority none)",
+      "signature": "2gwDsZqzGQnUsY5fDVujjcmgfdPzyaPKJRtVUSePTkJBkVHYNwQxau9c4vgvu8zwvL6SaXhwxFKFEacnBD1Qemp1"
+    },
+    {
+      "step": "sweep (the funder's rest back)",
+      "signature": "2XdxFtwv6hvgGreUGVKfwN5AdvCsvsHkErThG1pg86G732DqRgMLmHNi2mjMU6PUzanU4SZvsxsEhZvpQDu6S8kU"
+    },
+    {
+      "step": "sweep (kept keys, to the run's return address 9bUzp4G6dFrT1YZuuNAE6p4pZKvai726nAb6XpiMmbzJ)",
+      "signature": "3CUZ2CpNwk8DabVSSD5T62AFJ2JWy8rdU1E8A2ZWMZsYW6RLbRgNXzpQPGHsiWd6s2beD7NRt8hsJUp2KCDJHTRb"
+    }
+  ],
+  "funders": [
+    "7Y7omJGVsxTm797X6ytUuskfeQ2kjVs4UK4Hip2hKkvB"
+  ]
+}

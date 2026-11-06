@@ -30,6 +30,7 @@ export const LIVE_CHECKS = [
   "helper-token-page-cold",
   "solana-jupiter-build",
   "solana-legs-share-wait",
+  "solana-mint-supply-moves",
   "wallet-per-buy",
   "helper-v4-hook-liquidity",
   "helper-robinhood-capacity",
@@ -43,6 +44,7 @@ export const LIVE_CHECKS = [
   "wallet-restore-transfer-rpcs",
   "pool-buy-send-fast",
   "helper-page-jup-429",
+  "vault-review-fixes-1",
 ];
 
 // `{commit}` is the deployed commit

@@ -118,10 +118,13 @@ test("the prepay keys the deposit message's own decimal and attaches the bytes i
   assert.equal(vaultStoragePrepay(VAULT, P, VAULT_STORAGE_PREPAY.bytes_when_a_tree_may_grow).deposit_yocto, 904n * VAULT_STORAGE_BYTE_COST);
   // a top-up on a record that exists: the 148 bytes a tree's growth adds
   assert.equal(vaultStoragePrepay(VAULT, P, 148).deposit_yocto, 148n * VAULT_STORAGE_BYTE_COST);
-  assert.equal(vaultStoragePrepay(VAULT, 0n, 756).args.precommitment, "0");
-  assert.throws(() => vaultStoragePrepay(VAULT, VAULT_FIELD_P, 756), /precommitment: not below p/);
-  assert.throws(() => vaultStoragePrepay(VAULT, -1n, 756), /precommitment: not below p/);
-  assert.throws(() => vaultStoragePrepay(VAULT, 5 as unknown as bigint, 756), /precommitment: not below p/);
+  // R-01: the vault refuses precommitment 0 (no note on it could be spent), so the kit builds none
+  assert.throws(() => vaultStoragePrepay(VAULT, 0n, 756), /precommitment: not in 1\.\.p-1/);
+  assert.equal(vaultStoragePrepay(VAULT, 1n, 756).args.precommitment, "1");
+  assert.equal(vaultStoragePrepay(VAULT, VAULT_FIELD_P - 1n, 756).args.precommitment, (VAULT_FIELD_P - 1n).toString());
+  assert.throws(() => vaultStoragePrepay(VAULT, VAULT_FIELD_P, 756), /precommitment: not in 1\.\.p-1/);
+  assert.throws(() => vaultStoragePrepay(VAULT, -1n, 756), /precommitment: not in 1\.\.p-1/);
+  assert.throws(() => vaultStoragePrepay(VAULT, 5 as unknown as bigint, 756), /precommitment: not in 1\.\.p-1/);
   assert.throws(() => vaultStoragePrepay("not a vault", P, 756), /vault: not a NEAR account id/);
   for (const bad of [0, -1, 1.5, Number.NaN, 2 ** 53, true, "756", 756n, undefined]) {
     assert.throws(() => vaultStoragePrepay(VAULT, P, bad as unknown as number), /bytes: not a positive whole number/, String(bad));

@@ -22,7 +22,7 @@ import {
   type DepositQuoteContext,
   type DepositRead,
 } from "../src/rules/deposit.ts";
-import { VAULT_TOKEN_CODE_HASH } from "../../kit/src/vault/shapes.ts";
+import { VAULT_FIELD_P, VAULT_TOKEN_CODE_HASH } from "../../kit/src/vault/shapes.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 
 const vector = JSON.parse(readFileSync(new URL("../../wallet/test/vectors/deposit-delegate.json", import.meta.url), "utf8")) as {
@@ -153,6 +153,11 @@ for (const x of [U, R, V]) {
       checkDepositCall(good(x, { args: enc(argsOf(x, AMOUNT, JSON.stringify({ precommitment: P.toString(), depositor: x.id, memo: "x" }))) }), ctx(x)));
     refused("msg.precommitment", () =>
       checkDepositCall(good(x, { args: enc(argsOf(x, AMOUNT, JSON.stringify({ precommitment: (P + 1n).toString(), depositor: x.id }))) }), ctx(x)));
+    // R-01: a note on precommitment 0 (or at p) could never be spent, and the vault refuses it: the page signs no call on it,
+    // even with the call written exactly for it
+    for (const p0 of [0n, VAULT_FIELD_P])
+      refused("msg.precommitment", () =>
+        checkDepositCall(good(x, { args: enc(argsOf(x, AMOUNT, JSON.stringify({ precommitment: p0.toString(), depositor: x.id }))) }), ctx(x, { note: { precommitment: p0, amount: AMOUNT } })));
     refused("msg", () => checkDepositCall(good(x, { args: enc(JSON.stringify({ receiver_id: VAULT, amount: AMOUNT.toString(), msg: { precommitment: P.toString(), depositor: x.id } })) }), ctx(x)));
     // args: another vault, a fourth key, another spelling of the same call, a repeated key
     refused("args.receiver_id", () => checkDepositCall(good(x, { args: enc(argsOf(x, AMOUNT, undefined, "vault.attacker.testnet")) }), ctx(x)));
@@ -424,11 +429,16 @@ test("an amount above HELPER_BIND_DEPOSIT_CAP is refused; the cap itself signs",
   assert.equal(checkDepositCall(ugood({ args: enc8(argsOf(U, HELPER_BIND_DEPOSIT_CAP)) }), at(HELPER_BIND_DEPOSIT_CAP)).sender_id, U.id);
 });
 
-test("info: P is not checked below the field here (P >= p or negative: the vault refuses it and the token returns the USDC to U)", () => {
+test("R-01: P outside 1..p-1 (0, p, -1) is refused here, as the kit's deposit message and the vault refuse it", () => {
   const p = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-  for (const bad of [p, -1n]) {
+  for (const bad of [0n, p, -1n]) {
     const sp = JSON.stringify({ receiver_id: VAULT, amount: AMOUNT.toString(), msg: JSON.stringify({ precommitment: bad.toString(), depositor: U.id }) });
-    assert.equal(checkDepositCall(ugood({ args: enc8(sp) }), uctx({ note: { precommitment: bad, amount: AMOUNT } })).sender_id, U.id);
+    refused("msg.precommitment", () => checkDepositCall(ugood({ args: enc8(sp) }), uctx({ note: { precommitment: bad, amount: AMOUNT } })));
+  }
+  // the edges inside the field still sign
+  for (const ok of [1n, p - 1n]) {
+    const sp = JSON.stringify({ receiver_id: VAULT, amount: AMOUNT.toString(), msg: JSON.stringify({ precommitment: ok.toString(), depositor: U.id }) });
+    assert.equal(checkDepositCall(ugood({ args: enc8(sp) }), uctx({ note: { precommitment: ok, amount: AMOUNT } })).sender_id, U.id);
   }
 });
 

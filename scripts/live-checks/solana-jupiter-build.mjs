@@ -58,6 +58,7 @@ import {
   solanaDecodeLookupTable,
   solanaDecodeTransaction,
   solanaJsonRpc,
+  solanaMintDisagreement,
 } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-jupiter-build";
@@ -119,6 +120,17 @@ export function base58(bytes) {
 }
 const b64 = (s) => Uint8Array.from(Buffer.from(s, "base64"));
 const accRead = (a) => (a ? { owner: a.owner, data: b64(a.data) } : null);
+/** The mint line of a run: the two providers' reads of `mint` ({ owner, data: base64 } each) judged as S6 and S10 judge
+ * them (the kit's solanaMintDisagreement), and said as they are: equal, the same but for the supply a burn moves (card
+ * solana-mint-supply-moves), or the first field they differ in. [ok, text]. */
+export function mintLine(label, mint, ma, mb) {
+  if (!ma || !mb) return [false, `${label} ${mint} not read on both providers`];
+  if (ma.owner === mb.owner && ma.data === mb.data) return [true, `${label} ${mint} read equal on both providers, owner ${ma.owner}`];
+  const off = solanaMintDisagreement(accRead(ma), accRead(mb));
+  if (off) return [false, `${label} ${mint}: the providers disagree on the mint's ${off}`];
+  const supply = (a) => Buffer.from(a.data, "base64").readBigUInt64LE(36);
+  return [true, `${label} ${mint} read on both providers, the same but for its supply (${supply(ma)} / ${supply(mb)}) or withheld fees, owner ${ma.owner}`];
+}
 
 // A fetch that answers the kit's build calls from a shape's recorded calls, in order, and refuses a call the kit makes
 // that the record does not hold, so the replay runs the kit's own query, cap search and parse.
@@ -212,7 +224,7 @@ export async function judge(r) {
   for (const kind of none ? ["listed"] : ["listed", "noRoute"]) {
     const mint = r.mints?.[kind];
     const [ma, mb] = r.reads?.accounts?.[mint] ?? [null, null];
-    say(!!ma && !!mb && ma.owner === mb.owner && ma.data === mb.data, `${kind === "listed" ? "listed" : "no-route"} mint ${mint} read equal on both providers, owner ${ma?.owner}`);
+    say(...mintLine(`${kind === "listed" ? "listed" : "no-route"} mint`, mint, ma, mb));
   }
   // each call once: a candidate's asks, its market asks, and the shapes' (the chosen token's are its shapes')
   const asked = (s) => [...(s?.calls ?? []), ...(s?.market ?? [])].map((c) => c.sentAt);

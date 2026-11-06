@@ -1,7 +1,7 @@
 {
- "about": "card vault-kit-sync. recorded: the testnet vault's 2.5.6 views read on two RPCs (state_tree at final, then every view at the lower height), by the card's recorder, before any deposit landed. pageSet: three deposits and two spends (one settled, one paid) in the vault's serde form, field for field the order of contracts/vault/src/lib.rs DepositView and SpendView; test values only.",
+ "about": "card vault-kit-sync. recorded: the testnet vault's 2.5.6 views read on two RPCs (state_tree at final, then every view at the lower height), by fixtures/vault-sync-capture.ts (recorded again by card vault-review-fixes-kit at the R-03 page sizes), on a vault no deposit has reached. pageSet: three deposits and two spends (one settled, one paid) in the vault's serde form, field for field the order of contracts/vault/src/lib.rs DepositView and SpendView; test values only.",
  "recorded": {
-  "recorded_at": "2026-11-01T14:45:15.294Z",
+  "recorded_at": "2026-11-06T05:57:05.826Z",
   "vault": "vault.bf-vs-20261101t012200.testnet",
   "rpcs": [
    "https://test.rpc.fastnear.com",
@@ -9,58 +9,6 @@
   ],
   "answers": [
    {
-    "rpc": "https://test.rpc.fastnear.com",
-    "params": {
-     "request_type": "call_function",
-     "account_id": "vault.bf-vs-20261101t012200.testnet",
-     "method_name": "state_tree",
-     "args_base64": "e30=",
-     "finality": "final"
-    },
-    "answer": {
-     "jsonrpc": "2.0",
-     "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
-      "logs": [],
-      "result": [
-       123,
-       34,
-       115,
-       105,
-       122,
-       101,
-       34,
-       58,
-       48,
-       44,
-       34,
-       100,
-       101,
-       112,
-       116,
-       104,
-       34,
-       58,
-       48,
-       44,
-       34,
-       114,
-       111,
-       111,
-       116,
-       34,
-       58,
-       34,
-       48,
-       34,
-       125
-      ]
-     },
-     "id": "blindfill"
-    }
-   },
-   {
     "rpc": "https://near-testnet.drpc.org",
     "params": {
      "request_type": "call_function",
@@ -73,42 +21,10 @@
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "24rppnk5NsUDLsGz3zi4WYED5C5VscwDTbEA7wcekX15",
-      "block_height": 275762776,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       123,
-       34,
-       115,
-       105,
-       122,
-       101,
-       34,
-       58,
-       48,
-       44,
-       34,
-       100,
-       101,
-       112,
-       116,
-       104,
-       34,
-       58,
-       48,
-       44,
-       34,
-       114,
-       111,
-       111,
-       116,
-       34,
-       58,
-       34,
-       48,
-       34,
-       125
-      ]
+      "result": [123,34,115,105,122,101,34,58,48,44,34,100,101,112,116,104,34,58,48,44,34,114,111,111,116,34,58,34,48,34,125]
      }
     }
    },
@@ -119,191 +35,15 @@
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "state_tree",
      "args_base64": "e30=",
-     "block_id": 275762775
+     "finality": "final"
     },
     "answer": {
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       123,
-       34,
-       115,
-       105,
-       122,
-       101,
-       34,
-       58,
-       48,
-       44,
-       34,
-       100,
-       101,
-       112,
-       116,
-       104,
-       34,
-       58,
-       48,
-       44,
-       34,
-       114,
-       111,
-       111,
-       116,
-       34,
-       58,
-       34,
-       48,
-       34,
-       125
-      ]
-     },
-     "id": "blindfill"
-    }
-   },
-   {
-    "rpc": "https://test.rpc.fastnear.com",
-    "params": {
-     "request_type": "call_function",
-     "account_id": "vault.bf-vs-20261101t012200.testnet",
-     "method_name": "label_tree",
-     "args_base64": "e30=",
-     "block_id": 275762775
-    },
-    "answer": {
-     "jsonrpc": "2.0",
-     "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
-      "logs": [],
-      "result": [
-       123,
-       34,
-       115,
-       105,
-       122,
-       101,
-       34,
-       58,
-       48,
-       44,
-       34,
-       100,
-       101,
-       112,
-       116,
-       104,
-       34,
-       58,
-       48,
-       44,
-       34,
-       114,
-       111,
-       111,
-       116,
-       34,
-       58,
-       34,
-       48,
-       34,
-       125
-      ]
-     },
-     "id": "blindfill"
-    }
-   },
-   {
-    "rpc": "https://test.rpc.fastnear.com",
-    "params": {
-     "request_type": "call_function",
-     "account_id": "vault.bf-vs-20261101t012200.testnet",
-     "method_name": "deposits",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
-    },
-    "answer": {
-     "jsonrpc": "2.0",
-     "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
-      "logs": [],
-      "result": [
-       91,
-       93
-      ]
-     },
-     "id": "blindfill"
-    }
-   },
-   {
-    "rpc": "https://test.rpc.fastnear.com",
-    "params": {
-     "request_type": "call_function",
-     "account_id": "vault.bf-vs-20261101t012200.testnet",
-     "method_name": "spends",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
-    },
-    "answer": {
-     "jsonrpc": "2.0",
-     "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
-      "logs": [],
-      "result": [
-       91,
-       93
-      ]
-     },
-     "id": "blindfill"
-    }
-   },
-   {
-    "rpc": "https://test.rpc.fastnear.com",
-    "params": {
-     "request_type": "call_function",
-     "account_id": "vault.bf-vs-20261101t012200.testnet",
-     "method_name": "leaves",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
-    },
-    "answer": {
-     "jsonrpc": "2.0",
-     "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
-      "logs": [],
-      "result": [
-       91,
-       93
-      ]
-     },
-     "id": "blindfill"
-    }
-   },
-   {
-    "rpc": "https://test.rpc.fastnear.com",
-    "params": {
-     "request_type": "call_function",
-     "account_id": "vault.bf-vs-20261101t012200.testnet",
-     "method_name": "labels",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
-    },
-    "answer": {
-     "jsonrpc": "2.0",
-     "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
-      "logs": [],
-      "result": [
-       91,
-       93
-      ]
+      "result": [123,34,115,105,122,101,34,58,48,44,34,100,101,112,116,104,34,58,48,44,34,114,111,111,116,34,58,34,48,34,125]
      },
      "id": "blindfill"
     }
@@ -315,49 +55,37 @@
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "state_tree",
      "args_base64": "e30=",
-     "block_id": 275762775
+     "block_id": 276448562
     },
     "answer": {
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       123,
-       34,
-       115,
-       105,
-       122,
-       101,
-       34,
-       58,
-       48,
-       44,
-       34,
-       100,
-       101,
-       112,
-       116,
-       104,
-       34,
-       58,
-       48,
-       44,
-       34,
-       114,
-       111,
-       111,
-       116,
-       34,
-       58,
-       34,
-       48,
-       34,
-       125
-      ]
+      "result": [123,34,115,105,122,101,34,58,48,44,34,100,101,112,116,104,34,58,48,44,34,114,111,111,116,34,58,34,48,34,125]
      }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "state_tree",
+     "args_base64": "e30=",
+     "block_id": 276448562
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
+      "logs": [],
+      "result": [123,34,115,105,122,101,34,58,48,44,34,100,101,112,116,104,34,58,48,44,34,114,111,111,116,34,58,34,48,34,125]
+     },
+     "id": "blindfill"
     }
    },
    {
@@ -367,49 +95,37 @@
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "label_tree",
      "args_base64": "e30=",
-     "block_id": 275762775
+     "block_id": 276448562
     },
     "answer": {
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       123,
-       34,
-       115,
-       105,
-       122,
-       101,
-       34,
-       58,
-       48,
-       44,
-       34,
-       100,
-       101,
-       112,
-       116,
-       104,
-       34,
-       58,
-       48,
-       44,
-       34,
-       114,
-       111,
-       111,
-       116,
-       34,
-       58,
-       34,
-       48,
-       34,
-       125
-      ]
+      "result": [123,34,115,105,122,101,34,58,48,44,34,100,101,112,116,104,34,58,48,44,34,114,111,111,116,34,58,34,48,34,125]
      }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "label_tree",
+     "args_base64": "e30=",
+     "block_id": 276448562
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
+      "logs": [],
+      "result": [123,34,115,105,122,101,34,58,48,44,34,100,101,112,116,104,34,58,48,44,34,114,111,111,116,34,58,34,48,34,125]
+     },
+     "id": "blindfill"
     }
    },
    {
@@ -418,21 +134,38 @@
      "request_type": "call_function",
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "deposits",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6NDUwfQ==",
+     "block_id": 276448562
     },
     "answer": {
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       91,
-       93
-      ]
+      "result": [91,93]
      }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "deposits",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6NDUwfQ==",
+     "block_id": 276448562
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
+      "logs": [],
+      "result": [91,93]
+     },
+     "id": "blindfill"
     }
    },
    {
@@ -441,21 +174,38 @@
      "request_type": "call_function",
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "spends",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MjUwfQ==",
+     "block_id": 276448562
     },
     "answer": {
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       91,
-       93
-      ]
+      "result": [91,93]
      }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "spends",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MjUwfQ==",
+     "block_id": 276448562
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
+      "logs": [],
+      "result": [91,93]
+     },
+     "id": "blindfill"
     }
    },
    {
@@ -464,21 +214,38 @@
      "request_type": "call_function",
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "leaves",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6NzUwfQ==",
+     "block_id": 276448562
     },
     "answer": {
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       91,
-       93
-      ]
+      "result": [91,93]
      }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "leaves",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6NzUwfQ==",
+     "block_id": 276448562
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
+      "logs": [],
+      "result": [91,93]
+     },
+     "id": "blindfill"
     }
    },
    {
@@ -487,21 +254,38 @@
      "request_type": "call_function",
      "account_id": "vault.bf-vs-20261101t012200.testnet",
      "method_name": "labels",
-     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6MTAwMH0=",
-     "block_id": 275762775
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6NzUwfQ==",
+     "block_id": 276448562
     },
     "answer": {
      "id": "blindfill",
      "jsonrpc": "2.0",
      "result": {
-      "block_hash": "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj",
-      "block_height": 275762775,
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
       "logs": [],
-      "result": [
-       91,
-       93
-      ]
+      "result": [91,93]
      }
+    }
+   },
+   {
+    "rpc": "https://test.rpc.fastnear.com",
+    "params": {
+     "request_type": "call_function",
+     "account_id": "vault.bf-vs-20261101t012200.testnet",
+     "method_name": "labels",
+     "args_base64": "eyJmcm9tIjowLCJsaW1pdCI6NzUwfQ==",
+     "block_id": 276448562
+    },
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f",
+      "block_height": 276448562,
+      "logs": [],
+      "result": [91,93]
+     },
+     "id": "blindfill"
     }
    }
   ]

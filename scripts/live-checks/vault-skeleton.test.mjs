@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, wasmProblems, networkProblems, operatorProblems, DEPLOYMENT, RPCS, TESTNET_USDC, TEST_BUILD_MARK } from "./vault-skeleton.mjs";
+import { check, wasmProblems, networkProblems, operatorProblems, DEPLOYMENT, RPCS, TESTNET_USDC, TEST_BUILD_MARK, PROMISE_ALLOWED, DEPLOYED_BEFORE_ONE_RECEIPT } from "./vault-skeleton.mjs";
 // the reads' waits (a rate limit's, the pacing between asks) recorded as asked, never slept, so replays run at once
 const NOSLEEP = async () => {};
 
@@ -268,4 +268,46 @@ test("the live check FAILs a deployed wasm holding the out-of-gas test build's m
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD "));
   assert.ok(bad.length === 2 && bad.every((l) => /^BAD not the out-of-gas test build on .*: holds "blindfill-vault test build: on_payout runs out of gas"$/.test(l)), bad.join("\n"));
+});
+
+// Card vault-review-fixes-1 (review A-01, F-6): a payout is one receipt, so a build imports at most six promise host
+// functions and never promise_and. The real v1 vault (testnet-v1.json, deployed before the card) still joins its two
+// payout receipts with promise_and: its bytes, read from vault-testnet-t01.answers.json, are the planted build.
+const v1Code = () => {
+  const a = load("vault-testnet-t01.answers.json").find((x) => x.params.request_type === "view_code");
+  return Buffer.from(a.json.result.code_base64, "base64");
+};
+
+test("the promise imports allowed are six, with no promise_and", () => {
+  assert.deepEqual([...PROMISE_ALLOWED].sort(), ["promise_batch_action_function_call_weight", "promise_batch_action_transfer", "promise_batch_create", "promise_batch_then", "promise_result", "promise_results_count"]);
+});
+
+test("planted: the real v1 code through the strict path (as deploy.mjs calls it): promise_and is not allowed", () => {
+  const v1 = v1Code();
+  assert.deepEqual(wasmProblems(v1).promises, ["promise_and"]);
+  assert.deepEqual(wasmProblems(v1, { deployedAs: "vault.someone-else.testnet" }).promises, ["promise_and"], "a listed sha on another account");
+  assert.deepEqual(wasmProblems(v1, { deployedAs: "vault.bf-vt-20261102t071444.testnet" }).promises, [], "the listed sha on its own account");
+});
+
+test("planted: the live check FAILs a deployed wasm importing promise_and (the real v1 code, the record's sha set to it)", async () => {
+  const v1 = v1Code();
+  const sha = (await import("node:crypto")).createHash("sha256").update(v1).digest("hex");
+  const answers = load("vault-skeleton.answers.json").map((a) =>
+    a.params?.request_type === "view_code" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_base64: v1.toString("base64") } } } : a,
+  );
+  const r = await check({ sleep: NOSLEEP, deployment: { ...deployment, wasm_sha256: sha }, fetchFn: replay(answers) });
+  assert.equal(r.ok, false);
+  const bad = r.lines.filter((l) => l.startsWith("BAD ") && l.includes("promise imports"));
+  assert.ok(bad.length === 2 && bad.every((l) => /, not allowed: promise_and$/.test(l)), r.lines.join("\n"));
+});
+
+test("the vaults deployed before one-receipt payouts: a frozen list, each entry its record's full sha256 and account", () => {
+  assert.ok(Object.isFrozen(DEPLOYED_BEFORE_ONE_RECEIPT) && DEPLOYED_BEFORE_ONE_RECEIPT.every(Object.isFrozen));
+  assert.deepEqual(DEPLOYED_BEFORE_ONE_RECEIPT.map((d) => d.record), ["contracts/vault/deployments/testnet-v1.json", "contracts/vault/deployments/mainnet-test.json"]);
+  for (const d of DEPLOYED_BEFORE_ONE_RECEIPT) {
+    const rec = JSON.parse(readFileSync(path.join(HERE, "../..", d.record), "utf8"));
+    assert.equal(d.sha256, rec.wasm_sha256, d.record);
+    assert.equal(d.account, rec.account_id, d.record);
+    assert.match(d.sha256, /^[0-9a-f]{64}$/);
+  }
 });

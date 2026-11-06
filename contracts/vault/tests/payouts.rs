@@ -9,15 +9,18 @@
 //! vault's `ft_on_transfer` makes the same leaves and labels the fixture's proofs were made against, and the vault
 //! holds the 31,000,000 the notes are worth.
 //!
-//! 1. `one_part_fails_*`: same_call (2,000,000 with a 500,000 fee) with the recipient registered on the token and the
-//!    fee recipient not, then (on a fresh vault) the reverse. The unregistered part fails on the token and nothing of
-//!    it moves; the other part is delivered; `on_payout` leaves the spend `refund_pending` with `refund_value` equal
-//!    to the failed part exactly, `totals.returned` the same, and logs `payout {delivered, returned}`.
+//! 1. `one_part_fails_*` (review A-01, vault-review-opus-async): same_call (2,000,000 with a 500,000 fee) with the
+//!    recipient registered on the token and the fee recipient not, then (on a fresh vault) the reverse. The payout is
+//!    one receipt `[ft_transfer(recipient), ft_transfer(fee recipient)]`, so the unregistered transfer fails it whole:
+//!    nothing moves, to either account, even when the recipient's transfer ran first; `on_payout` leaves the spend
+//!    `refund_pending` with `refund_value` the whole 2,000,000, `totals.returned` the same, and logs
+//!    `payout {delivered 0, returned 2,000,000}`. The relayer keeps no fee for a payout that never arrived, as in
+//!    Privacy Pools' relay, whose two transfers revert together.
 //! 2. `vt_s04_*` (V:1138): relayed with a fee to an account the token has never seen, with its `register_deposit`:
 //!    one Tgas under the gas bound (Σ static 70 + 100 Tgas) is refused (`InsufficientGas`), and row 14 one yocto short
 //!    is refused (`InsufficientStorageDeposit`), each with no state byte, no storage use and no log changed and the
 //!    nullifier unspent; then exactly the bound and exactly row 14's requirement land: the account is registered and
-//!    paid 6,900,000, the relayer 100,000, the spend `paid` with REFUND_RESERVE_BYTES' worth in its reserve. Then a
+//!    paid 6,900,000, the relayer 100,000, in one receipt, the spend `paid` with REFUND_RESERVE_BYTES' worth in its reserve. Then a
 //!    self withdrawal (fee 0, the recipient signs) lands at its own bound (145 Tgas) and requirement. Then `on_payout`
 //!    called by anyone but the vault is refused.
 //! 3. `a_registration_below_the_minimum_returns_part_0_*`: short_registration (4,000,000, no fee) attaches a
@@ -141,10 +144,18 @@ async fn refused(h: &Harness, by: &Account, a: Value, yocto: u128, tgas: u64, wa
     Ok(())
 }
 
-/// A receipt's last function call's arguments, as text.
-fn args_text(r: &Receipt) -> String {
-    let b: near_sdk::json_types::Base64VecU8 = serde_json::from_value(json!(r.args.last().unwrap())).unwrap();
-    String::from_utf8(b.0).unwrap()
+/// The receivers of a receipt's `ft_transfer` calls, in order.
+fn transfer_receivers(r: &Receipt) -> Vec<String> {
+    r.methods
+        .iter()
+        .zip(&r.args)
+        .filter(|(m, _)| m.as_str() == "ft_transfer")
+        .map(|(_, a)| {
+            let b: near_sdk::json_types::Base64VecU8 = serde_json::from_value(json!(a)).unwrap();
+            let v: Value = serde_json::from_slice(&b.0).unwrap();
+            v["receiver_id"].as_str().unwrap_or_default().to_string()
+        })
+        .collect()
 }
 
 /// The event names a receipt logged, in order.
@@ -152,20 +163,20 @@ fn events(r: &Receipt) -> Vec<String> {
     r.logs.iter().map(|l| l.split(r#""event":""#).nth(1).and_then(|e| e.split('"').next()).unwrap_or("").to_string()).collect()
 }
 
-/// The withdrawal landed: its withdraw receipt logged exactly its three events, each payout part's receipt ran as
-/// `want` says (recipient part, fee part), and on_payout ran once and logged `payout {delivered, returned}`.
-fn landed(h: &Harness, o: &Outcome, name: &str, parts: &[(&str, bool)], delivered: u128, returned: u128) -> R<()> {
+/// The withdrawal landed: its withdraw receipt logged exactly its three events, its payout is ONE receipt on the token
+/// whose `ft_transfer` calls pay `to`, in order (the recipient, then the fee recipient when there is a fee), and that
+/// receipt ran as `ok` says, all or none (review A-01); on_payout ran once and logged `payout {delivered, returned}`.
+/// Returns the payout receipt.
+fn landed<'a>(h: &Harness, o: &'a Outcome, name: &str, to: &[&str], ok: bool, delivered: u128, returned: u128) -> R<&'a Receipt> {
     let w = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
     assert!(w.ok(), "{name}: {}", w.line());
     assert_eq!(events(w), ["leaf_inserted", "withdrawn", "withdrawal_relayed"], "{name}: {:?}", w.logs);
-    let transfers: Vec<&Receipt> = o.receipts.iter().filter(|r| r.executor == h.token.as_str() && r.methods.last().map(String::as_str) == Some("ft_transfer")).collect();
-    assert_eq!(transfers.len(), parts.len(), "{name}: payout parts {:#?}", transfers.iter().map(|r| r.line()).collect::<Vec<_>>());
-    for (who, ok) in parts {
-        let r = transfers.iter().find(|r| args_text(r).contains(&format!(r#""receiver_id":"{who}""#)));
-        let r = r.ok_or_else(|| format!("{name}: no part to {who}"))?;
-        assert_eq!(r.ok(), *ok, "{name}: the part to {who}: {}", r.line());
-        println!("{name}: part to {who}: {}", r.line());
-    }
+    let payouts: Vec<&Receipt> = o.receipts.iter().filter(|r| r.executor == h.token.as_str() && r.methods.iter().any(|m| m == "ft_transfer")).collect();
+    assert_eq!(payouts.len(), 1, "{name}: payout receipts {:#?}", payouts.iter().map(|r| r.line()).collect::<Vec<_>>());
+    let p = payouts[0];
+    assert_eq!(transfer_receivers(p), to, "{name}: {}", p.line());
+    assert_eq!(p.ok(), ok, "{name}: the payout receipt: {}", p.line());
+    println!("{name}: payout to {to:?}: {}", p.line());
     let cb = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
     assert!(cb.ok(), "{name}: {}", cb.line());
     assert_eq!(cb.logs.len(), 1, "{name}: {:?}", cb.logs);
@@ -176,7 +187,7 @@ fn landed(h: &Harness, o: &Outcome, name: &str, parts: &[(&str, bool)], delivere
         cb.logs[0]
     );
     println!("{name}: {}\n{name}: {}", w.line(), cb.line());
-    Ok(())
+    Ok(p)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -187,29 +198,33 @@ enum Failing {
 
 async fn one_part_fails(kind: TokenKind, failing: Failing) -> R<()> {
     let (h, relayer, alice) = deposited(kind).await?;
-    let (paid, unpaid) = match failing {
+    let (registered, unregistered) = match failing {
         Failing::Fee => (&alice, &relayer),
         Failing::Recipient => (&relayer, &alice),
     };
-    let _ = h.storage_deposit(&h.root, paid.id()).await?;
-    assert!(h.view(&h.token, "storage_balance_of", json!({"account_id": unpaid.id()})).await?.is_null());
-    let (to_recipient, fee) = (1_500_000u128, 500_000u128);
-    let (delivered, returned) = match failing {
-        Failing::Fee => (to_recipient, fee),
-        Failing::Recipient => (fee, to_recipient),
-    };
+    let _ = h.storage_deposit(&h.root, registered.id()).await?;
+    assert!(h.view(&h.token, "storage_balance_of", json!({"account_id": unregistered.id()})).await?.is_null());
+    let withdrawn = 2_000_000u128;
     let o = withdraw(&h, &relayer, args("same_call"), 1_000_000_000_000_000_000_000_000, 300).await?;
-    landed(&h, &o, "same_call", &[("alice.test.near", matches!(failing, Failing::Fee)), ("relayer.test.near", matches!(failing, Failing::Recipient))], delivered, returned)?;
+    let p = landed(&h, &o, "same_call", &["alice.test.near", "relayer.test.near"], false, 0, withdrawn)?;
+    // the failing action is the unregistered account's transfer: action 0 for the recipient, action 1 for the fee,
+    // after the recipient's transfer had run in the same receipt
+    let at = match failing {
+        Failing::Recipient => r#""index":0"#,
+        Failing::Fee => r#""index":1"#,
+    };
+    let f = p.failure().ok_or("the payout receipt landed")?;
+    assert!(f.contains(at), "{failing:?}: the payout did not fail at {at}: {f}");
     h.wait_final(&h.vault).await?;
-    // exactly the delivered part moved; the failed part is still the vault's
-    assert_eq!(h.token_balance(paid.id()).await?, delivered, "{failing:?}: the delivered part");
-    assert_eq!(h.token_balance(unpaid.id()).await?, 0, "{failing:?}: the failed part moved");
-    assert_eq!(h.token_balance(&h.vault).await?, 31_000_000 - delivered);
+    // nothing moved, to either account: the whole amount is still the vault's
+    assert_eq!(h.token_balance(alice.id()).await?, 0, "{failing:?}: the recipient was paid");
+    assert_eq!(h.token_balance(relayer.id()).await?, 0, "{failing:?}: the relayer kept a fee");
+    assert_eq!(h.token_balance(&h.vault).await?, 31_000_000);
     let r = spend_row(&h, "same_call").await?;
-    assert_eq!((r["status"].as_str(), r["refund_value"].clone()), (Some("refund_pending"), json!(returned.to_string())), "{r}");
+    assert_eq!((r["status"].as_str(), r["refund_value"].clone()), (Some("refund_pending"), json!(withdrawn.to_string())), "{r}");
     let t = h.view(&h.vault, "totals", json!({})).await?;
-    assert_eq!((t["spent"].clone(), t["returned"].clone()), (json!("2000000"), json!(returned.to_string())), "{t}");
-    println!("{kind:?}, {failing:?} failed: delivered {delivered}, refund_pending {returned}\n{}", h.gas_table());
+    assert_eq!((t["spent"].clone(), t["returned"].clone()), (json!("2000000"), json!(withdrawn.to_string())), "{t}");
+    println!("{kind:?}, {failing:?} failed: delivered 0 to {} and 0 to {}, refund_pending {withdrawn}\n{}", alice.id(), relayer.id(), h.gas_table());
     h.i1().await?;
     Ok(())
 }
@@ -250,8 +265,8 @@ async fn vt_s04(kind: TokenKind) -> R<()> {
     refused(&h, &relayer, a.clone(), need - 1, bound, "InsufficientStorageDeposit").await?;
     assert!(spend_rows(&h).await?.is_empty(), "a refused call spent the nullifier");
     let o = withdraw(&h, &relayer, a, need, bound).await?;
-    landed(&h, &o, "new_account", &[("newcomer.test.near", true), ("relayer.test.near", true)], 7_000_000, 0)?;
-    let part0 = o.receipts.iter().find(|r| r.methods == ["storage_deposit", "ft_transfer"]).ok_or("no [storage_deposit, ft_transfer] part")?;
+    landed(&h, &o, "new_account", &["newcomer.test.near", "relayer.test.near"], true, 7_000_000, 0)?;
+    let part0 = o.receipts.iter().find(|r| r.methods == ["storage_deposit", "ft_transfer", "ft_transfer"]).ok_or("no [storage_deposit, ft_transfer, ft_transfer] payout")?;
     assert!(part0.ok(), "{}", part0.line());
     h.wait_final(&h.vault).await?;
     assert!(!h.view(&h.token, "storage_balance_of", json!({"account_id": newcomer.id()})).await?.is_null(), "the registration did not happen");
@@ -267,7 +282,7 @@ async fn vt_s04(kind: TokenKind) -> R<()> {
     let need = row14_need(alice.id().as_str(), alice.id().as_str(), 0, 1);
     refused(&h, &alice, args("same_nullifier_a"), need, bound - 1, "InsufficientGas").await?;
     let o = withdraw(&h, &alice, args("same_nullifier_a"), need, bound).await?;
-    landed(&h, &o, "same_nullifier_a", &[("alice.test.near", true)], 1_000_000, 0)?;
+    landed(&h, &o, "same_nullifier_a", &["alice.test.near"], true, 1_000_000, 0)?;
     h.wait_final(&h.vault).await?;
     assert_eq!(h.token_balance(alice.id()).await?, 1_000_000);
     let r = spend_row(&h, "same_nullifier_a").await?;
@@ -313,7 +328,7 @@ async fn a_registration_below_the_minimum_returns_part_0(kind: TokenKind) -> R<(
     let need = row14_need(relayer.id().as_str(), fresh.id().as_str(), 1, 1);
     // no fee, a registration: 15 + 10 + 30 + 100 Tgas
     let o = withdraw(&h, &relayer, args("short_registration"), need, 155).await?;
-    landed(&h, &o, "short_registration", &[("fresh.test.near", false)], 0, 4_000_000)?;
+    landed(&h, &o, "short_registration", &["fresh.test.near"], false, 0, 4_000_000)?;
     let part0 = o.receipts.iter().find(|r| r.methods == ["storage_deposit", "ft_transfer"]).ok_or("no [storage_deposit, ft_transfer] part")?;
     let f = part0.failure().ok_or("part 0 landed")?;
     println!("part 0 failed at its storage_deposit: {f}");

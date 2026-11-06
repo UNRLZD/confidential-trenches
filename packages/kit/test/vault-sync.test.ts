@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as Kit from "../src/index.ts";
 
-const { VAULT_CONSTANTS, VaultSyncStopped, vaultSync, vaultSyncStart } = Kit;
+const { VAULT_CONSTANTS, VAULT_SYNC_PAGE, VaultSyncStopped, vaultSync, vaultSyncStart, vaultViewTooHeavy } = Kit;
 type Cursor = Kit.VaultSyncCursor;
 type Rpc = Kit.VaultSyncRpc;
 
@@ -94,11 +94,11 @@ test("the recorded testnet answers on two RPCs: both agree at the lower final he
     },
   }));
   const r = await vaultSync({ vault: rec.vault, rpcs: [rpcs[0], rpcs[1]], cursor: vaultSyncStart(rec.vault) });
-  assert.equal(r.height, 275762775);
-  assert.equal(r.blockHash, "Enn61H1z6MAAihjUJSp16sgNryD8qdQn55SQYaAQqGNj");
+  assert.equal(r.height, 276448562);
+  assert.equal(r.blockHash, "GgyDjbzq36GqSVGToHxnVAbx4qr1jDPLzQrsw9GBJn7f");
   assert.deepEqual(r.stateTree, { size: 0, depth: 0, root: 0n });
   assert.deepEqual([r.deposits, r.spends, r.leaves, r.labels], [[], [], [], []]);
-  assert.deepEqual(r.cursor, { vault: rec.vault, height: 275762775, deposits: 0, spends: 0, leaves: 0, labels: 0 });
+  assert.deepEqual(r.cursor, { vault: rec.vault, height: 276448562, deposits: 0, spends: 0, leaves: 0, labels: 0 });
 });
 
 // ---------- two agreeing RPCs ----------
@@ -195,26 +195,29 @@ function grown(nDeposits: number, nLeaves: number): Snap {
 }
 
 test("a cursor resume reads only the new rows, across a page boundary", async () => {
+  const D = VAULT_SYNC_PAGE.deposits;
+  const L = VAULT_SYNC_PAGE.leaves;
   const chain: Chain = new Map([
-    [H, grown(1_000, 1_000)],
-    [H + 10, grown(1_502, 1_502)],
+    [H, grown(2 * D, 2 * L)],
+    [H + 10, grown(2 * D + 52, 2 * L + 52)],
   ]);
   const firstRpcs = pair(chain);
   const first = await vaultSync({ vault: VAULT, rpcs: firstRpcs, cursor: vaultSyncStart(VAULT) });
   // A full page is never the end: the next page is read, and it is empty.
-  for (const f of firstRpcs) assert.deepEqual(f.calls.filter((c) => c.method === "deposits").map((c) => c.args.from), [0, 1_000]);
-  assert.equal(first.cursor.deposits, 1_000);
-  assert.equal(first.cursor.leaves, 1_000);
+  for (const f of firstRpcs) assert.deepEqual(f.calls.filter((c) => c.method === "deposits").map((c) => c.args.from), [0, D, 2 * D]);
+  for (const f of firstRpcs) assert.deepEqual(f.calls.filter((c) => c.method === "leaves").map((c) => c.args.from), [0, L, 2 * L]);
+  assert.equal(first.cursor.deposits, 2 * D);
+  assert.equal(first.cursor.leaves, 2 * L);
   const rpcs = pair(chain, {}, {}, [H + 10, H + 10]);
   const next = await vaultSync({ vault: VAULT, rpcs, cursor: first.cursor });
-  assert.deepEqual(next.deposits.map((d) => d.index), Array.from({ length: 502 }, (_, i) => 1_000 + i));
-  assert.equal(next.leaves.length, 502);
-  assert.equal(next.leaves[0], 2000n);
-  assert.deepEqual(next.cursor, { vault: VAULT, height: H + 10, deposits: 1_502, spends: 1, leaves: 1_502, labels: 4 });
+  assert.deepEqual(next.deposits.map((d) => d.index), Array.from({ length: 52 }, (_, i) => 2 * D + i));
+  assert.equal(next.leaves.length, 52);
+  assert.equal(next.leaves[0], 1000n + BigInt(2 * L));
+  assert.deepEqual(next.cursor, { vault: VAULT, height: H + 10, deposits: 2 * D + 52, spends: 1, leaves: 2 * L + 52, labels: 4 });
   for (const f of rpcs) {
     const froms = (m: string) => f.calls.filter((c) => c.method === m).map((c) => c.args.from);
-    assert.deepEqual(froms("deposits"), [1_000]); // 502 rows: one page, short, so the end
-    assert.deepEqual(froms("leaves"), [1_000]);
+    assert.deepEqual(froms("deposits"), [2 * D]); // 52 rows: one page, short, so the end
+    assert.deepEqual(froms("leaves"), [2 * L]);
     assert.deepEqual(froms("labels"), [4]);
     assert.deepEqual(froms("spends"), [1]); // from the first spend not settled, which can still change
   }
@@ -337,12 +340,14 @@ test("B: another fork's hash, no block_hash, no block_height, another height, a 
   for (const [what, answer] of cases) assert.notEqual(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { answer }), cursor: vaultSyncStart(VAULT) })), "returned", what);
 });
 
-test("C1: exactly PAGE_MAX rows then an empty page; one RPC's empty second page while the other has rows stops", async () => {
-  const chain: Chain = new Map([[H, grown(1_500, 1_500)]]);
-  const cut: Tamper = (m, a, v) => (m === "deposits" && a.from === 1_000 ? [] : v);
+test("C1: exactly whole pages then an empty page; one RPC's empty next page while the other has rows stops", async () => {
+  const D = VAULT_SYNC_PAGE.deposits;
+  const L = VAULT_SYNC_PAGE.leaves;
+  const chain: Chain = new Map([[H, grown(3 * D, 3 * L)]]);
+  const cut: Tamper = (m, a, v) => (m === "deposits" && a.from === 2 * D ? [] : v);
   assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(chain, { tamper: cut }), cursor: vaultSyncStart(VAULT) })), "disagree");
-  const ok = await vaultSync({ vault: VAULT, rpcs: pair(new Map([[H, grown(1_000, 1_000)]])), cursor: vaultSyncStart(VAULT) });
-  assert.deepEqual([ok.cursor.deposits, ok.cursor.leaves], [1_000, 1_000]);
+  const ok = await vaultSync({ vault: VAULT, rpcs: pair(new Map([[H, grown(2 * D, 2 * L)]])), cursor: vaultSyncStart(VAULT) });
+  assert.deepEqual([ok.cursor.deposits, ok.cursor.leaves], [2 * D, 2 * L]);
 });
 
 test("C2: a page longer than asked (1,001 rows) on one RPC disagrees; on both it is refused as a page", async () => {
@@ -378,7 +383,7 @@ test("E2: a deposits or spends cursor past the list's end stops (count); a curso
   const rpcs = pair(chain);
   const r = await vaultSync({ vault: VAULT, rpcs, cursor: { ...vaultSyncStart(VAULT), deposits: 3 }, lists: ["deposits"] });
   assert.deepEqual([r.deposits.length, r.cursor.deposits], [0, 3]);
-  for (const f of rpcs) assert.deepEqual(f.calls.filter((c) => c.method === "deposits").map((c) => c.args), [{ from: 3, limit: 1_000 }, { from: 2, limit: 1 }]);
+  for (const f of rpcs) assert.deepEqual(f.calls.filter((c) => c.method === "deposits").map((c) => c.args), [{ from: 3, limit: VAULT_SYNC_PAGE.deposits }, { from: 2, limit: 1 }]);
   const r2 = await vaultSync({ vault: VAULT, rpcs: pair(chain, {}, {}, [H + 10, H + 10]), cursor: r.cursor, lists: ["deposits"] });
   assert.deepEqual(r2.deposits.map((d) => d.index), [3, 4]);
 });
@@ -488,4 +493,118 @@ test("the mutants the review's set left alive (M2, M21, M22, M32): each now has 
   const offBy: Tamper = (m, a, v) => (m === "deposits" && a.from === 2 && a.limit === 1 ? [{ ...SET.deposits[2], index: 7 }] : v);
   const c = { ...vaultSyncStart(VAULT), deposits: 3 };
   assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(one(), { tamper: offBy }, { tamper: offBy }), cursor: c, lists: ["deposits"] })), "row");
+});
+
+// ---------- R-03: pages any public RPC serves ----------
+// The answers below are the RPCs' own, read 2026-11-06 05:47-05:49Z (src/vault/sync.ts, vaultViewTooHeavy): nearcore's
+// gas cap at HTTP 200 on all six listed RPCs, and dRPC's free plan's time cap at HTTP 408.
+const GAS_CAP = (h: number) => ({ jsonrpc: "2.0", id: "blindfill", result: { block_hash: hashOf(h), block_height: h, error: "wasm execution failed with error: HostError(GasLimitExceeded)", logs: [] } });
+const DRPC_TIMEOUT = { id: "blindfill", jsonrpc: "2.0", error: { message: "Request timeout on the free plan, please upgrade to paid plan", code: 30 } };
+const LISTS = ["deposits", "spends", "leaves", "labels"] as const;
+
+/** Every list longer than its first page: 1,000 deposits, 600 spends (all settled), 1,600 leaves, 1,000 labels. */
+function big(): Snap {
+  const g = grown(1_000, 1_600);
+  const spends = Array.from({ length: 600 }, (_, i) => ({ ...SET.spends[0], index: i }));
+  const labels = Array.from({ length: 1_000 }, (_, i) => String(5000n + BigInt(i)));
+  return { ...g, spends, labels, label_tree: { ...SET.label_tree, size: labels.length } };
+}
+/** An RPC that refuses any list page over `n` rows with `refusal`. */
+const over = (n: number, refusal: (h: number) => unknown): FakeOpts => ({
+  answer: (p, honest) => {
+    const a = JSON.parse(atob(p.args_base64 as string));
+    return (LISTS as readonly string[]).includes(p.method_name as string) && a.limit > n ? refusal(honest.result.block_height as number) : honest;
+  },
+});
+const limits = (f: Fake, m: string) => f.calls.filter((c) => c.method === m).map((c) => c.args.limit as number);
+
+test("R-03: an RPC refusing pages over 100 rows with nearcore's gas answer: every list reads whole, the same as two that refuse none, each halving counted", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  const whole = await vaultSync({ vault: VAULT, rpcs: pair(chain), cursor: vaultSyncStart(VAULT) });
+  const rpcs = pair(chain, over(100, GAS_CAP));
+  const r = await vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) });
+  assert.deepEqual(r, whole);
+  assert.deepEqual([r.deposits.length, r.spends.length, r.leaves.length, r.labels.length], [1_000, 600, 1_600, 1_000]);
+  // Each list starts at its own page, halves until the page passes, and keeps that page: both RPCs were asked the same.
+  assert.deepEqual(limits(rpcs[0], "spends"), [250, 125, ...Array(10).fill(62)]); // 600 rows: 9 full pages of 62, then 42
+  assert.deepEqual(limits(rpcs[0], "deposits").slice(0, 4), [450, 225, 112, 56]);
+  assert.deepEqual(limits(rpcs[0], "leaves").slice(0, 4), [750, 375, 187, 93]);
+  assert.deepEqual(limits(rpcs[0], "labels").slice(0, 4), [750, 375, 187, 93]);
+  for (const m of LISTS) assert.deepEqual(limits(rpcs[0], m), limits(rpcs[1], m), m);
+  const halvings = LISTS.map((m) => limits(rpcs[0], m).filter((l) => l > 100).length);
+  assert.deepEqual(halvings, [3, 2, 3, 3]);
+});
+
+test("R-03: dRPC's free-plan timeout (HTTP 408, code 30) is asked again after a wait, the same page, never halved", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  const whole = await vaultSync({ vault: VAULT, rpcs: pair(chain), cursor: vaultSyncStart(VAULT) });
+  // busy on the first two asks of the first spends page, then answering
+  let busy = 0;
+  const flaky: FakeOpts = { answer: (p, honest) => (p.method_name === "spends" && busy++ < 2 ? DRPC_TIMEOUT : honest) };
+  const rpcs = pair(chain, {}, flaky);
+  const t0 = Date.now();
+  assert.deepEqual(await vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) }), whole);
+  assert.ok(Date.now() - t0 >= Kit.VAULT_SYNC_BUSY_WAITS_MS[0]! + Kit.VAULT_SYNC_BUSY_WAITS_MS[1]!, "it waited before each new ask");
+  assert.deepEqual(limits(rpcs[0], "spends"), [250, 250, 250]); // the answering side is asked with the busy one, each time
+  assert.deepEqual([...new Set(limits(rpcs[1], "spends"))], [250]);
+  // busy every time: asked 1 + 3 times, then the sync stops naming the RPC, the page never halved
+  const always = pair(chain, {}, { answer: (p, honest) => (p.method_name === "spends" ? DRPC_TIMEOUT : honest) });
+  await assert.rejects(vaultSync({ vault: VAULT, rpcs: always, cursor: vaultSyncStart(VAULT), lists: ["spends"] }), (e: unknown) => {
+    assert.ok(e instanceof VaultSyncStopped && e.code === "rpc" && /rpc-b: spends: busy \(a free-plan timeout\) 4 times/.test(e.message), String(e));
+    return true;
+  });
+  assert.deepEqual(limits(always[1], "spends"), [250, 250, 250, 250]);
+});
+
+test("R-03: an error that is not the gas cap or dRPC's timeout stops at the first page, never halves", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  const others: [string, (h: number) => unknown][] = [
+    ["another wasm error", (h) => ({ ...GAS_CAP(h), result: { ...GAS_CAP(h).result, error: "wasm execution failed with error: MethodResolveError(MethodNotFound)" } })],
+    ["a handler error", () => rpcError("UNKNOWN_BLOCK")],
+    ["dRPC's rate limit", () => ({ id: "blindfill", jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } })],
+    ["code 30, other words", () => ({ ...DRPC_TIMEOUT, error: { ...DRPC_TIMEOUT.error, message: "Internal error" } })],
+  ];
+  for (const [what, refusal] of others) {
+    const rpcs = pair(chain, over(0, refusal));
+    assert.equal(await code(vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT), lists: ["spends"] })), "rpc", what);
+    assert.deepEqual(limits(rpcs[0], "spends"), [250], what);
+  }
+});
+
+test("R-03: a page of an eighth of the first refused stops (rpc), naming the RPC, after three halvings", async () => {
+  const rpcs = pair(new Map([[H, big()]]), over(0, GAS_CAP));
+  await assert.rejects(vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT), lists: ["spends"] }), (e: unknown) => {
+    assert.ok(e instanceof VaultSyncStopped && e.code === "rpc" && /rpc-a: spends: refused as too heavy, even at 31 rows/.test(e.message), String(e));
+    return true;
+  });
+  assert.deepEqual(limits(rpcs[0], "spends"), [250, 125, 62, 31]);
+  for (const list of LISTS) {
+    const r = pair(new Map([[H, big()]]), over(0, GAS_CAP));
+    assert.equal(await code(vaultSync({ vault: VAULT, rpcs: r, cursor: vaultSyncStart(VAULT), lists: [list] })), "rpc", list);
+    const p = VAULT_SYNC_PAGE[list];
+    assert.deepEqual(limits(r[0], list), [p, Math.floor(p / 2), Math.floor(p / 4), Math.floor(p / 8)], list);
+  }
+  // the tree heads are not paged: a gas answer to one stops the sync
+  const heads = pair(one(), { answer: (p, honest) => (p.method_name === "label_tree" ? GAS_CAP(H) : honest) });
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: heads, cursor: vaultSyncStart(VAULT) })), "rpc");
+});
+
+test("R-03: a page longer than asked after a halving, on both RPCs, is refused as a page (mutant: page.length > VAULT_SYNC_PAGE[list])", async () => {
+  // both refuse over 100 rows; at 62 rows both answer 63, under the first page's 250, over what was asked
+  const longer: Tamper = (m, a, v) => (m === "spends" && a.limit === 62 ? big().spends.slice(a.from!, a.from! + 63) : v);
+  const opts = { ...over(100, GAS_CAP), tamper: longer };
+  assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(new Map([[H, big()]]), opts, opts), cursor: vaultSyncStart(VAULT), lists: ["spends"] })), "row");
+});
+
+test("R-03: vaultViewTooHeavy is true for nearcore's gas answer only, vaultViewBusy for dRPC's timeout only", () => {
+  assert.equal(vaultViewTooHeavy(GAS_CAP(H)), true);
+  assert.equal(vaultViewTooHeavy(DRPC_TIMEOUT), false);
+  assert.equal(Kit.vaultViewBusy(DRPC_TIMEOUT), true);
+  assert.equal(Kit.vaultViewBusy(GAS_CAP(H)), false);
+  for (const x of [null, "x", {}, { result: { error: "wasm execution failed" } }, rpcError("UNKNOWN_BLOCK"), { error: { code: 30 } }, { error: { code: "30", message: DRPC_TIMEOUT.error.message } }]) {
+    assert.equal(vaultViewTooHeavy(x), false, JSON.stringify(x));
+    assert.equal(Kit.vaultViewBusy(x), false, JSON.stringify(x));
+  }
+  // the page sizes stay at or under the vault's own cap
+  for (const m of LISTS) assert.ok(VAULT_SYNC_PAGE[m] >= 1 && VAULT_SYNC_PAGE[m] <= VAULT_CONSTANTS.PAGE_MAX, m);
 });
