@@ -187,7 +187,12 @@ function evmLimited(chain: RpcChain, answer: unknown): number {
  *  provider may serve the request, and this one still serves the others. Never a range cap (the device pages on those)
  *  or a revert (the call's own answer). */
 const SHAPE_CODES: ReadonlySet<unknown> = new Set([-32701, -32601]);
-const SHAPE_WORDS = /specify an address|missing required field 'address'/i;
+/** And one that does not keep the blocks the request asks (card evm-rpc-spare-list, live run 42206377652: a restore's
+ *  Robinhood read stopped on rpc-robinhood.blockmachine.io's -32002 "keyless requests are served for the most recent
+ *  5000 blocks only", 2026-11-06 10:56Z): blockvectra's -32011 "block reference is outside the public history window"
+ *  (2026-11-04 14:4xZ), PublicNode's "Archive requests require a personal token" and "historical state ... is not
+ *  available" (2026-11-05 01:15Z). A provider that keeps them may answer it; this one still serves the newest blocks. */
+const SHAPE_WORDS = /specify an address|missing required field 'address'|most recent \d+ blocks|outside the public history window|archive requests require|historical state .*not available/i;
 function evmShapeRefused(chain: RpcChain, answer: unknown): boolean {
   if (!EVM_CHAINS.has(chain)) return false;
   return (Array.isArray(answer) ? answer : [answer]).some((a) => {
