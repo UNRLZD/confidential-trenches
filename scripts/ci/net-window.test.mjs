@@ -104,6 +104,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-small-note-buys.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/solana-legs-share-wait.mjs",
+  "scripts/live-checks/token-page-fills-after.mjs",
   "scripts/live-checks/trade-box-bal-cash.mjs",
   "scripts/live-checks/trade-box-pool.mjs",
   "scripts/live-checks/vault-setup-files.mjs",

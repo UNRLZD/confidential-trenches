@@ -1,13 +1,15 @@
 // node --test scripts/live-checks/token-page-fills-after.test.mjs: the live check's verdict replays recorded runs
 // (token-page-fills-after.answers.json), each read on 6 Nov by token-page-fills-after.mjs collect() in headless Chrome,
-// APP_HOST framed by the stand-in shell signed out, the token reads answered by the check (the chain-named row first,
-// then the recorded answer), at 390 and 1440:
-//   good: this card's build at APP_HOST's name (--harness --build): the symbol with the price loading, a second read
-//         5 s later, the price drawn, no third read: PASS;
-//   bad:  the deployed APP_HOST on 6 Nov, before this card: the chain row's null price drawn as the dash, no second
-//         read: FAIL.
+// APP_HOST framed by the stand-in shell signed out, the token reads answered by the check, at 390 and 1440, and the
+// helper's page of its top Trending token read live:
+//   good: this card's build at APP_HOST's name (--harness --build) and this card's helper (--helper, run beside it):
+//         fill: the symbol with the price loading, a second read 5 s later, the price drawn, no third read; unlisted:
+//         the dash, no skeleton, read again at 5 s; the helper's Jupiter page filling false: PASS;
+//   bad:  the deployed APP_HOST and helper on 6 Nov, before this card: fill: the dash, never read again; unlisted: never
+//         read again; the helper's page has no filling: FAIL.
 // Planted from the good run: no data-filling, the price drawn as a dash at first, a second read too soon or too late, a
-// third read, the price still loading after, a page error, a missing shot, a missing run.
+// third read, the price still loading after, a skeleton on the unlisted page, an unlisted page not read again, the
+// helper's filling true or absent, a page error, a missing shot, a missing run.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -40,6 +42,8 @@ test("recorded bad answer: the deployed app before this card draws the dash and 
   assert.equal(r.ok, false, r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /data-filling absent, price "—"/.test(l)), r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /second token read never made/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => /^BAD unlisted .*second token read never made/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => /^BAD helper: .*filling "absent"/.test(l)), r.lines.join("\n"));
 });
 
 test("planted: no filling mark, a dash at first, a read too soon or late, a third read, still loading, an error, a missing shot or run fail", () => {
@@ -53,5 +57,11 @@ test("planted: no filling mark, a dash at first, a read too soon or late, a thir
   fails(planted((r) => r.runs[0].errors.push("TypeError: x")), /page errors/);
   fails(planted((r) => delete r.runs[1].shots.filled), /screenshot missing/);
   fails(planted((r) => r.runs.pop()), /run\(s\) of 2/);
+  fails(planted((r) => Object.assign(r.unlisted[0].first, { filling: "true", priceLoading: true, price: null })), /unlisted phone: data-filling true, price loading/);
+  fails(planted((r) => (r.unlisted[1].readsAt = [0])), /unlisted desktop: second token read never made/);
+  fails(planted((r) => r.unlisted.pop()), /unlisted: 1 run\(s\) of 2/);
+  fails(planted((r) => (r.helper.reads.at(-1).filling = true)), /helper: .*filling true/);
+  fails(planted((r) => (r.helper.reads.at(-1).src = "chain")), /helper: .*src "chain"/);
+  fails(planted((r) => (r.helper = {})), /helper: .*not read/);
   fails({ runs: [] }, /run\(s\) of 2/);
 });
