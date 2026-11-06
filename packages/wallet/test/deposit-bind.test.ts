@@ -1673,9 +1673,10 @@ test("bind-on-sync 1: vault reads pinned below max_block_height + 5 never read P
   const ac = new AbortController();
   let ticks = 0;
   t.chain.tick = () => (t.chain.blocks(10n), ++ticks === 40 && ac.abort(new Error("caller stopped")));
-  // a second call on P fails the test at once (review L4): its send never reaches the relayer
+  // a second call on P fails the test at once (review L4): the bind is stopped at its send, which never reaches the
+  // relayer (a send that throws is only "no answer" to the bind, so the stop is what ends it)
   const fetchFn = (async (url: string, init: RequestInit) => {
-    if (t.sent.length > 0) throw new Error("a second call on P");
+    if (t.sent.length > 0) ac.abort(new Error("a second call on P"));
     return t.deps.fetchFn(url, init);
   }) as typeof fetch;
   const rpcs = t.deps.rpcs.map((r, k) => ({
@@ -1881,6 +1882,8 @@ test("review L2: prepay_open (R2) with U's previous note marked TAKEN but its P 
   const chain = new Chain(depositAccount(SEED, 1n, i).account);
   await store.move(first.id, "PLANNED", "TAKEN");
   chain.addRow(first.precommitment); // another device on the seed landed the TAKEN note's P
+  // this device's cursor is already past that row (another bind read the pages): the previous P is still searched from 0
+  await store.saveSyncCursor({ ...vaultSyncStart(VAULT), deposits: 1, height: Number(chain.low()) });
   const ref: NoteRef = { kind: "second", id: { id: "U", s: 1n, i }, n: 0 };
   const second = await store.add({ ref, scope: 1n, precommitment: pc(ref), state: "PLANNED" });
   const r = relayer(chain, ["prepay_open", "tx"], lands(chain));
