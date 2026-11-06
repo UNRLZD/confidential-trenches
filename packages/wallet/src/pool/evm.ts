@@ -107,9 +107,9 @@ export const EVM_POOL_TAG = "finalized";
 export const EVM_NEWEST_TAG = "latest";
 /** The first eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
-/** A W's Transfer read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the
- * page may double past it once more (card restore-check-bounded; evmTokensSentTo, evmTokensSentToOne: the pool sync's
- * pages keep the ceiling for the whole read until its live check's record is taken again). The pager reads no cap's words, so a refusal under a provider's
+/** A log read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the page
+ * may double past it once more: a W's Transfer read (card restore-check-bounded; evmTokensSentTo, evmTokensSentToOne)
+ * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words, so a refusal under a provider's
  * cap (no answer in time, a spare's own error behind the helper's route) sets a ceiling as a cap does; held for the
  * whole read, each one halved the rest of it: the helper's Base route, capped at 1,000 blocks, ended CI's W reads of
  * 50,000 blocks at 312, 78 and 624-block pages against the Mac's 625 (live runs 42125976095, 42143211092 and
@@ -651,8 +651,8 @@ export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to:
  * read's failure (unread, never an empty list). Any other refusal of a page over one block (a provider's cap, in
  * whatever words, or no answer in time) halves its page; after a
  * full page reads, the page doubles again, up to EVM_LOG_PAGE_BLOCKS and below the smallest size refused in this read
- * until `ceilingPages` full pages in a row have read under it (the Transfer reads' EVM_LOG_CEILING_PAGES; none: to the
- * read's end), so a cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
+ * until `ceilingPages` full pages in a row have read under it (the Transfer reads' and the pool sync's
+ * EVM_LOG_CEILING_PAGES; none: to the read's end), so a cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG) is a lag. A page of
  * one block refused is the read's failure, with the provider's own error.
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, page: bigint[], signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, ceilingPages = Infinity): Promise<E[]> {
@@ -966,7 +966,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
       throw new Error(why);
     };
-    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, page, held.length, signal, sleep) : [];
+    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, page, held.length, signal, sleep, EVM_LOG_CEILING_PAGES) : [];
     const events = [...held, ...fresh];
     const stateTree = new VaultTree(events.map((e) => e.state));
     const labels = events.flatMap((e) => (e.label === null ? [] : [e.label]));
