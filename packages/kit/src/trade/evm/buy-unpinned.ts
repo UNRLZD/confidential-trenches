@@ -293,11 +293,12 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),
       pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
       adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1" }),
-      // the delegate that sells through the v4 PoolManager and reverts unless W's balance of the token fell by exactly
-      // the signed amount (card evm-selldelegate-exact-debit: scripts/live-checks/evm-selldelegate-exact-debit.
-      // base-sepolia.json, deploy tx 0xa889469f4b7386072b3343b295002c09a4aff89638d29b304ac940c0c6168121; its code the
-      // build's, read by that card's live check on sepolia.base.org and base-sepolia-rpc.publicnode.com, 4 Nov)
-      sellDelegate: "0xe39f1b9934810792c090d8ab8f555b9955527260",
+      // the delegate at the pool-review-3 build: the 11-field Sell (0x0c2cb9ca) this kit signs, its fee paid to the
+      // signed feeRecipient (card evm-testnet-delegate-review3: scripts/live-checks/evm-testnet-delegate-review3.
+      // base-sepolia.json, deploy tx 0x326bc8a4f4200b0cdf230a8398ed7127c9d6137ed0bc1fd6deef391e3d178b71; its code the
+      // build's on sepolia.base.org and base-sepolia-rpc.publicnode.com, 6 Nov 17:05Z; the exact-debit delegate before
+      // it dispatched the 10-field sell)
+      sellDelegate: "0x7a034461193cc6b1a7d5d0f5fe4a36b34e7ebc12",
       // the helper's sell sender (POOL_EVM_SELL_KEY_BASE_SEPOLIA, made on the helper box by
       // scripts/deploy/evm-sender-key.mjs, which printed only this address; 0.001 ETH read on sepolia.base.org and
       // base-sepolia-rpc.publicnode.com, 4 Nov 17:33Z); the helper does not start with any other sell key
@@ -338,12 +339,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       routers: Object.freeze([]),
       pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
       adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" }),
-      // the delegate that sells through the v4 PoolManager alone here and reverts unless W's balance of the token fell
-      // by exactly the signed amount (card evm-selldelegate-exact-debit: scripts/live-checks/
-      // evm-selldelegate-exact-debit.robinhood-testnet.json, deploy tx
-      // 0x62c517784feda75d5597229118cb9c4eb2a370fc34114694c1d009ce84158459; its code the build's, read by that card's
-      // live check on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov)
-      sellDelegate: "0x9909a660c8a55829335dd4d894c8375bfcfcd65b",
+      // the delegate at the pool-review-3 build, selling through the v4 PoolManager alone here (card
+      // evm-testnet-delegate-review3: scripts/live-checks/evm-testnet-delegate-review3.robinhood-testnet.json, deploy tx
+      // 0xe15dad948f744299e9d76c42a82534ce8b6a04d844bb014ebd23cd1d90003e2b; its code the build's on
+      // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 6 Nov 17:05Z)
+      sellDelegate: "0xcec6c1b18be682cfa1679568eab309db79fe3cce",
       // the helper's sell sender (POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET, made as on Base Sepolia; 0.001 ETH read on
       // rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 4 Nov 17:33Z)
       sellSender: "0xd12d83097671d731df2db731e973ad9a07673607",

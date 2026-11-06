@@ -45,7 +45,7 @@ const HISTORICAL = Object.freeze([
   {
     file: "scripts/live-checks/pool-evm-testnet-run.mjs",
     string: "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)",
-    why: "the testnet run's recorded sells (pool-evm-testnet-run.<chain>.json, e.g. Base Sepolia 0x32bb0d25..., input 0xbea5695c on sepolia.base.org and base-sepolia-rpc.publicnode.com) went through the SellDelegate before card helper-sell-fee-recipient added feeRecipient",
+    why: "the testnet runs' recorded sells before card evm-testnet-delegate-review3 (pool-evm-testnet-run.<chain>.json, e.g. Base Sepolia 0x32bb0d25..., input 0xbea5695c on sepolia.base.org and base-sepolia-rpc.publicnode.com) went through the SellDelegate before card helper-sell-fee-recipient added feeRecipient; a run through that card's redeploy is read with the build's",
   },
   {
     file: "scripts/live-checks/helper-evm-abi-tie.mjs",

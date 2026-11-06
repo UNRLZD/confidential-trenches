@@ -22,7 +22,7 @@
 //   - each W that sold: its code on both RPCs is the EIP-7702 designator 0xef0100 ‖ the pinned SellDelegate;
 //   - the run key: no more than DUST wei left, and its nonce the number of transactions it sent.
 // The pins: the pool from card pool-evm-deploy's record, the sell delegate from the newest of its redeploys made before
-// the run started (card evm-sell-v4's, which sells through the v4 PoolManager, then card evm-selldelegate-exact-debit's), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
+// the run started (card evm-sell-v4's, which sells through the v4 PoolManager, card evm-selldelegate-exact-debit's, then card evm-testnet-delegate-review3's), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
 // from the run's record but what it claims, and each claim is read back. Every chain's run has a sell.
 // A run that stopped part way (its record names why in `stopped`, pool-evm-testnet-run.<chain>.stopped.json) is read
 // back the same way, every transaction and the run key's rest, and needs only its deposit: its Tx lines go into the run
@@ -76,11 +76,12 @@ export const VIEWS = Object.freeze({
 });
 
 // Each chain: its two RPCs (scripts/ci/money-gate.mjs RPCS), and its pins (see the header)
-// The sell delegate a run went through: the newest of the delegate's redeploys alone (card evm-sell-v4's, then card
-// evm-selldelegate-exact-debit's) made before the run started, so each run is read against the delegate the kit pinned then
-const SELL_KEYS = ["evm-sell-v4", "evm-selldelegate-exact-debit"];
+// The sell delegate a run went through: the newest of the delegate's redeploys alone (card evm-sell-v4's, card
+// evm-selldelegate-exact-debit's, then card evm-testnet-delegate-review3's) made before the run started, so each run is
+// read against the delegate the kit pinned then
+const SELL_KEYS = ["evm-sell-v4", "evm-selldelegate-exact-debit", "evm-testnet-delegate-review3"];
 const sellRecordAt = (chain, at) => {
-  const recs = SELL_KEYS.map((k) => path.join(HERE, `${k}.${chain}.json`)).filter(existsSync).map((f) => JSON.parse(readFileSync(f, "utf8")));
+  const recs = SELL_KEYS.map((k) => [k, path.join(HERE, `${k}.${chain}.json`)]).filter(([, f]) => existsSync(f)).map(([key, f]) => ({ ...JSON.parse(readFileSync(f, "utf8")), key }));
   const before = recs.filter((r) => r.dryRun === false && Date.parse(r.at) <= Date.parse(at)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   if (!before.length) throw new Error(`no SellDelegate redeploy on ${chain} before the run at ${at}`);
   return before[0];
@@ -92,6 +93,8 @@ const pinsOf = (chain, at) => {
   return {
     pool: d.contracts.PrivacyPoolSimple.address.toLowerCase(),
     sellDelegate: s.contracts.SellDelegate.address.toLowerCase(),
+    // the sell that delegate dispatches: the 11-field one from card evm-testnet-delegate-review3's redeploy on
+    sellSelector: s.key === "evm-testnet-delegate-review3" ? SELL_SELECTOR : SELL_SELECTOR_10,
     poolManager: c.poolManager.address.toLowerCase(),
     router: c.router?.address ? c.router.address.toLowerCase() : null,
   };
@@ -106,12 +109,16 @@ const words = (data) => (String(data).slice(2).match(/.{64}/g) ?? []).map((w) =>
 const addrOf = (w) => `0x${w.toString(16).padStart(40, "0")}`;
 const topicAddr = (t) => lower(`0x${String(t).slice(26)}`);
 const word = (x) => BigInt(x).toString(16).padStart(64, "0");
-export const SELL_SELECTOR = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)");
-/** The target W signed, from a SellDelegate.sell call's input (the Sell tuple's third word), or null when the input is
- *  not one. */
-export function sellTarget(input) {
+// SellDelegate.sell at the pool-review-3 build (the Sell with its feeRecipient), and the 10-field sell of the delegates
+// before it, which the runs before card evm-testnet-delegate-review3 went through (pool-evm-testnet-run.<chain>.json,
+// e.g. Base Sepolia 0x32bb0d25..., input 0xbea5695c on sepolia.base.org and base-sepolia-rpc.publicnode.com)
+export const SELL_SELECTOR = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)");
+export const SELL_SELECTOR_10 = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)");
+/** The target W signed, from a SellDelegate.sell call's input (the Sell tuple's third word, in both shapes), or null
+ *  when the input is not a call of `selector`, the sell the run's delegate dispatches. */
+export function sellTarget(input, selector = SELL_SELECTOR_10) {
   const h = String(input).toLowerCase();
-  if (!h.startsWith(SELL_SELECTOR) || !/^0x[0-9a-f]*$/.test(h)) return null;
+  if (!h.startsWith(selector) || !/^0x[0-9a-f]*$/.test(h)) return null;
   const w = (i) => (h.length >= 10 + 64 * (i + 1) ? BigInt(`0x${h.slice(10 + 64 * i, 10 + 64 * (i + 1))}`) : null);
   const at = w(0);
   if (at === null || at % 32n !== 0n || at > BigInt(h.length)) return null;
@@ -191,7 +198,7 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
           const through = t.venue === "v4" ? pins.poolManager : t.venue === "v3" ? pins.router : null;
           // the target W signed, from the chain's own answer: a record cannot say one and the chain hold another (the
           // review of a22060d, item 1)
-          const signed = sellTarget(tx.input);
+          const signed = sellTarget(tx.input, pins.sellSelector);
           if (signed === null) throw new Error(`${t.step} ${t.hash}: its input is not a SellDelegate.sell call`);
           if (signed !== lower(t.target)) throw new Error(`${t.step} ${t.hash}: W signed the target ${signed}, the record says ${t.target}`);
           if (!through || signed !== through) throw new Error(`${t.step} ${t.hash}: a ${t.venue} sell through ${signed}, not this chain's pinned ${t.venue === "v4" ? "PoolManager" : "router"} ${through}`);

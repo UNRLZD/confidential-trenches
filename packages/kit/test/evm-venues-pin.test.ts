@@ -25,10 +25,12 @@ const code = (f: () => unknown): string => {
 };
 const record = (chain: string) =>
   JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
-// the SellDelegate that sells through the v4 PoolManager with the exact-debit check, deployed again by card
-// evm-selldelegate-exact-debit (card evm-sell-v4's delegate before it, which the build file now freezes)
-const sellRecord = (chain: string) =>
-  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/evm-selldelegate-exact-debit.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+// the SellDelegate at the pool-review-3 build (the 11-field Sell the kit signs, its fee to the signed feeRecipient),
+// deployed again by card evm-testnet-delegate-review3 (card evm-selldelegate-exact-debit's and card evm-sell-v4's
+// delegates before it, which the build file freezes: they dispatch the 10-field sell)
+const sellFile = (key: string, chain: string) =>
+  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/${key}.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+const sellRecord = (chain: string) => sellFile("evm-testnet-delegate-review3", chain);
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
 const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
@@ -65,6 +67,9 @@ test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 ad
     assert.equal(lower(v.adapters?.v3), lower(r.UniswapV3Adapter?.address), chain); // none on Robinhood testnet (M365)
     assert.equal(lower(v.sellDelegate), lower(sellRecord(chain).SellDelegate!.address), chain);
     assert.notEqual(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain); // the v1 delegate sells through no PoolManager
+    // nor the 10-field delegates: their sell is 0xbea5695c, never the 11-field 0x0c2cb9ca W signs
+    assert.notEqual(lower(v.sellDelegate), lower(sellFile("evm-selldelegate-exact-debit", chain).SellDelegate!.address), chain);
+    assert.notEqual(lower(v.sellDelegate), lower(sellFile("evm-sell-v4", chain).SellDelegate!.address), chain);
     assert.equal(lower(v.poolManager), lower(DEPLOY.CHAINS[chain]!.poolManager.address), chain);
     assert.equal(Object.getPrototypeOf(v), null, chain);
     assert.equal(Object.getPrototypeOf(v.adapters), null, chain);

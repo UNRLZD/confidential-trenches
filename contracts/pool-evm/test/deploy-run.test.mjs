@@ -315,7 +315,7 @@ test("--only SellDelegate deploys the delegate alone at nonce 0, constructed wit
   assert.deepEqual(r.record.txs.map((x) => x.step), ["deploy SellDelegate", "sweep (the run key's rest back)"]);
   const word = (a) => a.slice(2).padStart(64, "0");
   assert.deepEqual(c.created, [init("SellDelegate") + word(CHAINS["base-sepolia"].weth.address) + word(CHAINS["base-sepolia"].poolManager.address)]);
-  assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-selldelegate-exact-debit\.mjs --deployment /.test(l)), why(c));
+  assert.ok(c.logs.some((l) => /^deploy: done\. Next: node scripts\/live-checks\/evm-testnet-delegate-review3\.mjs --deployment /.test(l)), why(c));
 });
 
 test("--only FeeCollector deploys the fee collector alone beside the chain's set (card evm-fee-collector), constructed with the sell sender the kit pins; its record names it and its sink; the sweep lands", OPTS, async (t) => {
