@@ -80,6 +80,10 @@ type Chain = {
   /** Check 7b: the fee account's storage_balance_of (set or null) and is_blocklisted answer, per provider. */
   feeRegistered: [boolean, boolean];
   feeListed: [unknown, unknown];
+  /** The fee account's storage_balance_of answer on both providers, overriding feeRegistered (a malformed one). */
+  feeBalanceAnswer?: unknown;
+  /** Check 8: the recipient's is_blocklisted answer, per provider. */
+  recipientListed: [unknown, unknown];
   /** Answers to storage_balance_of, overriding `registered` (a malformed one, for the shape check). */
   balanceAnswer?: unknown;
   /** view_account's or view_access_key_list's answered block, per provider, when it is not the block asked. */
@@ -103,6 +107,7 @@ const chain = (over: Partial<Chain> = {}): Chain => ({
   account: [A_OK, A_OK],
   feeRegistered: [true, true],
   feeListed: [false, false],
+  recipientListed: [false, false],
   ...over,
 });
 
@@ -137,8 +142,9 @@ function provider(c: Chain, i: 0 | 1): Rpc {
       const h = Number(p.block_id);
       const args = JSON.parse(Buffer.from(String(p.args_base64), "base64").toString("utf8")) as Record<string, unknown>;
       let v: unknown;
-      if (p.method_name === "storage_balance_of" && args.account_id === CFG.feeRecipient) v = c.feeRegistered[i] ? { total: MIN.toString(), available: "0" } : null;
+      if (p.method_name === "storage_balance_of" && args.account_id === CFG.feeRecipient) v = c.feeBalanceAnswer !== undefined ? c.feeBalanceAnswer : c.feeRegistered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "is_blocklisted" && args.account_id === CFG.feeRecipient) v = c.feeListed[i];
+      else if (p.method_name === "is_blocklisted" && args.account_id === W.recipient) v = c.recipientListed[i];
       else if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
       else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus }] : [];
@@ -220,7 +226,7 @@ function setup(c = chain(), opts: { status?: () => TokenStatus; release?: number
 const code = (a: Awaited<ReturnType<typeof carryWithdraw>>) => ("error" in a.body ? a.body.error.code : "ok");
 
 /** What readChecks returns, for the checks on what was read. */
-const reads = (over: Partial<ChainReads> = {}): ChainReads => ({ registered: true, registerMin: MIN, finalMs: 0n, stateKnown: true, labelKnown: true, totals: { deposited: 10n ** 12n, spent: 0n, returned: 0n }, feeAccount: { registered: true, blocklisted: false }, ...over });
+const reads = (over: Partial<ChainReads> = {}): ChainReads => ({ registered: true, registerMin: MIN, finalMs: 0n, stateKnown: true, labelKnown: true, totals: { deposited: 10n ** 12n, spent: 0n, returned: 0n }, feeAccount: { registered: true, blocklisted: false }, recipientListed: false, ...over });
 
 // ---- The send ----
 
@@ -493,7 +499,7 @@ test("check 7b again in the queue: a fee account blocklisted, or unregistered, a
   for (const [flip, why] of [
     [(c: Chain) => (c.feeListed = [true, true]), "registered true, blocklisted true"],
     [(c: Chain) => (c.feeRegistered = [false, false]), "registered false, blocklisted false"],
-    [(c: Chain) => (c.down = true), "not read at an agreed block"],
+    [(c: Chain) => (c.down = true), "not read (fee read refused: rpc 0: block did not answer (fetch failed))"],
   ] as [(c: Chain) => void, string][]) {
     let asked = 0;
     const c = chain();
@@ -520,6 +526,65 @@ test("readChecks reads check 7b's two views of fee_recipient (not the recipient'
   assert.deepEqual(r.feeAccount, { registered: true, blocklisted: true });
   assert.equal(feeAccountReady(r.feeAccount), false);
   assert.equal(feeAccountReady({ registered: true, blocklisted: false }), true);
+});
+
+// ---- The review of the fee check (card vault-review-fixes-1, 08:18Z) ----
+
+// Finding 1: a payout is one receipt (A-01), so a recipient the token blocklists fails it whole into refund_pending, and
+// the settle pays the refund note's storage: check 8 reads is_blocklisted(recipient) at check 7's block, and again in
+// the queue. Exactly true is bad_recipient; anything but a boolean, or two providers apart, is 503 with nothing signed.
+test("check 8 reads is_blocklisted(recipient): true on both is 400 bad_recipient, nothing signed, fund_recipient true or false; apart or not a boolean is 503; false sends", async () => {
+  for (const body of [req(), { ...req(), fund_recipient: false }]) {
+    const s = setup(chain({ recipientListed: [true, true] }));
+    const a = await carryWithdraw(body, s.deps);
+    assert.deepEqual([a.status, code(a)], [400, "bad_recipient"], `fund_recipient ${body.fund_recipient}`);
+    assert.equal(s.relayer.sent.length, 0);
+    assert.equal(s.store.get(NF), null);
+  }
+  for (const recipientListed of [[true, false], ["true", "true"], [null, null]] as [unknown, unknown][]) {
+    const s = setup(chain({ recipientListed }));
+    const a = await carryWithdraw(req(), s.deps);
+    assert.equal(a.status, 503, JSON.stringify(recipientListed));
+    assert.equal(s.relayer.sent.length, 0, JSON.stringify(recipientListed));
+  }
+  assert.equal(code(await carryWithdraw(req(), setup().deps)), "ok");
+});
+
+test("check 8 again in the queue: a recipient blocklisted after the reads and before signing is 400 bad_recipient, nothing signed", async () => {
+  let asked = 0;
+  const c = chain();
+  const s = setup(c, { status: () => (++asked === 2 && (c.recipientListed = [true, true]), open) });
+  const a = await carryWithdraw(req(), s.deps);
+  assert.equal(asked, 2);
+  assert.deepEqual([a.status, code(a)], [400, "bad_recipient"]);
+  assert.equal(s.relayer.sent.length, 0);
+  assert.equal(s.store.get(NF), null);
+});
+
+// Findings 4 and 5: the fee balance's shape is checked (a {} is no balance), a failed 7b read at check 7 answers 503
+// relayer_low with its own log line, and the hold at check 7 stands on its own: the queue is never reached.
+test("check 7b at check 7: a malformed fee balance ({}) or a blocklist answer that is no boolean is 503 relayer_low with a \"not read\" log line, nothing signed", async () => {
+  for (const over of [{ feeBalanceAnswer: {} }, { feeBalanceAnswer: { total: "1.5" } }, { feeListed: [null, null] }, { feeRegistered: [true, false] }] as Partial<Chain>[]) {
+    const s = setup(chain(over));
+    const lines: string[] = [];
+    s.deps.log = (l) => lines.push(l);
+    const a = await carryWithdraw(req(), s.deps);
+    assert.deepEqual([a.status, code(a)], [503, "relayer_low"], JSON.stringify(over));
+    assert.equal(s.relayer.sent.length, 0, JSON.stringify(over));
+    assert.equal(lines.length, 1, JSON.stringify(over));
+    assert.ok(lines[0]!.startsWith(`withdraw 503 relayer_low: ${FEE_ACCOUNT_NOT_READY} (${CFG.feeRecipient} on ${CFG.token}: not read (`), lines[0]);
+  }
+});
+
+test("check 7b's hold at check 7 stands on its own: a fee account unregistered at the reads, registered before the queue, is 503 relayer_low and the queue's guard never runs", async () => {
+  let asked = 0;
+  const c = chain({ feeRegistered: [false, false] });
+  // check 10 is asked first at the entry; the account is registered right after, so only the entry's own hold can hold it
+  const s = setup(c, { status: () => (++asked === 1 && (c.feeRegistered = [true, true]), open) });
+  const a = await carryWithdraw(req(), s.deps);
+  assert.deepEqual([a.status, code(a)], [503, "relayer_low"]);
+  assert.equal(asked, 1, "the queue's guard (check 10 again) never ran");
+  assert.equal(s.relayer.sent.length, 0);
 });
 
 // ---- Check 7 ----
