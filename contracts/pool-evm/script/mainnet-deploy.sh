@@ -6,14 +6,16 @@
 #   sh contracts/pool-evm/script/mainnet-deploy.sh robinhood <your Robinhood chain address>
 #   sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> --sweep-kept
 #     a stopped run whose key was kept (its last line says so): sends the key's ETH back to the address that run was
-#     given, and no other, then removes the key
+#     given, and no other, then removes the key, unless the run is unfinished and made a contract (the key stays for the
+#     resume) or a transfer it asked for may still land
 # Each chain is its own paste: it funds, deploys and fails on its own, so a stop on one never touches the other.
 # 1. deploy.mjs --mainnet. Before any key or transaction it refuses: an RPC that does not answer the chain's id (the
 #    chain's own public RPC and PublicNode's, pool-evm-deploy.mjs MAINNETS), a return address with code or with no ETH
 #    on either RPC, a build whose runtime is not pool-evm-deploy.build.json's or whose init code is not deploy.mjs
 #    MAINNET_INIT's, and a chain whose record (contracts/pool-evm/deployments/<chain>.json) exists. Then it prints the
 #    run key's address and the need with its parts, and waits. Send exactly that much ETH to the printed address from
-#    the address you passed (the line says "send exactly ... from" it). It deploys the withdrawal verifier, the pool,
+#    the address you passed, in one transfer (the line says "send exactly ... from" it): more than asked, or a second
+#    transfer, can hide one still to land. It deploys the withdrawal verifier, the pool,
 #    the v4 adapter, the v3 adapter and the sell delegate, each checked as the build's code on both RPCs, sweeps the
 #    rest back to your address and writes contracts/pool-evm/deployments/<chain>.json.
 # 2. The live check on that record, on both of the chain's RPCs: no owner, no proxy, the pinned code, the run key empty.
@@ -23,8 +25,9 @@
 # and the record is committed right after (a paste in another clone is refused too, once main holds the record or the
 # kit pins the pool); a run stopped before its last deploy writes no record, and the same paste in the same folder
 # resumes it with its kept key, reusing every contract it made, asking only for what the key lacks.
-# After a resume, send only the amount the resume newly asks for (its ask replaces the first run's), and before any
-# --sweep-kept wait until both of the chain's RPCs show that transfer landed.
+# After a resume, send only the amount the resume newly asks for. Every amount asked adds up: the key is removed only
+# once all of them have landed, so if an earlier ask was never sent the key stays (holding at most dust: nothing is
+# lost). Before any --sweep-kept wait until both of the chain's RPCs show the transfer landed.
 # Nothing is typed in: no seed phrase or key is asked for. The run key is made in memory and kept in a 0700 folder
 # (~/.local/state/pool-evm-deploy) only until both RPCs read it empty; every transaction it signs is journaled
 # beside the record before it is sent. Ctrl-C or a closed terminal stops the run at its next step and the sweep sends
