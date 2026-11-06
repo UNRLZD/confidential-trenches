@@ -17,6 +17,7 @@
 //   node scripts/live-checks/precommit-taken-recover.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the restored note's place (the recorded bad answer: no such mark).
 // PASS exit 0, FAIL exit 1, error exit 2.
+// Runs: once, it re-reads one finished devnet run's finalized txs, marks and tree pages, which no host deploy can change; the page code it ran is held by pool-deposit.test.ts and the bundle by signpage-release
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
