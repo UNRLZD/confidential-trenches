@@ -14,7 +14,7 @@
 // zero fee gives, which no fee lowers; an amount above that bound whose checked answer clears every floor but
 // MIN_DEPOSIT is refused below_min too, never quote_check_failed: the device read the reason off a verified answer.
 import {
-  ONECLICK_FEE_BPS, ONECLICK_USDC_ASSETS, ONECLICK_VAULT_MIN_OUT, OneClickQuoteError, checkOneClickQuote, oneClickFloors,
+  ONECLICK_USDC_ASSETS, ONECLICK_VAULT_MIN_OUT, OneClickQuoteError, checkOneClickQuote, oneClickFeeBps, oneClickFloors,
   type OneClickChecked, type OneClickCheckOptions, type OneClickPath, type OneClickRequest,
 } from "../../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP, HELPER_FETCH_INIT } from "../../../kit/src/helper/v1.ts";
@@ -51,24 +51,20 @@ export interface DepositReadContext {
 }
 
 /**
- * The path deposit.quote checks a live quote on (./deposit-quote.ts): the helper's 1Click key. The minimum and a dry
- * quote's lines are worked out at this path's fee, ONECLICK_FEE_BPS[DEPOSIT_QUOTE_PATH], whatever path a dry answer's
- * entry names, so the sheet shows what the live quote is held to.
+ * The path deposit.quote checks a live quote on (./deposit-quote.ts): the helper's 1Click key. A dry quote is checked on
+ * it too, so the minimum, a dry quote's lines and the live quote are held to one fee.
  */
 export const DEPOSIT_QUOTE_PATH: OneClickPath = "partner";
 
 export type DepositReadAnswer<T> = { ok: true; result: T } | { ok: false; code: DepositRefusal };
 const no = (code: DepositRefusal): { ok: false; code: DepositRefusal } => ({ ok: false, code });
 
-/** F on a quote from `origin` into the vault's USDC on `path`: none on the same asset, the path's own otherwise. */
-const feeBpsFrom = (origin: string, path: OneClickPath): number => (origin === DEPOSIT_QUOTE_DESTINATION ? 0 : ONECLICK_FEE_BPS[path]);
 /**
- * The paths a dry quote's fee entry may name, in the order tried: the partner path's (the helper's 1Click key, fee 20 on
- * every live quote of the G1 runs), then the keyless one's (fee 1), which a dry quote through the helper named on 6 Nov
- * 14:06Z. Either is 1Click's own collector, compared exactly, and the floor is held at the fee the entry names. A dry
- * quote moves no money, and an entry that names less than 1Click took only raises the floor (fails closed).
+ * F on a quote from `origin` into the vault's USDC: 1Click's fee on that route (the kit's oneClickFeeBps: 0 on the same
+ * asset, 1 bp between two USDC assets, card oneclick-partner-fee-live), worked out from the device's own request, never
+ * from the answer's appFees, which 1Click does not sign; the kit's check refuses any entry other than this fee.
  */
-const DRY_PATHS: readonly OneClickPath[] = ["partner", "keyless"];
+const routeFeeBps = (origin: string): number => oneClickFeeBps(DEPOSIT_QUOTE_PATH, origin, DEPOSIT_QUOTE_DESTINATION);
 
 /** The device's min out floor for `amountIn` USDC base units, before MIN_DEPOSIT raises it; 0 when the fees take it all. */
 function floorMinOut(amountIn: bigint, feeBps: number, withdrawFee: bigint): bigint {
@@ -85,8 +81,8 @@ function floorMinOut(amountIn: bigint, feeBps: number, withdrawFee: bigint): big
  * The least amount of a USDC asset, in base units, whose floor clears MIN_DEPOSIT at `withdrawFee`, or null when no
  * amount up to the beta cap does. Searched on oneClickFloors itself, which rises with the amount.
  */
-export function depositMinimum(origin: string, withdrawFee: bigint, path: OneClickPath = DEPOSIT_QUOTE_PATH): bigint | null {
-  const feeBps = feeBpsFrom(origin, path);
+export function depositMinimum(origin: string, withdrawFee: bigint): bigint | null {
+  const feeBps = routeFeeBps(origin);
   if (floorMinOut(HELPER_BIND_DEPOSIT_CAP, feeBps, withdrawFee) < ONECLICK_VAULT_MIN_OUT) return null;
   let lo = 1n, hi = HELPER_BIND_DEPOSIT_CAP;
   while (lo < hi) {
@@ -97,10 +93,10 @@ export function depositMinimum(origin: string, withdrawFee: bigint, path: OneCli
   return lo;
 }
 
-/** True when `amount` of a USDC asset is under the minimum any withdraw fee and any path's fee leave (the keyless path's
- *  is the least): refused before any request. */
+/** True when `amount` of a USDC asset is under the minimum the route's fee leaves at any withdraw fee (a zero one gives
+ *  the least): refused before any request. */
 export function belowDepositBound(origin: string, amount: bigint): boolean {
-  const bound = depositMinimum(origin, 0n, "keyless");
+  const bound = depositMinimum(origin, 0n);
   return bound === null || amount < bound;
 }
 
@@ -160,8 +156,8 @@ const statusCode = (status: number): DepositRefusal | null =>
 /**
  * The withdraw fee a checked dry answer may stand for, bounded by its signed amounts: a dry answer's withdrawFee is not
  * signed (src/checks/oneclick.ts), so a helper could rewrite it after 1Click signed. 1Click's amountOut is at most
- * amountIn less its fee and its withdraw fee, so amountIn − amountOut − ⌊amountIn × F / 10,000⌋ (F the entry's own
- * fee) is at least the withdraw fee 1Click took: the figure counts up to that and no more, never below 0.
+ * amountIn less its fee and its withdraw fee, so amountIn − amountOut − ⌊amountIn × F / 10,000⌋ (F the route's fee,
+ * the one the kit's check held the entry to) is at least the withdraw fee 1Click took: the figure counts up to that and no more, never below 0.
  */
 export function signedWithdrawFee(q: Pick<OneClickChecked, "amountIn" | "amountOut" | "unsignedDryWithdrawFee">, feeBps: number): bigint {
   const room = q.amountIn - q.amountOut - (q.amountIn * BigInt(feeBps)) / 10_000n;
@@ -169,9 +165,9 @@ export function signedWithdrawFee(q: Pick<OneClickChecked, "amountIn" | "amountO
   return room <= 0n ? 0n : w < room ? w : room;
 }
 
-/** One dry quote of `amount` from `origin`, asked and checked: the checked quote, the path its fee entry named and that
- *  path's fee, or the refusal. */
-async function dryQuote(origin: string, amount: bigint, ctx: DepositReadContext): Promise<DepositReadAnswer<OneClickChecked & { path: OneClickPath; feeBps: number }>> {
+/** One dry quote of `amount` from `origin`, asked and checked on DEPOSIT_QUOTE_PATH: the checked quote and the route's
+ *  fee, or the refusal. */
+async function dryQuote(origin: string, amount: bigint, ctx: DepositReadContext): Promise<DepositReadAnswer<OneClickChecked & { feeBps: number }>> {
   const now = ctx.now ?? Date.now;
   const request = depositDryRequest(origin, amount, now());
   let reply;
@@ -182,18 +178,12 @@ async function dryQuote(origin: string, amount: bigint, ctx: DepositReadContext)
   }
   const code = statusCode(reply.status);
   if (code) return no(code);
-  const at = now();
-  for (const path of DRY_PATHS) {
-    const check = { path, pricing: "usdc", decimalsIn: USDC_DECIMALS, decimalsOut: USDC_DECIMALS, now: at } as const;
-    try {
-      return { ok: true, result: { ...checkOneClickQuote(request, reply.body, { ...check, intoVault: true }), path, feeBps: feeBpsFrom(origin, path) } };
-    } catch (e) {
-      // another path's fee entry: try the next path; any other failure is the answer's
-      if (e instanceof OneClickQuoteError && e.check === "app-fees" && path !== DRY_PATHS.at(-1)) continue;
-      return no(shortOnlyOfMinimum(e, request, reply.body, check) ? "below_min" : "quote_check_failed");
-    }
+  const check = { path: DEPOSIT_QUOTE_PATH, pricing: "usdc", decimalsIn: USDC_DECIMALS, decimalsOut: USDC_DECIMALS, now: now() } as const;
+  try {
+    return { ok: true, result: { ...checkOneClickQuote(request, reply.body, { ...check, intoVault: true }), feeBps: routeFeeBps(origin) } };
+  } catch (e) {
+    return no(shortOnlyOfMinimum(e, request, reply.body, check) ? "below_min" : "quote_check_failed");
   }
-  return no("quote_check_failed");
 }
 
 /** Answers deposit.dry: the quote lines of a dry quote that passed every check, else a code. */
@@ -207,11 +197,8 @@ export async function depositDryKind(params: Record<string, unknown>, ctx: Depos
   const got = await dryQuote(origin, amount, ctx);
   if (!got.ok) return got;
   const q = got.result;
-  // the lines at the live quote's fee: an entry naming less (the keyless path's) is taken down by the difference
-  const live = feeBpsFrom(origin, DEPOSIT_QUOTE_PATH);
-  const less = live > q.feeBps ? (q.amountIn * BigInt(live - q.feeBps)) / 10_000n : 0n;
-  const out = q.amountOut > less ? q.amountOut - less : 0n;
-  const minOut = q.minAmountOut > less ? q.minAmountOut - less : 0n;
+  // the checked quote's own signed amounts, held to the same fee and floors as the live quote
+  const out = q.amountOut, minOut = q.minAmountOut;
   if (out > HELPER_BIND_DEPOSIT_CAP) return no("above_max");
   // what the live quote would be refused for: under the vault's least deposit at its fee
   if (minOut < ONECLICK_VAULT_MIN_OUT) return no("below_min");
@@ -273,7 +260,7 @@ export async function depositAssetsKind(ctx: DepositReadContext = {}): Promise<D
     const p = probes[i]!;
     if (!p.ok) return;
     // the withdraw fee no higher than the signed amounts allow, the minimum at the live quote's fee
-    const min = depositMinimum(a.id, signedWithdrawFee(p.result, p.result.feeBps), DEPOSIT_QUOTE_PATH);
+    const min = depositMinimum(a.id, signedWithdrawFee(p.result, p.result.feeBps));
     if (min === null) return;
     assets.push({ origin_asset: a.id, chain: a.chain, symbol: "USDC", decimals: USDC_DECIMALS, min: decimal(min, USDC_DECIMALS),
       max_usd: decimal(HELPER_BIND_DEPOSIT_CAP, USDC_DECIMALS) });
