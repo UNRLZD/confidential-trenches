@@ -10,6 +10,10 @@
 //     dispatches it and not the 10-field one (0xbea5695c, SELL_SELECTOR_10), which main's pinned delegates dispatched.
 //   Nothing reads today's kit pin or today's build: when a later card moves the pin or rebuilds the delegate (the build
 //   file then freezes this build at its address), this end state stays true and the check passes.
+//   The known limit: the runs' FeeCollector is read from evm-fee-collector.<chain>.json as it is today, so a later
+//   testnet FeeCollector redeploy written over that record fails this check (closed: the recorded sells' Paid is then
+//   from another address) after every helper deploy, until this card's runs are re-run through the new collector,
+//   which such a redeploy needs anyway.
 // Then:
 //   - HELPER_HOST's fee answer for each testnet pool (GET /v1/pool/fee?pool=): fee_collector is the kit's feeCollector
 //     pin and sell_sender the kit's sellSender pin;
@@ -98,7 +102,10 @@ export async function check(o) {
  *  the kit pinned when the runs sold, which each sell's Paid must come from */
 export function collectorAt(chain) {
   const f = path.join(HERE, `evm-fee-collector.${chain}.json`);
-  const r = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
+  return collectorOf(existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null);
+}
+/** The FeeCollector a deploy record names, or null for a dry run's record, none, or no address */
+export function collectorOf(r) {
   const a = lower(r?.dryRun === false ? r.contracts?.FeeCollector?.address : "");
   return ADDRESS.test(a) ? a : null;
 }
@@ -170,7 +177,7 @@ export function checkHelper(answers, venues = evmPoolVenues()) {
   return { ok: lines.every((l) => l.startsWith("ok")), lines, senders };
 }
 
-/** Whether receipt `r` carries `collector`'s Paid(W, value >= fee), not removed */
+/** Whether receipt `r` carries `collector`'s Paid(W, exactly the fee), not removed: FeeCollector emits msg.value */
 export function paidIn(r, collector, w, fee) {
   const word = (x) => "0x" + lower(x).replace(/^0x/, "").padStart(64, "0");
   return (r?.logs ?? []).some((l) => l && l.removed !== true && lower(l.address) === collector && Array.isArray(l.topics) && l.topics.length === 2 && lower(l.topics[0]) === PAID && lower(l.topics[1]) === word(w) && /^0x[0-9a-f]{64}$/.test(lower(l.data)) && BigInt(l.data) === fee);

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { CHAINS, FUNDINGS, RUN_FUNDINGS, RUN_SENDERS, check, checkHelper, checkRuns, collectorAt, runRecord } from "./evm-testnet-delegate-review3.mjs";
+import { CHAINS, FUNDINGS, RUN_FUNDINGS, RUN_SENDERS, check, checkHelper, checkRuns, collectorAt, collectorOf, runRecord } from "./evm-testnet-delegate-review3.mjs";
 import { replayer } from "./notes-per-pool-evm.mjs";
 import { BUILD } from "./pool-evm-deploy.mjs";
 
@@ -231,6 +231,13 @@ test("a helper sell's Paid read fails on each rule broken alone: address, W, val
       "data at fee - 1": receipt((e) => ((paidLog(e, c).data = "0x" + word(fee - 1n)), e)),
       "data at fee + 1": receipt((e) => ((paidLog(e, c).data = "0x" + word(fee + 1n)), e)),
       "removed true": receipt((e) => ((paidLog(e, c).removed = true), e)),
+      // a third topic on the collector's Paid log: not the event Paid(address indexed, uint256)
+      "a third topic": receipt((e) => (paidLog(e, c).topics.push("0x" + word(1)), e)),
+      // the call is not the 11-field sell (its selector the 10-field one), every other word the same
+      "another selector": (e) => {
+        if (e.method === "eth_getTransactionByHash") e.result.input = "0xbea5695c" + e.result.input.slice(10);
+        return e;
+      },
       "status 0x0": receipt((e) => ((e.result.status = "0x0"), e)),
       // the call's fee word and the Paid value both 0: only the zero fee breaks a rule
       "fee 0": (e) => {
@@ -259,4 +266,23 @@ test("a helper sell's Paid read fails on each rule broken alone: address, W, val
     const feeTo = runsOf().map((r) => (r.record.chain === c ? { ...r, record: { ...r.record, txs: r.record.txs.map((t) => (t.kind === "sell" ? { ...t, feeTo: "0x" + "fe".repeat(20) } : t)) } } : r));
     assert.ok((await runOn(feeTo)).lines.some((l) => l.startsWith("FAIL") && sellLine(c).test(l)), c);
   }
+});
+
+// the review of 3ebf850f: a dry run's FeeCollector record (or none, or one with no address) names no collector, so its
+// sells fail closed; and the v1 delegate's frozen build names the sell its deployed code dispatches
+test("a dry run's FeeCollector record names no collector; the v1 delegate's frozen sell selector is the one its deployed code dispatches", () => {
+  for (const c of CHAINS) {
+    const rec = JSON.parse(readFileSync(new URL(`./evm-fee-collector.${c}.json`, import.meta.url), "utf8"));
+    assert.equal(collectorOf(rec), collectorAt(c), c);
+    assert.equal(collectorOf({ ...rec, dryRun: true }), null, c);
+    assert.equal(collectorOf({ ...rec, dryRun: undefined }), null, c);
+    assert.equal(collectorOf({ ...rec, contracts: {} }), null, c);
+  }
+  assert.equal(collectorOf(null), null);
+  const V = JSON.parse(readFileSync(new URL("./sell-delegate-v1.code.json", import.meta.url), "utf8"));
+  const v1 = BUILD.frozen.SellDelegate;
+  assert.equal(lower(v1.at[V.chain]), lower(V.address), "the record is the frozen v1 delegate's");
+  assert.match(v1.sell, /^0x[0-9a-f]{8}$/);
+  assert.ok(lower(V.code).includes(`63${v1.sell.slice(2)}`), `the v1 code dispatches ${v1.sell}`);
+  assert.ok(!lower(V.code).includes(`63${BUILD.contracts.SellDelegate.sell.slice(2)}`), "and not the current build's sell");
 });

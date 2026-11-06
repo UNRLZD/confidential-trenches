@@ -358,6 +358,11 @@ test("ATTACK A9: an EVM sell checkEvmSell refused, at any rule, stays unsigned (
     [evmQuotedSell(VENUES, q, fields, Date.now()), ask, { ...ctx, feeCap: 10n ** 13n - 1n }, q.minOut, "fee_cap_over_device_cap"],
     [evmQuotedSell(VENUES, q, fields, Date.now()), ask, ctx, q.minOut + 1n, "min_out"],
     [evmQuotedSell(VENUES, q, fields, Date.now()), ask, { ...ctx, nowMs: (t + 120n) * 1000n }, q.minOut, "deadline_past"],
+    // the review of 3ebf850f: the rules above the pool's, each on its own. Another W's sell; a Base sell asked as
+    // Robinhood's (a list that pins Robinhood too, so the chain rule itself refuses); another token than the ask's
+    [evmQuotedSell(VENUES, q, fields, Date.now()), ask, { ...ctx, wallet: "0x" + "77".repeat(20) }, q.minOut, "wallet"],
+    [evmQuotedSell(VENUES, q, fields, Date.now()), { ...ask, chain: "robinhood" }, { ...ctx, evm: { venues: Object.freeze({ ...VENUES, robinhood: pin(evmPoolVenues().robinhood, { pool: EVM_POOL }) }), feeRecipient: FEE_TO } }, q.minOut, "chain"],
+    [evmQuotedSell(VENUES, q, fields, Date.now()), { ...ask, token: "0x" + "66".repeat(20) }, ctx, q.minOut, "token"],
   ];
   for (const [built, a, c, floor, rule] of cases) {
     assert.throws(() => checkEvmSell(built, a, c, floor), (e: unknown) => e instanceof PoolRuleRefused && e.rule === rule, rule);
