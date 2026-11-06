@@ -14,16 +14,20 @@
 //! 1. Check 7: short_registration (fresh.test.near, unregistered, register_deposit 1) and same_call (alice, not yet
 //!    registered, register_deposit 0): 400 register_deposit_wrong each; the relayer's key nonce unmoved.
 //! 2. alice registered. Check 10: the watch halted: 503 token_halted; nonce unmoved, no record.
-//! 3. same_call carried: 200 {tx_hash, submitted}; the outcome rounds read it from blocks as succeeded; the relayer is
-//!    not registered on the token, so the fee's transfer fails the one payout receipt and nothing moves (review A-01):
-//!    refund_pending 2,000,000, and its settle attaches 148 B x 1e19 and writes the refund note. On chain: the
-//!    withdraw's receipt on the vault ok, the spends row settled with payer the relayer and recipient alice, alice
-//!    paid nothing and the relayer no fee.
+//! 3. Check 7b (card vault-review-fixes-1, review F-1): the relayer's fee account not registered on the token, then
+//!    registered (by alice) but blocklisted: same_call is 503 relayer_low each time, its log line naming the fee
+//!    account, nonce unmoved, no record. Then ready: same_call carried, 200 {tx_hash, submitted}; the outcome rounds
+//!    read it from blocks as succeeded; one payout receipt pays alice the withdrawal less the fee and the relayer the
+//!    fee; settled with refund_value 0.
 //! 4. A restart: same_call again: 400 spent, nothing signed.
-//! 5. The relayer registered. same_nullifier_a and same_nullifier_b (one nullifier, two proofs) at once: one 200, the
-//!    other 400 in_flight; one spend on chain; paid, settled with 0 attached, the reserve back to the relayer.
+//! 5. same_nullifier_a and same_nullifier_b (one nullifier, two proofs) at once: one 200, the other 400 in_flight; one
+//!    spend on chain; paid, settled with 0 attached, the reserve back to the relayer.
 //! 6. new_account (newcomer.test.near, unregistered, register_deposit the token's minimum): 200, paid, settled; the
 //!    relayer holds the 100,000 fee.
+//! 7. A payout that fails on chain (the review's coverage of refund_pending): the mock token fails every ft_transfer
+//!    to alice, so one_block_a's one payout receipt fails whole (review A-01): refund_pending with refund_value the
+//!    whole withdrawal (4,000,000), alice paid nothing, and the relayer's settle attaches 148 B x 1e19 (the refund
+//!    note's tree may grow) and settles it, writing the refund note.
 //! Prints each relayer transaction's receipts and the relayer's NEAR before and after.
 #![cfg(feature = "sandbox")]
 
@@ -293,8 +297,30 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!((s["status"].as_str(), s["recipient"].as_str(), s["fee"].as_str()), (Some("settled"), Some("newcomer.test.near"), Some("100000")), "{s}");
     assert_eq!(w.h.token_balance(w.relayer.id()).await? - fee0, 100_000, "the relayer holds the fee");
 
+    // 7. a payout that fails on chain: refund_pending, the whole withdrawal in the refund note, settled with the refund
+    // note's attachment
+    w.h.mock_fail("ft_transfer", Some(w.alice.id()), true).await?;
+    let alice0 = w.h.token_balance(w.alice.id()).await?;
+    let v = w.carry(&["ok"], &["one_block_a"], 60).await?;
+    assert_eq!(code(&v, 0), (200, "ok".into()), "{}", v["answers"]);
+    let tx = v["answers"][0]["body"]["tx_hash"].as_str().ok_or("no tx_hash")?.to_string();
+    assert_eq!(w.vault_receipts(&tx, "withdraw").await?, vec![true], "the withdraw ran on the vault");
+    let r = row(&v, "one_block_a");
+    assert_eq!((r["outcome"].as_str(), r["settle"]["done"].as_bool()), (Some("succeeded"), Some(true)), "{r}");
+    let settle_tx = r["settle"]["tx"]["tx_hash"].as_str().ok_or("no settle tx")?.to_string();
+    assert_eq!(w.vault_receipts(&settle_tx, "settle").await?, vec![true], "the settle ran on the vault");
+    let st = w.h.rpc("tx", json!({"tx_hash": settle_tx, "sender_account_id": w.relayer.id(), "wait_until": "FINAL"})).await?;
+    let action = &st["result"]["transaction"]["actions"][0]["FunctionCall"];
+    assert_eq!((action["method_name"].as_str(), action["deposit"].as_str()), (Some("settle"), Some("1480000000000000000000")), "the settle attaches 148 B x 1e19: {st}");
+    let s = w.spend_row("one_block_a").await?;
+    assert_eq!((s["status"].as_str(), s["recipient"].as_str()), (Some("settled"), Some("alice.test.near")), "{s}");
+    assert_eq!(s["refund_value"], s["withdrawn"], "the whole withdrawal came back into the refund note: {s}");
+    assert_eq!(s["withdrawn"], "4000000", "{s}");
+    assert_eq!(w.h.token_balance(w.alice.id()).await? - alice0, 0, "alice was paid by a payout that failed");
+    w.h.mock_fail("ft_transfer", Some(w.alice.id()), false).await?;
+
     let near1 = w.h.near_balance(w.relayer.id()).await?;
-    println!("relayer NEAR: {near0} before, {near1} after ({} spent on three withdrawals and three settles)", near0 - near1);
+    println!("relayer NEAR: {near0} before, {near1} after ({} spent on four withdrawals and four settles)", near0 - near1);
     w.h.i1().await?;
     Ok(())
 }
