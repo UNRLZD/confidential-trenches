@@ -5,8 +5,9 @@
 //!   hand on: `GAS_FT_TRANSFER` and `GAS_ON_PAYOUT`, plus `GAS_STORAGE_DEPOSIT` when `register_deposit > 0` and a
 //!   second `GAS_FT_TRANSFER` when `fee > 0` (45, 55, 60 or 70 Tgas). Too little gas could never strand a spend (a
 //!   promise that cannot reserve its static fails the whole receipt, the spend with it, 2.5.2); the check gives that
-//!   case its own error before the proof is verified. 100 Tgas covers the vault's own work at depth 32 (83.823 Tgas
-//!   burnt plus 2.554 Tgas of execution fees it prepays, 2.11).
+//!   case its own error before the proof is verified. 100 Tgas covers the vault's own work at depth 32 (VT-S12,
+//!   tests/s12.rs: 82.590 Tgas burnt plus 2.445 Tgas of execution fees it prepays net, 85.035, with a fee and a new
+//!   recipient; 2.11).
 //! - Row 13: `fee = relay_fee`, `to_recipient = withdrawn - fee`, exact (row 8 holds `fee <= withdrawn / 2` and row 7
 //!   `withdrawn >= 1`, so `to_recipient >= 1`; a split that broke this would panic, never pay).
 //! - Row 14: at the end of the call, the attachment must cover (the bytes the call wrote, `env::storage_usage()` at the

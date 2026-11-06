@@ -1146,11 +1146,19 @@ impl Harness {
     }
 
     /// `signed` (one signed intent) in `execute_intents`, sent by `relayer` with `gas` Tgas, read raw, with the gas
-    /// each function-call receipt was given (from the same transaction read at final).
+    /// each function-call receipt was given (`given`).
     pub async fn execute_intents(&self, relayer: &Account, signed: Value, gas: u64) -> R<Sent> {
         let intents: AccountId = INTENTS.parse()?;
         let o = self.call_outcome(relayer, &intents, "execute_intents", json!({"signed": [signed]}), NearToken::from_yoctonear(0), Gas::from_tgas(gas)).await?;
-        let v = self.rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": o.tx_hash, "sender_account_id": relayer.id(), "wait_until": "FINAL"})).await?;
+        let given = self.given(&o, relayer.id()).await?;
+        Ok(Sent { o, given })
+    }
+
+    /// The gas each function-call receipt of `o` (sent by `signer`) was given, by receipt id: the sum of its function
+    /// calls' prepaid gas, from the same transaction read at final (`EXPERIMENTAL_tx_status`); the first receipt's from
+    /// the transaction itself.
+    pub async fn given(&self, o: &Outcome, signer: &AccountId) -> R<BTreeMap<String, u64>> {
+        let v = self.rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": o.tx_hash, "sender_account_id": signer, "wait_until": "FINAL"})).await?;
         let mut given = BTreeMap::new();
         let gas_of = |a: &Value| a["FunctionCall"]["gas"].as_u64().or_else(|| a["FunctionCall"]["gas"].as_str().and_then(|g| g.parse().ok()));
         for rc in v["result"]["receipts"].as_array().into_iter().flatten() {
@@ -1160,7 +1168,7 @@ impl Harness {
         let first = v["result"]["transaction_outcome"]["outcome"]["receipt_ids"][0].as_str().unwrap_or_default().to_string();
         let g: u64 = v["result"]["transaction"]["actions"].as_array().into_iter().flatten().filter_map(gas_of).sum();
         given.entry(first).or_insert(g);
-        Ok(Sent { o, given })
+        Ok(given)
     }
 }
 

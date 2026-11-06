@@ -24,7 +24,7 @@
 //!    at 2^32 - 1; each measured deposit's prepay first, and its note ragequit by u after (paid: on_payout and the
 //!    payout receipt). Then every view.
 //! 2. intents: a 64-hex S's deposits through intents.near with the kit's `min_gas`, k = 0 and 1 real, 2..16 and 32
-//!    patched, 300 Tgas attached.
+//!    patched, 300 Tgas attached to `execute_intents` (a solver's call, not ours; tests/s13.rs's).
 //! 3. withdraw: two funding deposits and the fixture's two roots seeded (as tests/s10.rs seeds a proof's roots); w1
 //!    at the real index 1, w2 at the real index 3, w3..w17 at 2^k - 1 (state tree only) for k = 3..16 and 32. Each
 //!    pays newcomer 900,000 with its registration and relayer 100,000 (the costliest payout, 70 Tgas of statics).
@@ -32,12 +32,24 @@
 //!    payout bounces whole and the spend waits as refund_pending; then each settle writes its refund note at 2^k - 1
 //!    of both trees for k = 1..16 and 32.
 //!
+//! Every call attaches what its real caller attaches, read from the caller's source, and must land at depth 32: U's
+//! deposit the kit's VAULT_DEPOSIT_CARRIER.gas_tgas (packages/kit/src/vault/shapes.ts), the relayer's storage_prepay
+//! PREPAY_GAS (apps/helper/src/bind/send.ts), withdraw and settle the helper's WITHDRAW_GAS and SETTLE_GAS
+//! (apps/helper/src/withdraw/send.ts), and a ragequit the vault's own floor for it, `check_gas`'s statics + 100 Tgas
+//! (src/payout.rs; the kit names no ragequit gas). Only the views, sent as transactions to read their gas, attach 300.
+//!
 //! The asserts (VT-S12's proof, vault.md 5): every method's measured and extrapolated Tgas at depth 32 under 300; the
-//! withdrawal's and the ragequit's own work under GAS_OWN_WORK_TGAS, the 100 Tgas `check_gas` keeps for it; every
-//! `on_payout` at most a sixth of its static GAS_ON_PAYOUT_TGAS; every payout receipt within the statics of its calls
-//! (GAS_STORAGE_DEPOSIT_TGAS, GAS_FT_TRANSFER_TGAS). `VT_S12_PLANT=<on_payout|ft_transfer|storage_deposit|own_work>`
-//! reads that static as 1 Tgas, lower than the measure, and the run must fail. Every row names the build measured
-//! (the vault wasm's size and sha256), the sandbox (version and protocol, from RPC status) and the platform.
+//! withdrawal's and the ragequit's own work under GAS_OWN_WORK_TGAS, the 100 Tgas `check_gas` keeps for it, counted
+//! as src/payout.rs counts it: the gas the receipt takes from what it was attached, its burnt gas less its own
+//! receipt's execution fee plus the execution fees it prepays for the receipts it makes, read as the attached gas less
+//! what its payout and `on_payout` receipts were given (unused gas goes to them by weight, so none is left); every
+//! `on_payout` at most a sixth of its static GAS_ON_PAYOUT_TGAS; every payout receipt within the smallest static of
+//! the calls it holds (GAS_STORAGE_DEPOSIT_TGAS, GAS_FT_TRANSFER_TGAS), so each call in it is within its own.
+//! `VT_S12_PLANT=<on_payout|ft_transfer|storage_deposit|own_work>` reads that static as 1 Tgas, lower than the
+//! measure, and every test whose calls it bounds must fail: on_payout and ft_transfer direct, withdraw and settle;
+//! storage_deposit withdraw and settle (the payouts that register); own_work direct and withdraw. Every row names the
+//! build measured (the vault wasm's size and sha256), the sandbox (version and protocol, from RPC status) and the
+//! platform.
 #![cfg(feature = "sandbox")]
 
 mod harness;
@@ -45,7 +57,7 @@ mod harness;
 use blindfill_vault::constants::{GAS_FT_TRANSFER_TGAS, GAS_ON_PAYOUT_TGAS, GAS_STORAGE_DEPOSIT_TGAS, PAGE_MAX};
 use blindfill_vault::context::field_of;
 use blindfill_vault::field;
-use blindfill_vault::payout::GAS_OWN_WORK_TGAS;
+use blindfill_vault::payout::{self, GAS_OWN_WORK_TGAS};
 use harness::{Harness, Outcome, Receipt, TokenKind, R, TGAS, YOCTO_PER_BYTE};
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::types::{Gas, NearToken};
@@ -68,7 +80,64 @@ const PREPAY: u128 = 904 * YOCTO_PER_BYTE;
 /// A withdrawal's and a ragequit's attachment: over row 14's bytes and reserve (at most 710 + 74 + 389 B here), the
 /// registration and a yocto per transfer; the rest stays in the spend's reserve.
 const SPEND_ATTACH: u128 = 20_000_000_000_000_000_000_000;
-const CALL_GAS: Gas = Gas::from_tgas(300);
+/// A view sent as a transaction to read its gas; no caller sends one.
+const VIEW_GAS: Gas = Gas::from_tgas(300);
+
+/// A file of the repository, from the vault's crate.
+fn repo_file(rel: &str) -> String {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").join(rel);
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"))
+}
+
+/// The digits (underscores dropped) at the start of `s`, as a number.
+fn number(s: &str, what: &str) -> u64 {
+    let d: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '_').filter(|c| *c != '_').collect();
+    d.parse().unwrap_or_else(|_| panic!("{what}: no number at {s:?}"))
+}
+
+/// `export const <name> = <gas>n;` in a helper file, the one line that declares it, as whole Tgas.
+fn helper_gas(rel: &str, name: &str) -> Gas {
+    let src = repo_file(rel);
+    let head = format!("export const {name} = ");
+    let lines: Vec<&str> = src.lines().filter(|l| l.starts_with(&head)).collect();
+    assert_eq!(lines.len(), 1, "{rel} declares {name} once, on one line");
+    let g = number(&lines[0][head.len()..], name);
+    assert_eq!(g % TGAS as u64, 0, "{rel} {name}: {g} is not a whole number of Tgas");
+    let g = Gas::from_gas(g);
+    println!("VT-S12 attached | {name} | {} Tgas | {rel}", g.as_tgas());
+    g
+}
+
+/// U's deposit gas: the kit's VAULT_DEPOSIT_CARRIER.gas_tgas, the one `gas_tgas` of that object in shapes.ts.
+fn deposit_gas() -> Gas {
+    let rel = "packages/kit/src/vault/shapes.ts";
+    let src = repo_file(rel);
+    let body: Vec<&str> = src.lines().skip_while(|l| !l.starts_with("export const VAULT_DEPOSIT_CARRIER = {")).take_while(|l| !l.starts_with("} as const;")).collect();
+    let g: Vec<&str> = body.iter().filter_map(|l| l.trim().strip_prefix("gas_tgas: ")).collect();
+    assert_eq!(g.len(), 1, "{rel}: VAULT_DEPOSIT_CARRIER names gas_tgas once");
+    let t = number(g[0], "VAULT_DEPOSIT_CARRIER.gas_tgas");
+    println!("VT-S12 attached | VAULT_DEPOSIT_CARRIER.gas_tgas | {t} Tgas | {rel}");
+    Gas::from_tgas(t)
+}
+
+fn prepay_gas() -> Gas {
+    helper_gas("apps/helper/src/bind/send.ts", "PREPAY_GAS")
+}
+
+fn withdraw_gas() -> Gas {
+    helper_gas("apps/helper/src/withdraw/send.ts", "WITHDRAW_GAS")
+}
+
+fn settle_gas() -> Gas {
+    helper_gas("apps/helper/src/withdraw/send.ts", "SETTLE_GAS")
+}
+
+/// A ragequit with no registration: the vault's own floor, `check_gas`'s statics (ft_transfer, on_payout) + 100.
+fn ragequit_gas() -> Gas {
+    let t = payout::statics_tgas(0, 0) + GAS_OWN_WORK_TGAS;
+    println!("VT-S12 attached | ragequit (check_gas's floor) | {t} Tgas | src/payout.rs");
+    Gas::from_tgas(t)
+}
 
 fn fixture() -> Value {
     serde_json::from_str(FIXTURE).unwrap()
@@ -189,7 +258,8 @@ impl Meter {
 }
 
 /// Every payout receipt and `on_payout` of `o` against the statics: `on_payout` at most a sixth of
-/// GAS_ON_PAYOUT_TGAS, the payout receipt within the statics of the calls it holds. Records both at k; returns
+/// GAS_ON_PAYOUT_TGAS, the payout receipt within the smallest static of the calls it holds (each call burns part of
+/// the receipt's gas, so each is then within its own static). Records both at k; returns
 /// whether the payout delivered (`on_payout`'s result is the vault's, so read the payout receipt's status).
 fn payouts(h: &Harness, m: &mut Meter, o: &Outcome, k: u8, how: How, what: &str) -> R<bool> {
     let cb = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
@@ -199,7 +269,7 @@ fn payouts(h: &Harness, m: &mut Meter, o: &Outcome, k: u8, how: How, what: &str)
     let pay: Vec<&Receipt> = o.receipts.iter().filter(|r| r.executor == h.token.as_str() && r.predecessor == h.vault.as_str() && !r.methods.is_empty()).collect();
     assert_eq!(pay.len(), 1, "{what}: want one payout receipt, got {}", pay.len());
     let p = pay[0];
-    let statics: f64 = p
+    let least = p
         .methods
         .iter()
         .map(|x| match x.as_str() {
@@ -207,8 +277,8 @@ fn payouts(h: &Harness, m: &mut Meter, o: &Outcome, k: u8, how: How, what: &str)
             "ft_transfer" => static_tgas("ft_transfer", GAS_FT_TRANSFER_TGAS),
             other => panic!("{what}: the payout receipt calls {other}"),
         })
-        .sum();
-    assert!(tgas(p.gas_burnt) <= statics, "{what}: the payout receipt [{}] burnt {:.3} Tgas, over its statics {statics:.3}", p.action_key(), tgas(p.gas_burnt));
+        .fold(f64::MAX, f64::min);
+    assert!(tgas(p.gas_burnt) <= least, "{what}: the payout receipt [{}] burnt {:.3} Tgas, over the smallest static of its calls ({least:.3})", p.action_key(), tgas(p.gas_burnt));
     let delivered = p.ok();
     let tag = if delivered { "paid" } else { "refund_pending" };
     m.add(&format!("on_payout ({tag})"), k, 0, cb, how);
@@ -216,10 +286,23 @@ fn payouts(h: &Harness, m: &mut Meter, o: &Outcome, k: u8, how: How, what: &str)
     Ok(delivered)
 }
 
-/// The own work of a withdrawal or a ragequit under the 100 Tgas `check_gas` keeps for it.
-fn own_work(r: &Receipt, what: &str) {
+/// The own work of a withdrawal or a ragequit `r` in `o`, sent with `attached`, as src/payout.rs counts it against the
+/// 100 Tgas `check_gas` keeps for it: what `r` took of its attached gas, `attached` less the gas its payout and
+/// `on_payout` receipts were given (its burnt gas less its own receipt's execution fee, which the transaction paid,
+/// plus the execution fees it prepays for them). Prints it with its margin under 100; returns it in Tgas.
+async fn own_work(h: &Harness, o: &Outcome, signer: &Account, r: &Receipt, attached: Gas, what: &str) -> R<f64> {
+    let given = h.given(o, signer.id()).await?;
+    let made: Vec<&Receipt> = o.receipts.iter().filter(|x| x.predecessor == h.vault.as_str() && !x.methods.is_empty()).collect();
+    assert_eq!(made.len(), 2, "{what}: want the payout and on_payout receipts, got {}", made.len());
+    let handed: u64 = made.iter().map(|x| *given.get(&x.id).unwrap_or_else(|| panic!("{what}: no prepaid gas read for {}", x.id))).sum();
+    assert_eq!(given.get(&r.id), Some(&attached.as_gas()), "{what}: the receipt was not given the attached {} Tgas", attached.as_tgas());
+    let need = tgas(attached.as_gas() - handed);
+    let fees = need - tgas(r.gas_burnt);
+    assert!(fees > 0.0 && fees < 5.0, "{what}: {need:.3} Tgas taken against {:.3} burnt: {fees:+.3} Tgas of execution fees, not the 0.885-2.554 vault.md 2.11 reads", tgas(r.gas_burnt));
     let bound = static_tgas("own_work", GAS_OWN_WORK_TGAS);
-    assert!(tgas(r.gas_burnt) < bound, "{what}: the receipt burnt {:.3} Tgas, not under the {bound} Tgas check_gas keeps for its own work", tgas(r.gas_burnt));
+    println!("VT-S12 own work | {what} | attached {} Tgas | burnt {:.3} + execution fees net {fees:.3} = {need:.3} Tgas | {:.1} % under the {bound} check_gas keeps", attached.as_tgas(), tgas(r.gas_burnt), (bound - need) / bound * 100.0);
+    assert!(need < bound, "{what}: its own work {need:.3} Tgas (burnt {:.3} + execution fees {fees:.3}), not under the {bound} Tgas check_gas keeps for it", tgas(r.gas_burnt));
+    Ok(need)
 }
 
 /// Each k's tree size before its insert at index 2^k - 1, and the depth a real tree of that size has: k, except 0 for
@@ -229,7 +312,7 @@ fn at(k: u8) -> (u64, u8) {
 }
 
 async fn prepay(h: &Harness, by: &Account, p: &str) -> R<Outcome> {
-    h.call(by, &h.vault, "storage_prepay", json!({"precommitment": p}), y(PREPAY), Gas::from_tgas(30)).await
+    h.call(by, &h.vault, "storage_prepay", json!({"precommitment": p}), y(PREPAY), prepay_gas()).await
 }
 
 /// U's own `ft_transfer_call` of `value` into the vault on `p` for `depositor`; lands, the vault's balance rises by
@@ -238,7 +321,7 @@ async fn deposit(h: &Harness, u: &Account, p: &str, value: u128, depositor: &Acc
     let before = h.token_balance(&h.vault).await?;
     let msg = format!(r#"{{"precommitment":"{p}","depositor":"{depositor}"}}"#);
     let args = json!({"receiver_id": h.vault, "amount": value.to_string(), "msg": msg});
-    let o = h.call(u, &h.token, "ft_transfer_call", args, y(1), CALL_GAS).await?;
+    let o = h.call(u, &h.token, "ft_transfer_call", args, y(1), deposit_gas()).await?;
     assert_eq!(h.token_balance(&h.vault).await? - before, value, "the deposit at {index} did not land");
     assert_eq!(h.tree("state_tree").await?.0, index + 1, "the deposit's leaf is not at {index}");
     Ok(o.calls_exactly(&h.vault, "ft_on_transfer", 1)?[0].clone())
@@ -246,7 +329,7 @@ async fn deposit(h: &Harness, u: &Account, p: &str, value: u128, depositor: &Acc
 
 /// A view sent as a transaction, so its gas is burnt; returns the vault's receipt.
 async fn view_tx(h: &Harness, by: &Account, method: &str, args: Value) -> R<Receipt> {
-    let o = h.call(by, &h.vault, method, args, y(0), CALL_GAS).await?;
+    let o = h.call(by, &h.vault, method, args, y(0), VIEW_GAS).await?;
     Ok(o.calls_exactly(&h.vault, method, 1)?[0].clone())
 }
 
@@ -298,9 +381,11 @@ async fn vt_s12_direct() -> R<()> {
         assert_eq!(rq["public_signals"][0], f["leaves"][i], "ragequit {i}: not note {}", i + 1);
         let args = json!({"proof": rq["proof"], "public_signals": rq["public_signals"], "register_deposit": rq["register_deposit"], "refund_precommitment": rq["refund_precommitment"]});
         let held = h.token_balance(u.id()).await?;
-        let o = h.call(&u, &h.vault, "ragequit", args, y(SPEND_ATTACH), CALL_GAS).await?;
+        let gas = ragequit_gas();
+        let o = h.call(&u, &h.vault, "ragequit", args, y(SPEND_ATTACH), gas).await?;
         let r = o.calls_exactly(&h.vault, "ragequit", 1)?[0];
-        own_work(r, &format!("ragequit at k {k}"));
+        assert!(r.ok(), "ragequit at k {k}: {}", r.line());
+        own_work(&h, &o, &u, r, gas, &format!("ragequit at k {k}")).await?;
         m.add("ragequit", k, 0, r, how);
         assert!(payouts(&h, &mut m, &o, k, how, &format!("ragequit at k {k}"))?, "ragequit at k {k}: the payout did not deliver");
         assert_eq!(h.token_balance(u.id()).await? - held, VALUE, "ragequit at k {k}: u was not paid");
@@ -428,17 +513,18 @@ async fn vt_s12_withdraw() -> R<()> {
             h.seed_trees(Some(at(k)), None).await?;
         }
         let (to_new, to_relayer) = (h.token_balance(newcomer.id()).await?, h.token_balance(relayer.id()).await?);
-        let o = h.call_outcome(&relayer, &h.vault, "withdraw", withdraw_args(w), y(SPEND_ATTACH + REGISTER + 2), CALL_GAS).await?;
+        let gas = withdraw_gas();
+        let o = h.call_outcome(&relayer, &h.vault, "withdraw", withdraw_args(w), y(SPEND_ATTACH + REGISTER + 2), gas).await?;
         let r = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
         assert!(r.ok(), "withdraw at k {k}: {}", r.line());
         assert_eq!(h.tree("state_tree").await?.0, at(k).0 + 1, "withdraw at k {k}: the change leaf is not at 2^k - 1");
-        own_work(r, &format!("withdraw at k {k}"));
+        let need = own_work(&h, &o, &relayer, r, gas, &format!("withdraw at k {k}")).await?;
         m.add("withdraw", k, k as u32, r, how);
         assert!(payouts(&h, &mut m, &o, k, how, &format!("withdraw at k {k}"))?, "withdraw at k {k}: the payout did not deliver");
         assert_eq!((h.token_balance(newcomer.id()).await? - to_new, h.token_balance(relayer.id()).await? - to_relayer), (900_000, 100_000), "withdraw at k {k}: the payout");
         let whole = tgas(o.receipts.iter().map(|r| r.gas_burnt).sum());
-        println!("VT-S12 withdraw | k {k} | the whole transaction {whole:.3} Tgas; the receipt {:.3} + its 70 Tgas of statics = {:.3}", tgas(r.gas_burnt), tgas(r.gas_burnt) + 70.0);
-        assert!(tgas(r.gas_burnt) + 70.0 < LIMIT_TGAS, "withdraw at k {k}: its own work and statics are not under {LIMIT_TGAS}");
+        println!("VT-S12 withdraw | k {k} | the whole transaction {whole:.3} Tgas; its own work {need:.3} + its 70 Tgas of statics = {:.3} of the {} attached", need + 70.0, gas.as_tgas());
+        assert!(need + 70.0 < tgas(gas.as_gas()), "withdraw at k {k}: its own work and statics are not under the {} Tgas attached", gas.as_tgas());
     }
     println!("{}", h.gas_table());
     h.i1().await?;
@@ -457,15 +543,16 @@ async fn vt_s12_settle() -> R<()> {
     // the withdrawals at a patched 2^20, out of the way of every 2^k - 1 below; every payout bounces on relayer
     h.seed_trees(Some((1 << 20, 20)), None).await?;
     for (j, w) in ws.iter().enumerate() {
-        let o = h.call_outcome(&relayer, &h.vault, "withdraw", withdraw_args(w), y(SPEND_ATTACH + REGISTER + 2), CALL_GAS).await?;
+        let o = h.call_outcome(&relayer, &h.vault, "withdraw", withdraw_args(w), y(SPEND_ATTACH + REGISTER + 2), withdraw_gas()).await?;
         let r = o.calls_exactly(&h.vault, "withdraw", 1)?[0];
         assert!(r.ok(), "withdraw {j}: {}", r.line());
         assert!(!payouts(&h, &mut m, &o, 20, How::Patched, &format!("withdraw {j}"))?, "withdraw {j}: the payout delivered; it must bounce");
     }
     for (w, &k) in ws.iter().zip(KS.iter()) {
         h.seed(at(k).0, at(k).1).await?;
-        let o = h.call(&stranger, &h.vault, "settle", json!({"nullifier_hash": w["public_signals"][1]}), y(0), CALL_GAS).await?;
+        let o = h.call(&stranger, &h.vault, "settle", json!({"nullifier_hash": w["public_signals"][1]}), y(0), settle_gas()).await?;
         let r = o.calls_exactly(&h.vault, "settle", 1)?[0];
+        assert!(r.ok(), "settle at k {k}: {}", r.line());
         assert_eq!((h.tree("state_tree").await?.0, h.tree("label_tree").await?.0), (at(k).0 + 1, at(k).0 + 1), "settle at k {k}: the refund note is not at 2^k - 1");
         m.add("settle (refund note)", k, 2 * k as u32, r, How::Patched);
     }
