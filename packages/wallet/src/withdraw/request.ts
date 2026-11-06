@@ -210,7 +210,8 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
       if (p.publicSignals[7] !== req.context) throw new Error("proof: its context is not the request's");
       body = { withdrawal: req.withdrawal, proof: vaultProof(p.proof), public_signals: p.publicSignals, fund_recipient: true, token };
       // WU-06: RESERVED, with the spent note's ref and so the change index, before the request leaves this function.
-      await notes.move(note.id, "HELD", "RESERVED", { attempt });
+      // its body with it, so a later page sends the same bytes again (card signpage-withdraw-handoff: the settle pass)
+      await notes.move(note.id, "HELD", "RESERVED", { attempt, request: JSON.stringify(body) });
     } catch (e) {
       await free();
       throw e;

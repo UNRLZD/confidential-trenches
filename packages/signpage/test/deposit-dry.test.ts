@@ -36,8 +36,8 @@ const dec6 = (v: bigint): string => {
 };
 
 /** 1Click's dry answer to `req`, honest: `spread` bps over its fee (5; 15 is the device's own cap, an answer at its
- *  floor), W off, min out 1 % under. */
-function dryAnswer(req: OneClickRequest, w = W, spread = 5, fee = 20): Answer {
+ *  floor), W off, min out 1 % under. Its fee between two USDC assets is 1 bp (docs fees.md, live reads 6 Nov 15:19Z). */
+function dryAnswer(req: OneClickRequest, w = W, spread = 5, fee = 1): Answer {
   const a = BigInt(req.amount);
   const same = req.originAsset === req.destinationAsset;
   const out = a - w - (a * BigInt((same ? 0 : fee) + spread)) / 10_000n;
@@ -133,24 +133,22 @@ const ASSETS = { type: "deposit.assets" };
 const dry = (amount: string, origin_asset = SOL_USDC) => ({ type: "deposit.dry", origin_asset, amount });
 
 // ------------------------------------------------------------------------------------------------ the minimum
-test("the minimum is the least amount whose floor clears MIN_DEPOSIT at the fee, found on oneClickFloors itself", () => {
-  // by hand: amountOut ≥ 1,010,101 makes ⌈amountOut × 0.99⌉ ≥ 1,000,000; then A − ⌊A × 35 / 10,000⌋ ≥ 1,010,101 + 5,538
-  assert.equal(depositMinimum(SOL_USDC, W), 1_019_206n);
-  assert.equal(depositMinimum(BASE_USDC, W), 1_019_206n);
+test("the minimum is the least amount whose floor clears MIN_DEPOSIT at the route's fee, found on oneClickFloors itself", () => {
+  // by hand: amountOut ≥ 1,010,101 makes ⌈amountOut × 0.99⌉ ≥ 1,000,000; then, at 1Click's 1 bp between two USDC
+  // assets and S 15, A − ⌊A × 16 / 10,000⌋ ≥ 1,010,101 + 5,538
+  assert.equal(depositMinimum(SOL_USDC, W), 1_017_266n);
+  assert.equal(depositMinimum(BASE_USDC, W), 1_017_266n);
   // the same asset pays no fee to 1Click: A − ⌊A × 15 / 10,000⌋ ≥ 1,015,639
   assert.equal(depositMinimum(NEAR_USDC, W), 1_017_164n);
-  // with no withdraw fee; on the keyless path (fee 1): A − ⌊A × 16 / 10,000⌋ ≥ 1,015,639
-  assert.equal(depositMinimum(SOL_USDC, 0n), 1_013_648n);
-  assert.equal(depositMinimum(SOL_USDC, W, "keyless"), 1_017_266n);
-  for (const [asset, w, path] of [[SOL_USDC, W, "partner"], [NEAR_USDC, W, "partner"], [SOL_USDC, 0n, "partner"], [SOL_USDC, 123_456n, "partner"], [SOL_USDC, W, "keyless"], [SOL_USDC, 0n, "keyless"]] as const) {
-    const m = depositMinimum(asset, w, path)!;
-    const f = (a: bigint) => oneClickFloors({ amountIn: a, withdrawFee: w, slippageBps: 100, feeBps: asset === NEAR_USDC ? 0 : path === "partner" ? 20 : 1, pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault: false }).minAmountOut;
-    assert.ok(f(m) >= ONECLICK_VAULT_MIN_OUT && f(m - 1n) < ONECLICK_VAULT_MIN_OUT, `${asset} at ${w} on ${path}`);
+  for (const [asset, w] of [[SOL_USDC, W], [NEAR_USDC, W], [SOL_USDC, 0n], [SOL_USDC, 123_456n], [BASE_USDC, 0n]] as const) {
+    const m = depositMinimum(asset, w)!;
+    const f = (a: bigint) => oneClickFloors({ amountIn: a, withdrawFee: w, slippageBps: 100, feeBps: asset === NEAR_USDC ? 0 : 1, pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault: false }).minAmountOut;
+    assert.ok(f(m) >= ONECLICK_VAULT_MIN_OUT && f(m - 1n) < ONECLICK_VAULT_MIN_OUT, `${asset} at ${w}`);
   }
   // a fee no amount up to the cap clears: no minimum
   assert.equal(depositMinimum(SOL_USDC, 10n ** 12n), null);
-  // the bound before any request: no withdraw fee, the least path fee (keyless, 1): A − ⌊A × 16 / 10,000⌋ ≥ 1,010,101
-  assert.equal(depositMinimum(SOL_USDC, 0n, "keyless"), 1_011_719n);
+  // the bound before any request: no withdraw fee: A − ⌊A × 16 / 10,000⌋ ≥ 1,010,101
+  assert.equal(depositMinimum(SOL_USDC, 0n), 1_011_719n);
   assert.equal(belowDepositBound(SOL_USDC, 1_011_718n), true);
   assert.equal(belowDepositBound(SOL_USDC, 1_011_719n), false);
 });
@@ -162,8 +160,8 @@ test("deposit.assets through the frame, signed out: the three assets as 1Click l
   assert.deepEqual(a.result, {
     assets: [
       { origin_asset: NEAR_USDC, chain: "near", symbol: "USDC", decimals: 6, min: "1.017164", max_usd: "1000" },
-      { origin_asset: SOL_USDC, chain: "solana", symbol: "USDC", decimals: 6, min: "1.019206", max_usd: "1000" },
-      { origin_asset: BASE_USDC, chain: "base", symbol: "USDC", decimals: 6, min: "1.019206", max_usd: "1000" },
+      { origin_asset: SOL_USDC, chain: "solana", symbol: "USDC", decimals: 6, min: "1.017266", max_usd: "1000" },
+      { origin_asset: BASE_USDC, chain: "base", symbol: "USDC", decimals: 6, min: "1.017266", max_usd: "1000" },
     ],
   });
   assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.assets"](a.result), true, "the kit's client takes it");
@@ -180,7 +178,7 @@ test("deposit.assets: the minimum follows 1Click's quoted withdraw fee, per asse
   const f = frame({ by: { [SOL_USDC]: { w: 0n } } });
   const a = await f.ask(ASSETS);
   const sol = (a.result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!;
-  assert.equal(sol.min, "1.013648");
+  assert.equal(sol.min, "1.011719");
 });
 
 test("deposit.assets: an asset 1Click does not list as the release has it, or whose quote fails a check, is left out", async () => {
@@ -224,8 +222,8 @@ test("deposit.assets: the helper busy or down answers that code, not kept, so th
 test("deposit.dry through the frame, signed out: the checked dry quote's lines in USD and 1Click's own time, to the placeholder", async () => {
   const f = frame();
   const a = await f.ask(dry("25"));
-  // 25,000,000 − 5,538 − ⌊25,000,000 × 25 / 10,000⌋ = 24,931,962; min out ⌈× 0.99⌉ = 24,682,643
-  assert.deepEqual(a.result, { amount_out_usd: "24.931962", min_amount_out_usd: "24.682643", fee_usd: "0.068038", time_estimate_s: 20 });
+  // 25,000,000 − 5,538 − ⌊25,000,000 × 6 / 10,000⌋ = 24,979,462; min out ⌈× 0.99⌉ = 24,729,668
+  assert.deepEqual(a.result, { amount_out_usd: "24.979462", min_amount_out_usd: "24.729668", fee_usd: "0.020538", time_estimate_s: 20 });
   assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.dry"](a.result), true, "the kit's client takes it");
   assert.equal(f.sent.length, 1);
   const r = f.sent[0]!.body!;
@@ -236,18 +234,40 @@ test("deposit.dry through the frame, signed out: the checked dry quote's lines i
   });
 });
 
-test("deposit.dry and deposit.assets: a fee entry of 1Click's keyless path (fee 1, as the helper's dry quotes named on 6 Nov 14:06Z) is taken, its floor held at that fee; any other fee is quote_check_failed", async () => {
-  const keyless: Net = { quote: { fee: 1 } };
-  // 25,000,000 − 5,538 − ⌊25,000,000 × 6 / 10,000⌋ = 24,979,462, less the live quote's 19 bps more (47,500): the lines
-  // at deposit.quote's fee (card review item 3)
-  assert.deepEqual((await frame(keyless).ask(dry("25"))).result, { amount_out_usd: "24.931962", min_amount_out_usd: "24.682168", fee_usd: "0.068038", time_estimate_s: 20 });
-  const sol = ((await frame({ by: { [SOL_USDC]: { fee: 1 } } }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!;
-  // the minimum at the live quote's fee (partner, 20), never the dry entry's (keyless 1 gives 1.017266)
-  assert.equal(sol.min, "1.019206");
-  // the keyless floor on an answer cut to the partner's fee: refused, the floor is the fee the entry names
-  assert.deepEqual((await frame({ quote: { fee: 1, spread: 24 } }).ask(dry("25"))).error, { code: "quote_check_failed" });
-  for (const fee of [0, 2, 19, 21, 100]) assert.deepEqual((await frame({ quote: { fee } }).ask(dry("25"))).error, { code: "quote_check_failed" }, String(fee));
+// Card oneclick-partner-fee-live: F is the route's fee, from the device's own request (origin and destination asset),
+// never the answer's appFees, which 1Click does not sign: an entry other than 1Click's 1 bp is refused wherever it is read.
+test("deposit.dry, deposit.assets and deposit.quote: F is the route's (1 bp USDC to USDC); any other entry is quote_check_failed", async () => {
+  // an answer at the floor of that fee passes; one cut deeper is refused
+  assert.equal((await frame({ quote: { spread: 15 } }).ask(dry("25"))).ok, true);
+  assert.deepEqual((await frame({ quote: { spread: 16 } }).ask(dry("25"))).error, { code: "quote_check_failed" });
+  for (const fee of [0, 2, 19, 20, 21, 100]) {
+    assert.deepEqual((await frame({ quote: { fee } }).ask(dry("25"))).error, { code: "quote_check_failed" }, `dry, fee ${fee}`);
+    const ids = ((await frame({ by: { [SOL_USDC]: { fee } } }).ask(ASSETS)).result!.assets as { origin_asset: string }[]).map((x) => x.origin_asset);
+    assert.deepEqual(ids, [NEAR_USDC, BASE_USDC], `assets, fee ${fee}: Solana's left out`);
+    assert.deepEqual((await quotePage(liveFetch([], undefined, 15, 201, fee))("25")).error, { code: "quote_check_failed" }, `quote, fee ${fee}`);
+  }
   assert.deepEqual((await frame({ quote: { after: (x) => void (x.quoteRequest.appFees = [{ recipient: U, fee: 1 }]) } }).ask(dry("25"))).error, { code: "quote_check_failed" }, "another collector");
+});
+
+test("review L1: an entry relabelled after 1Click signed (fee 1 signed, 20 sent on) is refused, never read as a 19 bps cut", async () => {
+  const relabel = (x: Answer) => void (x.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 20 }]);
+  assert.deepEqual((await frame({ quote: { after: relabel } }).ask(dry("25"))).error, { code: "quote_check_failed" });
+  const ids = ((await frame({ by: { [SOL_USDC]: { after: relabel } } }).ask(ASSETS)).result!.assets as { origin_asset: string }[]).map((x) => x.origin_asset);
+  assert.deepEqual(ids, [NEAR_USDC, BASE_USDC]);
+  assert.deepEqual((await quotePage(liveFetch([], relabel))("25")).error, { code: "quote_check_failed" });
+  // the same answer as signed passes, and its lines are its own signed amounts, with nothing taken off
+  assert.deepEqual((await frame().ask(dry("25"))).result!.amount_out_usd, "24.979462");
+});
+
+test("review L2: an answer whose amounts take 20 bps under a 1 bp entry, its withdrawFee raised: the room is counted at the route's fee, once", async () => {
+  // 1Click's probe of 10 USDC with 21 bps more taken than its 1 bp entry says (20 hidden + 1 spread): the signed room is
+  // 10,000,000 − amountOut − ⌊10,000,000 × 1 / 10,000⌋ = W + 21,000 = 26,538, and the minimum is the least A with
+  // ⌈(A − 26,538 − ⌊A × 16 / 10,000⌋) × 0.99⌉ ≥ 1,000,000, worked out here by hand, not by the code under test
+  const hidden: Net["quote"] = { spread: 21, after: (x) => void (x.quote.withdrawFee = "9900000") };
+  const sol = ((await frame({ by: { [SOL_USDC]: hidden } }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!;
+  let a = 1_000_000n;
+  while (((a - 26_538n - (a * 16n) / 10_000n) * 9_900n + 9_999n) / 10_000n < 1_000_000n) a++;
+  assert.equal(sol.min, dec6(a));
 });
 
 test("deposit.dry: the time is the dry answer's own (not signed), checked as a whole number of seconds", async () => {
@@ -273,10 +293,10 @@ test("deposit.dry: below_min before any request, under the bound no fee lowers; 
   assert.equal(f.sent.length, 1);
   // an answer at the device's own floor: at the minimum deposit.assets gave it lands, one unit under it is below_min
   const atFloor: Net = { quote: { spread: 15 } };
-  assert.equal((await frame(atFloor).ask(dry("1.019206"))).ok, true);
-  assert.deepEqual((await frame(atFloor).ask(dry("1.019205"))).error, { code: "below_min" });
+  assert.equal((await frame(atFloor).ask(dry("1.017266"))).ok, true);
+  assert.deepEqual((await frame(atFloor).ask(dry("1.017265"))).error, { code: "below_min" });
   // a kinder answer than the floor clears MIN_DEPOSIT under the minimum: the device takes it, it never refuses a quote that lands
-  assert.equal((await frame().ask(dry("1.019205"))).ok, true);
+  assert.equal((await frame().ask(dry("1.017265"))).ok, true);
 });
 
 test("deposit.dry: an answer that fails a check is quote_check_failed, never below_min, even under the minimum", async () => {
@@ -315,7 +335,7 @@ function quotePage(fetchFn: typeof fetch) {
   };
 }
 /** 1Click's live answer to a deposit to U, honest at its fee, signed. */
-function liveFetch(sent: OneClickRequest[], tamper?: (a: Answer) => void, spread = 15, status = 201, fee = 20): typeof fetch {
+function liveFetch(sent: OneClickRequest[], tamper?: (a: Answer) => void, spread = 15, status = 201, fee = 1): typeof fetch {
   return (async (_url: string | URL | Request, init?: RequestInit) => {
     const req = JSON.parse(String(init?.body)) as OneClickRequest;
     sent.push(req);
@@ -340,9 +360,9 @@ test("deposit.quote: below_min before any request under the bound, and off the v
   assert.deepEqual((await ask("0.5")).error, { code: "below_min" });
   assert.equal(sent.length, 0, "nothing sent under the bound");
   assert.deepEqual((await ask("1.011719")).error, { code: "below_min" });
-  assert.deepEqual((await ask("1.019205")).error, { code: "below_min" });
+  assert.deepEqual((await ask("1.017265")).error, { code: "below_min" });
   assert.equal(sent.length, 2);
-  assert.equal((await ask("1.019206")).ok, true);
+  assert.equal((await ask("1.017266")).ok, true);
   // an answer that fails another check stays quote_check_failed under the minimum
   const ask2 = quotePage(liveFetch([], (a) => void (a.quoteRequest.refundTo = DEPOSIT_DRY_PLACEHOLDER)));
   assert.deepEqual((await ask2("1.011719")).error, { code: "quote_check_failed" });
@@ -363,7 +383,7 @@ test("review 2: a withdrawFee rewritten after 1Click signed cannot move the mini
   const minOf = async (q: Net["quote"]) =>
     ((await frame({ quote: q }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!.min;
   const honest = await minOf({ spread: 0 });
-  assert.equal(honest, "1.019206");
+  assert.equal(honest, "1.017266");
   for (const w of ["5000000", "9900000"])
     assert.equal(await minOf({ spread: 0, after: (x) => void (x.quote.withdrawFee = w) }), honest, `withdrawFee rewritten to ${w}`);
   // one the fees then take the whole probe with: the device's own floor refuses the answer, the asset is left out
@@ -372,16 +392,18 @@ test("review 2: a withdrawFee rewritten after 1Click signed cannot move the mini
   const room = await minOf({ spread: 5, after: (x) => void (x.quote.withdrawFee = "9900000") });
   assert.equal(room, (Number(depositMinimum(SOL_USDC, 5_538n + 5_000n)) / 1e6).toString());
   // the bound itself
-  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_974_462n, unsignedDryWithdrawFee: 9_000_000n }, 20), 5_538n);
-  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_974_462n, unsignedDryWithdrawFee: 4_000n }, 20), 4_000n);
-  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 10_000_000n, unsignedDryWithdrawFee: 4_000n }, 20), 0n);
+  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_993_462n, unsignedDryWithdrawFee: 9_000_000n }, 1), 5_538n);
+  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 9_993_462n, unsignedDryWithdrawFee: 4_000n }, 1), 4_000n);
+  assert.equal(signedWithdrawFee({ amountIn: 10_000_000n, amountOut: 10_000_000n, unsignedDryWithdrawFee: 4_000n }, 1), 0n);
 });
 
-test("review 3: at the minimum deposit.assets showed from keyless dry entries, the live deposit.quote (partner, at its floor) gives the address", async () => {
-  const shown = ((await frame({ quote: { fee: 1 } }).ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!.min;
+test("review 3 and L3: at the minimum deposit.assets shows, deposit.dry and the live deposit.quote (each at its floor) both go; one unit under, both are below_min", async () => {
+  const shown = ((await frame().ask(ASSETS)).result!.assets as { origin_asset: string; min: string }[]).find((x) => x.origin_asset === SOL_USDC)!.min;
+  assert.equal(shown, "1.017266");
   assert.equal((await quotePage(liveFetch([], undefined, 15))(shown)).ok, true, `deposit.quote at the shown ${shown}`);
-  // and a dry quote under the live fee's minimum is below_min even when the keyless entry would clear it
-  assert.deepEqual((await frame({ quote: { fee: 1, spread: 15 } }).ask(dry("1.017266"))).error, { code: "below_min" });
+  assert.equal((await frame({ quote: { spread: 15 } }).ask(dry(shown))).ok, true, `deposit.dry at the shown ${shown}`);
+  assert.deepEqual((await quotePage(liveFetch([], undefined, 15))("1.017265")).error, { code: "below_min" });
+  assert.deepEqual((await frame({ quote: { spread: 15 } }).ask(dry("1.017265"))).error, { code: "below_min" });
 });
 
 test("review 4: each read answers within its deadline, down, and holds no other message meanwhile (a Running kind)", async () => {
@@ -440,7 +462,7 @@ test("review 6: the bound before any request is USDC's alone: an asset the devic
   assert.equal(asked, 1);
 });
 
-test("review 6: the live deposit.quote refuses 1Click's keyless fee entry: the dry paths never reach the live check", async () => {
-  assert.deepEqual((await quotePage(liveFetch([], undefined, 15, 201, 1))("25")).error, { code: "quote_check_failed" });
-  assert.equal((await quotePage(liveFetch([], undefined, 15, 201, 20))("25")).ok, true);
+test("review 6: the live deposit.quote takes 1Click's 1 bp entry between two USDC assets and refuses the other-pair 20", async () => {
+  assert.equal((await quotePage(liveFetch([], undefined, 15, 201, 1))("25")).ok, true);
+  assert.deepEqual((await quotePage(liveFetch([], undefined, 15, 201, 20))("25")).error, { code: "quote_check_failed" });
 });

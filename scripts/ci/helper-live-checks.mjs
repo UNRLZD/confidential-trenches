@@ -48,6 +48,7 @@ export const LIVE_CHECKS = [
   "pool-buy-send-fast",
   "helper-page-jup-429",
   "vault-review-fixes-1",
+  "oneclick-partner-fee-live",
 ];
 
 // `{commit}` is the deployed commit

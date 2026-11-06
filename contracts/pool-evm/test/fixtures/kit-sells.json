@@ -58,11 +58,11 @@
   "signature": "0x710a3bea334d14fa5dba22a8b470936cec4615b43a69298f126e9334062fd6a830ffd158d68e8f1d9de7af57be9419d38470fa865e2bb7edbff4a6bf9a330d9d1b",
   "authorization": {
    "chainId": 84532,
-   "delegate": "0xe39f1b9934810792c090d8ab8f555b9955527260",
+   "delegate": "0x7a034461193cc6b1a7d5d0f5fe4a36b34e7ebc12",
    "nonce": "3442025",
    "yParity": 1,
-   "r": "0x698a6fe2d5ff421bb5cfa8c70ffd5d5464a04dbe1d6500d972a383309eb1dd3f",
-   "s": "0x15ebe6594e0abce44d60e8f0fd3bf863f6139926d8cc5b00d2903fb95da44985"
+   "r": "0xa83503f78456eba00ccb03f82f0de2eb754bacad7abba9912185594343d7475a",
+   "s": "0x31d3a0718f9b4f633a8eda0c632a03d1499d71b3b379ecc4541335b157aa787d"
   }
  }
 }

@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { CHECK_IDLE_MS, drawWithdrawForm, evaluate, formatUnits, refusalWords, WITHDRAW_WORDS } from "../src/withdraw/form.ts";
+import { RELEASE_WITHDRAW_RELAYER } from "../../wallet/src/withdraw/relay.ts";
+import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "../src/withdraw/handoff.ts";
 
 const MAIN = NEAR_NETWORKS.mainnet;
 const VIEW = { jsonrpc: "2.0", result: { amount: "1", block_hash: "x", block_height: 222692520, code_hash: "11111111111111111111111111111111", locked: "0", storage_paid_at: 0, storage_usage: 100 } };
@@ -117,7 +119,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = () => sleep(CHECK_IDLE_MS + 60);
 
 /** A drawn form whose RPCs answer from `exists` (an account's name -> it exists) and may be held by `gate`. */
-function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bigint>; handoff?: boolean } = {}) {
+function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bigint>; handoff?: boolean; end?: () => { kind: string; fee?: bigint } | void } = {}) {
   const exists = new Set(["alice.near", "bob.near"]);
   let gate: Promise<void> | null = null;
   const view = (name: string): NearRpc => ({
@@ -129,6 +131,7 @@ function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bi
     },
   });
   const handed: unknown[] = [];
+  const fees: bigint[] = [];
   const steps: Promise<void>[] = [];
   const doc = { createElement: (tag: string) => new El(tag) } as unknown as Document;
   const button = (action: string, label: string, onClick: () => void) => {
@@ -143,13 +146,13 @@ function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bi
     rpcs: [view(MAIN.fastnear[0]), view(MAIN.drpc)] as const,
     available: over.available ?? (async () => 10_000_000n),
     fee: over.fee ?? (async () => 120_000n),
-    ...(over.handoff === false ? {} : { handoff: (w: unknown) => void handed.push(w) }),
+    ...(over.handoff === false ? {} : { handoff: async (w: unknown, fee: bigint) => (handed.push(w), fees.push(fee), over.end?.()) }),
   };
   const form = drawWithdrawForm(doc, deps, button, (step) => void steps.push(step())) as unknown as El;
   const input = (k: string) => form.find((e) => e.dataset.input === k)!;
   const go = form.find((e) => e.dataset.action === "withdraw")!;
   return {
-    form, go, handed, exists,
+    form, go, handed, fees, exists,
     /** Holds the reads made from now on until the returned `open`; reads made after `free` are not held. */
     hold: () => { let open!: () => void; gate = new Promise((r) => (open = r)); return open; },
     free: () => { gate = null; },
@@ -185,6 +188,34 @@ test("Withdraw is disabled until both fields pass, and with no hand-off it stays
   assert.equal(none.form.dataset.state, "ready");
   assert.equal(none.go.disabled, true);
   assert.equal(none.go.dataset.pending, "withdraw-relay");
+});
+
+test("the tap gives the hand-off the fee it drew; a hand-off that finds the relayer's fee higher has the form draw it and stop", async () => {
+  const f = drawn();
+  f.type("to", "alice.near");
+  f.type("amount", "5");
+  await settle();
+  await f.tap();
+  assert.deepEqual(f.fees, [120_000n], "the fee drawn at the tap");
+  // the new fee still fits the note: drawn ready again, no outcome, nothing more handed over until the next tap
+  const g = drawn({ end: () => ({ kind: "fee", fee: 130_000n }) });
+  g.type("to", "alice.near");
+  g.type("amount", "5");
+  await settle();
+  await g.tap();
+  assert.equal(g.handed.length, 1);
+  assert.equal(g.form.dataset.outcome, undefined, "a fee above the drawn one is no outcome");
+  assert.equal(g.form.dataset.state, "ready");
+  // the new fee leaves the note short: drawn refused, Withdraw disabled
+  const h = drawn({ end: () => ({ kind: "fee", fee: 6_000_000n }) });
+  h.type("to", "alice.near");
+  h.type("amount", "5");
+  await settle();
+  await h.tap();
+  assert.equal(h.handed.length, 1);
+  assert.equal(h.form.dataset.outcome, undefined);
+  assert.equal(h.form.dataset.state, "refused");
+  assert.equal(h.go.disabled, true);
 });
 
 test("the tap hands over nothing when the address or amount it checks again is not the one drawn", async () => {
@@ -248,4 +279,25 @@ test("a stale answer is never drawn: a check that answers after a newer keystrok
   await sleep(50);
   assert.equal(f.form.dataset.state, "refused", "the older ready answer is not drawn over the newer refusal");
   assert.equal(f.go.disabled, true);
+});
+
+test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet relayer, no hand-off and no settle pass", async () => {
+  assert.equal(PAGE_NETWORK, "mainnet");
+  assert.equal(RELEASE_WITHDRAW_RELAYER.testnet, null, "the testnet relayer is the testnet build's only");
+  let opened = 0;
+  const no = async (): Promise<never> => {
+    opened += 1;
+    throw new Error("not opened");
+  };
+  const page = { store: no, notes: no, seed64: no, prover: { load: no, prove: no } };
+  const d = withdrawFormDeps(page);
+  assert.equal(d.network, "mainnet");
+  assert.deepEqual(d.rpcs.map((r) => r.name), [MAIN.fastnear[0], MAIN.drpc]);
+  assert.equal(d.handoff, undefined);
+  await assert.rejects(d.fee(), /no withdrawal relayer on mainnet/);
+  assert.equal(withdrawHandoff(page), null);
+  // the testnet release on this build names no relayer: nothing offered there either
+  assert.equal(withdrawHandoff(page, { network: "testnet" }), null);
+  assert.deepEqual(await withdrawSettle(page), { outcomes: {} });
+  assert.equal(opened, 0, "neither the store nor the seed is opened");
 });

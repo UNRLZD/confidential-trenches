@@ -10,8 +10,8 @@
 //   - deposit.dry for 25 USDC from Solana answers amount_out_usd, min_amount_out_usd, fee_usd and time_estimate_s with
 //     min_amount_out_usd <= amount_out_usd <= 25, fee_usd exactly 25 - amount_out_usd (decimal arithmetic, no float),
 //     amount_out_usd within 50 bps of what 1Click answers the same dry quote with no key (this check posts the request
-//     body the page sent, deadline renewed, to 1Click directly: the keyless path takes 1 bps, the page's partner path 20
-//     bps, plus price drift), and time_estimate_s within a factor of 2 of that quote's timeEstimate (two paths, two
+//     body the page sent, deadline renewed, to 1Click directly: both paths take 1Click's 1 bp between two USDC assets,
+//     card oneclick-partner-fee-live, so the gap is price drift), and time_estimate_s within a factor of 2 of that quote's timeEstimate (two paths, two
 //     estimates; an exact match would fail on a busy second);
 //   - every request the page sends to the helper's 1Click proxy is a POST /v0/tokens (the helper takes every proxy call
 //     as a POST and asks 1Click with GET, apps/helper/src/server.ts) or a POST /v0/quote with dry: true

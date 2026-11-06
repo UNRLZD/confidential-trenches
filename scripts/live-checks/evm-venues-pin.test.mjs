@@ -1,5 +1,5 @@
-// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-04 for card
-// evm-selldelegate-exact-debit) through the live check: the recorded good answers pass on both testnets; the same recording with one
+// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-06 for card
+// evm-testnet-delegate-review3) through the live check: the recorded good answers pass on both testnets; the same recording with one
 // thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH
 // with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is the
 // newest redeploy's, card evm-selldelegate-exact-debit's; the PoolManager is pool-evm-deploy's CHAINS one), and two RPCs of one operator.
@@ -27,8 +27,8 @@ function replay(answers) {
     return { ok: a.status === 200, status: a.status, json: async () => a.json };
   };
 }
-const run = (chain, { answers = A.good, venue = evmPoolVenues()[chain], rpcs = CHAINS[chain].rpcs } = {}) =>
-  check({ chain, venue, deployment: RECORD[chain], fetchFn: replay(answers), rpcs, sleep: async () => {} });
+const run = (chain, { answers = A.good, venue = evmPoolVenues()[chain], rpcs = CHAINS[chain].rpcs, deployment = RECORD[chain] } = {}) =>
+  check({ chain, venue, deployment, fetchFn: replay(answers), rpcs, sleep: async () => {} });
 const lower = (s) => String(s).toLowerCase();
 /** the recording with every answer `pick(a)` selects changed by `f(a.json)`, on the RPCs `urls` */
 function mutate(urls, pick, f) {
@@ -59,8 +59,9 @@ test("a pin's code with one byte flipped, or other code on one RPC, fails", asyn
   for (const chain of A.chains) {
     const [u1, u2] = CHAINS[chain].rpcs;
     for (const pin of [evmPoolVenues()[chain].pool, evmPoolVenues()[chain].sellDelegate, evmPoolVenues()[chain].adapters.v4]) {
-      fails(await run(chain, { answers: mutate([u1, u2], isCode(pin), (j) => (j.result = flip(j.result, 200))) }), /is the build's/);
-      fails(await run(chain, { answers: mutate(u1, isCode(pin), (j) => (j.result = flip(j.result, 200))) }), /the same code on both RPCs/);
+      // byte 1: outside every pin's immutables (the pool-review-3 delegate holds one at 200)
+      fails(await run(chain, { answers: mutate([u1, u2], isCode(pin), (j) => (j.result = flip(j.result, 1))) }), /is the build's/);
+      fails(await run(chain, { answers: mutate(u1, isCode(pin), (j) => (j.result = flip(j.result, 1))) }), /the same code on both RPCs/);
       fails(await run(chain, { answers: mutate([u1, u2], isCode(pin), (j) => (j.result = "0x")) }), /the same code on both RPCs/);
     }
   }
@@ -76,9 +77,11 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
   const other = "0x000000000000000000000000000000000000bad0";
   fails(await run(b, { venue: { ...v, sellDelegate: other } }), /the sell delegate pin 0x0+bad0/);
   // the v1 delegate (pool-evm-deploy's record), which sells through no PoolManager, is no longer the pin (card evm-sell-v4-kit)
-  fails(await run(b, { venue: { ...v, sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88" } }), /the sell delegate pin 0x23ad\w+ is the record's SellDelegate 0xe39f/);
+  fails(await run(b, { venue: { ...v, sellDelegate: "0x23ad5aabcc139650597f8dc79e9def8bd817ef88" } }), /the sell delegate pin 0x23ad\w+ is the record's SellDelegate 0x7a03/);
   // nor the evm-sell-v4 delegate, which has no exact-debit check (card evm-selldelegate-exact-debit)
-  fails(await run(b, { venue: { ...v, sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf" } }), /the sell delegate pin 0xfa14\w+ is the record's SellDelegate 0xe39f/);
+  fails(await run(b, { venue: { ...v, sellDelegate: "0xfa1442419b6984b8e3aa8933c690f80f063b6adf" } }), /the sell delegate pin 0xfa14\w+ is the record's SellDelegate 0x7a03/);
+  // nor the exact-debit delegate, which dispatches the 10-field sell (card evm-testnet-delegate-review3)
+  fails(await run(b, { venue: { ...v, sellDelegate: "0xe39f1b9934810792c090d8ab8f555b9955527260" } }), /the sell delegate pin 0xe39f\w+ is the record's SellDelegate 0x7a03/);
   fails(await run(b, { venue: { ...v, poolManager: other } }), /the PoolManager 0x0+bad0 is pool-evm-deploy's/);
   fails(await run(b, { venue: { ...v, poolManager: undefined } }), /the PoolManager \(none\) is pool-evm-deploy's/);
   fails(await run(b, { venue: { ...v, pool: other } }), /the pool pin 0x0+bad0/);
@@ -86,6 +89,16 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
   fails(await run(b, { venue: { ...v, routers: [other] } }), /the routers/);
   fails(await run("robinhood-testnet", { venue: { ...evmPoolVenues()["robinhood-testnet"], adapters: { v3: other, v4: evmPoolVenues()["robinhood-testnet"].adapters.v4 } } }), /the v3 adapter pin 0x0+bad0 is the record's UniswapV3Adapter \(none\)/);
   fails(await run(b, { rpcs: [u1, u1] }), /operator/);
+});
+
+test("a kit pin whose code is a build the build file froze fails: main's pins at the exact-debit delegates, the 10-field sell, read 6 Nov (card evm-testnet-delegate-review3)", async () => {
+  const F = A.frozenPin;
+  for (const chain of A.chains) {
+    const pin = F.pins[chain];
+    const deployment = { ...RECORD[chain], contracts: { ...RECORD[chain].contracts, SellDelegate: { address: pin } } };
+    const r = await run(chain, { answers: F.answers, venue: { ...evmPoolVenues()[chain], sellDelegate: pin }, deployment });
+    fails(r, new RegExp(`the sell delegate ${pin} is the build's SellDelegate`));
+  }
 });
 
 // the review of c473b3d: the build's code with other immutables, consistent on both RPCs, must fail

@@ -17,12 +17,26 @@ import { base58 } from "@scure/base";
 // or a server.
 export const ONECLICK_SIGNING_KEYS: readonly string[] = ["ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc"];
 
-// 1Click's own fee entry, unsigned (D4), so it is compared exactly and a changed collector fails closed (D-R7). Read
-// 2026-11-01: the keyless path answers [{recipient: 5880ad2b…47dd, fee: 1}] (also D52's 60 answers); the partner path
-// (the helper's 1Click key) answers fee 20 to the same collector in all five live quotes of the G1 runs read by status.
-// A same-asset quote (origin = destination) answers appFees [] with no fee (D52; the keyless dry fixture "same").
+// 1Click's own fee entry, unsigned (D4), so it is compared exactly and a changed collector fails closed (D-R7). Its fee
+// follows the route, not the key (card oneclick-partner-fee-live). 1Click's fee table (docs.near-intents.org
+// resources/fees.md, read 2026-11-06T15:18Z): with an API key, "0.20% (20 bps) normally; 0.01% (1 bp) for stablecoin
+// pairs (USDC, USDT, DAI) and same-asset multichain routes"; without one, 25 bps more "on top". Read live 2026-11-06
+// 15:19-15:21Z, one dry body each, keyless direct and through the helper (it sends its key as X-API-Key; a made-up key on
+// X-API-Key or on Authorization: Bearer answers 401 "Invalid token", so the helper's 201 shows only that it sent no key
+// 1Click refuses): Solana and Base USDC
+// to NEAR USDC answer [{recipient: 5880ad2b…47dd, fee: 1}] both ways, wNEAR and SOL to NEAR USDC fee 20 both ways (as
+// the five live wNEAR quotes of the G1 runs, fixture "live", and D52's 60 keyless USDC answers at fee 1). The keyless 25
+// bps shows in neither the entry nor the amount (100 USDC from Solana: amountOut 99,986,032 both ways), so both paths
+// pin the same fees. A same-asset quote (origin = destination) answers appFees [] with no fee (D52; fixture "same").
+// A stablecoin route is one between two of ONECLICK_USDC_ASSETS; any other pair, a same-asset multichain one included,
+// is held to 20, so a 1 bp entry on a route not listed here is refused (fails closed) until the route joins the list.
 const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd";
-export const ONECLICK_FEE_BPS = { keyless: 1, partner: 20 } as const;
+/** 1Click's fee on a stablecoin route, one between two of ONECLICK_USDC_ASSETS, per path (it was one fee per path before
+ *  card oneclick-partner-fee-live); the deposit's routes are all here. A stablecoin or same-asset route outside that list
+ *  is held to ONECLICK_PAIR_FEE_BPS, so it must join the list before it ships, or its 1 bp quotes are refused. */
+export const ONECLICK_FEE_BPS = { keyless: 1, partner: 1 } as const;
+/** The fee on any other pair, per path. */
+export const ONECLICK_PAIR_FEE_BPS = { keyless: 20, partner: 20 } as const;
 export type OneClickPath = keyof typeof ONECLICK_FEE_BPS;
 
 // The release's USDC assets on 1Click (GET /v0/tokens, read 2026-11-01T01:40Z: symbol USDC on near, sol and base, 6
@@ -206,7 +220,7 @@ export interface OneClickFloorInput {
   amountIn: bigint;
   withdrawFee: bigint; // destination base units, 1Click's figure (D51, D52)
   slippageBps: number;
-  feeBps: number; // F: the path's pinned fee, 0 on a same-asset quote
+  feeBps: number; // F: the route's pinned fee (oneClickFeeBps), 0 on a same-asset quote
   pricing: OneClickPricing;
   decimalsIn: number;
   decimalsOut: number;
@@ -244,18 +258,27 @@ export function oneClickFloors(x: OneClickFloorInput): { amountOut: bigint; minA
   return { amountOut, minAmountOut };
 }
 
-// The pinned fee entry: [] on a same-asset quote, else exactly one entry, the collector and the path's fee as read,
+/** F, 1Click's fee in bps on a quote from `originAsset` to `destinationAsset` on `path`, from the device's own request:
+ *  0 on the same asset, ONECLICK_FEE_BPS between two of the release's USDC assets, ONECLICK_PAIR_FEE_BPS otherwise. */
+export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinationAsset: string): number {
+  if (originAsset === destinationAsset) return 0;
+  const stable = ONECLICK_USDC_ASSETS.includes(originAsset) && ONECLICK_USDC_ASSETS.includes(destinationAsset);
+  return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path];
+}
+
+// The pinned fee entry: [] on a same-asset quote, else exactly one entry, the collector and the route's fee as read,
 // nothing else set. Returns F.
-function checkAppFees(v: unknown, path: OneClickPath, sameAsset: boolean): number {
-  if (sameAsset) {
+function checkAppFees(v: unknown, path: OneClickPath, originAsset: string, destinationAsset: string): number {
+  const fee = oneClickFeeBps(path, originAsset, destinationAsset);
+  if (originAsset === destinationAsset) {
     if (!(Array.isArray(v) && v.length === 0)) fail("app-fees", `appFees ${show(JSON.stringify(v))} on a same-asset quote is not []`);
     return 0;
   }
   const e = Array.isArray(v) && v.length === 1 ? v[0] : undefined;
-  const ok = isObj(e) && e.recipient === ONECLICK_COLLECTOR && e.fee === ONECLICK_FEE_BPS[path] &&
+  const ok = isObj(e) && e.recipient === ONECLICK_COLLECTOR && e.fee === fee &&
     Object.keys(e).every((k) => k === "recipient" || k === "fee" || e[k] === null || e[k] === undefined);
-  if (!ok) fail("app-fees", `appFees ${show(JSON.stringify(v))} is not 1Click's own ${path} entry`);
-  return ONECLICK_FEE_BPS[path];
+  if (!ok) fail("app-fees", `appFees ${show(JSON.stringify(v))} is not 1Click's own ${path} entry (fee ${fee} on this route)`);
+  return fee;
 }
 
 // A signed `...Formatted` amount must be the base-unit amount at the decimals the caller passed, truncated to its shown
@@ -310,7 +333,7 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
     depositAddress = q.depositAddress as string;
     deadline = q.deadline as string;
   }
-  const feeBps = checkAppFees(qr.appFees, opts.path, request.originAsset === request.destinationAsset);
+  const feeBps = checkAppFees(qr.appFees, opts.path, request.originAsset, request.destinationAsset);
 
   const t = typeof a.timestamp === "string" ? Date.parse(a.timestamp) : Number.NaN;
   if (!(now - t <= ONECLICK_MAX_AGE_MS && t - now <= ONECLICK_MAX_AHEAD_MS))

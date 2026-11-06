@@ -10,7 +10,7 @@ import { after, test } from "node:test";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, vaultNote, type NoteRef } from "../src/notes/secrets.ts";
-import { NOTE_EDGES, NOTE_STATES, SEND_MARGIN_MS, openNoteStore, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "../src/notes/store.ts";
+import { NOTE_EDGES, NOTE_STATES, NOTE_REQUEST_MAX, SEND_MARGIN_MS, openNoteStore, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -167,6 +167,37 @@ test("fields: a leaf only when it lands and only one that hashes to its commitme
   const back = await t.ns.move(held.id, "RESERVED", "UNSPENT", { blockTimeMs: 78n });
   assert.equal(back.deadlineMs, undefined, "back to UNSPENT drops it");
   assert.equal(back.attempt, undefined);
+});
+
+test("a RESERVED note holds its request body (card signpage-withdraw-handoff): written with HELD -> RESERVED only, read back, dropped when it leaves RESERVED", async () => {
+  const t = await tab();
+  const body = JSON.stringify({ withdrawal: { deadline_ms: 77 }, public_signals: ["1"] });
+  const a = await landed(t.ns, 5n, 51n, 9n);
+  await assert.rejects(t.ns.move(a.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "51", request: body }), /HELD -> RESERVED only/);
+  const held = await t.ns.move(a.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "51" });
+  for (const bad of ["", "not json", "[1]", "null", "x".repeat(NOTE_REQUEST_MAX + 1)])
+    await assert.rejects(t.ns.move(a.id, "HELD", "RESERVED", { attempt: held.attempt, request: bad }), /request/, JSON.stringify(bad.slice(0, 12)));
+  // a JSON object over the bound is refused for its size, not its shape; one at the bound is taken
+  const pad = (n: number) => JSON.stringify({ pad: "x".repeat(n - '{"pad":""}'.length) });
+  assert.equal(new TextEncoder().encode(pad(NOTE_REQUEST_MAX + 1)).length, NOTE_REQUEST_MAX + 1);
+  await assert.rejects(t.ns.move(a.id, "HELD", "RESERVED", { attempt: held.attempt, request: pad(NOTE_REQUEST_MAX + 1) }), new RegExp(`at most ${NOTE_REQUEST_MAX} B`));
+  const big = await landed(t.ns, 5n, 54n, 9n);
+  const hbig = await t.ns.move(big.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "54" });
+  assert.equal((await t.ns.move(big.id, "HELD", "RESERVED", { attempt: hbig.attempt, request: pad(NOTE_REQUEST_MAX) })).request!.length, NOTE_REQUEST_MAX);
+  const res = await t.ns.move(a.id, "HELD", "RESERVED", { attempt: held.attempt, request: body });
+  assert.equal(res.request, body);
+  assert.equal((await t.ns.get(a.id))!.request, body, "read back as written");
+  const free = await t.ns.move(a.id, "RESERVED", "UNSPENT", { blockTimeMs: 78n });
+  assert.equal(free.request, undefined, "UNSPENT holds no request");
+  // RESERVED -> SPENT drops it too, and so does a parent settled SPENT by its stored change
+  const b = await landed(t.ns, 5n, 52n, 9n);
+  const hb = await t.ns.move(b.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "52" });
+  await t.ns.move(b.id, "HELD", "RESERVED", { attempt: hb.attempt, request: body });
+  assert.equal((await t.ns.move(b.id, "RESERVED", "SPENT")).request, undefined);
+  // a RESERVED note written with no request (a pool's) reads back with none
+  const c = await landed(t.ns, 5n, 53n, 9n);
+  const hc = await t.ns.move(c.id, "UNSPENT", "HELD", { deadlineMs: 77n, context: "53" });
+  assert.equal((await t.ns.move(c.id, "HELD", "RESERVED", { attempt: hc.attempt })).request, undefined);
 });
 
 test("births: PLANNED for a return, move or second note; UNSPENT with its leaf; never a repeat", async () => {

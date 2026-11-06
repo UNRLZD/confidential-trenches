@@ -416,12 +416,14 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   const noSell: Record<string, string> = { ...env };
   delete noSell.POOL_EVM_SELL_KEY_BASE_SEPOLIA;
   assert.equal(evmPoolSendersFromEnv(noSell, pinned(own)).get(POOL)!.sellSender, null);
-  // the kit's own list pins each testnet's sell sender (the helper box's key) and no mainnet's yet: a test key on Base
-  // Sepolia is refused at start against the kit's own pin; a chain with no pin starts with sales off, never with an
-  // unpinned key (the device sims each sale from the pin, so there is nothing to sim a sale from)
+  // the kit's own list pins each network's sell sender (the helper box's keys; the mainnets' since card
+  // evm-mainnet-senders): a test key on Base Sepolia is refused at start against the kit's own pin; a chain with no pin
+  // starts with sales off, never with an unpinned key (the device sims each sale from the pin, so there is nothing to sim
+  // a sale from)
   assert.equal(kit["base-sepolia"].sellSender, "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553");
   assert.equal(kit["robinhood-testnet"].sellSender, "0xd12d83097671d731df2db731e973ad9a07673607");
-  for (const c of ["base", "robinhood"] as const) assert.equal(Object.hasOwn(kit[c], "sellSender"), false, c);
+  assert.equal(kit.base.sellSender, "0x2139756ab61ad861b4e25a009f092683e7454ee9");
+  assert.equal(kit.robinhood.sellSender, "0x92874bbc2638f644872d911d8b72d734978e24ae");
   assert.throws(() => evmPoolSendersFromEnv(env), (e: Error) => e.message.includes("POOL_EVM_SELL_KEY_BASE_SEPOLIA") && e.message.includes(kit["base-sepolia"].sellSender!));
   const unpinned = { ...kit, "base-sepolia": Object.fromEntries(Object.entries(kit["base-sepolia"]).filter(([k]) => k !== "sellSender")) as typeof kit["base-sepolia"] };
   const off = evmPoolSendersFromEnv(env, unpinned).get(POOL)!;
@@ -429,6 +431,26 @@ test("the EVM pool sell sender's address is the kit's pinned sell sender for its
   assert.equal(off.sender, evmAddressOf(KEY), "the withdraws still go");
   const refused = await off.sell({});
   assert.deepEqual([refused.status, (refused.body as { error: { code: string } }).error.code], [503, "not_configured"]);
+});
+
+// card evm-mainnet-senders: the kit pins each mainnet's sell sender (the helper box's own key, made by the research
+// repo's scripts/deploy/evm-sender-key.mjs), so a mainnet sell key off that pin is refused at start against the kit's own
+// list (evmPoolSendersFromEnv's pin check), naming the name and the pin, never a key; the pin's own key starts
+test("a Base or Robinhood mainnet sell key that is not the kit's pinned sell sender is refused at start", () => {
+  const kit = evmPoolVenues();
+  const SELL_KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_MAINNET_SELL_SENDER").digest());
+  const hexOf = (k: Uint8Array) => "0x" + Buffer.from(k).toString("hex");
+  for (const [chain, net] of [["base", "BASE"], ["robinhood", "ROBINHOOD"]] as const) {
+    const pin = kit[chain].sellSender;
+    assert.match(String(pin), /^0x[0-9a-f]{40}$/, `the kit pins ${chain}'s sell sender`);
+    const env = { [`POOL_EVM_ADDRESS_${net}`]: POOL, [`POOL_EVM_SENDER_KEY_${net}`]: hexOf(KEY), [`POOL_EVM_SELL_KEY_${net}`]: hexOf(SELL_KEY) };
+    assert.throws(
+      () => evmPoolSendersFromEnv(env),
+      (e: Error) => e.message === `POOL_EVM_SELL_KEY_${net} is not the key of the kit's pinned sell sender for ${chain} (${pin})` && !e.message.includes(hexOf(KEY).slice(2)) && !e.message.includes(hexOf(SELL_KEY).slice(2)),
+    );
+    const own = evmAddressOf(SELL_KEY);
+    assert.equal(evmPoolSendersFromEnv(env, { ...kit, [chain]: { ...kit[chain], sellSender: own } }).get(POOL)!.sellSender, own, `${chain}: the pin's own key starts`);
+  }
 });
 
 test("the withdraw's deadline again after the queue's wait: a carry whose deadline came within the margin while it waited is deadline_near, nothing sent", async () => {

@@ -193,6 +193,8 @@ test("every move into the vault is the moving account's own ft_transfer_call; no
   }
   assert.deepEqual(Object.keys(S.VAULT_DEPOSIT_SIGNERS), ["U", "R", "V"]);
   assert.deepEqual(S.VAULT_ALSO_ACCEPTS.map((a) => [a.method, a.signed_by_kit]), [["ft_withdraw", false]]);
+  // the min_gas an intents.near ft_withdraw into the vault signs: VT-S13's rule on its measured worst case
+  assert.equal(S.VAULT_ALSO_ACCEPTS[0].min_gas_tgas, 156);
 });
 
 test("salt, numbers and ids are refused in every form the vault refuses", () => {

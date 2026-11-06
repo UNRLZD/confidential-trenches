@@ -36,6 +36,19 @@ test("the paste exists and is the one the deploy script names", () => {
   assert.match(readFileSync(path.join(HERE, "../script/deploy.mjs"), "utf8"), /sh contracts\/pool-evm\/script\/mainnet-deploy\.sh \$\{chainName\} --sweep-kept/);
 });
 
+test("the paste's text names every contract a mainnet run deploys (MAINNETS contracts), the fee collector and its sink included", async () => {
+  const { MAINNETS } = await import("../../../scripts/live-checks/pool-evm-deploy.mjs");
+  const words = { WithdrawalVerifier: "the withdrawal verifier", PrivacyPoolSimple: "the pool", UniswapV4Adapter: "the v4 adapter", UniswapV3Adapter: "the v3 adapter", SellDelegate: "the sell delegate", FeeCollector: "the fee collector" };
+  const text = readFileSync(PASTE, "utf8").split("\n").filter((l) => l.startsWith("#")).map((l) => l.replace(/^#\s?/, "")).join(" ").replace(/\s+/g, " ");
+  for (const chain of Object.keys(MAINNETS)) {
+    for (const n of MAINNETS[chain].contracts) {
+      assert.ok(Object.hasOwn(words, n), `${n}: a contract the paste's text has no words for`);
+      assert.ok(text.includes(words[n]), `the paste's text does not name ${words[n]} (${n})`);
+    }
+  }
+  assert.match(text, /the fee collector, its sink the sell sender the kit pins for the chain/);
+});
+
 test("a deploy: deploy.mjs --mainnet with the chain and the return address, then the live check on its record; stdin is never read", () => {
   for (const chain of ["base", "robinhood"]) {
     const r = paste([chain, A]);
