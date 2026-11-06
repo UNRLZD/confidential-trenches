@@ -73,7 +73,7 @@ fn txt(v: &Value) -> &str {
 }
 
 fn u(v: &Value) -> u128 {
-    s(v).parse().unwrap()
+    txt(v).parse().unwrap()
 }
 
 /// 2.5.2 row 14's requirement for a withdraw of `sp` by `payer`: bytes (a tree that grows a level adds LEVEL_BYTES),
@@ -123,7 +123,7 @@ async fn deposited(kind: TokenKind) -> R<World> {
     let (relayer, relayer2) = (h.account("relayer", 50).await?, h.account("relayer2", 50).await?);
     let (alice, bob, carol) = (h.account("alice", 50).await?, h.account("bob", 50).await?, h.account("carol", 50).await?);
     let stranger = h.account("stranger", 50).await?;
-    let ids: Vec<&str> = [&u, &q, &relayer, &relayer2, &alice, &bob, &carol].iter().map(|a| a.id().as_str()).collect();
+    let ids = [u.id().as_str(), q.id().as_str(), relayer.id().as_str(), relayer2.id().as_str(), alice.id().as_str(), bob.id().as_str(), carol.id().as_str()];
     assert_eq!(ids, ["u.test.near", "q.test.near", "relayer.test.near", "relayer2.test.near", "alice.test.near", "bob.test.near", "carol.test.near"], "the fixture's accounts");
     let total: u128 = txt(&f["deposited"]).parse()?;
     h.mint(u.id(), total).await?;
