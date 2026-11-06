@@ -16,6 +16,7 @@
   "wasm_sha256": "e2e280869bdff90ad54f7be2bc1181dcef6e229eaa8f17b99f2e8bc33a422037",
   "wasm_bytes": 129172,
   "code_hash": "GGfTdwuLbonERu3vKnpLF828eyWZ4DxS24kpLp67PmSn",
+  "non_reproducible": "built by cargo near build non-reproducible-wasm on the host (its build line), before the vault built in the pinned Docker image (card vault-reproducible-build); its wasm names no source",
   "asset": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
   "scope": "20545538849474029115763149114674867753589201314404884747672366183146404171958",
   "version": "blindfill-vault 0.1.0 testnet",

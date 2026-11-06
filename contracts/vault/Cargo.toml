@@ -8,6 +8,24 @@ edition = "2021"
 rust-version = "1.96"
 license = "Apache-2.0"
 publish = false
+# NEP-330: the wasm's contract_source_metadata links here, and its build_info names this repository at the commit built
+repository = "https://github.com/UNRLZD/confidential-trenches"
+
+# The reproducible build (vault.md 2.8, NEP-330): `cargo near build reproducible-wasm` runs container_build_command in
+# this image, which is named by its digest, so every machine builds the same bytes from the same commit.
+# The image is cargo-near 0.22.0's own pin for a new project (`cargo near new`): cargo-near 0.21.1 on rustc 1.96.0, the
+# toolchain the vault is held to. The tag is read by people only; Docker pulls the digest. scripts/deploy.mjs holds the
+# same image, digest and commands (REPRODUCIBLE) and refuses a build when this table differs from them.
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.21.1-rust-1.96.0"
+image_digest = "sha256:ccb22bb4e677ed022d8b9d1aa1b32f0af52dd0471ef1c32e48dedbf68ee6ee17"
+passed_env = []
+# the mainnet build; --no-embed-abi keeps the ABI export out (vault.md 2.5.7 lists every export)
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked", "--no-embed-abi"]
+
+# the testnet build (`--variant testnet`): the same image and flags with feature testnet
+[package.metadata.near.reproducible_build.variant.testnet]
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked", "--no-embed-abi", "--features", "testnet"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
