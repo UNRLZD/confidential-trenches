@@ -36,9 +36,8 @@
 import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
 import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
-import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
-import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
+import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { pageHelperRpc, pageReference, pageRpc } from "./page-rpc.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
 import { ArmRefused, armRecordOf, armRecords, claimArm, settleArm, solanaArmedSigner, type ArmRecord } from "@blindfill/wallet/arming/records";
@@ -99,7 +98,8 @@ export function releaseTradeDeps(): TradeHost["deps"] {
   return {
     helper: TRADE_HELPER,
     providers,
-    reference: (q) => readSolanaReference(providers, q),
+    // a provider read that fails past its retry rejects (pageReference), never reads as "no reference pool"
+    reference: (q) => pageReference(providers, q),
     paths: solanaSendPaths({ helper: solanaHelperRpc(TRADE_HELPER) }),
   };
 }
@@ -354,6 +354,10 @@ export function tradeKind(host: TradeHost): TradeKind {
       // the legs' signatures the kit kept, from its onSigned: one it dropped as late (the age rule at a signature, card
       // kit-renewal-read-bounded) reaches no answer, stage write or txs, and a teardown's frames are never in it
       const signed: TxRef[] = [];
+      // a reference read that failed past its retry (card pool-read-down): before a leg is signed the trade is "down"
+      // (not now), never a price check or a failure; from the first signature on, never down (a tx may land)
+      let readDown = false;
+      let signing = false;
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
         if (stage === "signed") write({ stage, txs: signed.slice() });
@@ -372,19 +376,27 @@ export function tradeKind(host: TradeHost): TradeKind {
         const req: SolanaTradeRequest & { wallets: string[] } = { side, token, slippageBps: params.slippage_bps as number, legs, wallets: set.all };
         record = await run(req, {
           ...host.deps,
-          sign: (wallet, message, tx) => signer.sign(wallet, message, tx),
+          reference: (q, p) =>
+            host.deps.reference(q, p).catch((e: unknown) => {
+              if (e instanceof SolanaRpcTransportError) readDown = true;
+              throw e;
+            }),
+          sign: (wallet, message, tx) => {
+            signing = true;
+            return signer.sign(wallet, message, tx);
+          },
           onSigned: (kept) => { signed.splice(0, signed.length, ...kept.map((k) => ({ chain: "solana" as const, hash: k.signature }))); },
           onProgress,
         });
       } catch (e) {
-        if (!answer) return (await refuse(e instanceof ArmRefused ? "not_armed" : "failed"), undefined);
+        if (!answer) return (await refuse(e instanceof ArmRefused ? "not_armed" : readDown && !signing ? "down" : "failed"), undefined);
         throw e;
       } finally {
         signer.close();
         await unmark(store, keys, record);
       }
       const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature }] : []));
-      if (!answer) return refuse(refusalCode(record));
+      if (!answer) return refuse(readDown && !signing ? "down" : refusalCode(record));
       write({ txs });
     }
 
