@@ -47,6 +47,9 @@ export const QUEUE_WAIT_MS = 3_000;
  */
 export const PACED: ReadonlySet<VendorName> = new Set(["jupiter"]);
 export const QUEUE_POLL_MS = 250;
+/** The most of one vendor's calls the other helpers may seed (card helper-deploy-reads-fast): a Developer key's 600 a minute
+ *  and the second a counted minute spans, with room. */
+export const VENDOR_SEED_MAX = 1_000;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
 /**
@@ -114,7 +117,10 @@ const KEY_SHAPE = /^[\x21-\x7e]{8,4096}$/; // printable ASCII, no space or line 
 export type ProxyAnswer = { status: number; headers: Record<string, string>; body: string; why?: string; timing?: string[] };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 type Read = { status: number; body: string; fetchedAt: string; timing?: string[] };
-type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void> };
+/** `peers` (card helper-deploy-reads-fast): the other helpers on the same keys (shared-calls.ts callsFiles), whose calls
+ *  every draw that may reach a vendor counts first, and to which each such draw is told at once. */
+export type Peers = { read(): unknown; write(calls: Record<string, number[]>): void };
+type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers };
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
 const UPSTREAM = () => error(503, "upstream");
@@ -174,6 +180,40 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const forms = keyForms(keys);
   const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v], lend: true }])) as Record<VendorName, BudgetLimits>;
   const budget = upstreamBudget((v) => limits[v as VendorName], now);
+  /** Each vendor's calls this helper made that its window may still count (card helper-deploy-reads-fast). */
+  const calls = (): Record<string, number[]> => Object.fromEntries(VENDOR_NAMES.map((v) => [v, budget.calls(v)]));
+  /** The other helpers' calls on the same keys (hostile input: whole ms numbers no later than a second from now,
+   *  VENDOR_SEED_MAX a vendor at most, the newest kept), counted in each vendor's budget in place of the last seed: a
+   *  vendor counts every call on its key, and while a deploy's two helpers overlapped each one counted only its own,
+   *  so together they drew Jupiter past its minute (live run 42125976095 attempt 1: helper-token-page-cold, a page 503
+   *  "jupiter held" after Jupiter's 429). */
+  function seed(vendors: unknown): void {
+    const o = typeof vendors === "object" && vendors !== null && !Array.isArray(vendors) ? (vendors as Record<string, unknown>) : {};
+    for (const v of VENDOR_NAMES) {
+      const t = Object.hasOwn(o, v) && Array.isArray(o[v]) ? (o[v] as unknown[]).filter((x): x is number => typeof x === "number" && Number.isSafeInteger(x) && x <= now() + 1_000).sort((x, y) => x - y).slice(-VENDOR_SEED_MAX) : [];
+      budget.seed(v, t);
+    }
+  }
+  /** A draw that may reach a vendor: the peers' calls counted first, and the draw told to them once it goes. A peer
+   *  file that cannot be read or written leaves this helper counting its own, as before. */
+  const drawUp = (name: VendorName, client: string | undefined, reserved: boolean): number => {
+    if (deps.peers) {
+      try {
+        seed(deps.peers.read());
+      } catch {
+        // counted again at the next draw
+      }
+    }
+    const w = budget.take(name, client, 1, false, reserved);
+    if (w === 0 && deps.peers) {
+      try {
+        deps.peers.write(calls());
+      } catch {
+        // told at the next draw
+      }
+    }
+    return w;
+  };
   const cache = new Map<string, Read & { expires: number }>();
   let cacheBytes = 0;
   const inflight = new Map<string, Promise<Read | ProxyAnswer>>();
@@ -245,7 +285,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (!turned) return notReady(`${name} held`, heldS());
       if (attempt > 0) {
         // the retry reaches the vendor again, so it draws from the total too
-        if (budget.take(name, undefined, 1, false, reserved) > 0) return notReady(budget.refusedBy());
+        if (drawUp(name, undefined, reserved) > 0) return notReady(budget.refusedBy());
       }
       const headers: Record<string, string> = { accept: "application/json" };
       const key = keys[name];
@@ -309,7 +349,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
     // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
     // one in flight reaches nothing, so it counts in the caller's share alone
-    const take = (shareOnly = false): number => budget.take(name, client, 1, shareOnly, reserved);
+    const take = (shareOnly = false): number => (shareOnly ? budget.take(name, client, 1, true, reserved) : drawUp(name, client, reserved));
     // card helper-crowd-429: a draw the share or the total refuses waits for its room, until `by` at most, and a draw the
     // vendor's hold refuses waits for the hold's end when it comes by then; a draw that goes is taken at once, with no
     // await, so a call right behind it still finds it in flight. A cache hit (its share only, which turns with its
@@ -381,5 +421,12 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     return source({ status: out.status, headers: { [HELPER_FETCHED_AT_HEADER]: out.fetchedAt }, body: out.body, ...(out.timing ? { timing: [`budget;dur=${Math.round(budgetMs)}`, ...out.timing] } : {}) });
   }
 
-  return { handle, keyCount: Object.keys(keys).length };
+  return {
+    handle,
+    keyCount: Object.keys(keys).length,
+    /** Each vendor's calls this helper made that its window may still count (card helper-deploy-reads-fast). */
+    calls,
+    /** Counts the other helpers' calls on the same keys (card helper-deploy-reads-fast). */
+    seed,
+  };
 }

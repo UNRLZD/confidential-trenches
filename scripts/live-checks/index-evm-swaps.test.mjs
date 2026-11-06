@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { HEADER_TIMED, SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { HEADER_TIMED, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
+import * as check from "./index-evm-swaps.mjs";
 import { candlesFault, CANDLES_PATH, judge, read, TRADES_PATH, tradesFault, units } from "./index-evm-swaps.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -271,4 +272,96 @@ test("card helper-robinhood-swaps: a hooked v4 pool's buys on the tape as the po
   const sides = JSON.parse(A.robinhood_good_hooked.reads.trades.body).trades.slice(0, 5).map((t) => t.side);
   assert.ok(sides.filter((s) => s === "b").length >= 2, `the sample holds buys: ${sides.join("")}`);
   assert.ok(g.lines.includes(`ok  5 of 5 sampled trades carry a Transfer of the token for exactly their amt, ${JSON.stringify(sides.join(""))} against the pool`), g.lines.join("\n"));
+});
+
+test("card helper-deploy-reads-fast: a FAIL names each read the helper answered, its status, time and Server-Timing; a PASS prints none (made from the good answer in the shape of live run 42122733397 attempt 1: the judged token's candles 23 s after the read, two listed tokens tried before it)", () => {
+  const late = edit((rec) => {
+    const at = Date.parse(rec.reads.candles.headers["x-fetched-at"]);
+    rec.readAt = new Date(at - 22_967).toISOString();
+    rec.listsRead = { status: 200, ms: 160, headers: { "server-timing": "total;dur=1" } };
+    rec.tried = [
+      { token: "0x00000000000000000000000000000000000000a1", candles: { status: 503, ms: 12_004, headers: { "server-timing": 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms", total;dur=12001' } } },
+      { token: "0x00000000000000000000000000000000000000a2", candles: { status: 200, ms: 5_610, headers: { "server-timing": 'evm-open;dur=5600, evm-queue;dur=4100;desc="6 posts: pace 4100 ms, in flight 0 ms", total;dur=5602' } }, trades: { status: 200, ms: 150, headers: {} } },
+    ];
+    rec.reads.candles.ms = 2_201;
+    rec.reads.candles.headers["server-timing"] = 'evm-open;dur=2190, evm-queue;dur=1500;desc="3 posts: pace 1500 ms, in flight 0 ms", total;dur=2191';
+  });
+  const r = run(late);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.includes("candles X-Fetched-At")), bad(r).join("\n"));
+  const reads = r.lines.filter((l) => l.startsWith("--  read:"));
+  assert.deepEqual(reads, [
+    '--  read: lists 200 in 160 ms, Server-Timing "total;dur=1"',
+    '--  read: 0x00000000000000000000000000000000000000a1 before it: candles 503 in 12004 ms, Server-Timing "evm-open;dur=12000, evm-queue;dur=9100;desc=\\"14 posts: pace 6200 ms, in flight 2900 ms\\", total;dur=12001"',
+    '--  read: 0x00000000000000000000000000000000000000a2 before it: candles 200 in 5610 ms, Server-Timing "evm-open;dur=5600, evm-queue;dur=4100;desc=\\"6 posts: pace 4100 ms, in flight 0 ms\\", total;dur=5602"; trades 200 in 150 ms, Server-Timing none',
+    `--  read: ${late.coin} candles 200 in 2201 ms, Server-Timing "evm-open;dur=2190, evm-queue;dur=1500;desc=\\"3 posts: pace 1500 ms, in flight 0 ms\\", total;dur=2191"`,
+    `--  read: ${late.coin} trades 200 in 1 ms, Server-Timing "total;dur=0"`,
+  ]);
+  // the same run on time passes, and prints no read lines
+  const onTime = run({ ...late, readAt: A.good.readAt });
+  assert.equal(onTime.ok, true, bad(onTime).join("\n"));
+  assert.equal(onTime.lines.filter((l) => l.startsWith("--  read:")).length, 0);
+});
+
+test("card helper-deploy-reads-fast: read() keeps the lists read and each listed token tried before the judged one, with status, time and Server-Timing", async () => {
+  const list = { lists: { new: [{ token: "0x00000000000000000000000000000000000000a1" }, { token: A.good.coin }] } };
+  const fetchFn = async (url, init) => {
+    if (url.endsWith("/v1/market/lists?chain=base")) return new Response(JSON.stringify(list), { status: 200, headers: { "server-timing": "total;dur=1" } });
+    if (url.includes("0x00000000000000000000000000000000000000a1")) return new Response('{"error":{"code":"upstream"}}', { status: 503, headers: { "server-timing": 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms"' } });
+    return replay(A.good)(url, init);
+  };
+  const got = await read("https://api.confidential.unrealized.trade", undefined, fetchFn);
+  assert.equal(got.coin, A.good.coin);
+  assert.deepEqual([got.listsRead.status, got.listsRead.headers["server-timing"]], [200, "total;dur=1"]);
+  assert.equal(got.tried.length, 1);
+  assert.deepEqual([got.tried[0].token, got.tried[0].candles.status, got.tried[0].candles.headers["server-timing"]], ["0x00000000000000000000000000000000000000a1", 503, 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms"']);
+  assert.ok(Number.isFinite(got.tried[0].candles.ms));
+});
+
+const EP06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789";
+const BUNDLER = A.bundle_base?.bundler ?? "0x4b5c33c3c7a31bd108f5a99b64683b0056a62226";
+const word = (a) => `0x${"0".repeat(24)}${a.slice(2)}`;
+
+test("card helper-deploy-reads-fast fold: the recorded bundle (Base tx 0x672edabc, EntryPoint v0.6): its swaps' sender is the user operation's account, never the bundler", () => {
+  assert.equal(typeof check.swapSenders, "function", "index-evm-swaps.mjs swapSenders");
+  const b = A.bundle_base;
+  const swap = (l) => [TOPIC.swap2, TOPIC.swap3, TOPIC.swap4, TOPIC.curveBuy, TOPIC.curveSell].includes(l.topics?.[0]);
+  const got = check.swapSenders(b.receipt, swap);
+  assert.deepEqual(got, { bundle: true, senders: [b.account] });
+  assert.ok(!got.senders.includes(b.bundler), "the bundler named");
+  // a swap before the EntryPoint's BeforeExecution is validation, in no operation's run
+  const [mark, ...rest] = b.receipt.logs;
+  const swaps = rest.filter(swap);
+  assert.ok(swaps.length > 0 && mark.topics[0].startsWith("0xbb47ee3e"));
+  assert.deepEqual(check.swapSenders({ ...b.receipt, logs: [...swaps, mark, rest.at(-1)] }, swap).senders, []);
+  // a UserOperationEvent logged by another contract marks nothing
+  assert.deepEqual(check.swapSenders({ ...b.receipt, logs: [mark, ...swaps, { ...rest.at(-1), address: "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae" }] }, swap).senders, []);
+  // the same logs sent by an ordinary transaction: its sender
+  assert.deepEqual(check.swapSenders({ ...b.receipt, to: "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae" }, swap), { bundle: false, senders: [b.bundler] });
+});
+
+/** The good run with its first sampled trade's receipt made a bundle to EntryPoint v0.6: the bundler sends it, the
+ *  trade's own logs sit in one user operation's run (BeforeExecution before them, its UserOperationEvent naming the
+ *  trade's trader after), as Base tx 0x672edabc logged them. `trader` names who the tape says traded. */
+const bundled = (trader) =>
+  edit((rec) => {
+    const tape = JSON.parse(rec.reads.trades.body).trades;
+    const t0 = tape[0];
+    const r = rec.chain.receipts[t0.tx];
+    const ev = A.bundle_base.receipt.logs;
+    const before = ev.find((l) => l.topics[0].startsWith("0xbb47ee3e"));
+    const uoe = ev.find((l) => l.topics[0].startsWith("0x49628fd1"));
+    r.logs = [before, ...r.logs, { ...uoe, topics: [uoe.topics[0], uoe.topics[1], word(t0.trader), uoe.topics[3]] }];
+    r.from = BUNDLER;
+    r.to = EP06;
+    body(rec, "trades", (b) => (b.trades[0].trader = trader === "bundler" ? BUNDLER : t0.trader));
+  });
+
+test("card helper-deploy-reads-fast fold: a sampled bundle trade named by its user operation's account passes; named by the bundler (the receipt's from) it fails", () => {
+  const good = run(bundled("account"));
+  assert.deepEqual(bad(good), []);
+  assert.ok(good.lines.some((l) => l.includes("the account of the user operation whose run holds its swap")));
+  const wrong = run(bundled("bundler"));
+  assert.equal(wrong.ok, false);
+  assert.ok(bad(wrong).some((l) => l.includes(`sent by "${BUNDLER}"`)), bad(wrong).join("\n"));
 });
