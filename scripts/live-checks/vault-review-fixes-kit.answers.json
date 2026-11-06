@@ -1,0 +1,305 @@
+{
+ "about": "vault-review-fixes-kit.mjs collect(), each read 2026-11-06. good: card/vault-review-fixes-kit (159a6452 and this check), the six listed RPCs probed over the view cap and the testnet vault read on the exit pair: PASS. bad: the same collect() run from main a04e3efd (before this card; its own verdict cannot run there, as a04e3efd has no vaultViewTooHeavy): the probes give the same answers, and the read asks every list for 1,000 rows (spends 497 Tgas): FAIL.",
+ "good": {
+  "at": "2026-11-06T06:08:55.718Z",
+  "probes": [
+   {
+    "network": "mainnet",
+    "url": "https://rpc.mainnet.fastnear.com",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "H4RoPC69NJBqCg24v9QFApbxZeBvphYyGjymu7nFpjEd",
+      "block_height": 223276536,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "mainnet",
+    "url": "https://rpc.mainnet.near.org",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "5NVX3MFbPPJwnSWJtSFtkw9Y7ZWCZcrS5dYqN7SGsPZw",
+      "block_height": 223276542,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "mainnet",
+    "url": "https://near.drpc.org",
+    "status": 200,
+    "answer": {
+     "id": "x",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "CU5VC2vrVLMemDBr5q5yjNAypEoZAwWxHPPwCJJmAbZ1",
+      "block_height": 223276544,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     }
+    }
+   },
+   {
+    "network": "testnet",
+    "url": "https://test.rpc.fastnear.com",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "BaLwyMUbYUr6GQiomEk4ZD39BrKEmqLmW2c75DMENk9g",
+      "block_height": 276449737,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "testnet",
+    "url": "https://rpc.testnet.near.org",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "9jHxMnGM7DKqfjgcG6ghp88D533ADYLcf88o7agUALU8",
+      "block_height": 276449744,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "testnet",
+    "url": "https://near-testnet.drpc.org",
+    "status": 200,
+    "answer": {
+     "id": "x",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "BwTZrw6rLV8RDpawwHJ89aB57VmTQPYzL6rsCvkiMnk8",
+      "block_height": 276449746,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     }
+    }
+   }
+  ],
+  "exit": {
+   "height": 276449746,
+   "pages": [
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "deposits",
+     "limit": 450
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "deposits",
+     "limit": 450
+    },
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "spends",
+     "limit": 250
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "spends",
+     "limit": 250
+    },
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "leaves",
+     "limit": 750
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "leaves",
+     "limit": 750
+    },
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "labels",
+     "limit": 750
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "labels",
+     "limit": 750
+    }
+   ],
+   "rows": {
+    "deposits": 5,
+    "spends": 6,
+    "leaves": 11,
+    "labels": 6
+   },
+   "sizes": {
+    "state": 11,
+    "label": 6
+   },
+   "whole": true
+  }
+ },
+ "bad": {
+  "at": "2026-11-06T06:09:09.115Z",
+  "probes": [
+   {
+    "network": "mainnet",
+    "url": "https://rpc.mainnet.fastnear.com",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "2uAgvNXWAFA16vq6iNRvmTBDAuSPMUu7vKpA5VVJu45K",
+      "block_height": 223276560,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "mainnet",
+    "url": "https://rpc.mainnet.near.org",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "3gQQg1cTY1ZmSCUiHxt5nzSWXjJT2GxnUKnK1VrkMevr",
+      "block_height": 223276566,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "mainnet",
+    "url": "https://near.drpc.org",
+    "status": 200,
+    "answer": {
+     "id": "x",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "62sBrGyhS7SrDaH34PSVQCzseaeTKZD9uxLEvqP28g89",
+      "block_height": 223276568,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     }
+    }
+   },
+   {
+    "network": "testnet",
+    "url": "https://test.rpc.fastnear.com",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "2mFSiGpGGhYh5usXWKMawdAESHQ1arjTDf1qNp1BySPt",
+      "block_height": 276449760,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "testnet",
+    "url": "https://rpc.testnet.near.org",
+    "status": 200,
+    "answer": {
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "5DPUMWPFC6tejXTHzjgocHAeiHYEQ2rMKmwYiDZiXFMg",
+      "block_height": 276449767,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     },
+     "id": "x"
+    }
+   },
+   {
+    "network": "testnet",
+    "url": "https://near-testnet.drpc.org",
+    "status": 200,
+    "answer": {
+     "id": "x",
+     "jsonrpc": "2.0",
+     "result": {
+      "block_hash": "FXxPDPCjf1GJYxxSXdCUuEW8n85voXNSwHwX8a5DNv6C",
+      "block_height": 276449768,
+      "error": "wasm execution failed with error: HostError(GasLimitExceeded)",
+      "logs": []
+     }
+    }
+   }
+  ],
+  "exit": {
+   "height": 276449768,
+   "pages": [
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "deposits",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "deposits",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "spends",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "spends",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "leaves",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "leaves",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://test.rpc.fastnear.com",
+     "method": "labels",
+     "limit": 1000
+    },
+    {
+     "rpc": "https://near-testnet.drpc.org",
+     "method": "labels",
+     "limit": 1000
+    }
+   ],
+   "rows": {
+    "deposits": 5,
+    "spends": 6,
+    "leaves": 11,
+    "labels": 6
+   },
+   "sizes": {
+    "state": 11,
+    "label": 6
+   },
+   "whole": true
+  }
+ }
+}
