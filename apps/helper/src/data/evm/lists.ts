@@ -85,16 +85,18 @@ const LOGS_MAX = 2_000;
 // tokens still without two answers, padsAt and recordsAt; a code read goes down the list past a provider that does not
 // answer it, codeBlock and hadCode). The spares, read 2026-11-06 12:38Z from this Mac (an address filter's eth_getLogs of
 // 100 blocks 5,000, 50,000 and 500,000 blocks back, a state read 600 s back, eth_chainId 8453 and 4663 on each):
-// Base: base.gateway.tenderly.co (Tenderly), base.api.pocket.network (Pocket), rpc.sentio.xyz (Sentio) and
-// base.public.blockpi.network (BlockPI) answered all three, 353-2,022 ms (blastapi now refuses a getLogs over 10
-// blocks, -32600, and stays first for its old state); Robinhood: robinhood.api.pocket.network (Pocket) and
+// Base: base.gateway.tenderly.co (Tenderly), base.api.pocket.network (Pocket) and rpc.sentio.xyz (Sentio) answered all
+// three, 353-2,022 ms (blastapi now refuses a getLogs over 10 blocks, -32600, and stays first for its old state);
+// base.public.blockpi.network (BlockPI) answered them too, and was dropped (card helper-evm-range-cap-walk) for a
+// Cloudflare 521 outage on every chain of its public endpoint from about 16:00Z on 6 Nov (521 on base and ethereum,
+// read 16:05-16:56Z), which failed evm-rpc-spare-list after every helper deploy; Robinhood: robinhood.api.pocket.network (Pocket) and
 // 4663.rpc.thirdweb.com (thirdweb) answered all three, 412-841 ms. Left out: mainnet.base.org (-32011 on every
 // getLogs), base-pokt.nodies.app and 1rpc.io (50 blocks), base.meowrpc.com (no eth_getLogs), base.llamarpc.com (525),
 // rpc-robinhood.blockmachine.io (-32002 past its newest 5,000 blocks; "missing trie node" 600 s back),
 // api.blockvectra.com (-32011 outside its history window), robinhood.rpc.blxrbdn.com (-32601 eth_getLogs), daybreak and
 // globalstake (5 s and more, a timeout at 500,000 back; no state 600 s back).
 export const MAKER_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
-  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base", "https://base.public.blockpi.network/v1/rpc/public"],
+  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base"],
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://4663.rpc.thirdweb.com"],
 };
 
