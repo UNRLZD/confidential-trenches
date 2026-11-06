@@ -3,7 +3,8 @@
 // network pins (the wallet's SOL_POOLS and EVM_POOLS, both empty until the pools deploy: every kind is refused
 // not_allowed until then, and no read is made for a refused one).
 // - A sell's amount is in the token's decimals: the device reads the mint (Solana) or decimals() (EVM) on two
-//   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals.
+//   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals. A
+//   read that fails on either provider is "down" (card pool-read-down), never not_allowed.
 // - Refused on Base and Robinhood whatever the pins, until a rule checks it: a pool.deposit (no EVM deposit check yet).
 //   A pool.withdraw goes to the flow: its onward send from W to the typed address is checked by rules/pool.ts
 //   checkEvmOnwardSend (card signpage-pool-withdraw-form); the page's EVM flows land with signpage-evm-pool-trade.
@@ -46,6 +47,9 @@ type Answer<K extends PoolKind> = HostRefusal | Deferred<K> | HostAnswer<K>;
 type Handler<K extends PoolKind> = (params: Record<string, unknown>, ctx: KindContext) => Answer<K>;
 
 const NO: { error: "not_allowed" } = Object.freeze({ error: "not_allowed" as const });
+/** A provider read that still fails after the page's own retry (card pool-read-down): "not now", never "no" (api.ts
+ *  RETRY_CODES, so the same request again runs again). not_allowed comes only from a rule. */
+const DOWN: { error: "down" } = Object.freeze({ error: "down" as const });
 const EVM_REFUSED: ReadonlySet<PoolKind> = new Set(["pool.deposit"]);
 
 const checked = (p: PoolRequest, reads?: TokenDecimalsReads): PoolAsk | null => {
@@ -85,8 +89,9 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
           await got.after.catch(() => {});
           answer = (got.answer() ?? NO) as HostAnswer<K> | HostRefusal;
         },
+        // either provider's read failed: down, and both reads are asked again with the request (one alone sets nothing)
         () => {
-          answer = NO;
+          answer = DOWN;
         },
       );
       return { running: true, after, answer: () => answer };
