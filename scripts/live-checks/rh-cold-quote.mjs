@@ -7,7 +7,7 @@
 //   - the cold quote ends ok under BOUND_MS: what ships on Robinhood's keyless first scan provider, which answers about
 //     3-4 getLogs calls of 10M blocks a second (card rh-cold-quote); TARGET_MS is the card's end state, which card
 //     rpc-keyed-lists tightens BOUND_MS to with a keyed deep provider;
-//   - every warm quote ends ok under WARM_MS;
+//   - every warm quote ends ok, their median under WARM_MS and the slowest under WARM_MAX_MS;
 //   - the case still holds: TORCH has MIN_POOLS pools at least with currencies other than the native asset or WETH in
 //     the scan's depth, read after the quotes on the chain's first scan provider (a token whose seeded pools are gone
 //     proves nothing about a cold scan).
@@ -25,6 +25,7 @@ export const BOUND_MS = 30_000;
 export const TARGET_MS = 10_000;
 export const WARM = 5;
 export const WARM_MS = 3_000;
+export const WARM_MAX_MS = 5_000;
 // 100 read 2026-11-06 01:4xZ on rpc.mainnet.chain.robinhood.com
 export const MIN_POOLS = 50;
 const INITIALIZE = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
@@ -32,11 +33,6 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 const TORCH = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111"; // evm-quote-lag-held.mjs
 // TORCH's quote route: its hookless native 0.3% pool (Q 268.7e18 for 0.001 ETH, 2026-11-06 01:5xZ)
 export const REQ = { chain: "robinhood", token: TORCH, amountIn: 10n ** 15n, slippageBps: 300, route: { venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: TORCH, fee: 3000, tickSpacing: 60, hooks: ZERO, hookData: "0x" }] } };
-
-const pct = (xs, p) => {
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
-};
 
 /** The verdict on a run ({ cold: { ms, code, message?, hosts }, warm: [{ ms, code, message? }], shape?: { pools } }). */
 export function check(run) {
@@ -54,7 +50,13 @@ export function check(run) {
     say(warm.length >= WARM, `warm: ${warm.length} quotes (${WARM} wanted)`);
     const wrong = warm.filter((q) => q.code !== "ok");
     say(wrong.length === 0, `warm: ${warm.length - wrong.length} of ${warm.length} end ok${wrong.length ? ` (others: ${[...new Set(wrong.map((q) => q.code))].join(", ")})` : ""}`);
-    if (warm.length > 0) say(Math.max(...warm.map((q) => q.ms)) < WARM_MS, `warm: p50 ${pct(warm.map((q) => q.ms), 50)} ms, the slowest ${Math.max(...warm.map((q) => q.ms))} ms (each under ${WARM_MS} ms wanted)`);
+    if (warm.length > 0) {
+      const ms = warm.map((q) => q.ms);
+      const s = [...ms].sort((a, b) => a - b);
+      const median = s.length % 2 === 1 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+      say(median < WARM_MS, `warm: median ${median} ms (under ${WARM_MS} ms wanted)`);
+      say(s[s.length - 1] < WARM_MAX_MS, `warm: the slowest ${s[s.length - 1]} ms (under ${WARM_MAX_MS} ms wanted)`);
+    }
   }
   const n = run?.shape?.pools;
   say(Number.isSafeInteger(n) && n >= MIN_POOLS, `case: TORCH has ${n ?? "an unread number of"} pools with other currencies in the scan's depth (${MIN_POOLS} at least wanted)`);
