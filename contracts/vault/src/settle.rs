@@ -8,7 +8,8 @@
 //!   2.5.4, VT-S17) is refused (`SpendInFlight`), and so is `settled` (`AlreadySettled`), so one spend makes at most
 //!   one note.
 //! - Step 2, when `refund_pending`: `nonce += 1`, `label = keccak256(scope_be32 ‖ nonce_be32) mod p`, `commitment =
-//!   Poseidon(refund_value, label, refund_precommitment)`, the commitment into the state tree and the label into the
+//!   Poseidon(refund_value, label, refund_precommitment)` (a precommitment the withdraw or ragequit reserved in
+//!   `precommitments`, so no deposit shares it), the commitment into the state tree and the label into the
 //!   label tree with the checks of 2.5.1 row 10, and `refund_label`, `refund_leaf_index` written in the record. The
 //!   label gets no `label_index` row: a refund note has no depositor, so ragequit (2.5.3 row 2) never passes on it.
 //!   `totals` is not touched: `on_payout` already counted the refund in `returned`, which 2.5.2 row 9 holds as the

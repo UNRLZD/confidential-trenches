@@ -12,6 +12,10 @@
 //! 2. recipient_bounces: relayed, to an unregistered recipient with `register_deposit` 0: the recipient's transfer
 //!    fails the payout receipt (refund_pending 2,000,000, no fee kept). The relayer attaches row 14's requirement and
 //!    SURPLUS.
+//! 2b. Card vault-refund-precommit-reserve: the stranger read fee_bounces' refund precommitment (public on the spend
+//!    and in withdrawal_relayed) and prepaid it before the withdrawal; its deposit on it is refused
+//!    (`PrecommitmentAlreadyUsed`, the token back to it), and a prepay on recipient_bounces' is refused, so each
+//!    refund note below is the only note on its precommitment.
 //! 3. A stranger settles fee_bounces. Its refund note is the state tree's 9th leaf, so the tree grows a level and
 //!    settle writes 389 + 74 B: one yocto short of the shortfall is refused with no state byte, no storage use, no
 //!    log and no NEAR moved; then the shortfall and EXTRA lands, the refund note is exactly 7,000,000 on its precommitment
@@ -37,8 +41,9 @@ const DEPOSITS: &str = include_str!("fixtures/withdraw-spends.json");
 const SPENDS: &str = include_str!("fixtures/settle-spends.json");
 /// The kit's prepay whenever a tree may grow (2.10 (h)).
 const PREPAY_BYTES: u128 = 904;
-/// 2.3: a spend's bytes with a 64-byte payer and recipient, when the state tree grows no level.
-const SPEND_BYTES: u128 = 710;
+/// 2.3: a spend's bytes with a 64-byte payer and recipient (710, + 81 for its refund precommitment's
+/// `precommitments` row), when the state tree grows no level.
+const SPEND_BYTES: u128 = 791;
 const REFUND_RESERVE_BYTES: u128 = blindfill_vault::constants::REFUND_RESERVE_BYTES as u128;
 /// What a tree that grows a level adds to an insert (2.3).
 const LEVEL_BYTES: u128 = 74;
@@ -214,6 +219,10 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     let newcomer = h.account("newcomer", 5).await?;
     let stranger = h.account("stranger", 50).await?;
     let _ = h.storage_deposit(&h.root, newcomer.id()).await?;
+    // the stranger's prepay on fee_bounces' refund precommitment, made before the withdrawal (2b)
+    let refund_fb = args("fee_bounces")["withdrawal"]["refund_precommitment"].as_str().unwrap().to_string();
+    let prepay = NearToken::from_yoctonear(PREPAY_BYTES * YOCTO_PER_BYTE);
+    let _ = h.call(&stranger, &h.vault, "storage_prepay", json!({"precommitment": refund_fb}), prepay, Gas::from_tgas(30)).await?;
 
     // 1. a registered recipient with register_deposit > 0, the fee recipient not registered
     let need_fb = row14_need(relayer.id().as_str(), newcomer.id().as_str(), REGISTER, 2);
@@ -239,6 +248,24 @@ async fn vt_s08(kind: TokenKind) -> R<()> {
     }
     let totals = h.view(&h.vault, "totals", json!({})).await?;
     assert_eq!(totals, json!({"deposited": "31000000", "spent": "9000000", "returned": "9000000"}));
+
+    // 2b. a deposit on a pending spend's refund precommitment is refused; a prepay on one is refused
+    h.mint(stranger.id(), 1_000_000).await?;
+    let msg = format!(r#"{{"precommitment":"{refund_fb}","depositor":"{}"}}"#, stranger.id());
+    let o = h
+        .call_outcome(&stranger, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": "1000000", "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
+        .await?;
+    let r = o.calls_exactly(&h.vault, "ft_on_transfer", 1)?[0];
+    let e = r.failure().ok_or("a deposit on fee_bounces' refund precommitment landed")?;
+    assert!(e.contains("PrecommitmentAlreadyUsed"), "{e}");
+    h.wait_final(&h.vault).await?;
+    assert_eq!((h.token_balance(stranger.id()).await?, h.token_balance(&h.vault).await?), (1_000_000, 31_000_000), "the refused deposit moved tokens");
+    let refund_rb = args("recipient_bounces")["withdrawal"]["refund_precommitment"].as_str().unwrap().to_string();
+    let o = h.call_outcome(&stranger, &h.vault, "storage_prepay", json!({"precommitment": refund_rb}), prepay, Gas::from_tgas(30)).await?;
+    let r = o.calls_exactly(&h.vault, "storage_prepay", 1)?[0];
+    assert!(r.failure().is_some_and(|f| f.contains("PrecommitmentAlreadyUsed")), "a prepay on recipient_bounces' refund precommitment: {}", r.line());
+    assert_eq!(h.view(&h.vault, "totals", json!({})).await?, totals, "a refused deposit moved totals");
+    println!("2b: a deposit and a prepay on pending spends' refund precommitments: refused (PrecommitmentAlreadyUsed)");
 
     // 3. a stranger settles fee_bounces: the 9th state leaf grows the tree a level, so the reserve is short 74 B
     let st = h.view(&h.vault, "state_tree", json!({})).await?;

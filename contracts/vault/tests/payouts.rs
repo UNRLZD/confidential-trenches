@@ -43,8 +43,9 @@ use near_workspaces::Account;
 const SPENDS: &str = include_str!("fixtures/withdraw-spends.json");
 /// The kit's prepay whenever a tree may grow (2.10 (h)).
 const PREPAY_BYTES: u128 = 904;
-/// 2.3: a spend's bytes with a 64-byte payer and recipient, when the state tree grows no level.
-const SPEND_BYTES: u128 = 710;
+/// 2.3: a spend's bytes with a 64-byte payer and recipient (710, + 81 for its refund precommitment's
+/// `precommitments` row), when the state tree grows no level.
+const SPEND_BYTES: u128 = 791;
 const REFUND_RESERVE_BYTES: u128 = blindfill_vault::constants::REFUND_RESERVE_BYTES as u128;
 /// USDC's and the mock's registration.
 const REGISTER: u128 = 1_250_000_000_000_000_000_000;

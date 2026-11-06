@@ -15,9 +15,12 @@
 //!    are refused with `NullifierAlreadySpent`; a refused call changes no byte of the vault's state and logs nothing.
 //! 2. `vt_s06_unknown_zero_and_other_vault_roots_are_refused`: a state root or ASP root that is unknown, 0, or another
 //!    vault's (the same notes under another scope) is refused (`UnknownStateRoot`, `UnknownLabelRoot`) with no byte
-//!    changed; a proof against an older root (4 of the 6 deposits) lands. VT-S07's last case rides here (V:1134): that
-//!    withdrawal's refund precommitment is a stranger's pending deposit precommitment (the stranger prepaid it first);
-//!    the withdrawal lands and the stranger's deposit on it still lands.
+//!    changed; a proof against an older root (4 of the 6 deposits) lands. VT-S07's last case rides here (V:1134), as
+//!    card vault-refund-precommit-reserve changed it: that withdrawal's refund precommitment P is a stranger's pending
+//!    deposit precommitment (the stranger prepaid it first); the withdrawal lands and reserves P, so the stranger's
+//!    deposit on P is refused (`PrecommitmentAlreadyUsed`, the token back to the stranger, no leaf), a new prepay on P
+//!    is refused, and settle still writes the refund note on P. Then a withdrawal whose refund precommitment a
+//!    stranger's deposit already used is refused with no byte changed.
 //! 3. `rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes`: rows 4, 7, 8, 9 and 10 refuse with no state byte,
 //!    no storage use and no log changed; three landed calls each write 2.3's bytes for their account ids (+74 B when
 //!    the state tree grows a level) and log exactly `leaf_inserted`, `withdrawn` then `withdrawal_relayed`.
@@ -38,7 +41,7 @@ use near_workspaces::Account;
 
 const SPENDS: &str = include_str!("fixtures/withdraw-spends.json");
 const GAS: Gas = Gas::from_tgas(300);
-/// Over row 14's charge: (at most 784 B + REFUND_RESERVE_BYTES) x 1e19 + 2 yocto; the rest stays in the reserve.
+/// Over row 14's charge: (at most 865 B + REFUND_RESERVE_BYTES) x 1e19 + 2 yocto; the rest stays in the reserve.
 const ATTACHED: NearToken = NearToken::from_near(1);
 /// The kit's prepay whenever a tree may grow (2.10 (h)).
 const PREPAY: NearToken = NearToken::from_yoctonear(904 * YOCTO_PER_BYTE);
@@ -255,20 +258,29 @@ async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused(kind: TokenKind) 
     let o = withdraw(&h, &relayer, args("old_root", None)).await?;
     let gas = landed(&h, &o)?.map_err(|f| format!("old_root: {f}"))?;
     println!("older root (4 of 6 deposits): landed, {:.3} Tgas", gas as f64 / 1e12);
-    // the stranger's deposit on that precommitment still lands (its prepay is the one above)
+    // the withdrawal reserved P: the stranger's deposit on it is refused (its prepay is the one above), the token
+    // gives the stranger the whole amount back, and no leaf is written
     let leaves = h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64().ok_or("state_tree size")?;
     let held = h.token_balance(&h.vault).await?;
     h.mint(stranger.id(), 1_000_000).await?;
     let msg = format!(r#"{{"precommitment":"{pending}","depositor":"{}"}}"#, stranger.id());
     let d = h
-        .call(&stranger, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": "1000000", "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
+        .call_outcome(&stranger, &h.token, "ft_transfer_call", json!({"receiver_id": h.vault, "amount": "1000000", "msg": msg}), NearToken::from_yoctonear(1), Gas::from_tgas(180))
         .await?;
-    let _ = d.calls_exactly(&h.vault, "ft_on_transfer", 1)?;
-    assert_eq!(h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64(), Some(leaves + 1), "the stranger's deposit wrote no leaf");
-    assert_eq!(h.token_balance(&h.vault).await? - held, 1_000_000, "the vault did not keep the stranger's deposit");
-    println!("a refund precommitment equal to a stranger's pending deposit precommitment: the withdrawal landed, then the stranger's deposit landed");
-    // and the withdrawal's refund is not lost to that deposit: its row holds P, refund_pending, and settle writes the
-    // refund note on P (settle reads no precommitment set, src/settle.rs)
+    let r = d.calls_exactly(&h.vault, "ft_on_transfer", 1)?[0];
+    let f = r.failure().ok_or("the stranger's deposit on a pending spend's refund precommitment landed")?;
+    assert!(f.contains("PrecommitmentAlreadyUsed"), "{f}");
+    h.wait_final(&h.vault).await?;
+    assert_eq!(h.view(&h.vault, "state_tree", json!({})).await?["size"].as_u64(), Some(leaves), "the refused deposit wrote a leaf");
+    assert_eq!(h.token_balance(&h.vault).await?, held, "the vault kept a refused deposit");
+    assert_eq!(h.token_balance(stranger.id()).await?, 1_000_000, "the token did not give the stranger the amount back");
+    // and a prepay on P after the withdrawal is refused
+    let o = h.call_outcome(&stranger, &h.vault, "storage_prepay", json!({"precommitment": pending}), PREPAY, Gas::from_tgas(30)).await?;
+    let r = o.calls_exactly(&h.vault, "storage_prepay", 1)?[0];
+    assert!(r.failure().is_some_and(|f| f.contains("PrecommitmentAlreadyUsed")), "a prepay on P: {}", r.line());
+    println!("a refund precommitment equal to a stranger's pending deposit precommitment: the withdrawal landed, then the stranger's deposit and a new prepay on it were refused (PrecommitmentAlreadyUsed)");
+    // the withdrawal's refund: its row holds P, refund_pending, and settle writes the refund note on P, the one note
+    // the vault holds on P
     let n = signal("old_root", 1);
     let r = spend_row(&h, &n).await?;
     assert_eq!((r["refund_precommitment"].as_str(), r["status"].as_str()), (Some(pending.as_str()), Some("refund_pending")), "{r}");
@@ -283,7 +295,14 @@ async fn vt_s06_unknown_zero_and_other_vault_roots_are_refused(kind: TokenKind) 
         (Some(pending.as_str()), Some("settled"), Some(refund.as_str()), Some(size)),
         "{r}"
     );
-    println!("settle old_root: the refund note of {refund} on P is leaf {size}, after the stranger's deposit on P");
+    println!("settle old_root: the refund note of {refund} on P is leaf {size}, the only note on P");
+    // a withdrawal whose refund precommitment a stranger's deposit already used is refused, no byte changed
+    let taken = args("one_block_a", None)["withdrawal"]["refund_precommitment"].as_str().unwrap().to_string();
+    h.mint(stranger.id(), 1_000_000).await?;
+    deposit(&h, &stranger, &stranger, &taken, "1000000").await?;
+    refused(&h, &relayer, args("one_block_a", None), "PrecommitmentAlreadyUsed").await?;
+    assert!(spend_row(&h, &signal("one_block_a", 1)).await.is_err(), "a refused withdrawal left a spend");
+    println!("a withdrawal whose refund precommitment is a deposit's: refused (PrecommitmentAlreadyUsed)");
     // and the unchanged same_call lands after its refusals
     let o = withdraw(&h, &relayer, args("same_call", None)).await?;
     landed(&h, &o)?.map_err(|f| format!("same_call: {f}"))?;
@@ -323,7 +342,8 @@ async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes(kind: Toke
         println!("signal {i} = {x}: refused ({want})");
     }
 
-    // 2.3: 710 B with a 64-byte payer and recipient; these are shorter, and the third grows the state tree a level
+    // 2.3: 791 B with a 64-byte payer and recipient (710 + the refund precommitment's `precommitments` row 81); these
+    // are shorter, and the third grows the state tree a level
     let short = (64 - relayer.id().as_str().len() as u64) + (64 - "alice.test.near".len() as u64);
     let mut wrote = vec![];
     for name in ["same_call", "same_nullifier_a", "one_block_a"] {
@@ -340,7 +360,7 @@ async fn rows_4_and_7_to_10_refuse_and_a_landed_call_writes_its_bytes(kind: Toke
         println!("{name}: landed, {:.3} Tgas, wrote {} B, state tree depth {depth}", gas as f64 / 1e12, now - used);
         wrote.push(now - used);
     }
-    assert_eq!(wrote, vec![710 - short, 710 - short, 710 - short + 74]);
+    assert_eq!(wrote, vec![791 - short, 791 - short, 791 - short + 74]);
     println!("{}", h.gas_table());
     h.i1().await?;
     Ok(())

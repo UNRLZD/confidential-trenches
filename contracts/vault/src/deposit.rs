@@ -22,7 +22,8 @@
 //!
 //! Rows 3 to 12, the deposit itself (`Vault::deposit`), ported from Privacy Pools v1.3.0's deposit at the lines vault.md
 //! 2.5.1's table cites (`Entrypoint.sol:324-329`, `PrivacyPool.sol:90-106`), Copyright 2025 0XBOW LTD, Apache-2.0:
-//! - Row 3: the precommitment unused (`PrecommitmentAlreadyUsed`, `Entrypoint.sol:324`).
+//! - Row 3: the precommitment unused (`PrecommitmentAlreadyUsed`, `Entrypoint.sol:324`), by a deposit or as a spend's
+//!   reserved `refund_precommitment` (src/withdraw.rs row 11), so no deposit shares a refund note's precommitment.
 //! - Row 4: `amount >= MIN_DEPOSIT` (`MinimumDepositAmount`, `Entrypoint.sol:329`, a constant here).
 //! - Row 5: `amount < u128::MAX` (`InvalidDepositValue`, `PrivacyPool.sol:90`).
 //! - Row 6: a `prepaid[precommitment]` record (`NoPrepay`), deleted; its whole amount stays with the vault (Dev 3).

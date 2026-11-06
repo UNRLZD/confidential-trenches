@@ -18,14 +18,14 @@
 //!    (each with no state byte changed and the token back to its sender), and after one more yocto it lands, 904;
 //!    deposit 6 on exactly 756 B lands, 756;
 //! 3. the withdrawals of tests/fixtures/settle-spends.json, attached exactly 2.5.2 row 14's figure from EXPECTED: one
-//!    yocto short is refused with nothing changed; fee_bounces 617 and recipient_bounces (with SURPLUS) 614;
+//!    yocto short is refused with nothing changed; fee_bounces 698 and recipient_bounces (with SURPLUS) 695;
 //! 4. settle fee_bounces, the state tree's 9th leaf, grows it a level: 463, the 74 B attached; settle
 //!    recipient_bounces 389 from its reserve, and the payer gets exactly SURPLUS back;
-//! 5. D ragequits note 3 (tests/fixtures/ragequit-spends.json): 475, 64-byte payer and recipient.
+//! 5. D ragequits note 3 (tests/fixtures/ragequit-spends.json): 556, 64-byte payer and recipient.
 //!
 //! Vault B, one deposit (note 5 for u) whose withdrawal proof's two roots are seeded into the root sets by a sandbox
 //! state patch (the proof was made against the six-note trees; nothing else is patched): the withdrawal's change leaf
-//! is the state tree's 2nd leaf (a level, 617 + 74), and its settle the state tree's 3rd leaf and the label tree's 2nd,
+//! is the state tree's 2nd leaf (a level, 698 + 74), and its settle the state tree's 3rd leaf and the label tree's 2nd,
 //! growing both trees in one call: 389 + 74 + 74 = 537 (V:488).
 //!
 //! Depth 32 (vault.md 2.11): on vault B's setup, both trees patched to size 2^32 - 1 and depth 32 with a side node at
@@ -60,21 +60,21 @@ const EXPECTED: &[(&str, u128)] = &[
     ("deposit, both trees grow a level", 756 + 74 + 74),
     ("deposit, no level", 756),
     ("deposit refused", 0),
-    // V:114 710 for a 64-byte payer and recipient
+    // V:114 710 for a 64-byte payer and recipient, + 81 for the refund precommitment's `precommitments` row
     ("withdraw refused", 0),
-    ("withdraw fee_bounces", 710 - 47 - 46),
-    ("withdraw recipient_bounces", 710 - 47 - 49),
+    ("withdraw fee_bounces", 791 - 47 - 46),
+    ("withdraw recipient_bounces", 791 - 47 - 49),
     // V:115 the refund note 389 (V:488)
     ("settle, the state tree grows a level", 389 + 74),
     ("settle, no level", 389),
-    // V:116 475, the depositor D 64 bytes as payer and recipient
-    ("ragequit", 475),
+    // V:116 475, the depositor D 64 bytes as payer and recipient, + 81 for the refund precommitment's row
+    ("ragequit", 556),
     ("B deposit, both trees' first node", 756 - 53 + 74 + 74),
-    ("B withdraw, the state tree grows a level", 710 - 47 - 46 + 74),
+    ("B withdraw, the state tree grows a level", 791 - 47 - 46 + 74),
     // V:488 "up to 537 B when a tree grows a level", here both trees at once
     ("B settle, both trees grow a level", 389 + 74 + 74),
     ("depth 32 deposit", 756 - 53),
-    ("depth 32 withdraw", 710 - 47 - 46),
+    ("depth 32 withdraw", 791 - 47 - 46),
     ("depth 32 settle", 389),
 ];
 

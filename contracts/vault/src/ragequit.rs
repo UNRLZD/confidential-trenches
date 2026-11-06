@@ -20,7 +20,9 @@
 //!   value, `status = in_flight`, `payer` and `recipient` the caller (the depositor), `fee` 0, `context` 0 and
 //!   `new_leaf_index` 0 (a ragequit inserts no change; restore reads a spend with context 0 as a ragequit, vault.md
 //!   VT-S19), the caller's `refund_precommitment` (the device names Poseidon(refundMaster, l, j), wallet.md 2.3
-//!   Secrets); `totals.spent += value`.
+//!   Secrets); `totals.spent += value`. As 2.5.2 row 11: `refund_precommitment` not in `precommitments`
+//!   (`PrecommitmentAlreadyUsed`, checked after the nullifier), then reserved there for good (its value the spend
+//!   index), so settle's refund note never shares a precommitment, and so a nullifier, with a deposit.
 //! - Row 6: storage as 2.5.2 row 14 (`InsufficientStorageDeposit`, the last refusal; the reserve kept in the record),
 //!   then `value` paid to the depositor in 2.5.2 row 15's one payout receipt (with `register_deposit`, no fee's
 //!   transfer) and `on_payout(spend_index, value, 0)`, which turns a bounced payout into a refund note's amount (2.5.4).
@@ -100,6 +102,10 @@ impl Vault {
         if self.spent.contains_key(&nullifier_hash) {
             env::panic_str("NullifierAlreadySpent");
         }
+        let refund = field::to_be(&refund);
+        if self.precommitments.contains_key(&refund) {
+            env::panic_str("PrecommitmentAlreadyUsed: refund_precommitment is a deposit's or another spend's");
+        }
         let spent = self.totals.spent.0.checked_add(value).unwrap_or_else(|| env::panic_str("InvalidPoolState"));
         let index = self.spends.len();
         self.spent.insert(&nullifier_hash, &index);
@@ -107,7 +113,7 @@ impl Vault {
             nullifier_hash,
             withdrawn: value,
             new_leaf_index: 0,
-            refund_precommitment: field::to_be(&refund),
+            refund_precommitment: refund,
             refund_value: 0,
             refund_label: [0; 32],
             refund_leaf_index: 0,
@@ -118,6 +124,8 @@ impl Vault {
             fee: 0,
             context: [0; 32],
         });
+        // the refund note's precommitment, reserved for good, as 2.5.2 row 11
+        self.precommitments.insert(&refund, &index);
         self.totals.spent = U128(spent);
         // row 6: storage (the last refusal), then the payout and its callback
         self.charge_storage(index, usage0, register_deposit, 0);
@@ -276,9 +284,10 @@ mod tests {
         assert!(raw(by) == raw_before, "{want}: a raw record changed");
     }
 
-    /// 2.3's ragequit bytes, spent 81 + spends 394 at a 64-byte id, for a depositor id `by` (payer and recipient both).
+    /// 2.3's ragequit bytes, spent 81 + spends 394 at a 64-byte id + the refund precommitment's `precommitments` row 81,
+    /// for a depositor id `by` (payer and recipient both).
     fn bytes(by: &str) -> u128 {
-        475 - 2 * (64 - by.len() as u128)
+        556 - 2 * (64 - by.len() as u128)
     }
 
     #[test]
@@ -296,7 +305,9 @@ mod tests {
         assert_eq!(v.totals.spent.0, value);
         // row 14's rule: the attachment less the bytes and the yocto (register_deposit 0) is the reserve
         let reserve = s.reserve;
-        assert_eq!(ONE_NEAR - reserve - 1, bytes(&by) * PRICE, "a ragequit writes spent 81 + spends 394, less what a short depositor id saves");
+        assert_eq!(ONE_NEAR - reserve - 1, bytes(&by) * PRICE, "a ragequit writes spent 81 + spends 394 + precommitments 81, less what a short depositor id saves");
+        // the refund precommitment reserved under the spend's index
+        assert_eq!(v.precommitments.get(&be(&a.3)), Some(0));
         // the payout: the depositor's part, then on_payout(index, value, 0)
         let r = get_created_receipts();
         assert_eq!(r.len(), 2, "{r:?}");
@@ -318,6 +329,33 @@ mod tests {
         // the kit's spends row: context 0, the depositor as recipient
         let row = serde_json::to_value(&v.spends(0, 1)[0]).unwrap();
         assert_eq!((row["context"].as_str(), row["recipient"].as_str(), row["fee"].as_str()), (Some("0"), Some(by.as_str()), Some("0")));
+    }
+
+    /// The refund note's precommitment, as withdraw's (card vault-refund-precommit-reserve): a landed ragequit
+    /// reserves its refund_precommitment, so a stranger's deposit on it is refused at deposit row 3 even with its prepay
+    /// made first; and a ragequit whose refund_precommitment a deposit already used is refused with nothing written.
+    #[test]
+    fn a_ragequits_refund_precommitment_is_reserved_and_one_a_deposit_used_is_refused() {
+        let mut v = vault(false);
+        let a = rq("deposit");
+        let (refund, by) = (be(&a.3), a.4.clone());
+        call(&by, 0);
+        v.prepaid.insert(&refund, &ONE_NEAR);
+        ragequit_as(&mut v, &by, ONE_NEAR, a.clone()).unwrap();
+        let m = crate::deposit::DepositMessage { precommitment: refund, depositor: id("stranger.test.near") };
+        call("stranger.test.near", 0);
+        let e = catch_unwind(AssertUnwindSafe(|| v.deposit(&m, 1_000_000)))
+            .map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
+            .expect_err("a deposit on a pending ragequit's refund precommitment landed");
+        assert!(e.contains("PrecommitmentAlreadyUsed"), "{e}");
+        assert_eq!(v.deposits.len(), 6);
+
+        let mut v = vault(false);
+        call("stranger.test.near", 0);
+        v.prepaid.insert(&refund, &ONE_NEAR);
+        assert_eq!(v.deposit(&m, 1_000_000), 6);
+        refused(&mut v, &by, ONE_NEAR, Gas::from_tgas(300), a, "PrecommitmentAlreadyUsed");
+        assert_eq!(v.spends.len(), 0);
     }
 
     #[test]

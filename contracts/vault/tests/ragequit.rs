@@ -29,8 +29,9 @@ use near_workspaces::Account;
 
 const FIXTURE: &str = include_str!("fixtures/ragequit-spends.json");
 const PREPAY_BYTES: u128 = 904;
-/// 2.3: a ragequit's bytes (spent 81 + spends 394) with a 64-byte depositor.
-const RAGEQUIT_BYTES: u128 = 475;
+/// 2.3: a ragequit's bytes (spent 81 + spends 394 + its refund precommitment's `precommitments` row 81) with a
+/// 64-byte depositor.
+const RAGEQUIT_BYTES: u128 = 556;
 const REFUND_RESERVE_BYTES: u128 = blindfill_vault::constants::REFUND_RESERVE_BYTES as u128;
 const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 

@@ -116,6 +116,9 @@ pub struct Vault {
     spent: LookupMap<Bytes32, u64>,
     /// append-only: a push writes the row and its count together (key: prefix, then the index as 8 LE bytes)
     spends: Vector<Spend>,
+    /// every precommitment a note is or will be made on, used once: a deposit's -> its deposit index (2.5.1 row 11),
+    /// and a withdrawal's or ragequit's `refund_precommitment` -> its spend index (2.5.2 row 11), reserved for good.
+    /// Only the keys are read: deposit row 3, storage_prepay, withdraw row 11 and ragequit row 5 refuse a key in it.
     precommitments: LookupMap<Bytes32, u64>,
     /// append-only, as `spends`
     deposits: Vector<Deposit>,

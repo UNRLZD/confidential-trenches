@@ -34,7 +34,8 @@ fn precommitment_arg(s: &str) -> Bytes32 {
 #[near]
 impl Vault {
     /// Adds the attached NEAR to `prepaid[precommitment]`. Refused: a precommitment that is not a canonical decimal
-    /// below p, 0, one a deposit already used (`PrecommitmentAlreadyUsed`), and a new record with less than
+    /// below p, 0, one a deposit already used or a spend reserved as its refund precommitment
+    /// (`PrecommitmentAlreadyUsed`), and a new record with less than
     /// `DEPOSIT_STORAGE_BYTES` × `storage_byte_cost()` attached (`InsufficientStorageDeposit`). Any amount adds to an
     /// existing record. Event `storage_prepaid {precommitment, payer, amount}`, `amount` being this call's attachment.
     #[payable]

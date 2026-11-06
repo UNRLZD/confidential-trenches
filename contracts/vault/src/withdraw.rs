@@ -31,11 +31,17 @@
 //! - Row 10: Groth16 verify with the withdraw key, the 8 signals in snarkjs order (`verifier::verify_withdraw`,
 //!   `InvalidProof`).
 //! - Row 11: `existingNullifierHash` not in `spent` (`NullifierAlreadySpent`); a spend is keyed on it, never on the
-//!   proof's bytes, which anyone can re-randomise. Row 12: `newCommitmentHash` into the state tree with LeanIMT's
-//!   checks (`LeafAlreadyExists`, `LeafCannotBeZero`, `MaxTreeDepthReached`), even when the change is 0. Every refusal
+//!   proof's bytes, which anyone can re-randomise. Then `refund_precommitment` not in `precommitments`
+//!   (`PrecommitmentAlreadyUsed`): settle makes the spend's refund note on it (2.5.5), and two notes on one
+//!   precommitment share one nullifier, so a deposit's or another spend's is refused, and this spend reserves it
+//!   below, so a later deposit or prepay on it is refused (src/deposit.rs row 3, src/prepay.rs). Row 12:
+//!   `newCommitmentHash` into the state tree with LeanIMT's checks (`LeafAlreadyExists`, `LeafCannotBeZero`,
+//!   `MaxTreeDepthReached`), even when the change is 0. Every refusal
 //!   of rows 1-12 comes before the first write and the first log; then the change leaf, the `spent` row, the `spends`
 //!   record (status `in_flight`, `payer` the predecessor, the request's recipient, `relay_fee` as `fee`, its
-//!   `refund_precommitment` and `context`, refund fields 0) and `totals.spent += withdrawnValue` are written.
+//!   `refund_precommitment` and `context`, refund fields 0), the `precommitments` row reserving `refund_precommitment`
+//!   (its value the spend index; kept for good, whether or not a refund note is ever made) and `totals.spent +=
+//!   withdrawnValue` are written. Row 14 charges that row's 81 B (1 + 32 + 8 + 40) to the attachment with the rest.
 //!
 //! Between rows 3 and 4 the gas pre-check, and after row 12 rows 13-15 (src/payout.rs): the fee split, the storage
 //! charge (`InsufficientStorageDeposit`, the last refusal, which rolls back every write above it) and the payouts with
@@ -235,9 +241,13 @@ impl Vault {
     fn spend(&mut self, c: &Checked, withdrawn: u128, payer: AccountId) -> (u64, Inserted) {
         let nullifier_hash = field::to_be(&c.signals[SIGNAL_NULLIFIER_HASH]);
         let new_commitment = field::to_be(&c.signals[SIGNAL_NEW_COMMITMENT]);
-        // row 11, its check
+        // row 11, its checks: the nullifier unspent, then the refund precommitment no deposit or spend holds
         if self.spent.contains_key(&nullifier_hash) {
             env::panic_str("NullifierAlreadySpent");
+        }
+        let refund = c.fields.refund_precommitment;
+        if self.precommitments.contains_key(&refund) {
+            env::panic_str("PrecommitmentAlreadyUsed: refund_precommitment is a deposit's or another spend's");
         }
         // taken before any write, so nothing after the first write can refuse (row 9 makes it fail only on a total that
         // could never be reached: spent + withdrawn over 2^128 - 1)
@@ -253,7 +263,7 @@ impl Vault {
             nullifier_hash,
             withdrawn,
             new_leaf_index,
-            refund_precommitment: c.fields.refund_precommitment,
+            refund_precommitment: refund,
             refund_value: 0,
             refund_label: [0; 32],
             refund_leaf_index: 0,
@@ -264,6 +274,8 @@ impl Vault {
             fee: c.fields.relay_fee,
             context: field::to_be(&c.signals[SIGNAL_CONTEXT]),
         });
+        // the refund note's precommitment, reserved for good: no deposit or spend can take it after this one
+        self.precommitments.insert(&refund, &index);
         self.totals.spent = U128(spent);
         // its leaf_inserted is logged by withdraw, after rows 14 and 15
         (index, ins)
@@ -901,8 +913,10 @@ mod spend_tests {
         assert_eq!((r["refund_value"].as_str(), r["refund_label"].as_str(), r["refund_leaf_index"].as_u64()), (Some("0"), Some("0"), Some(0)));
         assert_eq!(r["status"], "in_flight", "on_payout has not run");
         assert_eq!(r["payer"], RELAYER);
-        // row 14: 1 NEAR less the 614 bytes written and 2 yocto (two ft_transfers; register_deposit 0)
-        assert_eq!(r["reserve"], (ONE_NEAR - 614 * 10_000_000_000_000_000_000 - 2).to_string());
+        // row 14: 1 NEAR less the 695 bytes written and 2 yocto (two ft_transfers; register_deposit 0)
+        assert_eq!(r["reserve"], (ONE_NEAR - 695 * 10_000_000_000_000_000_000 - 2).to_string());
+        // row 11: the refund precommitment reserved under the spend's index
+        assert_eq!(v.precommitments.get(&be(&w.refund_precommitment)), Some(0));
         assert_eq!(r["recipient"], w.recipient.as_str());
         assert_eq!(r["fee"], w.relay_fee);
         assert_eq!(r["context"], s[SIGNAL_CONTEXT]);
@@ -953,6 +967,59 @@ mod spend_tests {
         call();
         assert!(verifier::verify_withdraw(&r.encode(), &s.each_ref().map(|x| field::from_decimal(x).unwrap())), "-A, -B verifies");
         refused(&mut v, (w, r, s), "NullifierAlreadySpent");
+    }
+
+    /// The refund note's precommitment (card vault-refund-precommit-reserve). A landed withdrawal reserves its
+    /// refund_precommitment, which the spend record and withdrawal_relayed make public: a stranger's deposit on it is
+    /// refused at row 3 even with its prepay made before the withdrawal, and a prepay after it is refused, so settle's
+    /// refund note (2.5.5) never shares a precommitment, and so a nullifier, with a deposit.
+    #[test]
+    fn a_deposit_on_a_pending_spends_refund_precommitment_is_refused() {
+        let mut v = vault();
+        let (w, p, s) = spend("same_call");
+        let refund = be(&w.refund_precommitment);
+        call();
+        v.prepaid.insert(&refund, &ONE_NEAR);
+        withdraw(&mut v, (w.clone(), p, s)).unwrap();
+        assert_eq!(v.precommitments.get(&refund), Some(0), "reserved under spend 0");
+        let m = crate::deposit::DepositMessage { precommitment: refund, depositor: "stranger.test.near".parse().unwrap() };
+        call();
+        let e = catch_unwind(AssertUnwindSafe(|| v.deposit(&m, 1_000_000)))
+            .map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
+            .expect_err("a deposit on a pending spend's refund precommitment landed");
+        assert!(e.contains("PrecommitmentAlreadyUsed"), "{e}");
+        assert_eq!((v.deposits.len(), v.nonce, v.totals.deposited.0), (0, 0, 31_000_000));
+        call();
+        let e = catch_unwind(AssertUnwindSafe(|| v.storage_prepay(w.refund_precommitment.clone())))
+            .map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
+            .expect_err("a prepay on a pending spend's refund precommitment landed");
+        assert!(e.contains("PrecommitmentAlreadyUsed"), "{e}");
+    }
+
+    /// Row 11's second check: a withdrawal whose refund_precommitment a deposit already used is refused, with nothing
+    /// written, logged or sent; its nullifier stays unspent. The nullifier is checked first.
+    #[test]
+    fn a_withdrawal_whose_refund_precommitment_is_a_deposits_is_refused_with_nothing_written() {
+        let mut v = vault();
+        let c = spend("same_call");
+        let refund = be(&c.0.refund_precommitment);
+        call();
+        v.prepaid.insert(&refund, &ONE_NEAR);
+        let m = crate::deposit::DepositMessage { precommitment: refund, depositor: "stranger.test.near".parse().unwrap() };
+        assert_eq!(v.deposit(&m, 1_000_000), 0);
+        let (size, deposited) = (v.state_tree.size, v.totals.deposited.0);
+        refused(&mut v, c.clone(), "PrecommitmentAlreadyUsed");
+        assert_eq!((v.spends.len(), v.totals.spent.0, v.state_tree.size, v.totals.deposited.0), (0, 0, size, deposited));
+        assert!(!v.spent.contains_key(&be(&c.2[SIGNAL_NULLIFIER_HASH])));
+        // another spend's: the reservation holds against a second spend naming it, whatever its proof
+        let mut v = vault();
+        call();
+        v.precommitments.insert(&refund, &7);
+        refused(&mut v, c, "PrecommitmentAlreadyUsed");
+        // a spent nullifier is named first, as before
+        let mut v = vault();
+        withdraw(&mut v, spend("same_call")).unwrap();
+        refused(&mut v, spend("same_call"), "NullifierAlreadySpent");
     }
 
     #[test]
@@ -1175,8 +1242,9 @@ mod spend_tests {
         }
     }
 
-    /// A landed call writes exactly its records (2.3: 710 B with a 64-byte payer and recipient; here the payer is 17 B
-    /// and the recipient 15 B, so 710 - 47 - 49 = 614, and 74 B more when the state tree grows a level; row 14's
+    /// A landed call writes exactly its records (2.3: 710 B with a 64-byte payer and recipient, and 81 B for the
+    /// refund precommitment's `precommitments` row, 791; here the payer is 17 B and the recipient 15 B, so
+    /// 791 - 47 - 49 = 695, and 74 B more when the state tree grows a level; row 14's
     /// reserve is a same-size overwrite) and logs exactly the change leaf's leaf_inserted, withdrawn, then
     /// withdrawal_relayed.
     #[test]
@@ -1220,7 +1288,7 @@ mod spend_tests {
             );
         }
         // the third change leaf is index 8: the state tree grows from depth 3 to 4
-        assert_eq!(wrote, vec![(614, 3), (614, 3), (688, 4)]);
+        assert_eq!(wrote, vec![(695, 3), (695, 3), (769, 4)]);
     }
 
     /// Every public signal is bound by the proof: one that rows 1-9 accept, changed, fails row 10.
@@ -1274,9 +1342,9 @@ mod spend_tests {
         // (name, yocto for the transfers, register_deposit, bytes written: relayer.test.near pays, the recipient is
         // alice.test.near, or newcomer.test.near with its registration)
         for (name, transfers, register, bytes) in [
-            ("same_call", 2u128, 0u128, 614u128),
-            ("same_nullifier_a", 1, 0, 614),
-            ("new_account", 2, 1_250_000_000_000_000_000_000, 617),
+            ("same_call", 2u128, 0u128, 695u128),
+            ("same_nullifier_a", 1, 0, 695),
+            ("new_account", 2, 1_250_000_000_000_000_000_000, 698),
         ] {
             let need = (bytes + crate::constants::REFUND_RESERVE_BYTES as u128) * price + register + transfers;
             for short in [need - 1, 0] {

@@ -46,9 +46,9 @@ use near_sdk::testing_env;
 use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::{Account, AccountId};
 
-/// withdraw's attached NEAR for this request (7.1): (710 + 389) × 1e19 + register_deposit + 2 yocto (two transfers).
+/// withdraw's attached NEAR for this request (7.1): (791 + 389) × 1e19 + register_deposit + 2 yocto (two transfers).
 const REGISTER_DEPOSIT: u128 = 1_250_000_000_000_000_000_000;
-const ATTACHED: u128 = 1_099 * 10_000_000_000_000_000_000 + REGISTER_DEPOSIT + 2;
+const ATTACHED: u128 = 1_180 * 10_000_000_000_000_000_000 + REGISTER_DEPOSIT + 2;
 const GAS: Gas = Gas::from_tgas(300);
 
 /// The vault's whole raw state at final, as (key, value) base64 pairs in key order.
