@@ -988,6 +988,20 @@ class ScanRefused extends EvmQuoteError {}
  *  so it is asked again whole, never as its halves (card evm-rpc-spare-list, re-review of 156ece1 LOW-2: a 1-block lag
  *  asked the newest block 3 times in 9 requests where 2 do; a block or two behind is a provider's normal state). */
 class NotHeldYet extends EvmQuoteError {}
+/** A cold scan's refusal that no next provider is asked about (review of 8fd51265):
+ *  - a provider whose rate limit holds it past the quote's bound is up, so its blocks never go to a spare alone (one
+ *    429 with a Retry-After of 120 s handed Robinhood's spare the whole cold depth);
+ *  - a request at its smallest span that matches more logs than the provider answers (SCAN_MAX_LOGS, or an error that
+ *    names its limit) is too_many_pools. A token flooded with made-up pools is then unquotable, never priced on a
+ *    spare's word: about 10,000 Initialize events naming the token made the first fail its range, and its spare, which
+ *    hid the real pool, read those blocks alone. */
+class ScanStop extends EvmQuoteError {}
+/** An answer whose error names the provider's cap on the logs one request matches (Robinhood's "logs matched by query
+ *  exceeds limit of 10000"; geth's "query returned more than 10000 results"), never its rate limit (`limited`). */
+const crowded = (a: unknown) => {
+  const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
+  return typeof m === "string" && !limited(a) && /exceeds limit|returned more than|too many logs|response size exceeded/i.test(m);
+};
 function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanGate {
   let limit = parallel;
   // the limit up to which each answer adds 1, half the limit at the last congestion; past it an answer adds 1 / limit
@@ -1009,7 +1023,11 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
     for (;;) {
       const now = performance.now();
       if (now >= untilMs) throw past();
-      if (resumeAt > untilMs) return refuse("rpc_error", `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`);
+      if (resumeAt > untilMs) {
+        const m = `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`;
+        // a warm scan's goes to the next, as its hold does; a cold scan's refuses (ScanStop)
+        throw fast ? new EvmQuoteError("rpc_error", m) : new ScanStop("rpc_error", m);
+      }
       if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw new ScanRefused("rpc_error", `the scan provider limited its rate for ${Math.round(resumeAt - now)} ms`);
       if (now < resumeAt) await new Promise((r) => setTimeout(r, resumeAt - now));
       else if (flying < Math.floor(limit)) {
@@ -1243,8 +1261,9 @@ async function scanPools(
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
     const keep = (rs: unknown[]) => got.push(...rs.map((r) => ({ part, a, b, logs: r as unknown[] })));
-    // a cold request this provider failed at once, where another follows, is asked as its halves on this one down to
-    // SCAN_ALONE blocks, its splits left as they were, before the next has any of it (SCAN_ALONE)
+    // a cold request of more than SCAN_ALONE blocks this provider failed in any way, where another follows, is asked as
+    // its halves on this one, its splits left as they were, before the next has any of it (SCAN_ALONE; review of
+    // 8fd51265, MEDIUM: an answer with an error took SCAN_SPLITS halvings and handed the spare 1,249,750 blocks alone)
     const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;
     const halves = (left: number) => {
       const mid = a + Math.floor((b - a) / 2);
@@ -1255,18 +1274,13 @@ async function scanPools(
       // throttled one is asked again whole by the gate; past the scan's bound each half refuses before it is sent); one
       // whose last block the provider does not hold yet is asked again whole, its tries left (NotHeldYet)
       let notYet = false;
-      let out = false;
       const rs = await on.gate.ask(rpc, calls, 1, fast).then(logsOf, (e) => {
-        if (e instanceof ScanRefused) {
-          if (!alone) throw e;
-          out = true;
-          return null;
-        }
+        if (e instanceof ScanStop || (e instanceof ScanRefused && !alone)) throw e;
         notYet = e instanceof NotHeldYet;
         return null;
       });
-      if (out) return halves(splits);
       if (rs !== null && fine(rs)) return void keep(rs);
+      if (alone) return halves(splits);
       // a warm scan's request one failed goes to the next whole: halves help a span too long for its time or its logs,
       // never a warm one (card evm-scan-second-provider: Robinhood's first answering no logs held a warm quote 9.5 to
       // 11 s, 61 halves through its 2 at once, 2026-11-05 17:3xZ)
@@ -1279,12 +1293,13 @@ async function scanPools(
       const mid = a + Math.floor((b - a) / 2);
       return settle([one({ part, a, b: mid, on }, splits - 1), one({ part, a: mid + 1, b, on }, splits - 1)]);
     }
-    const rs = await on.gate.ask(rpc, calls, SCAN_TRIES, fast).then(logsOf, (e) => {
-      if (e instanceof ScanRefused && alone) return null;
-      throw e;
-    });
-    if (rs === null) return halves(0);
-    if (!fine(rs)) return refuse("rpc_error", "the scan provider answered no logs");
+    const out = await on.gate.ask(rpc, calls, SCAN_TRIES, fast);
+    const rs = logsOf(out);
+    if (!fine(rs)) {
+      // at its smallest span, a request that matches more logs than its provider answers refuses, never goes to the next
+      if (rs.some((r) => Array.isArray(r) && r.length >= SCAN_MAX_LOGS) || out.slice(0, filters.length).some(crowded)) throw new ScanStop("too_many_pools", `more than ${SCAN_MAX_LOGS} pools a request in blocks ${a} to ${b}`);
+      return refuse("rpc_error", "the scan provider answered no logs");
+    }
     keep(rs);
   };
   // every request runs to its end, so each span that comes back is kept, and the first failure is thrown after
@@ -1301,7 +1316,7 @@ async function scanPools(
   const run = (j: Job): Promise<void> =>
     one(j).catch(async (e) => {
       const next = j.on.next;
-      if (next === undefined) throw e;
+      if (next === undefined || e instanceof ScanStop) throw e;
       let done: Spans = [];
       for (const g of got) if (g.part === j.part && g.a >= j.a && g.b <= j.b) done = withSpan(done, g.a, g.b);
       const rest: Job[] = [];

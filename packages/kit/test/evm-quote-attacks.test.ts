@@ -1353,6 +1353,57 @@ test("card rh-cold-quote: a first that answers HTTP 503 to the newest blocks han
   assert.equal(c.failed(), 1);
   assert.equal(c.spared(), 2_000, JSON.stringify(c.spareAsked));
 });
+// review of 8fd51265: the token's real pool 500,000 blocks back on the first, which answers `first(inner)`; the spare
+// hides it. A cold scan's failures of the first never hand the spare its depth
+const rcFirst = (coin: string, first: (inner: EvmRpc) => EvmRpc) => {
+  const real: ModelPool = { key: keyOf(coin, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const pools = [seeded(coin), real];
+  const inner = scanner(RC_HEAD, [{ key: real.key, at: RC_HEAD - 500_000 }]);
+  const spareAsked: [number, number][] = [];
+  const spare = scanner(RC_HEAD, [], spareAsked);
+  const req = { chain: "robinhood" as const, token: coin, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(coin) };
+  const spared = () => [...new Set(spareAsked.map(String))].map((r) => r.split(",").map(Number)).reduce((n, [a, b]) => n + b! - a! + 1, 0);
+  return { spared, run: () => verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [first(inner), spare])) };
+};
+// a fetch that answers `inner` as JSON-RPC, or `instead`'s response where it names one
+const rcFetch = (inner: EvmRpc, instead: (calls: EvmRpcCall[]) => Response | null): typeof fetch =>
+  (async (_u: unknown, init: { body: string }) => {
+    const calls = (JSON.parse(init.body) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    const o = instead(calls);
+    if (o !== null) return o;
+    const out = await inner(calls);
+    return new Response(JSON.stringify(out.map((x, id) => ({ ...(x as object), id }))), { status: 200 });
+  }) as unknown as typeof fetch;
+// the first's getLogs answers: an error for any range that holds block `at` and spans more than `over` blocks
+const rcErr = (at: number, over: number, message: string) => (inner: EvmRpc): EvmRpc => async (calls, s) => {
+  const out = await inner(calls, s);
+  return out.map((o, i) => {
+    const f = calls[i]!.params[0] as { fromBlock?: string; toBlock?: string };
+    const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
+    return calls[i]!.method === "eth_getLogs" && a <= at && b >= at && b - a + 1 > over ? { jsonrpc: "2.0", id: i, error: { code: -32005, message } } : o;
+  });
+};
+
+test("card rh-cold-quote: a cold scan's first throttled past the quote's bound (one 429, Retry-After 120 s) refuses rpc_error, never hands the spare its depth", async () => {
+  let n = 0;
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1e01", (inner) =>
+    evmJsonRpc("https://first.example", rcFetch(inner, (calls) => (calls.some((x) => x.method === "eth_getLogs") && n++ === 0 ? new Response("", { status: 429, headers: { "retry-after": "120" } }) : null)), 16 << 20));
+  assert.deepEqual(await c.run(), { accepted: false, code: "rpc_error" });
+  assert.equal(c.spared(), 0);
+});
+
+test("card rh-cold-quote: a first that answers an error for any request over 1M blocks holding the real pool is asked its halves down to 1M: the seeded route is refused", async () => {
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1e04", rcErr(RC_HEAD - 500_000, 1_000_000, "query timeout exceeded"));
+  assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" });
+  assert.equal(c.spared(), 0);
+});
+
+test("card rh-cold-quote: a token flooded with made-up pools, past the first's cap on logs at every span, is too_many_pools, never priced on the spare's word", async () => {
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1e02", rcErr(RC_HEAD - 500_000 + 1_000, 0, "logs matched by query exceeds limit of 10000"));
+  assert.deepEqual(await c.run(), { accepted: false, code: "too_many_pools" });
+  assert.equal(c.spared(), 0);
+});
+
 
 test("D1 the reference through unlisted v4 middles is a route the device quotes and builds; the same route unquoted, or on v3, is refused", async () => {
   const token = "0x00000000000000000000000000000000000fd1fd";

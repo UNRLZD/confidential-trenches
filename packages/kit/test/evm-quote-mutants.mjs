@@ -51,6 +51,12 @@ export const MUTANTS = [
   [QUOTE, "const alone = !fast && on.next !== undefined && b - a + 1 > SCAN_ALONE;", "const alone = false;", R, "card rh-cold-quote: one HTTP 503 from the first"],
   [QUOTE, "    if (on.next !== undefined && to === head && Math.min(", "    if (false && on.next !== undefined && to === head && Math.min(", R, "card rh-cold-quote: a first whose backend is a block behind"],
   [QUOTE, "const SCAN_ALONE = 1_000_000;", "const SCAN_ALONE = 10_000_000;", R, "card rh-cold-quote: one HTTP 503 from the first"],
+  // a cold scan's first throttled past the bound, any failure over SCAN_ALONE blocks, and a flood at the smallest span
+  // (review of 8fd51265)
+  [QUOTE, "if (next === undefined || e instanceof ScanStop) throw e;", "if (next === undefined) throw e;", R, "card rh-cold-quote: a cold scan's first throttled past"],
+  [QUOTE, "throw fast ? new EvmQuoteError(\"rpc_error\", m) : new ScanStop(\"rpc_error\", m);", "throw new EvmQuoteError(\"rpc_error\", m);", R, "card rh-cold-quote: a cold scan's first throttled past"],
+  [QUOTE, "      if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: a first that answers an error for any request over 1M"],
+  [QUOTE, "out.slice(0, filters.length).some(crowded)", "false", R, "card rh-cold-quote: a token flooded with made-up pools"],
   [QUOTE, "const at = { blockHash: hash, requireCanonical: true };", "const at = { blockHash: hash };", Q, "Q1 "],
   [QUOTE, "const near = (x: Block, y: Block) => x.number - y.number <= maxLag && y.number - x.number <= maxLag;", "const near = (x: Block, y: Block) => true;", R, "R5 "],
   [QUOTE, "if (back.number !== lo.number || back.hash !== lo.hash || back.timestamp !== lo.timestamp || back.baseFeePerGas !== lo.baseFeePerGas) {", "if (false) {", R, "R1b "],
@@ -90,7 +96,7 @@ export const MUTANTS = [
   [QUOTE, "const hints = (Array.isArray(a.hints) ?", "const hints = (false ?", R, "N1b "],
   // (SP3, not N1a: N1a's provider answers its newest request's head block with an error too, refused there since card
   // evm-scan-second-provider)
-  [QUOTE, "if (!fine(rs)) return refuse(", "if (false) return refuse(", R, "SP3 "],
+  [QUOTE, "    if (!fine(rs)) {\n      // at its smallest span", "    if (false) {\n      // at its smallest span", R, "SP3 "],
   // card evm-quote-head-watch: a scan request that fails or overflows is asked by halves; one ending past maxLag behind
   // the agreed block is scanned on to it
   [QUOTE, "rs.every((r) => Array.isArray(r) && r.length < SCAN_MAX_LOGS)", "rs.every((r) => Array.isArray(r))", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
@@ -155,7 +161,7 @@ export const MUTANTS = [
   [QUOTE, "if (scanHead - b > maxLag) return refuse(", "if (false) return refuse(", R, "S2 "],
   // card evm-scan-second-provider: a request the first scan provider fails goes to the second; the first passes on at
   // once a refused connection and a throttle held past 2 s; the newest request asks its head block in its batch
-  [QUOTE, "      if (next === undefined) throw e;", "      throw e;", R, "SP1 "],
+  [QUOTE, "      if (next === undefined || e instanceof ScanStop) throw e;", "      throw e;", R, "SP1 "],
   [QUOTE, "            if (spareNext) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "SP1 "],
   [QUOTE, "      if (fast && resumeAt - now > EVM_SCAN_HOLD_MS) throw", "      if (false) throw", R, "SP4 "],
   [QUOTE, "    const left = fast ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;", "    const left = toBound;", R, "SP2 "],
@@ -316,7 +322,7 @@ export const MUTANTS = [
   [QUOTE, "    limit = sst = Math.max(1, Math.floor(limit / 2));", "    sst = limit;", R, "TH3 "],
   [QUOTE, "      else if (flying < Math.floor(limit)) {", "      else if (true) {", R, "TH3 "],
   [QUOTE, "limit = Math.min(parallel, limit < sst ? limit + 1 : limit + 1 / limit);", "limit = Math.min(parallel, limit);", R, "TH3 "],
-  [QUOTE, "      if (resumeAt > untilMs) return refuse(", "      if (false) return refuse(", R, "TH4 "],
+  [QUOTE, "      if (resumeAt > untilMs) {\n        const m =", "      if (false) {\n        const m =", R, "TH4 "],
   [QUOTE, '          if ((e as Error | null)?.name === "TimeoutError") congest(sent);', "", R, "TH5 "],
   [QUOTE, "    if (sent !== cuts) return false;", "", R, "TH6 "],
   [QUOTE, "      if (now >= untilMs) throw past();", "", R, "TH7 "],
@@ -326,7 +332,7 @@ export const MUTANTS = [
   // browser's fetch failure, a TypeError with no cause, asked again whole too (LOW-B); the bound's race and abort, the
   // refusals' backoff and the per-round list, each held by a named test (LOW-A)
   [QUOTE, "            if (++refused >= SCAN_TRIES) throw new ScanRefused(", "            if (false) throw new ScanRefused(", R, "B1r "],
-  [QUOTE, "        if (e instanceof ScanRefused) {\n          if (!alone) throw e;\n", "        if (e instanceof ScanRefused && alone) {\n", R, "B1r "],
+  [QUOTE, "if (e instanceof ScanStop || (e instanceof ScanRefused && !alone)) throw e;", "if (e instanceof ScanStop) throw e;", R, "B1r "],
   [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1r "],
   [QUOTE, "            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));", "            await nap(0);", R, "B1a "],
   [QUOTE, 'if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code))))', 'if (e instanceof TypeError && typeof code === "string" && CONNECT_ERRORS.has(code))', R, "B8 "],
