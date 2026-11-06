@@ -77,11 +77,11 @@ async function settle<T>(t: TestContext, p: Promise<T>): Promise<T> {
   return p;
 }
 /** A page read, answered with its status and the mocked ms it took. */
-type Timed = { status: number; ms: number; retryAfterS?: number };
+type Timed = { status: number; ms: number; retryAfterS?: number; body: string };
 function ask(tok: ReturnType<typeof T.createSolanaToken>, m: string): { done: Timed | null; p: Promise<Timed> } {
   const t0 = Date.now();
   const h: { done: Timed | null; p: Promise<Timed> } = { done: null, p: null! };
-  h.p = tok.page(m).then((a) => (h.done = { status: a.status, ms: Date.now() - t0, ...(a.retryAfterS === undefined ? {} : { retryAfterS: a.retryAfterS }) }));
+  h.p = tok.page(m).then((a) => (h.done = { status: a.status, ms: Date.now() - t0, body: a.body, ...(a.retryAfterS === undefined ? {} : { retryAfterS: a.retryAfterS }) }));
   return h;
 }
 const clock = (t: TestContext) => {
@@ -204,16 +204,17 @@ test("card helper-token-page-cold: searches stay at SEARCH_PER_SPAN in the proxy
     ask(tok2, mint(n));
     await run(t, LAT + 20);
   }
+  // card helper-page-jup-429: the page answers at once named on chain (this stand-in names none), never held
   const late = ask(tok2, mint(999));
-  await run(t, 50);
-  assert.deepEqual([late.done?.status, late.done?.retryAfterS], [503, undefined], "not held for the slot, and not our 429");
+  await run(t, T.JUP_PAGE_WAIT_MS + 50);
+  assert.deepEqual([late.done?.status, late.done?.retryAfterS, JSON.parse(late.done!.body).row.src], [200, undefined, "chain"], "not held for the slot, and not our 429");
   const before = proxy.calls.length;
   await run(t, 61_000); // the counted minute's oldest search leaves it
   assert.equal(proxy.calls.length, before + 1);
   assert.ok(proxy.calls.at(-1)!.mints.includes(mint(999)), "its mint was searched when the slot came");
   const retry = ask(tok2, mint(999));
   await run(t, 50);
-  assert.equal(retry.done?.status, 200, "the retry is answered from the row read");
+  assert.deepEqual([retry.done?.status, JSON.parse(retry.done!.body).row.src], [200, "jupiter"], "the retry is answered from the row read");
   assert.equal(proxy.calls.length, before + 1, "with no search of its own");
 });
 
@@ -372,7 +373,7 @@ async function suiteWithOne429(t: TestContext, ra: number) {
         void proxy.handle("jupiter", "/swap/v2/build", "q=device", "", "198.51.100.7").then((a) => (build = a));
       }
       for (let ms = 0; h.done === null && ms < 15_000; ms += 50) await run(t, 50);
-      pages.push(h.done ?? { status: 0, ms: -1 });
+      pages.push(h.done ?? { status: 0, ms: -1, body: "" });
     }
     await run(t, 10_000);
   }
@@ -408,7 +409,8 @@ test("card helper-crowd-429 fold 6: a Jupiter hold past the page's budget answer
   for (let ms = 0; (a.done === null || b.done === null) && ms < 20_000; ms += 50) await run(t, 50);
   await run(t, 100);
   const bd = await build;
-  assert.deepEqual([a.done?.status, a.done?.retryAfterS, b.done?.status, b.done?.retryAfterS], [503, undefined, 503, undefined], "not ready, no 429 and no wait of ours named");
+  // card helper-page-jup-429: both pages answer named on chain, no 429 and no wait of ours named
+  assert.deepEqual([a.done?.status, a.done?.retryAfterS, b.done?.status, b.done?.retryAfterS], [200, undefined, 200, undefined], "named on chain, no 429 and no wait of ours named");
   assert.deepEqual([bd.status, JSON.parse(bd.body)], [503, { error: { code: "upstream" } }], "the build too: the device falls back on its public path (H2.3)");
   assert.equal(upstream.length, 1, "one call met the 429; nothing else reached Jupiter inside its reset");
 });
@@ -420,7 +422,9 @@ test("card helper-ready-page-warm: a page that answers not ready names why in th
   const held = createProxy({}, { now: () => Date.now(), fetch: (async () => new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": "30" } })) as never });
   const a = why(T.createSolanaToken(held, rpc, { now: () => Date.now() }), mint(3000));
   for (let ms = 0; ms < 20_000; ms += 50) await run(t, 50);
-  assert.deepEqual(await a, [503, "jupiter held", '{"error":{"code":"upstream"}}'], "Jupiter's 429 holds it past the wait: the body unchanged, the cause logged");
+  // card helper-page-jup-429: Jupiter's hold is no refusal of the page: it answers named on chain, nothing to log
+  const [st, w] = await a;
+  assert.deepEqual([st, w], [200, undefined], "Jupiter's 429 holds the search past the wait: the page is named on chain");
   // the mint's RPC read fails
   const down = { handle: async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "solana held" }) };
   const ok = searchProxy();
@@ -435,10 +439,13 @@ test("card helper-ready-page-warm: a not-ready page tells its caller why in the 
   const proxyOf = (retryAfter: string) => createProxy({}, { now: () => Date.now(), fetch: (async () => new Response("{}", { status: 429, headers: { "content-type": "application/json", "retry-after": retryAfter } })) as never });
   const held = timing(T.createSolanaToken(proxyOf("30"), rpc, { now: () => Date.now() }), mint(3100));
   for (let ms = 0; ms < 20_000; ms += 50) await run(t, 50);
-  assert.deepEqual(await held, [503, 'search-held;desc="jupiter held"', '{"error":{"code":"upstream"}}'], "Jupiter's hold past the wait");
+  // card helper-page-jup-429: the page answers named on chain and its timing names why it has no Jupiter row
+  const h = await held;
+  assert.deepEqual([h[0], (h[1] as string).split(", ").find((e) => e.startsWith("search-"))], [200, 'search-held;desc="jupiter held"'], "Jupiter's hold past the wait");
   const twice = timing(T.createSolanaToken(proxyOf("1"), rpc, { now: () => Date.now() }), mint(3101));
   for (let ms = 0; ms < 20_000; ms += 50) await run(t, 50);
-  assert.deepEqual(await twice, [503, 'search-429;desc="jupiter provider 429"', '{"error":{"code":"upstream"}}'], "Jupiter's 429 twice");
+  const tw = await twice;
+  assert.deepEqual([tw[0], (tw[1] as string).split(", ").find((e) => e.startsWith("jup;"))], [200, `jup;desc="late";dur=${T.JUP_PAGE_WAIT_MS}`], "Jupiter's 429s outlast the page's wait");
   const down = { handle: async () => ({ status: 503, body: '{"error":{"code":"upstream"}}', why: "solana held" }) };
   const r = timing(T.createSolanaToken(searchProxy(), down, { now: () => Date.now() }), mint(3102));
   await run(t, 1_000);
@@ -459,8 +466,15 @@ test("card helper-page-jup-429: a cold page's search met by a Jupiter 429, a 429
       return new Response(JSON.stringify(mints.map(rowOf)), { headers: { "content-type": "application/json" } });
     }) as never,
   });
-  const a = ask(T.createSolanaToken(proxy, rpc, { now: () => Date.now() }), mint(3200));
+  const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
+  const a = ask(tok, mint(3200));
   for (let ms = 0; a.done === null && ms < 20_000; ms += 50) await run(t, 50);
-  assert.equal(a.done?.status, 200, `the page after two resets: ${a.done?.status}`);
+  assert.equal(a.done?.status, 200, `the page at once, named on chain: ${a.done?.status}`);
+  for (let ms = 0; n < 3 && ms < 20_000; ms += 50) await run(t, 50);
+  await run(t, 100);
   assert.equal(n, 3, "three sends: two 429s and the read");
+  // card helper-page-jup-429: the next read has the row the search held
+  const again = ask(tok, mint(3200));
+  await run(t, 50);
+  assert.equal(JSON.parse(again.done!.body).row.src, "jupiter");
 });

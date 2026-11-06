@@ -40,7 +40,8 @@ function chain(held: () => boolean) {
       const keys = r.params[0] as string[];
       if ((r.params[1] as { encoding?: string }).encoding === "base64") return ok({ context: { slot: 1 }, value: keys.map(() => null) });
       if (keys.length === 2 && keys[1] === pumpCurveAddress(keys[0]!)) return { status: 200, body: JSON.stringify(FX.tokens[PUMP].accounts) };
-      if (keys[0] === PUMP) return { status: 200, body: JSON.stringify({ ...FX.tokens[PUMP].accounts, result: { ...FX.tokens[PUMP].accounts.result, value: [FX.tokens[PUMP].accounts.result.value[0]] } }) };
+      // the mint read: the mint and its Metaplex metadata account (card helper-page-jup-429), none recorded
+      if (keys[0] === PUMP) return { status: 200, body: JSON.stringify({ ...FX.tokens[PUMP].accounts, result: { ...FX.tokens[PUMP].accounts.result, value: keys.map((_, i) => (i === 0 ? FX.tokens[PUMP].accounts.result.value[0] : null)) } }) };
       return ok({ context: { slot: 1 }, value: keys.map(() => ({ owner: TOKEN_2022_PROGRAM, data: { parsed: { type: "account", info: { owner: OWNER } } } })) });
     },
   };
