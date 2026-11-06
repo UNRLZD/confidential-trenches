@@ -100,9 +100,9 @@ test("a real proof of the request passes the relayer's checks 1-4 as written, an
 });
 
 // card vault-refund-precommit-reserve's pin: a stranger's deposit on our refund precommitment R (the vault takes it:
-// deposit.rs:109-110 refuses a repeated P among deposits only) costs the user nothing. Our refund note on R is picked
-// and proved at its own leaf with its own value, and the stranger's larger leaf on R is never spent. A picker or prover
-// that looked notes up by precommitment in the pages, or took the larger leaf on R, fails here.
+// deposit.rs:109-110 refuses a repeated P among deposits only) costs the user nothing. With the stranger's larger leaf
+// on R in the tree, our refund note is picked and a real proof is made at our leaf, on our 7 USDC, so a request that
+// spent the stranger's leaf on R fails here. note-restore.test.ts's twin test holds the lookup by precommitment.
 test("our refund note is spendable after a stranger's deposit on its R: a real proof at our leaf, never the stranger's", async () => {
   const v = await vaultWith([2_000_000n]);
   const parent = v.notes[0]!;

@@ -124,7 +124,6 @@ impl Status {
     }
 }
 
-/// Whether an RPC status object reads as success (`Status::parse(v).ok()`).
 /// A note's commitment, Poseidon(value, label, precommitment), from the decimals the vault's views give (the vault's
 /// own PoseidonT4, as deposit and settle hash a note).
 pub fn commitment_on(value: &str, label: &str, precommitment: &str) -> String {
@@ -133,6 +132,7 @@ pub fn commitment_on(value: &str, label: &str, precommitment: &str) -> String {
     to_decimal(&from_be(&blindfill_vault::poseidon::PoseidonT4::new().hash(&be(value), &be(label), &be(precommitment))))
 }
 
+/// Whether an RPC status object reads as success (`Status::parse(v).ok()`).
 pub fn status_is_ok(v: &Value) -> bool {
     Status::parse(v).ok()
 }

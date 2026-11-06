@@ -20,9 +20,10 @@
 //! And card vault-refund-precommit-reserve's pin, `vt_s09_twins` (from the same six deposits): the vault holds a
 //! precommitment twice by design (deposit.rs:109-110 refuses a repeated P among deposits only; ragequit and settle
 //! write no precommitments), and no twin can be ragequit by anyone:
-//! a. a stranger deposits on u's refund precommitment R (public on a spend): it lands. u's ragequit of that note
-//!    fails row 2 on the stranger's label (`OnlyOriginalDepositor`); the stranger's fails row 3 (`InvalidProof`:
-//!    the proof needs R's nullifier and secret, which only u holds).
+//! a. rows 2 and 3 only: a stranger deposits on u's refund precommitment R (here before any spend names it; VT-S07
+//!    in withdraw_spend.rs holds the pending-spend case): it lands. u's ragequit of that note fails row 2 on the
+//!    stranger's label (`OnlyOriginalDepositor`); the stranger's fails row 3 (`InvalidProof`: the proof needs R's
+//!    nullifier and secret, which only u holds).
 //! b. q ragequits note 6 naming u's pending deposit precommitment P, and its payout bounces: the settle adds a gift
 //!    leaf on P; u's deposit on P still lands, both leaves hash from P, and the gift's ragequit is refused for u
 //!    and q (its label names no deposit).
@@ -309,7 +310,8 @@ async fn vt_s09_twins(kind: TokenKind) -> R<()> {
     let w = deposited(kind).await?;
     let h = &w.h;
 
-    // a. the stranger's deposit on u's refund precommitment R: it lands, and nobody can ragequit it
+    // a. rows 2 and 3: the stranger's deposit on u's refund precommitment R (no spend names R yet; VT-S07 holds the
+    // pending-spend case) lands, and nobody can ragequit it
     let r_u = rq_args("deposit")["refund_precommitment"].as_str().ok_or("refund_precommitment")?.to_string();
     let theirs = deposit_on(h, &w.stranger, &r_u, 1_000_000).await?;
     let (label_s, at_s) = (theirs["label"].as_str().ok_or("label")?.to_string(), theirs["leaf_index"].as_u64().ok_or("leaf_index")?);
