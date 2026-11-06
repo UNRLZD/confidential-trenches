@@ -21,7 +21,9 @@
 // A broken retry path is a FAIL, never hidden as a token passed over: when the search ends with no route, the check
 // asks Jupiter itself at each of MARKET_CAPS the search did not ask (its own list, not the kit's), and a route there
 // that fits makes that token the shapes, which then FAIL. A run where no candidate has the shape is its own verdict,
-// NO-SHAPE (exit 3), never a PASS; the judge holds it to every passed-over candidate's recorded answers.
+// INCONCLUSIVE (exit 3), said on its own line (card jupiter-build-budget-503: run 42188135355 ended "none of the shape"
+// with nothing saying the retry path went unchecked), never a PASS; the judge holds it to every passed-over
+// candidate's recorded answers.
 // The check's Jupiter calls are a device's builds and its probes, each at least PACE_MS after the last, so one runner
 // asks at most JUPITER_PER_MINUTE in any counted minute, what the helper lends a client on the total alone
 // (apps/helper/src/limits/limits.ts LEND_FREE_SHARES x the share): the run is never past its own share or lent, so the
@@ -40,7 +42,7 @@
 // outAmount at the slippage this check asked for, so the floor decoded from the signed bytes must be at least what was
 // asked. S11 and S12 need a funded simulation and the reference pool, the buy flow's.
 //   node scripts/live-checks/solana-jupiter-build.mjs [--base <helper origin>] [--token <mint>] [--no-route-token <mint>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2, NO-SHAPE exit 3 (no candidate has no route at 40 and a fitting one).
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (no candidate has no route at 40 and a fitting one).
 //   --record writes every answer the run read, so the test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
@@ -68,8 +70,10 @@ export const CAUSE = /(^|,\s*)cause;desc="(429|held|budget|5xx|timeout|send|key|
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 export const BUY_LAMPORTS = 10_000_000n; // 0.01 SOL
 export const SLIPPAGE_BPS = 1000;
-/** Candidates asked to find one with no route at 40; 7 of 40 listed tokens had none on 2026-11-05 03:30Z. */
-export const PROBES = 24;
+/** Candidates asked to find one with no route at 40; 7 of 40 listed tokens had none on 2026-11-05 03:30Z. Card
+ * jupiter-build-budget-503: 24 asked in 37 calls found none whose buy and sell both had it (run 42188135355, two
+ * buys only), so up to 48, inside PROBE_CALLS: a candidate that routes at 40 is one call. */
+export const PROBES = 48;
 /** The most a candidate asks: each side's 3 builds and 2 market asks. */
 export const CANDIDATE_CALLS = 2 * (3 + 2);
 /** The candidates' Jupiter calls at most: 60 at PACE_MS is 8 min, inside the check job's 20 (live.yml check
@@ -197,13 +201,17 @@ async function marketFit(r, req, market) {
   return null;
 }
 
-/** The check on one recorded run: PASS, FAIL, or NO-SHAPE (no candidate had the shape, and nothing else is BAD). */
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2). */
+export const EXIT = { PASS: 0, FAIL: 1, INCONCLUSIVE: 3 };
+/** The line an INCONCLUSIVE run says on its own: no candidate had the shape, so the retry path was not checked. */
+export const inconclusiveLine = (n) => `INCONCLUSIVE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among ${n} candidates: the device's retry path was not checked this run`;
+/** The check on one recorded run: PASS, FAIL, or INCONCLUSIVE (no candidate had the shape, and nothing else is BAD). */
 export async function judge(r) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(r.shapes?.length === SHAPES.length && SHAPES.every((s, i) => r.shapes[i]?.name === s.name), `the four shapes: ${(r.shapes ?? []).map((s) => s.name).join("; ")}`);
   const none = !r.mints?.noRoute;
-  if (none) lines.push(`NONE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among ${(r.probes ?? []).length} candidates`);
+  if (none) lines.push(inconclusiveLine((r.probes ?? []).length));
   // every candidate passed over is held to its own recorded answers: a token of the shape, or one whose search broke,
   // is never passed over (a record from before candidates kept their answers has none to replay, and names its token)
   for (const p of r.probes ?? []) {
@@ -286,7 +294,7 @@ export async function judge(r) {
     say(ok, `${at} ${tx.size} bytes (limit ${SOLANA_MAX_TX_BYTES}), caps ${steps}, route ${build.route.join(" + ")} by ${kind}, ${dec.message.instructions.length} instructions, ${tx.tablesUsed.length} table(s), CU limit ${tx.cuLimit}, builds ${Math.round(ms)} ms${sameHash ? "" : `, blockhash ${dec.message.blockhash} is not the device's`}${off.length ? `; refused: ${off.join("; ")}` : `; ${JUDGED.join(",")} pass`}`);
   }
   const bad = lines.length === 0 || lines.some((l) => l.startsWith("BAD"));
-  const verdict = bad ? "FAIL" : none ? "NO-SHAPE" : "PASS";
+  const verdict = bad ? "FAIL" : none ? "INCONCLUSIVE" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
 }
 
@@ -458,7 +466,7 @@ if (import.meta.main) {
     const { verdict, lines } = await judge(answer);
     for (const l of lines) console.log(l);
     console.log(`live-check ${KEY}: ${verdict} (${answer.base}, tokens ${answer.mints.listed} and ${answer.mints.noRoute ?? "none of the shape"})`);
-    process.exit({ PASS: 0, FAIL: 1, "NO-SHAPE": 3 }[verdict]);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);

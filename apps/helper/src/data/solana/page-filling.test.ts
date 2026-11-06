@@ -149,3 +149,30 @@ test("card token-page-fills-after: the app's 5 s re-reads of a held chain-named 
   assert.ok(later.length >= 2, `the held page's search read again in the background: ${later.length}`);
   assert.deepEqual(later.filter((s) => s.caller !== false), [], "every re-read's search is a background read");
 });
+
+test("card jupiter-build-budget-503: N fill polls of one mint (four devices a second for 14 s) while its search is in flight or held make one Jupiter search", async (t) => {
+  clock(t);
+  // Jupiter answers the search 2 s after it is sent: the first pages are late (named on chain, filling), the search in
+  // flight under them, then its row held JUP_FRESH_MS
+  const searches: string[] = [];
+  const proxy = createProxy({}, {
+    now: () => Date.now(),
+    fetch: (async (url: string) => {
+      const u = new URL(url);
+      if (u.pathname.endsWith("/search")) searches.push(u.searchParams.get("query")!);
+      await new Promise((ok) => setTimeout(ok, 2_000));
+      return new Response(JSON.stringify(u.pathname.endsWith("/search") ? u.searchParams.get("query")!.split(",").map(rowOf) : {}), { headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
+  const m = mint(9);
+  const polls: { done: Page | null }[] = [];
+  for (let s = 0; s <= 14; s++) {
+    for (let d = 0; d < 4; d++) polls.push(ask(tok, m));
+    await run(t, 1_000);
+  }
+  await run(t, 1_000);
+  assert.ok(polls.every((p) => p.done?.status === 200), polls.map((p) => p.done?.status ?? "pending").join(" "));
+  assert.deepEqual([polls[0]!.done?.filling, polls.at(-1)!.done?.filling, polls.at(-1)!.done?.row?.src], [true, false, "jupiter"], "the first late, the last from the held row");
+  assert.deepEqual(searches, [m], `${polls.length} polls, ${searches.length} Jupiter searches`);
+});

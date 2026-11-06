@@ -198,7 +198,7 @@ jobs:
           {
             echo "### $NAME"
             echo '```'
-            if [ -e "$log" ]; then grep -E '^(BAD|WARN)|PASS|FAIL|ERROR|[Ee]rror' "$log" | head -200; else echo "no output: the check did not start"; fi
+            if [ -e "$log" ]; then grep -E '^(BAD|WARN)|PASS|FAIL|INCONCLUSIVE|ERROR|[Ee]rror' "$log" | head -200; else echo "no output: the check did not start"; fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
