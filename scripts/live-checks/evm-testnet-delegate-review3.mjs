@@ -31,7 +31,7 @@
 // which the test replays), keeping the file's recorded bad answers (main 0628a2d5's pins); --write-record, on PASS,
 // writes the run record evm-testnet-delegate-review3.md (Money path: yes, one Tx line per transaction of the redeploys,
 // the runs and each run key's funding), which the money gate reads back.
-// Runs: after each helper deploy (scripts/ci/helper-live-checks.mjs): the fee answer is HELPER_HOST's, checked against
+// After each helper deploy (listed in scripts/ci/helper-live-checks.mjs): the fee answer is HELPER_HOST's, checked against
 // the kit's pins of that deploy; the rest is chain state no later deploy or pin move changes
 import "../net-window.mjs";
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
