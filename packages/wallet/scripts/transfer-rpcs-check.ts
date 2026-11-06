@@ -26,7 +26,7 @@ import { createInterface } from "node:readline";
 import { solanaPacedRpc } from "@blindfill/kit";
 import { HOLDINGS_RPC_LIMIT } from "../src/pool/buy-wallets.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_CHAIN_IDS, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_EVENTS, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmAgreedLogs, evmAnswered, evmHoldsAnchor, evmPair, evmRetryLag, evmRpcHex, evmTokensSentTo, evmTokensSentToOne, type EvmBlock, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_LOG_CEILING_PAGES, EVM_LOG_PAGE_BLOCKS, EVM_NEWEST_TAG, EVM_POOL_EVENTS, EVM_POOL_TAG, EVM_TRANSFER_RPCS, evmAgreedBlock, evmAgreedLogs, evmAnswered, evmHoldsAnchor, evmPair, evmRetryLag, evmRpcHex, evmTokensSentTo, evmTokensSentToOne, type EvmBlock, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
 
 type Args = { network: EvmNetwork; w: string; from?: string; back?: string; wait: boolean; helper?: string; pool?: readonly string[] };
 
@@ -94,7 +94,8 @@ try {
     if (a.pool === undefined) return { anchor, from, tokens: await evmTokensSentTo(rpcs, a.w, from, { fin, anchor }, page, undefined, sleep) };
     const topic = (sig: string) => `0x${Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex")}`;
     const filter = { address: a.w.toLowerCase(), topics: [[topic(EVM_POOL_EVENTS.Deposited), topic(EVM_POOL_EVENTS.Withdrawn), topic(EVM_POOL_EVENTS.Bought)]] };
-    const logs = await evmAgreedLogs(rpcs, filter, () => { throw new Error("a log at an address with none"); }, from, { fin, anchor }, page, 0, undefined, sleep);
+    // the pool sync's page ceiling (EVM_LOG_CEILING_PAGES, card notes-per-pool-evm-base-hang), as evmTreeSync reads
+    const logs = await evmAgreedLogs(rpcs, filter, () => { throw new Error("a log at an address with none"); }, from, { fin, anchor }, page, 0, undefined, sleep, EVM_LOG_CEILING_PAGES);
     return { anchor, from, tokens: logs.map(String) };
   };
   const r = await evmRetryLag(read, sleep);

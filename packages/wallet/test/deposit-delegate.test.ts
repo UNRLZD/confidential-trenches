@@ -351,13 +351,14 @@ test("H4.3: what the device refuses to sign, the helper refuses too when U's key
   }
 });
 
-test("the device refuses before signing: the cap, a window over 600 or not whole, P not below p", async () => {
+test("the device refuses before signing: the cap, a window over 600 or not whole, P outside 1..p-1 (vault review R-01)", async () => {
   await refused(sign({ amount: HELPER_BIND_DEPOSIT_CAP + 1n }), "call", /HELPER_BIND_DEPOSIT_CAP/);
   assert.ok((await sign({ amount: HELPER_BIND_DEPOSIT_CAP })).signed_delegate.length > 0); // the cap itself is signed
   await assert.rejects(sign({ amount: VAULT_CONSTANTS.MIN_DEPOSIT - 1n }), DepositAccountRefused); // the read's own floor
   for (const w of [DEPOSIT_WINDOW_MAX + 1, 10_000, 0, -1, 1.5, Number.NaN]) await refused(sign({ window: w }), "window");
   assert.equal((await sign({ window: 1 })).max_block_height, HEIGHT + 1n);
-  await refused(sign({ precommitment: VAULT_FIELD_P }), "call", /below p/);
+  for (const precommitment of [VAULT_FIELD_P, 0n]) await refused(sign({ precommitment }), "call", /precommitment: not in 1\.\.p-1/);
+  assert.ok((await sign({ precommitment: 1n })).signed_delegate.length > 0); // 1 is the smallest P the vault takes
   await assert.rejects(depositDelegate(SEED, S, I, { ...ARGS, network: "devnet" as "testnet" }, replayDepositReads("testnet", PUB)), /unknown network devnet/);
 });
 

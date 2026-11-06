@@ -378,7 +378,9 @@ test("check 6: msg keeps every clause of the vault's row 2 (V 2.10 (e))", async 
     [`{"precommitment":12345678901234567890123,"depositor":"${dep}"}`, "msg: not written as the kit writes it"],
     [JSON.stringify({ precommitment: 1, depositor: dep }), "msg.precommitment: not one canonical decimal"],
     [JSON.stringify({ precommitment: "01", depositor: dep }), "msg.precommitment: not one canonical decimal"],
-    [JSON.stringify({ precommitment: String(FIELD_P), depositor: dep }), "msg.precommitment: not below p"],
+    [JSON.stringify({ precommitment: String(FIELD_P), depositor: dep }), "msg.precommitment: not in 1..p-1"],
+    // the vault refuses P = 0 (vault review R-01): the helper never carries a bind it would refuse
+    [JSON.stringify({ precommitment: "0", depositor: dep }), "msg.precommitment: not in 1..p-1"],
     [JSON.stringify({ precommitment: "1", depositor: "Alice.near" }), "msg.depositor: not a NEAR account id"],
     [JSON.stringify({ precommitment: "1", depositor: 7 }), "msg.depositor: not a NEAR account id"],
     [JSON.stringify({ precommitment: "1", depositor: VAULT }), "msg.depositor: the vault"],
@@ -387,7 +389,7 @@ test("check 6: msg keeps every clause of the vault's row 2 (V 2.10 (e))", async 
   ];
   for (const [msg, why] of cases) await refused(body(withMsg(msg)), "bad_msg", why);
   await passes(body(withMsg(JSON.stringify({ precommitment: String(FIELD_P - 1n), depositor: dep }))));
-  await passes(body(withMsg(JSON.stringify({ precommitment: "0", depositor: dep }))));
+  await passes(body(withMsg(JSON.stringify({ precommitment: "1", depositor: dep }))));
 });
 
 test("check 6: P not in the deposits pages", async () => {

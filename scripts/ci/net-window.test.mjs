@@ -83,6 +83,7 @@ export const CHANGED = [
   "scripts/live-checks/relayer-fee-account.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
   "scripts/live-checks/relayer-withdraw-send.mjs",
+  "scripts/live-checks/rh-cold-quote.mjs",
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",
@@ -105,6 +106,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-small-note-buys.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/solana-legs-share-wait.mjs",
+  "scripts/live-checks/token-page-fills-after.mjs",
   "scripts/live-checks/trade-box-bal-cash.mjs",
   "scripts/live-checks/trade-box-pool.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
@@ -114,6 +116,7 @@ export const CHANGED = [
   "scripts/live-checks/vault-testnet-t01.mjs",
   "scripts/live-checks/vault-testnet-t04.mjs",
   "scripts/live-checks/vault-mainnet.mjs",
+  "scripts/live-checks/vault-review-fixes-kit.mjs",
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
 ];

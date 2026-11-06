@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Live check of card notes-per-pool-evm: the wallet's EVM pool sync (packages/wallet/src/pool/evm.ts) reads each
-// deployed testnet pool on the two money-gate RPCs of its chain (scripts/ci/money-gate.mjs), and every check passes.
+// deployed testnet pool on two RPCs of two operators (CHAINS), and every check passes.
 // The sync itself runs in packages/wallet/scripts/evm-pool-sync-check.ts, a child process (Blindfill's code stays
 // behind the kit's entry for this file; no check here is a second implementation of the sync's). This file makes
 // every network call for it, so it records or replays them.
@@ -18,7 +18,10 @@
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of notes-per-pool-evm.answers.json, and its bad run: the same
 // answers with currentTreeSize one higher on both RPCs, which the sync must refuse.
-// Runs: pending notes-per-pool-evm-base-hang, it reads no host and hangs on Base Sepolia today (no line in 20 min, 4 Nov 20:07Z; Robinhood testnet PASS in 28 s); fixed, it is a Runs: once
+// Bounded (card notes-per-pool-evm-base-hang): the chains are read at once, each printed as it ends with its calls and
+// time, and each has CHAIN_DEADLINE_MS: a sync still going then fails, naming the call it is stuck on (the URL's host,
+// the method, the block range and its try). On 4 Nov 20:07Z the Base Sepolia run printed nothing in 20 min.
+// Runs: once, it reads no host: the wallet's pool sync at the checkout against the testnets' public RPCs; the wallet tests hold its pager
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -39,13 +42,22 @@ export const VIEWS = Object.fromEntries(["SCOPE()", "currentRoot()", "currentTre
 
 // The pools and their deploy txs, from card pool-evm-deploy's run records
 // (scripts/live-checks/pool-evm-deploy.base-sepolia.json and pool-evm-deploy.robinhood-testnet.json, deployed
-// 3 Nov 05:02-05:04Z). The RPCs are the money gate's for each chain (scripts/ci/money-gate.mjs), two operators each.
+// 3 Nov 05:02-05:04Z). Robinhood testnet's RPCs are the money gate's (scripts/ci/money-gate.mjs), two operators. Base
+// Sepolia's are the pair that pages the pool's logs wide, as card evm-pool-reads-throttle's SYNC (card
+// notes-per-pool-evm-base-hang): the chain makes a block every 200 ms (blocks 53,801,443 to 55,089,154 in 257,542 s on
+// sepolia.base.org, base-sepolia-rpc.publicnode.com and base-testnet.api.pocket.network alike, 6 Nov 04:35Z), and the
+// money gate's sepolia.base.org answers the pool's eth_getLogs over 200 blocks "-32614: eth_getLogs is limited to a
+// 200 range" (1,000 to 100,000 blocks, 04:35Z), so the pager's 156-block pages: 744 pages in 222 s from the pool's
+// deploy block, about 8,250 pages and 41 min for the pool's 1,285,746 blocks, 2,770 more a day (04:27-04:31Z).
+// PublicNode answered the same filter over 1,000, 10,000 and 50,000 blocks in 116-176 ms and refused 100,000 ("-32701:
+// exceed maximum block range: 50000"); Pocket answered 1,000 to 100,000 blocks in 188-265 ms (04:35Z): at the pager's
+// 10,000-block pages, about 130 pages each.
 export const CHAINS = Object.freeze({
   "base-sepolia": Object.freeze({
     chainId: 84532n,
     pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
     deployTx: "0x388b62ddca5ba87084edb814e5290f097be2ff9b4ecb1dec69b5f2c567cb163a",
-    rpcs: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"]),
+    rpcs: Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"]),
   }),
   "robinhood-testnet": Object.freeze({
     chainId: 46630n,
@@ -54,6 +66,10 @@ export const CHAINS = Object.freeze({
     rpcs: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"]),
   }),
 });
+
+/** Each chain's sync ends within this: Robinhood testnet's read took 28 s from the Mac (4 Nov 20:07Z) and Base
+ * Sepolia's on its wide pair about 130 pages a side; this is over 5 times either, so the job stays under 5 min. */
+export const CHAIN_DEADLINE_MS = 240_000;
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -123,14 +139,41 @@ async function deployBlock(c, transport) {
   return { number: BigInt(a.blockNumber), hash: a.blockHash };
 }
 
-/** The wallet's sync on one chain, its RPCs bridged to `transport`. Resolves the sync's report, or throws its refusal. */
-function runSync(name, c, fromBlock, transport, wait) {
+const host = (u) => new URL(u).host;
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+/** A call as a line names it: the method, an eth_getLogs page's range or a block's tag, and the URL's host only. */
+function callName(c) {
+  const f = c.params?.[0];
+  const what = c.method === "eth_getLogs" && f?.fromBlock !== undefined ? ` ${BigInt(f.fromBlock)}..${BigInt(f.toBlock)} (${BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n} blocks)` : typeof f === "string" ? ` ${f}` : "";
+  return `${c.method}${what} on ${host(c.url)}`;
+}
+
+/** The wallet's sync on one chain, its RPCs bridged to `transport`, ended at `deadlineMs`. Resolves the sync's report
+ * with its calls (`calls`, `ms`), or throws its refusal; past the deadline the child is stopped and the refusal names
+ * the stuck call: the oldest still unanswered, else the last answered, with its try and the time since. */
+function runSync(name, c, fromBlock, transport, wait, deadlineMs) {
   return new Promise((resolve, reject) => {
     const args = { network: name, pool: c.pool, fromBlock: fromBlock.toString(), urls: c.rpcs, wait };
+    const t0 = Date.now();
     const child = spawn(process.execPath, [SYNC, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
-    let buf = "", err = "", settled = false;
+    let buf = "", err = "", settled = false, calls = 0;
+    const open = new Map(); // id -> the call, asked at
+    const tries = new Map(); // [url, method, params] -> times asked
+    let last = null; // the last answered call and when
     child.stdin.on("error", () => {}); // an answer after the sync has exited
-    const settle = (f, v) => (settled ? undefined : ((settled = true), f(v)));
+    const stuck = () => {
+      const now = Date.now();
+      const o = [...open.values()].sort((a, b) => a.at - b.at)[0];
+      if (o !== undefined) return `${callName(o)}, try ${o.try}, no answer in ${secs(now - o.at)}`;
+      if (last === null) return "no call asked";
+      const said = last.error === undefined ? "answered" : `refused (${String(last.error).slice(0, 100)})`;
+      return `${callName(last)}, try ${last.try}, ${said}, ${secs(now - last.at)} waited since`;
+    };
+    const timer = setTimeout(() => {
+      settle(reject, new Error(`no end in ${secs(deadlineMs)} (${calls} calls): stuck on ${stuck()}`));
+      child.kill("SIGKILL");
+    }, deadlineMs);
+    const settle = (f, v) => (settled ? undefined : ((settled = true), clearTimeout(timer), f(v)));
     child.stderr.on("data", (d) => (err += d));
     child.stdout.on("data", (d) => {
       buf += d;
@@ -138,10 +181,18 @@ function runSync(name, c, fromBlock, transport, wait) {
         const m = JSON.parse(buf.slice(0, i));
         buf = buf.slice(i + 1);
         if (m.rpc) {
-          transport(c.rpcs[m.rpc.k], m.rpc.method, m.rpc.params).then((a) => {
+          const url = c.rpcs[m.rpc.k];
+          const k = JSON.stringify([url, m.rpc.method, m.rpc.params]);
+          const call = { url, method: m.rpc.method, params: m.rpc.params, at: Date.now(), try: (tries.get(k) ?? 0) + 1 };
+          tries.set(k, call.try);
+          open.set(m.rpc.id, call);
+          calls++;
+          transport(url, m.rpc.method, m.rpc.params).then((a) => {
+            open.delete(m.rpc.id);
+            last = { ...call, at: Date.now(), error: a.error };
             if (!child.stdin.destroyed) child.stdin.write(`${JSON.stringify({ id: m.rpc.id, ...a })}\n`);
           });
-        } else if (m.done) settle(resolve, m.done);
+        } else if (m.done) settle(resolve, { ...m.done, calls, ms: Date.now() - t0 });
         else if (m.fail) settle(reject, new Error(m.fail));
       }
     });
@@ -159,15 +210,15 @@ function view(r, s) {
   return x[0];
 }
 
-/** The check on one chain: { ok, lines }. */
-export async function check(name, transport, { wait = true } = {}) {
+/** The check on one chain: { ok, lines }. `deadlineMs`: the sync's (CHAIN_DEADLINE_MS). */
+export async function check(name, transport, { wait = true, deadlineMs = CHAIN_DEADLINE_MS } = {}) {
   const c = CHAINS[name];
   if (c === undefined) throw new Error(`unknown chain ${name}`);
   const lines = [];
   try {
     const d = await deployBlock(c, transport);
     lines.push(`${name}: deploy tx ${c.deployTx} in block ${d.number} (${d.hash}) on both RPCs, creating ${c.pool}`);
-    const r = await runSync(name, c, d.number, transport, wait);
+    const r = await runSync(name, c, d.number, transport, wait, deadlineMs);
     if (r.chainIds.some((x) => x !== c.chainId.toString())) throw new Error(`chain ids ${r.chainIds.join(", ")}, not ${c.chainId}`);
     lines.push(`${name}: eth_chainId ${c.chainId} on both; SCOPE() ${view(r, "SCOPE()")} on both is evmPoolScopeOf(pool, ${c.chainId})`);
     for (const [t, a] of [["finalized", r.finalized], ["newest agreed", r.newest]]) {
@@ -175,7 +226,7 @@ export async function check(name, transport, { wait = true } = {}) {
       lines.push(`${name}: ${t} anchor ${a.number} ${a.hashes[0]} on both`);
     }
     const v = (s) => view(r, s);
-    lines.push(`${name}: from block ${d.number} the logs rebuild currentRoot ${v("currentRoot()")}, currentTreeSize ${v("currentTreeSize()")}, currentLabelRoot ${v("currentLabelRoot()")}, currentLabelTreeSize ${v("currentLabelTreeSize()")} at the newest anchor, on both; depth ${r.depth}`);
+    lines.push(`${name}: from block ${d.number} the logs rebuild currentRoot ${v("currentRoot()")}, currentTreeSize ${v("currentTreeSize()")}, currentLabelRoot ${v("currentLabelRoot()")}, currentLabelTreeSize ${v("currentLabelTreeSize()")} at the newest anchor, on both; depth ${r.depth} (${r.calls} calls in ${secs(r.ms)})`);
     lines.push(r.cut === null
       ? `${name}: no leaf yet (no leaf before the pool's time ${r.nowMs} ms): stateRootTimes and labelRootTimes are read from the first deposit on`
       : `${name}: the cut before ${r.cut.beforeMs} ms (${r.cut.stateSize} state, ${r.cut.labelSize} label leaves): stateRootTimes(${r.cut.stateRoot}) and labelRootTimes(${r.cut.labelRoot}) are its last leaves' block times on both`);
@@ -203,14 +254,15 @@ async function main(argv) {
   const record = at("--record");
   let ok = true;
   const good = {}, bad = {};
-  for (const name of names) {
+  // the chains at once, each printed as it ends
+  await Promise.all(names.map(async (name) => {
     const rec = recorder();
     const r = await check(name, rec.transport);
     for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
     ok &&= r.ok;
     good[name] = rec.log;
     bad[name] = spoil(rec.log);
-  }
+  }));
   if (record) {
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good, bad }, null, 1)}\n`);
     console.log(`recorded ${record}`);

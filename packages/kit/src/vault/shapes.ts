@@ -69,7 +69,8 @@ export const VAULT_NOTE_HASHES = {
 export const VAULT_DEPOSIT_MESSAGE_FIELDS = ["precommitment", "depositor"] as const;
 export const VAULT_DEPOSIT_MESSAGE_MAX_BYTES = 1_024;
 /**
- * precommitment: one canonical decimal below VAULT_FIELD_P. depositor: the account a ragequit pays, the moving id
+ * precommitment: one canonical decimal in 1..p-1 (0 is refused: no (nullifier, secret) hashes to it, so its note could
+ * never be spent; vault review R-01). depositor: the account a ragequit pays, the moving id
  * itself, a lowercase 64-hex NEAR-implicit id (vault paper 2.10: the kit refuses any other depositor).
  */
 export type VaultDepositMessage = { precommitment: string; depositor: string };
@@ -80,7 +81,7 @@ export type VaultDepositMessage = { precommitment: string; depositor: string };
  * under 200 bytes.
  */
 export function vaultDepositMessage(precommitment: bigint, depositor: string): string {
-  if (typeof precommitment !== "bigint" || precommitment < 0n || precommitment >= VAULT_FIELD_P) throw new Error("precommitment: not below p");
+  if (typeof precommitment !== "bigint" || precommitment <= 0n || precommitment >= VAULT_FIELD_P) throw new Error("precommitment: not in 1..p-1");
   if (typeof depositor !== "string" || !/^[0-9a-f]{64}$/.test(depositor)) throw new Error("depositor: not a lowercase 64-hex NEAR-implicit id");
   const msg: VaultDepositMessage = { precommitment: precommitment.toString(), depositor };
   return JSON.stringify(msg);
@@ -270,8 +271,12 @@ export const VAULT_ON_PAYOUT = {
   method: "on_payout",
   args: ["spend_index", "to_recipient", "fee"],
   private: true,
-  /** promise results, in this order; the fee part only when fee > 0 */
-  results: ["recipient part", "fee part"],
+  /**
+   * one promise result: the payout, ONE receipt on the token that registers the recipient (only when register_deposit
+   * > 0), pays to_recipient and pays the fee (only when fee > 0), all or none (vault review A-01: a failed payout
+   * refunds the whole withdrawn value and pays no fee)
+   */
+  results: ["payout"],
 } as const;
 export type VaultOnPayoutArgs = { spend_index: number; to_recipient: string; fee: string };
 
