@@ -5,7 +5,7 @@
 //   after four candidates passed over (three route at 40, Jupiter refuses one), its buy and sell asked once each, 40
 //   no route then 48, which fit: PASS.
 // - fixed_mint (00:53Z): 1znxCqDU…qyNd, the token the check met on 2026-11-06, named: its sell routes at 40: FAIL.
-// - no_shape: good_found's real answers with its token of the shape left out: NO-SHAPE, never a PASS.
+// - no_shape: good_found's real answers with its token of the shape left out: INCONCLUSIVE on its own line, never a PASS.
 // read() itself runs on markets made of the good run's answers: one that answers a second ask differently, one with no
 // token of the shape, one whose first candidate Jupiter refuses.
 // - good (2026-11-05 05:37Z, the pace and the probe of folds 3 and 4): the listed token CniPCE4b…pump at 40; the
@@ -29,7 +29,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { JUPITER_PER_MINUTE, PACE_MS, base58, judge, mostIn, read } from "./solana-jupiter-build.mjs";
+import { EXIT, JUPITER_PER_MINUTE, PACE_MS, base58, inconclusiveLine, judge, mostIn, read } from "./solana-jupiter-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "solana-jupiter-build.answers.json"), "utf8"));
@@ -302,7 +302,7 @@ test("read() on a market whose no-route token answers a second ask differently: 
   for (const name of [NAMES[1], NAMES[3]]) assert.ok(v.lines.some((l) => l.startsWith(`ok  ${name}: `) && l.includes(", caps 40 no route, 48 fits, ")), name);
 });
 
-test("read() on a market where the first candidate routes at 40 and the second has no route anywhere: NO-SHAPE, never a PASS, each candidate held to its answers", async (t) => {
+test("read() on a market where the first candidate routes at 40 and the second has no route anywhere: INCONCLUSIVE, never a PASS, each candidate held to its answers", async (t) => {
   const answers = recorded();
   // the listed token's answers again for another mint: a candidate that routes at 40
   const other = "DABCynB9Ft9gg9oewK3nyjfag467CsALsXtMm9f1tgcf";
@@ -312,10 +312,10 @@ test("read() on a market where the first candidate routes at 40 and the second h
   market(t, { lists: { trending_1h: [LISTED], new: [{ token: other }, SHAPED] }, answers, accounts: { [other]: A.good.reads.accounts[A.good.mints.listed] } });
   const r = await read({ ...clock() });
   const v = await judge(r);
-  assert.equal(v.verdict, "NO-SHAPE", v.lines.join("\n"));
+  assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
   assert.equal(v.ok, false);
   assert.equal(r.mints.noRoute, null);
-  assert.ok(v.lines.includes("NONE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among 2 candidates"), v.lines.join("\n"));
+  assert.ok(v.lines.includes(inconclusiveLine(2)), v.lines.join("\n"));
   assert.ok(v.lines.some((l) => l.startsWith(`ok  candidate ${other}: buy 40 fits: routes at 40, passed over`)), v.lines.join("\n"));
   assert.ok(v.lines.some((l) => l.startsWith(`ok  candidate ${A.good.mints.noRoute}: buy no_route: no route (40 no_route, 48 no_route, 60 no_route): no fitting route within the search's reach, passed over`)), v.lines.join("\n"));
   // the no-shape record with a passed-over candidate's answers made into the shape's: FAIL, a token of the shape passed over
@@ -384,12 +384,13 @@ test("recorded fixed_mint run (00:53Z, --no-route-token 1znxCqDU…qyNd, the min
   assert.deepEqual(bad(r).map((l) => l.replace(/\(.*\)/, "(…)")), ["BAD S-2 sell, a token with no route at 40: the token routes at 40 (…), so this is not the retry path"]);
 });
 
-test("recorded no_shape run (good_found's real answers with its token of the shape left out): NO-SHAPE, never a PASS", async () => {
+test("recorded no_shape run (good_found's real answers with its token of the shape left out): INCONCLUSIVE on its own line, exit 3, never a PASS", async () => {
   const r = await judge(A.no_shape);
-  assert.equal(r.verdict, "NO-SHAPE", r.lines.join("\n"));
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
   assert.equal(r.ok, false);
+  assert.equal(EXIT[r.verdict], 3);
   assert.deepEqual(bad(r), []);
-  assert.ok(r.lines.includes("NONE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among 4 candidates"));
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("INCONCLUSIVE")), ["INCONCLUSIVE no token with no route at 40 and a fitting one within the search's reach, buy and sell, among 4 candidates: the device's retry path was not checked this run"]);
   // a candidate's answers dropped: the no-shape verdict has nothing to stand on: FAIL
   const g = copy(A.no_shape);
   delete g.probes[0].buy;
