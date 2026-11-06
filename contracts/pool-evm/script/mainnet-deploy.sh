@@ -17,9 +17,12 @@
 #    the v4 adapter, the v3 adapter and the sell delegate, each checked as the build's code on both RPCs, sweeps the
 #    rest back to your address and writes contracts/pool-evm/deployments/<chain>.json.
 # 2. The live check on that record, on both of the chain's RPCs: no owner, no proxy, the pinned code, the run key empty.
+# Once both chains' records pass and the kit pins them, the money gate's run record is written by
+#   node scripts/live-checks/pool-evm-deploy-mainnet.mjs --write-record   (scripts/live-checks/pool-evm-deploy-mainnet.md)
 # The record is the one-deploy guard, so the paste line names the folder it runs in (cd <the repository> && sh ...),
-# and the record is committed right after; a stopped run writes no record, and the same paste in the same folder
-# resumes it with its kept key, reusing every contract it made.
+# and the record is committed right after (a paste in another clone is refused too, once main holds the record or the
+# kit pins the pool); a run stopped before its last deploy writes no record, and the same paste in the same folder
+# resumes it with its kept key, reusing every contract it made, asking only for what the key lacks.
 # Nothing is typed in: no seed phrase or key is asked for. The run key is made in memory and kept in a 0700 folder
 # (~/.local/state/pool-evm-deploy) only until both RPCs read it empty; every transaction it signs is journaled
 # beside the record before it is sent. Ctrl-C or a closed terminal stops the run at its next step and the sweep sends

@@ -21,18 +21,25 @@
 //     the owner's paste (script/mainnet-deploy.sh, card pool-evm-deploy-mainnet) and its sweep form. A mainnet run
 //     differs from a testnet run in these, each refused before a key is made: the RPC is the chain's first in
 //     pool-evm-deploy.mjs MAINNETS (or a loopback fork of it with --out, the rehearsal); the record goes to
-//     contracts/pool-evm/deployments/<chain>.json, and once it exists the run is refused, naming the live check;
-//     --return must also hold ETH on both RPCs (the wallet the owner funds from); each contract's init code must be
-//     MAINNET_INIT's. Then: the run key is kept in a 0700 folder (keysBase(), file 0600) until the cleanup reads it at
+//     contracts/pool-evm/deployments/<chain>.json, and once it exists the run is refused, naming the live check, as it
+//     is when origin/main holds that record or the kit pins a pool for the chain (deployedElsewhere); --return must
+//     also hold ETH on both RPCs (the wallet the owner funds from); each contract's init code must be MAINNET_INIT's,
+//     and those checked bytes are the ones sent; the max fee (the lower of both RPCs') must be at most MAX_FEE_CAP.
+//     Then: the run key, made in memory, is kept in a 0700 folder (keysBase(), file 0600), written with the journal just
+//     before the run's try (a throw before it leaves no key behind), until the cleanup reads it at
 //     most DUST on both RPCs with every nonce it signed landed, and never removed after a stop before the funding was
 //     read; the run's journal (the record's path, .journal.json) holds every transaction it signs, written before
 //     the send and in the finally, and the key's state. A stopped run that made a contract keeps its key; while a
 //     journal's key is kept the same paste (the same --return, no other) resumes with that key: each contract the
-//     stopped run made is reused once its receipt and its code on both RPCs read back as the build's, and only the rest
-//     is deployed, at the key's next nonces; or --sweep-kept sends the key's rest back to that journal's return
-//     address, and no other, then removes the key. A journal whose key is removed is moved aside by the next run. Only a
-//     completed run writes the record. Each contract's code is read again on both RPCs. The funding line gives the need
-//     in wei and, exactly, in ETH.
+//     stopped run made is reused once its receipt and its code on both RPCs read back as the build's (one that landed
+//     but does not read back stops the resume before any funding, and the pool is reused only with its verifier), and
+//     only the rest is deployed, at the key's next nonces; or --sweep-kept sends the key's rest back to that journal's
+//     return address, and no other, then removes the key: any journal whose key is not removed ("kept", or "in use" after
+//     a run killed outright), the return wallet's balance not asked. A journal whose key is removed is moved aside by
+//     the next run. The record is written once every deploy is made, before the sweep, and again with the sweep; a
+//     run that made fewer writes none. The journal and the record are each written whole (writeAtomic). Each contract's
+//     code is read again on both RPCs. The funding line asks for the need less what the key holds, in wei and, exactly,
+//     in ETH, and for nothing when the key holds the need (a resume's kept key). Each RPC call is tried RPC_TRIES times.
 //
 // Steps:
 //  1. The chain from eth_chainId: the named testnet's id, on its RPC or on a loopback URL (an anvil fork of it, the dry
@@ -97,6 +104,21 @@ export const onlyFile = (name, chain) => path.join(REPO, "scripts/live-checks", 
 const GAS_MARGIN = (g) => (g * 12n) / 10n;
 const OP_ORACLE = "0x420000000000000000000000000000000000000f"; // the OP Stack GasPriceOracle predeploy
 const SWEEP_TX_BYTES = 200n; // an EIP-1559 transfer signed is about 110 bytes
+// Each RPC call's tries (pool-evm-deploy.mjs rpc: 1.5 s more wait per try, 67.5 s of waits over 10 tries). They outlast a
+// provider's one-minute throttle window: rpc.mainnet.chain.robinhood.com answered HTTP 429 with no Retry-After for about
+// 61 s (packages/wallet/src/pool/evm.ts EVM_LOG_THROTTLE_TRIES, read 5 Nov 13:55Z), and 5 tries (15 s) ended a run there.
+export const RPC_TRIES = 10;
+// A mainnet run's max fee per gas (twice the base fee plus the tip, the lower of the two RPCs') is refused above this,
+// before any key: a broken or lying RPC answer, not a busy chain. 2 gwei is about 200 times Base's (base fee 5,002,715
+// wei, tip 1,000,000) and about 44 times Robinhood's (base fee 22,646,000 wei, tip 0), read on both RPCs of each on
+// 2026-11-06 00:07Z, and above anvil's own 1 gwei tip, so a fork's rehearsal runs as the paste does.
+export const MAX_FEE_CAP = 2n * 10n ** 9n;
+/** Writes `text` to `file` whole or not at all: a temporary file beside it, then a rename over it */
+export function writeAtomic(file, text) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, file);
+}
 
 // ---- the mainnets (card pool-evm-deploy-mainnet) ----
 // Each contract's init code (forge's bytecode.object, before the constructor's arguments) as the build pinned in
@@ -123,6 +145,20 @@ export function initProblems(name, code) {
   const b = bytes(code);
   const k = keccak(b);
   return b.length === pin.length && k === pin.keccak ? null : `${name}: init code keccak256 ${k} (${b.length} bytes), not the pinned ${pin.keccak} (${pin.length} bytes)`;
+}
+/**
+ * Why `chainName`'s pool counts as deployed beyond this checkout, or null: origin/main holds its record (fetched first),
+ * or the kit pins a pool for it. A paste in another clone of the repository is refused as one in this folder is.
+ */
+export async function deployedElsewhere(chainName) {
+  const file = path.relative(REPO, deploymentFile(chainName));
+  const git = (...a) => spawnSync("git", ["-C", REPO, ...a], { encoding: "utf8" });
+  if (git("fetch", "-q", "origin", "main").status !== 0) return "git fetch origin main failed: the record on main could not be read";
+  if (git("rev-parse", "--verify", "-q", "origin/main").status !== 0) return "origin/main is not here: the record on main could not be read";
+  if (git("cat-file", "-e", `origin/main:${file}`).status === 0) return `origin/main holds ${file}`;
+  const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href);
+  const pool = evmPoolVenues()[chainName]?.pool;
+  return pool ? `the kit pins the ${chainName} pool ${pool}` : null;
 }
 /** A record's journal: the record's path with .journal.json */
 export const journalOf = (out) => out.replace(/\.json$/, "") + ".journal.json";
@@ -283,7 +319,7 @@ export async function main(args, io = {}) {
   if (!out) throw new Error("a dry run (a loopback RPC) needs --out, so it never writes the real record");
   // every final check reads the chain's second RPC too (the fork's other loopback name on a dry run)
   const second = dryRun ? url.replace("127.0.0.1", "localhost") : chain.rpcs[1];
-  const call = (method, params, u = url) => rpc(fetchFn, u, method, params, sleep);
+  const call = (method, params, u = url) => rpc(fetchFn, u, method, params, sleep, RPC_TRIES);
   const rel = (f) => path.relative(process.cwd(), f);
   const liveCheck = `node scripts/live-checks/${only ? ALONE[only].key : "pool-evm-deploy"}.mjs --deployment ${rel(out)}${dryRun ? ` --rpc ${url},${second}` : ""}`;
 
@@ -309,10 +345,18 @@ export async function main(args, io = {}) {
     if (!existsSync(journalFile)) throw new Error(`${rel(journalFile)} does not exist: no run's key is kept`);
     j0 = JSON.parse(readFileSync(journalFile, "utf8"));
     if (j0.chain !== chainName) throw new Error(`${rel(journalFile)} is ${j0.chain}'s, not ${chainName}'s`);
-    if (j0.keys?.state !== "kept") throw new Error(`${rel(journalFile)}: its run key is ${j0.keys?.state}, not kept: nothing to sweep`);
+    // kept, or "in use": a run killed outright (during a deploy or its sweep) never wrote "kept"; the key file is checked
+    // against the journal's deployer when it is read
+    if (!j0.keys?.state || j0.keys.state === "removed") throw new Error(`${rel(journalFile)}: its run key is ${j0.keys?.state ?? "unknown"}: nothing to sweep`);
     if (opt("--return") !== undefined && returnAddress(opt("--return")) !== j0.return) throw new Error(`--sweep-kept goes back only to the run's return address ${j0.return}, not ${opt("--return")}`);
   } else if (mainnet) {
-    if (existsSync(out)) throw new Error(`${rel(out)} exists: the pool is deployed on ${chainName}: run its live check alone: ${liveCheck}`);
+    if (existsSync(out)) {
+      const j = existsSync(journalFile) ? JSON.parse(readFileSync(journalFile, "utf8")) : null;
+      const left = j?.keys?.state && j.keys.state !== "removed" ? `; its run key is still ${j.keys.state}: send its rest back: ${sweepCommand(chainName)}` : "";
+      throw new Error(`${rel(out)} exists: the pool is deployed on ${chainName}: run its live check alone: ${liveCheck}${left}`);
+    }
+    const elsewhere = await (io.deployedElsewhere ?? deployedElsewhere)(chainName);
+    if (elsewhere) throw new Error(`the pool is deployed on ${chainName} already: ${elsewhere}`);
     if (existsSync(journalFile)) {
       const j = JSON.parse(readFileSync(journalFile, "utf8"));
       const keptWhy = `(${(j.keys?.why ?? []).join("; ") || "its state unknown"})`;
@@ -344,12 +388,13 @@ export async function main(args, io = {}) {
     if ((await call("eth_chainId", [], u)) !== chain.chainId) throw new Error(`${u} does not answer ${chainName}'s chain id`);
     const c = await call("eth_getCode", [ret, "latest"], u);
     if (c !== "0x") throw new Error(`--return ${ret} has code on ${u} (${(c.length - 2) / 2} bytes): the rest goes only to an account with none`);
-    if (mainnet && !(big(await call("eth_getBalance", [ret, "latest"], u)) > 0n)) throw new Error(`--return ${ret} holds no ETH on ${u}: pass the wallet you send the funding from`);
+    if (mainnet && !kept && !(big(await call("eth_getBalance", [ret, "latest"], u)) > 0n)) throw new Error(`--return ${ret} holds no ETH on ${u}: pass the wallet you send the funding from`);
   }
 
   const startedAt = new Date().toISOString();
-  let pinned, forgeVersion, sk, deployer, names, addrs, datas, gas, need, keyDir;
+  let pinned, forgeVersion, sk, deployer, names, addrs, datas, gas, need, keyDir, inits;
   let journalKeys = null;
+  let keysBase0 = null;
   const big0 = (x) => (x === undefined || x === null ? x : BigInt(x));
   // a stopped run's kept key, for --sweep-kept or a resume
   const loadKept = () => {
@@ -384,8 +429,10 @@ export async function main(args, io = {}) {
     const built = buildOf();
     for (const n of ORDER) if (JSON.stringify(built[n]) !== JSON.stringify(pinned[n])) throw new Error(`${n}: forge's build differs from ${path.basename(BUILD_FILE)}`);
     names = only ? [only] : chain.contracts;
+    // read once: the bytes checked here are the bytes sent
+    inits = Object.fromEntries(names.map((n) => [n, initOf(n)]));
     if (mainnet) for (const n of names) {
-      const p = initProblems(n, initOf(n));
+      const p = initProblems(n, inits[n]);
       if (p) throw new Error(p);
     }
     forgeVersion = spawnSync("forge", ["--version"], { encoding: "utf8" }).stdout?.split("\n")[0] ?? "forge";
@@ -400,15 +447,8 @@ export async function main(args, io = {}) {
       deployer = addressOf(sk);
     }
     if (deployer === ret) throw new Error("--return is the run key itself");
-    if (mainnet && !resume) {
-      const base = io.keysBase ?? keysBase();
-      mkdirSync(base, { recursive: true, mode: 0o700 });
-      chmodSync(base, 0o700);
-      keyDir = mkdtempSync(path.join(base, `${chainName}-`));
-      chmodSync(keyDir, 0o700);
-      writeFileSync(path.join(keyDir, "key"), hex(sk) + "\n", { mode: 0o600 });
-      journalKeys = { folder: path.basename(keyDir), state: "in use", why: [], sweep: sweepCommand(chainName) };
-    }
+    // a new mainnet key stays in memory until the run's try: then its folder and the journal are written together
+    if (mainnet && !resume) keysBase0 = io.keysBase ?? keysBase();
     let n0 = 0n;
     const reused = {};
     if (resume) {
@@ -423,30 +463,50 @@ export async function main(args, io = {}) {
         if (!n || t.step !== `deploy ${n}` || !names.includes(n) || reused[n] || !/^0x[0-9a-f]{40}$/.test(String(t.address))) continue;
         const rc = await call("eth_getTransactionReceipt", [t.hash]);
         if (!rc || rc.status !== "0x1" || rc.contractAddress?.toLowerCase() !== t.address) continue;
+        // it landed: it is reused, or the run stops here, before any funding (deploying it again would leave a pool
+        // pointing at a verifier the record does not name)
         const codes = await onBoth((u) => call("eth_getCode", [t.address, "latest"], u), (code) => isBuild(n, code));
-        if (codes.every(([, code]) => isBuild(n, code))) reused[n] = t.address;
+        const bad = codes.filter(([, code]) => !isBuild(n, code)).map(([u]) => u);
+        if (bad.length) throw new Error(`the stopped run's ${n} at ${t.address} (${t.hash}) landed, but its code does not read back as the build's on ${bad.join(" and ")}: nothing was sent; run the same paste again once both RPCs have it, or send the key's rest back: ${sweepCommand(chainName)}`);
+        reused[n] = t.address;
       }
+      if (reused.PrivacyPoolSimple && !reused.WithdrawalVerifier) throw new Error(`the stopped run's pool ${reused.PrivacyPoolSimple} is reused only with its verifier, which did not read back: nothing was sent; send the key's rest back: ${sweepCommand(chainName)}`);
     } else {
-      console.log(`deploy: run key ${deployer} (made in this run, never printed${mainnet ? `; kept in ${keyDir} until the run reads it empty on both RPCs` : ""})`);
+      console.log(`deploy: run key ${deployer} (made in this run, never printed)`);
       if (big(await call("eth_getTransactionCount", [deployer, "pending"])) !== 0n) throw new Error(`${deployer} has sent transactions already`);
     }
     if (only) console.log(`deploy: ${only} alone (--only), to ${rel(out)}`);
     rest = names.filter((n) => !reused[n]);
     addrs = { ...reused, ...Object.fromEntries(rest.map((n, i) => [n, createAddress(deployer, n0 + BigInt(i))])) };
     if (resume) console.log(`deploy: resuming the stopped run with its key: ${Object.entries(reused).map(([n, a]) => `${n} ${a}`).join(", ") || "nothing"} read back on both RPCs as the build's: reused; ${rest.join(", ") || "nothing"} to deploy from nonce ${n0}`);
-    datas = Object.fromEntries(rest.map((n) => [n, initOf(n) + argsOf(n, chain, addrs).map(addrArg).join("")]));
+    datas = Object.fromEntries(rest.map((n) => [n, inits[n] + argsOf(n, chain, addrs).map(addrArg).join("")]));
     nonce0 = n0;
   }
 
   // 4. the need
-  const fees = async () => {
-    const block = await call("eth_getBlockByNumber", ["latest", false]);
-    const tip = big(await call("eth_maxPriorityFeePerGas", []).catch(() => "0x0"));
+  // the fee terms on each RPC; the lower max fee of the two (one that fails leaves the other's; both failing throws)
+  const feesOn = async (u) => {
+    const block = await call("eth_getBlockByNumber", ["latest", false], u);
+    const tip = big(await call("eth_maxPriorityFeePerGas", [], u).catch(() => "0x0"));
     return { tip, maxFee: 2n * big(block.baseFeePerGas) + tip };
+  };
+  const fees = async () => {
+    const got = [];
+    let err = null;
+    for (const u of [url, second]) {
+      try {
+        got.push(await feesOn(u));
+      } catch (e) {
+        err = e;
+      }
+    }
+    if (!got.length) throw err;
+    return got.reduce((a, b) => (b.maxFee < a.maxFee ? b : a));
   };
   const l1Bound = async (n) => (chain.op ? big(await call("eth_call", [{ to: OP_ORACLE, data: selector("getL1FeeUpperBound(uint256)") + word(n) }, "latest"])) : 0n);
   const transferGas = async (to) => GAS_MARGIN(big(await call("eth_estimateGas", [{ from: deployer, to, value: "0x0" }, "latest"])));
   const { tip, maxFee } = await fees();
+  if (mainnet && !kept && maxFee > MAX_FEE_CAP) throw new Error(`the max fee ${maxFee} wei/gas is over the cap ${MAX_FEE_CAP} (deploy.mjs MAX_FEE_CAP): no key was kept and nothing was sent`);
   if (!kept) {
     const verifierCode = JSON.parse(readFileSync(path.join(POOL_DIR, "out/WithdrawalVerifier.sol/WithdrawalVerifier.json"), "utf8")).deployedBytecode.object;
     gas = {};
@@ -469,7 +529,6 @@ export async function main(args, io = {}) {
   const signed = kept || resume
     ? (j0.txs ?? []).map((s) => ({ ...s, nonce: big0(s.nonce), tip: big0(s.tip), maxFee: big0(s.maxFee), gas: big0(s.gas), receipt: null }))
     : [];
-  const priorCount = signed.length;
   let stopped = null;
   let stoppedAt = null;
   let complete = false;
@@ -479,7 +538,7 @@ export async function main(args, io = {}) {
     if (!journalFile) return;
     const txs = signed.map((s) => ({ step: s.step, ...(s.contract ? { contract: s.contract } : {}), ...(s.address ? { address: s.address } : {}), hash: s.hash, raw: s.raw, nonce: String(s.nonce), tip: String(s.tip), maxFee: String(s.maxFee), gas: String(s.gas), sentAt: s.sentAt, landed: Boolean(s.receipt) || Boolean(s.landed) }));
     const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
-    writeFileSync(journalFile, JSON.stringify(j, null, 2) + "\n");
+    writeAtomic(journalFile, JSON.stringify(j, null, 2) + "\n");
   };
   const landed = () => signed.filter((s) => s.receipt).sort((a, b) => Number(a.nonce - b.nonce));
   const send = async (step, t, extra = {}) => {
@@ -489,13 +548,16 @@ export async function main(args, io = {}) {
     try {
       await call("eth_sendRawTransaction", [s.raw]);
     } catch (e) {
-      // a resend of a send whose answer was lost (or one already mined) is the node saying it has it; any other answer
-      // is a refusal: that transaction is dropped, so it never becomes the fee basis of a replacement
-      if (!/already known|known transaction|nonce too low|already imported/i.test(e.message)) {
+      // a resend of a send whose answer was lost (or one already mined) is the node saying it has it. Another JSON-RPC
+      // error answer is the node's refusal: that transaction is dropped, so it never becomes the fee basis of a
+      // replacement. No answer at all (every try failed) leaves its outcome unknown: it stays journaled and is waited
+      // for as sent (the settle sends it again or replaces it)
+      if (e.rpcError && !/already known|known transaction|nonce too low|already imported/i.test(e.message)) {
         signed.splice(signed.indexOf(s), 1);
         writeJournal();
         throw e;
       }
+      if (!e.rpcError) console.error(`deploy: ${step} ${s.hash}: no answer to its send (${String(e.message).split("\n")[0]}): waited for as sent`);
     }
     return s;
   };
@@ -520,7 +582,7 @@ export async function main(args, io = {}) {
       contracts: Object.fromEntries(names.filter((n) => txs.some((t) => t.contract === n && t.step === `deploy ${n}`)).map((n) => [n, { address: addrs[n] }])),
       txs,
     };
-    writeFileSync(out, JSON.stringify(d, null, 2) + "\n");
+    writeAtomic(out, JSON.stringify(d, null, 2) + "\n");
     console.log(`deploy: wrote ${out}`);
   };
 
@@ -592,13 +654,39 @@ export async function main(args, io = {}) {
     if (stopped) throw new Error(`stopped by ${stopped}`);
   };
 
+  if (keysBase0) {
+    // no await from here to the try: a signal is handled once the try runs, and a throw before it leaves no key behind
+    mkdirSync(keysBase0, { recursive: true, mode: 0o700 });
+    chmodSync(keysBase0, 0o700);
+    keyDir = mkdtempSync(path.join(keysBase0, `${chainName}-`));
+    chmodSync(keyDir, 0o700);
+    writeFileSync(path.join(keyDir, "key"), hex(sk) + "\n", { mode: 0o600 });
+    journalKeys = { folder: path.basename(keyDir), state: "in use", why: [], sweep: sweepCommand(chainName) };
+  }
   let done = false;
   try {
     writeJournal();
+    if (keysBase0) console.log(`deploy: the run key is kept in ${keyDir} until the run reads it empty on both RPCs`);
     if (!kept) {
       // 4. the funding
-      console.log(`deploy: waiting for ${need} wei (${eth(need)}) at ${deployer} on ${chainName}`);
-      if (mainnet) console.log(`deploy: send exactly ${need} wei (${ethExact(need)}) to ${deployer} from ${ret}, the address you passed`);
+      // what the key holds first (a resumed run's kept key may hold some or all of the need): the line asks only for the
+      // shortfall, and for nothing when the key holds the need, so no transfer is asked for that the run would not wait for
+      let held0 = null;
+      while (held0 === null) {
+        go();
+        try {
+          held0 = big(await call("eth_getBalance", [deployer, "latest"]));
+        } catch (e) {
+          console.log(`deploy: the run key's balance not read (${e.message}): reading it again in ${WAITS.poll / 1000} s`);
+          await sleep(WAITS.poll);
+        }
+      }
+      if (held0 >= need) console.log(`deploy: the run key ${deployer} holds ${held0} wei, at least the need ${need} wei: send nothing`);
+      else {
+        const short = need - held0;
+        console.log(`deploy: waiting for ${short} wei (${eth(short)}) at ${deployer} on ${chainName}${held0 > 0n ? `: the need ${need} wei less the ${held0} it holds` : ""}`);
+        if (mainnet) console.log(`deploy: send exactly ${short} wei (${ethExact(short)}) to ${deployer} from ${ret}, the address you passed`);
+      }
       // a read that fails (its five tries all rate-limited or reset) is read again at the next poll: a run that ended
       // here would leave the owner's transfer to a run that is gone (the Solana devnet rehearsal's run, 5 Nov 18:47Z)
       for (;;) {
@@ -638,6 +726,12 @@ export async function main(args, io = {}) {
       console.log(`deploy: every contract's code is the build's on ${url} and ${second}`);
       done = true;
       complete = true;
+      // the record (the one-deploy guard) before the sweep: a run killed during the sweep leaves it, and the sweep's
+      // own transactions join it after (here, or by --sweep-kept)
+      if (mainnet) {
+        record();
+        writeJournal();
+      }
     }
   } finally {
     try {
@@ -686,12 +780,14 @@ export async function main(args, io = {}) {
     }
     if (kept) {
       // a deployed chain's record gets the sweeps this run landed, so the live check's nonce count holds
-      if (existsSync(out) && signed.length > priorCount) {
+      if (existsSync(out)) {
         const d = JSON.parse(readFileSync(out, "utf8"));
-        const more = signed.slice(priorCount).filter((s) => s.receipt).map((s) => ({ step: s.step, hash: s.hash }));
+        const have = new Set(d.txs.map((t) => t.hash));
+        // every transaction of the key that landed and the record does not list: this run's, and a killed run's sweep
+        const more = landed().filter((s) => !have.has(s.hash)).map((s) => ({ step: s.step, hash: s.hash }));
         if (more.length) {
           d.txs.push(...more);
-          writeFileSync(out, JSON.stringify(d, null, 2) + "\n");
+          writeAtomic(out, JSON.stringify(d, null, 2) + "\n");
           console.log(`deploy: ${rel(out)} lists the ${more.length} sweep(s) too`);
         }
       }
