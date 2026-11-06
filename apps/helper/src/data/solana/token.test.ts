@@ -13,7 +13,7 @@ import { createProxy } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
-  CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, LAUNCH_WAIT_MS, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
+  CANDLES_FIELDS, createSolanaToken, GT_PAGE_WAIT_MS, GT_PER_MIN, HOLDERS_FIELDS, JUP_GAP_MS, JUP_PAGE_WAIT_MS, LAUNCH_WAIT_MS, metadataAddress, PAGE_FIELDS, RISK_FIELDS, toCandles, toHolders, toMint, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, topPool,
 } from "./token.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/token-page.json", import.meta.url), "utf8"));
@@ -45,12 +45,13 @@ function fakeRpc(opts: { accounts?: (mint: string) => unknown; largest?: unknown
         const rec = FX.tokens[keys[0]!]?.accounts ?? { jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: [null, null] } };
         return { status: 200, body: JSON.stringify(opts.accounts ? opts.accounts(keys[0]!) : rec) };
       }
-      if (keys.length === 1) {
+      if (keys.length === 2 && keys[1] === metadataAddress(keys[0]!)) {
+        // the mint read (card helper-page-jup-429: the mint and its Metaplex metadata account, none recorded here)
         const rec = FX.tokens[keys[0]!]?.accounts;
-        const v = rec ? { ...rec, result: { ...rec.result, value: [rec.result.value[0]] } } : { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null] } };
+        const v = rec ? { ...rec, result: { ...rec.result, value: [rec.result.value[0], null] } } : { jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null, null] } };
         // an `accounts` answer is recorded for the mint and its curve: the mint read takes its first account
         const o = opts.accounts?.(keys[0]!) as { result?: { value?: unknown[] } } | undefined;
-        const one = o?.result?.value ? { ...o, result: { ...o.result, value: o.result.value.slice(0, 1) } } : o;
+        const one = o?.result?.value ? { ...o, result: { ...o.result, value: [o.result.value[0] ?? null, null] } } : o;
         return { status: 200, body: JSON.stringify(opts.accounts ? one : v) };
       }
       return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: opts.owners }) };
@@ -156,7 +157,7 @@ test("page: a pump.fun token on its curve: curve_bps from the curve account, lp 
   assert.equal(p.decimals, 6);
 });
 
-test("page: not a mint (no account, a system account, a token account, a third program) and not on Jupiter answer 404", async () => {
+test("page: not a mint (no account, a system account, a token account, a third program), and a mint Jupiter does not know with no name on chain, answer 404; a mint named on chain is its page (card helper-page-jup-429)", async () => {
   const noAcct = createSolanaToken(fakeProxy(), fakeRpc({ accounts: () => ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [null, null] } }) }), { now: () => NOW });
   assert.equal((await noAcct.page(PUMP)).status, 404);
   const rec = FX.tokens[PUMP].accounts;
@@ -168,11 +169,21 @@ test("page: not a mint (no account, a system account, a token account, a third p
     const t = createSolanaToken(fakeProxy(), fakeRpc({ accounts: () => ({ ...rec, result: { ...rec.result, value: [bad, null] } }) }), { now: () => NOW });
     assert.equal((await t.page(PUMP)).status, 404);
   }
+  // a mint Jupiter does not know is named by its own tokenMetadata extension, src chain, Jupiter's fields null
   const notListed = createSolanaToken(fakeProxy({ search: () => [] }), fakeRpc(), { now: () => NOW });
-  assert.equal((await notListed.page(PUMP)).status, 404);
-  // Jupiter answering a different token for the query is not this token
+  const nl = await notListed.page(PUMP);
+  assert.equal(nl.status, 200);
+  const nlRow = JSON.parse(nl.body).row;
+  assert.deepEqual([nlRow.symbol, nlRow.name, nlRow.src, nlRow.price_usd, nlRow.holders], ["PUMP", "Pump", "chain", null, null]);
+  // Jupiter answering a different token for the query is not this token: named on chain, never the other token's row
   const other = createSolanaToken(fakeProxy({ search: () => FX.tokens[CURVE].search }), fakeRpc(), { now: () => NOW });
-  assert.equal((await other.page(PUMP)).status, 404);
+  const ot = JSON.parse((await other.page(PUMP)).body).row;
+  assert.deepEqual([ot.symbol, ot.src], ["PUMP", "chain"]);
+  // with no name on chain either (its tokenMetadata dropped), not found
+  const v0 = rec.result.value[0];
+  const nameless = { ...v0, data: { ...v0.data, parsed: { ...v0.data.parsed, info: { ...v0.data.parsed.info, extensions: v0.data.parsed.info.extensions.filter((e: { extension: string }) => e.extension !== "tokenMetadata") } } } };
+  const unnamed = createSolanaToken(fakeProxy({ search: () => [] }), fakeRpc({ accounts: () => ({ ...rec, result: { ...rec.result, value: [nameless, null] } }) }), { now: () => NOW });
+  assert.equal((await unnamed.page(PUMP)).status, 404);
   // not an address at all: refused before any read
   const proxy = fakeProxy();
   const t = createSolanaToken(proxy, fakeRpc(), { now: () => NOW });
@@ -192,11 +203,18 @@ test("page: an upstream down answers 503; the last good page serves up to 60 s, 
   down = true;
   now += 10_000;
   assert.equal((await t.page(PUMP)).status, 200, "stale but under 60 s");
-  await new Promise((ok) => setTimeout(ok, 10)); // the one refresh that answer started runs out (card helper-token-page-fast)
+  // the one refresh that answer started runs out (card helper-token-page-fast), its Jupiter wait included
+  await new Promise((ok) => setTimeout(ok, JUP_PAGE_WAIT_MS + 50));
   now += 60_000;
-  assert.equal((await t.page(PUMP)).status, 503);
+  // card helper-page-jup-429: Jupiter down past 60 s: the page is named on chain, Jupiter's row (70 s old) not served
+  const late = await t.page(PUMP);
+  assert.deepEqual([late.status, JSON.parse(late.body).row.src, JSON.parse(late.body).row.price_usd], [200, "chain", null]);
   const cold = createSolanaToken(fakeProxy({ down: true }), fakeRpc(), { now: () => NOW });
-  assert.equal((await cold.page(PUMP)).status, 503);
+  const c = await cold.page(PUMP);
+  assert.deepEqual([c.status, JSON.parse(c.body).row.symbol, JSON.parse(c.body).row.src], [200, "PUMP", "chain"]);
+  // the chain down: no page
+  const noChain = createSolanaToken(proxy, fakeRpc({ down: true }), { now: () => NOW });
+  assert.equal((await noChain.page(PUMP)).status, 503);
   const rpcDown = createSolanaToken(fakeProxy(), fakeRpc({ down: true }), { now: () => NOW });
   assert.equal((await rpcDown.page(PUMP)).status, 503);
 });
@@ -258,16 +276,20 @@ test("page and holders: a token on Discover's lists takes its row from there, wi
   assert.deepEqual(proxy.calls, [`jupiter/tokens/v2/search?query=${PUMP}`]);
 });
 
-test("page: one search failing fails every mint in it with 503, and the next search is a new call", async () => {
+test("page: one search failing answers every mint in it named on chain (card helper-page-jup-429), and the next search is a new call", async () => {
   let down = true;
   const ok = fakeProxy();
   const proxy = { calls: ok.calls, handle: (v: string, p: string, q: string) => (down ? fakeProxy({ down: true }).handle(v, p, q) : ok.handle(v, p, q)) };
   let now = NOW;
   const tok = createSolanaToken(proxy, fakeRpc(), { now: () => now });
-  assert.deepEqual((await Promise.all([tok.page(PUMP), tok.page(CURVE)])).map((a) => a.status), [503, 503]);
+  const both = await Promise.all([tok.page(PUMP), tok.page(CURVE)]);
+  assert.deepEqual(both.map((a) => [a.status, JSON.parse(a.body).row.src]), [[200, "chain"], [200, "chain"]]);
+  const searches = ok.calls.length;
   down = false;
   now += 5_000;
   assert.equal((await tok.page(PUMP)).status, 200);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(ok.calls.length > searches, "a new search");
 });
 
 /** A promise and the hand that settles it. */
@@ -573,8 +595,9 @@ test("page and holders: a throttled RPC read with nothing good to serve answers 
   const a = await createSolanaToken(fakeProxy(), throttledRpc, { now: () => NOW }).page(PUMP);
   assert.deepEqual([a.status, JSON.parse(a.body), a.retryAfterS], [429, { error: { code: "rate_limited" } }, 7]);
   const throttledProxy = { handle: async () => ({ status: 429, headers: { "Retry-After": "12" }, body: '{"error":{"code":"rate_limited"}}' }) };
+  // card helper-page-jup-429: Jupiter's refusal is no refusal of the page: it is named on chain
   const b = await createSolanaToken(throttledProxy, fakeRpc(), { now: () => NOW }).page(PUMP);
-  assert.deepEqual([b.status, JSON.parse(b.body), b.retryAfterS], [503, { error: { code: "upstream" } }, undefined]);
+  assert.deepEqual([b.status, JSON.parse(b.body).row.symbol, JSON.parse(b.body).row.src, b.retryAfterS], [200, "PUMP", "chain", undefined]);
   let now = NOW;
   let throttle = false;
   const rpc = fakeRpc();
