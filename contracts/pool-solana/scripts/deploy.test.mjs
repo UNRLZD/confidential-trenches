@@ -2553,3 +2553,54 @@ test("review f369 Low 2: a funding that is not one plain System Transfer from it
   assert.deepEqual(r.funders, ["F1"]);
   for (const sig of ["relayed", "cpi", "seeded"]) assert.ok(said.some((l) => l.includes(sig) && /left out of the record/.test(l)), said.join("\n"));
 });
+
+// ---- the re-review of b6b2937e..7c838388 (FIX 1): a stranger never becomes a run key ----
+test("review 7c83 M1: a stranger's transaction naming the funder (a transfer into the return address, or a loader instruction with the programdata as an extra account) never makes it a run key", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const u32 = (n, extra = 0) => { const d = Buffer.alloc(4 + extra); d.writeUInt32LE(n, 0); return d; };
+  const transfer = () => { const d = u32(2, 8); d.writeBigUInt64LE(1n, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const chainTx = {
+    // (a) one plain Transfer from S into the return address, the funder an unused extra key
+    toReturn: tx(1, ["S1", "R0", SYS, "F1"], [{ programIdIndex: 2, accounts: [0, 1], data: transfer() }]),
+    // (b) a loader Write on S's own buffer, the programdata and the funder appended
+    write: tx(2, ["S2", "BUF", LOADER, "PD", "F1"], [{ programIdIndex: 2, accounts: [1, 0, 3, 4], data: b58(u32(1, 12)) }]),
+    // the run's own: its SetAuthority to none on the programdata (authority the payer, at accounts[1])
+    auth: tx(3, ["F1", "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }]),
+    ...Object.fromEntries(["S1", "S2"].map((p, i) => [`pd-${p}`, tx(4 + i, [p, "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }])])),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR(["pd-S1", "pd-S2", "auth"].map((signature) => ({ signature, err: null })));
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const said = [];
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "F1",
+    txs: ["toReturn", "write"].map((signature) => ({ step: "funding (to the funder)", signature })) }, { say: (l) => said.push(l) });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["auth"]);
+  assert.deepEqual(r.funders, ["F1"]);
+  for (const sig of ["toReturn", "write"]) assert.ok(said.some((l) => l.includes(sig) && /left out of the record/.test(l)), said.join("\n"));
+});
+
+test("review 7c83 M1: a --prior-only resume finds the first run's key from its own SetAuthority on the programdata, and keeps that run's funding", async () => {
+  const SYS = "11111111111111111111111111111111";
+  const u32 = (n, extra = 0) => { const d = Buffer.alloc(4 + extra); d.writeUInt32LE(n, 0); return d; };
+  const transfer = () => { const d = u32(2, 8); d.writeBigUInt64LE(9n, 4); return b58(d); };
+  const tx = (slot, keys, instructions) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: keys, instructions } } });
+  const chainTx = {
+    fund: tx(1, ["R0", "OLD", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: transfer() }]),
+    auth: tx(2, ["OLD", "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }]),
+    init: tx(3, ["NEW", "PoolProg"], [{ programIdIndex: 1, accounts: [], data: "1" }]),
+  };
+  const fetchFn = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === "getSignaturesForAddress") return okR([{ signature: "auth", err: null }]);
+    if (method === "getTransaction") return okR(chainTx[params[0]]);
+    throw new Error(`unexpected ${method}`);
+  };
+  const r = await chainRecord(fetchFn, "u", { programdata: "PD", return_to: "R0", funder: "NEW",
+    txs: [{ step: "first run (--prior)", signature: "fund" }, { step: "init (tag 0)", signature: "init" }] });
+  assert.deepEqual(r.txs.map((t) => t.signature), ["fund", "auth", "init"]);
+  assert.deepEqual(r.funders, ["OLD", "NEW"]);
+});
