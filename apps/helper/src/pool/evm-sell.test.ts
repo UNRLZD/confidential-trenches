@@ -688,6 +688,21 @@ const receiptOf = (status: "0x0" | "0x1", o: { gasUsed?: bigint; price?: bigint;
   status, gasUsed: `0x${(o.gasUsed ?? 1_000_000n).toString(16)}`, effectiveGasPrice: `0x${(o.price ?? 2n * BASE + TIP).toString(16)}`, ...(o.l1Fee === undefined ? {} : { l1Fee: `0x${o.l1Fee.toString(16)}` }),
 });
 const reads = (calls: Calls, m: string) => calls.filter((c) => c.method === m).length;
+/** The pool's Deposited topic, written out here (IPrivacyPool.sol:65), held to the helper's and to a landed testnet sale's. */
+const DEPOSITED = `0x${hex(keccak_256(utf8("Deposited(address,uint256,uint256,uint256,uint256)")))}`;
+/** The pool's Deposited log as a node answers it: from `pool`, depositor `w`, the four words, the fourth `pre`. */
+const depositedLog = (w: string, pre: bigint, pool = POOL) => ({ address: pool, topics: [DEPOSITED, `0x${a32(w)}`], data: `0x${w32(77n)}${w32(88n)}${w32(10n ** 15n)}${w32(pre)}`, removed: false });
+/** A sale's receipt once SellDelegate.sell ran in it: status 1 and the pool's Deposited log of the Sell the sent
+ *  transaction carries (its W the tx's `to`, its precommitment the Sell's), found among `calls`' sends by hash; null
+ *  for a hash not sent there. `log` changes the log (a plant). */
+const provenOf = (calls: Calls, o: { gasUsed?: bigint; log?: (l: ReturnType<typeof depositedLog>) => unknown } = {}) => (hash: string) => {
+  const raw = sends(calls).find((r) => `0x${hex(keccak_256(unhex(r)))}` === hash);
+  if (raw === undefined) return null;
+  const tx = dec(unhex(raw).subarray(1)) as Rlp[];
+  const sale = evmReadSell(tx[7] as Uint8Array);
+  const log = depositedLog(`0x${hex(tx[5] as Uint8Array)}`, sale.precommitment);
+  return { ...receiptOf("0x1", { l1Fee: L1, ...(o.gasUsed === undefined ? {} : { gasUsed: o.gasUsed }) }), logs: [o.log ? o.log(log) : log] };
+};
 /** A sale from a fresh W of `label`, its authorization at W's pending nonce (the mock answers 7 for any but W). */
 const freshBody = (label: string, o: { sell?: Partial<Sell>; fee?: bigint } = {}) => {
   const k = key(label);
@@ -801,11 +816,11 @@ test("bad_route: a sale to any target but the PoolManager or a listed router, or
 });
 
 test("unpaid sell gas: reverting sales are held against the client, the token, W and the sender's budget; past a cap 429 rate_limited with the wait", async () => {
-  // 50 sales from one client, 50 fresh Ws, each its own token, every landed transaction reverting: the client's cap
+  // 50 sales from one client, 50 fresh Ws, each its own token, every landed transaction reverting on both providers: the client's cap
   const worst = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1;
   const tokenOf = (i: number) => `0x${(0x7000 + i).toString(16).padStart(40, "0")}`;
   const x: Calls = [];
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => receiptOf("0x0", { l1Fee: L1 }) })], () => NOW);
   let sent = 0;
   let last: Awaited<ReturnType<typeof s.sell>> | undefined;
   for (let i = 0; i < 50; i++) {
@@ -821,7 +836,7 @@ test("unpaid sell gas: reverting sales are held against the client, the token, W
   assert.ok(detail(last!).includes("this client"), detail(last!));
   // one W, many Sell nonces, each its own token, no client: W's cap
   const v: Calls = [];
-  const u = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(v, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  const u = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(v, { receipt: () => receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => receiptOf("0x0", { l1Fee: L1 }) })], () => NOW);
   let byW = 0;
   for (let i = 0; i < 50; i++) {
     last = await u.sell(body({ sell: { nonce: BigInt(i), token: tokenOf(i) } }));
@@ -836,9 +851,10 @@ test("unpaid sell gas: reverting sales are held against the client, the token, W
   const all = await Promise.all(Array.from({ length: 50 }, (_, i) => t.sell(freshBody(`W-burst-${i}`))));
   assert.equal(BigInt(all.filter((a) => a.status === 200).length), EVM_SELL_UNPAID_CAP_WEI / worst);
   assert.ok(all.filter((a) => a.status !== 200).every((a) => code(a) === "rate_limited"));
-  // a sale that landed and paid its fee holds nothing: 60 in a row from one client all go
+  // a sale that landed and paid its fee (both providers' receipts carry the pool's Deposited log) holds nothing: 60 in
+  // a row from one client all go
   const z: Calls = [];
-  const paid = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(z, { receipt: () => receiptOf("0x1", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  const paid = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(z, { receipt: provenOf(z) }), rpc([], { receipt: provenOf(z) })], () => NOW);
   for (let i = 0; i < 60; i++) {
     assert.equal((await paid.sell(freshBody(`W-paid-${i}`), "203.0.113.10")).status, 200, `sale ${i}`);
     await tick();
@@ -1869,7 +1885,8 @@ test("an idle lane is never named behind: reads that send nothing, ten minutes a
 
 test("the sender's whole budget holds every sale (H1): 20 clients, each with one paid landing, then their reverting sales from fresh Ws and tokens stop at EVM_SELL_UNPAID_BUDGET_WEI with 429 and its wait", async () => {
   let landing = true;
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc([], { receipt: () => receiptOf(landing ? "0x1" : "0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  const h: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(h, { receipt: (x) => (landing ? provenOf(h)(x) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: (x) => (landing ? provenOf(h)(x) : null) })], () => NOW);
   const K = 20;
   for (let c = 0; c < K; c++) {
     assert.equal((await s.sell(freshBody(`W-h1-paid-${c}`, { sell: { token: `0x${(0xc000 + c).toString(16).padStart(40, "0")}` } }), `198.51.100.${c + 1}`)).status, 200);
@@ -1899,7 +1916,8 @@ test("a paid landing is one in the window that paid its cost: one older than the
   for (const [name, later, gasUsed] of [["older than the window", EVM_SELL_UNPAID_WINDOW_MS + 1_000, 1_000_000n], ["its cost over its fee", 0, 2_000_000n]] as const) {
     let clock = NOW;
     let landing = true;
-    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc([], { receipt: () => (landing ? receiptOf("0x1", { l1Fee: L1, gasUsed }) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: () => null })], () => clock);
+    const h: Calls = [];
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(h, { receipt: (x) => (landing ? provenOf(h, { gasUsed })(x) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: (x) => (landing ? provenOf(h, { gasUsed })(x) : null) })], () => clock);
     assert.equal((await s.sell(freshBody("W-pl-0", { sell: { token: "0x00000000000000000000000000000000000d0d00" } }), "192.0.2.5")).status, 200);
     await settle(() => false, 4);
     landing = false;
@@ -1920,7 +1938,7 @@ test("a paid landing frees its caller of the token's cap only: strangers' revert
   const tokenOf = (i: number) => `0x${(0xb000 + i).toString(16).padStart(40, "0")}`;
   let landing = true;
   const x: Calls = [];
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: () => receiptOf(landing ? "0x1" : "0x0", { l1Fee: L1 }) }), rpc([], { receipt: () => null })], () => NOW);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: (y) => (landing ? provenOf(x)(y) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: (y) => (landing ? provenOf(x)(y) : null) })], () => NOW);
   // the honest client and W: one sale that landed and paid
   const W0 = "W-honest-0";
   assert.equal((await s.sell(freshBody(W0, { sell: { token: tokenOf(9999) } }), "192.0.2.1")).status, 200);
@@ -1960,4 +1978,122 @@ test("the receipt watch backs off: from the poll interval, doubling, to 15 times
   // 4, 8, 16, 32, then 60 each: about 9 reads in 400 ms; one read every 4 ms would be about 100
   const n = reads(x, "eth_getTransactionReceipt");
   assert.ok(n >= 4 && n <= 14, `${n} receipt reads in 400 ms`);
+});
+
+// ---- Card helper-sender-fee-proof: a landed sale counts as paid only when both providers' receipts prove it. The call to
+// W runs whatever code W holds as it runs: a W holder can land a second authorization at W's nonce just ahead of the
+// sale, so the sell sender's call runs their code, which burns the gas and returns status 1. A sale is proven only by
+// the pool's Deposited log of its Sell (from the Sell's pool, depositor W, the Sell's precommitment) on both receipts.
+
+/** Sales from fresh Ws, each its own token, from one client, every receipt `rc` (both providers' answers, from the
+ *  sends in `calls`), until the first 429: how many went, and that 429. */
+async function untilHeld(make: (calls: Calls) => [Opts, Opts], label: string) {
+  const x: Calls = [];
+  const [oa, ob] = make(x);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => NOW);
+  let sent = 0;
+  let last: Awaited<ReturnType<typeof s.sell>> | undefined;
+  for (let i = 0; i < 60 && last?.status !== 429; i++) {
+    last = await s.sell(freshBody(`W-${label}-${i}`, { sell: { token: `0x${(0xe000 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.77");
+    if (last.status === 200) sent++;
+    await settle(() => false, 4);
+  }
+  return { sent, last: last! };
+}
+const WORST = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1; // the receipts' cost here too: gas 1,000,000 at 2 x base + tip
+
+test("a sale that landed with status 1 but no Deposited log (W ran another contract's code) is charged its whole cost: a client's sales stop at its cap", async () => {
+  const r = await untilHeld(() => [{ receipt: () => receiptOf("0x1", { l1Fee: L1 }) }, { receipt: () => receiptOf("0x1", { l1Fee: L1 }) }], "nolog");
+  assert.equal(BigInt(r.sent), EVM_SELL_UNPAID_CAP_WEI / WORST, `${r.sent} sent`);
+  assert.deepEqual([r.last.status, code(r.last)], [429, "rate_limited"]);
+  assert.ok(detail(r.last).includes("this client"), detail(r.last));
+});
+
+test("the same sale proven on both providers holds nothing: 60 in a row from one client all go", async () => {
+  const r = await untilHeld((x) => [{ receipt: provenOf(x) }, { receipt: provenOf(x) }], "proven");
+  assert.equal(r.sent, 60);
+});
+
+test("one provider's receipt never clears a charge: proven on one provider while the other returns none, or a receipt without the log, or a revert (with the log or without), is charged", async () => {
+  for (const [name, other] of [
+    ["the other returns none", () => () => null],
+    ["the other's receipt has no Deposited log", () => () => receiptOf("0x1", { l1Fee: L1 })],
+    ["the other's receipt reverted", () => () => receiptOf("0x0", { l1Fee: L1 })],
+    ["the other's receipt reverted with the log", (x: Calls) => (h: string) => ({ ...provenOf(x)(h), status: "0x0" })],
+  ] as const) {
+    for (const side of ["a", "b"] as const) {
+      const r = await untilHeld((x) => (side === "a" ? [{ receipt: provenOf(x) }, { receipt: other(x) }] : [{ receipt: other(x) }, { receipt: provenOf(x) }]), `one-${side}-${name.length}`);
+      assert.equal(BigInt(r.sent), EVM_SELL_UNPAID_CAP_WEI / WORST, `${name}, proven on ${side} only: ${r.sent} sent`);
+      assert.ok(detail(r.last).includes("this client"), `${name}, ${side}: ${detail(r.last)}`);
+    }
+  }
+});
+
+test("each part of the Deposited log is checked: another emitter, another topic, another depositor, another precommitment, a removed log, a short data or a third topic is no proof, on either provider", async () => {
+  const plants: [string, (l: ReturnType<typeof depositedLog>) => unknown][] = [
+    ["from W's own address (code at W can emit any log)", (l) => ({ ...l, address: l.topics[1]!.replace(/^0x0{24}/, "0x") })],
+    ["from another contract", (l) => ({ ...l, address: "0x00000000000000000000000000000000000bad00" })],
+    ["another event's topic", (l) => ({ ...l, topics: [`0x${"ab".repeat(32)}`, l.topics[1]] })],
+    ["another depositor", (l) => ({ ...l, topics: [l.topics[0], `0x${a32("0x00000000000000000000000000000000000bad01")}`] })],
+    ["another precommitment", (l) => ({ ...l, data: `${l.data.slice(0, 2 + 3 * 64)}${w32(SELL.precommitment + 1n)}` })],
+    ["a removed log (a reorg)", (l) => ({ ...l, removed: true })],
+    ["data a word short", (l) => ({ ...l, data: l.data.slice(0, 2 + 3 * 64) })],
+    ["a third topic", (l) => ({ ...l, topics: [...l.topics, `0x${w32(1n)}`] })],
+  ];
+  for (const [name, log] of plants) {
+    for (const side of ["a", "b"] as const) {
+      const r = await untilHeld((x) => (side === "a" ? [{ receipt: provenOf(x, { log }) }, { receipt: provenOf(x) }] : [{ receipt: provenOf(x) }, { receipt: provenOf(x, { log }) }]), `plant-${side}-${plants.findIndex((p) => p[0] === name)}`);
+      assert.equal(BigInt(r.sent), EVM_SELL_UNPAID_CAP_WEI / WORST, `${name} on ${side}: ${r.sent} sent`);
+    }
+  }
+  // the log's address and topics in upper case are the same log (an RPC's hex is read in either case)
+  const up = await untilHeld((x) => [{ receipt: provenOf(x, { log: (l) => ({ ...l, address: l.address.toUpperCase().replace(/^0X/, "0x"), topics: l.topics.map((t) => t.toUpperCase().replace(/^0X/, "0x")) }) }) }, { receipt: provenOf(x) }], "upper");
+  assert.equal(up.sent, 60);
+});
+
+test("a sale with no proof marks nothing paid: its client and W stay held by a spent token's cap, as a caller with no landing is", async () => {
+  for (const [name, proof] of [["status 1, no log", false], ["proven", true]] as const) {
+    let landing = true;
+    const x: Calls = [];
+    const first = (y: string) => (proof ? provenOf(x)(y) : receiptOf("0x1", { l1Fee: L1 }));
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: (y) => (landing ? first(y) : receiptOf("0x0", { l1Fee: L1 })) }), rpc([], { receipt: (y) => (landing ? first(y) : null) })], () => NOW);
+    assert.equal((await s.sell(freshBody(`W-mark-${name}`, { sell: { token: "0x00000000000000000000000000000000000e0e00" } }), "192.0.2.44")).status, 200);
+    await settle(() => false, 4);
+    landing = false;
+    const T = "0x00000000000000000000000000000000000e0e01";
+    for (let i = 0; i < 60; i++) {
+      await s.sell(freshBody(`W-mark-t-${name}-${i}`, { sell: { token: T } }), `198.51.100.${i}`);
+      await tick();
+    }
+    const again = await s.sell(freshBody(`W-mark-again-${name}`, { sell: { token: T } }), "192.0.2.44");
+    if (proof) assert.equal(again.status, 200, `${name}: ${JSON.stringify(again.body)}`);
+    else {
+      assert.deepEqual([again.status, code(again)], [429, "rate_limited"], `${name}: ${JSON.stringify(again.body)}`);
+      assert.ok(detail(again).includes("this token"), detail(again));
+    }
+  }
+});
+
+test("the cost is the higher of the two receipts': a proven sale either provider reads at twice the gas is over its fee and marks nothing paid", async () => {
+  for (const side of ["a", "b"] as const) {
+    let landing = true;
+    const x: Calls = [];
+    const at = (high: boolean) => (y: string) => (landing ? provenOf(x, high ? { gasUsed: 2_000_000n } : {})(y) : null);
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, receiptPollMs: 1 }, [rpc(x, { receipt: (y) => at(side === "a")(y) ?? receiptOf("0x0", { l1Fee: L1 }) }), rpc([], { receipt: at(side === "b") })], () => NOW);
+    assert.equal((await s.sell(freshBody(`W-hi-${side}-0`, { sell: { token: "0x00000000000000000000000000000000000e0f00" } }), "192.0.2.45")).status, 200);
+    await settle(() => false, 4);
+    landing = false;
+    const T = "0x00000000000000000000000000000000000e0f01";
+    for (let i = 0; i < 60; i++) {
+      await s.sell(freshBody(`W-hi-${side}-t-${i}`, { sell: { token: T } }), `198.51.100.${i}`);
+      await tick();
+    }
+    const again = await s.sell(freshBody(`W-hi-${side}-1`, { sell: { token: T } }), "192.0.2.45");
+    assert.deepEqual([again.status, code(again)], [429, "rate_limited"], `twice the gas on ${side}: ${JSON.stringify(again.body)}`);
+  }
+});
+
+test("the Deposited topic is the pool's: the helper's constant, this test's and the one a sale that landed on base-sepolia carries (0x4251f1ed..., helper-evm-sender.md) are one", () => {
+  assert.equal(evmModule.DEPOSITED_TOPIC, DEPOSITED);
+  assert.equal(DEPOSITED, "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549");
 });

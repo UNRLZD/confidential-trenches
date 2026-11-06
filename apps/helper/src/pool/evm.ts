@@ -101,7 +101,12 @@
 // eth_estimateGas or eth_maxPriorityFeePerGas), maxFeePerGas min(2 x base + tip, (fee - the chain fee) / gas), so the
 // sender's worst cost, gas x maxFeePerGas + the chain fee, is within the fee. That worst cost is held against
 // the caps from the send; the sale's receipt, read in the background on both providers, turns it into what went
-// unpaid: all of gasUsed x effectiveGasPrice + l1Fee on a revert, that less the fee on a sale that paid less, else 0.
+// unpaid (card helper-sender-fee-proof): a sale is proven only when both providers return its receipt with status 1
+// and each carries the pool's Deposited log (IPrivacyPool.sol) from the Sell's pool with _depositor W and
+// _precommitmentHash the Sell's precommitment (the call to W runs whatever code W holds then: a status 1 alone proves
+// nothing); a proven sale's unpaid is its cost (the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee)
+// less the fee, at least 0; any other receipt pair is charged its whole cost; one provider's receipt alone changes
+// nothing, so the worst stays held.
 // Once per (W, Sell nonce): a repeat gets the first hash and sends nothing, unless that sale ended without landing on
 // the providers' own reads (a receipt with status 0 on either, or once now is past its deadline plus
 // EVM_SELL_DROP_MARGIN_MS no transaction on either): then (W, nonce) is free for a new send, as often as W's unpaid cap
@@ -383,6 +388,49 @@ export const EVM_LANE_SENT_WINDOW_MS = 10_000;
 const EVM_LANE_PRIOR_MAX = 8;
 /** A 0-value transfer's gas: 21,000 (OP Stack, Base); on Arbitrum (Robinhood) the L1 poster's gas is added to it. */
 export const EVM_SELF_TRANSFER_GAS = 21_000n;
+/** The pool's Deposited(address indexed _depositor, uint256 _commitment, uint256 _label, uint256 _value, uint256
+ *  _precommitmentHash) (contracts/pool-evm/src/interfaces/IPrivacyPool.sol), its topic 0. */
+export const DEPOSITED_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Deposited(address,uint256,uint256,uint256,uint256)")))}`;
+/**
+ * Whether the receipt `r` (a provider's answer, read as hostile) carries the pool's Deposited log of this sale: from
+ * `pool`, not removed, its two topics Deposited's and W's address, its data the four words, the fourth the Sell's
+ * precommitment. SellDelegate.sell deposits the sale's ETH less the fee with W as msg.sender in the same call that pays
+ * the fee, so a sale whose call ran it carries this log.
+ */
+export function evmSaleDeposited(r: unknown, pool: string, w: string, precommitment: bigint): boolean {
+  const logs = (r as { logs?: unknown } | null)?.logs;
+  if (!Array.isArray(logs)) return false;
+  const depositor = `0x${w.slice(2).toLowerCase().padStart(64, "0")}`;
+  return logs.some((l) => {
+    if (typeof l !== "object" || l === null) return false;
+    const { address, topics, data, removed } = l as { address?: unknown; topics?: unknown; data?: unknown; removed?: unknown };
+    if (removed === true || evmRpcHex(address) !== pool || !Array.isArray(topics) || topics.length !== 2) return false;
+    if (evmRpcHex(topics[0]) !== DEPOSITED_TOPIC || evmRpcHex(topics[1]) !== depositor) return false;
+    const d = evmRpcHex(data);
+    return d !== null && d.length === 2 + 4 * 64 && BigInt(`0x${d.slice(2 + 3 * 64)}`) === precommitment;
+  });
+}
+/**
+ * What a landed sale left unpaid, from its two receipts, one per provider, read as hostile (card
+ * helper-sender-fee-proof): proven only when both read status 1 and each carries the pool's Deposited log of the Sell
+ * (evmSaleDeposited: the call to W runs whatever code W holds then, so a status 1 alone proves nothing). A proven sale's
+ * unpaid is its cost less the fee, at least 0, and it paid when its cost is at most the fee; any other pair is charged its
+ * whole cost and paid nothing. The cost is the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee; a
+ * receipt whose cost cannot be read counts `worst`.
+ */
+export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, unknown>, sale: { pool: string; w: string; precommitment: bigint; fee: bigint }, worst: bigint): { proven: boolean; paid: boolean; unpaid: bigint } {
+  const costOf = (r: Record<string, unknown>): bigint => {
+    try {
+      return qty(r.gasUsed) * qty(r.effectiveGasPrice) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : qty(r.l1Fee));
+    } catch {
+      return worst;
+    }
+  };
+  const [ca, cb] = [costOf(ra), costOf(rb)];
+  const cost = ca > cb ? ca : cb;
+  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmSaleDeposited(r, sale.pool, sale.w, sale.precommitment));
+  return { proven: ok, paid: ok && cost <= sale.fee, unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };
+}
 /** The first wait before a sent transaction's receipt is read, doubling each read up to EVM_RECEIPT_POLL_BACKOFF times
  *  it (400 ms to 30 s), until its deadline plus the send margin [design: two of Base's 200 ms blocks (2 s, one block,
  *  before block 53556127), then a few reads a minute up to the same 30 s]. */
@@ -1137,49 +1185,55 @@ export function evmPoolSender(
   /**
    * Reads a lane's send's receipt on both providers in the background, first after cfg.receiptPollMs
    * (EVM_SELL_RECEIPT_POLL_MS), the wait doubling to EVM_RECEIPT_POLL_BACKOFF times it. A receipt ends it (`landed` reads
-   * it) and drops the send's record; another send taking its nonce (a replacement) ends it; its record's bound (`until` +
+   * it) and drops the send's record; a watch with `landed` (a sale's) reads on until both providers have returned the
+   * receipt, each provider's latest kept, and only then calls `landed` with the two (card helper-sender-fee-proof: one
+   * provider's receipt never clears a charge; past the bound with one only, `landed` is never called); another send
+   * taking its nonce (a replacement) ends it; its record's bound (`until` +
    * EVM_LANE_WATCH_MS, or the bound a replacement kept from the send it replaced) ends it, with one log line from the
    * watch that saw the bound come (one started past it, a held answer's tend, ends without). A send unmined past the
    * margin has its lane tended at each read (a hole behind it is filled, it is replaced past `until`).
    */
-  function watch(lane: Lane, nonce: bigint, hash: string, until: number, landed?: (r: Record<string, unknown>) => void): void {
+  function watch(lane: Lane, nonce: bigint, hash: string, until: number, landed?: (ra: Record<string, unknown>, rb: Record<string, unknown>) => void): void {
     const first = cfg.receiptPollMs ?? EVM_SELL_RECEIPT_POLL_MS;
     const sent = now();
     const mine = lane.sent.get(nonce);
     const bound = mine?.bound ?? until + EVM_LANE_WATCH_MS;
     let every = first;
+    // each provider's receipt, its latest answer: a sale's watch reads on until both have one
+    const seen: [Record<string, unknown> | null, Record<string, unknown> | null] = [null, null];
+    let used = false;
     const tick = async (): Promise<void> => {
       const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);
-      const got = rc.flatMap((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? [x.value as Record<string, unknown>] : []));
-      if (got.length > 0) {
-        lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used
-        landed?.(got.find((x) => evmRpcHex(x.status) === "0x0") ?? got[0]!);
-        return;
+      rc.forEach((x, i) => {
+        if (x.status === "fulfilled" && x.value !== null && typeof x.value === "object") seen[i] = x.value as Record<string, unknown>;
+      });
+      if (seen[0] !== null || seen[1] !== null) {
+        if (!used) lane.sent.delete(nonce); // a receipt for any send at the nonce: it is used
+        used = true;
+        if (landed === undefined) return;
+        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);
+        // one provider's receipt only: read on until the other returns it, never past the bound
+        if (now() > bound) return;
+      } else {
+        if (mine === undefined || lane.sent.get(nonce) !== mine) return;
+        if (now() > bound) {
+          if (sent <= bound) log(`evm ${cfg.network}: ${lane.from}'s nonce ${nonce} (${hash}) is unmined past its watch; new sends wait for it`);
+          return;
+        }
+        if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);
       }
-      if (mine === undefined || lane.sent.get(nonce) !== mine) return;
-      if (now() > bound) {
-        if (sent <= bound) log(`evm ${cfg.network}: ${lane.from}'s nonce ${nonce} (${hash}) is unmined past its watch; new sends wait for it`);
-        return;
-      }
-      if (now() - sent > EVM_SELL_DROP_MARGIN_MS) tend(lane);
       every = Math.min(every * 2, first * EVM_RECEIPT_POLL_BACKOFF);
       setTimeout(() => void tick(), every).unref?.();
     };
     setTimeout(() => void tick(), every).unref?.();
   }
-  /** A sale's receipt turns its held worst cost into what went unpaid: all of its cost on a revert, its cost less the fee
-   *  on a sale that paid less, else 0, and a sale that landed and paid marks its W and client. A sale never seen landed
+  /** A sale's two receipts, one per provider, turn its held worst cost into what went unpaid (evmSaleUnpaid), and a
+   *  sale proven paid marks its W and client; any other marks nothing. A sale whose receipt both providers never return
    *  keeps its worst cost held for the window. */
-  const landedSale = (held: Charge, fee: bigint, keys: readonly string[]) => (r: Record<string, unknown>): void => {
-    let cost: bigint;
-    try {
-      cost = qty(r.gasUsed) * qty(r.effectiveGasPrice) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : qty(r.l1Fee));
-    } catch {
-      cost = held.wei; // a receipt whose cost cannot be read: the worst stays held
-    }
-    const ok = evmRpcHex(r.status) === "0x1";
-    held.wei = ok ? (cost > fee ? cost - fee : 0n) : cost;
-    if (!ok || cost > fee) return;
+  const landedSale = (held: Charge, s: EvmSell, w: string, keys: readonly string[]) => (ra: Record<string, unknown>, rb: Record<string, unknown>): void => {
+    const r = evmSaleUnpaid(ra, rb, { pool: s.pool, w, precommitment: s.precommitment, fee: s.fee }, held.wei);
+    held.wei = r.unpaid;
+    if (!r.paid) return;
     for (const k of keys) {
       if (!k.startsWith("w:") && !k.startsWith("c:")) continue;
       paid.delete(k);
@@ -1255,7 +1309,7 @@ export function evmPoolSender(
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(s.deadline) * 1000 + EVM_POOL_SEND_MARGIN_MS;
     sentAt(sellLane, nonce, until, maxFeePerGas, tip, hash, false);
-    watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s.fee, keys));
+    watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s, w, keys));
     return { status: 200, body: { hash } };
   }
   return {
