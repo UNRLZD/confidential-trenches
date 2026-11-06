@@ -18,7 +18,7 @@ import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import {
   EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
+  EvmUnansweredError, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -1611,13 +1611,24 @@ test("card helper-evm-range-cap-walk (review P-A): a seat's cap walk never lands
   const A = bareRpc("https://a.example", askedA, (span) => { if (span > 1000) throw new Error("HTTP 400: RPC error -32614: eth_getLogs is limited to a 1000 range"); return ["A's answer"]; });
   const B = bareRpc("https://b.example", [], () => { throw new Error("HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a 10 block range."); });
   const C = bareRpc("https://c.example", [], () => ["C's answer"]);
-  const [s0, s1] = evmPair([A, B, C]);
-  assert.deepEqual(await s0("eth_getLogs", logRange(0, 999)), ["A's answer"]);
-  // A caps the next page at 1,000: seat 0 walks to C
-  assert.deepEqual(await s0("eth_getLogs", logRange(1000, 2999)), ["C's answer"]);
-  assert.equal(s0.url, "https://c.example");
-  // seat 1's blocks 0..999: B caps at 10; A answered seat 0 in this read, C is seat 0's: no provider is left, refused
-  await assert.rejects(s1("eth_getLogs", logRange(0, 999)), /10 block range/);
+  const pair = evmPair([A, B, C]);
+  const [s0, s1] = pair;
+  // one agreed read, as the pool sync's: seat 0 pages first, then seat 1 reads the same blocks
+  let seat0Done!: () => void;
+  const after0 = new Promise<void>((r) => (seat0Done = r));
+  await assert.rejects(evmAgreedRead(pair, async (rpc, k) => {
+    if (k === 0) {
+      assert.deepEqual(await rpc("eth_getLogs", logRange(0, 999)), ["A's answer"]);
+      // A caps the next page at 1,000: seat 0 walks to C
+      assert.deepEqual(await rpc("eth_getLogs", logRange(1000, 2999)), ["C's answer"]);
+      assert.equal(s0.url, "https://c.example");
+      seat0Done();
+      return null;
+    }
+    await after0;
+    // seat 1's blocks 0..999: B caps at 10; A answered seat 0 in this read, C is seat 0's: no provider is left, refused
+    return rpc("eth_getLogs", logRange(0, 999));
+  }), /10 block range/);
   assert.notEqual(s1.url, "https://a.example");
   assert.equal(askedA.filter((x) => x === `${q(0)}..${q(999)}`).length, 1, "A answered blocks 0..999 for one seat only");
 });
@@ -1647,12 +1658,22 @@ test("card helper-evm-range-cap-walk (review P-E): the throttle walk too never s
     const A = bareRpc("https://a.example", askedA, () => { if (a++ === 1) throw HTTP_429(); return ["A's answer"]; });
     const B = bareRpc("https://b.example", [], () => { if (b++ === 0) throw HTTP_429(); return ["B's answer"]; });
     const C = bareRpc("https://c.example", [], () => ["C's answer"]);
-    const [s0, s1] = evmPair([A, B, C]);
-    assert.deepEqual(await s0("eth_getLogs", logRange(0, 999)), ["A's answer"]);
-    assert.deepEqual(await s0("eth_getLogs", logRange(1000, 1999)), ["C's answer"]); // A 429s: rests, seat 0 to C
-    t += EVM_SPARE_REST_MS + 1;
-    // B 429s: C is seat 0's and A answered seat 0 in this read, so none is free: B's own 429 goes up
-    await assert.rejects(s1("eth_getLogs", logRange(0, 999)), /HTTP 429/);
+    const pair = evmPair([A, B, C]);
+    const [, s1] = pair;
+    let seat0Done!: () => void;
+    const after0 = new Promise<void>((r) => (seat0Done = r));
+    await assert.rejects(evmAgreedRead(pair, async (rpc, k) => {
+      if (k === 0) {
+        assert.deepEqual(await rpc("eth_getLogs", logRange(0, 999)), ["A's answer"]);
+        assert.deepEqual(await rpc("eth_getLogs", logRange(1000, 1999)), ["C's answer"]); // A 429s: rests, seat 0 to C
+        t += EVM_SPARE_REST_MS + 1;
+        seat0Done();
+        return null;
+      }
+      await after0;
+      // B 429s: C is seat 0's and A answered seat 0 in this read, so none is free: B's own 429 goes up
+      return rpc("eth_getLogs", logRange(0, 999));
+    }), /HTTP 429/);
     assert.notEqual(s1.url, "https://a.example");
     assert.equal(askedA.filter((x) => x === `${q(0)}..${q(999)}`).length, 1);
   } finally {
@@ -1687,4 +1708,19 @@ test("card helper-evm-range-cap-walk (review LOW): a refusal from the provider a
   // c refused 100,000 for seat 1 after b's walk: c pages at its own 25,000 at once, never halved from b's page
   const x = pageSizes(lc);
   assert.deepEqual(x.slice(0, 2), [100_000, 25_000], `c's pages ${x.slice(0, 6)}`);
+});
+
+test("card helper-evm-range-cap-walk (re-check of d2b77940): a seat read alone, outside an agreed read, binds no provider: the next agreed read may seat it on the other side", async () => {
+  const A = bareRpc("https://a.example", [], (span) => { if (span > 1000) throw new Error("HTTP 400: RPC error -32614: eth_getLogs is limited to a 1000 range"); return ["A's answer"]; });
+  const B = bareRpc("https://b.example", [], () => { throw new Error("HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a 10 block range."); });
+  const C = bareRpc("https://c.example", [], () => ["C's answer"]);
+  const pair = evmPair([A, B, C]);
+  const [s0, s1] = pair;
+  // seat 0 alone (a W's transfer scan, a time read): A answers, then caps a wider page and seat 0 walks to C
+  assert.deepEqual(await s0("eth_getLogs", logRange(0, 999)), ["A's answer"]);
+  assert.deepEqual(await s0("eth_getLogs", logRange(1000, 2999)), ["C's answer"]);
+  // the next agreed read: seat 1's B caps at 10 and walks to A, which answered seat 0 only outside a read
+  const [x, y] = await evmAgreedRead(pair, (rpc) => rpc("eth_getLogs", logRange(0, 999)));
+  assert.deepEqual([x, y], [["C's answer"], ["A's answer"]]);
+  assert.equal(s1.url, "https://a.example");
 });
