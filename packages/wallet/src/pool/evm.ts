@@ -392,7 +392,11 @@ export const EVM_SPARE_REST_MS = 60_000;
  * other seat's and not resting, whose cap is not known to be under the span asked, and the call is made there at once;
  * with none, to the provider of the largest cap named, whose own refusal goes up so the pager pages at that cap. The
  * capped provider is not rested: it still answers the seat's other reads when a later move seats it. Which two
- * providers sit changes, never that two read and agree. Read live: the kit's Base list seats blastapi second, which
+ * providers sit changes, never that two read and agree: within the agreed reads in flight (both), neither walk ever
+ * seats a provider that answered on the other seat, so one provider's answer never stands on both sides of a read
+ * paged over many calls; with none left the seat's own error goes up (the pager halves, the read refuses). A seat call
+ * asks each provider at most once (review of 8cdf6ee8: two providers naming a cap one under each span walked
+ * without end). Read live: the kit's Base list seats blastapi second, which
  * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
  * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
  */
@@ -403,31 +407,39 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess)
   const named = list.map(() => false);
   const at = [0, 1];
-  // the provider seat k moves to: a resting-free one after its own in list order, else (`soonest`) the one whose rest
-  // ends first; never the other seat's
-  const next = (k: number, soonest: boolean): number | null => {
+  // the providers that answered on each seat in the reads in flight (review of 8cdf6ee8, HIGH): a seat never moves to one
+  // that answered on the other seat, so one provider's answer never stands on both sides of one agreed read; cleared
+  // when the last read in flight ends (both)
+  const sides: [Set<number>, Set<number>] = [new Set(), new Set()];
+  let inflight = 0;
+  // whether provider i may take seat k: not the other seat's provider, nor one that answered on the other seat
+  const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i);
+  // the provider seat k moves to: a resting-free one after its own in list order, never one asked in this call
+  // (`asked`), else (`soonest`) the one whose rest ends first; only one free for seat k
+  const next = (k: number, soonest: boolean, asked: ReadonlyMap<number, unknown>): number | null => {
     let best: number | null = null;
     for (let s = 1; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (i === at[1 - k]) continue;
-      if (restUntil[i]! <= Date.now()) return i;
+      if (!free(k, i)) continue;
+      if (restUntil[i]! <= Date.now() && !asked.has(i)) return i;
       if (soonest && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
     }
     return best !== null && restUntil[best]! <= restUntil[at[k]!]! ? best : null;
   };
-  // each provider's eth_getLogs cap as its words named it (null: none known), and the widest span it answered
+  // each provider's eth_getLogs cap as its last refusal named it (null: none known), and the widest span it answered
   const capOf: (bigint | null)[] = list.map(() => null);
   const answered: (bigint | null)[] = list.map(() => null);
-  // the provider a capped seat k moves to for a page of `span` blocks: the next one in list order, not the other seat's
-  // and not resting, with no cap known under `span`; else the one (the seat's own too) with the largest cap named
-  const wider = (k: number, span: bigint): number => {
+  // the provider a capped seat k moves to for a page of `span` blocks: the next one in list order free for seat k, not
+  // resting and not asked in this call, with no cap known under `span`; else the one free for seat k (its own too) with
+  // the largest cap named
+  const wider = (k: number, span: bigint, asked: ReadonlyMap<number, unknown>): number => {
     let best = at[k]!;
     for (let s = 1; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (i === at[1 - k] || restUntil[i]! > Date.now()) continue;
+      if (!free(k, i) || restUntil[i]! > Date.now()) continue;
       const c = capOf[i]!;
-      if (c === null || c >= span) return i;
-      if (c > (capOf[best] ?? 0n)) best = i;
+      if (!asked.has(i) && (c === null || c >= span)) return i;
+      if (c !== null && c > (capOf[best] ?? 0n)) best = i;
     }
     return best;
   };
@@ -443,22 +455,29 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   const seat = (k: number): EvmRpc => {
     const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
       const span = method === "eth_getLogs" ? spanOf(params) : null;
+      // each provider asked at most once in one call, its error kept (review of 8cdf6ee8, MEDIUM: as the helper's
+      // callEvm): a call ends after at most one ask of each provider in the list
+      const asked = new Map<number, unknown>();
       for (;;) {
-        if (restUntil[at[k]!]! > Date.now()) at[k] = next(k, true) ?? at[k]!;
+        if (restUntil[at[k]!]! > Date.now()) at[k] = next(k, true, asked) ?? at[k]!;
         const i = at[k]!;
+        if (asked.has(i)) throw asked.get(i);
         try {
           const r = await list[i]!(method, params);
+          sides[k]!.add(i);
           if (span !== null && (answered[i] === null || span > answered[i]!)) answered[i] = span;
           if (span !== null && capOf[i] !== null && span > capOf[i]!) capOf[i] = null;
           return r;
         } catch (e) {
+          asked.set(i, e);
           const t = throttled(e);
           const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
           if (span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!)) {
-            if (capOf[i] === null || cap > capOf[i]!) capOf[i] = cap;
+            capOf[i] = cap;
             if (at[k] !== i) continue; // another call on this seat moved it already
-            const n = wider(k, span);
+            const n = wider(k, span, asked);
             if (n === i) throw e;
+            // the largest cap's provider: its own refusal goes up from its seat, asked again only if not yet in this call
             at[k] = n;
             continue;
           }
@@ -466,9 +485,9 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
           named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
           if (at[k] !== i) continue; // another call on this seat moved it already
-          const n = next(k, false);
+          const n = next(k, false, asked);
           if (n === null) {
-            at[k] = next(k, true) ?? i;
+            at[k] = next(k, true, asked) ?? i;
             // the read's wait is for the provider now seated: its own Retry-After, else the read's backoff
             const j = at[k]!;
             if (j === i) throw e;
@@ -480,8 +499,17 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
     };
     return Object.defineProperty(call, "url", { get: () => list[at[k]!]!.url, enumerable: true }) as EvmRpc;
   };
-  return [seat(0), seat(1)];
+  const pair: Rpcs = [seat(0), seat(1)];
+  READS.set(pair[0], {
+    begin: () => void inflight++,
+    end: () => {
+      if (--inflight === 0) sides[0].clear(), sides[1].clear();
+    },
+  });
+  return pair;
 }
+/** A pair's reads in flight (evmPair), by its first seat: both() opens one around each agreed read. */
+const READS = new WeakMap<EvmRpc, { begin(): void; end(): void }>();
 
 /**
  * f on both RPCs at once, under one AbortController: when one side fails (or the caller aborts) the other is aborted
@@ -489,6 +517,15 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
  */
 async function both<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   signal?.throwIfAborted();
+  const read = READS.get(rpcs[0]);
+  read?.begin();
+  try {
+    return await bothIn(rpcs, f, signal);
+  } finally {
+    read?.end();
+  }
+}
+async function bothIn<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   const ac = new AbortController();
   const stop = () => ac.abort(signal!.reason);
   signal?.addEventListener("abort", stop, { once: true });
@@ -845,6 +882,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     } catch (e) {
       // the other RPC failed and this read was stopped: never a smaller page for the next W
       signal?.throwIfAborted();
+      // the refusal is the page of the provider that refused it: the seat's provider now, which a cap walk may have
+      // moved during the call (review of 8cdf6ee8, LOW)
+      const p = pager.of(rpc, k);
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       const t = throttled(e);
@@ -883,12 +923,14 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     tries = 0;
     again = 0;
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
+    // the page of the provider that answered (a cap walk may have moved the seat during the call)
+    const q = pager.of(rpc, k);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     const full = end - at + 1n === size;
-    if (full && (p.answered === null || size > p.answered)) p.answered = size;
+    if (full && (q.answered === null || size > q.answered)) q.answered = size;
     if (full && (widest === null || size > widest)) widest = size;
     if (full && refused !== null && ++held >= hold) refused = null;
-    if (full && size * 2n <= max && (refused === null || size * 2n < refused)) p.size = size * 2n;
+    if (full && size * 2n <= max && (refused === null || size * 2n < refused)) q.size = size * 2n;
     at = end + 1n;
   }
   for (let i = 1; i < out.length; i++) {

@@ -175,7 +175,8 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *     1 of 18. Paced at 2 calls a second, 3 at once.
  *   - base.api.pocket.network (in blockpi's place, card helper-evm-range-cap-walk: blockpi answered HTTP 521 on every
  *     chain from about 16:00Z 6 Nov): x-ratelimit-limit 1200, its reset 60 s ahead, a count of its own apart from
- *     Robinhood's (read 6 Nov 18:49-18:50Z); single 1,000-block eth_getLogs at 10 a second for 6 s and batches of 10 a
+ *     Robinhood's (read 6 Nov 18:49-18:50Z), and x-ratelimit-limit-global 90000, one count shared by every user of
+ *     its gateway, which none of ours can pace; single 1,000-block eth_getLogs at 10 a second for 6 s and batches of 10 a
  *     second none throttled, 3 batches of 10 eth_call at once 18 of 18 answered (18:47Z); about 75 calls a second for
  *     40 s, past the minute's 1,200, answered 429 (18:45Z). Paced at 10 calls a second, 30 at once: at most 630 in any
  *     minute.
