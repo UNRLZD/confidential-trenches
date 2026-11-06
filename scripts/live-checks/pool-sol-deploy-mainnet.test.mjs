@@ -154,3 +154,22 @@ test("paste 1's stopped journal is named in the run's record, and its words neve
   // no earlier attempt, no line
   assert.ok(!mainnetRunRecord({ ...D, txs: [], need: "1" }, MAINNET_RPCS).includes("attempt-1"));
 });
+
+test("the run record passes the money gate's reader: a step that names an address (paste 2's --sweep-kept to the return address) never puts it on the steps line", async () => {
+  const { parseLive } = await import("../ci/money-gate.mjs");
+  const txs = [
+    { signature: "5wGExGuraxHFnnnobPR85vr3fBu7mW6BEgrpZWotwMZupKtdRSUj1jBExFbm7wiFeeHR8tqUUbZMAfnH8EM7uQPM", step: "funding (to the funder)" },
+    { signature: "3CUZ2CpNwk8DabVSSD5T62AFJ2JWy8rdU1E8A2ZWMZsYW6RLbRgNXzpQPGHsiWd6s2beD7NRt8hsJUp2KCDJHTRb", step: `sweep (kept keys, to the run's return address ${D.return_to})` },
+    { signature: "2XdxFtwv6hvgGreUGVKfwN5AdvCsvsHkErThG1pg86G732DqRgMLmHNi2mjMU6PUzanU4SZvsxsEhZvpQDu6S8kU", step: `sweep (kept keys, to a sender of the funding ${D.funder})` },
+  ];
+  const md = mainnetRunRecord({ ...D, txs, need: "1" }, MAINNET_RPCS, earlierAttempts());
+  const r = parseLive(md, "pool-sol-deploy-mainnet");
+  assert.deepEqual(r.problems, [], md);
+  assert.equal(r.txs.length, 3);
+  const steps = md.split("\n").find((l) => l.startsWith("The run: "));
+  assert.match(steps, /sweep \(kept keys, to the run's return address\), sweep \(kept keys, to a sender of the funding\)\.$/);
+  // and the committed record, the one the money gate reads on this card
+  const committed = parseLive(readFileSync(path.join(HERE, "pool-sol-deploy-mainnet.md"), "utf8"), "pool-sol-deploy-mainnet");
+  assert.deepEqual(committed.problems, []);
+  assert.equal(committed.txs.length, 8);
+});
