@@ -798,7 +798,7 @@ test("a pool.deposit refused (U holds the rung but not its costs: not_funded) re
 // nothing sent and the note still PLANNED; the other provider's word alone is never taken. From U's first send on, it
 // is never "down".
 for (const p of [0, 1] as const) {
-  test(`card pool-read-down: provider ${p} down past the page's retry answers down before U signs, and never down after`, async () => {
+  test(`card pool-read-down: provider ${p} down past the page's retry answers down before U signs; after the send, sent or the read-back's verdict, never failed, down or a throw`, async () => {
     let before = 0;
     let after = 0;
     for (let from = 0; ; from++) {
@@ -807,7 +807,7 @@ for (const p of [0, 1] as const) {
       const u = await plannedU(ns);
       c.fund(u.address, Number(RUNG) + COST);
       const d = pairDown([c.rpc(), c.rpc()] as const, p, from);
-      // past a send the run may throw (its kind answers failed, poolDepositKind): never down either way
+      // a throw past the send would reach poolDepositKind's catch as failed while the tx may land
       const a = await runPoolDeposit(host(c, ns, { rpcs: d.rpcs }), ask(RUNG)).catch((e: unknown) => ({ thrown: String(e) }));
       if (!d.fired()) break;
       if (c.sent.length === 0) {
@@ -816,7 +816,9 @@ for (const p of [0, 1] as const) {
         assert.deepEqual((await ours(ns)).map((n) => n.state), ["PLANNED"], `from call ${from}`);
       } else {
         after++;
-        assert.notDeepEqual(a, { error: "down" }, `from call ${from}`);
+        assert.ok("stage" in a, `from call ${from}: ${JSON.stringify(a)}`);
+        if (a.stage === "sent") assert.deepEqual(a.txs.map((t) => t.hash), [c.sent[0]!], `from call ${from}`);
+        else assert.ok(["filled", "not_landed"].includes(a.stage), `from call ${from}: ${a.stage}`);
       }
     }
     assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);

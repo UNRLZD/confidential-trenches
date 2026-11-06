@@ -450,8 +450,14 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     }
     return { stage: "filled", txs: landedTxs };
   } catch (e) {
+    // the read-back's own verdicts (not landed, taken, stuck), each from reads that answered
     if (e instanceof Refused) return e.code === "not_landed" ? { stage: "not_landed", txs: sentTxs } : landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "not_allowed" };
+    // any other fault past U's send (a provider down after its retry): the transaction may land, so the answer is
+    // never failed. What landed is part filled; else "sent" with its signature, and the note, INCOMING, settles at the
+    // next load or run (as pool-sell answers; card pool-read-down)
+    if (landedTxs.length) return { stage: "part_filled", txs: landedTxs };
+    if (sentTxs.length) return { stage: "sent", txs: sentTxs };
     // a provider read that still fails after the page's own retry, before U signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     throw e;
