@@ -28,7 +28,7 @@
 //     Then: the run key, made in memory, is kept in a 0700 folder (keysBase(), file 0600), written with the journal just
 //     before the run's try (a throw before it leaves no key behind), until the cleanup reads it at
 //     most DUST on both RPCs with every nonce it signed landed, each RPC read at its own head block at or past every
-//     receipt of the key's and the block its funding was read at, and what the key has received (that balance plus each
+//     receipt of the key's, and what the key has received (that balance plus each
 //     landed transaction's outflowOf) covers every funding its runs asked for (the journal's asked); never removed
 //     after a stop before the funding was read (on both RPCs), nor while a run not whole made a contract (a receipt
 //     or code at a journaled deploy address on either RPC: the same paste resumes, in the run and in --sweep-kept
@@ -574,18 +574,17 @@ export async function main(args, io = {}) {
   // transactions are the stopped run's, not a reading of its own funding.
   let funded = Boolean(kept) && j0?.funded === true;
   // Every funding the key's runs asked for (each "waiting for" line's wei), journaled before its line is printed and
-  // carried through every resume and --sweep-kept, and the highest block at which a run read its funding: the key is
-  // removed only once, on both RPCs at a block at or past that one and every receipt of its own, what it has received
-  // (its balance plus what each of its landed transactions took) covers every one of them, so a transfer it asked for
-  // that is still to land never finds the key gone. A journal from before the list counts its run's need as one.
+  // carried through every resume and --sweep-kept: the key is removed only once, on both RPCs at a block at or past
+  // every receipt of its own, what it has received (its balance plus what each of its landed transactions took)
+  // covers every one of them, so a transfer it asked for that is still to land never finds the key gone. A journal
+  // from before the list counts its run's need as one.
   const asked = (j0?.asked ?? (j0 ? [j0.need ?? "0"] : [])).map(BigInt);
-  let seenBlock = big(j0?.seen_block ?? 0);
   // On a mainnet the journal (journalFile) holds the run's state, rewritten before each send and in the finally: every
   // signed transaction (its raw form is public once sent; no key), the key folder's name and state and why
   const writeJournal = () => {
     if (!journalFile) return;
     const txs = signed.map((s) => ({ step: s.step, ...(s.contract ? { contract: s.contract } : {}), ...(s.address ? { address: s.address } : {}), hash: s.hash, raw: s.raw, nonce: String(s.nonce), tip: String(s.tip), maxFee: String(s.maxFee), gas: String(s.gas), ...(s.value !== undefined ? { value: String(s.value) } : {}), to: s.to ?? null, sentAt: s.sentAt, landed: Boolean(s.receipt) || Boolean(s.landed) }));
-    const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), funded, wait_txs: kept ? (j0?.wait_txs ?? null) : waitTxs, asked: asked.map(String), seen_block: String(seenBlock), stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
+    const j = { chain: chainName, chainId: Number(BigInt(id)), dryRun, return: ret, deployer, need: String(need ?? (j0?.need ?? "0")), at: j0?.at ?? startedAt, complete: complete || Boolean(j0?.complete), funded, wait_txs: kept ? (j0?.wait_txs ?? null) : waitTxs, asked: asked.map(String), stopped: stopped ?? (kept ? j0?.stopped : null) ?? null, stopped_at: stoppedAt ?? (kept ? j0?.stopped_at : null) ?? null, keys: journalKeys, txs };
     writeAtomic(journalFile, JSON.stringify(j, null, 2) + "\n");
   };
   const landed = () => signed.filter((s) => s.receipt).sort((a, b) => Number(a.nonce - b.nonce));
@@ -618,17 +617,14 @@ export async function main(args, io = {}) {
     return { tip, maxFee: maxOf(bump(maxOf(...at.map((s) => s.maxFee))), f.maxFee, tip) };
   };
   const receiptOf = async (s) => (s.receipt ??= await call("eth_getTransactionReceipt", [s.hash]));
-  // the run key's balance on both RPCs, each read at that RPC's head block: the lower balance and the higher block
+  // the run key's balance on both RPCs: the lower of the two (a read that fails throws)
   const heldOnBoth = async () => {
     let bal = null;
-    let block = 0n;
     for (const u of [url, second]) {
-      const b = big(await call("eth_blockNumber", [], u));
-      const v = big(await call("eth_getBalance", [deployer, "0x" + b.toString(16)], u));
+      const v = big(await call("eth_getBalance", [deployer, "latest"], u));
       if (bal === null || v < bal) bal = v;
-      if (b > block) block = b;
     }
-    return { bal, block };
+    return bal;
   };
   // --sweep-kept: what the key sent out since its run's funding wait (its journaled transactions from wait_txs on,
   // each counted by outflowOf). Any of it unread (a receipt, or a journal from before wait_txs and value were kept)
@@ -761,7 +757,7 @@ export async function main(args, io = {}) {
       while (held0 === null) {
         go();
         try {
-          held0 = (await heldOnBoth()).bal;
+          held0 = await heldOnBoth();
         } catch (e) {
           console.log(`deploy: the run key's balance not read (${e.message}): reading it again in ${WAITS.poll / 1000} s`);
           await sleep(WAITS.poll);
@@ -779,16 +775,13 @@ export async function main(args, io = {}) {
       // here would leave the owner's transfer to a run that is gone (the Solana devnet rehearsal's run, 5 Nov 18:47Z)
       for (;;) {
         go();
-        let held = { bal: -1n, block: 0n };
+        let held = -1n;
         try {
           held = await heldOnBoth();
         } catch (e) {
           console.log(`deploy: the run key's balance not read (${e.message}): reading it again in ${WAITS.poll / 1000} s`);
         }
-        if (held.bal >= need) {
-          if (held.block > seenBlock) seenBlock = held.block;
-          break;
-        }
+        if (held >= need) break;
         await sleep(WAITS.poll);
       }
       funded = true;
@@ -836,7 +829,7 @@ export async function main(args, io = {}) {
           // less than that (nothing, or a part) and the key is kept. What the key sent out since its funding wait (an
           // earlier --sweep-kept's landed sweeps and every landed transaction's fee) came out of what it was sent, so it
           // counts toward the need: a part held and sent back is no reading of it, the rest landing later is
-          const bal = await heldOnBoth().then((r) => r.bal, () => 0n);
+          const bal = await heldOnBoth().catch(() => 0n);
           const out = await sentOut();
           if (bal + out >= BigInt(j0.need ?? 0) && bal > 0n) {
             funded = true;
@@ -873,7 +866,7 @@ export async function main(args, io = {}) {
             const o = l ? outflowOf(l, l.receipt, deployer) : null;
             out = o === null ? null : out + o;
           }
-          const floor = signed.reduce((m, s) => (s.receipt?.blockNumber != null && big(s.receipt.blockNumber) > m ? big(s.receipt.blockNumber) : m), seenBlock);
+          const floor = signed.reduce((m, s) => (s.receipt?.blockNumber != null && big(s.receipt.blockNumber) > m ? big(s.receipt.blockNumber) : m), 0n);
           const askedAll = asked.reduce((a, b) => a + b, 0n);
           // each RPC read at its own head block: the balance, the nonce and each deploy address's code at that one block
           const left = await onBoth(async (u) => {

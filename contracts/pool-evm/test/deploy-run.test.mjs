@@ -1177,3 +1177,22 @@ test("resume-safe block: the key is removed only at a block past every transacti
   assert.equal(sw.error, null, String(sw.error?.message) + why(c));
   assert.deepEqual(folders(m.keys), [], why(c));
 });
+
+test("resume-safe unread: a run whose sweep receipt the first RPC lags on keeps its key (what it received is not known) and reads the receipt again: once it shows, --sweep-kept removes the key", OPTS, async (t) => {
+  const m = room(t);
+  let sh = null;
+  let lag = true;
+  const c = mainnet({ sent: (raw, hash) => parse(raw).to === E && (sh ??= hash) });
+  answer(c, (u, method, params) => (lag && method === "eth_getTransactionReceipt" && u === BASE.rpcs[0] && params[0] === sh ? null : undefined));
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
+  const j = journalOf(m);
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /no receipt read yet/.test(w)), j.keys.why.join("; "));
+  lag = false;
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.deepEqual(folders(m.keys), [], "removed once the receipt is read" + why(c));
+  assert.equal(JSON.parse(readFileSync(m.out, "utf8")).txs.length, Number(c.nonce.get(c.deployer)), "the record lists the sweep" + why(c));
+});
