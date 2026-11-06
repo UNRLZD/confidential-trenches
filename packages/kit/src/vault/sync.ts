@@ -25,8 +25,9 @@
 //   sync reads it again (a row read again replaces the earlier copy, by its index).
 // - No lookup of one secret-derived value: whole pages only, matched here (2.5.6). Deposits are confirmed from these
 //   rows, never from a transaction read by hash (2.10 (c)).
-// - Pages any public RPC serves (review R-03): each list starts at VAULT_SYNC_PAGE rows, at most 125 Tgas a view, and a
-//   page an RPC refuses as too heavy is read again at half its rows on both RPCs, so the list still reads whole.
+// - Pages any public RPC serves (review R-03): each list starts at VAULT_SYNC_PAGE rows, about 125 Tgas a view; a page
+//   an RPC refuses as too heavy is read again at half its rows on both RPCs (at most three times), so the list still
+//   reads whole, and a busy answer is asked again after a wait (VAULT_SYNC_BUSY_WAITS_MS).
 // - An abort ends the sync at once, even inside a read an RPC never answers; the signal goes to the RPC's query too.
 // The kit names no provider: the caller passes two RPCs of different operators (the wallet's NEAR_NETWORKS pair).
 import { VAULT_CONSTANTS, VAULT_FIELD_P, vaultAccountId, vaultDecimal, type VaultSpendStatus } from "./shapes.ts";
@@ -51,7 +52,7 @@ export const VAULT_SYNC_LISTS = ["deposits", "spends", "leaves", "labels"] as co
 export type VaultSyncList = (typeof VAULT_SYNC_LISTS)[number];
 
 /**
- * Each list's first page, in rows: as many as one view call can carry at no more than 125 Tgas (vault review R-03,
+ * Each list's first page, in rows: as many as one view call can carry at about 125 Tgas (vault review R-03,
  * research docs/reviews/vault-review-opus-contract.md l.45). The view caps:
  * - The protocol's is 1,000 Tgas today; it was 200 Tgas, then 300 from protocol 52, then 1,000 from 83 (near-parameters
  *   0.37.4 res/runtime_configs/52.yaml l.2, 83.yaml l.8, parameters.snap l.203). A node can set its own lower one
@@ -62,30 +63,40 @@ export type VaultSyncList = (typeof VAULT_SYNC_LISTS)[number];
  *   the others. The lowest cap any nearcore has had is 200 Tgas, so 125 Tgas leaves over a third of it spare.
  * The gas per page was measured with the release build in near-sandbox 2.13.4, with each list's largest rows
  * (contracts/vault/tests/review_viewgas.rs, review R-03):
- * - spends: 250 rows 125.135 Tgas (500 rows 249.148, 1,000 rows 497.053), so 250;
+ * - spends: 250 rows 125.135 Tgas, measured (500 rows 249.148, 1,000 rows 497.053), so 250;
  * - deposits: 1,000 rows 276.385 Tgas, at most 0.277 a row with the call's own cost in it, so 450 (at most 124.4);
  * - leaves: 1,000 rows 162.548 Tgas, at most 0.163 a row, so 750 (at most 121.9);
  * - labels: the same view code as leaves (lib.rs `labels` and `leaves` are both tree_page), so 750.
- * A page an RPC still refuses as too heavy (vaultViewTooHeavy) is read again at half its rows, down to one row.
+ * A page an RPC still refuses as too heavy (vaultViewTooHeavy) is read again at half its rows, at most three times:
+ * a page of VAULT_SYNC_PAGE[list] / 8 rows refused stops the sync, naming the RPC, since an RPC that caps that low
+ * would turn a long list into days of reads.
  */
 export const VAULT_SYNC_PAGE: Readonly<Record<VaultSyncList, number>> = /* @__PURE__ */ Object.freeze({ deposits: 450, spends: 250, leaves: 750, labels: 750 });
 
 /**
  * Whether one RPC's answer to a view refuses it as too heavy, so the same rows read in a smaller page can pass:
- * - nearcore's gas cap: `result.error` is "wasm execution failed with error: HostError(GasLimitExceeded)" at HTTP 200,
- *   the exact answer of all six listed RPCs to a view over the cap (read 2026-11-06 05:47-05:49Z on
- *   rpc.mainnet.fastnear.com, rpc.mainnet.near.org, near.drpc.org, test.rpc.fastnear.com, rpc.testnet.near.org and
- *   near-testnet.drpc.org);
- * - dRPC's free plan's time cap: `error.code` 30 with "Request timeout on the free plan, please upgrade to paid plan",
- *   at HTTP 408. near.drpc.org and near-testnet.drpc.org gave it to a slow view that FastNEAR answered in 640 ms
- *   (read 2026-11-06 05:47Z). The RPC adapters give that answer back rather than throw on it (nearRpc, exitRpc).
- * Any other answer is not this one: another error stops the read as before, so a fault never halves a page forever.
+ * nearcore's gas cap, `result.error` "wasm execution failed with error: HostError(GasLimitExceeded)" at HTTP 200, the
+ * exact answer of all six listed RPCs to a view over the cap (read 2026-11-06 05:47-05:49Z on both FastNEAR URLs and
+ * the dRPC URL of each network in NEAR_NETWORKS). Any other answer is not this one: another error stops the read as
+ * before.
  */
 export function vaultViewTooHeavy(a: unknown): boolean {
-  if (!isObj(a)) return false;
-  if (isObj(a.result) && typeof a.result.error === "string") return a.result.error.includes("HostError(GasLimitExceeded)");
-  return isObj(a.error) && a.error.code === 30 && typeof a.error.message === "string" && a.error.message.startsWith("Request timeout on the free plan");
+  return isObj(a) && isObj(a.result) && typeof a.result.error === "string" && a.result.error.includes("HostError(GasLimitExceeded)");
 }
+
+/**
+ * Whether one RPC's answer says it is busy, so the same view asked again later can pass: dRPC's free plan's timeout,
+ * HTTP 408 with `error.code` 30 and "Request timeout on the free plan, please upgrade to paid plan" (near.drpc.org and
+ * near-testnet.drpc.org, read 2026-11-06 05:47Z; the RPC adapters nearRpc and exitRpc give that body back rather than
+ * throw on it). It comes from the provider's load, not the page's size (a review's 14 near-cap views on dRPC answered
+ * at HTTP 200), so the read asks for the same page again after each of VAULT_SYNC_BUSY_WAITS_MS, then stops.
+ */
+export function vaultViewBusy(a: unknown): boolean {
+  return isObj(a) && isObj(a.error) && a.error.code === 30 && typeof a.error.message === "string" && a.error.message.startsWith("Request timeout on the free plan");
+}
+
+/** The waits, in ms, before each time a busy answer (vaultViewBusy) is asked again: three tries more, then a stop. */
+export const VAULT_SYNC_BUSY_WAITS_MS: readonly number[] = /* @__PURE__ */ Object.freeze([250, 500, 1_000]);
 
 /**
  * Where the next sync starts: per list, the first row it reads; the height the last sync read at, which the next must
@@ -209,14 +220,16 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
     const size = list === "leaves" ? stateTree.size : list === "labels" ? labelTree.size : null;
     const rows: unknown[] = [];
     // A page an RPC refuses as too heavy is read again at half its rows, on both RPCs, so both still answer the same
-    // rows; the smaller page holds for the rest of this list. One row refused stops the sync.
+    // rows; the smaller page holds for the rest of this list. A page of an eighth of the first refused stops the sync.
     let limit = VAULT_SYNC_PAGE[list];
+    const floor = Math.floor(VAULT_SYNC_PAGE[list] / 8);
     for (let at = from; ; ) {
       let page: unknown;
       try {
         page = await read(list, { from: at, limit });
       } catch (e) {
-        if (!(e instanceof TooHeavy) || limit === 1) throw e;
+        if (!(e instanceof TooHeavy)) throw e;
+        if (limit <= floor) throw new VaultSyncStopped("rpc", `${e.detail}, even at ${limit} rows`);
         limit = Math.floor(limit / 2);
         continue;
       }
@@ -255,11 +268,17 @@ function call(vault: string, method: string, a: Record<string, number>, at: { fi
 /** One RPC's answer to one view call: its bytes, height and block hash, or a stop ("rpc"). */
 async function answer(rpc: VaultSyncRpc, params: Obj, signal?: AbortSignal): Promise<{ bytes: Uint8Array; height: number; hash: string }> {
   let a: unknown;
-  try {
-    a = await untilAbort(rpc.query(params, signal), signal);
-  } catch (e) {
-    if (signal?.aborted) throw signal.reason;
-    throw new VaultSyncStopped("rpc", `${rpc.name}: ${e instanceof Error ? e.message : String(e)}`);
+  for (let tries = 0; ; tries++) {
+    try {
+      a = await untilAbort(rpc.query(params, signal), signal);
+    } catch (e) {
+      if (signal?.aborted) throw signal.reason;
+      throw new VaultSyncStopped("rpc", `${rpc.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!vaultViewBusy(a)) break;
+    const wait = VAULT_SYNC_BUSY_WAITS_MS[tries];
+    if (wait === undefined) throw new VaultSyncStopped("rpc", `${rpc.name}: ${String(params.method_name)}: busy (a free-plan timeout) ${tries + 1} times`);
+    await untilAbort(new Promise((ok) => setTimeout(ok, wait)), signal);
   }
   if (vaultViewTooHeavy(a)) throw new TooHeavy(`${rpc.name}: ${String(params.method_name)}: refused as too heavy`);
   const r = isObj(a) && a.error === undefined ? a.result : undefined;
@@ -281,8 +300,10 @@ async function answer(rpc: VaultSyncRpc, params: Obj, signal?: AbortSignal): Pro
  * of more than one row catches it and halves its page.
  */
 class TooHeavy extends VaultSyncStopped {
+  readonly detail: string;
   constructor(detail: string) {
     super("rpc", detail);
+    this.detail = detail;
   }
 }
 

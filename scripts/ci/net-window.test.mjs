@@ -113,6 +113,7 @@ export const CHANGED = [
   "scripts/live-checks/vault-testnet-t01.mjs",
   "scripts/live-checks/vault-testnet-t04.mjs",
   "scripts/live-checks/vault-mainnet.mjs",
+  "scripts/live-checks/vault-review-fixes-kit.mjs",
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
 ];

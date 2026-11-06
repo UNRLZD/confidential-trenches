@@ -946,7 +946,7 @@ test("a deposits page with a leading byte-order mark is not a page: unsure, the 
 // nearcore's gas cap at HTTP 200 on all six listed RPCs, dRPC's free-plan timeout at HTTP 408.
 const GAS_CAP = { jsonrpc: "2.0", id: "x", result: { block_hash: "11111111111111111111111111111111", block_height: 1, error: "wasm execution failed with error: HostError(GasLimitExceeded)", logs: [] } };
 const DRPC_TIMEOUT = { id: "x", jsonrpc: "2.0", error: { message: "Request timeout on the free plan, please upgrade to paid plan", code: 30 } };
-test("R-03: deposits pages an RPC refuses as too heavy are read again at half the rows; P on a later page is held, the halving counted", async () => {
+test("R-03: deposits pages an RPC refuses as too heavy are read again at half the rows (at most three times); P on a later page is held, the halving counted; a busy answer is asked again", async () => {
   const t = await setup();
   for (let i = 0; i < 300; i++) t.chain.addRow(BigInt(7_000 + i), { depositor: "x.testnet" });
   t.chain.addRow(t.note.precommitment);
@@ -965,26 +965,47 @@ test("R-03: deposits pages an RPC refuses as too heavy are read again at half th
       },
     };
   };
-  for (const refusal of [GAS_CAP, DRPC_TIMEOUT]) {
+  {
     const asked: number[] = [];
-    const rpcs = [capped(0, 100, refusal, asked), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
+    const rpcs = [capped(0, 100, GAS_CAP, asked), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
     const got = await new DepositsWatch(VAULT, t.note.precommitment, rpcs).read();
     assert.equal(got.state, "held");
     assert.equal(got.state === "held" && got.row.index, 300);
     // 301 rows: 450 and 225 and 112 refused, then pages of 56 (5 full, one of 21)
     assert.deepEqual(asked, [450, 225, 112, 56, 56, 56, 56, 56, 56]);
   }
+  // dRPC's free-plan timeout is the provider's load, not the page's size: the same page asked again after a wait
+  {
+    const asked: number[] = [];
+    let busy = 0;
+    const r = t.deps.rpcs[0];
+    const flaky = { name: r.name, tx: r.tx, query: async (p: Record<string, unknown>) => {
+      if (p.method_name === "deposits") {
+        asked.push(JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString()).limit);
+        if (busy++ < 2) return structuredClone(DRPC_TIMEOUT);
+      }
+      return r.query(p);
+    } };
+    const got = await new DepositsWatch(VAULT, t.note.precommitment, [flaky, t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc]).read();
+    assert.equal(got.state, "held");
+    assert.deepEqual(asked, [450, 450, 450]);
+    // busy every time: asked 1 + 3 times, then unsure, never a smaller page
+    const always: number[] = [];
+    const busyRpc = [capped(0, 0, DRPC_TIMEOUT, always), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
+    assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, busyRpc).read(), { state: "unsure" });
+    assert.deepEqual(always, [450, 450, 450, 450]);
+  }
   // any other error is not a cap: the read is unsure at once, with no smaller page asked
-  const other = { jsonrpc: "2.0", id: "x", result: { ...GAS_CAP.result, error: "wasm execution failed with error: FunctionCallError(MethodResolveError(MethodNotFound))" } };
+  const other = { jsonrpc: "2.0", id: "x", result: { ...GAS_CAP.result, error: "wasm execution failed with error: MethodResolveError(MethodNotFound)" } };
   const asked: number[] = [];
   const rpcs = [capped(0, 0, other, asked), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
   assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, rpcs).read(), { state: "unsure" });
   assert.deepEqual(asked, [450]);
-  // a cap even at one row: unsure after the halvings run out
+  // a cap at an eighth of the first page: unsure after three halvings
   const one: number[] = [];
   const all = [capped(0, 0, GAS_CAP, one), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
   assert.deepEqual(await new DepositsWatch(VAULT, t.note.precommitment, all).read(), { state: "unsure" });
-  assert.deepEqual(one, [450, 225, 112, 56, 28, 14, 7, 3, 1]);
+  assert.deepEqual(one, [450, 225, 112, 56]);
 });
 
 test("F2 (M47): a lapse whose nonce moves between the device's read and the signer's: no call at another nonce is sent", async () => {

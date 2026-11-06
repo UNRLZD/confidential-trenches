@@ -71,8 +71,8 @@ export function nearPairRule(network?: NearNetwork): string {
  * A provider by URL. A status other than 200 or 408, a body that is not JSON or no answer in time throws. A 408's JSON
  * body is given back as the answer: dRPC's free plan answers a view it stopped for time that way, HTTP 408 with
  * {"error":{"message":"Request timeout on the free plan, please upgrade to paid plan","code":30}} (near.drpc.org and
- * near-testnet.drpc.org, read 2026-11-06 05:47Z), and the vault's page reads halve their page on it (the kit's
- * vaultViewTooHeavy); to every other reader it is a JSON-RPC error like any other.
+ * near-testnet.drpc.org, read 2026-11-06 05:47Z), and the vault's page reads ask for the same page again after a wait
+ * (the kit's vaultViewBusy); to every other reader it is a JSON-RPC error like any other.
  */
 export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): NearRpc {
   return {

@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { nearPairNetwork, VaultSyncStopped, VAULT_SYNC_LISTS, VAULT_SYNC_PAGE, vaultViewTooHeavy } from "@blindfill/kit";
+import { nearPairNetwork, VaultSyncStopped, VAULT_SYNC_LISTS, VAULT_SYNC_PAGE, vaultViewBusy } from "@blindfill/kit";
 import { EXIT_NETWORKS, ExitRpcRefused, exitReadPages, exitRpc } from "../src/rpc.ts";
 import { replayRpc, type PagesFile } from "./replay.ts";
 
@@ -121,17 +121,17 @@ test("exitRpc posts one JSON-RPC query and refuses a status other than 200 or 40
   const bad = (async () => new Response("busy", { status: 429 })) as unknown as typeof fetch;
   await assert.rejects(exitRpc("https://near-testnet.drpc.org", bad).query(params), /HTTP 429/);
   // R-03: dRPC's free plan stops a slow view at HTTP 408 with this body (near-testnet.drpc.org, read 2026-11-06 05:47Z);
-  // it comes back as the answer, which the kit's read halves its page on
+  // it comes back as the answer, which the kit's read asks again after a wait
   const timeout = { id: "blindfill-exit", jsonrpc: "2.0", error: { message: "Request timeout on the free plan, please upgrade to paid plan", code: 30 } };
   const slow = (async () => new Response(JSON.stringify(timeout), { status: 408 })) as unknown as typeof fetch;
   const a = await exitRpc("https://near-testnet.drpc.org", slow).query(params);
   assert.deepEqual(a, timeout);
-  assert.equal(vaultViewTooHeavy(a), true);
+  assert.equal(vaultViewBusy(a), true);
   const notJson = (async () => new Response("Request Timeout", { status: 408 })) as unknown as typeof fetch;
   await assert.rejects(exitRpc("https://near-testnet.drpc.org", notJson).query(params));
 });
 
-test("R-03: the read starts each list at the kit's page sizes, so no page is over 125 Tgas", () => {
+test("R-03: the read starts each list at the kit's page sizes, about 125 Tgas a page", () => {
   for (const [p] of [...A.answers, ...B.answers].filter(([p]) => atBlock(p))) {
     const q = JSON.parse(p);
     if (!(VAULT_SYNC_LISTS as readonly string[]).includes(q.method_name)) continue;

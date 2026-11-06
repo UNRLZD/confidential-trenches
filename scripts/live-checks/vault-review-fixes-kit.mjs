@@ -1,29 +1,35 @@
 #!/usr/bin/env node
-// Live check of card vault-review-fixes-kit (vault review R-03): the vault's lists read whole on public RPCs at any
-// size. The kit's sync (packages/kit/src/vault/sync.ts), which the signing page and the exit tool both run, starts each
-// list at a page of at most 125 Tgas and reads a page again at half its rows when an RPC refuses it as too heavy
-// (vaultViewTooHeavy). Two things can break that after a deploy, and this reads both:
-//   1. The RPCs. Each of the six the release lists (RPCS below, held to the kit's own pair rule, nearPairRule, word for
-//      word: both FastNEAR URLs and dRPC, on mainnet and testnet) gets a view over its gas cap: social's get with PROBE_KEYS copies of one empty key (it passed at 15,429
-//      copies and stopped at 15,546 on all six, 2026-11-06 05:48-05:49Z). Its answer must be one the kit's
-//      vaultViewTooHeavy knows. If an RPC changes the words of its refusal, the halving stops working without a sound.
-//      A probe that still answers is no longer over the cap: that is an error (exit 2), not a verdict.
-//   2. The pages. The kit's vaultSync, the read the exit tool runs (packages/exit/src/rpc.ts exitReadPages is vaultSync
-//      on this pair), reads the release's testnet vault on the exit pair (test.rpc.fastnear.com and
-//      near-testnet.drpc.org): every list whole, and every list's first page at most 125 Tgas by the gas measured for
+// Check of card vault-review-fixes-kit (vault review R-03): the vault's lists read whole on public RPCs at any size.
+// The kit's sync (packages/kit/src/vault/sync.ts), which the exit tool runs (packages/exit/src/rpc.ts exitReadPages),
+// starts each list at a page of about 125 Tgas, reads a page again at half its rows (at most three times) when an RPC
+// refuses it as too heavy (vaultViewTooHeavy), and asks a busy answer again after a wait (vaultViewBusy). Two things
+// outside this repo can break that, and this reads both:
+//   1. The RPCs. Each of the six the release lists (RPCS below, held to the kit's own pair rule, nearPairRule, word
+//      for word: both FastNEAR URLs and dRPC, on mainnet and testnet) gets a view over the protocol's gas cap: social's
+//      get with PROBE_KEYS copies of one empty key (it passed at 15,429 copies and stopped at 15,546 on all six,
+//      2026-11-06 05:48-05:49Z). An RPC that answers it whole has a higher cap, which is fine; one that refuses it must
+//      do so in words the kit knows (vaultViewTooHeavy, or vaultViewBusy). If an RPC changes the words of its refusal,
+//      the halving stops working without a sound: that alone fails.
+//   2. The pages. The kit's vaultSync reads the release's testnet vault on the exit pair (test.rpc.fastnear.com and
+//      near-testnet.drpc.org): every list whole, and every list's first page about 125 Tgas by the gas measured for
 //      each row (GAS_PER_ROW). This file may import only the kit's public entry (check:imports), so the URLs and the
 //      vault are written here; judge() holds the URLs to nearPairRule.
+// Runs: once, by hand: no host's bundle runs the kit's vault sync (SIGN_HOST's app.js holds none, and apps/terminal/src
+// never calls vaultSync), so no host deploy changes what this reads; the exit tool runs on the user's own machine.
 //   node scripts/live-checks/vault-review-fixes-kit.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read (each probe's answer, each page asked of the exit pair), so the check's test can
-// replay it. The verdict runs this checkout's vaultViewTooHeavy over the recorded answers.
+// replay it. The verdict runs this checkout's vaultViewTooHeavy and vaultViewBusy over the recorded answers.
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as kit from "../../packages/kit/src/index.ts";
 
 const KEY = "vault-review-fixes-kit";
-/** The view gas budget a page must stay under, in Tgas: well under the lowest cap nearcore has had (200 Tgas). */
+/**
+ * The view gas budget a first page must stay under, in Tgas: well under the lowest cap nearcore has had (200 Tgas). By
+ * the per-row shares below, 250 spends come to 124.3 (measured as a page of 250: 125.135, sync.ts VAULT_SYNC_PAGE).
+ */
 export const BUDGET_TGAS = 125;
 /**
  * Tgas a row, at most: a 1,000-row page of each list's largest rows, measured with the release build in near-sandbox
@@ -35,8 +41,8 @@ export const LISTS = Object.keys(GAS_PER_ROW);
 export const PROBE_KEYS = 20_000;
 /** The release's NEAR RPCs: per network, its FastNEAR URLs and its dRPC URL (packages/kit/src/near/networks.ts). */
 export const RPCS = {
-  mainnet: { fastnear: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"], drpc: "https://near.drpc.org" },
-  testnet: { fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], drpc: "https://near-testnet.drpc.org" },
+  mainnet: { fastnear: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"], drpc: "https://near.drpc.org" }, // near-rpc-operators: one operator (the release's FastNEAR alternatives, each probed alone, never paired)
+  testnet: { fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], drpc: "https://near-testnet.drpc.org" }, // near-rpc-operators: one operator (the same)
 };
 /** The exit tool's pair and the testnet vault (packages/exit/src/rpc.ts EXIT_NETWORKS.testnet). */
 export const EXIT = { rpcs: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], vault: "vault.bf-vt-20261102t071444.testnet" }; // gitleaks:allow (a public account id)
@@ -55,7 +61,13 @@ export function judge(rec) {
   const probes = Array.isArray(rec?.probes) ? rec.probes : [];
   for (const url of urls) {
     const p = probes.find((x) => x?.url === url);
-    say(p !== undefined && kit.vaultViewTooHeavy(p.answer), p === undefined ? `${url}: no probe read` : `${url}: a view over the cap answers ${short(p.answer)}, ${kit.vaultViewTooHeavy(p.answer) ? "a refusal the kit halves on" : "not a refusal the kit knows"}`);
+    if (p === undefined) {
+      say(false, `${url}: no probe read`);
+      continue;
+    }
+    const whole = Array.isArray(p.answer?.result?.result);
+    const known = kit.vaultViewTooHeavy(p.answer) ? "a refusal the kit halves on" : kit.vaultViewBusy(p.answer) ? "busy, which the kit asks again" : null;
+    say(whole || known !== null, `${url}: a view over the protocol's cap answers ${short(p.answer)}, ${whole ? "whole (a higher cap)" : known ?? "not a refusal the kit knows"}`);
   }
   const ex = rec?.exit;
   if (!ex || ex.error !== undefined || !Array.isArray(ex.pages)) say(false, `the exit pair: the read stopped (${ex?.error ?? "no read"})`);
@@ -78,7 +90,6 @@ async function probe(network, url) {
   const params = { request_type: "call_function", finality: "final", account_id: account, method_name: "get", args_base64: Buffer.from(JSON.stringify({ keys: Array(PROBE_KEYS).fill(key) })).toString("base64") };
   const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "x", method: "query", params }), signal: AbortSignal.timeout(30_000) });
   const answer = await res.json();
-  if (Array.isArray(answer?.result?.result)) throw new Error(`${url}: the probe answered a result: it is no longer over the view cap`);
   return { network, url, status: res.status, answer };
 }
 
