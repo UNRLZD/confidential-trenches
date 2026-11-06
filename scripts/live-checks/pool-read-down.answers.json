@@ -1,8 +1,8 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet) on main 2badbf7b with the fold: packages/signpage/index.html and public/app.js as build-app.mjs wrote them at a484a4dc, release-49",
+    "good": "this card's SIGN_HOST build (mainnet) with main 40342057 merged: packages/signpage/index.html and public/app.js as committed at 4a597be8 (build-app.mjs --check equal), release-52",
     "bad": "main 2badbf7b's build (mainnet, release-47): a failed provider read answers not_allowed, failed or quote_check_failed: FAIL",
-    "liveBefore": "SIGN_HOST read 2026-11-06T01:19Z, before this card's deploy: FAIL"
+    "liveBefore": "SIGN_HOST read 2026-11-06T01:47Z, before this card's deploy: FAIL"
   },
   "good": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-S7ROvsbiEibQrEjikoV0g7R/K6pvjKFcMO6DGtKnDQYGQZroTf9fgTEx+kAFfV0N\"></script>\n  </head>\n  <body></body>\n</html>\n",
@@ -25,8 +25,8 @@
     "trade": 0
   },
   "liveBefore": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-r4bYFn2mpshJ4o+F4cum8Blbq4NYpmxirACjKaVJG4+QmI1ZnYc4OUTqy/5de7jY",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Pr7Z6E+8ECZneCCT5Fs6LdKp76ayP8/eJxm8sVikVU2NmzWbK2CBqtXvW2a77Z3c\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Pr7Z6E+8ECZneCCT5Fs6LdKp76ayP8/eJxm8sVikVU2NmzWbK2CBqtXvW2a77Z3c",
     "kinds": false,
     "flows": 0,
     "wire": false,

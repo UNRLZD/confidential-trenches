@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/pool-read-down.test.mjs: the live check replays its recorded answers
 // (pool-read-down.answers.json). good: this card's SIGN_HOST build, every failed provider read answered down: PASS.
-// bad: main 2badbf7b's build (release-47): FAIL. liveBefore: SIGN_HOST before this card's deploy (release-46): FAIL.
+// bad: main 2badbf7b's build (release-47): FAIL. liveBefore: SIGN_HOST before this card's deploy (release-51, the same files as release-47): FAIL.
 // Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
