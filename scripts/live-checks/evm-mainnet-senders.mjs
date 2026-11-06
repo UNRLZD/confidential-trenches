@@ -6,7 +6,7 @@
 //     scripts/deploy/evm-sender-key.mjs, which printed only the address);
 //   - the paste's plan deploys FeeCollector with the set (pool-evm-deploy.mjs MAINNETS contracts), and its sink is that
 //     pin (deploy.mjs sinkOf reads the same field, and refuses the paste before any key with none);
-//   - the pin has no code on the chain's two RPCs of two operators (an EIP-7702 delegation there would run inside every
+//   - each of the chain's two RPCs of two operators answers the chain's id, and the pin has no code on it (an EIP-7702 delegation there would run inside every
 //     fee the collector forwards);
 //   - once the paste has written contracts/pool-evm/deployments/<chain>.json: its FeeCollector's sink is the pin, the
 //     collector's runtime on both RPCs is the build's with that one word at its immutable, and a kit feeCollector pin,
@@ -52,9 +52,20 @@ export async function check({ venues = evmPoolVenues(), plans = MAINNETS, record
     say(!others.some(([, p]) => p === pin), `${chain}: its pin is its own, no other network's (${others.map(([c, p]) => `${c} ${p}`).join(", ") || "none other"})`);
     const contracts = plans[chain]?.contracts ?? [];
     say(contracts.at(-1) === "FeeCollector" && contracts.filter((n) => n === "FeeCollector").length === 1, `${chain}: the paste deploys FeeCollector with the set, its sink the pin: ${contracts.join(", ")}`);
-    const rpcs = rpcsOf(chain);
     if (!ADDRESS.test(pin)) continue;
-    for (const url of rpcs.slice(0, 2)) {
+    // each RPC answers the chain's id before any code is read on it; one that does not is read no further
+    const rpcs = [];
+    for (const url of rpcsOf(chain).slice(0, 2)) {
+      const on = `on ${new URL(url).host}`;
+      try {
+        const id = await rpc(fetchFn, url, "eth_chainId", [], sleep);
+        say(id === plans[chain]?.chainId, `${chain}: chain id ${id} is ${chain}'s ${plans[chain]?.chainId} ${on}`);
+        if (id === plans[chain]?.chainId) rpcs.push(url);
+      } catch (e) {
+        say(false, `${chain}: the chain id read ${on}: ${String(e.message).split("\n")[0]}`);
+      }
+    }
+    for (const url of rpcs) {
       const on = `on ${new URL(url).host}`;
       try {
         const code = await rpc(fetchFn, url, "eth_getCode", [pin, "latest"], sleep);
@@ -76,7 +87,7 @@ export async function check({ venues = evmPoolVenues(), plans = MAINNETS, record
     say(kitCollector === "" || kitCollector === at, `${chain}: the kit's feeCollector pin is the record's: ${kitCollector || "none pinned yet"}`);
     if (!ADDRESS.test(at)) continue;
     const b = pinnedBuild(chain, "FeeCollector", at);
-    for (const url of rpcs.slice(0, 2)) {
+    for (const url of rpcs) {
       const on = `on ${new URL(url).host}`;
       try {
         const code = await rpc(fetchFn, url, "eth_getCode", [at, "latest"], sleep);

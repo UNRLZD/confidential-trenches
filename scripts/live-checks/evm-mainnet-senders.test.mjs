@@ -59,9 +59,16 @@ test("the recorded bad answers fail: the kit and plan at f99ba2df; a pin with co
   fails(code, /robinhood: the pin 0x0bd7d308f8e1639fab988df18a8011f41eacad73 has no code/);
 });
 
+test("made from good: an RPC answering another chain's id fails and its code is read no further", async () => {
+  const answers = A.good.answers.map((a) => (a.method === "eth_chainId" && a.url === A.rpcs.robinhood[1] ? { ...a, json: { ...a.json, result: "0x2105" } } : a));
+  const r = await run({ answers });
+  fails(r, /robinhood: chain id 0x2105 is robinhood's 0x1237 on robinhood-rpc.publicnode.com/);
+  assert.equal(r.lines.filter((l) => /robinhood: the pin .* has no code/.test(l)).length, 1, "the code read on that RPC only");
+});
+
 test("made from good: one pin on both mainnets, a testnet's pin, a plan without FeeCollector each fail", async () => {
-  fails(await run({ pins: { base: A.good.pins.base, robinhood: A.good.pins.base }, answers: [...A.good.answers, ...A.good.answers.map((a) => ({ ...a, params: [A.good.pins.base, "latest"] }))] }), /robinhood: its pin is its own/);
-  fails(await run({ pins: { ...A.good.pins, base: kit["base-sepolia"].sellSender }, answers: [...A.good.answers, ...A.good.answers.map((a) => ({ ...a, params: [kit["base-sepolia"].sellSender, "latest"] }))] }), /base: its pin is its own/);
+  fails(await run({ pins: { base: A.good.pins.base, robinhood: A.good.pins.base }, answers: [...A.good.answers, ...A.good.answers.filter((a) => a.method === "eth_getCode").map((a) => ({ ...a, params: [A.good.pins.base, "latest"] }))] }), /robinhood: its pin is its own/);
+  fails(await run({ pins: { ...A.good.pins, base: kit["base-sepolia"].sellSender }, answers: [...A.good.answers, ...A.good.answers.filter((a) => a.method === "eth_getCode").map((a) => ({ ...a, params: [kit["base-sepolia"].sellSender, "latest"] }))] }), /base: its pin is its own/);
   const plans = { ...MAINNETS, base: { ...MAINNETS.base, contracts: MAINNETS.base.contracts.filter((n) => n !== "FeeCollector") } };
   fails(await run({ plans }), /base: the paste deploys FeeCollector/);
 });
