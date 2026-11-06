@@ -368,9 +368,13 @@ test("what is left keeps the keys: a lamport on either RPC, a buffer or programd
 
 test("the record from chain reads: the programdata's SetAuthority gets a line, funders are the fee payers, slot order", async () => {
   const D0 = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
-  // a loader instruction names the programdata (PD) among its accounts, as the deploy and the SetAuthority do
+  // the loader's instructions as sent, the payer the authority: DeployWithMaxDataLen (u32 2, u64 max len; the
+  // programdata at accounts[1], the authority at [7]) and SetAuthority to none (u32 4, no new authority; the programdata
+  // at [0], the authority at [1])
+  const loaderIx = (tag) => tag === 2 ? { programIdIndex: 1, accounts: [0, 2, 0, 0, 0, 0, 0, 0], data: b58(Buffer.from([2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0])) }
+    : { programIdIndex: 1, accounts: [2, 0], data: b58(Buffer.from([4, 0, 0, 0, 0])) };
   const tx = (slot, payer, loaderTag) => ({ slot, meta: { err: null }, transaction: { message: { accountKeys: [payer, "BPFLoaderUpgradeab1e11111111111111111111111", "PD"],
-    instructions: loaderTag === undefined ? [] : [{ programIdIndex: 1, accounts: [2], data: (loaderTag === 4 ? "5" : "3") }] } } });
+    instructions: loaderTag === undefined ? [] : [loaderIx(loaderTag)] } } });
   // the funding: one System Transfer from its payer into the run's funder F2
   const fundTx = { slot: 1, meta: { err: null }, transaction: { message: { accountKeys: [D0, "F2", "11111111111111111111111111111111"], instructions: [{ programIdIndex: 2, accounts: [0, 1], data: "3Bxs41hAcYbghSB9" }] } } };
   const chainTx = { fund: fundTx, dep: tx(2, "F1", 2), auth: tx(3, "F1", 4), init: tx(4, "F2") };
@@ -2491,8 +2495,10 @@ test("review 7a21 L-4: a funding is read from its transaction (a System transfer
   const chainTx = {
     fund: tx(1, ["X0", "F1", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: sysTransfer(5n) }]), // the exchange pays the funder
     sweep: tx(5, ["F1", "R0", SYS], [{ programIdIndex: 2, accounts: [0, 1], data: sysTransfer(4n) }]),
-    dep: tx(2, ["F1", LOADER], [{ programIdIndex: 1, data: "3" }]),
-    stranger: tx(3, ["X0", LOADER], [{ programIdIndex: 1, data: "3" }]),
+    // the run's deploy (DeployWithMaxDataLen: the programdata at accounts[1], the authority F1 at [7])
+    dep: tx(2, ["F1", LOADER, "PD"], [{ programIdIndex: 1, accounts: [0, 2, 0, 0, 0, 0, 0, 0], data: b58(Buffer.from([2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0])) }]),
+    // the funding wallet's own, naming the programdata: a Write on its buffer, which lands without the authority
+    stranger: tx(3, ["X0", LOADER, "BUF", "PD"], [{ programIdIndex: 1, accounts: [2, 0, 3], data: b58(Buffer.from([1, 0, 0, 0, 0, 0, 0, 0])) }]),
   };
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
@@ -2567,7 +2573,9 @@ test("review 7c83 M1: a stranger's transaction naming the funder (a transfer int
     write: tx(2, ["S2", "BUF", LOADER, "PD", "F1"], [{ programIdIndex: 2, accounts: [1, 0, 3, 4], data: b58(u32(1, 12)) }]),
     // the run's own: its SetAuthority to none on the programdata (authority the payer, at accounts[1])
     auth: tx(3, ["F1", "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }]),
-    ...Object.fromEntries(["S1", "S2"].map((p, i) => [`pd-${p}`, tx(4 + i, [p, "PD", LOADER], [{ programIdIndex: 2, accounts: [1, 0], data: b58(u32(4, 1)) }])])),
+    // each stranger's own on the programdata: a Write on its buffer naming it, which lands (a SetAuthority as the
+    // authority would fail on chain and is never in the history read)
+    ...Object.fromEntries(["S1", "S2"].map((p, i) => [`pd-${p}`, tx(4 + i, [p, "BUF", LOADER, "PD"], [{ programIdIndex: 2, accounts: [1, 0, 3], data: b58(u32(1, 4)) }])])),
   };
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);

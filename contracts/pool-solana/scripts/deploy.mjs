@@ -585,13 +585,15 @@ const LOADER_STEPS = { 0: "buffer made", 1: "buffer write", 2: "deploy with the 
  * A deployment record's transactions and funders from chain reads alone: its transactions plus each of the run's own
  * on its programdata (the deploy and the SetAuthority to none after it; immutable after, so the list ends there). The
  * run's own keys are read from the transactions, never from a step's label or an older record's funders: its funder,
- * a payer of a loader instruction on this programdata or a lookup-table instruction on the record's table (a first
- * run's deploy, SetAuthority, table), and a payer of a sweep (one plain System Transfer into the return address). Any
- * other payer's transaction is kept only as a funding: one plain System Transfer from its payer into a run key (a
- * compute budget instruction beside it allowed). Anything else (a relayer's, a CPI, TransferWithSeed) is left out,
- * said through `say`, and its payer is never the run's: anyone can send a transaction naming the programdata, or one
- * into the funder. Each read at finalized with no error, in slot order; and `funders`, every fee payer among them that
- * is not `return_to`.
+ * and a payer that signed as the authority, at the instruction's fixed authority position, of a loader instruction on
+ * this programdata (deploy, upgrade, SetAuthority, close) or a lookup-table instruction on the record's table. Only
+ * the upgrade or table authority lands those, and that is only ever a run key; both the record's transactions and the
+ * programdata's history are read for them (a --prior-only resume finds the first run's key there). A run key's
+ * transactions are kept, and another payer's only as a funding: one plain System Transfer from its payer into a run key
+ * (a compute budget instruction beside it allowed). Anything else (a relayer's, a CPI, TransferWithSeed, a transaction
+ * that only names the funder or the programdata) is left out, said through `say`, and its payer is never the run's.
+ * Each read at finalized with no error, in slot order; and `funders`, every fee payer among them that is not
+ * `return_to`.
  */
 export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}) {
   const steps = new Map(d.txs.map((t) => [t.signature, t.step]));
@@ -618,12 +620,19 @@ export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}
     const isTransfer = keys[i.programIdIndex] === SYSTEM && data.length === 12 && data[0] === 2 && data[1] === 0 && data[2] === 0 && data[3] === 0;
     return isTransfer && i.accounts?.length === 2 && keys[i.accounts[0]] === keys[0] ? keys[i.accounts[1]] : null;
   };
-  // a run key's own: a loader instruction on this programdata, or a lookup-table instruction on the record's table
-  const onOurs = (t) => {
+  // the payer signed as the authority of this programdata or the record's table: a loader instruction (u32 tag) with
+  // the programdata and the authority at its fixed positions, or a lookup-table instruction with the table at
+  // accounts[0] and the authority at accounts[1]
+  const LOADER_AUTHORITY = { 2: [1, 7], 3: [0, 6], 4: [0, 1], 5: [0, 2], 7: [0, 1] };
+  const authorityOf = (t) => {
     const keys = keysOf(t);
     return t.transaction.message.instructions.some((i) => {
-      const accounts = (i.accounts ?? []).map((a) => keys[a]);
-      return (keys[i.programIdIndex] === LOADER_V3 && accounts.includes(d.programdata)) || (keys[i.programIdIndex] === ALT_PROGRAM && !!d.table && accounts.includes(d.table));
+      const at = (n) => (i.accounts && i.accounts.length > n ? keys[i.accounts[n]] : undefined);
+      if (keys[i.programIdIndex] === ALT_PROGRAM) return !!d.table && at(0) === d.table && at(1) === keys[0];
+      if (keys[i.programIdIndex] !== LOADER_V3) return false;
+      const data = b58decode(i.data);
+      const pos = data.length >= 4 ? LOADER_AUTHORITY[data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24)] : undefined;
+      return !!pos && at(pos[0]) === d.programdata && at(pos[1]) === keys[0];
     });
   };
   const rows = [];
@@ -635,20 +644,16 @@ export async function chainRecord(fetchFn, url, d, { wait, say = () => {} } = {}
   };
   const known = [];
   for (const [signature, step] of steps) known.push({ signature, step, t: await read(signature) });
+  const onChain = [];
+  for (const signature of history) onChain.push({ signature, step: null, t: await read(signature) });
   const ours = new Set([d.funder].filter(Boolean));
-  for (const k of known) {
-    const p = keysOf(k.t)[0];
-    if (p !== d.return_to && (onOurs(k.t) || plainTo(k.t) === d.return_to)) ours.add(p);
-  }
+  for (const k of [...known, ...onChain]) if (authorityOf(k.t)) ours.add(keysOf(k.t)[0]);
   ours.delete(d.return_to);
   for (const k of known) {
     if (ours.has(keysOf(k.t)[0]) || ours.has(plainTo(k.t))) add(k.signature, k.t, k.step);
-    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not one plain System Transfer from its payer into the run's funder`);
+    else say(`left out of the record: ${k.signature} (${k.step}): paid by ${keysOf(k.t)[0]}, not a run key's nor one plain System Transfer from its payer into a run key`);
   }
-  for (const signature of history) {
-    const t = await read(signature);
-    if (ours.has(keysOf(t)[0])) add(signature, t, null);
-  }
+  for (const k of onChain) if (ours.has(keysOf(k.t)[0])) add(k.signature, k.t, null);
   rows.sort((a, b) => a.slot - b.slot);
   return { ...d, txs: rows.map(({ step, signature }) => ({ step, signature })), funders: [...new Set(rows.map((r) => r.payer).filter((p) => p !== d.return_to))] };
 }
