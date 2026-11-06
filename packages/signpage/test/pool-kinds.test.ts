@@ -294,8 +294,10 @@ const TREE_FILES = TREES.flatMap((d) => sources(join(ROOT, d))).filter((f) => !/
 const FIXTURE_FILES = sources(FIXTURES);
 // one program for all of them (built once: every test reads this one); the fixtures' signer files only add signers no
 // real file reaches, and the planted leak is a signer file, `define` as the real four are
+// the planted L3 case: the test exempts signDigest in it, as EXEMPT does in sell-unpinned.ts
+const L3_FIXTURE = "packages/signpage/test/fixtures/signer-guard/bad/l3-nested-exempt-name.ts";
 const GUARD_MS = Date.now();
-const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, ...FIXTURE_DEFS], VIRTUAL, { ...NON_SIGNERS, [FIXTURE_DEFS[0]!]: ["fixtureIsQuotedSell", "isSignedSell"], [FIXTURE_DEFS[2]!]: ["own"] }, { ...EXEMPT, [FIXTURE_DEFS[2]!]: { define: true } });
+const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, ...FIXTURE_DEFS], VIRTUAL, { ...NON_SIGNERS, [FIXTURE_DEFS[0]!]: ["fixtureIsQuotedSell", "isSignedSell"], [FIXTURE_DEFS[2]!]: ["own"] }, { ...EXEMPT, [FIXTURE_DEFS[2]!]: { define: true }, [L3_FIXTURE]: { curve: ["signDigest"] } });
 const GUARD_BUILT_MS = Date.now() - GUARD_MS;
 const names = (files: readonly string[]) => files.map((f) => f.slice(ROOT.length));
 /** The npm packages the page bundles, by name and version: a new one (a signing library) is read here first. */
@@ -398,10 +400,20 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
     "b21d-typehash-bytes.ts": r(`encodes the Sell type hash: "0x7964e18e.*${no}`, `encodes the Sell type hash as a number${no}`, `encodes the Sell type hash as bytes${no}`, `encodes the deposit as bytes${no}`), // H1
     "b30-eval.ts": r("imports node:vm", "runs code from text: eval", "runs code from text: Function", "runs code from text: a callee of the type Function", "runs code from text: eval", "runs code from text: setTimeout given a string"), // L2
     "b31-helper-signer.ts": r("imports the helper \\(a server file\\) on the device"), // M1
+    // the re-review of c00a169d: each passes at c00a169d, and is refused here (k4, k6 and p9 were refused there too)
+    "p1-point-ecdsa.ts": r("uses @noble/curves: \\.Fn of its WeierstrassPointCons", "uses @noble/curves: \\.multiply of its WeierstrassPoint", "uses @noble/curves: \\.BASE of its WeierstrassPointCons", "uses @noble/curves: \\.multiply of its WeierstrassPoint"), // H1b
+    "p2-dynimport-pinned.ts": r("imports at run time a module that exports @scure/bip32", "uses whole, or by a computed key, a module that exports @scure/bip32", "imports at run time a module that exports @noble/curves", "uses whole, or by a computed key, a module that exports @noble/curves"), // H1
+    "p3b-reexport-user.ts": r("uses whole, or by a computed key, a module that exports @scure/bip32", "uses whole, or by a computed key, a module that exports @scure/bip32", "imports at run time a module that exports @scure/bip32"), // H1
+    "l3-nested-exempt-name.ts": r("uses @noble/curves: \\.sign of its ECDSA"), // L3: the nested signDigest; the top-level one is exempt (below)
+    "k1-toplevel-pick.ts": r(`calls .*${pool}${no}`), // L1
+    "k4-hoisted.ts": r(`calls .*${pool}${no}`),
+    "k6-closure-before-pick.ts": r(`calls .*${pool}${no}`),
+    "p9-subclass.ts": r("hands a value of @scure/bip32 \\(HDKey\\) on as another type", "casts a value of @scure/bip32"),
   };
   const bad = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "bad")));
   assert.deepEqual(bad.map((f) => f.slice(FIXTURES.length + 5)).sort(), Object.keys(BAD).sort(), "the planted cases were read");
   assert.deepEqual(names(GUARD.unguarded(bad)), names(bad));
+  assert.deepEqual(GUARD.sites(join(ROOT, L3_FIXTURE)).map((s) => [s.line, s.ok]), [[5, true], [9, false]], "L3: only the top-level signDigest is exempt");
   for (const f of bad) assert.match(GUARD.sites(f).filter((s) => !s.ok).map((s) => s.what).join("\n"), BAD[f.slice(FIXTURES.length + 5)]!, f);
   // no false refusal: the rule's signer by an alias, with the wallet's evmNextNote by an alias in the same function, is
   // read and passes; a re-export (named, `export *`, a default), types, a predicate, a comment, a local that shares a
