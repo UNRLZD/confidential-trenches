@@ -1148,6 +1148,9 @@ test("card helper-evm-range-cap-walk: a cap's named span is the page at once (ba
     [3_000, "RPC error -32602: query spans 10000 blocks (from 0x1 to 0x2710), but only 3000 are allowed"],
     [1_000, "RPC error -32005: Log response size exceeded. Maximum allowed number of requested blocks is 1000"],
     [500, "HTTP 400: RPC error -32602: invalid argument 0: block range exceeds maximum 500"],
+    // base-mainnet.public.blastapi.io's words, as evm-transfer-rpc-spares recorded them: the page goes to 10 at once,
+    // where halving went 2,001 to 7 in 8 refusals
+    [10, "HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a 10 block range. Based on your parameters, this block range should work: [0x33437f9, 0x3343802]"],
   ] as const) {
     const span = BigInt(cap) * 100n;
     const pages = await readCapped(span, cap, words);
@@ -1211,4 +1214,9 @@ test("card helper-evm-range-cap-walk (review fold 3): on a W's Transfer read, a 
   const anchor = { number: head, hash: block.hash, timestamp: T0, baseFeePerGas: null };
   assert.deepEqual(await evmTokensSentToOne(rpc, W(0n, 0), from, { fin: anchor, anchor }, [EVM_LOG_PAGE_BLOCKS], undefined, async () => {}), []);
   assert.deepEqual(pages.slice(0, 6), [10_000, 1_000, 1_000, 1_000, 1_000, 500], `pages ${pages.slice(0, 8)}`);
+});
+
+test("card helper-evm-range-cap-walk: a read no provider refuses pages at its widest every page, the last page's remainder aside: never a smaller page", async () => {
+  const pages = await readCapped(95_001n, 1_000_000, "unused");
+  assert.deepEqual(pages.map(([n]) => n), [...Array(9).fill(10_000), 5_001]);
 });
