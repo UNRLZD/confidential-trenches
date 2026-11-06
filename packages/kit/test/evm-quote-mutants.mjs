@@ -55,7 +55,7 @@ export const MUTANTS = [
   // (review of 8fd51265)
   [QUOTE, "if (next === undefined || e instanceof ScanStop) throw e;", "if (next === undefined) throw e;", R, "card rh-cold-quote: a cold scan's first throttled past"],
   [QUOTE, "throw fast ? new EvmQuoteError(\"rpc_error\", m) : new ScanStop(\"rpc_error\", m);", "throw new EvmQuoteError(\"rpc_error\", m);", R, "card rh-cold-quote: a cold scan's first throttled past"],
-  [QUOTE, "    if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: one HTTP 503 from the first"],
+  [QUOTE, "    if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000"],
   [QUOTE, "    if (answered || rs !== null) return short();\n", "", R, "card rh-cold-quote: 12,000 made-up pools past the first's cap, answered in rpc.mainnet"],
   [QUOTE, "if (e instanceof BadAnswer) throw new ScanAnswered(", "if (false) throw new ScanAnswered(", R, "card rh-cold-quote: a first that answers HTTP 413"],
   [QUOTE, "throw res.status >= 500 ? new Error(m) : new BadAnswer(m);", "throw new Error(m);", R, "card rh-cold-quote: a first that answers HTTP 413"],

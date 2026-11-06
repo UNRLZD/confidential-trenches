@@ -1001,24 +1001,16 @@ test("G2 an X whose scan fails refuses the quote, as the token's own scan does: 
   const market = marketOf(x);
   const inner = scanner(5_000_000, [{ key: real.key, at: 4_500_000 }, { key: market.key, at: 4_100_000 }]);
   const tx = "0x" + x.slice(2).padStart(64, "0");
-  // the scan provider answers the token's logs and every other scan, and no logs for x's markets (x with the native
-  // asset or WETH): a quote that went on without them would find x unpriced and pass the seeded route
+  // the scan provider answers the token's logs and every other scan, and fails each request for x's markets (x with the
+  // native asset or WETH; HTTP 503, its only provider): a quote that went on without them would find x unpriced and
+  // pass the seeded route
   const pair = ["0x" + "0".repeat(64), "0x" + WETH.slice(2).padStart(64, "0")];
   const broken: EvmRpc = async (calls) => {
-    const out = (await inner(calls)) as { result?: unknown }[];
-    return out.map((a, i) => {
-      const t = calls[i]!.method === "eth_getLogs" ? (calls[i]!.params[0] as { topics: unknown[] }).topics.flat() : [];
-      return t.includes(tx) && t.some((x) => pair.includes(x as string)) ? { ...a, result: null } : a;
-    });
+    const t = calls.flatMap((c) => (c.method === "eth_getLogs" ? (c.params[0] as { topics: unknown[] }).topics.flat() : []));
+    if (t.includes(tx) && t.some((x) => pair.includes(x as string))) throw new Error("the provider answered HTTP 503");
+    return inner(calls);
   };
-  // an answer short of the logs is asked as its halves of the same provider down to one block (review of 1277e8af): one
-  // that answers every range so ends at the quote's bound, here 1.5 s
-  evmScanBound?.(1_500);
-  try {
-    assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
-  } finally {
-    evmScanBound?.();
-  }
+  assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
 });
 
 test("G3 the scan provider's head is read once per quote: an X scan that waits behind others reads to the same head", async () => {
@@ -1207,9 +1199,12 @@ test("B1 USDG on Robinhood: its standard ETH pool quotes, though 120 currencies 
   const jitcMarket: ModelPool = { key: keyOf(jitc, NATIVE, 2500, 50, NATIVE), give: (a) => a };
   const pools = [eth, jitcPool, jitcMarket, ...lonely];
   const logs = [...lonely.map((p, i) => ({ key: p.key, at: 45_000_000 + i })), { key: jitcPool.key, at: 46_000_000 }, { key: jitcMarket.key, at: 44_000_000 }];
-  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, 50_000_000), chain(pools, 1, 50_000_000)], NOW, scanner(50_000_000, logs, [], 100_000)));
+  const asked: [number, number][] = [];
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0, 50_000_000), chain(pools, 1, 50_000_000)], NOW, scanner(50_000_000, logs, asked, 100_000)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.equal((v as { amountOut: bigint }).amountOut, 3000n * AMOUNT);
+  // past USDG's own two requests of the whole depth, every request at the OR span: none the provider refuses
+  assert.equal(asked.filter(([a, b]) => b - a + 1 > 100_000).length, 2, `${asked.length} getLogs`);
 });
 
 // Card rh-cold-quote: TORCH on Robinhood (2026-11-06 01:3xZ): its quote route, the hookless native 0.3% pool, and 100
@@ -1352,6 +1347,17 @@ test("card rh-cold-quote: one HTTP 503 from the first on a cold getLogs is asked
   await assert.rejects(c.run(), (e: unknown) => e instanceof EvmQuoteError && e.code === "below_reference");
   assert.equal(c.failed(), 1);
   assert.ok(c.spareAsked.every(([a, b]) => b - a + 1 <= 1_000_000), JSON.stringify(c.spareAsked));
+});
+
+test("card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000 blocks holding the real pool's block is asked its halves down to 100,000: the spare reads none", async () => {
+  const at = RC_HEAD - 500_000;
+  const c = rcFirst("0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f14", (inner) => async (calls, s) => {
+    const f = calls.find((x) => x.method === "eth_getLogs")?.params[0] as { fromBlock: string; toBlock: string } | undefined;
+    if (f !== undefined && Number(f.fromBlock) <= at && Number(f.toBlock) >= at && Number(f.toBlock) - Number(f.fromBlock) + 1 > 100_000) throw new Error("the provider answered HTTP 503");
+    return inner(calls, s);
+  });
+  assert.deepEqual(await c.run(), { accepted: false, code: "below_reference" });
+  assert.equal(c.spared(), 0);
 });
 
 test("card rh-cold-quote: a first that answers HTTP 503 to the newest blocks hands the spare those blocks alone: the seeded route is refused", async () => {
