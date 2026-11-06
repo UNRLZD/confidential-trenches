@@ -86,6 +86,7 @@ export const CHANGED = [
   "scripts/live-checks/rh-cold-quote.mjs",
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
+  "scripts/live-checks/evm-pool-sync-wide-pages.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",
   "scripts/live-checks/signpage-pool-flow.mjs",
   "scripts/live-checks/signpage-pool-kinds.mjs",

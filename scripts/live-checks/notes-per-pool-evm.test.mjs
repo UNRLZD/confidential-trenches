@@ -10,8 +10,11 @@ import { test } from "node:test";
 import { CHAINS, VIEWS, check, replayer, spoil } from "./notes-per-pool-evm.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./notes-per-pool-evm.answers.json", import.meta.url), "utf8"));
-/** The pager's first and widest page, in blocks (packages/wallet/src/pool/evm.ts EVM_LOG_PAGE_BLOCKS). */
+/** The page the pool sync's page counts are held to, in blocks: the pager's first and widest before card
+ * evm-pool-sync-wide-pages (packages/wallet/src/pool/evm.ts EVM_LOG_PAGE_BLOCKS), a bound its wider pages keep. */
 const PAGE = 10_000;
+/** The pool sync's first page on each provider since that card (evm.ts EVM_POOL_LOG_PAGE_BLOCKS). */
+const FIRST = 100_000;
 /** The Base Sepolia pool's deploy block, and its time (sepolia.base.org, publicnode, Pocket alike, 6 Nov 04:35Z). */
 const DEPLOY_BLOCK = 53_801_443, DEPLOY_TIME = 1_793_682_157;
 /** Base Sepolia's head at the read below (sepolia.base.org, 6 Nov 04:35Z): the pool's life is 1,287,712 blocks. */
@@ -115,7 +118,7 @@ test("a sync with no end fails at its deadline, naming the call it is stuck on: 
   const r = await check("base-sepolia", transport, { wait: false, deadlineMs: 3_000 });
   assert.equal(r.ok, false);
   assert.ok(Date.now() - t0 < 15_000, `ended after ${Date.now() - t0} ms`);
-  const want = `stuck on eth_getLogs ${DEPLOY_BLOCK}..${DEPLOY_BLOCK + PAGE - 1} (${PAGE} blocks) on ${pocket}, try 1, no answer in `;
+  const want = `stuck on eth_getLogs ${DEPLOY_BLOCK}..${DEPLOY_BLOCK + FIRST - 1} (${FIRST} blocks) on ${pocket}, try 1, no answer in `;
   assert.match(r.lines.at(-1), /^base-sepolia: no end in 3\.0 s \(\d+ calls\): /);
   assert.ok(r.lines.at(-1).includes(want), r.lines.at(-1));
   assert.ok(!/https?:\/\//.test(r.lines.at(-1)), r.lines.at(-1));
