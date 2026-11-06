@@ -15,9 +15,6 @@ import { ORIGINS, run } from "./signpage-release.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-release.answers.json"), "utf8"));
 const GOOD = ANSWERS.good;
-const LIST_FILE = path.join(HERE, "../../packages/signpage/releases", `${GOOD.release}.json`);
-const LIST = JSON.parse(readFileSync(LIST_FILE, "utf8"));
-
 const tmp = mkdtempSync(path.join(tmpdir(), "ct-signpage-release-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 let n = 0;
@@ -26,6 +23,15 @@ const file = (obj) => {
   writeFileSync(f, JSON.stringify(obj));
   return f;
 };
+// The list the good answer was read against, with the hosts at their names since card hosts-main-on-top (SIGN_HOST on
+// the main address, APP_HOST on ct-app, the helper on ct-api), by the one map the recorded answers carry too: in the
+// origins and in every header that names a host (the CSPs). The written release-1 keeps the names it had; every file,
+// size and hash is as written.
+const OLD_NAMES = /(?<![A-Za-z0-9.-])(?:(api|sign)\.)?confidential\.unrealized\.trade(?![A-Za-z0-9-])/g;
+const moved = (text) => text.replace(OLD_NAMES, (_, sub) => (sub === "api" ? "ct-api.unrealized.trade" : sub === "sign" ? "confidential.unrealized.trade" : "ct-app.unrealized.trade"));
+const LIST = JSON.parse(moved(readFileSync(path.join(HERE, "../../packages/signpage/releases", `${GOOD.release}.json`), "utf8")));
+assert.deepEqual(Object.fromEntries(Object.entries(LIST.hosts).map(([k, h]) => [k, h.origin])), { ...ORIGINS });
+const LIST_FILE = file(LIST);
 const replay = (answer, list = LIST, host = null) => run(file(list), ["--answer", file(answer)], host);
 /** LIST with only `name`'s host, as release-list.mjs --print --host writes a build's list after a deploy. */
 const one = (name) => ({ ...LIST, hosts: { [name]: LIST.hosts[name] } });
