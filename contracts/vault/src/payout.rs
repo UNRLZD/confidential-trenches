@@ -14,19 +14,22 @@
 //!   `ft_transfer`, else `InsufficientStorageDeposit` and the whole call rolls back. Everything above the bytes,
 //!   `register_deposit` and the yocto stays in the spend record's `reserve`, a same-size overwrite (no new byte).
 //! - Row 15: `promise::pay_then_on_payout`.
-//! - `on_payout(spend_index, to_recipient, fee)`, `#[private]`: the result count must be 1 when `fee == 0` and 2
-//!   otherwise, else it panics before any read of state or any write. Each part is read by name as Successful (its
+//! - `on_payout(spend_index, to_recipient, fee)`, `#[private]`: the result count must be exactly 1, the one payout
+//!   receipt's, else it panics before any read of state or any write. The result is read by name as Successful (its
 //!   content never read: an empty result, or one too long to read at `max_len` 0) or Failed; anything else panics
-//!   (`promise::payout_results`). The returned sum `r` (the failed parts' amounts) sets the record to `refund_pending`
-//!   with `refund_value = r`, or `paid` when `r = 0`; `totals.returned += r`; event `payout`.
+//!   (`promise::payout_result`). The amounts are the spend record's, never the arguments' (review A-04): the
+//!   arguments must equal the record's split (`to_recipient = withdrawn - fee`, `fee`), else `PayoutMismatch` before
+//!   any write. Successful: the record is `paid`. Failed: nothing moved, neither the recipient's amount nor the fee
+//!   (one receipt, all or none: review A-01), so `refund_value = withdrawn`, the record `refund_pending` and
+//!   `totals.returned += withdrawn`; event `payout`.
 //!
 //! No event or log comes before the last refusal of a call (NEAR keeps a failed receipt's logs): `withdraw` logs
 //! `leaf_inserted`, `withdrawn` and `withdrawal_relayed` only after row 14 and the promises of row 15.
 //!
 //! Ported from Privacy Pools v1.3.0's fee split (`Entrypoint.sol:159-169`, two transfers, `WithdrawalRelayed` at
 //! :175) and `_push` (`PrivacyPoolComplex.sol:64-67`), Copyright 2025 0XBOW LTD, Apache-2.0. Deviations (vault.md
-//! 2.7): an absolute fee (Dev 8), NEAR storage paid by the caller (Dev 3), and payouts as promises whose failed parts
-//! become refund-pending amounts (Dev 4, Dev 9).
+//! 2.7): an absolute fee (Dev 8), NEAR storage paid by the caller (Dev 3), and the payout as one promise whose failure
+//! makes the whole withdrawn amount refund-pending (Dev 4, Dev 9), where PP's relay reverts both transfers together.
 
 use crate::constants::{GAS_FT_TRANSFER_TGAS, GAS_ON_PAYOUT_TGAS, GAS_STORAGE_DEPOSIT_TGAS, REFUND_RESERVE_BYTES};
 use crate::events::Event;
@@ -65,7 +68,7 @@ pub fn split(withdrawn: u128, fee: u128) -> u128 {
     }
 }
 
-/// 1 yocto per `ft_transfer`: one for the recipient, one more for the fee part.
+/// 1 yocto per `ft_transfer`: one for the recipient, one more for the fee's transfer.
 pub fn transfers(fee: u128) -> u128 {
     if fee > 0 {
         2
@@ -90,14 +93,14 @@ pub fn reserve_after(attached: u128, bytes: u64, byte_cost: u128, register_depos
     Some(attached - charged - register_deposit - yocto)
 }
 
-/// 2.5.4: (delivered, returned) of a payout from whether each part ran.
-pub fn outcome(to_recipient: u128, fee: u128, recipient_ran: bool, fee_ran: bool) -> (u128, u128) {
-    let (mut delivered, mut returned) = (0u128, 0u128);
-    for (amount, ran) in [(to_recipient, recipient_ran), (fee, fee_ran)] {
-        let into = if ran { &mut delivered } else { &mut returned };
-        *into = into.checked_add(amount).unwrap_or_else(|| env::panic_str("InvalidPoolState"));
+/// 2.5.4: (delivered, returned) of a payout of `withdrawn` (the recipient's amount and the fee together) from whether
+/// its one receipt ran: all of it, or none of it.
+pub fn outcome(withdrawn: u128, ran: bool) -> (u128, u128) {
+    if ran {
+        (withdrawn, 0)
+    } else {
+        (0, withdrawn)
     }
-    (delivered, returned)
 }
 
 impl Vault {
@@ -126,16 +129,20 @@ impl Vault {
 
 #[near]
 impl Vault {
-    /// 2.5.4: what each payout part delivered. The vault's own promise is its only caller (`#[private]`).
+    /// 2.5.4: what the payout delivered. The vault's own promise is its only caller (`#[private]`). The amounts are
+    /// the spend record's; the arguments, the kit's `VaultOnPayoutArgs`, must match them (review A-04).
     #[private]
     pub fn on_payout(&mut self, spend_index: u64, to_recipient: U128, fee: U128) {
-        // the count, then each result by name: any panic here comes before any read of state or write
-        let (recipient_ran, fee_ran) = promise::payout_results(fee.0);
-        let (delivered, returned) = outcome(to_recipient.0, fee.0, recipient_ran, fee_ran);
+        // the count, then the result by name: any panic here comes before any read of state or write
+        let ran = promise::payout_result();
         let mut s = self.spends.get(spend_index).unwrap_or_else(|| env::panic_str("UnknownSpend"));
         if s.status != Status::InFlight {
             env::panic_str("SpendNotInFlight");
         }
+        if s.withdrawn.checked_sub(s.fee) != Some(to_recipient.0) || s.fee != fee.0 {
+            env::panic_str("PayoutMismatch: on_payout's amounts are not the spend record's");
+        }
+        let (delivered, returned) = outcome(s.withdrawn, ran);
         let total = self.totals.returned.0.checked_add(returned).unwrap_or_else(|| env::panic_str("InvalidPoolState"));
         s.status = if returned > 0 { Status::RefundPending } else { Status::Paid };
         s.refund_value = returned;
@@ -274,8 +281,8 @@ mod tests {
         assert_eq!((s.withdrawn, s.fee, s.reserve, s.refund_leaf_index), (withdrawn, fee, 3_890_000_000_000_000_000_000, 0));
     }
 
-    // VT-U06 (vault.md 5, V:1132): one part and two parts, each Successful or Failed; a long Successful result; a wrong
-    // count.
+    // VT-U06 (vault.md 5, V:1132): the one payout receipt, Successful or Failed, with and without a fee; a long
+    // Successful result; a wrong count.
 
     #[test]
     fn vt_u06_one_part_successful_or_failed() {
@@ -283,20 +290,20 @@ mod tests {
         lands(vec![PromiseResult::Failed], 1_000_000, 0, 1_000_000);
     }
 
+    /// A-01 (review vault-review-opus-async): a relayed payout is one receipt, so it is all or none. Failed, neither the
+    /// recipient's 1,500,000 nor the relayer's 500,000 moved: the refund is the whole 2,000,000 and the relayer keeps
+    /// no fee for a payout that never arrived (PP's relay reverts both transfers together).
     #[test]
-    fn vt_u06_two_parts_return_exactly_the_failed_parts() {
-        // withdrawn 2,000,000 with a fee of 500,000: to_recipient 1,500,000
-        lands(vec![ok(b""), ok(b"")], 2_000_000, 500_000, 0);
-        lands(vec![ok(b""), PromiseResult::Failed], 2_000_000, 500_000, 500_000);
-        lands(vec![PromiseResult::Failed, ok(b"")], 2_000_000, 500_000, 1_500_000);
-        lands(vec![PromiseResult::Failed, PromiseResult::Failed], 2_000_000, 500_000, 2_000_000);
+    fn vt_u06_a_relayed_payout_is_all_or_none() {
+        lands(vec![ok(b"")], 2_000_000, 500_000, 0);
+        lands(vec![PromiseResult::Failed], 2_000_000, 500_000, 2_000_000);
     }
 
     #[test]
     fn vt_u06_a_successful_result_longer_than_64_bytes_counts_as_delivered() {
         lands(vec![ok(&[b'7'; 65])], 1_000_000, 0, 0);
-        lands(vec![ok(&[b'7'; 100_000]), PromiseResult::Failed], 2_000_000, 500_000, 500_000);
-        lands(vec![PromiseResult::Failed, ok(&[b'"'; 4096])], 2_000_000, 500_000, 1_500_000);
+        lands(vec![ok(&[b'7'; 100_000])], 2_000_000, 500_000, 0);
+        lands(vec![ok(&[b'"'; 4096])], 2_000_000, 500_000, 0);
     }
 
     #[test]
@@ -305,8 +312,8 @@ mod tests {
             (vec![], 0),
             (vec![ok(b""), ok(b"")], 0),
             (vec![], 500_000),
-            (vec![ok(b"")], 500_000),
-            (vec![PromiseResult::Failed], 500_000),
+            (vec![ok(b""), ok(b"")], 500_000),
+            (vec![PromiseResult::Failed, ok(b"")], 500_000),
             (vec![ok(b""), ok(b""), ok(b"")], 500_000),
         ] {
             let n = results.len();
@@ -321,6 +328,35 @@ mod tests {
             assert!(raw_then(vec![]) == before, "{n} results with fee {fee}: a record changed");
             assert_eq!(near_sdk::borsh::to_vec(&v).unwrap(), struct_before, "{n} results with fee {fee}: the struct changed");
         }
+    }
+
+    /// A-04 (review vault-review-opus-async): the amounts are the spend record's. Arguments that differ from the
+    /// record's split are refused with nothing written, so no later edit of the promise can over-count a refund (an
+    /// over-count would pay a refund note from other users' notes and underflow row 9's `spent - returned`).
+    #[test]
+    fn on_payout_refuses_amounts_that_are_not_the_records() {
+        // (the record's withdrawn and fee, on_payout's to_recipient and fee); the first is the review's scratch case
+        for (withdrawn, record_fee, to_recipient, fee) in [
+            (1_000_000, 0, 1_000_000_000, 0),
+            (1_000_000, 0, 999_999, 0),
+            (2_000_000, 500_000, 1_000_000_000, 500_000),
+            (2_000_000, 500_000, 1_500_000, 0),
+            (2_000_000, 500_000, 1_500_001, 500_000),
+            (2_000_000, 500_000, 2_000_000, 0),
+            (2_000_000, 500_000, 1_000_000, 1_000_000),
+        ] {
+            let mut v = in_flight(withdrawn, record_fee);
+            let (before, struct_before) = (raw_then(vec![PromiseResult::Failed]), near_sdk::borsh::to_vec(&v).unwrap());
+            let e = catch_unwind(AssertUnwindSafe(|| v.on_payout(0, U128(to_recipient), U128(fee))))
+                .map_err(|e| e.downcast::<String>().map(|s| *s).unwrap_or_default())
+                .unwrap_err();
+            assert!(e.contains("PayoutMismatch"), "({to_recipient}, {fee}): {e}");
+            assert_eq!(get_logs(), Vec::<String>::new(), "({to_recipient}, {fee}): logged");
+            assert!(raw_then(vec![]) == before, "({to_recipient}, {fee}): a record changed");
+            assert_eq!(near_sdk::borsh::to_vec(&v).unwrap(), struct_before, "({to_recipient}, {fee}): the struct changed");
+        }
+        // the record's own split lands, and the refund is the record's withdrawn
+        lands(vec![PromiseResult::Failed], 2_000_000, 500_000, 2_000_000);
     }
 
     /// `#[private]` is checked by the exported wrapper, which a unit test does not run: tests/payouts.rs calls it as a
@@ -340,7 +376,7 @@ mod tests {
         let mut v = in_flight(2_000_000, 500_000);
         callback(vec![], VAULT);
         let before = env::storage_usage();
-        on_payout(&mut v, vec![PromiseResult::Failed, ok(b"")], 1_500_000, 500_000).unwrap();
+        on_payout(&mut v, vec![PromiseResult::Failed], 1_500_000, 500_000).unwrap();
         assert_eq!(env::storage_usage(), before);
     }
 
@@ -391,11 +427,9 @@ mod tests {
     }
 
     #[test]
-    fn outcome_sums_the_parts() {
-        assert_eq!(outcome(1_500_000, 500_000, true, true), (2_000_000, 0));
-        assert_eq!(outcome(1_500_000, 500_000, true, false), (1_500_000, 500_000));
-        assert_eq!(outcome(1_500_000, 500_000, false, true), (500_000, 1_500_000));
-        assert_eq!(outcome(1_500_000, 500_000, false, false), (0, 2_000_000));
-        assert_eq!(outcome(7, 0, false, true), (0, 7));
+    fn outcome_is_all_or_none() {
+        assert_eq!(outcome(2_000_000, true), (2_000_000, 0));
+        assert_eq!(outcome(2_000_000, false), (0, 2_000_000));
+        assert_eq!(outcome(u128::MAX - 1, false), (0, u128::MAX - 1));
     }
 }

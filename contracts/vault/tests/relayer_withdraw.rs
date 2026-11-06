@@ -15,9 +15,10 @@
 //!    registered, register_deposit 0): 400 register_deposit_wrong each; the relayer's key nonce unmoved.
 //! 2. alice registered. Check 10: the watch halted: 503 token_halted; nonce unmoved, no record.
 //! 3. same_call carried: 200 {tx_hash, submitted}; the outcome rounds read it from blocks as succeeded; the relayer is
-//!    not registered on the token, so its fee part bounces (refund_pending 500,000) and its settle attaches 148 B x
-//!    1e19 and writes the refund note. On chain: the withdraw's receipt on the vault ok, the spends row settled with
-//!    payer the relayer and recipient alice, alice paid 2,000,000 - 500,000.
+//!    not registered on the token, so the fee's transfer fails the one payout receipt and nothing moves (review A-01):
+//!    refund_pending 2,000,000, and its settle attaches 148 B x 1e19 and writes the refund note. On chain: the
+//!    withdraw's receipt on the vault ok, the spends row settled with payer the relayer and recipient alice, alice
+//!    paid nothing and the relayer no fee.
 //! 4. A restart: same_call again: 400 spent, nothing signed.
 //! 5. The relayer registered. same_nullifier_a and same_nullifier_b (one nullifier, two proofs) at once: one 200, the
 //!    other 400 in_flight; one spend on chain; paid, settled with 0 attached, the reserve back to the relayer.
@@ -224,7 +225,7 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(code(&v, 0), (400, "recipient_refused".into()), "{}", v["answers"]);
     assert_eq!(w.key_nonce().await?, n0, "a refused fund_recipient request signs nothing");
 
-    // 3. same_call carried, its fee bouncing (the relayer not registered): refund_pending, settled with a refund note
+    // 3. same_call carried, its fee failing the payout (the relayer not registered): refund_pending, settled with a refund note
     let alice0 = w.h.token_balance(w.alice.id()).await?;
     let v = w.carry(&["ok"], &["same_call"], 60).await?;
     assert_eq!(code(&v, 0), (200, "ok".into()), "{}", v["answers"]);
@@ -239,8 +240,8 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert_eq!(w.vault_receipts(&settle_tx, "settle").await?, vec![true], "the settle ran on the vault");
     let s = w.spend_row("same_call").await?;
     assert_eq!((s["status"].as_str(), s["payer"].as_str(), s["recipient"].as_str()), (Some("settled"), Some("relayer.test.near"), Some("alice.test.near")), "{s}");
-    assert_eq!(s["refund_value"], "500000", "the fee part bounced into a refund note: {s}");
-    assert_eq!(w.h.token_balance(w.alice.id()).await? - alice0, 1_500_000, "alice paid the withdrawn amount less the fee");
+    assert_eq!(s["refund_value"], "2000000", "the whole withdrawal came back into a refund note: {s}");
+    assert_eq!(w.h.token_balance(w.alice.id()).await? - alice0, 0, "alice was paid by a payout that failed");
 
     // 4. a restart: the same note again
     let n1 = w.key_nonce().await?;

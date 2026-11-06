@@ -1312,8 +1312,8 @@ mod spend_tests {
         }
     }
 
-    /// Row 15 (V:395) from withdraw itself: part 0 to TOKEN, part 1 only with a fee, then on_payout after both, with
-    /// the spend's index and the exact split.
+    /// Row 15 (V:395) from withdraw itself: one receipt to TOKEN, the fee's transfer in it only with a fee, then
+    /// on_payout after it, with the spend's index and the exact split.
     #[test]
     fn a_landed_call_makes_its_payouts_then_on_payout() {
         use near_sdk::mock::MockAction;
@@ -1336,14 +1336,19 @@ mod spend_tests {
         let mut v = vault();
         withdraw(&mut v, spend("same_call")).unwrap();
         let r = get_created_receipts();
-        assert_eq!(r.len(), 3, "{r:?}");
+        // one payout receipt (A-01): the recipient's transfer and the fee's, all or none
+        assert_eq!(r.len(), 2, "{r:?}");
         assert_eq!(r[0].receiver_id.as_str(), crate::constants::TOKEN);
-        assert_eq!(calls(&r[0]), vec![c("ft_transfer", r#"{"receiver_id":"alice.test.near","amount":"1500000"}"#, 1, 15)]);
-        assert_eq!(r[1].receiver_id.as_str(), crate::constants::TOKEN);
-        assert_eq!(calls(&r[1]), vec![c("ft_transfer", r#"{"receiver_id":"relayer.test.near","amount":"500000"}"#, 1, 15)]);
-        assert_eq!(r[2].receiver_id.as_str(), "vault.test.near");
-        assert_eq!(r[2].receipt_indices, vec![0, 2]);
-        assert_eq!(calls(&r[2]), vec![c("on_payout", r#"{"spend_index":0,"to_recipient":"1500000","fee":"500000"}"#, 0, 30)]);
+        assert_eq!(
+            calls(&r[0]),
+            vec![
+                c("ft_transfer", r#"{"receiver_id":"alice.test.near","amount":"1500000"}"#, 1, 15),
+                c("ft_transfer", r#"{"receiver_id":"relayer.test.near","amount":"500000"}"#, 1, 15),
+            ]
+        );
+        assert_eq!(r[1].receiver_id.as_str(), "vault.test.near");
+        assert_eq!(r[1].receipt_indices, vec![0]);
+        assert_eq!(calls(&r[1]), vec![c("on_payout", r#"{"spend_index":0,"to_recipient":"1500000","fee":"500000"}"#, 0, 30)]);
         // no fee: one part, the callback after it
         withdraw(&mut v, spend("same_nullifier_a")).unwrap();
         let r = get_created_receipts();
