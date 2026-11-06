@@ -78,3 +78,30 @@ test("planted: 5 legs, fewer than the check's 6: FAIL", async () => {
   assert.equal(v.ok, false);
   assert.deepEqual(bad(v), ["BAD 5 legs, 5 takers (6 to 64 legs, a taker each)"]);
 });
+
+// Card solana-mint-supply-moves: the two providers read the mint each at its own slot, so a burn between them moves
+// the supply alone (run 42161763756, 6 Nov 04:20Z: C5xph2yL6gMdxmuLGxJBkGpmuDFfyi5fqkBNhvL6pump, every leg refused S10).
+/** good, with provider B's read of the mint changed by `change` on its bytes. */
+function mintB(change) {
+  const r = copy(A.good);
+  const pair = r.reads.accounts[r.mint];
+  const d = Buffer.from(pair[1].data, "base64");
+  change(d);
+  pair[1] = { ...pair[1], data: d.toString("base64") };
+  return r;
+}
+
+test("planted: provider B's mint read differs in supply only (a burn between the two reads): PASS, every leg passes S10", async () => {
+  const r = await judge(mintB((d) => d.writeBigUInt64LE(d.readBigUInt64LE(36) - 559_661n, 36)));
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.match(r.lines.find((l) => l.includes(`mint ${A.good.mint}`)), /^ok {2}mint \S+ read equal on both providers/);
+});
+
+test("planted: provider B's mint read differs in its freeze authority: FAIL, the mint and every leg refused S10", async () => {
+  const r = await judge(mintB((d) => { d.writeUInt32LE(1, 46); d.fill(9, 50, 82); }));
+  assert.equal(r.ok, false);
+  const b = bad(r);
+  assert.match(b[0], /^BAD mint \S+ read equal on both providers/);
+  assert.equal(b.length, 1 + A.good.legs.length, r.lines.join("\n"));
+  for (const l of b.slice(1)) assert.match(l, /refused: S10 the providers disagree on the mint$/);
+});

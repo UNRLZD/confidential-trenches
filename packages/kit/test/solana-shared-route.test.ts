@@ -250,6 +250,15 @@ test("S6 pass: a fee config that charges nothing or a hook with no program passe
   }
 });
 
+test("S6 pass: the providers' reads of the mint differ in supply only (a burn between their slots, card solana-mint-supply-moves)", () => {
+  const burnt = changed(CLEAN, (d) => { new DataView(d.buffer).setBigUint64(36, new DataView(d.buffer).getBigUint64(36, true) - 559_661n, true); });
+  for (const c of T22_CASES) {
+    const v = check(c, viaAuthority(c), undefined, [CLEAN, burnt]);
+    assert.equal(s6(v).ok, true, `${c.name}: S6 ${s6(v).detail}`);
+    assert.equal(result(v, "S10").ok, true, `${c.name}: S10 ${result(v, "S10").detail}`);
+  }
+});
+
 // Each refusal of a Token-2022 side through Jupiter's authority's ATA, a buy's destination and a sell's source: the
 // mint reads in place of the recorded ones, and S6's words.
 const MINT_REFUSALS: { what: string; detail: RegExp; mint: () => MintPair; s10?: boolean }[] = [

@@ -58,6 +58,7 @@ import {
   solanaDecodeLookupTable,
   solanaDecodeTransaction,
   solanaJsonRpc,
+  solanaMintAgreed,
 } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-jupiter-build";
@@ -212,7 +213,7 @@ export async function judge(r) {
   for (const kind of none ? ["listed"] : ["listed", "noRoute"]) {
     const mint = r.mints?.[kind];
     const [ma, mb] = r.reads?.accounts?.[mint] ?? [null, null];
-    say(!!ma && !!mb && ma.owner === mb.owner && ma.data === mb.data, `${kind === "listed" ? "listed" : "no-route"} mint ${mint} read equal on both providers, owner ${ma?.owner}`);
+    say(!!ma && !!mb && solanaMintAgreed(accRead(ma), accRead(mb)), `${kind === "listed" ? "listed" : "no-route"} mint ${mint} read equal on both providers, owner ${ma?.owner}`);
   }
   // each call once: a candidate's asks, its market asks, and the shapes' (the chosen token's are its shapes')
   const asked = (s) => [...(s?.calls ?? []), ...(s?.market ?? [])].map((c) => c.sentAt);

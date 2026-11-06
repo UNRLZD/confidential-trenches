@@ -10,7 +10,8 @@
 // The device's reads come from two public RPCs: the mint and every lookup table a build names, and the blockhash at
 // finalized on the first. The run is paced by the helper's own answers: the room waits each Retry-After, and the
 // check asks nothing else of Jupiter.
-// It passes only when: six legs, six takers; the mint reads equal on both providers; every leg's recorded calls replay
+// It passes only when: six legs, six takers; the mint reads agree on both providers (the kit's solanaMintAgreed: every field
+// but the supply a burn moves); every leg's recorded calls replay
 // through the kit's own cap search and room wait (the answers, Retry-After included, as recorded), so no 429 or 503
 // reaches a leg as its end; each leg ends in a build that assembles at most 1,232 bytes on the device's blockhash and
 // passes the quote checks on the frame (JUDGED, as solana-jupiter-build.mjs); every call answered 429 or 503 was
@@ -37,6 +38,7 @@ import {
   solanaDecodeLookupTable,
   solanaDecodeTransaction,
   solanaJsonRpc,
+  solanaMintAgreed,
 } from "../../packages/kit/src/index.ts";
 import { BASE, BUY_LAMPORTS, JUDGED, RPCS, SLIPPAGE_BPS, base58 } from "./solana-jupiter-build.mjs";
 
@@ -84,7 +86,7 @@ export async function judge(r) {
   const takers = new Set(legs.map((l) => l.wallet));
   say(legs.length >= LEGS && legs.length <= MAX_LEGS && takers.size === legs.length, `${legs.length} legs, ${takers.size} takers (${LEGS} to ${MAX_LEGS} legs, a taker each)`);
   const [ma, mb] = r.reads?.accounts?.[r.mint] ?? [null, null];
-  say(!!ma && !!mb && ma.owner === mb.owner && ma.data === mb.data, `mint ${r.mint} read equal on both providers, owner ${ma?.owner}`);
+  say(!!ma && !!mb && solanaMintAgreed(accRead(ma), accRead(mb)), `mint ${r.mint} read equal on both providers, owner ${ma?.owner}`);
   const bh = r.blockhash;
   say(!!bh && typeof bh.blockhash === "string" && Number.isSafeInteger(bh.lastValidBlockHeight), `the device's blockhash at finalized: ${bh?.blockhash} valid to height ${bh?.lastValidBlockHeight}`);
   let builds = 0;
