@@ -45,6 +45,9 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const unhex = (s: string) => new Uint8Array(Buffer.from(s.replace(/^0x/, ""), "hex"));
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
 const a32 = (a: string) => a.slice(2).toLowerCase().padStart(64, "0");
+/** W's signature as the calldata carries it: its length, 65, then r, s, v padded to three words (the helper reads only
+ *  its shape; the pool and the simulation check the signer). */
+const SIG = `${w32(65n)}${"ab".repeat(65).padEnd(192, "0")}`;
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const cat = (...p: Uint8Array[]) => Uint8Array.from(p.flatMap((x) => [...x]));
 const SELL_SELECTOR = hex(keccak_256(utf8("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)")).subarray(0, 4));
@@ -850,7 +853,7 @@ test("unpaid sell gas: reverting sales are held against the client, the token, W
 function withdrawData(fee: bigint, nullifier: bigint, deadlineMs = NOW + 300_000): string {
   const relay = [a32("0x0000000000000000000000000000000000000a11"), a32(FEE_TO), w32(10n ** 16n), w32(BigInt(deadlineMs)), w32(1n), "c9".padEnd(64, "0")];
   const proof = Array.from({ length: 16 }, (_, i) => (i === 9 ? nullifier : BigInt(i + 1)));
-  return `0x${WITHDRAW_SELECTOR}${w32(18n * 32n)}${proof.map(w32).join("")}${w32(fee)}${a32(POOL)}${w32(64n)}${w32(192n)}${relay.join("")}`;
+  return `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(fee)}${w32(28n * 32n)}${a32(POOL)}${w32(64n)}${w32(192n)}${relay.join("")}${SIG}`;
 }
 
 test("withdraws still go while sales answer 429: the sell sender's whole budget spent refuses every sale, a client's included, and that client's withdraw is still sent from the withdraw sender", async () => {

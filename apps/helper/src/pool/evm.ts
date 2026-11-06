@@ -5,9 +5,11 @@
 //
 // The body: { "pool": "0x<the pool>", "data": "0x<calldata>", "epoch": <the start, ms, of the epoch whose fee the
 // proof binds> }. Checks, each a refusal before any send (422 unless named):
-//   bad_shape        not withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256) in its one
-//                    canonical ABI encoding (every offset, length and padding as the encoder writes them, nothing
-//                    after), or over EVM_BODY_DATA_MAX (400);
+//   bad_shape        not withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes),
+//                    PrivacyPool.withdraw(Withdrawal, WithdrawProof, fee, W's signature) as the pool compiles it
+//                    (contracts/pool-evm/abi.json, card helper-evm-abi-tie), in its one canonical ABI encoding (every
+//                    offset, length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
+//                    EVM_BODY_DATA_MAX (400);
 //   not_pool         the withdrawal's processooor is not the pool the body names, which this helper carries;
 //   fee_recipient    the request pays the fee to anyone but this release's fee recipient;
 //   epoch_off        the epoch is not inside the proof's life (deadlineMs - POOL_LIFE_MAX_MS up to the deadline), is
@@ -149,22 +151,27 @@ import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
 
-/** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 27 = 868 bytes). */
+/** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 32 = 1,028 bytes, WITHDRAW_LEN). */
 export const POOL_EVM_BODY_MAX = 4_096;
-export const EVM_BODY_DATA_MAX = 1_024;
+export const EVM_BODY_DATA_MAX = 2_048;
 /** The most gas the helper pays for one withdraw: the measured Privacy Pools withdrawal is 611,391 (M349), so 2.5x [design]. */
 export const EVM_GAS_MAX = 1_500_000n;
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const unhex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
 const selectorOf = (sig: string): string => hex(keccak_256(new TextEncoder().encode(sig)).subarray(0, 4));
-export const WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256)";
+/** The pool's withdraw as it compiles (contracts/pool-evm/abi.json; contracts/pool-evm/test/abi-tie.test.mjs ties it). */
+export const WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)";
 export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);
 
 const word = (d: Uint8Array, i: number): bigint => BigInt(`0x${hex(d.subarray(4 + 32 * i, 4 + 32 * (i + 1))) || "0"}`);
-const W_OFFSET = 18n * 32n; // the Withdrawal tuple's tail starts after 1 + 16 + 1 head words
+const HEAD_WORDS = 19; // the Withdrawal's offset, the proof's 16 words, the fee, the signature's offset
+const W_OFFSET = BigInt(32 * HEAD_WORDS); // the Withdrawal tuple's tail starts after the head
 const RELAY_WORDS = 6; // recipient, feeRecipient, feeCap, deadlineMs, refundPrecommitment, salt
-const WITHDRAW_LEN = 4 + 32 * (18 + 3 + RELAY_WORDS);
+const W_WORDS = 3 + RELAY_WORDS; // processooor, the data's offset (64), its length (192), the data
+const SIG_OFFSET = BigInt(32 * (HEAD_WORDS + W_WORDS)); // W's signature's tail, after the Withdrawal's
+const SIG_WORDS = 4; // its length (65), r, s, v and 31 zero bytes
+const WITHDRAW_LEN = 4 + 32 * (HEAD_WORDS + W_WORDS + SIG_WORDS);
 const isAddressWord = (w: bigint) => w >> 160n === 0n;
 const addr = (w: bigint) => `0x${w.toString(16).padStart(40, "0")}`;
 
@@ -175,9 +182,12 @@ export function evmReadWithdraw(d: Uint8Array): EvmWithdraw {
   if (d.length !== WITHDRAW_LEN || hex(d.subarray(0, 4)) !== WITHDRAW_SELECTOR) throw new Error("not withdraw's calldata");
   if (word(d, 0) !== W_OFFSET) throw new Error("the withdrawal's offset");
   const fee = word(d, 17);
-  const processooor = word(d, 18);
-  if (!isAddressWord(processooor) || word(d, 19) !== 64n || word(d, 20) !== BigInt(32 * RELAY_WORDS)) throw new Error("the withdrawal's layout");
-  const r = (i: number) => word(d, 21 + i);
+  if (word(d, 18) !== SIG_OFFSET) throw new Error("the signature's offset");
+  const processooor = word(d, HEAD_WORDS);
+  if (!isAddressWord(processooor) || word(d, HEAD_WORDS + 1) !== 64n || word(d, HEAD_WORDS + 2) !== BigInt(32 * RELAY_WORDS)) throw new Error("the withdrawal's layout");
+  const at = HEAD_WORDS + W_WORDS; // the signature: 65 bytes, as the pool's _signer takes only 65; the rest of its word zero
+  if (word(d, at) !== 65n || (word(d, at + 3) & ((1n << 248n) - 1n)) !== 0n) throw new Error("the signature's layout");
+  const r = (i: number) => word(d, HEAD_WORDS + 3 + i);
   if (!isAddressWord(r(0)) || !isAddressWord(r(1)) || r(3) >> 64n !== 0n || (r(5) & ((1n << 128n) - 1n)) !== 0n) throw new Error("the relay data's padding");
   // pubSignals[1], existingNullifierHash: head word 1 + 2 (pA) + 4 (pB) + 2 (pC) + 1
   const nullifier = word(d, 10).toString(16).padStart(64, "0");

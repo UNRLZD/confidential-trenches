@@ -30,11 +30,14 @@ const PROOF = Array.from({ length: 16 }, (_, i) => BigInt(1000 + i));
 
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
 const a32 = (a: string) => a.slice(2).padStart(64, "0");
+/** W's signature as the calldata carries it: its length, 65, then r, s, v padded to three words (the helper reads only
+ *  its shape; the pool and the simulation check the signer). */
+const SIG = `${w32(65n)}${"ab".repeat(65).padEnd(192, "0")}`;
 /** withdraw's calldata as solc's abi.encode writes it; `relayLen` and `feeToWord` replace one word each. */
 function calldata(o: { nullifier?: bigint; deadlineMs?: bigint; relayLen?: bigint; feeToWord?: string } = {}): string {
   const relay = [a32(RECIPIENT), o.feeToWord ?? a32(FEE_TO), w32(10n ** 16n), w32(o.deadlineMs ?? BigInt(DEADLINE)), w32(5n), "c9ebb52422ed595de60e051c69edee1a".padEnd(64, "0")];
   const proof = PROOF.map((v, i) => (i === 9 && o.nullifier !== undefined ? o.nullifier : v));
-  return `0x${WITHDRAW_SELECTOR}${w32(18n * 32n)}${proof.map(w32).join("")}${w32(FEE)}${a32(POOL)}${w32(64n)}${w32(o.relayLen ?? 192n)}${relay.join("")}`;
+  return `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(FEE)}${w32(28n * 32n)}${a32(POOL)}${w32(64n)}${w32(o.relayLen ?? 192n)}${relay.join("")}${SIG}`;
 }
 
 type Calls = { method: string; params: readonly unknown[] }[];
