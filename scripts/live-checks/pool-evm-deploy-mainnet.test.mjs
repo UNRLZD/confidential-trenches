@@ -12,7 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check as pinCheck, recordOf } from "./evm-venues-pin.mjs";
-import { checkMainnets } from "./pool-evm-deploy-mainnet.mjs";
+import { checkMainnets, mainnetRunRecord } from "./pool-evm-deploy-mainnet.mjs";
 import { MAINNETS } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-deploy-mainnet.answers.json", import.meta.url), "utf8"));
@@ -93,4 +93,15 @@ test("no payer is exempt: a recorded transaction sent by anyone but the run key 
   const rich = structuredClone(A.good);
   for (const a of rich) if (a.method === "eth_getBalance" && a.params[0].toLowerCase() === key) a.json.result = "0x" + (10n ** 13n + 1n).toString(16);
   fails(await run({ answers: rich }), /base: deploy FAIL deployer .* keeps at most 10000000000000 wei/);
+});
+
+test("the mainnets' run record (--write-record's, the money gate's) has Money path: yes and one Tx line per transaction of each record; a dry run's is refused", () => {
+  const real = Object.fromEntries(Object.entries(A.records).map(([c, d]) => [c, { ...d, dryRun: false }]));
+  const text = mainnetRunRecord(real);
+  const lines = text.split("\n");
+  assert.equal(lines[0], "CARD pool-evm-deploy-mainnet / live: PASS");
+  assert.equal(lines[1], "Money path: yes");
+  const tx = lines.filter((l) => l.startsWith("Tx: "));
+  assert.deepEqual(tx, Object.keys(MAINNETS).flatMap((c) => real[c].txs.map((t) => `Tx: ${c} ${t.hash}`)));
+  assert.throws(() => mainnetRunRecord(A.records), /a dry run/);
 });

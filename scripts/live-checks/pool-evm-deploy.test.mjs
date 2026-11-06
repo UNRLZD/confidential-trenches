@@ -167,3 +167,19 @@ test("the mainnets (card pool-evm-deploy-mainnet): Base and Robinhood, both adap
   for (const n of ["ethereum", "__proto__", "constructor"]) assert.equal(chainOf(n), undefined, n);
   assert.ok(!Object.hasOwn(CHAINS, "base"), "the testnet loops never meet a mainnet");
 });
+
+test("a mainnet record never folds into this run record: runRecord refuses it, and --write-record refuses it before any read", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = (await import("node:path")).default;
+  const M = JSON.parse(readFileSync(new URL("./pool-evm-deploy-mainnet.answers.json", import.meta.url), "utf8")).records.base;
+  const real = { ...M, dryRun: false };
+  assert.throws(() => runRecord([real]), /base is a mainnet: its run record is pool-evm-deploy-mainnet\.md/);
+  const f = path.join(mkdtempSync(path.join(tmpdir(), "ped-")), "base.json");
+  writeFileSync(f, JSON.stringify(real));
+  const r = spawnSync(process.execPath, [new URL("./pool-evm-deploy.mjs", import.meta.url).pathname, "--deployment", f, "--write-record"], { encoding: "utf8", timeout: 20_000 });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /base is a mainnet: its run record is pool-evm-deploy-mainnet\.md/);
+  assert.doesNotMatch(r.stdout, /live-check pool-evm-deploy base:/, "nothing was read");
+});

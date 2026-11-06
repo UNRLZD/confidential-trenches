@@ -327,11 +327,18 @@ export function recorder(fetchFn = fetch) {
   return { answers, fetchFn: wrapped };
 }
 
-/** The run record's text from the deployment records, after a PASS: every transaction of each run, testnet, money path */
-export function runRecord(ds) {
-  for (const d of ds) if (d.dryRun || !chainOf(d.chain)) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
+/**
+ * The run record's text from the deployment records, after a PASS: every transaction of each run, money path. The
+ * testnets' is this check's (pool-evm-deploy.md); the mainnets' is pool-evm-deploy-mainnet.mjs's, with `mainnet` and its
+ * key (pool-evm-deploy-mainnet.md): a mainnet record never folds into the testnets' file, nor a testnet's into it.
+ */
+export function runRecord(ds, { mainnet = false, key = KEY } = {}) {
+  for (const d of ds) {
+    if (d.dryRun || !chainOf(d.chain)) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
+    if (Object.hasOwn(MAINNETS, d.chain) !== mainnet) throw new Error(mainnet ? `${d.chain} is a testnet: its run record is ${path.basename(RECORD)}` : `${d.chain} is a mainnet: its run record is pool-evm-deploy-mainnet.md (node scripts/live-checks/pool-evm-deploy-mainnet.mjs --write-record)`);
+  }
   return [
-    `CARD ${KEY} / live: PASS`,
+    `CARD ${key} / live: PASS`,
     "Money path: yes",
     ...ds.flatMap((d) => d.txs.map((t) => `Tx: ${d.chain} ${t.hash}`)),
     "",
@@ -341,7 +348,9 @@ export function runRecord(ds) {
       `Deployer ${d.deployer}, a run key that lived only in the run, funded with ${d.need} wei (the printed need) and swept back to ${d.return} at the run's end.`,
       "",
     ]),
-    "The testnet addresses the contracts call are read on chain, not taken from a published page, for Robinhood testnet (no Uniswap page lists it): its PoolManager has the code hash of the Robinhood mainnet PoolManager, and WETH answers symbol and name \"WETH\" behind an upgradeable proxy whose implementation this check pins (M365).",
+    mainnet
+      ? "The addresses the contracts call (the v4 PoolManager, SwapRouter02 and WETH) are the kit's venue list's, each code hash read on both RPCs and pinned in pool-evm-deploy.mjs MAINNETS; Robinhood's WETH is an upgradeable proxy whose implementation is pinned too."
+      : "The testnet addresses the contracts call are read on chain, not taken from a published page, for Robinhood testnet (no Uniswap page lists it): its PoolManager has the code hash of the Robinhood mainnet PoolManager, and WETH answers symbol and name \"WETH\" behind an upgradeable proxy whose implementation this check pins (M365).",
     "",
   ].join("\n");
 }
@@ -353,6 +362,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const files = opt("--deployment") ? opt("--deployment").split(",") : [...Object.keys(CHAINS), ...Object.keys(MAINNETS)].map(deploymentFile).filter(existsSync);
     if (files.length === 0) throw new Error("no deployment record (pool-evm-deploy.<chain>.json) to check");
     const ds = files.map((f) => JSON.parse(readFileSync(f, "utf8")));
+    // the testnets' run record only: a mainnet record's is pool-evm-deploy-mainnet.mjs --write-record's, refused here
+    // before any read
+    if (args.includes("--write-record")) runRecord(ds.map((d) => ({ ...d, dryRun: false })));
     const rec = recorder();
     let ok = true;
     for (const d of ds) {
