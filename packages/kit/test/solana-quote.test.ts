@@ -12,6 +12,7 @@ import {
   SOLANA_PUMP_AMM_PROGRAM,
   SolanaWalletLinks,
   checkSolanaQuote,
+  solanaMintDisagreement,
   solanaPumpVolumeAccumulator,
   solanaVolumeAccumulator,
   type SolanaAccountRead,
@@ -398,6 +399,26 @@ function withExt(m: SolanaAccountRead, type: number, body: Uint8Array): SolanaAc
   return { owner: m.owner, data: d };
 }
 
+// Provider B's read of the mint with one change (card solana-mint-supply-moves): the two providers read each at its own
+// slot, and a burn between them moves the supply alone.
+function mintB(c: ReturnType<typeof buyCase>, change: (d: Uint8Array) => void, base?: SolanaAccountRead): void {
+  const a = base ?? (c.reads.mint[0] as SolanaAccountRead);
+  const d = a.data.slice();
+  change(d);
+  (c.reads as { mint: unknown }).mint = [a, { owner: a.owner, data: d }];
+}
+// A TransferFeeConfig body (108 bytes): two authorities 7…7 and 8…8, withheld_amount, then the older and newer
+// TransferFee { epoch, maximum_fee, basis_points }.
+function feeBody(withheld: bigint, bps: number): Uint8Array {
+  const b = new Uint8Array(108);
+  b.fill(7, 0, 32);
+  b.fill(8, 32, 64);
+  setU64(b, 64, withheld);
+  for (const at of [72, 90]) { setU64(b, at, 1n); setU64(b, at + 8, 1_000n); setU16(b, at + 16, bps); }
+  return b;
+}
+const SUPPLY = 36; // spl-token Mint: mint_authority COption<Pubkey> (36), supply u64, decimals u8, is_initialized, freeze_authority COption<Pubkey>
+
 for (const [name, id, mutate] of CASES) {
   test(`refused: ${name}`, () => {
     const c = buyCase();
@@ -565,6 +586,13 @@ const ACCEPTED: [string, (c: ReturnType<typeof buyCase>) => void][] = [
       x.walletLamports.post += 650_240n;
     }
   }],
+  ["S10 the providers' mint reads differ in supply only (a burn between their slots: C5xph…pump, 6 Nov 04:20Z)", (c) => {
+    mintB(c, (d) => { setU64(d, SUPPLY, 999_921_247_000_000n); });
+  }],
+  ["S10 the providers' mint reads differ in a transfer-fee mint's withheld fees only (a harvest between their slots)", (c) => {
+    const fee = withExt(c.reads.mint[0] as SolanaAccountRead, 1, feeBody(5_000n, 0));
+    mintB(c, (d) => { setU64(d, d.length - 108 + 64, 6_000n); setU64(d, SUPPLY, 1n); }, fee);
+  }],
   ["U-6: an SPL middle account created before the route and closed after it, native out unchanged", (c) => { middle(c, TOKEN); }],
   ["U-6: a Token-2022 middle account harvested right before its close", (c) => { middle(c, T22, { harvest: "before-close" }); }],
 ];
@@ -604,6 +632,18 @@ const R2: [string, SolanaQuoteCheckId, (c: ReturnType<typeof buyCase>) => Uint8A
     const [k, pair] = Object.entries(c.reads.tables)[0] as [string, readonly [SolanaAccountRead, SolanaAccountRead]];
     (c.reads as { tables: unknown }).tables = { [k]: [pair[0], { owner: SYSTEM, data: pair[1].data }] };
   }],
+  ["S10 the providers disagree on the mint's freeze authority", "S10", (c) => mintB(c, (d) => { setU32(d, 46, 1); d.fill(9, 50, 82); })],
+  ["S10 the providers disagree on the mint's mint authority", "S10", (c) => mintB(c, (d) => { setU32(d, 0, 1); d.fill(9, 4, 36); })],
+  ["S10 the providers disagree on the mint's decimals", "S10", (c) => mintB(c, (d) => { d[44] = 9; })],
+  ["S10 the providers disagree on the mint's supply and its freeze authority", "S10", (c) => mintB(c, (d) => { setU64(d, SUPPLY, 1n); setU32(d, 46, 1); d.fill(9, 50, 82); })],
+  ["S10 the providers disagree on the mint's transfer fee", "S10", (c) => { const fee = withExt(c.reads.mint[0] as SolanaAccountRead, 1, feeBody(0n, 0)); mintB(c, (d) => { setU16(d, d.length - 2, 100); }, fee); }],
+  ["S10 the providers disagree on the mint's transfer fee authority", "S10", (c) => { const fee = withExt(c.reads.mint[0] as SolanaAccountRead, 1, feeBody(0n, 0)); mintB(c, (d) => { d[d.length - 108] = 1; }, fee); }],
+  ["S10 the providers disagree on the mint's metadata pointer", "S10", (c) => mintB(c, (d) => { d[170] = (d[170] as number) ^ 1; })],
+  ["S10 the providers disagree on the mint's last byte", "S10", (c) => mintB(c, (d) => { d[d.length - 1] = (d[d.length - 1] as number) ^ 1; })],
+  ["S10 the providers disagree inside a 108-byte extension that is not the fee config", "S10", (c) => { const m = withExt(c.reads.mint[0] as SolanaAccountRead, 10, feeBody(5_000n, 0)); mintB(c, (d) => { setU64(d, d.length - 108 + 64, 6_000n); }, m); }],
+  // a fee config shorter than its 108 bytes is not one: its bytes 64..72 are compared, never masked as withheld fees
+  ["S10 the providers disagree inside a fee config shorter than 108 bytes", "S10", (c) => { const m = withExt(c.reads.mint[0] as SolanaAccountRead, 1, feeBody(5_000n, 0).slice(0, 100)); mintB(c, (d) => { setU64(d, d.length - 100 + 64, 6_000n); }, m); }],
+  ["S10 provider B reads the mint one byte longer", "S10", (c) => { const a = c.reads.mint[0] as SolanaAccountRead; (c.reads as { mint: unknown }).mint = [a, { owner: a.owner, data: Uint8Array.from([...a.data, 0]) }]; }],
   ["S10 nonzero bytes after the last extension", "S10", (c) => { const a = c.reads.mint[0] as SolanaAccountRead; const m = { owner: a.owner, data: Uint8Array.from([...a.data, 0, 0, 0, 0, 7]) }; (c.reads as { mint: unknown }).mint = [m, m]; }],
   ["S13 an account created with a stranger as owner", "S13", (c) => { ix(c.m, 5).accounts[2] = addKey(c.m, randomKey()); }],
   ["DECODE a compact-u16 not in its shortest form", "DECODE", (c) => { const b = encode(c.m); return Uint8Array.from([0x81, 0x00, ...b.subarray(1)]); }],
@@ -618,6 +658,51 @@ for (const [name, id, mutate] of R2) {
     refusedBy(id, run(c, bytes ?? undefined));
   });
 }
+// Each mint disagreement above, refused by S10 alone, naming the first field that differs (the fixture's extensions:
+// MetadataPointer 18 at 166, TokenMetadata 19 at 234, then the test's own at 394).
+const MINT_FIELDS: Record<string, string> = {
+  "S10 the providers disagree on the mint's freeze authority": "freeze authority",
+  "S10 the providers disagree on the mint's mint authority": "mint authority",
+  "S10 the providers disagree on the mint's decimals": "decimals",
+  "S10 the providers disagree on the mint's supply and its freeze authority": "freeze authority",
+  "S10 the providers disagree on the mint's transfer fee": "extension 1",
+  "S10 the providers disagree on the mint's transfer fee authority": "extension 1",
+  "S10 the providers disagree on the mint's metadata pointer": "extension 18",
+  "S10 the providers disagree on the mint's last byte": "extension 19",
+  "S10 the providers disagree inside a 108-byte extension that is not the fee config": "extension 10",
+  "S10 the providers disagree inside a fee config shorter than 108 bytes": "extension 1",
+  "S10 provider B reads the mint one byte longer": "length (394 / 395 bytes)",
+};
+test("refused: S10 each of its mint disagreements is refused as one, by S10 alone, naming the field", () => {
+  const rows = R2.filter(([name]) => /^S10 (the providers disagree|provider B reads)/.test(name));
+  assert.deepEqual(rows.map(([name]) => name).sort(), Object.keys(MINT_FIELDS).sort());
+  for (const [name, , mutate] of rows) {
+    const c = buyCase();
+    mutate(c);
+    const v = run(c);
+    assert.deepEqual(v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`), [`S10 the providers disagree on the mint's ${MINT_FIELDS[name]}`], name);
+  }
+});
+test("the real C5xph…pump pair a burn moved (fixtures/solana-mint-c5xph-burn.json): it agrees, and any other byte of it changed refuses", () => {
+  const X = JSON.parse(readFileSync(new URL("./fixtures/solana-mint-c5xph-burn.json", import.meta.url), "utf8")) as { reads: [Acc & { slot: number }, Acc & { slot: number }] };
+  const [a, b] = X.reads.map((r) => read({ ...r, lamports: 0 })) as [SolanaAccountRead, SolanaAccountRead];
+  const supply = (m: SolanaAccountRead): bigint => new DataView(m.data.buffer, m.data.byteOffset).getBigUint64(36, true);
+  assert.notEqual(supply(a), supply(b), "the burn moved the supply between the two slots");
+  assert.equal(solanaMintDisagreement(a, b), null);
+  for (let i = 0; i < b.data.length; i++) {
+    if (i >= 36 && i < 44) continue; // the supply
+    const d = b.data.slice();
+    d[i] = (d[i] as number) ^ 1;
+    assert.notEqual(solanaMintDisagreement(a, { owner: b.owner, data: d }), null, `byte ${i}`);
+  }
+});
+test("refused: S10 a mint whose owner differs names both owners", () => {
+  const c = buyCase();
+  const a = c.reads.mint[0] as SolanaAccountRead;
+  (c.reads as { mint: unknown }).mint = [a, { owner: TOKEN, data: a.data }];
+  const v = run(c);
+  assert.equal(v.results.find((r) => r.id === "S10")?.detail, `the providers disagree on the mint's owner program (${T22} / ${TOKEN})`);
+});
 
 test("accepted: a first PumpSwap buy from a fresh wallet that creates its PumpSwap volume account (rent 1,346,200)", () => {
   const c = buyCase();

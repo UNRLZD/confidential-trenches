@@ -519,6 +519,63 @@ function s13(c: Ctx, wk: Walk): SolanaQuoteResult {
   return off.length ? fail("S13", off.join("; ")) : pass("S13", `${wk.created.size} created, every one but the output closed to the wallet`);
 }
 
+// Two providers read the mint each at its own slot, so a field that moves on every burn, mint or harvest can differ
+// between two honest reads. Two of them do, and no check reads either: the supply (u64 at 36, after the 36-byte
+// mint_authority COption: spl-token state.rs Mint, the base of a Token-2022 mint too), which every Burn and MintTo
+// moves (run 42161763756, 6 Nov 04:20Z, refused C5xph2yL6gMdxmuLGxJBkGpmuDFfyi5fqkBNhvL6pump whose supply its burns
+// move), and TransferFeeConfig's withheld_amount (u64 at its body + 64, after its two 32-byte authorities;
+// transfer_fee/mod.rs:135-149), which every HarvestWithheldTokensToMint moves. Every other byte is compared as read: the
+// owner program, the mint and freeze authorities, decimals, is_initialized, the account type, and each Token-2022
+// extension whole (its type, length and body), so no field a check reads is ever left out. The walk is decided by the
+// extension headers alone, which are compared, so equal masked bytes mean the same fields were masked on both.
+const MINT_SUPPLY = 36;
+function mintMoving(d: Uint8Array): Uint8Array {
+  const m = d.slice();
+  if (m.length >= MINT_SUPPLY + 8) m.fill(0, MINT_SUPPLY, MINT_SUPPLY + 8);
+  if (m.length < 166 || m[165] !== 1) return m;
+  for (let o = 166; o + 4 <= m.length; ) {
+    const type = u16(m, o);
+    const len = u16(m, o + 2);
+    if (type === 0 || o + 4 + len > m.length) break;
+    if (type === EXT_TRANSFER_FEE_CONFIG && len === 108) m.fill(0, o + 4 + 64, o + 4 + 72);
+    o += 4 + len;
+  }
+  return m;
+}
+/** The mint's field at byte `i` of its data (spl-token state.rs Mint, then Token-2022's account type and extensions). */
+function mintField(d: Uint8Array, i: number): string {
+  if (i < MINT_SUPPLY) return "mint authority";
+  if (i < MINT_SUPPLY + 8) return "supply";
+  if (i === 44) return "decimals";
+  if (i === 45) return "is_initialized";
+  if (i < 82) return "freeze authority";
+  if (i < 165) return "bytes before its account type";
+  if (i === 165) return "account type";
+  for (let o = 166; o + 4 <= d.length; ) {
+    const type = u16(d, o);
+    const len = u16(d, o + 2);
+    if (i < o + 4) return `extension header at byte ${o}`;
+    if (type === 0 || o + 4 + len > d.length) break;
+    if (i < o + 4 + len) return `extension ${type}`;
+    o += 4 + len;
+  }
+  return "bytes after its last extension";
+}
+/** The first field two providers' reads of one mint differ in, past the two that move (mintMoving), or null when they
+ * agree: S6 and S10 refuse with it, and the reference read too. */
+export function solanaMintDisagreement(a: SolanaAccountRead, b: SolanaAccountRead): string | null {
+  if (a.owner !== b.owner) return `owner program (${a.owner} / ${b.owner})`;
+  if (a.data.length !== b.data.length) return `length (${a.data.length} / ${b.data.length} bytes)`;
+  const x = mintMoving(a.data);
+  const y = mintMoving(b.data);
+  const i = x.findIndex((v, k) => v !== y[k]);
+  return i < 0 ? null : mintField(a.data, i);
+}
+/** True when two providers' reads of one mint agree on every field but its supply and its withheld transfer fees. */
+export function solanaMintAgreed(a: SolanaAccountRead, b: SolanaAccountRead): boolean {
+  return solanaMintDisagreement(a, b) === null;
+}
+
 // Why a second move of the token, out of Jupiter's authority's account into the wallet's, could change the amount, or
 // null when it cannot: the token's mint, read equal on both providers, whose extensions (walked as S10 walks them)
 // charge no fee and run no hook. Called only on a Token-2022 side: that is the token (the output of a buy, the input of
@@ -535,7 +592,8 @@ const feeCharged = (d: Uint8Array, slot: number): boolean => u16(d, slot + 16) !
 function secondMove(c: Ctx): string | null {
   const [a, b] = c.reads.mint;
   if (!a || !b) return "the mint is not read on both providers";
-  if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return "the providers disagree on the mint";
+  const off = solanaMintDisagreement(a, b);
+  if (off) return `the providers disagree on the mint's ${off}`;
   const d = a.data;
   if (d.length === 82) return null;
   if (d.length < 166 || d[165] !== 1) return `the mint of ${d.length} bytes has no mint account type`;
@@ -655,12 +713,13 @@ function s9(c: Ctx): SolanaQuoteResult {
   return c.tx.size <= SOLANA_MAX_TX_BYTES ? pass("S9", `${c.tx.size} bytes`) : fail("S9", `${c.tx.size} bytes > ${SOLANA_MAX_TX_BYTES}`);
 }
 
-// S10: the token's mint, the same bytes on both providers. No confidential transfers, no transfer hook whose authority
+// S10: the token's mint, the same on both providers but for its supply and withheld fees (solanaMintAgreed). No confidential transfers, no transfer hook whose authority
 // can change it, and a non-transferable mint gets no route.
 function s10(c: Ctx): SolanaQuoteResult {
   const [a, b] = c.reads.mint;
   if (!a || !b) return fail("S10", "mint not read on both providers");
-  if (a.owner !== b.owner || !eqBytes(a.data, b.data)) return fail("S10", "the providers disagree on the mint");
+  const off = solanaMintDisagreement(a, b);
+  if (off) return fail("S10", `the providers disagree on the mint's ${off}`);
   if (a.owner === SOLANA_TOKEN_PROGRAM) return a.data.length === 82 ? pass("S10", "SPL Token mint") : fail("S10", `SPL Token mint of ${a.data.length} bytes`);
   if (a.owner !== SOLANA_TOKEN_2022_PROGRAM) return fail("S10", `mint owner ${a.owner} is not a token program`);
   const d = a.data;
