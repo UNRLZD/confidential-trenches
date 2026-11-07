@@ -67,4 +67,8 @@ test("the facts read from a bundle", () => {
   assert.deepEqual([facts("", next).sent, facts("", next).trade], [true, 2]);
   assert.equal(facts("", next.replace("if(u().length)return{stage:`sent`,txs:u()};", "")).sent, false);
   assert.equal(facts("", next.replace("g&&!_&&w===`failed`?`down`:w", "w")).trade, 1);
+  // and what landed as a count (a rung with no tx named still counts)
+  const counted = next.replace("if(s.length)return{stage:`part_filled`,txs:s};", "if(c)return{stage:`part_filled`,txs:s};");
+  assert.equal(facts("", counted).sent, true);
+  assert.equal(facts("", counted.replace("if(u().length)return{stage:`sent`,txs:u()};", "")).sent, false);
 });
