@@ -34,7 +34,7 @@
 //
 // Nothing here logs or reads a network; the caller reads on two RPCs and hands the reads in. U's secret key is derived
 // only for its address and zeroed at once.
-import { EVM_POOL_MIN_DEPOSIT, solanaPoolDepositCost, solanaPoolDepositTx, solanaPoolPreMarkOf, solanaRentMin, type SolanaRent, VAULT_FIELD_P } from "@blindfill/kit";
+import { EVM_POOL_MIN_DEPOSIT, solanaPoolDepositCost, solanaPoolDepositTx, solanaPoolPage, solanaPoolPreMark, solanaPoolPreMarkOf, solanaRentMin, type SolanaRent, VAULT_FIELD_P } from "@blindfill/kit";
 import { base58 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
@@ -111,8 +111,17 @@ export function sameChainNext(a: { seed64: Uint8Array; scope: bigint; ladder: La
   return { kind: "keep", left: a.balance };
 }
 
-/** A read of an account (the lower lamports of two RPCs, the same owner and bytes on both), or null for none. */
-export type AccountRead = { readonly owner: string; readonly data: Uint8Array; readonly lamports: bigint } | null;
+/** A read of one address: its account (the lower lamports of two RPCs, the same owner and bytes on both), or null when
+ *  there is none. The address is part of the read, so a read of another account is refused, never priced. */
+export type AccountRead = { readonly address: string; readonly account: { readonly owner: string; readonly data: Uint8Array; readonly lamports: bigint } | null };
+
+/** The lamports at `want` from `read`, refusing a read of another address. */
+function lamportsAt(read: AccountRead, want: string, what: string): bigint {
+  if (read === null || typeof read !== "object" || read.address !== want) throw new Error(`${what}: the read is not of ${want}`);
+  const l = read.account === null ? 0n : read.account.lamports;
+  if (typeof l !== "bigint" || l < 0n) throw new Error(`${what}: lamports, a bigint at or above 0`);
+  return l;
+}
 
 /** The first note of U's chain no precommitment mark names on the Solana pool (`markAt`: the read at that note's mark
  *  address, at finalized on both RPCs, parsed by the kit's solanaPoolPreMarkOf), and what that address holds. */
@@ -122,19 +131,18 @@ export function solanaChainNext(seed64: Uint8Array, scope: bigint, first: NoteRe
     const ref = refAt(first as Extract<NoteRef, { kind: "deposit" }>, n);
     const precommitment = noteSecrets(seed64, ref).precommitment;
     const read = markAt(precommitment);
-    if (solanaPoolPreMarkOf(read, program) === null) {
-      const held = read === null ? 0n : read.lamports;
-      if (typeof held !== "bigint" || held < 0n) throw new Error("a mark read's lamports: a bigint at or above 0");
-      return { ref, precommitment, held };
-    }
+    const held = lamportsAt(read, solanaPoolPreMark(program, precommitment), `${refKey(ref)}'s mark`);
+    if (solanaPoolPreMarkOf(read.account, program) === null) return { ref, precommitment, held };
   }
   throw new Error("no second arrival left on this id");
 }
 
 /**
  * The Solana step, with the unsigned tx of a deposit step (U its signer and fee payer). U's cost is priced as the
- * program charges it: the fee, and the mark's and both pages' rent less what they hold (`pages`: the lamports of the
- * pages the sizes name, the lower of two RPCs). U keeps 0 or at least an empty account's rent.
+ * program charges it: the fee, and the mark's and both pages' rent less what they hold (`pages`: the reads of the two
+ * pages the deposit writes, the ones the sizes name, refused when either read is of another address: at a page boundary
+ * the page before is full and holds its rent, and pricing the new one by it would leave U short). U keeps 0 or at least
+ * an empty account's rent.
  */
 export function solanaSameChainDeposit(a: {
   program: string;
@@ -147,7 +155,7 @@ export function solanaSameChainDeposit(a: {
   balance: bigint;
   fee: bigint;
   rent: SolanaRent;
-  pages: { state: bigint; label: bigint };
+  pages: { state: AccountRead; label: AccountRead };
   sizes: { stateSize: number; labelSize: number };
   blockhash: string;
 }): SameChainStep & { u: string; tx?: { message: Uint8Array; wire: Uint8Array } } {
@@ -157,7 +165,9 @@ export function solanaSameChainDeposit(a: {
   id.secretKey.fill(0);
   const u = base58.encode(id.publicKey);
   const next = solanaChainNext(a.seed64, a.scope, a.first, a.program, a.markAt);
-  const cost = solanaPoolDepositCost(a.fee, a.rent, a.sizes, { mark: next.held, statePage: a.pages.state, labelPage: a.pages.label });
+  const statePage = lamportsAt(a.pages.state, solanaPoolPage(a.program, 0, a.sizes.stateSize), "the state page");
+  const labelPage = lamportsAt(a.pages.label, solanaPoolPage(a.program, 1, a.sizes.labelSize), "the label page");
+  const cost = solanaPoolDepositCost(a.fee, a.rent, a.sizes, { mark: next.held, statePage, labelPage });
   const step = sameChainNext({ ...a, next, cost, floor: solanaRentMin(a.rent, 0) });
   if (step.kind !== "deposit") return { ...step, u };
   return { ...step, u, tx: solanaPoolDepositTx(a.program, u, { value: step.value, precommitment: step.precommitment }, a.sizes, a.blockhash) };

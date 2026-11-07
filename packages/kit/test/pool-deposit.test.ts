@@ -139,6 +139,9 @@ test("Solana: a mark's read: no account or a funded system account is no mark; t
     { owner: rec.owner, data: data.subarray(0, 16) },
     { owner: rec.owner, data: Uint8Array.from(data, (x, i) => (i === 16 ? 2 : x)) },
     { owner: rec.owner, data: Uint8Array.from(data, (x, i) => (i < 8 ? 0 : x)) },
+    // a value of 1 lamport, below MIN_DEPOSIT and not 0; a nonce of 0 with a real value: the program writes neither
+    { owner: rec.owner, data: Uint8Array.from(data, (x, i) => (i === 0 ? 1 : i < 8 ? 0 : x)) },
+    { owner: rec.owner, data: Uint8Array.from(data, (x, i) => (i >= 8 && i < 16 ? 0 : x)) },
   ])
     assert.throws(() => solanaPoolPreMarkOf(bad, DEVNET.program), SolanaPoolDepositError);
 });

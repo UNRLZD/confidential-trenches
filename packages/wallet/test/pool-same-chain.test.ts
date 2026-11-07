@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { SOLANA_SYSTEM_PROGRAM, solanaPoolTreeSizes, solanaRentMin, solanaRentOf, type SolanaRent, vaultLabelOf } from "@blindfill/kit";
+import { SOLANA_SYSTEM_PROGRAM, solanaPoolPage, solanaPoolPreMark, solanaPoolTreeSizes, solanaRentMin, solanaRentOf, type SolanaRent, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey, type NoteState } from "../src/notes/store.ts";
@@ -20,10 +20,13 @@ import { SOL_LADDER, solanaPoolOf } from "../src/pool/solana.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const DEVNET = JSON.parse(readFileSync(new URL("../../signpage/test/fixtures/pool-devnet.json", import.meta.url), "utf8")) as { program: string; answers: { accounts: Record<string, { owner: string; lamports: number; data: [string, string] } | null> }[] };
+// the devnet pool read later on both RPCs: the state tree at 44, the label tree at 32 (releases add state leaves only)
+const LATER = JSON.parse(readFileSync(new URL("../../kit/test/fixtures/solana-pool-deposit.json", import.meta.url), "utf8")) as { now: { pool: { owner: string; data: string } }[] };
 const PROGRAM = DEVNET.program;
 const SCOPE = solanaPoolOf(PROGRAM).scope;
 const ACC = DEVNET.answers[0]!.accounts;
-const SIZES = solanaPoolTreeSizes({ owner: ACC.pool!.owner, data: base64.decode(ACC.pool!.data[0]) }, PROGRAM);
+const SIZES = solanaPoolTreeSizes({ owner: LATER.now[0]!.pool.owner, data: base64.decode(LATER.now[0]!.pool.data) }, PROGRAM);
+assert.deepEqual(SIZES, { stateSize: 44, labelSize: 32 });
 const RENT = solanaRentOf({ owner: ACC.rent!.owner, data: base64.decode(ACC.rent!.data[0]) });
 const FREE: SolanaRent = { lamportsPerByte: 0n, factor: 1n };
 const FEE = 5_000n;
@@ -32,8 +35,9 @@ const RUNG = SOL_LADDER.min; // 0.01 SOL
 const U0: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
 const U0n = (n: number): NoteRef => ({ kind: "second", id: { id: "U", s: SCOPE, i: 0 }, n });
 const P = (ref: NoteRef) => noteSecrets(SEED, ref).precommitment;
+type Account = NonNullable<AccountRead["account"]>;
 /** A mark as the program writes it: value u64 LE, nonce u64 LE, tag 1, at rent(17). */
-const markRead = (value: bigint, nonce: bigint, rent: SolanaRent = RENT): AccountRead => {
+const markAccount = (value: bigint, nonce: bigint, rent: SolanaRent = RENT): Account => {
   const data = new Uint8Array(17);
   const v = new DataView(data.buffer);
   v.setBigUint64(0, value, true);
@@ -41,29 +45,44 @@ const markRead = (value: bigint, nonce: bigint, rent: SolanaRent = RENT): Accoun
   data[16] = 1;
   return { owner: PROGRAM, data, lamports: solanaRentMin(rent, 17) };
 };
-const strayRead = (lamports: bigint): AccountRead => ({ owner: SOLANA_SYSTEM_PROGRAM, data: new Uint8Array(0), lamports });
+const stray = (lamports: bigint): Account => ({ owner: SOLANA_SYSTEM_PROGRAM, data: new Uint8Array(0), lamports });
+const markAt = (p: bigint, account: Account | null): AccountRead => ({ address: solanaPoolPreMark(PROGRAM, p), account });
+/** A page's rent-exempt minimum at its length after `size` entries' insert (the program's push_entry). */
 const pageNeed = (rent: SolanaRent, size: number) => solanaRentMin(rent, 16 + 72 * ((size % 1024) + 1));
+const page = (tree: 0 | 1, size: number) => solanaPoolPage(PROGRAM, tree, size);
 
-/** The pool as the program keeps it: tree sizes, each page's lamports, each mark address's account. */
-function world(rent: SolanaRent) {
-  const sizes = { ...SIZES };
-  // the recorded pool holds one entry on each page, each at its rent; `stray` lamports a stranger sent
-  const pages = { state: pageNeed(rent, 0), label: pageNeed(rent, 0) };
-  const marks = new Map<bigint, AccountRead>();
-  let nonce = 1n;
+/** The pool as the program keeps it: tree sizes, each page's lamports by address, each mark address's account. */
+function world(rent: SolanaRent, sizes0 = SIZES) {
+  const sizes = { ...sizes0 };
+  // each tree's current page holds its entries' rent; the state and label pages hold different amounts (44 and 32)
+  const pages = new Map<string, bigint>();
+  for (const [tree, size] of [[0, sizes.stateSize], [1, sizes.labelSize]] as const) if (size % 1024 !== 0) pages.set(page(tree, size), pageNeed(rent, size - 1));
+  const marks = new Map<bigint, Account>();
+  let nonce = BigInt(sizes.labelSize);
+  const read = (address: string): AccountRead => ({ address, account: pages.has(address) ? { owner: PROGRAM, data: new Uint8Array(0), lamports: pages.get(address)! } : null });
   return {
     sizes, pages, marks,
-    markAt: (p: bigint): AccountRead => marks.get(p) ?? null,
+    markAt: (p: bigint): AccountRead => markAt(p, marks.get(p) ?? null),
+    /** The reads of the two pages a deposit writes now. */
+    pageReads: () => ({ state: read(page(0, sizes.stateSize)), label: read(page(1, sizes.labelSize)) }),
+    read,
+    /** A stranger's lamports on the current page of `tree`. */
+    tip(tree: 0 | 1, lamports: bigint) {
+      const at = page(tree, tree === 0 ? sizes.stateSize : sizes.labelSize);
+      pages.set(at, (pages.get(at) ?? 0n) + lamports);
+    },
     /** The program's deposit: what it takes from U beyond the value (the fee, the mark's and pages' shortfall). */
     deposit(value: bigint, precommitment: bigint): bigint {
       const had = marks.get(precommitment);
-      assert.ok(had === undefined || had === null || had.owner === SOLANA_SYSTEM_PROGRAM, "PrecommitmentAlreadyUsed");
+      assert.ok(had === undefined || had.owner === SOLANA_SYSTEM_PROGRAM, "PrecommitmentAlreadyUsed");
       const short = (need: bigint, held: bigint) => (need > held ? need - held : 0n);
       let charge = FEE + short(solanaRentMin(rent, 17), had?.lamports ?? 0n);
-      charge += short(pageNeed(rent, sizes.stateSize), pages.state) + short(pageNeed(rent, sizes.labelSize), pages.label);
-      pages.state = pages.state > pageNeed(rent, sizes.stateSize) ? pages.state : pageNeed(rent, sizes.stateSize);
-      pages.label = pages.label > pageNeed(rent, sizes.labelSize) ? pages.label : pageNeed(rent, sizes.labelSize);
-      const m = markRead(value, ++nonce, rent)!;
+      for (const [tree, size] of [[0, sizes.stateSize], [1, sizes.labelSize]] as const) {
+        const at = page(tree, size), held = pages.get(at) ?? 0n, need = pageNeed(rent, size);
+        charge += short(need, held);
+        pages.set(at, held > need ? held : need);
+      }
+      const m = markAccount(value, ++nonce, rent);
       marks.set(precommitment, { ...m, lamports: (had?.lamports ?? 0n) > m.lamports ? had!.lamports : m.lamports });
       sizes.stateSize++;
       sizes.labelSize++;
@@ -74,13 +93,13 @@ function world(rent: SolanaRent) {
 
 /** One Solana U run as the device makes it, each deposit applied as the program applies it: what U deposited, what it
  *  keeps, and that every planned `left` is what U really holds after. */
-function runSolana(balance: bigint, rent: SolanaRent, plant?: (w: ReturnType<typeof world>) => void) {
-  const w = world(rent);
+function runSolana(balance: bigint, rent: SolanaRent, plant?: (w: ReturnType<typeof world>) => void, sizes0 = SIZES) {
+  const w = world(rent, sizes0);
   plant?.(w);
   const held: HeldNote[] = [];
   const out: { ref: NoteRef; value: bigint }[] = [];
   for (let k = 0; k < 64; k++) {
-    const step = solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held, markAt: w.markAt, balance, fee: FEE, rent, pages: { ...w.pages }, sizes: { ...w.sizes }, blockhash: BLOCKHASH });
+    const step = solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held, markAt: w.markAt, balance, fee: FEE, rent, pages: w.pageReads(), sizes: { ...w.sizes }, blockhash: BLOCKHASH });
     if (step.kind === "keep") return { out, left: step.left, u: step.u };
     assert.equal(step.kind, "deposit");
     if (step.kind !== "deposit") throw new Error("unreachable");
@@ -125,33 +144,56 @@ test("the fee is carried by U at the recorded devnet rent: each note a rung, run
 test("review M-1: lamports a stranger sent to a page or to the mark's address lower U's charge, and U still ends at 0 or rent(0)", () => {
   const cost = FEE + solanaRentMin(RENT, 17) + 2n * 72n * RENT.lamportsPerByte * RENT.factor;
   // priced from a page's expected size, U would plan left 0 here and keep the stray lamport: under rent(0), refused
-  for (const plant of [(w: ReturnType<typeof world>) => void (w.pages.state += 1n), (w: ReturnType<typeof world>) => void w.marks.set(P(U0), strayRead(7n)), (w: ReturnType<typeof world>) => void ((w.pages.label += 999_999_999n), w.marks.set(P(U0), strayRead(solanaRentMin(RENT, 17) * 2n)))]) {
+  for (const plant of [(w: ReturnType<typeof world>) => w.tip(0, 1n), (w: ReturnType<typeof world>) => w.tip(1, 3n), (w: ReturnType<typeof world>) => void w.marks.set(P(U0), stray(7n)), (w: ReturnType<typeof world>) => void (w.tip(1, 999_999_999n), w.marks.set(P(U0), stray(solanaRentMin(RENT, 17) * 2n)))]) {
     for (const B of [RUNG + cost, 3n * RUNG + 2n * cost, 87_654_321n]) runSolana(B, RENT, plant);
   }
+  // a stray lamport on the state page only (the trees at 44 and 32, their pages holding different rents): read from the
+  // state page's own read, never the label's
+  for (const B of [RUNG + cost - 1n, RUNG + cost + 2n]) runSolana(B, RENT, (w) => w.tip(0, 1n));
   // the charge read from the accounts: a page that already holds its new length's rent costs U nothing
   const w = world(RENT);
-  w.pages.state += 10n ** 9n;
-  w.pages.label += 10n ** 9n;
-  const step = solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held: [], markAt: w.markAt, balance: RUNG + FEE + solanaRentMin(RENT, 17), fee: FEE, rent: RENT, pages: w.pages, sizes: w.sizes, blockhash: BLOCKHASH });
+  w.tip(0, 10n ** 9n);
+  w.tip(1, 10n ** 9n);
+  const step = solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held: [], markAt: w.markAt, balance: RUNG + FEE + solanaRentMin(RENT, 17), fee: FEE, rent: RENT, pages: w.pageReads(), sizes: w.sizes, blockhash: BLOCKHASH });
   assert.deepEqual([step.kind, "left" in step ? step.left : null], ["deposit", 0n]);
 });
 
+test("review L-2 (delta): each page's read is tied to the page the deposit writes: at a page boundary the full page before is refused, and the new page is priced in full", () => {
+  // the state tree at 1024: page 0 is full and holds its rent; the deposit writes entry 1024, the first of page 1
+  const at = { stateSize: 1024, labelSize: 32 };
+  const w = world(RENT, at);
+  w.pages.set(page(0, 1023), pageNeed(RENT, 1023));
+  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held: [], markAt: w.markAt, fee: FEE, rent: RENT, sizes: at, blockhash: BLOCKHASH };
+  const balance = RUNG + FEE + solanaRentMin(RENT, 17) + pageNeed(RENT, 1024) + 72n * RENT.lamportsPerByte * RENT.factor;
+  // the page before passed as the state page: refused, never priced at 0
+  assert.throws(() => solanaSameChainDeposit({ ...base, balance, pages: { state: w.read(page(0, 1023)), label: w.pageReads().label } }), /the state page: the read is not of/);
+  // the label page passed as the state page: refused
+  assert.throws(() => solanaSameChainDeposit({ ...base, balance, pages: { state: w.pageReads().label, label: w.pageReads().label } }), /the state page: the read is not of/);
+  // the mark read of another note's address: refused
+  assert.throws(() => solanaSameChainDeposit({ ...base, balance, markAt: () => markAt(P(U0n(5)), null), pages: w.pageReads() }), /mark: the read is not of/);
+  // the right pages: page 1 does not exist yet and is paid in full (rent(16 + 72)), and U ends at exactly 0
+  const step = solanaSameChainDeposit({ ...base, balance, pages: w.pageReads() });
+  assert.deepEqual([step.kind, "left" in step ? step.left : null], ["deposit", 0n]);
+  runSolana(balance, RENT, undefined, at);
+});
+
 test("review M-2: a stranger's lamports at a note's mark address are no mark: the note is deposited, never skipped; a foreign account there is refused", () => {
-  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held: [], balance: 10n * RUNG, fee: FEE, rent: RENT, pages: { state: pageNeed(RENT, 0), label: pageNeed(RENT, 0) }, sizes: SIZES, blockhash: BLOCKHASH };
-  const step = solanaSameChainDeposit({ ...base, markAt: (p) => (p === P(U0) ? strayRead(1n) : null) });
+  const w = world(RENT);
+  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held: [], balance: 10n * RUNG, fee: FEE, rent: RENT, pages: w.pageReads(), sizes: SIZES, blockhash: BLOCKHASH };
+  const step = solanaSameChainDeposit({ ...base, markAt: (p) => markAt(p, p === P(U0) ? stray(1n) : null) });
   assert.deepEqual([step.kind, "ref" in step ? refKey(step.ref) : null], ["deposit", refKey(U0)]);
-  assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, (p) => (p === P(U0) ? strayRead(3n) : null)), { ref: U0, precommitment: P(U0), held: 3n });
+  assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, (p) => markAt(p, p === P(U0) ? stray(3n) : null)), { ref: U0, precommitment: P(U0), held: 3n });
   // a real mark is the program's: the note is past, and the store must hold it
-  assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, (p) => (p === P(U0) ? markRead(RUNG, 2n) : null)).ref, U0n(0));
-  assert.throws(() => solanaSameChainDeposit({ ...base, markAt: () => ({ owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: new Uint8Array(17), lamports: 1n }) }), /another program/);
+  assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, (p) => markAt(p, p === P(U0) ? markAccount(RUNG, 2n) : null)).ref, U0n(0));
+  assert.throws(() => solanaSameChainDeposit({ ...base, markAt: (p) => markAt(p, { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: new Uint8Array(17), lamports: 1n }) }), /another program/);
 });
 
 test("a reload mid-way settles the open note and never deposits again at a new index", () => {
   const B = 80_000_000n; // 0.05 + 0.02 + 0.01
   const plan = poolDepositPlan(SEED, SCOPE, SOL_LADDER, U0, B);
   assert.deepEqual(plan.notes.map((n) => n.value), [50_000_000n, 20_000_000n, 10_000_000n]);
-  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, fee: 0n, rent: FREE, pages: { state: 0n, label: 0n }, sizes: SIZES, blockhash: BLOCKHASH };
-  const marked = (...refs: NoteRef[]) => (p: bigint): AccountRead => (refs.some((r) => P(r) === p) ? markRead(RUNG, 2n, FREE) : null);
+  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, fee: 0n, rent: FREE, pages: world(FREE).pageReads(), sizes: SIZES, blockhash: BLOCKHASH };
+  const marked = (...refs: NoteRef[]) => (p: bigint): AccountRead => markAt(p, refs.some((r) => P(r) === p) ? markAccount(RUNG, 2n, FREE) : null);
   // U's deposit note landed; second arrival 0 was signed and written INCOMING, then the page reloaded before it landed
   const held = (s: NoteState): HeldNote[] => [{ ref: U0, state: "UNSPENT" }, { ref: U0n(0), state: s }];
   const pending = solanaSameChainDeposit({ ...base, held: held("INCOMING"), markAt: marked(U0), balance: 30_000_000n });
@@ -187,9 +229,9 @@ test("the next note's precommitment is recomputed from the words, and a note of 
   const other: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
   assert.throws(() => sameChainNext({ ...args, next: { ref: other, precommitment: P(other) } }), /not of U's chain/);
   assert.throws(() => sameChainNext({ ...args, first: { kind: "deposit", s: SCOPE + 1n, i: 0 }, next: { ref: U0, precommitment: P(U0) } }), /scope is its s/);
-  assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, () => null), { ref: U0, precommitment: P(U0), held: 0n });
+  assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, (p) => markAt(p, null)), { ref: U0, precommitment: P(U0), held: 0n });
   // a scope that is not the program's pool's is refused before any key is derived
-  assert.throws(() => solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE + 1n, ladder: SOL_LADDER, first: { kind: "deposit", s: SCOPE + 1n, i: 0 }, held: [], markAt: () => null, balance: RUNG, fee: 0n, rent: FREE, pages: { state: 0n, label: 0n }, sizes: SIZES, blockhash: BLOCKHASH }), /not the program's pool's/);
+  assert.throws(() => solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE + 1n, ladder: SOL_LADDER, first: { kind: "deposit", s: SCOPE + 1n, i: 0 }, held: [], markAt: (p) => markAt(p, null), balance: RUNG, fee: 0n, rent: FREE, pages: world(FREE).pageReads(), sizes: SIZES, blockhash: BLOCKHASH }), /not the program's pool's/);
   // below the smallest rung with its cost: U keeps it all
   assert.deepEqual(sameChainNext({ ...args, balance: RUNG - 1n, next: { ref: U0, precommitment: P(U0) } }), { kind: "keep", left: RUNG - 1n });
 });
