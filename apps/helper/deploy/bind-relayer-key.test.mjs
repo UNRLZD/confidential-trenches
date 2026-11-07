@@ -65,18 +65,21 @@ exec "${process.execPath}" "$@"
     { mode: 0o755 },
   );
   // `extra` sets names in the script's shell; a name set to undefined is removed from it
-  const run = (extra = {}, ...args) => {
+  const shellOf = (extra) => {
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extra };
     for (const [k, v] of Object.entries(env)) if (v === undefined) delete env[k];
-    return spawnSync("bash", [path.join(deploy, "bind-relayer-key.sh"), ...args], { encoding: "utf8", env });
+    return env;
   };
+  const run = (extra = {}, ...args) => spawnSync("bash", [path.join(deploy, "bind-relayer-key.sh"), ...args], { encoding: "utf8", env: shellOf(extra) });
+  // the script under bash -x, as an operator tracing it would run it: every command bash runs is echoed on stderr
+  const runTraced = (extra = {}) => spawnSync("bash", ["-x", path.join(deploy, "bind-relayer-key.sh")], { encoding: "utf8", env: shellOf(extra) });
   const envText = () => readFileSync(path.join(deploy, ".env"), "utf8");
   const plant = (text) => {
     const f = path.join(dir, "plant.out");
     writeFileSync(f, text);
     return { PLANT_OUT: f };
   };
-  return { dir, deploy, log, run, envText, plant };
+  return { dir, deploy, log, run, runTraced, envText, plant };
 }
 
 const valueOf = (text, name) => text.split("\n").find((l) => l.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -85,9 +88,13 @@ const files = (s) => readdirSync(s.deploy).sort();
 test("writes the three mainnet names once: the vault mainnet-v1.json's, the key a real ed25519 key of the implicit gas account; prints only public parts; the helper starts with them", () => {
   const s = server();
   const before = s.envText();
+  const inode = statSync(path.join(s.deploy, ".env")).ino;
   const r = s.run();
   assert.equal(r.status, 0, r.stderr);
   const after = s.envText();
+  // review FIX 4: deploy/.env is replaced by one rename of a whole new file (a new inode), never rewritten in place, so
+  // a run killed half way leaves the old file whole (with the withdraw relayer's funded key in it)
+  assert.notEqual(statSync(path.join(s.deploy, ".env")).ino, inode, "deploy/.env replaced by a rename, not written in place");
   assert.ok(after.startsWith(before), "every line kept, byte for byte, the three added after them");
   for (const n of NAMES) assert.equal(after.split("\n").filter((l) => l.startsWith(`${n}=`)).length, 1, n);
   assert.equal(valueOf(after, "BIND_VAULT_MAINNET"), MAINNET_VAULT);
@@ -139,6 +146,30 @@ test("planted: a second run, or any of the three names already set in any form r
       assert.equal(s.envText(), was);
       assert.equal(existsSync(s.log), false, "no key made");
     }
+  }
+});
+
+// review FIX 3: an operator may trace the script with bash -x, which echoes every command with its expanded words; no
+// key may reach that trace, neither a new one (never held in a shell variable) nor one already in deploy/.env (the
+// exit-3 check never captures the line it finds)
+test("under bash -x: a fresh run and every exit-3 refusal print no key text", () => {
+  const s = server();
+  const r = s.runTraced();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^\+ /m, "the run was traced");
+  const secret = valueOf(s.envText(), "BIND_RELAYER_KEY_MAINNET");
+  const seed = Buffer.from(base58decode(secret.slice(8))).subarray(0, 32);
+  for (const t of [secret.slice(8), seed.toString("hex"), seed.toString("base64"), base58(seed)]) assert.ok(!(r.stdout + r.stderr).includes(t), "the new key is not in the trace");
+  const k = freshKey();
+  for (const line of [`BIND_RELAYER_KEY_MAINNET=${k.key}`, `export BIND_RELAYER_KEY_MAINNET=${k.key}`, `  BIND_RELAYER_KEY_MAINNET = ${k.key}`, `BIND_RELAYER_MAINNET=${k.account}\nBIND_RELAYER_KEY_MAINNET=${k.key}`]) {
+    const t = server({ env: `${BASE_ENV}${line}\n` });
+    const was = t.envText();
+    const x = t.runTraced();
+    assert.equal(x.status, 3, `${line.slice(0, 30)}: exit ${x.status}`);
+    assert.match(x.stderr, /^\+ /m, "the run was traced");
+    const out = x.stdout + x.stderr;
+    assert.ok(!out.includes(k.key.slice(8)) && !out.includes(k.seed.toString("hex")), `the existing key is not in the trace: ${JSON.stringify(line.slice(0, 30))}`);
+    assert.equal(t.envText(), was);
   }
 });
 

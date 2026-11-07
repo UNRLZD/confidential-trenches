@@ -4,12 +4,19 @@
 # is at a commit that has this file and contracts/vault/deployments/mainnet-v1.json (git fetch and checkout, as
 # redeploy.sh's step 1 does):
 #   apps/helper/deploy/bind-relayer-key.sh
-# The order, which it prints again at the end with the account filled in:
-#   0. this step;
-#   1. apps/helper/deploy/redeploy.sh <this commit>, so the helper starts with the three lines below;
-#   2. the owner sends 1 NEAR to the gas account (the carry's floor for one more deposit is 0.3302526 NEAR,
+# The order on the first deploy of mainnet-v1.json (review FIX 2). The key is checked against the deployed image's
+# MAINNET_VAULT (exit 5 below), and the commit R that adds the record is the one that moves that pin
+# (src/withdraw/send.ts, held by its test), so R must be running before this step can pass:
+#   1. apps/helper/deploy/redeploy.sh R, holding the helper's live checks: from R on, helper-bind-relayer-mainnet is
+#      listed (scripts/ci/helper-live-checks.mjs bindMainnetPlan) and fails until step 3, and a failing check undoes a
+#      deploy;
+#   2. this step, on R's checkout;
+#   3. apps/helper/deploy/redeploy.sh R again, so the helper starts with the three lines below;
+#   4. the owner sends 1 NEAR to the gas account (the carry's floor for one more deposit is 0.3302526 NEAR,
 #      src/bind/send.ts RELAYER_FLOOR_YOCTO; below it every deposit answers relayer_low);
-#   3. once it has landed: the helper's live checks, helper-bind-relayer-mainnet among them.
+#   5. once it has landed: the helper's live checks, helper-bind-relayer-mainnet among them.
+# Later runs (a new server, a lost .env) start at step 2 on a running commit that has the record. At the end the script
+# prints the steps after it (3 to 5, numbered 1 to 3 there) with the account filled in.
 # In order, stopping at the first failure with deploy/.env unchanged:
 #   1. refuses (exit 3) when any line of deploy/.env sets one of the three names below (redeploy.sh's lines_of
 #      matcher), so a second run never replaces a key the gas account already holds; when deploy/.env names no image
@@ -111,7 +118,8 @@ main() {
   record="$root/contracts/vault/deployments/mainnet-v1.json"
 
   for name in "${NAMES[@]}"; do
-    if [[ -e "$env" ]] && [[ -n "$(lines_of "$env" "$name")" ]]; then
+    # grep -q: the matching line is never captured, so not even bash -x prints it (review FIX 3)
+    if [[ -e "$env" ]] && lines_of "$env" "$name" | grep -q .; then
       echo "bind-relayer-key: $name is already set in deploy/.env; nothing changed (the gas account keeps its key)" >&2
       exit 3
     fi
