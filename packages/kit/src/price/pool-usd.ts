@@ -52,7 +52,7 @@ import { base58 } from "@scure/base";
 import type { Chain } from "../orders/record.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset } from "../signpage/messages.ts";
 import { solanaParseAccountsAnswer } from "../trade/solana/pool.ts";
-import { SolanaRpcTransportError, solanaSameProvider, type SolanaRpc } from "../trade/solana/send.ts";
+import { SolanaRpcTransportError, solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "../trade/solana/send.ts";
 
 /** A price at most this far ahead of the device's clock is used: further, the clock is wrong and no age can be told. */
 export const POOL_USD_MAX_AHEAD_S = 60;
@@ -153,10 +153,6 @@ const fail = (why: string): never => {
 
 /** A try that answered nothing in its bound. */
 class NoAnswer extends Error {}
-function within<T>(p: Promise<T>, what: string, ms: number): Promise<T> {
-  let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new NoAnswer(`${what}: no answer in ${ms} ms`)), ms)))]).finally(() => clearTimeout(t));
-}
 /** RPC error -32016 "Minimum context slot has not been reached", as the kit's solanaJsonRpc words it: the provider is
  *  behind the slot asked for. */
 const behind = (e: unknown): boolean => e instanceof Error && e.message.startsWith("RPC error -32016:");
@@ -172,10 +168,18 @@ const nowAt = (nowS: number, bound: Bound): number => nowS + (Date.now() - bound
  *  the read's bound ends or the read is stopped. Any other answer, an error included, ends it at once. */
 async function call(rpc: SolanaRpc, method: string, params: readonly unknown[], what: string, bound: Bound): Promise<unknown> {
   for (let tries = 1; ; tries++) {
-    if (bound.stopped) return fail(`${what}: not asked again, the read has ended`);
-    const left = bound.end - Date.now();
+    // a try's bound counts from when the call goes out in its provider's queue (a paced provider: the signing page's pair),
+    // never from its wait for a turn, and is taken then, within the read's bound (card solana-release-reads-paced)
+    const timed = solanaTimedRpc(rpc, () => {
+      // a read that has ended asks no provider again, a try that waited for its turn while it ended included
+      if (bound.stopped) throw new Error(`${what}: not asked again, the read ended before its turn`);
+      const left = bound.end - Date.now();
+      // a turn that comes once the read's bound has ended sends nothing: no try begins past it
+      if (left <= 0) throw new NoAnswer(`${what}: no turn inside the read's bound`);
+      return Math.min(POOL_USD_CALL_TIMEOUT_MS, left);
+    }, (ms) => new NoAnswer(`${what}: no answer in ${ms} ms`));
     try {
-      return await within(Promise.resolve().then(() => rpc(method, params)), what, Math.max(1, Math.min(POOL_USD_CALL_TIMEOUT_MS, left)));
+      return await Promise.resolve().then(() => timed(method, params));
     } catch (e) {
       if (!behind(e) && !slow(e)) throw e;
       const waitMs = POOL_USD_RETRY_BACKOFF_MS * 2 ** (tries - 1);

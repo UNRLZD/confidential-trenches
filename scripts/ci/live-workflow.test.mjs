@@ -119,9 +119,10 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's thirty-nine checks (signpage-shell runs four ways, pool-deposits, oneclick-fee-path-own-key, pool-answer-unknown and page-evm-rpc-csp the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's forty checks (signpage-shell runs four ways, pool-deposits, oneclick-fee-path-own-key, pool-answer-unknown, page-evm-rpc-csp and solana-release-reads-paced the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 39);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 40);
+  assert.ok(sign.include.some((e) => e.key === "solana-release-reads-paced" && !e.chrome && e.args === ""), "solana-release-reads-paced runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "oneclick-fee-path-own-key" && !e.chrome && e.args === ""), "oneclick-fee-path-own-key runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");

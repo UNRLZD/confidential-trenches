@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { solanaPacedRpc } from "../src/trade/solana/send.ts";
 import { base64 } from "@scure/base";
 import {
   POOL_USD_BLOCK_MAX_AGE_S,
@@ -630,4 +631,56 @@ test("poolUsdGoodUntilS reads POOL_USD_FEEDS only by an own key: a chain outside
     delete P.polluted;
   }
   assert.equal(good("solana"), 1_000 + POOL_USD_FEEDS.solana.maxAgeS);
+});
+
+// Card solana-release-reads-paced: the signing page hands the price read its paced pair (pageSolanaRpcs). With a
+// provider's pace full, the read waits for its turn and its try's bound (POOL_USD_CALL_TIMEOUT_MS) counts from when the
+// call goes out, never from that wait, so a wait past 5 s still answers the price, never NoAnswer. Real time (the
+// provider queue runs on performance.now()), on URLs of its own, so the limit named here binds no other test's provider.
+test("card solana-release-reads-paced: with a provider's pace full the price read waits for its turn and still answers", async () => {
+  const sent: number[] = [];
+  const a = Object.assign(async () => { sent.push(performance.now()); return GOOD(); }, { url: "https://pace-usd-a.example/" });
+  const b = Object.assign(async () => GOOD(), { url: "https://pace-usd-b.example/" });
+  const limit = { windowMs: 5_600, total: 1, perMethod: 1 };
+  const paced = solanaPacedRpc(a, limit);
+  // the pace full: a caller holding provider A under 1 call in any 5.6 s has made its call
+  await solanaPacedRpc(Object.assign(async () => null, { url: a.url }), limit)("getSlot", []);
+  const full = performance.now();
+  const r = await poolUsdToUnits({ chain: "solana", usd: "100", rpcs: [paced, b], nowMs: NOW }).then((v) => ({ v }), (e: unknown) => ({ e }));
+  assert.ok("v" in r, `the price read answered: ${"e" in r ? String((r.e as Error)?.message ?? r.e) : ""}`);
+  assert.equal(r.v, UNITS);
+  assert.equal(sent.length, 1, "one read on A, once its turn came");
+  assert.ok(sent[0]! - full >= 5_500, `the read on A went out once the pace let it: ${Math.round(sent[0]! - full)} ms`);
+});
+
+// Card solana-release-reads-paced: a try that waits for its turn in its provider's queue sends nothing once the read
+// has ended (the other provider refused) or once the read's bound has passed while it waited. Real timers (the queue
+// runs on them); the read's clock (Date) alone is moved, by node:test's mock, past the 12 s bound.
+const waiting = (url: string) => {
+  const sent: string[] = [];
+  const rpc = Object.assign(async (method: string) => { sent.push(method); return GOOD(); }, { url });
+  const limit = { windowMs: 400, total: 1, perMethod: 1 };
+  return { rpc: solanaPacedRpc(rpc, limit), sent, fill: () => solanaPacedRpc(Object.assign(async () => null, { url }), limit)("getSlot", []) };
+};
+test("retry: a try waiting for its turn sends nothing once the read has ended", async () => {
+  const a = waiting("https://pace-usd-stop-a.example/");
+  await a.fill();
+  const refuse = Object.assign(async () => { throw new Error("HTTP 403"); }, { url: "https://pace-usd-stop-b.example/" });
+  await assert.rejects(poolUsdPrice({ chain: "solana", rpcs: [a.rpc, refuse], nowMs: NOW }), /HTTP 403/);
+  await new Promise((r) => setTimeout(r, 600));
+  assert.deepEqual(a.sent, [], "a: its turn came after the read ended, and nothing was sent");
+});
+test("retry: a try whose turn comes past the read's bound sends nothing and fails the read as no answer", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["Date"], now: Date.now() });
+  t.after(() => resetTimers(t.mock.timers));
+  const a = waiting("https://pace-usd-late-a.example/");
+  await a.fill();
+  const b = Object.assign(async () => GOOD(), { url: "https://pace-usd-late-b.example/" });
+  const read = poolUsdPrice({ chain: "solana", rpcs: [a.rpc, b], nowMs: NOW });
+  read.catch(() => undefined); // awaited below
+  // b answered at once; a waits for its turn (real time) while the read's clock passes its bound
+  await new Promise((r) => setImmediate(r));
+  t.mock.timers.tick(POOL_USD_READ_DEADLINE_MS + 1_000);
+  await assert.rejects(read, /rpc 0 getMultipleAccounts: no turn inside the read's bound/);
+  assert.deepEqual(a.sent, [], "a: its turn came past the bound, and nothing was sent");
 });
