@@ -180,12 +180,38 @@ test("a rebuild whose floor is still under minOut is refused, never sent", async
   assert.equal(r.legs[0]?.dry, undefined);
 });
 
-test("a floor that rounds to 0 is refused before any build", async () => {
+test("a floor that rounds to 0 is refused: its build, out with the first reads, is dropped unassembled, nothing simulated or signed", async () => {
   const urls: string[] = [];
-  const r = await runSolanaTrade(request(BUY), { ...deps(BUY, { urls }), reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
+  const d = deps(BUY, { urls });
+  const r = await runSolanaTrade(request(BUY), { ...d, reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
   assert.equal(r.legs[0]?.minOut, 0n);
   assert.equal(r.legs[0]?.refused, "the floor rounds to 0");
-  assert.equal(urls.length, 0);
+  assert.ok(urls.length <= 1, `${urls.length} builds`);
+  for (const p of d.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.equal(r.legs[0]?.signature, undefined);
+});
+
+test("card solana-quote-under-1s: every leg's build goes out with the first reads, before the reference answers", async () => {
+  const urls: string[] = [];
+  const d = deps(SELL, { urls });
+  let builtBeforeReference = false;
+  // the reference answers only once a build is out, or after 3 s: a flow that waits for it before building is red
+  const reference: SolanaTradeDeps["reference"] = async (q, p) => {
+    const t = Date.now();
+    while (urls.length < request(SELL).legs.length && Date.now() - t < 3_000) await new Promise((ok) => setTimeout(ok, 5));
+    builtBeforeReference = urls.length === request(SELL).legs.length;
+    return d.reference(q, p);
+  };
+  const r = await runSolanaTrade(request(SELL), { ...d, reference });
+  assert.equal(builtBeforeReference, true, "the builds waited for the reference");
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+});
+
+test("card solana-quote-under-1s: no reference pool refuses every leg; the builds already out are dropped, nothing simulated or signed", async () => {
+  const d = deps(SELL);
+  const r = await runSolanaTrade(request(SELL), { ...d, reference: async () => null });
+  for (const l of r.legs) { assert.equal(l.refused, "no reference pool"); assert.equal(l.signature, undefined); assert.equal(l.verdict, undefined); }
+  for (const p of d.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
 });
 
 test("one wallet a request: every read and simulation of a buy and a three-wallet sell names one of the user's wallets", async () => {

@@ -378,29 +378,76 @@ type LegReference = { legExpectedOut: bigint; expectedOut: bigint };
  * fresh reads, a fresh reference and a fresh blockhash. */
 type Prepared = { leg: SolanaTradeLeg; rec: SolanaLegRecord; assembled: SolanaAssembled; checked: Uint8Array; renew: () => Promise<((bh: SolanaBlockhash, ref: LegReference) => Promise<Prepared | null>) | null> };
 
+/** What a leg's checks need from the trade's first reads: the blockhash the tx is assembled on and the mint on both
+ * providers; null when the trade or this leg is refused before them (no reference pool, a floor of 0, a read failed). */
+type LegGate = { blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null] } | null;
+/** A leg's build answered after its trade or leg was refused at the first reads: it is dropped, never assembled. */
+class LegGateClosed extends Error {}
+
 async function prepareLeg(
   req: SolanaTradeRequest,
   leg: SolanaTradeLeg,
   rec: SolanaLegRecord,
-  ctx: { deps: SolanaTradeDeps; blockhash: SolanaBlockhash; mint: [Acc | null, Acc | null]; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[]; room: SolanaBuildRoom },
+  ctx: { deps: SolanaTradeDeps; gate: Promise<LegGate>; otherWallets: readonly string[]; links: SolanaWalletLinks; heldMints: readonly string[]; room: SolanaBuildRoom },
 ): Promise<Prepared | null> {
-  const { deps, blockhash } = ctx;
+  const { deps } = ctx;
   const [pa, pb] = deps.providers;
   const now = deps.now ?? (() => performance.now());
-  const mintA = ctx.mint[0];
-  if (!mintA || (mintA.owner !== SOLANA_TOKEN_PROGRAM && mintA.owner !== SOLANA_TOKEN_2022_PROGRAM)) { rec.refused = "the mint is not a token mint on provider A"; return null; }
-  const tokenProgram = mintA.owner;
   const w = leg.wallet;
+  const t0 = now();
+  const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
+  const room = ctx.room;
+  // past the helper's share or room, a build waits the Retry-After inside the trade's bound (SolanaBuildRoom); a leg
+  // refused at the first reads waits no more (its bound ends there)
+  const roomWait = room.wait;
+  let closed = false;
+  const wait = { ...roomWait, get until() { return closed ? -Infinity : roomWait.until; } };
+  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}), wait };
+  const tb0 = now();
+  // A build's tables, read on both providers (assembly uses provider A's, S2 holds B's to the same bytes), and the
+  // device's own assembly on them, which refuses (too_large) a tx over 1,232 bytes: the cap search's judge. The build
+  // request names only the user's own request (side, wallet, token, amount, s), so it goes out with the trade's first
+  // reads (card solana-quote-under-1s); its tables are read as it answers, and its assembly waits for the first reads'
+  // blockhash and mint. Nothing of it is used before every check below has run on the device's own reads.
+  const fitOn = async (b: SolanaJupiterBuild) => {
+    const tableKeys = [...b.tables];
+    const [[ta, tb], g] = await Promise.all([tableKeys.length ? both((r) => readAccounts(r, tableKeys, "confirmed"), deps.providers) : ([[], []] as [(Acc | null)[], (Acc | null)[]]), ctx.gate]);
+    const m = g?.mint[0];
+    if (!g || rec.refused || !m || (m.owner !== SOLANA_TOKEN_PROGRAM && m.owner !== SOLANA_TOKEN_2022_PROGRAM)) throw new LegGateClosed();
+    const tables: Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]> = {};
+    const decoded: Record<string, SolanaLookupTable> = {};
+    tableKeys.forEach((k, i) => {
+      const a = ta[i] ?? null;
+      const bb = tb[i] ?? null;
+      tables[k] = [a, bb];
+      if (a && a.owner === SOLANA_ALT_PROGRAM) {
+        try { decoded[k] = solanaDecodeLookupTable(a.data); } catch { /* S2 refuses */ }
+      }
+    });
+    const feeOpts = mintHasTransferFee(m) ? { transferFeeMints: [req.token] } : {};
+    return { tables, assembled: assembleSolanaSwap(breq, b, { blockhash: g.blockhash.blockhash, lastValidBlockHeight: g.blockhash.lastValidBlockHeight, tables: decoded, tokenProgram: m.owner }, feeOpts) };
+  };
+  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote). Each
+  // leg searches on its own answers, all at once: no leg waits on another (at most SOLANA_JUPITER_MAX_BUILDS builds and
+  // one floor rebuild a leg, so K legs ask Jupiter K to 4K builds; a one-leg trade at most 4, the helper's share).
+  const search = fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
+  search.catch(() => undefined); // awaited below, or settled and dropped when the leg is refused at the first reads
+  const gate = await ctx.gate;
+  const mintA = gate?.mint[0];
+  const drop = async (why?: string): Promise<null> => {
+    closed = true;
+    if (why) rec.refused = why;
+    await search.catch(() => undefined);
+    return null;
+  };
+  if (!gate || rec.refused) return drop();
+  if (!mintA || (mintA.owner !== SOLANA_TOKEN_PROGRAM && mintA.owner !== SOLANA_TOKEN_2022_PROGRAM)) return drop("the mint is not a token mint on provider A");
+  const tokenProgram = mintA.owner;
   const ata = solanaAta(w, req.token, tokenProgram);
   const uva = solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM);
   const sva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
   const minOut = rec.minOut as bigint;
-  const t0 = now();
-  const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
-  const room = ctx.room;
-  // past the helper's share or room, a build waits the Retry-After inside the trade's bound (SolanaBuildRoom)
-  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}), wait: room.wait };
-  // The build, and with it on both providers the reads that do not depend on it: the rents in play (the wallet's
+  // While the build is out, on both providers the reads that do not depend on it: the rents in play (the wallet's
   // token account, its size from the mint, and the pump volume account) and the pre-state the simulation is held to
   // (the wallet, its token account, its two volume accounts: this wallet's only), which also gives spendable.
   const watch = [w, ata, uva, sva];
@@ -412,29 +459,7 @@ async function prepareLeg(
   };
   const sideReads = Promise.all([both(rentOf, deps.providers), both((r) => readAccounts(r, watch, "confirmed"), deps.providers)]);
   sideReads.catch(() => undefined); // awaited below; a refused build must not leave it unhandled
-  const tb0 = now();
-  // A build's tables, read on both providers (assembly uses provider A's, S2 holds B's to the same bytes), and the
-  // device's own assembly on them, which refuses (too_large) a tx over 1,232 bytes: the cap search's judge.
-  const feeOpts = mintHasTransferFee(mintA) ? { transferFeeMints: [req.token] } : {};
-  const fitOn = async (b: SolanaJupiterBuild) => {
-    const tableKeys = [...b.tables];
-    const [ta, tb] = tableKeys.length ? await both((r) => readAccounts(r, tableKeys, "confirmed"), deps.providers) : ([[], []] as [(Acc | null)[], (Acc | null)[]]);
-    const tables: Record<string, readonly [SolanaAccountRead | null, SolanaAccountRead | null]> = {};
-    const decoded: Record<string, SolanaLookupTable> = {};
-    tableKeys.forEach((k, i) => {
-      const a = ta[i] ?? null;
-      const bb = tb[i] ?? null;
-      tables[k] = [a, bb];
-      if (a && a.owner === SOLANA_ALT_PROGRAM) {
-        try { decoded[k] = solanaDecodeLookupTable(a.data); } catch { /* S2 refuses */ }
-      }
-    });
-    return { tables, assembled: assembleSolanaSwap(breq, b, { blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight, tables: decoded, tokenProgram }, feeOpts) };
-  };
-  // The cap search: 40, up on no route, down when the assembly is over 1,232 bytes (build.ts, Jupiter's requote). Each
-  // leg searches on its own answers, all at once: no leg waits on another (at most SOLANA_JUPITER_MAX_BUILDS builds and
-  // one floor rebuild a leg, so K legs ask Jupiter K to 4K builds; a one-leg trade at most 4, the helper's share).
-  const found = await fetchSolanaJupiterBuildThatFits(deps.helper, breq, fitOn, opts);
+  const found = await search;
   rec.buildCaps = found.steps;
   room.fitted(found.maxAccounts);
   let calls = found.calls.length;
@@ -558,7 +583,7 @@ async function prepareLeg(
     const checked = Uint8Array.from(a.wire);
     const verdict = checkSolanaQuote(checked, { side: req.side, wallet: w, token: req.token, amount: leg.amount, spendable: st.spendable, minOut, otherWallets: ctx.otherWallets, links: ctx.links, heldMints: ctx.heldMints }, {
       tables,
-      mint: [ctx.mint[0], ctx.mint[1]],
+      mint: [gate.mint[0], gate.mint[1]],
       rent: { tokenAccount: [rent[0][0], rent[1][0]], pumpVolumeAccumulator: [rent[0][1], rent[1][1]] },
       simulations: st.simulations,
       writable: st.writable,
@@ -802,12 +827,47 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
   // slices (SolanaWalletLinks; the caller's long-lived one when given, so only new wallets and keys cost).
   const links = deps.links ?? new SolanaWalletLinks();
   links.grow(req.wallets, [req.token, ...heldMints]).catch(() => undefined); // each leg awaits it with its own growth
-  const [ref, blockhash, mint] = await first;
+  // Every leg's build goes out now, with the first reads (card solana-quote-under-1s): a build asks only the user's own
+  // request, and a leg uses it only once the first reads are in and every check has run on the device's own reads. A
+  // leg refused at the first reads (no reference pool, a floor of 0, a read that failed) drops its build unused.
+  const room = new SolanaBuildRoom({
+    total: live.length,
+    boundMs: SOLANA_TRADE_BUILD_WAIT_MS,
+    ...(deps.now ? { clock: deps.now } : {}),
+    ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    ...(deps.onBuilds ? { onProgress: deps.onBuilds } : {}),
+  });
+  let openGate: (g: LegGate) => void = () => {};
+  const gate = new Promise<LegGate>((ok) => { openGate = ok; });
+  const legs = Promise.all(
+    live.map(async (i) => {
+      const rec = recs[i] as SolanaLegRecord;
+      try {
+        return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, gate, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints, room });
+      } catch (err) {
+        rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
+        return null;
+      } finally {
+        room.done();
+      }
+    }),
+  );
+  let firstRead: Awaited<typeof first>;
+  try {
+    firstRead = await first;
+  } catch (err) {
+    openGate(null);
+    await legs;
+    throw err;
+  }
+  const [ref, blockhash, mint] = firstRead;
   const e = ref?.expectedOut ?? null;
   record.reference = e;
   record.blockhash = blockhash;
   if (e === null || e <= 0n || !ref || ref.expectedOuts?.length !== live.length || ref.expectedOuts.some((x) => x <= 0n)) {
     for (const i of live) (recs[i] as SolanaLegRecord).refused = "no reference pool";
+    openGate(null);
+    await legs;
     progress("refused");
     return record;
   }
@@ -818,29 +878,8 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
     r.legExpectedOut = (ref.expectedOuts as readonly bigint[])[j] as bigint;
     if ((r.minOut as bigint) <= 0n) r.refused = "the floor rounds to 0";
   });
-  const room = new SolanaBuildRoom({
-    total: live.filter((i) => !(recs[i] as SolanaLegRecord).refused).length,
-    boundMs: SOLANA_TRADE_BUILD_WAIT_MS,
-    ...(deps.now ? { clock: deps.now } : {}),
-    ...(deps.sleep ? { sleep: deps.sleep } : {}),
-    ...(deps.onBuilds ? { onProgress: deps.onBuilds } : {}),
-  });
-  const prepared = (
-    await Promise.all(
-      live.map(async (i) => {
-        const rec = recs[i] as SolanaLegRecord;
-        if (rec.refused) return null;
-        try {
-          return await prepareLeg(req, req.legs[i] as SolanaTradeLeg, rec, { deps, blockhash, mint, otherWallets: [...all].filter((x) => x !== rec.wallet), links, heldMints, room });
-        } catch (err) {
-          rec.refused = err instanceof SolanaBuildError ? `build ${err.code}: ${err.message.slice(0, 160)}` : `error: ${String((err as Error)?.message ?? err).slice(0, 200)}`;
-          return null;
-        } finally {
-          room.done();
-        }
-      }),
-    )
-  ).filter((x): x is Prepared => x !== null);
+  openGate({ blockhash, mint });
+  const prepared = (await legs).filter((x): x is Prepared => x !== null);
   // The renewal's reference: E read again for the same set A, its floors drawn as the first read's were (T1.3).
   const rereference = async (): Promise<Map<SolanaLegRecord, LegReference> | null> => {
     const again = await deps.reference({ side: req.side, token: req.token, amount: total, amounts }, deps.providers);
