@@ -185,6 +185,7 @@ import {
   evmPoolSellTip,
   evmBuyRouteOf,
   evmPoolVenues,
+  evmRpcOperator,
   evmSellRouteOf,
   solanaJsonRpc,
   type EvmPoolChain,
@@ -192,7 +193,7 @@ import {
 } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
-import { heldPerClient, throttleOf } from "../limits/limits.ts";
+import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, type ProviderHolds } from "../limits/limits.ts";
 
 /** POST /v1/pool/evm/send's body limit, and the calldata's: a withdraw is 4 + 32 x 32 = 1,028 bytes (WITHDRAW_LEN), a buy
  *  1,220 bytes plus its swap data padded; the most a release's calldata can be is the most whose signed transaction, at
@@ -627,14 +628,23 @@ const blockOf = (v: unknown): EvmBlock => {
 const tag = (n: bigint) => `0x${n.toString(16)}`;
 
 /**
- * The first block at or after `seconds`, read on `rpc`: null when the newest block is still before it. Steps back from
- * the newest block, doubling, until a block is before it, then halves the gap.
+ * The first block at or after `seconds`, read on `rpc`: null when the newest block is still before it. Searches by the
+ * chain's own block time (card robinhood-mainnet-rpcs, review M-3), never a second as a block: the first step back is
+ * one block a second, at most as far as the time on a chain of a block a second or slower; each later step is the
+ * time still to go at the block time the two newest reads show, a tenth more, at least twice the step before (so a chain
+ * whose blocks stopped is still passed). Inside the bracket each probe lands where the block times put `seconds` less
+ * half a second (the gap between the blocks before it and the blocks at it, where the run of blocks with one timestamp
+ * makes the first at it), and halves the gap instead when the probe before took less than half of it.
+ * 8 to 10 reads at Robinhood's 0.1 s blocks, 1 to 600 s back, where a second as a block took 11 to 14 a minute back.
  */
 export async function evmFirstBlockAtOrAfter(rpc: EvmRpc, seconds: bigint): Promise<EvmBlock | null> {
   const at = async (n: bigint | "latest") => blockOf(await rpc("eth_getBlockByNumber", [n === "latest" ? n : tag(n), false]));
   let hi = await at("latest");
   if (hi.timestamp < seconds) return null;
+  // blocks per second over two reads, as a fraction (blocks, seconds); null when they share a timestamp
+  const rate = (a: EvmBlock, b: EvmBlock): [bigint, bigint] | null => (b.timestamp > a.timestamp ? [b.number - a.number, b.timestamp - a.timestamp] : null);
   let step = hi.timestamp - seconds + 1n;
+  let newer: EvmBlock | null = null;
   let lo: EvmBlock | null = null;
   for (;;) {
     if (hi.number === 0n) return hi;
@@ -644,13 +654,25 @@ export async function evmFirstBlockAtOrAfter(rpc: EvmRpc, seconds: bigint): Prom
       lo = b;
       break;
     }
+    newer = hi;
     hi = b;
-    step *= 2n;
+    const r = rate(hi, newer);
+    const want = r === null ? 0n : ((hi.timestamp - seconds + 1n) * r[0] * 11n) / (r[1] * 10n) + 1n;
+    step = want > step * 2n ? want : step * 2n;
   }
+  let halve = false;
   while (hi.number - lo.number > 1n) {
-    const mid = await at((lo.number + hi.number) / 2n);
+    const gap = hi.number - lo.number;
+    let n = (lo.number + hi.number) / 2n;
+    if (!halve) {
+      // where seconds - 1/2 falls between lo and hi, in half seconds so the arithmetic stays whole
+      const guess = lo.number + ((2n * (seconds - lo.timestamp) - 1n) * gap) / (2n * (hi.timestamp - lo.timestamp));
+      n = guess <= lo.number ? lo.number + 1n : guess >= hi.number ? hi.number - 1n : guess;
+    }
+    const mid = await at(n);
     if (mid.timestamp >= seconds) hi = mid;
     else lo = mid;
+    halve = !halve && (hi.number - lo.number) * 2n > gap;
   }
   return hi;
 }
@@ -1697,13 +1719,60 @@ export const POOL_EVM_COLLECTOR_ENV = {
 } as const;
 
 /**
+ * One spelling for an RPC URL (card robinhood-mainnet-rpcs, review L-3): what the URL parser writes, the bare origin
+ * when there is no path, query, fragment or userinfo, so `https://robinhood.drpc.org/` is the pace's and the holds' key
+ * `https://robinhood.drpc.org` (PROVIDER_PACE, the /v1/rpc proxy's pinned URLs), never a second provider with no pace.
+ * A URL that does not parse is left as written; its operator is none and the start refuses it.
+ */
+export function evmRpcUrlOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname === "/" && u.search === "" && u.hash === "" && u.username === "" && u.password === "" ? u.origin : u.href;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * `rpc` (provider `url`'s client) drawn from the helper's one pace and hold for that provider (card
+ * robinhood-mainnet-rpcs; helper-evm-sender review 4 Nov 22:38Z, L1): each call waits while the provider is held, then
+ * takes its post from the sender's reserve (limits.ts take with `sender`: down to empty, where callers' reads stop at
+ * SENDER_ROOM and background at CALLER_ROOM, fold A), so no crowd of /v1/rpc callers holds a withdraw past one post's
+ * refill, and it never spends the provider's limit outside the pace, however often a halted chain's reads are asked
+ * again; a throttle it is answered holds the provider for every path (its Retry-After, else 1 s). A provider with no
+ * pace (an env URL of the host's own) is only held.
+ */
+export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, sleep: (ms: number) => Promise<void> = (ms) => new Promise((go) => setTimeout(go, ms))): EvmRpc {
+  holds.reserve(url);
+  return async (method, params) => {
+    for (;;) {
+      const h = holds.heldMs(url);
+      const w = h > 0 ? h : holds.take(url, 1, false, true);
+      if (w === 0) break;
+      await sleep(w);
+    }
+    try {
+      return await rpc(method, params);
+    } catch (e) {
+      if (throttleOf(e, true) > 0) {
+        const after = (e as { afterMs?: unknown }).afterMs;
+        holds.hold(url, typeof after === "number" && after > 0 ? Math.min(Math.ceil(after / 1000), RETRY_AFTER_MAX_S) : 1);
+      }
+      throw e;
+    }
+  };
+}
+
+/**
  * The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off (a
  * sell key set alone is refused). A network whose venue in the kit (`venues`, the kit's own list) pins a sell sender
  * starts only with that sell key: the device sims each sale as sent from the pin (the kit's checks/evm/quote.ts
  * simmedSells), so a sale from any other key would run where the sim did not. With no sell key, or on a chain whose venue
  * pins no sell sender (the sell key is then not used), the network starts and refuses every sell (503 not_configured).
+ * `holds`: the helper's one pace and hold per provider (limits.ts providerHolds), which each sender's reads draw on
+ * (pacedEvmRpc); the server passes its own, shared with the swap, maker and /v1/rpc reads.
  */
-export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues()): Map<string, EvmPoolSender> {
+export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues(), holds?: ProviderHolds): Map<string, EvmPoolSender> {
   const out = new Map<string, EvmPoolSender>();
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
     const [pool, key, fee, feeTo, rpcs] = names.map((n) => env[n] ?? "");
@@ -1731,9 +1800,18 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
     const pair = v !== undefined && Object.hasOwn(v, "feeProviders") ? v.feeProviders : undefined;
     if (rpcs === "" && pair === undefined) throw new Error(`${names[4]} must be set: the kit lists no fee providers for ${network}`);
-    const urls = rpcs === "" ? [...pair!] : rpcs!.split(",");
+    const urls = (rpcs === "" ? [...pair!] : rpcs!.split(",")).map(evmRpcUrlOf);
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
-    const providers = urls.map((u) => solanaJsonRpc(u)) as unknown as [EvmRpc, EvmRpc]; // a plain JSON-RPC client
+    // fold B: two operators, by the kit's one rule (evmRpcOperator, card robinhood-mainnet-rpcs review L-2): two URLs of
+    // one operator are one word
+    const ops = urls.map(evmRpcOperator);
+    if (ops.includes(null)) throw new Error(`${names[4]} must be two http or https URLs`);
+    if (ops[0] === ops[1]) throw new Error(`${names[4]} must be two RPC URLs of two operators: both are ${ops[0]}`);
+    // a plain JSON-RPC client, drawn from the helper's pace for its provider when the server gives one
+    const providers = urls.map((u) => {
+      const r = solanaJsonRpc(u) as unknown as EvmRpc;
+      return holds === undefined ? r : pacedEvmRpc(u, r, holds);
+    }) as [EvmRpc, EvmRpc];
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     // sales go only from the pin: a chain with none starts with sales off, never with an unpinned key
     const sells = sellKey !== "" && pin !== undefined;
