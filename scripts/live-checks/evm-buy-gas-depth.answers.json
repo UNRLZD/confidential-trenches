@@ -1,0 +1,150 @@
+{
+ "bad": {
+  "at": "2026-11-07T08:07:58.234Z",
+  "from": "local, main 332672aa (the helper before this card)",
+  "runs": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "fee": {
+     "status": 200,
+     "body": {
+      "chain": "evm",
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "fee_recipient": "0x18598340001f037061135a9327c4673bb285649d",
+      "sell_sender": null,
+      "fee_collector": null,
+      "epoch_ms": 60000,
+      "epoch_start_ms": 1794038820000,
+      "block": "0x35027f4",
+      "fee": "10000000000000",
+      "step": "10000000000000"
+     }
+    },
+    "reads": [
+     {
+      "host": "sepolia.base.org",
+      "hash": "0x019a9c448511c3c3e926f6bd0bf26360171b69abdc1a3e3c762583402f6b8df8",
+      "baseFeePerGas": "0x4c4b40",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000004"
+     },
+     {
+      "host": "base-sepolia-rpc.publicnode.com",
+      "hash": "0x019a9c448511c3c3e926f6bd0bf26360171b69abdc1a3e3c762583402f6b8df8",
+      "baseFeePerGas": "0x4c4b40",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000004"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "fee": {
+     "status": 200,
+     "body": {
+      "chain": "evm",
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "fee_recipient": "0xbd20ec4c215480cd97ff02fa069b71cb39cd682b",
+      "sell_sender": null,
+      "fee_collector": null,
+      "epoch_ms": 60000,
+      "epoch_start_ms": 1794038820000,
+      "block": "0x8ef4424",
+      "fee": "20000000000000",
+      "step": "10000000000000"
+     }
+    },
+    "reads": [
+     {
+      "host": "rpc.testnet.chain.robinhood.com",
+      "hash": "0xf2f0d89cfa8de2a08b810e2184aef6270cb38fc82878a2b5fbda229d5e8f6f4c",
+      "baseFeePerGas": "0x989680",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000003"
+     },
+     {
+      "host": "robinhood-testnet.drpc.org",
+      "hash": "0xf2f0d89cfa8de2a08b810e2184aef6270cb38fc82878a2b5fbda229d5e8f6f4c",
+      "baseFeePerGas": "0x989680",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000003"
+     }
+    ]
+   }
+  ]
+ },
+ "good": {
+  "at": "2026-11-07T08:07:27.306Z",
+  "from": "local, this card",
+  "runs": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "fee": {
+     "status": 200,
+     "body": {
+      "chain": "evm",
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "fee_recipient": "0xe7e474f69d78ebdef83182dbec185253d9ccc5c7",
+      "sell_sender": null,
+      "fee_collector": null,
+      "epoch_ms": 60000,
+      "epoch_start_ms": 1794038820000,
+      "block": "0x35027f4",
+      "fee": "20000000000000",
+      "step": "10000000000000"
+     }
+    },
+    "reads": [
+     {
+      "host": "sepolia.base.org",
+      "hash": "0x019a9c448511c3c3e926f6bd0bf26360171b69abdc1a3e3c762583402f6b8df8",
+      "baseFeePerGas": "0x4c4b40",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000004"
+     },
+     {
+      "host": "base-sepolia-rpc.publicnode.com",
+      "hash": "0x019a9c448511c3c3e926f6bd0bf26360171b69abdc1a3e3c762583402f6b8df8",
+      "baseFeePerGas": "0x4c4b40",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000004"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "fee": {
+     "status": 200,
+     "body": {
+      "chain": "evm",
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "fee_recipient": "0x962d7e8b034cd19599374cb54c32fb38eefae97d",
+      "sell_sender": null,
+      "fee_collector": null,
+      "epoch_ms": 60000,
+      "epoch_start_ms": 1794038820000,
+      "block": "0x8ef4424",
+      "fee": "30000000000000",
+      "step": "10000000000000"
+     }
+    },
+    "reads": [
+     {
+      "host": "rpc.testnet.chain.robinhood.com",
+      "hash": "0xf2f0d89cfa8de2a08b810e2184aef6270cb38fc82878a2b5fbda229d5e8f6f4c",
+      "baseFeePerGas": "0x989680",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000003"
+     },
+     {
+      "host": "robinhood-testnet.drpc.org",
+      "hash": "0xf2f0d89cfa8de2a08b810e2184aef6270cb38fc82878a2b5fbda229d5e8f6f4c",
+      "baseFeePerGas": "0x989680",
+      "depth": "0x0000000000000000000000000000000000000000000000000000000000000003"
+     }
+    ]
+   }
+  ]
+ }
+}
