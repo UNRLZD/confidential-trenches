@@ -84,7 +84,7 @@ export function judge(rec) {
     say(dryOk, `${n}: typing ${AMOUNT} sends ${dry.length} deposit.dry${dry.length ? ` (${dry.map((d) => JSON.stringify(d)).join(", ")})` : ""}, want one with ${NEAR.origin_asset} and ${AMOUNT} only`);
     say(r.quoteState === "S4.3" && r.youGet === "$73.18", `${n}: the dry quote draws ${r.quoteState ?? "no state"}, You get ${r.youGet ?? "nothing"}`);
     const qOk = same(r.quote, { origin_asset: NEAR.origin_asset, amount: AMOUNT });
-    say(qOk, `${n}: Get address sends deposit.quote ${r.quote ? JSON.stringify(r.quote) : "nothing"}`);
+    say(qOk, `${n}: Get address sends deposit.quote ${r.quote ? JSON.stringify(r.quote) : "nothing"}${!qOk && r.tapGet ? ` (the tap: ${JSON.stringify(r.tapGet)})` : ""}`);
     say(r.addressState === "S4.13" && r.address === ADDRESS, `${n}: the address state ${r.addressState ?? "none"} draws ${r.address === ADDRESS ? "the quote's own address" : (r.address ?? "no address")}`);
     say(same(r.heading, ["NEAR"]), `${n}: the address heading reads ${JSON.stringify(r.heading ?? null)}, the asset once`);
     const want = STAGES.map(([, s]) => s);
@@ -151,7 +151,16 @@ async function runOne(browser, w, scheme, shots, route) {
     run.youGet = await f.locator("[data-sheet='deposit'] .dget .v .num").first().textContent({ timeout: 1_000 }).catch(() => null);
     await shot(page, "quote");
 
-    await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).catch(() => {});
+    // what the tap meets: the button's box, whether it is on, the element at its centre, and the tap's own error, so a
+    // tap that sends nothing says why
+    run.tapGet = await f.evaluate(() => {
+      const b = document.querySelector("[data-sheet='deposit'] [data-control='deposit-get']");
+      const r = b?.getBoundingClientRect();
+      const at = r ? document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) : null;
+      const name = (e) => (e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === "string" ? `.${e.className.trim().split(/\s+/).join(".")}` : ""}` : null);
+      return { box: r ? [r.x, r.y, r.width, r.height].map(Math.round) : null, view: [innerWidth, innerHeight], disabled: b?.disabled ?? null, hit: at === b || (b && b.contains(at)) ? "the button" : name(at) };
+    });
+    run.tapGet.error = await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).then(() => null, (e) => String(e?.message ?? e).split("\n").filter((l) => l.trim()).slice(0, 6).join(" | "));
     await waitState(f, "S4.13");
     run.quote = (await asked(page)).filter((m) => m.type === "deposit.quote").map(fieldsOf)[0] ?? null;
     run.addressState = await sheetState(f);
