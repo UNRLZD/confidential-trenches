@@ -495,8 +495,8 @@ export const MUTANTS = [
   // reverted, went to W and the replay reverts too; providers that disagree ban nothing; a hook behind two pools of the
   // route explains neither
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
-  [QUOTE, "      if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);", "      out.push(id);", R, "RV4 "],
-  [QUOTE, "      if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);", "      out.push(id);", R, "RV7 "],
+  [QUOTE, "      if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys)", "      for (const k of keys)", R, "RV4 "],
+  [QUOTE, "      if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys)", "      for (const k of keys)", R, "RV7 "],
   [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }] }]", R, "HC1 "],
   [QUOTE, "    if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
   [QUOTE, "    if ((await replay({})).ok) return [];\n", "", R, "HC2 "],
@@ -504,7 +504,13 @@ export const MUTANTS = [
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
   [QUOTE, "    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "", R, "RV8 "],
   [QUOTE, "(x, y) => x.ok === y.ok && (x.ok || x.data === (y as { data: string }).data),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
-  [QUOTE, " || keys.filter((x) => x.hooks === k.hooks).length !== 1) continue;", ") continue;", R, "RV10 "],
+  [QUOTE, "for (const k of keys) if (k.hooks === hk && !out.includes(", "for (const k of keys.filter((x) => x.hooks === hk).slice(0, 1)) if (k.hooks === hk && !out.includes(", R, "RV10 "],
+  // the sale is the quote's own: each field of the Sell and its route bound (a sale with one off is never evidence)
+  [QUOTE, "if (sToken !== BigInt(token) || sAmount", "if (sAmount", R, "RV11 "],
+  [QUOTE, " || sAmount !== quote.amountIn || sTarget", " || sTarget", R, "RV11 "],
+  [QUOTE, " || sTarget !== BigInt(quote.target) || sMinOut", " || sMinOut", R, "RV11 "],
+  [QUOTE, " || sMinOut !== quote.minOut) return [];", ") return [];", R, "RV11 "],
+  [QUOTE, "    if (JSON.stringify(signed) !== JSON.stringify(route)) return [];\n", "", R, "RV11 "],
   [SELLU, "if (swapData(chain, token, route, target, w, amount, minOut, true) !== lower(data))", "if (swapData(chain, token, route, target, w, amount, minOut) !== lower(data))", R, "HC6 "],
   [SELLU, "  evmSellRouteCheck(chain, token, route, true);\n  return route;", "  evmSellRouteCheck(chain, token, route);\n  return route;", R, "HC6 "],
   [SELLU, "return v4Data(chain, token, (route as Record<string, unknown>).hops, anyHook);", "return v4Data(chain, token, (route as Record<string, unknown>).hops, true);", R, "HC6 "],

@@ -4693,8 +4693,8 @@ const saleInput = (q: HookedQuote): string => {
 };
 /** Lands quote `q`'s sale on the modelled chain of `pools` at `block`: its status is what SellDelegate does there (0x0
  *  where it reverts), unless `status` says; returns its hash. */
-const land = async (pools: ModelPool[], q: HookedQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}): Promise<string> => {
-  const input = saleInput(q);
+const land = async (pools: ModelPool[], q: HookedQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}, edit: (input: string) => string = (x) => x): Promise<string> => {
+  const input = edit(saleInput(q));
   const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + (SALE_GAS - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
   const hash = "0x" + (0x5a1e0000 + ++saleNo).toString(16).padStart(64, "0");
   SALES.set(hash, { hash, input, block, blockHash: "0x" + (0xb10c0000 + saleNo).toString(16).padStart(64, "0"), status: run.result !== undefined ? "0x1" : "0x0", ...extra });
@@ -4987,7 +4987,7 @@ test("RV9 an honest hook that takes its fee through a delta the quoter sees, whe
   assert.deepEqual(await proved(pools, q1, hash), [], "the honest hook is not banned for a moved price");
 });
 
-test("RV10 one unlisted hook behind two pools of the route: the no-op replay replaces it in both, so no single pool explains the revert and nothing is banned", async () => {
+test("RV10 one unlisted hook behind two pools of the route: the no-op replay replaces it in both and rescues the sale, so both pools are banned (two pools on one hook never freeze the sale)", async () => {
   const token = "0x00000000000000000000000000000000000c1d0a";
   const x = xAt(0x7da);
   const SHARED = "0x00000000000000000000000000000000000040cc";
@@ -5000,5 +5000,50 @@ test("RV10 one unlisted hook behind two pools of the route: the no-op replay rep
   assert.ok(!("code" in q1) && q1.hooked.length === 2, show(q1));
   const hash = await land(pools, q1);
   assert.equal(SALES.get(hash)!.status, "0x0");
-  assert.deepEqual(await proved(pools, q1, hash), []);
+  assert.deepEqual([...(await proved(pools, q1, hash))].sort(), [hcPid(pool.key), hcPid(hostile.key)].sort());
+  // banned, the next quote leaves through the seeded pool, the only route left (X's honest market is reached only
+  // through the token's pool on that hook)
+  const q2 = await hcQuote(pools, token, logs, [hcPid(pool.key), hcPid(hostile.key)]);
+  assert.ok(!("code" in q2) && q2.hooked.length === 0, show(q2));
+});
+
+test("RV11 a reverted sale that is not the quote's own (its token, amount, minOut, target or route one off) is no evidence: nothing is banned; the quote's own sale bans", async () => {
+  const token = "0x00000000000000000000000000000000000c1d0b";
+  const other = "0x00000000000000000000000000000000000c1d0c"; // the token one off, with a pool of its own on the same hook
+  const H = "0x00000000000000000000000000000000000050cc";
+  const hostileOf = (t: string, fee: number, k: bigint): ModelPool => ({ key: keyOf(t, NATIVE, fee, 60, H), give: (a) => k * a, lie: (a) => k * a, state: pricedInto1(k), exec: (a, ctx) => (later(ctx) ? null : k * a) });
+  // the quote's pool (3000), a lower one on the same hook (3001: the route one off), and the other token's
+  const [a, c, o] = [hostileOf(token, 3000, 2n), hostileOf(token, 3001, 2n), hostileOf(other, 3000, 2n)];
+  const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (x) => x };
+  // the one-off route's pool quotes 1.5x as it is (so the quote picks the 3000 pool) and 2x with its hook a no-op
+  const pools = [market, a, { ...c, lie: (x: bigint) => (3n * x) / 2n }, o];
+  const q1 = await hcQuote(pools, token, [{ key: market.key, at: 4_500_000 }, { key: a.key, at: 4_500_001 }, { key: c.key, at: 4_500_002 }]);
+  assert.ok(!("code" in q1) && q1.hooked.length === 1 && q1.hooked[0] === hcPid(a.key), show(q1));
+  // the Sell's words: the tuple at word 0; token, amount and target its first three words, minOut its fifth, and its
+  // route's first hop's fee inside the data (abi.encode(PathKey[]))
+  const bump = (word: (w: (i: number) => bigint, t: number) => number, by = 1n) => (input: string) => {
+    const d = input.slice(10);
+    const w = (i: number) => BigInt("0x" + d.slice(64 * i, 64 * i + 64));
+    const i = word(w, Number(w(0) / 32n));
+    return input.slice(0, 10) + d.slice(0, 64 * i) + W(w(i) + by) + d.slice(64 * i + 64);
+  };
+  const fieldOf = (k: number) => bump((_w, t) => t + k);
+  const routeFee = bump((w, t) => {
+    const at = t + Number(w(t + 3) / 32n); // the data's length word
+    const arr = at + 1 + Number(w(at + 1) / 32n); // the PathKey[] length word
+    return arr + 1 + Number(w(arr + 1) / 32n) + 1; // the first hop's fee
+  });
+  const offs: [string, (x: string) => string][] = [
+    ["token", (x) => bump((_w, t) => t, BigInt(other) - BigInt(token))(x)],
+    ["amount", fieldOf(1)],
+    ["target", fieldOf(2)],
+    ["minOut", fieldOf(4)],
+    ["route", routeFee],
+  ];
+  for (const [what, edit] of offs) {
+    const hash = await land(pools, q1, HEAD_NO + 1, {}, edit);
+    assert.equal(SALES.get(hash)!.status, "0x0", what);
+    assert.deepEqual(await proved(pools, q1, hash), [], `a sale with its ${what} off is not the quote's`);
+  }
+  assert.deepEqual(await proved(pools, q1, await land(pools, q1)), [hcPid(a.key)]);
 });

@@ -2641,15 +2641,17 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    quote's minOut or more, so the price did not move: the hooks treated the sale and the quoter apart. A price that
 //    moved, by the market or by an attacker before the sale, bans nothing, even where an honest hook's own fee (one
 //    taken through a delta, which the quoter sees) is more than the miss;
-// 4. one pool: for each pool of `hooked` whose hook serves no other pool of the route, the replay with that hook's code
-//    alone replaced by EVM_NOOP_HOOK_CODE succeeds on both providers (SellDelegate held its minOut). That pool is
-//    banned: its hook alone stood between the sale and its minOut (a hook's error, WrappedError; a fee taken from the
-//    sale alone through a delta, MinOutNotMet; a malformed answer; gas burned).
+// 4. one hook: for each hook behind a pool of `hooked`, the replay with that hook's code alone replaced by
+//    EVM_NOOP_HOOK_CODE succeeds on both providers (SellDelegate held its minOut). That code alone stood between the sale
+//    and its minOut (a hook's error, WrappedError; a fee taken from the sale alone through a delta, MinOutNotMet; a
+//    malformed answer; gas burned), and the override replaces it for every pool behind it, so every pool of the route
+//    behind that hook is banned, each by its PoolId (two pools an attacker built on one hook would otherwise freeze the
+//    sale).
 // Anything else bans nothing: providers that disagree, a sale that did not revert, a replay that does not revert, a
-// pool whose hook alone does not explain the revert, a chain with no pinned sell delegate. A provider that does not
-// answer (rpc_error) is thrown, so the caller may ask again. What no replay at the parent block can see, a hook flipped
-// by a transaction earlier in the sale's own block, is not banned: it costs the sender that sale's gas, within the
-// helper's unpaid-gas caps, and the device tries again.
+// revert no one hook explains, a chain with no pinned sell delegate. A provider that does not answer (rpc_error) is
+// thrown, so the caller may ask again.
+// The gap: a hook flipped by a transaction earlier in the sale's own block leaves no evidence at the parent block, so it
+// is never banned and can freeze the sale until card evm-sell-hook-intrablock proves the sale's true pre-state.
 
 /** The PoolIds of the quote's `hooked` pools that the sale `txHash`'s revert proves at fault (see above), on the
  *  chain's pinned providers; [] where nothing is proved. The caller bans these (wallet pool/evm-sell-bans.ts). */
@@ -2772,13 +2774,11 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
     if (JSON.stringify(evmSellRouteOf(bought)) !== JSON.stringify(route)) return [];
     const [held] = await readBoth(rpcs, blk.parentHash, [sellRead(v, token, bought, quote.amountIn)]);
     if (held!.kind !== "out" || held!.amountOut < quote.minOut) return [];
-    // 4. one pool: the replay with that pool's hook alone a no-op succeeds
+    // 4. one hook: the replay with that hook alone a no-op succeeds; every pool of the route behind it is banned
     const keys = hopKeys(bought);
     const out: string[] = [];
-    for (const k of keys) {
-      const id = "0x" + poolId(k);
-      if (!quote.hooked.includes(id) || keys.filter((x) => x.hooks === k.hooks).length !== 1) continue;
-      if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);
+    for (const hk of [...new Set(keys.filter((k) => quote.hooked.includes("0x" + poolId(k))).map((k) => k.hooks))]) {
+      if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys) if (k.hooks === hk && !out.includes("0x" + poolId(k))) out.push("0x" + poolId(k));
     }
     return out;
   } catch (e) {
