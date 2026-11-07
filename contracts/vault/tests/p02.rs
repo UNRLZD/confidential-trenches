@@ -1546,11 +1546,12 @@ fn run(seed: u64, cases: u64, mutant: Mutant, gate: bool) -> BTreeMap<Branch, u6
     total
 }
 
-/// The long run: 24 cases of 48 steps with the branch gate (118 s on the box). A plain `cargo test` skips it; CI's
+/// The long run: 24 cases of 48 steps with the branch gate (424 s on the box on 2026-11-07, when main's run before the
+/// ragequits took 418 s there; 118 s on an earlier day). A plain `cargo test` skips it; CI's
 /// vault-sandbox job runs it in shard 1 (scripts/ci/vault-sandbox.mjs; tests/harness/run.sh passes
 /// `--include-ignored`) on every pull request that touches the vault.
 #[test]
-#[ignore = "the long run (24 x 48, 118 s on the box): cargo test --test p02 -- --ignored; run.sh runs it"]
+#[ignore = "the long run (24 x 48, 424 s on the box): cargo test --test p02 -- --ignored; run.sh runs it"]
 fn vt_p02_i1_to_i6_hold_after_every_step() {
     let counts = run(env_u64("P02_SEED", SEED), env_u64("P02_CASES", CASES), Mutant::from_env(), true);
     for b in [Branch::PayoutStorageDepositFailed, Branch::PayoutRecipientFailed, Branch::PayoutFeeFailed, Branch::SettleRefundNote] {
