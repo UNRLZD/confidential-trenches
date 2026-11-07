@@ -88,13 +88,17 @@ export function solanaPools(root = ROOT) {
 
 // helper-evm-sender-2.mjs runs helper-pool-senders' EVM branch once for each EVM network a pool may be deployed on
 // (card helper-evm-sender-2; the testnets and mainnets of scripts/live-checks/pool-evm-deploy.mjs, CHAINS and MAINNETS,
-// a test holds them), with the PrivacyPoolSimple its deploy record names: a testnet's record is
-// scripts/live-checks/pool-evm-deploy.<network>.json, a mainnet's contracts/pool-evm/deployments/<network>.json
-// (pool-evm-deploy.mjs deploymentFile, where contracts/pool-evm/script/deploy.mjs writes it). A network with no record
-// has no run.
+// a test holds them), with the PrivacyPoolSimple its deploy record names: a testnet's record is its newest pool set's,
+// scripts/live-checks/<card>.<network>.json for a card of POOL_REDEPLOYS, else pool-evm-deploy.<network>.json; a
+// mainnet's contracts/pool-evm/deployments/<network>.json (pool-evm-deploy.mjs poolFile, a test holds them equal). A
+// network with no record has no run.
 export const POOL_EVM_NETWORKS = ["base", "robinhood", "base-sepolia", "robinhood-testnet"];
 const EVM_MAINNETS = new Set(["base", "robinhood"]);
-export const evmPoolRecord = (network) => (EVM_MAINNETS.has(network) ? `contracts/pool-evm/deployments/${network}.json` : `scripts/live-checks/pool-evm-deploy.${network}.json`);
+const POOL_REDEPLOYS = ["pool-evm-buy-pays-revert"]; // pool-evm-deploy.mjs POOL_REDEPLOYS, newest first
+export const evmPoolRecord = (network, root = ROOT) =>
+  EVM_MAINNETS.has(network)
+    ? `contracts/pool-evm/deployments/${network}.json`
+    : `scripts/live-checks/${POOL_REDEPLOYS.map((k) => `${k}.${network}.json`).find((f) => existsSync(path.join(root, "scripts/live-checks", f))) ?? `pool-evm-deploy.${network}.json`}`;
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 
 /** The PrivacyPoolSimple each EVM network's deploy record names under `root`, lower case, or null where there is no
@@ -102,17 +106,17 @@ const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 export function evmPools(root = ROOT) {
   return Object.fromEntries(
     POOL_EVM_NETWORKS.map((network) => {
-      const file = path.join(root, evmPoolRecord(network));
+      const file = path.join(root, evmPoolRecord(network, root));
       if (!existsSync(file)) return [network, null];
       let rec;
       try {
         rec = JSON.parse(readFileSync(file, "utf8"));
       } catch {
-        throw new Error(`${evmPoolRecord(network)} is not JSON`);
+        throw new Error(`${evmPoolRecord(network, root)} is not JSON`);
       }
-      if (rec?.chain !== network) throw new Error(`${evmPoolRecord(network)} names chain ${rec?.chain}, not ${network}`);
+      if (rec?.chain !== network) throw new Error(`${evmPoolRecord(network, root)} names chain ${rec?.chain}, not ${network}`);
       const pool = rec.contracts?.PrivacyPoolSimple?.address;
-      if (typeof pool !== "string" || !EVM_ADDRESS.test(pool.toLowerCase())) throw new Error(`${evmPoolRecord(network)} names no PrivacyPoolSimple address`);
+      if (typeof pool !== "string" || !EVM_ADDRESS.test(pool.toLowerCase())) throw new Error(`${evmPoolRecord(network, root)} names no PrivacyPoolSimple address`);
       return [network, pool.toLowerCase()];
     }),
   );

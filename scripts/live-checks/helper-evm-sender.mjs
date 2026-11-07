@@ -42,6 +42,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolSignSellAuthorization, evmPoolVenues, evmSellRouteOf } from "../../packages/kit/src/index.ts";
 import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
+import { poolRecordName } from "./pool-evm-deploy.mjs";
 import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, its signatures and the digests
@@ -53,7 +54,10 @@ export const BASE = "https://api.confidential.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The EVM testnets a pool is deployed on, each with its deploy record. */
 export const NETWORKS = ["base-sepolia", "robinhood-testnet"];
-export const poolRecord = (network) => `pool-evm-deploy.${network}.json`;
+/** The record naming a network's current pool in `dir`: its newest pool set's (pool-evm-deploy.mjs poolRecordName). */
+export const poolRecord = (network, dir = HERE) => poolRecordName(network, dir);
+/** The first set's record of a network (card pool-evm-deploy's), before any pool redeploy. */
+export const FIRST_SET = (network) => `pool-evm-deploy.${network}.json`;
 /** The fee answer's field naming the helper's sell sender: an address, or null where no sell key is set */
 export const SENDER_FIELD = "sell_sender";
 /** EvmFeeAnswer's fields (apps/helper/src/pool/evm.ts). */
@@ -83,16 +87,18 @@ const json = (t) => {
   }
 };
 
-/** The pool each network's deploy record names, for the networks with a record. Throws on a bad record. */
-export function evmPoolRecords(dir = HERE) {
+/** The pool each network's deploy record names, for the networks with a record (`nameOf`: its current pool set's,
+ * poolRecord; FIRST_SET: the first set's, which the helper checks' recordings of 6 Nov were made on). Throws on a bad
+ * record. */
+export function evmPoolRecords(dir = HERE, nameOf = poolRecord) {
   const out = {};
   for (const network of NETWORKS) {
-    const file = path.join(dir, poolRecord(network));
+    const file = path.join(dir, nameOf(network, dir));
     if (!existsSync(file)) continue;
     const rec = json(readFileSync(file, "utf8"));
-    if (rec?.chain !== network) throw new Error(`${poolRecord(network)} names chain ${rec?.chain}, not ${network}`);
+    if (rec?.chain !== network) throw new Error(`${nameOf(network, dir)} names chain ${rec?.chain}, not ${network}`);
     const pool = rec.contracts?.PrivacyPoolSimple?.address;
-    if (typeof pool !== "string" || !ADDRESS.test(pool)) throw new Error(`${poolRecord(network)} names no PrivacyPoolSimple address`);
+    if (typeof pool !== "string" || !ADDRESS.test(pool)) throw new Error(`${nameOf(network, dir)} names no PrivacyPoolSimple address`);
     out[network] = pool;
   }
   return out;
@@ -355,9 +361,9 @@ export function sendersOf(run) {
   return out;
 }
 
-export async function read(base, fetchFn = fetch) {
+export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
   const pools = [];
-  for (const [network, pool] of Object.entries(evmPoolRecords())) {
+  for (const [network, pool] of Object.entries(records)) {
     const reads = [];
     const get = async (asked, url, init = {}) => {
       const r = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15_000) });

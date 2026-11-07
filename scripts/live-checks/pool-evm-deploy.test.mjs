@@ -49,7 +49,7 @@ test("the recorded good answers pass on both chains, every read on both RPCs", a
     const d = A.deployments[chain];
     const r = await run(chain);
     assert.equal(r.ok, true, r.lines.join("\n"));
-    assert.equal(d.dryRun, true);
+    assert.equal(d.dryRun, false, "the real deploys of card pool-evm-buy-pays-revert, read on each chain's two operators");
     for (const u of A.rpcs[chain]) assert.ok(r.lines.some((l) => l.endsWith(`chain id ${CHAINS[chain].chainId} is ${chain}'s ${CHAINS[chain].chainId} on ${u}`)), u);
     assert.deepEqual(Object.keys(d.contracts), CHAINS[chain].contracts);
     assert.equal(d.txs.filter((t) => t.contract).length, CHAINS[chain].contracts.length);
@@ -110,7 +110,7 @@ test("another chain id fails, and so do RPCs that are not two operators of the c
   assert.deepEqual(operatorProblems(CHAINS["robinhood-testnet"].rpcs, { ...real, chain: "robinhood-testnet" }), []);
   assert.match(operatorProblems(["https://sepolia.base.org", "https://sepolia.base.org/"], real).join(), /only 1 known base-sepolia operator/);
   assert.match(operatorProblems(["https://mainnet.base.org", "https://base.drpc.org"], real).join(), /only 0 known/);
-  assert.match(operatorProblems(CHAINS["base-sepolia"].rpcs, A.deployments["base-sepolia"]).join(), /dry-run record read on a non-loopback RPC/);
+  assert.match(operatorProblems(CHAINS["base-sepolia"].rpcs, { ...A.deployments["base-sepolia"], dryRun: true }).join(), /dry-run record read on a non-loopback RPC/);
 });
 
 test("the run record lists every transaction as a testnet Tx line, and refuses a dry run", () => {
@@ -120,7 +120,7 @@ test("the run record lists every transaction as a testnet Tx line, and refuses a
   const lines = text.split("\n").filter((l) => l.startsWith("Tx: "));
   assert.equal(lines.length, real.reduce((n, d) => n + d.txs.length, 0));
   for (const l of lines) assert.match(l, /^Tx: (base-sepolia|robinhood-testnet) 0x[0-9a-f]{64}$/);
-  assert.throws(() => runRecord([A.deployments["base-sepolia"]]), /a dry run/);
+  assert.throws(() => runRecord([{ ...A.deployments["base-sepolia"], dryRun: true }]), /a dry run/);
 });
 
 test("the frozen v1 sell delegate is the build only at the addresses the build file pins it to; anywhere else its code fails", async () => {
