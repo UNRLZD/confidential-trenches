@@ -4865,8 +4865,13 @@ function traceOf(s: ModelSale, tracer: string, who: 0 | 1, balances: Record<stri
   for (let i = 0; i < (e.frames ?? 0); i++) inner.push({ type: "STATICCALL", from: RH_PM, to: EARLIER, input: "0x", value: "0x0" });
   // a frame the PoolManager made into a hook `by` that did not error, inside it a call back into the PoolManager that
   // errored, and in that one errored frame into each hook of `into` (`by` called the PoolManager and caught its revert)
-  // (`errored`: `by`'s own frame errored too, the revert not caught)
-  if (e.caught !== undefined) inner.push({ type: "CALL", from: RH_PM, to: e.caught.by, input: "0x", value: "0x0", ...(e.caught.errored === true ? { error: "execution reverted" } : {}), calls: [{ type: "CALL", from: e.caught.by, to: RH_PM, input: "0x", value: "0x0", error: "execution reverted", calls: e.caught.into.map((h) => ({ type: "CALL", from: RH_PM, to: h, input: "0x", value: "0x0", error: "execution reverted" })) }] });
+  // (`errored`: `by`'s own frame errored too, the revert not caught; `via`: `by` reached the PoolManager through that
+  // contract, the pinned v4 adapter say, whose frame errored too)
+  if (e.caught !== undefined) {
+    const c = e.caught;
+    const intoPm = { type: "CALL", from: c.via ?? c.by, to: RH_PM, input: "0x", value: "0x0", error: "execution reverted", calls: c.into.map((h) => ({ type: "CALL", from: RH_PM, to: h, input: "0x", value: "0x0", error: "execution reverted" })) };
+    inner.push({ type: "CALL", from: RH_PM, to: c.by, input: "0x", value: "0x0", ...(c.errored === true ? { error: "execution reverted" } : {}), calls: [c.via === undefined ? intoPm : { type: "CALL", from: c.by, to: c.via, input: "0x", value: "0x0", error: "execution reverted", calls: [intoPm] }] });
+  }
   return err({ type: "CALL", from: SENDER, to: s.to ?? SELL_W, input: s.input, value: "0x0", ...e.root, calls: [err({ type: "CALL", from: e.pmFrom ?? s.to ?? SELL_W, to: RH_PM, input: "0x", value: "0x0", calls: inner }, failed)] }, s.status === "0x0");
 }
 const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: SALE_POOL, feeCollector: SALE_COLLECTOR }) }) as builder.EvmPoolVenueList;
@@ -4877,7 +4882,7 @@ const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEG
 // another call's root frame, extra accounts, errored frames, the caller of the errored frames, more frames, the caller
 // of the frame into the PoolManager)
 type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string; bought?: boolean; gas?: bigint; logs?: { address: string; topics: string[] }[]; l1Gas?: bigint; rcIndex?: string; errored?: string[]; trace?: TraceEdit };
-type TraceEdit = { apartOn?: 0 | 1; root?: Record<string, string>; accounts?: number; slots?: number; arbosSlots?: number; code?: number; erroredToo?: string[]; erroredFrom?: string; frames?: number; caught?: { by: string; into: string[]; errored?: true }; pmMoved?: true; withArbos?: false; pmFrom?: string };
+type TraceEdit = { apartOn?: 0 | 1; root?: Record<string, string>; accounts?: number; slots?: number; arbosSlots?: number; code?: number; erroredToo?: string[]; erroredFrom?: string; frames?: number; caught?: { by: string; into: string[]; errored?: true; via?: string }; pmMoved?: true; withArbos?: false; pmFrom?: string };
 const SALES = new Map<string, ModelSale>();
 let saleNo = 0;
 /** The sale of quote `q` as the device builds and W signs it (the signature is the model's: the modelled delegate takes any). */
@@ -6167,6 +6172,10 @@ test("review of f0f983d2, item 2 (buy, Robinhood) a delta-fee hook keyed on ArbO
   assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { erroredToo: [N1_H2] } }, {}, RH_NET), undefined, RH_NET), [hcPid(pools[2]!.key)], "the hostile hook's own frame errored");
   // the hostile hook's frame errored with the honest hook's under it: the outermost route hook alone is at fault
   assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { caught: { by: N1_H2, into: [N1_H1], errored: true } } }, {}, RH_NET), undefined, RH_NET), [hcPid(pools[2]!.key)], "the outermost hook");
+  // the same two through the pinned v4 adapter, whose PoolManager frame is one the device's own swapper may make
+  // (review of de4e3ed5, 3): the caught chain and the outermost hook still decide
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { caught: { by: N1_H2, into: [N1_H1], via: BUY_ADAPTER } } }, {}, RH_NET), undefined, RH_NET), [], "a revert the hostile hook caught, through the adapter");
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { caught: { by: N1_H2, into: [N1_H1], errored: true, via: BUY_ADAPTER } } }, {}, RH_NET), undefined, RH_NET), [hcPid(pools[2]!.key)], "the outermost hook, through the adapter");
 });
 
 test("review of f0f983d2, item 3 (buy, Robinhood) a hook that floods the trace with more accounts, slots and frames than the old fixed caps (256, 4,096, 4,096) but within what the buy's gas lets it touch: the trace is still evidence, and a hook flipped by an earlier transaction of the block is banned", async () => {
