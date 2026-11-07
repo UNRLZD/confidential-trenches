@@ -194,12 +194,13 @@ contract HostileV4Test is BuyBase {
     _sig = _signed(_b, 'local.buy');
   }
 
+  /// The swap is refused with `_err`, so the buy pays out as a withdraw (card pool-evm-buy-pays-revert): the fee paid,
+  /// W paid the rest in ETH, the note spent, and the PoolManager and the adapter hold what they held
   function _refused(IPrivacyPoolSimple.Buy memory _b, bytes memory _sig, bytes4 _err) internal {
-    uint256 _poolBefore = POOL.balance;
-    vm.expectRevert(_err);
-    _buy('local.buy', FEE, _b, _sig);
-    assertFalse(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'the note is not spent');
-    assertEq(POOL.balance, _poolBefore, 'the chunk stays in the pool');
+    uint256 _pmEth = PM_ADDR.balance;
+    _paysOut('local.buy', FEE, _b, _sig, _err);
+    assertEq(PM_ADDR.balance, _pmEth, 'the PoolManager holds what it held');
+    assertEq(IERC20Balance(WETH).balanceOf(address(adapter)), 0, 'adapter: no WETH');
   }
 
   function _lands(IPrivacyPoolSimple.Buy memory _b, bytes memory _sig) internal returns (uint256 _got) {
@@ -260,7 +261,9 @@ contract HostileV4Test is BuyBase {
     uint256 _q = _quote(address(0), _p);
     console.log('W would get', _q);
     (IPrivacyPoolSimple.Buy memory _b, bytes memory _sig) = _signedBuy(address(0), _p, _q + 1);
+    uint256 _snap = vm.snapshotState();
     _refused(_b, _sig, UniswapV4Adapter.TooLittleReceived.selector);
+    vm.revertToState(_snap); // the refused swap paid the note out: the same note again, with minOut 1
     (_b, _sig) = _signedBuy(address(0), _p, 1);
     uint256 _h = HH.balance;
     _lands(_b, _sig);

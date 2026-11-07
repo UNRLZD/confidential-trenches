@@ -40,6 +40,10 @@ abstract contract BuyForkBase is BuyBase {
     assertEq(PoseidonT4.DEPLOYED.codehash, PoseidonT4.CODEHASH);
     vm.warp(1_900_000_000);
     _setUpPool(_set);
+    // W is the published test key's address, which carries an EIP-7702 delegation on these mainnets (a sweeper that
+    // forwards the ETH it gets); the device's W is a fresh key with no code, so the fork's W has none either (a buy
+    // whose swap fails pays W in ETH, card pool-evm-buy-pays-revert)
+    vm.etch(W, '');
     (address _router,,,,) = _route();
     adapter = new UniswapV3Adapter(IV3SwapRouter(_router));
   }
@@ -95,25 +99,28 @@ abstract contract BuyForkBase is BuyBase {
     assertEq(vm.parseJsonBytes(_k, string.concat('.', _set, '.v3.data')), _path());
   }
 
-  /// A minOut above what the swap gives: the router refuses it (the adapter passes minOut on), so the buy reverts
-  /// and the note stays unspent.
+  /// A minOut above what the swap gives: the router refuses it (the adapter passes minOut on), so the swap is undone
+  /// and the buy pays out as a withdraw (card pool-evm-buy-pays-revert).
   function test_aMinOutOverTheQuoteFails() public {
     uint256 _quoted = _quote(0.4 ether);
     IPrivacyPoolSimple.Buy memory _b = _forkBuy(_quoted + 1);
     bytes memory _sig = _signed(_b, _setName());
+    uint256 _snap = vm.snapshotState();
+    vm.prank(POOL);
     vm.expectRevert(bytes('Too little received'));
-    _buy(_setName(), 0, _b, _sig);
-    assertFalse(pool.nullifierHashes(_proof(_setName()).pubSignals[1]));
+    pool.buySwap(_b, W, 0.4 ether);
+    vm.revertToState(_snap);
+    _paysOut(_setName(), 0, _b, _sig, NO_REASON);
   }
 
-  /// A route that buys another token than the one W signed for: W's balance of it does not rise.
+  /// A route that buys another token than the one W signed for: W's balance of it does not rise, so the swap is
+  /// undone and the buy pays out.
   function test_aRouteToAnotherTokenFails() public {
     IPrivacyPoolSimple.Buy memory _b = _forkBuy(1);
     (,, address _weth,,) = _route();
     _b.token = _weth;
     bytes memory _sig = _signed(_b, _setName());
-    vm.expectRevert(IPrivacyPoolSimple.MinOutNotMet.selector);
-    _buy(_setName(), 0, _b, _sig);
+    _paysOut(_setName(), 0, _b, _sig, IPrivacyPoolSimple.MinOutNotMet.selector);
   }
 }
 

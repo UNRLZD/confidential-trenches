@@ -21,7 +21,8 @@
 //     the run spent marked in nullifierHashes and every precommitment it used in usedPrecommitments, on both;
 //   - each W that sold: its code on both RPCs is the EIP-7702 designator 0xef0100 ‖ the pinned SellDelegate;
 //   - the run key: no more than DUST wei left, and its nonce the number of transactions it sent.
-// The pins: the pool from card pool-evm-deploy's record, the sell delegate from the newest of its redeploys made before
+// The pins: the pool from the newest pool set made before the run started (card pool-evm-deploy's record, then each
+// whole-set redeploy of pool-redeploys.mjs, card pool-evm-buy-pays-revert's), the sell delegate from the newest of its redeploys made before
 // the run started (card evm-sell-v4's, which sells through the v4 PoolManager, card evm-selldelegate-exact-debit's, then card evm-testnet-delegate-review3's), the PoolManager and the router from pool-evm-deploy.mjs's CHAINS; nothing else is taken
 // from the run's record but what it claims, and each claim is read back. Every chain's run has a sell.
 // A run that stopped part way (its record names why in `stopped`, pool-evm-testnet-run.<chain>.stopped.json) is read
@@ -42,6 +43,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { recorder } from "./notes-per-pool-evm.mjs";
 import { BUILD, CHAINS as DEPLOYED, pinnedBuild } from "./pool-evm-deploy.mjs";
+import { POOL_REDEPLOYS } from "./pool-redeploys.mjs";
 
 const KEY = "pool-evm-testnet-run";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -86,8 +88,17 @@ const sellRecordAt = (chain, at) => {
   if (!before.length) throw new Error(`no SellDelegate redeploy on ${chain} before the run at ${at}`);
   return before[0];
 };
+// The pool a run went through: the newest pool set made before the run (card pool-evm-deploy's, then each whole-set
+// redeploy of pool-redeploys.mjs POOL_REDEPLOYS), so a run on the first set and a run on a redeployed set each read
+// against the pool of their time
+export const poolRecordAt = (chain, at) => {
+  const recs = ["pool-evm-deploy", ...POOL_REDEPLOYS].map((k) => path.join(HERE, `${k}.${chain}.json`)).filter((f) => existsSync(f)).map((f) => JSON.parse(readFileSync(f, "utf8")));
+  const before = recs.filter((r) => r.dryRun === false && Date.parse(r.at) <= Date.parse(at)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  if (!before.length) throw new Error(`no pool deployed on ${chain} before the run at ${at}`);
+  return before[0];
+};
 const pinsOf = (chain, at) => {
-  const d = JSON.parse(readFileSync(path.join(HERE, `pool-evm-deploy.${chain}.json`), "utf8"));
+  const d = poolRecordAt(chain, at);
   const s = sellRecordAt(chain, at);
   const c = DEPLOYED[chain];
   return {

@@ -30,13 +30,14 @@ test("the pool's ABI is exactly the listed functions; only deposit takes value",
   assert.equal(abi.filter((e) => e.type === "receive" || e.type === "fallback").length, 0, "no receive, no fallback");
   const fns = abi.filter((e) => e.type === "function");
   assert.deepEqual(fns.map((f) => f.name).sort(), [
-    "ASSET", "MAX_RELAY_FEE_BPS", "MAX_TREE_DEPTH", "MIN_DEPOSIT", "SCOPE", "WITHDRAWAL_VERIFIER", "buy",
-    "currentLabelRoot", "currentLabelTreeDepth", "currentLabelTreeSize", "currentRoot", "currentTreeDepth",
+    "ASSET", "BUY_FAIL_GAS", "BUY_SWAP_GAS", "MAX_RELAY_FEE_BPS", "MAX_TREE_DEPTH", "MIN_DEPOSIT", "SCOPE",
+    "WITHDRAWAL_VERIFIER", "buy", "buySwap", "currentLabelRoot", "currentLabelTreeDepth", "currentLabelTreeSize", "currentRoot", "currentTreeDepth",
     "currentTreeSize", "deposit", "labelRootTimes", "nonce", "nullifierHashes", "stateRootTimes",
     "usedPrecommitments", "withdraw",
   ]);
   const writes = fns.filter((f) => f.stateMutability !== "view" && f.stateMutability !== "pure").map((f) => `${f.name} ${f.stateMutability}`);
-  assert.deepEqual(writes.sort(), ["buy nonpayable", "deposit payable", "withdraw nonpayable"]);
+  // buySwap answers only the pool itself (OnlyPool, test/Buy.t.sol test_onlyThePoolCallsBuySwap): buy's swap
+  assert.deepEqual(writes.sort(), ["buy nonpayable", "buySwap nonpayable", "deposit payable", "withdraw nonpayable"]);
 });
 
 // The sell delegate (card pool-evm-sell) runs in W's account: it declares no storage slot at all (W's sell nonce sits at
