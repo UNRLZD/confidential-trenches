@@ -1493,7 +1493,7 @@ test("review G: a send built again on its blockhash's expiry never counts toward
   assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent.at(-1) }] });
 });
 
-test("review J: once the ask's own deposit is signed, a provider fault is never down, even when that note was taken (the module's rule since pool-read-down): the run throws and the kind answers failed", async () => {
+test("review J (CO r2: down): a provider fault after the ask's only send was taken, with nothing of the ask landed and no send of it that may still land, answers down, so the user can ask again", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, 50_000_000);
@@ -1512,10 +1512,115 @@ test("review J: once the ask's own deposit is signed, a provider fault is never 
     if (raced && m === "getMultipleAccounts" && (p[0] as string[]).includes(RENT_SYSVAR)) throw down();
     return other(m, p);
   };
-  await assert.rejects(runPoolDeposit(host(c, ns, { rpcs: [racing, both] }), ask(RUNG)), SolanaRpcTransportError);
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [racing, both] }), ask(RUNG)), { error: "down" });
   assert.equal(c.sent.length, 1);
   assert.deepEqual(await shape(ns), [
     ["deposit", "UNSPENT", MIN_DEPOSIT],
     ["second", "PLANNED", undefined],
   ]);
+});
+
+// card pool-answer-unknown, delta review r2 (FIX, 4c38ff10): P8 and the reads of `landed` (mutants L1-L4).
+
+test("review P8: RPC 0's height read 5 blocks behind the node that gave its blockhash (a load-balanced URL), and RPC 1's 100 low, never read a live send expired: no send again before the blockhash's true expiry", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, Number(RUNG) + COST + EMPTY_RENT + 10 * FEE);
+  const behind = (rpc: SolanaRpc, n: number): SolanaRpc => async (m, p) => {
+    const a = await rpc(m, p);
+    return m === "getBlockHeight" && optsOf(p)?.commitment === "confirmed" ? (a as number) - n : a;
+  };
+  c.lands = false;
+  const said = c.height + 150; // the blockhash RPC 0 gives lives to here
+  await runPoolDeposit(host(c, ns, { rpcs: [behind(c.rpc(), 5), behind(c.rpc(), 100)], reads: 1 }), ask(RUNG));
+  const [n] = await ours(ns);
+  assert.equal(n!.sends![0]!.last_valid_block_height, BigInt(said), "RPC 0's word stands: its height read 5 behind never caps it lower");
+  c.height = said - 2; // finalized two blocks before the true expiry on both
+  await settlePoolDeposits(host(c, ns));
+  assert.equal(c.sent.length, 1, "built again while the first send's blockhash still lives");
+  c.height = said + 1;
+  c.lands = true;
+  await settlePoolDeposits(host(c, ns));
+  assert.equal(c.sent.length, 2, "built again once past it");
+});
+
+/** RPCs whose history reads fail from the first send on: a rung that lands is read landed with no tx named. `over`
+ *  maps each RPC's other calls (k: which RPC). */
+function unnamed(c: ReturnType<typeof chain>, rpcs: readonly [SolanaRpc, SolanaRpc] = [c.rpc(), c.rpc()], over?: (k: number, rpc: SolanaRpc) => SolanaRpc): readonly [SolanaRpc, SolanaRpc] {
+  const w = (rpc: SolanaRpc, k: number): SolanaRpc => {
+    const inner = over ? over(k, rpc) : rpc;
+    return async (m, p) => {
+      if (m === "getSignatureStatuses" && optsOf(p)?.searchTransactionHistory === true && c.sent.length >= 1) throw down();
+      return inner(m, p);
+    };
+  };
+  return [w(rpcs[0], 0), w(rpcs[1], 1)] as const;
+}
+
+test("review L1: a rung landed with no tx named, then the next note's precommitment taken on one RPC only: part_filled with the landed rung, never not_landed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const lagging = { on: false };
+  const lag = (_: string, a: Acc): Acc => (lagging.on && a.owner === FIX.program && a.data.length === 17 ? { owner: SYSTEM, lamports: 1_000_000, data: new Uint8Array(0) } : a);
+  const front = (k: number, rpc: SolanaRpc): SolanaRpc => async (m, p) => {
+    if (k === 0 && m === "simulateTransaction" && c.sent.length >= 1 && !lagging.on) {
+      c.apply(attackerTx(c, preOf(base64.decode(p[0] as string)), MIN_DEPOSIT)); // rung 2's precommitment, taken first
+      lagging.on = true; // RPC 1's finalized view lacks the new mark
+    }
+    return rpc(m, p);
+  };
+  const got = await runPoolDeposit(host(c, ns, { rpcs: unnamed(c, [c.rpc(), c.rpc({ mapAccount: lag })], front) }), ask(3n * RUNG));
+  assert.ok(lagging.on, "rung 2's precommitment was taken");
+  assert.equal(c.sent.length, 1);
+  assert.deepEqual(got, { stage: "part_filled", txs: [] });
+});
+
+test("review L2: a rung landed with no tx named, then U short for the next rung: part_filled with the landed rung, never not_funded", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 100_000_000);
+  const short: [string, bigint][] = [];
+  const got = await runPoolDeposit(host(c, ns, { rpcs: unnamed(c), short: shortsOf(short), landed: () => void (c.accounts.get(u.address)!.lamports = 0) }), ask(3n * RUNG));
+  assert.equal(c.sent.length, 1);
+  assert.deepEqual(got, { stage: "part_filled", txs: [] });
+});
+
+test("review L3: a rung landed with no tx named, then the kit refuses the next rung's pool read: part_filled with the landed rung, never failed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const after = { on: false };
+  const other = (address: string, a: Acc): Acc => (after.on && address === FIX.pool ? { ...a, owner: SYSTEM } : a);
+  const got = await runPoolDeposit(host(c, ns, { rpcs: unnamed(c, [c.rpc({ mapAccount: other }), c.rpc({ mapAccount: other })]), landed: () => void (after.on = true) }), ask(3n * RUNG));
+  assert.equal(c.sent.length, 1);
+  assert.deepEqual(got, { stage: "part_filled", txs: [] });
+});
+
+test("review L4: a page-load pass where one note lands with no tx named and another is stuck on its top-up answers not_landed, never not_funded", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u1 = await plannedU(ns);
+  c.fund(u1.address, Number(RUNG) + COST + EMPTY_RENT + 10 * FEE);
+  const kept: string[] = [];
+  const keep = (rpc: SolanaRpc): SolanaRpc => async (m, p) => {
+    if (m === "sendTransaction") kept.push(p[0] as string);
+    return rpc(m, p);
+  };
+  c.lands = false; // note A's send is dropped, kept here
+  assert.equal(((await runPoolDeposit(host(c, ns, { rpcs: [keep(c.rpc()), c.rpc()], reads: 1 }), ask(RUNG))) as { stage: string }).stage, "not_landed");
+  const u2 = await plannedU(ns);
+  assert.notEqual(u2.address, u1.address);
+  c.fund(u2.address, Number(RUNG) + COST + EMPTY_RENT + 10 * FEE);
+  assert.equal(((await runPoolDeposit(host(c, ns, { reads: 1 }), ask(RUNG))) as { stage: string }).stage, "not_landed"); // note B on U2, dropped
+  c.lands = true;
+  c.apply(base64.decode(kept[0]!)); // A's send lands late
+  c.height += 1_000; // B's send past its last valid height
+  c.accounts.get(u2.address)!.lamports = 0; // U2 cannot pay B's send again
+  const sent = c.sent.length;
+  const got = await settlePoolDeposits(host(c, ns, { rpcs: unnamed(c) }));
+  assert.equal(c.sent.length, sent, "nothing sent");
+  assert.deepEqual(await shape(ns).then((s) => s.map((x) => x[1]).sort()), ["INCOMING", "UNSPENT"]);
+  assert.deepEqual(got, { stage: "not_landed", txs: [] });
 });

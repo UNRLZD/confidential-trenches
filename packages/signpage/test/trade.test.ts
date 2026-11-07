@@ -16,7 +16,7 @@ import { armKey, type ArmRecord } from "@blindfill/wallet/arming/records";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { SOLANA_TOKEN_PROGRAM, solanaAta } from "../../kit/src/checks/solana/index.ts";
 import type { SolanaTradeDeps, SolanaTradeRecord, SolanaTradeRequest } from "../../kit/src/trade/solana/flow.ts";
-import { SolanaRpcTransportError, solanaSameProvider, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, solanaSameProvider, solanaPacedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
@@ -119,7 +119,9 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
     const legs: SolanaTradeRecord["legs"] = req.legs.map((l) => ({ wallet: l.wallet, amount: l.amount, expectedOut: 1n, minOut: 1n }));
     const reference = () => deps.reference({ side: req.side, token: req.token, amount: 1n, amounts: [1n] }, deps.providers);
     const read = script.providerRead;
-    const providerRead = () => Promise.all([deps.providers[0](read!.method, []), deps.providers[1](read!.method, [])]);
+    // paced as the kit's pacedDeps paces each provider before any read (flow.ts solanaPacedRpc; card pool-answer-unknown r2)
+    const paced = [solanaPacedRpc(deps.providers[0]), solanaPacedRpc(deps.providers[1])];
+    const providerRead = () => Promise.all([paced[0]!(read!.method, []), paced[1]!(read!.method, [])]);
     if (read && read.at !== "signed") {
       if (!read.caught) await providerRead();
       else {

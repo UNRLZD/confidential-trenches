@@ -1504,3 +1504,31 @@ test("solanaWrappedRpc (card pool-answer-unknown): a caller's wrapper is the sam
   await paced(a)("getSlot", []);
   assert.equal(size(bare).started, 1);
 });
+
+test("pacing calls the outermost wrapper it was given (card pool-answer-unknown r2): a caller's watch runs under solanaPacedRpc, and a paced provider paced again takes one slot", async () => {
+  const { solanaWrappedRpc, solanaPacedRpc: paced, solanaRpcQueueSize: size, SolanaRpcTransportError: Down } = await import("../src/trade/solana/send.ts");
+  // the watch sees the provider's fault: the bare provider throws, the watch counts it
+  const bare = Object.assign(async (_m: string, _p: readonly unknown[]): Promise<unknown> => { throw new Down("http_429", "HTTP 429", 4, "down.example"); }, { url: "https://watch.example/" });
+  let watched = 0;
+  const watch = solanaWrappedRpc(bare, (m, p) => { watched++; return bare(m, p); });
+  await assert.rejects(paced(watch)("getSlot", []), Down);
+  assert.equal(watched, 1, "the paced call reached the bare provider past the watch");
+  // a paced wrapper paced again (flow.ts paces what the page hands it) calls the watch once, in one slot
+  watched = 0;
+  await assert.rejects(paced(paced(watch))("getSlot", []), Down);
+  assert.equal(watched, 1);
+  // one slot only, under a limit of one call a minute: a second slot would wait the minute out
+  const tight = { windowMs: 60_000, total: 1, perMethod: 1 };
+  const within = <T,>(p: Promise<T>): Promise<T | "waited"> => Promise.race([p, new Promise<"waited">((r) => setTimeout(() => r("waited"), 1_000).unref())]);
+  const ok = async (_m: string, _p: readonly unknown[]): Promise<unknown> => "ok";
+  assert.equal(await within(paced(paced(ok, tight), tight)("getSlot", [])), "ok", "a paced provider paced again queued inside its own slot");
+  assert.equal(size(ok).started, 1);
+  // a caller's wrapper around a paced provider, paced again: its paced call is the outer slot's own call
+  const ok2 = async (_m: string, _p: readonly unknown[]): Promise<unknown> => "ok";
+  const inner = paced(ok2, tight);
+  let ran = 0;
+  const around = solanaWrappedRpc(inner, (m, p) => { ran++; return inner(m, p); });
+  assert.equal(await within(paced(around, tight)("getSlot", [])), "ok", "the paced provider inside the wrapper queued behind the slot it runs in");
+  assert.equal(ran, 1);
+  assert.equal(size(ok2).started, 1);
+});
