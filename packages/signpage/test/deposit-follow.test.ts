@@ -536,7 +536,13 @@ test(`V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min${what}; 
     now: () => 1_762_400_000_000,
   });
   await f.quoted("dq-v01", RESULT, { scope: 1n, index: i, u });
-  for (let k = 0; k < 400 && ((await w.get("ops", "dq-v01")) as { follow: { final?: true } }).follow.final !== true; k++) await new Promise((ok) => setTimeout(ok, 5));
+  // the wait is on the follow's own rounds (each a block), never the wall clock: a loaded runner only makes it slower.
+  // It ends at final, at 3000 rounds, or when no round comes in 2000 checks (a follow stopped without its end)
+  for (let still = 0; ((await w.get("ops", "dq-v01")) as { follow: { final?: true } }).follow.final !== true && sleeps.length < 3000 && still < 2000; ) {
+    const n = sleeps.length;
+    await new Promise((ok) => setTimeout(ok, 5));
+    still = sleeps.length === n ? still + 1 : 0;
+  }
   f.signedOut();
   await f.idle();
   const op = (await w.get("ops", "dq-v01")) as { stage: string; amount_usd: string; follow: { final?: true; notes: string[] } };
