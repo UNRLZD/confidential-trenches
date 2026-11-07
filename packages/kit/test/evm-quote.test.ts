@@ -424,9 +424,9 @@ test("Q12 a v3 two-hop route through the listed middle is held to every standard
 
 test("Q13 a token whose only pool sits behind a hook the device has not pinned refuses", async () => {
   assert.equal(F["base-unknown-hook"]!.outcome.code, "no_reference");
-  // card evm-route-parity: its route goes through a hook the sell builder does not take, so the buy is refused before
-  // any read: a buy enters only where its sell can leave
-  await refused(quote("base-unknown-hook"), "no_exit");
+  // card evm-buy-hook-converge: its route through a hook the venue does not list is quoted (its sell leaves through it,
+  // as the sale takes such a route), and refused as recorded: no pool but the route's own holds it (no_reference)
+  await refused(quote("base-unknown-hook"), "no_reference");
   // a pinned launchpad pool is a reference: Clanker's pool for the Clanker token answers, so its route quotes
   assert.ok((await quote("base-hook")).reference !== null);
 });
