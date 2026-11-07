@@ -456,10 +456,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const r = kind === null ? ({ error: "not_allowed" } as const) : kind(null, null);
     if ("error" in r) done();
     else
-      void r.after.then(() => {
-        const a = r.answer();
-        if (a === null || "error" in a) done();
-      });
+      // a pass that meets a take not final yet rejects (EvmNotFinalError): the settle ends, the note stays open
+      void r.after.then(
+        () => {
+          const a = r.answer();
+          if (a === null || "error" in a) done();
+        },
+        () => done(),
+      );
     return p;
   };
   /** The EVM chains whose pool has an INCOMING note of its own scope in the store. */

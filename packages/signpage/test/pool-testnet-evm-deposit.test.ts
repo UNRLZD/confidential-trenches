@@ -97,3 +97,36 @@ test("an EVM note left INCOMING settles with no request: on the signed-in load (
     assert.equal(now!.leaf!.value, ASK.amount, pass);
   }
 });
+
+test("a load's EVM pass that meets a take not final yet (EvmNotFinalError) ends the settle, with no unhandled rejection on the page", async () => {
+  const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
+  const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
+  const { evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const { EvmNotFinalError } = await import("../../wallet/src/pool/evm-restore.ts");
+  const scope = evmPoolScopeOf(PIN.pool, 84532n);
+  const idb = new IDBFactory();
+  const store = async () => {
+    const w = await openWalletStore({ indexedDB: idb });
+    stores.push(w);
+    return w;
+  };
+  const ns = await openNoteStore(await store());
+  const n = await ns.planDeposit(scope, (ref) => noteSecrets(SEED, ref).precommitment);
+  await ns.move(n.id, "PLANNED", "INCOMING", { evmSend: { hash: "0x" + "ab".repeat(32), nonce: 0n, value: ASK.amount, sentMs: 1n } });
+  ns.close();
+  const unhandled: unknown[] = [];
+  const on = (e: unknown) => void unhandled.push(e);
+  process.on("unhandledRejection", on);
+  try {
+    const r = rpcs();
+    const t = testnetPool({ store, seed64: async () => SEED.slice() }, { evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: () => r.pair, evmRound: () => async () => Promise.reject(new EvmNotFinalError("a take not final yet")) });
+    await t.settle();
+    await new Promise((ok) => setTimeout(ok, 20));
+  } finally {
+    process.off("unhandledRejection", on);
+  }
+  assert.deepEqual(unhandled, [], "no unhandled rejection");
+  const back = await openNoteStore(await store());
+  assert.equal((await back.get(n.id))!.state, "INCOMING", "left open for the next load");
+  back.close();
+});
