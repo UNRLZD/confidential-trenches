@@ -102,15 +102,35 @@ type Script = {
   read?: "first" | "renewal" | "signed";
   /** the page's reference read fails past its retry */
   referenceDown?: boolean;
+  /** a read on both providers as the kit's both() makes it (card pool-answer-unknown): before any signature, or with
+   * `at: "signed"` after the legs are signed. Its fault leaves run() (the blockhash and mint reads), or with `caught`
+   * refuses every leg "error: <message>" (or `refuse`) and returns the record (a build's side reads). */
+  providerRead?: { method: string; caught?: boolean; at?: "signed" };
+  /** the deps the kit is given */
+  onDeps?: (deps: SolanaTradeDeps) => void;
 };
 /** runSolanaTrade's stand-in: signs each leg (or `signAs`) through deps.sign, hands the kept signatures to onSigned, then
  * signed, sent and the final stage. */
 function standIn(script: Script, calls: SolanaTradeRequest[]) {
   return async (req: SolanaTradeRequest, deps: SolanaTradeDeps): Promise<SolanaTradeRecord> => {
     script.atStart?.();
+    script.onDeps?.(deps);
     calls.push(req);
     const legs: SolanaTradeRecord["legs"] = req.legs.map((l) => ({ wallet: l.wallet, amount: l.amount, expectedOut: 1n, minOut: 1n }));
     const reference = () => deps.reference({ side: req.side, token: req.token, amount: 1n, amounts: [1n] }, deps.providers);
+    const read = script.providerRead;
+    const providerRead = () => Promise.all([deps.providers[0](read!.method, []), deps.providers[1](read!.method, [])]);
+    if (read && read.at !== "signed") {
+      if (!read.caught) await providerRead();
+      else {
+        const why = await providerRead().then(() => null, (e: unknown) => (e instanceof Error ? e.message : String(e)));
+        if (why !== null) {
+          legs.forEach((l) => (l.refused = script.refuse ?? `error: ${why}`));
+          deps.onProgress?.("refused");
+          return { side: req.side, token: req.token, reference: 1n, blockhash: null, legs };
+        }
+      }
+    }
     if (script.read === "first") await reference();
     if (script.read === "renewal" && (await reference().then(() => null, (e: unknown) => String(e))) !== null) {
       legs.forEach((l) => (l.refused = "renewal: error: the read failed"));
@@ -132,6 +152,7 @@ function standIn(script: Script, calls: SolanaTradeRequest[]) {
       } else l.signature = base58.encode(sig);
     }
     if (script.read === "signed") await reference();
+    if (read?.at === "signed") await providerRead();
     const kept = legs.filter((l) => l.signature);
     deps.onSigned?.(kept.map((l) => ({ wallet: l.wallet, signature: l.signature! })));
     deps.onProgress?.("signed");
@@ -775,4 +796,71 @@ test("card pool-read-down: a reference read down before any leg is signed answer
   // the reference up: the run's other refusals keep their own codes
   const up = await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { read: "renewal" }).ask(buy("10"));
   assert.ok(up.answer && "result" in up.answer, JSON.stringify(up.answer));
+});
+
+// Card pool-answer-unknown: every provider read before the first signature, not only the reference, that fails past
+// the page's retry answers down; from the first signature on, never down (a tx may land).
+const transport = () => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "provider.down.example");
+/** Two providers: `p` rejects every call with `fault()`, the other answers no account. */
+const oneDown = (p: 0 | 1, fault: () => Error = transport): readonly [SolanaRpc, SolanaRpc] => {
+  const down: SolanaRpc = async () => { throw fault(); };
+  const up: SolanaRpc = async () => ({ value: null });
+  return p === 0 ? [down, up] : [up, down];
+};
+const kitReads = [
+  { method: "getLatestBlockhash" }, // the blockhash on both: its fault leaves run()
+  { method: "getAccountInfo" }, // the mint on both: its fault leaves run()
+  { method: "getMultipleAccounts", caught: true }, // a build's side reads: the kit refuses each leg "error: ..."
+] as const;
+
+test("card pool-answer-unknown: a provider read the kit makes before any leg is signed, down past its retry on either provider, answers down", async () => {
+  for (const providerRead of kitReads) {
+    for (const p of [0, 1] as const) {
+      const at = `${providerRead.method} on provider ${p}`;
+      const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
+      const q = page(s, { providerRead, final: "filled" }, oneDown(p));
+      const out = await throughApi("buy", q.handler, buy("10"));
+      assert.deepEqual((out.answer as { error: unknown }).error, { code: "down" }, at);
+      assert.deepEqual(out.stages, ["refused"], at);
+      assert.equal(q.opened(), 0, `${at}: the seed is never opened, so no leg is signed`);
+      assert.equal(mark(s, 0), undefined, `${at}: the wallet's mark goes`);
+    }
+  }
+});
+
+test("card pool-answer-unknown: a sell whose held read is down past its retry on either provider answers down, before anything runs", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  for (const p of [0, 1] as const) {
+    const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos) });
+    const held = provider({ [W[0]!.address]: 3_000n });
+    const down: SolanaRpc = async () => { throw transport(); };
+    const q = page(s, { final: "filled" }, p === 0 ? [down, held] : [held, down]);
+    const out = await throughApi("buy", q.handler, sell("1000"));
+    assert.deepEqual((out.answer as { error: unknown }).error, { code: "down" }, `provider ${p}`);
+    assert.deepEqual(out.stages, ["refused"], `provider ${p}`);
+    assert.equal(q.calls.length, 0, `provider ${p}: the kit never ran`);
+    assert.equal(mark(s, 0), undefined, `provider ${p}: no mark is made`);
+  }
+});
+
+test("card pool-answer-unknown: a provider down after the first signature, a price check refusal after a fault, or a fault that is not the transport's never answers down", async () => {
+  // after the legs are signed: a tx may land, so never down
+  const signed = await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { providerRead: { method: "getSignatureStatuses", at: "signed" } }, oneDown(0)).ask(buy("10"));
+  assert.deepEqual(signed.answer, { error: "failed" });
+  // a fault at a build's side read, then the kit's own price check refusal: the price check's code stands
+  const checked = await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { providerRead: { method: "getMultipleAccounts", caught: true }, refuse: "checks: S12 the simulated out is under the bar" }, oneDown(1)).ask(buy("10"));
+  assert.deepEqual(checked.answer, { error: "quote_check_failed" });
+  // a plain error, not a read past its retry: failed, thrown or caught by the kit
+  for (const providerRead of kitReads) {
+    const plain = await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { providerRead }, oneDown(0, () => new Error("HTTP 503"))).ask(buy("10"));
+    assert.deepEqual(plain.answer, { error: "failed" }, providerRead.method);
+  }
+});
+
+test("card pool-answer-unknown: the providers the kit gets keep their URLs, so its same-provider refusal and each provider's one queue still hold", async () => {
+  const withUrl = (url: string): SolanaRpc => Object.assign(async () => ({ value: null }), { url });
+  const given = [withUrl("https://a.example/"), withUrl("https://b.example/")] as const;
+  let seen: readonly SolanaRpc[] = [];
+  await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { final: "filled", onDeps: (d) => (seen = d.providers) }, given).ask(buy("10"));
+  assert.deepEqual(seen.map((r) => r.url), ["https://a.example/", "https://b.example/"]);
 });
