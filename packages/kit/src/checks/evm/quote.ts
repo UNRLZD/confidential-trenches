@@ -2660,8 +2660,7 @@ export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: stri
   return evmSellRevertedPoolsWith(quote, txHash, evmProviders(evmRanked(p), fetch));
 }
 
-const SEL_SELL = bytesToHex(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)"))).slice(0, 8);
-const NONE: readonly string[] = Object.freeze([]);
+const SEL_SELL = "0c2cb9ca"; // a literal, never a top-level call (the kit's index reaches the signing page's bundle): SellDelegate.sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)
 /** One provider's answer to a replay: success, or a revert with its data ("" for none); anything else is a refusal. */
 type Replay = { ok: true } | { ok: false; data: string };
 function replayOf(a: unknown, who: string): Replay {
@@ -2691,7 +2690,7 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
   if (!Array.isArray(rpcsIn) || rpcsIn.length < 2) return refuse("bad_request", "a ban is proved on two providers or more");
   const { chain, route, w, token } = quote;
   const v = venue(chain, venues);
-  if (quote.hooked.length === 0 || route.venue !== "uniswap-v4" || v.sellDelegate === undefined || v.v4 === undefined) return NONE;
+  if (quote.hooked.length === 0 || route.venue !== "uniswap-v4" || v.sellDelegate === undefined || v.v4 === undefined) return [];
   const h = txHash.toLowerCase();
   const rpcs = [...rpcsIn];
   try {
@@ -2713,29 +2712,29 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
       (x, y) => JSON.stringify(x) === JSON.stringify(y),
       () => refuse("rpc_disagree", `the providers answer the sale ${h} differently`),
     );
-    if (sale.hash !== h || sale.rcHash !== h || sale.rcBlock !== sale.blockHash || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return NONE;
+    if (sale.hash !== h || sale.rcHash !== h || sale.rcBlock !== sale.blockHash || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];
     // the sale is the quote's own: SellDelegate.sell(sell, fee, signature), its Sell's token, amount, target and minOut
     // the quote's, its data the route the quote holds
     const d = sale.input.slice(2);
-    if (!d.startsWith(SEL_SELL)) return NONE;
+    if (!d.startsWith(SEL_SELL)) return [];
     const at = (i: number) => (8 + 64 * i + 64 <= d.length ? BigInt("0x" + d.slice(8 + 64 * i, 8 + 64 * i + 64)) : -1n);
     const t0 = at(0);
-    if (t0 < 0n || t0 % 32n !== 0n || t0 > 0x10000n) return NONE;
+    if (t0 < 0n || t0 % 32n !== 0n || t0 > 0x10000n) return [];
     const t = Number(t0 / 32n);
     const [sToken, sAmount, sTarget, sData, sMinOut] = [at(t), at(t + 1), at(t + 2), at(t + 3), at(t + 4)];
-    if (sData < 0n || sData % 32n !== 0n || sData > 0x10000n) return NONE;
+    if (sData < 0n || sData % 32n !== 0n || sData > 0x10000n) return [];
     const dl = at(t + Number(sData / 32n));
-    if (dl < 0n || dl > 4096n || 8 + 64 * (t + Number(sData / 32n) + 1) + Number(dl) * 2 > d.length) return NONE;
+    if (dl < 0n || dl > 4096n || 8 + 64 * (t + Number(sData / 32n) + 1) + Number(dl) * 2 > d.length) return [];
     const off = 8 + 64 * (t + Number(sData / 32n) + 1);
     const data = "0x" + d.slice(off, off + Number(dl) * 2);
-    if (sToken !== BigInt(token) || sAmount !== quote.amountIn || sTarget !== BigInt(quote.target) || sMinOut !== quote.minOut) return NONE;
+    if (sToken !== BigInt(token) || sAmount !== quote.amountIn || sTarget !== BigInt(quote.target) || sMinOut !== quote.minOut) return [];
     let signed: EvmSellRoute;
     try {
       signed = evmSignedSellRouteOf(chain, { w, token, amount: sAmount, minOut: sMinOut, target: quote.target, data });
     } catch {
-      return NONE;
+      return [];
     }
-    if (JSON.stringify(signed) !== JSON.stringify(route)) return NONE;
+    if (JSON.stringify(signed) !== JSON.stringify(route)) return [];
     // 2. the sale's block: its parent, number and time, the same on two providers
     const { a: blk } = await agreeing(
       rpcs,
@@ -2748,9 +2747,9 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
       (x, y) => JSON.stringify(x) === JSON.stringify(y),
       () => refuse("rpc_disagree", `the providers answer the sale's block ${sale.blockHash} differently`),
     );
-    if (blk.hash !== sale.blockHash || BigInt(blk.number) !== BigInt(sale.blockNumber) || !/^0x[0-9a-f]{64}$/.test(blk.parentHash)) return NONE;
+    if (blk.hash !== sale.blockHash || BigInt(blk.number) !== BigInt(sale.blockNumber) || !/^0x[0-9a-f]{64}$/.test(blk.parentHash)) return [];
     const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);
-    if (gas <= 0n) return NONE;
+    if (gas <= 0n) return [];
     const asW = { [lower(w)]: { code: designator(v.sellDelegate) } };
     const parent = { blockHash: blk.parentHash, requireCanonical: true };
     const env = { number: qty(BigInt(blk.number)), time: qty(BigInt(blk.timestamp)) };
@@ -2766,13 +2765,13 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
       return a;
     };
     // the replay as the sale ran: it reverts, the same on both
-    if ((await replay({})).ok) return NONE;
+    if ((await replay({})).ok) return [];
     // 3. the market held: the quoter prices the route, its hooks as they are, at minOut or more at the parent block
     const n = route.hops.length;
     const bought: EvmRoute = { venue: "uniswap-v4", currencyIn: route.hops[n - 1]!.currency, hops: route.hops.map((_, i) => { const s = route.hops[n - 1 - i]!; return { currency: i === n - 1 ? token : route.hops[n - 2 - i]!.currency, fee: s.fee, tickSpacing: s.tickSpacing, hooks: s.hooks, hookData: "0x" }; }) };
-    if (JSON.stringify(evmSellRouteOf(bought)) !== JSON.stringify(route)) return NONE;
+    if (JSON.stringify(evmSellRouteOf(bought)) !== JSON.stringify(route)) return [];
     const [held] = await readBoth(rpcs, blk.parentHash, [sellRead(v, token, bought, quote.amountIn)]);
-    if (held!.kind !== "out" || held!.amountOut < quote.minOut) return NONE;
+    if (held!.kind !== "out" || held!.amountOut < quote.minOut) return [];
     // 4. one pool: the replay with that pool's hook alone a no-op succeeds
     const keys = hopKeys(bought);
     const out: string[] = [];
@@ -2781,9 +2780,9 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
       if (!quote.hooked.includes(id) || keys.filter((x) => x.hooks === k.hooks).length !== 1) continue;
       if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);
     }
-    return Object.freeze(out);
+    return out;
   } catch (e) {
-    if (e instanceof EvmQuoteError && e.code === "rpc_disagree") return NONE;
+    if (e instanceof EvmQuoteError && e.code === "rpc_disagree") return [];
     throw e;
   }
 }
