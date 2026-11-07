@@ -11,7 +11,7 @@
 //   come from the seed (l.177-179). The refund note of the same (l, j) gives refund_precommitment (l.186-188).
 // - The recipient is the NEAR account the user typed when the caller names one (`to`, card wallet-withdraw-move-out):
 //   the vault pays it straight, as the exit tool's vault withdraw row does (wallet.md:931) and as Privacy Pools v1
-//   does; fund_recipient is false (no A to fund) and register_deposit is the typed account's own two-RPC read. A
+//   does; fund_recipient is false (no A to fund) and register_deposit is the token's minimum, read naming no account (typedRegisterDepositOf). A
 //   ties nothing more (wallet.md:1021), so the hop it would add hides nothing. With no `to` (the arming path):
 // - the recipient is this note's own arming account A_{l,j} (markets.md l.989 and l.1534, "The kit makes every
 //   withdrawal's `recipient` this note's `A_{l,j}` (W:671)"; wallet.md l.645 step 5, the l.907 row), derived here after the pick, never taken
@@ -65,7 +65,7 @@ import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import { type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
 
-/** nearcore's account id rule (as arming/accounts.ts readTypedRegistration reads it). */
+/** nearcore's account id rule: 2-64 characters, lowercase letters and digits in parts joined by "-" or "_", those joined by ".". */
 const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
 /** A change note's ref: change note j of label l. */

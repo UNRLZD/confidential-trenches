@@ -2,20 +2,20 @@
  "good": {
   "key": "wallet-withdraw-move-out",
   "url": "local build",
-  "at": "2026-11-07T21:34:05.737Z",
+  "at": "2026-11-07T22:45:13.703Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-fkMrY3By+FJk8utk7AccJjSUv9mAQOEI6FWZKgdg5uo6srfHpz4kHILkuw9b2D6R",
+   "integrity": "sha384-/9sfEOe9A+MBh4K5KAYFjSIzN/qF2jdwobADf33oKQLlRUOBDC4o+gjj0nJ9YKDl",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 721262,
-   "sha384": "sha384-fkMrY3By+FJk8utk7AccJjSUv9mAQOEI6FWZKgdg5uo6srfHpz4kHILkuw9b2D6R",
+   "bytes": 720610,
+   "sha384": "sha384-/9sfEOe9A+MBh4K5KAYFjSIzN/qF2jdwobADf33oKQLlRUOBDC4o+gjj0nJ9YKDl",
    "markers": {
-    "the typed account is not a NEAR account id": 1,
+    "to: not a NEAR account id": 1,
     "to: the vault, intents.near or the token": 1,
     "nullifierHash or recipient: not given": 1,
     "dataset.notice=`unmatched`": 1,
@@ -26,20 +26,20 @@
  "bad_live_before": {
   "key": "wallet-withdraw-move-out",
   "url": "https://sign.confidential.unrealized.trade",
-  "at": "2026-11-07T21:34:05.945Z",
+  "at": "2026-11-07T22:45:14.006Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-BK+P+znB9c0bPoa3k8iiHCV25Lt6Y6kWOORGagTEM+aeab6F872AZ5g9u/Ix7MXz",
+   "integrity": "sha384-q0t1MGVoIcUi/KJT49CPzMsdeRLvHe3eklzHQHJRcCaBFNmhkV1rfEIB4ZxvU2Zf",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 711019,
-   "sha384": "sha384-BK+P+znB9c0bPoa3k8iiHCV25Lt6Y6kWOORGagTEM+aeab6F872AZ5g9u/Ix7MXz",
+   "bytes": 712635,
+   "sha384": "sha384-q0t1MGVoIcUi/KJT49CPzMsdeRLvHe3eklzHQHJRcCaBFNmhkV1rfEIB4ZxvU2Zf",
    "markers": {
-    "the typed account is not a NEAR account id": 0,
+    "to: not a NEAR account id": 0,
     "to: the vault, intents.near or the token": 0,
     "nullifierHash or recipient: not given": 0,
     "dataset.notice=`unmatched`": 0,

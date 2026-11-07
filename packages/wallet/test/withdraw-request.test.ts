@@ -379,7 +379,7 @@ function nullRegistration(net: NearNetwork, seen: unknown[]): [NearRpc, NearRpc]
   return [side("a", NEAR_NETWORKS[net].fastnear[0]), side("b", NEAR_NETWORKS[net].drpc)];
 }
 
-test("A's registration is read on the withdrawal's own token: another network's read is refused, nothing read, written or proved", async () => {
+test("the register_deposit is read on the withdrawal's own token: another network's read is refused, nothing read, written or proved", async () => {
   const v = await vaultWith();
   const seen: unknown[] = [];
   let writes = 0;
@@ -391,10 +391,11 @@ test("A's registration is read on the withdrawal's own token: another network's 
   assert.equal(writes, 0, "no write");
   assert.deepEqual(p.log, [], "no proof");
   assert.deepEqual((await v.ns.list()).map((n) => n.state), ["UNSPENT", "UNSPENT", "UNSPENT"]);
-  // on its own network the read is made for the request's own A, and its register_deposit is the one bound
+  // on its own network: the token's minimum on both RPCs, a read that names no account (review F2), and it is the
+  // register_deposit bound
   const r = await withdrawRequest(argsFor(v, signalsProver(), { registerDepositOf: armingRegisterDepositOf("mainnet", nullRegistration("mainnet", seen)) }));
-  assert.equal(seen.length, 4);
-  for (const q of seen as { account_id: string }[]) assert.equal(q.account_id, TOKEN);
+  assert.equal(seen.length, 2);
+  for (const q of seen as { account_id: string; method_name: string }[]) assert.deepEqual([q.account_id, q.method_name], [TOKEN, "storage_balance_bounds"]);
   assert.equal(r.body.withdrawal.register_deposit, "1250000000000000000000");
 });
 
@@ -414,18 +415,17 @@ const registration = (registered: boolean, net: NearNetwork = "mainnet", seen: u
   return [side("a", NEAR_NETWORKS[net].fastnear[0]), side("b", NEAR_NETWORKS[net].drpc)];
 };
 
-test("to a typed account: the proof's recipient is exactly that account, register_deposit is its own, fund_recipient is false", async () => {
+test("to a typed account: the proof's recipient is exactly that account, register_deposit is the token's minimum registered or not, fund_recipient is false", async () => {
   for (const registered of [false, true]) {
     const v = await vaultWith();
-    const seen: { account_id: string; args_base64: string }[] = [];
+    const seen: { account_id: string; method_name: string }[] = [];
     const r = await withdrawRequest(argsFor(v, signalsProver(), { to: TYPED, registerDepositOf: typedRegisterDepositOf("mainnet", registration(registered, "mainnet", seen)) }));
     assert.equal(r.recipient, TYPED, `registered ${registered}`);
     assert.equal(r.body.withdrawal.recipient, TYPED);
     assert.equal(r.body.fund_recipient, false);
-    assert.equal(r.body.withdrawal.register_deposit, registered ? "0" : "1250000000000000000000");
-    // the registration read names the typed account on the token, never the note's A
-    const asked = seen.filter((q) => JSON.parse(Buffer.from(q.args_base64, "base64").toString()).account_id !== undefined);
-    assert.deepEqual([...new Set(asked.map((q) => JSON.parse(Buffer.from(q.args_base64, "base64").toString()).account_id))], [TYPED]);
+    assert.equal(r.body.withdrawal.register_deposit, "1250000000000000000000");
+    // no read names the typed account (card relayer-cost-guards, review F2): the token's minimum on each RPC, nothing else
+    assert.deepEqual(seen.map((q) => [q.account_id, q.method_name]), [[TOKEN, "storage_balance_bounds"], [TOKEN, "storage_balance_bounds"]]);
     // the context the proof binds is over the typed recipient
     assert.equal(r.body.public_signals[7], vaultContextOf(keccak_256, vaultContextInput(VAULT, r.body.withdrawal), SCOPE).toString());
     const a = armAccount(SEED, v.notes[1]!.leaf!.label, 0);
@@ -457,9 +457,12 @@ test("the arming path is unchanged: with no typed account the request still pays
   assert.equal(r.body.fund_recipient, true);
 });
 
-test("typedRegisterDepositOf reads a named account's registration on the withdrawal's own token, refusing another token", async () => {
-  assert.equal(await typedRegisterDepositOf("mainnet", registration(false))(TYPED, TOKEN), 1_250_000_000_000_000_000_000n);
-  assert.equal(await typedRegisterDepositOf("mainnet", registration(true))(TYPED, TOKEN), 0n);
+test("typedRegisterDepositOf is armingRegisterDepositOf: the token's minimum registered or not, read naming no account, another token refused", async () => {
+  assert.equal(typedRegisterDepositOf, armingRegisterDepositOf);
+  for (const registered of [false, true]) {
+    const seen: { method_name: string }[] = [];
+    assert.equal(await typedRegisterDepositOf("mainnet", registration(registered, "mainnet", seen))(TYPED, TOKEN), 1_250_000_000_000_000_000_000n);
+    assert.deepEqual(seen.map((q) => q.method_name), ["storage_balance_bounds", "storage_balance_bounds"]);
+  }
   await assert.rejects(typedRegisterDepositOf("testnet", registration(false, "testnet"))(TYPED, TOKEN), /token/);
-  await assert.rejects(typedRegisterDepositOf("mainnet", registration(false))("Bob.near", TOKEN), /NEAR account/);
 });

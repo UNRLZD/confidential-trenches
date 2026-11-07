@@ -15,7 +15,7 @@
 // - The hand-off (card wallet-withdraw-move-out), offered wherever the release names a vault and a relayer (the
 //   testnet build today; SIGN_HOST's once the release writes mainnet's relayer with its vault): the vault pays the
 //   NEAR account the user typed straight, as Privacy Pools v1 and the exit tool's vault withdraw row (W:931) do, with
-//   fund_recipient false and register_deposit read on that account on the pair (typedRegisterDepositOf); A ties
+//   fund_recipient false and register_deposit the token's minimum, read on the pair naming no account (typedRegisterDepositOf); A ties
 //   nothing more (W:1021), so no hop through the note's A is made. The relayer's quote again for the typed amount
 //   (above the drawn fee: the form draws the new fee and nothing is proved), the vault's two trees read by the kit's
 //   vaultSync on the pair at one block (their roots the vault's), T the lower of the pair's final block times (agreeing

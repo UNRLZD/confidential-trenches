@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // Live check of card wallet-withdraw-move-out: SIGN_HOST's withdraw path pays the NEAR account the user typed straight
-// from the vault (the proof's recipient is that account, fund_recipient false, its own register_deposit), follows the
+// from the vault (the proof's recipient is that account, fund_recipient false, register_deposit the token's minimum, read naming no account), follows the
 // landing to the arrival on the vault's spend row, and shows a settle pass's unmatched withdrawal. The page is one
 // script: src/main.ts and all it imports are bundled into /app.js (packages/signpage/scripts/build-app.mjs), which
 // / names with its sha384. So the check reads what SIGN_HOST serves at / and at that script, as a browser does:
 //   - / names exactly one module script, /app.js, with its integrity, and /app.js's sha384 is that integrity;
-//   - /app.js holds this card's strings, which minifying keeps (string literals): the typed account's registration
-//     read (readTypedRegistration's refusal), withdrawRequest's refusal of the vault, intents.near or the token as the
-//     typed recipient, the arrival read's input refusal (wallet/src/withdraw/arrival.ts), and the form's unmatched
+//   - /app.js holds this card's strings, which minifying keeps (string literals): withdrawRequest's refusals of a typed
+//     recipient that is not a NEAR account id, and of the vault, intents.near or the token as the typed recipient, the arrival read's input refusal (wallet/src/withdraw/arrival.ts), and the form's unmatched
 //     notice (its mark and its draft words).
 // The mainnet build offers no hand-off until the release names mainnet's relayer (handoff.ts withdrawHandoff: null);
 // the code that pays the typed account is in the bundle either way, which is what this reads.
@@ -26,7 +25,7 @@ export const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
 const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage");
 /** This card's strings in the bundle, each as the minifier writes it. */
 export const MARKERS = [
-  "the typed account is not a NEAR account id",
+  "to: not a NEAR account id",
   "to: the vault, intents.near or the token",
   "nullifierHash or recipient: not given",
   "dataset.notice=`unmatched`",

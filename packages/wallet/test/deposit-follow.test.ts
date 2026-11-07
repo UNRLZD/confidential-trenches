@@ -13,14 +13,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
 import type { DepositStage } from "@blindfill/kit";
-import { base58 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
 import { IDBFactory } from "fake-indexeddb";
 import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { DepositAccountRefused, depositAccount, HEIGHT_SPREAD_MAX, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src/deposit/bind.ts";
-import { RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
-import { DEPOSIT_STATUS_URL, type DepositOp, followEnded, REFUND_MOVE_MS, type FollowArgs, type FollowDeps, followDeposit, type FollowRpc, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
+import { encodeDelegateAction, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
+import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, followEnded, REFUND_MOVE_MS, type FollowArgs, type FollowDeps, followDeposit, type FollowRpc, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
@@ -1163,7 +1163,14 @@ test("D3c: a held op whose money never bound never stands in another op's way: A
 });
 
 /** A bind call as the note store keeps it (only its shape is read here). */
-const callOf = (u: string, balance: bigint) => ({ signed_delegate: "AAAA", sender_id: u, receiver_id: NET.usdc, nonce: 1n, max_block_height: 1n, public_key: publicKeyOf(u), balance });
+// a call written for a note: its bytes a DelegateAction for U's whole balance (the follow reads a call's amount from
+// them, bind.ts callAmount) and a zero signature, as no relayer ever sees them
+const callOf = (u: string, balance: bigint) => {
+  const args = new TextEncoder().encode(JSON.stringify({ receiver_id: VAULT, amount: balance.toString(), msg: "{}" }));
+  const d = encodeDelegateAction({ sender_id: u, receiver_id: NET.usdc, method_name: "ft_transfer_call", args, gas: 1n, deposit: 1n, nonce: 1n, max_block_height: 1n, public_key: Uint8Array.from(Buffer.from(u, "hex")) });
+  const signed_delegate = base64.encode(Uint8Array.from([...d, 0, ...new Uint8Array(64)]));
+  return { signed_delegate, sender_id: u, receiver_id: NET.usdc, nonce: 1n, max_block_height: 1n, public_key: publicKeyOf(u), balance };
+};
 
 test("D4: with untilFinal, final is never written while U holds a credit not yet bound: a late 1.5 USDC is bound before the follow ends", async () => {
   const t = await setup(["SUCCESS"]);
@@ -1216,7 +1223,8 @@ test("D4b: with untilFinal, final is never written while a note's call is out (U
       t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
     }
   };
-  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40) });
+  // the call landed with the late note: final waits REFUND_FINAL_BLOCKS past its run (a refund to U cannot be ruled out)
+  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40 + Number(REFUND_FINAL_BLOCKS)) });
   const op = await opOf(t.w);
   const notes = await t.store.list();
   assert.equal(out.kind, "done");

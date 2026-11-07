@@ -8,7 +8,7 @@
 //
 // The device's side is the wallet's and the page's own modules: the note restored from VT-T02's 12 words
 // (packages/wallet/src/notes/restore.ts restoreNotes, writeRestored, on fake-indexeddb), the form's fee (fee()), the
-// tap's hand-off (withdrawRequest with `to` = W, so fund_recipient false and register_deposit W's own; relayWithdraw;
+// tap's hand-off (withdrawRequest with `to` = W, so fund_recipient false and register_deposit the token's minimum; relayWithdraw;
 // withdrawArrival), then the settle pass a reload runs (withdrawSettle), which must send nothing. The relayer's side is
 // the helper's own GET /v1/withdraw/fee quote and POST /v1/withdraw carry (apps/helper/src/withdraw/fee.ts, send.ts
 // carryWithdraw, outcomeRound every 10 s), run in this process with R's key and reached through the page's fetchFn at
@@ -22,8 +22,8 @@
 //      makes W.
 //   R, F  VT-T02's relayer and fee recipient (the release's testnet pair, wallet relay.ts RELEASE_WITHDRAW_RELAYER): R's
 //      key from VT-T02's seed (--t02-state, read only, never printed).
-//   W  wt-<run>.<P>: the typed account, named, no key, not registered on the token (so register_deposit is the
-//      token's storage minimum); <run> from this run's seed in --state (outside the repo, mode 600).
+//   W  wt-<run>.<P>: the typed account, named, no key, not registered on the token (register_deposit is the
+//      token's storage minimum for every recipient; W unregistered has the vault's payout register it); <run> from this run's seed in --state (outside the repo, mode 600).
 //   The note: VT-T02's change note (its 12 words from VT-T02's seed), found by the wallet's restore.
 //
 //   node contracts/vault/scripts/testnet-withdraw-typed.ts --parent <P> --key-file <path> --t02-state <path> --state <path> [--out <file>]

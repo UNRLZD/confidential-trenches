@@ -1,0 +1,9 @@
+{
+  "what": "storage_balance_bounds() of the vault's token, read with call_function at finality final on two providers of two operators per network (card relayer-cost-guards, 2026-11-07 19:16Z). fee.ts REGISTER_DEPOSIT_MAX is held to these answers by fee.test.ts.",
+  "reads": [
+    { "network": "mainnet", "contract": "VAULT_CONSTANTS.TOKEN, mainnet USDC", "rpc": "https://rpc.mainnet.fastnear.com", "block_height": 223508269, "block_hash": "A7pdESratFdgQkN2Zs8jpQEgVjBJCB4wko3Qfr9tC7Mt", "answer": { "min": "1250000000000000000000", "max": "1250000000000000000000" } },
+    { "network": "mainnet", "contract": "VAULT_CONSTANTS.TOKEN, mainnet USDC", "rpc": "https://near.drpc.org", "block_height": 223508269, "block_hash": "A7pdESratFdgQkN2Zs8jpQEgVjBJCB4wko3Qfr9tC7Mt", "answer": { "min": "1250000000000000000000", "max": "1250000000000000000000" } },
+    { "network": "testnet", "contract": "TESTNET_TOKEN in token-status/status.ts", "rpc": "https://test.rpc.fastnear.com", "block_height": 276672519, "block_hash": "Gack8BroDE8bJvxVRGuxgJZAAADR4oUm82Y9B6TPb6za", "answer": { "min": "1250000000000000000000", "max": "1250000000000000000000" } },
+    { "network": "testnet", "contract": "TESTNET_TOKEN in token-status/status.ts", "rpc": "https://near-testnet.drpc.org", "block_height": 276672519, "block_hash": "Gack8BroDE8bJvxVRGuxgJZAAADR4oUm82Y9B6TPb6za", "answer": { "min": "1250000000000000000000", "max": "1250000000000000000000" } }
+  ]
+}

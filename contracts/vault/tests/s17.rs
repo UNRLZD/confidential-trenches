@@ -20,7 +20,7 @@
 //!    nothing, and a stranger cannot run `on_payout` (`#[private]`), so nothing moves the record on. The logged event
 //!    misleads no one: every reader takes the spend's status from the `spends` view, never from an event
 //!    (packages/kit/src/vault/shapes.ts l.357-358: events count only from successful receipts;
-//!    packages/wallet/src/notes/restore.ts l.309; apps/helper/src/withdraw/send.ts l.407).
+//!    packages/wallet/src/notes/restore.ts l.309; apps/helper/src/withdraw/send.ts l.415).
 //! 3. the top-up 2.5.4 names (a storage re-pricing is met by anyone's plain Transfer to the vault): a stranger's
 //!    Transfer raises the vault's NEAR by exactly its amount, with the state, the storage use and `keys: []` unchanged.
 //!
