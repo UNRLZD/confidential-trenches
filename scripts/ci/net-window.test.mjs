@@ -52,6 +52,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-evm-abi-tie.mjs",
   "scripts/live-checks/helper-evm-sender.mjs",
   "scripts/live-checks/helper-host-health.mjs",
+  "scripts/live-checks/helper-mainnet-vault-env.mjs",
   "scripts/live-checks/helper-launchpad-origin.mjs",
   "scripts/live-checks/helper-live-bars-no-503.mjs",
   "scripts/live-checks/helper-page-jup-429.mjs",
