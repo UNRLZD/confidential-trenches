@@ -196,29 +196,31 @@ try {
         const row = f.locator(`${list} [role="listitem"]`).nth(2);
         const mint = await row.getAttribute("data-token");
         for (const how of ["control", "middle"]) {
+          // What a click opens is the anchor's own link: Chrome opens a new tab at it, on APP_HOST (the frame's host).
+          const link = `/token/solana/${mint}`;
+          const href = await row.locator("a").evaluate((a) => a.href);
+          check(href === `${APP_HOST}${link}`, `${tag} ${how}-click: the row's link is ${href}, want ${APP_HOST}${link}`);
           const popup = ctx.waitForEvent("page", { timeout: 8_000 }).catch(() => null);
           if (how === "control") await row.locator("a").click({ modifiers: ["ControlOrMeta"], position: { x: 40, y: 20 } });
           else await row.locator("a").click({ button: "middle", position: { x: 40, y: 20 } });
-          const np = await popup;
-          check(!!np, `${tag} ${how}-click: no new tab`);
-          if (np) {
-            // What a click opens: a new tab whose address is the row's own link. Chrome makes that tab itself, and Playwright
-            // cannot route the tab's first request (it is made before Playwright can attach to the tab), so the live APP_HOST
-            // answers it (CI run 41676339679: the tab sat at APP_HOST with the deployed build's page, whose script the
-            // local build's hash refuses, so the app never started and nothing moved to the shell). The tab's page is then
-            // loaded again at the address it opened at, now through the harness, exactly as the deep link below is.
-            // The tab is at the row's link on APP_HOST, or, when the live page loads fast, already moved to SIGN_HOST's shell
-            // at the same path (in-shell.ts): both are the row's own link, nothing else is accepted.
-            const link = `/token/solana/${mint}`;
-            const rowLink = (u) => u === `${APP_HOST}${link}` || u === `${SIGN_HOST}${link}`;
-            await np.waitForURL((u) => rowLink(u.href), { timeout: 8_000 }).catch(() => {});
-            const opened = np.url();
+          const live = await popup;
+          check(!!live, `${tag} ${how}-click: no new tab`);
+          if (live) {
+            // Chrome makes that tab itself, and Playwright cannot route its first request (it is made before Playwright can
+            // attach), so whatever the live APP_HOST serves answers it: the deployed build, whose script the local build's
+            // hash refuses (CI run 41676339679), a build that moves to another release's SIGN_HOST, or no page at all
+            // while a host has no DNS record (PR #377's run 42315514606: the tab sat at chrome-error://). None of that is
+            // this build's, so the tab Chrome made is closed and the row's link is opened in a tab the harness answers
+            // from its first request, in front as a user who opens a tab looks at it, exactly as the deep link below is.
+            console.log(`${tag} ${how}-click: a new tab opened (the live host left it at ${live.url().slice(0, 120)})`);
+            await live.close();
+            const np = await ctx.newPage();
+            const opened = `${APP_HOST}${link}`;
             const seen = [];
             np.on("request", (r) => seen.push(`req ${r.method()} ${r.url().slice(0, 120)}`));
             np.on("response", (r) => seen.push(`res ${r.status()} ${r.url().slice(0, 120)}`));
             np.on("console", (m) => m.type() === "error" && seen.push(`console error ${m.text().slice(0, 160)}`));
             np.on("pageerror", (e) => seen.push(`pageerror ${String(e).slice(0, 160)}`));
-            check(rowLink(opened), `${tag} ${how}-click: the new tab opened at ${opened}, the row's link is ${link} on ${APP_HOST} or ${SIGN_HOST}`);
             await np.bringToFront(); // a user who opens a tab looks at it
             await np.goto(opened, { waitUntil: "load" });
             const nf = await appFrame(np);
