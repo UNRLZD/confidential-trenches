@@ -9,7 +9,9 @@
 //   - the code's imports: none of 2.8's banned ones (a key, a deploy, a delete), promise imports inside the six (the seven for a vault deployed before card
 //     vault-review-fixes-1), and
 //     its exports inside 2.5.7's list (vault-skeleton.mjs wasmProblems); it names the network's token and no other;
-//   - config(): it answers, its asset the network's token and its version the network's, both pinned here.
+//   - config(): it answers, its asset the network's token and its version the network's, both pinned here;
+//   - with --registered: the vault is registered on that token (storage_balance_of(vault) non-null, total above 0), the
+//     read a deposit needs, since a token transfer to an unregistered vault is refused (card vault-mainnet-deploy).
 // Then one write: storage_prepay(P) with exactly the minimum attached (DEPOSIT_STORAGE_BYTES, which config() must
 // name, x 1e19 yocto), read back on both RPCs by --tx with --precommitment P: final, the tx itself (its hash, signer
 // and receiver), one storage_prepay call of exactly P and exactly that deposit, the tx and every receipt run and
@@ -20,7 +22,7 @@
 //   - testnet: the same line, run with the signer's testnet key in ~/.near-credentials/testnet/, or
 //     contracts/vault/scripts/prepay.mjs, which signs and sends that write itself and then reads it back.
 //   node scripts/live-checks/vault-mainnet.mjs --network testnet|mainnet --account <vault> --signer <id>
-//     [--deployment <file>] [--precommitment <P> [--tx <hash>]] [--record <file>]
+//     [--deployment <file>] [--registered] [--precommitment <P> [--tx <hash>]] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, reads PASS and the write still to send exit 3
 // --deployment is the vault's record (account_id, wasm_sha256, wasm_builds_sha256, code_hash, network); testnet's
 // default is contracts/vault/deployments/testnet-v1.json, mainnet names its own. --record writes every RPC answer the
@@ -135,7 +137,20 @@ export async function readPrepay({ fetchFn, url, hash, signer, account, precommi
   say(logged, `${account} logged one storage_prepaid ${JSON.stringify(want)} ${at}: ${events.length ? events.map((e) => JSON.stringify(e.data)).join(", ") : "no storage_prepaid event"}`);
 }
 
-export async function check({ network, account, deployment, fetchFn = fetch, rpcs = NETWORKS[network]?.rpcs, write = {}, wait = 3000, sleep = pause }) {
+/** `account`'s registration on `token` read on `url` at final, told to `say`: storage_balance_of non-null, total above 0. */
+export async function readRegistration({ fetchFn, url, token, account, say, sleep = pause }) {
+  const at = `on ${url}`;
+  try {
+    const r = await rpc(fetchFn, url, "query", { request_type: "call_function", account_id: token, method_name: "storage_balance_of", args_base64: Buffer.from(JSON.stringify({ account_id: account })).toString("base64"), finality: "final" }, sleep);
+    const bal = JSON.parse(Buffer.from(r.result).toString("utf8"));
+    const good = bal !== null && /^\d+$/.test(bal?.total ?? "") && BigInt(bal.total) > 0n;
+    say(good, `${account} is registered on ${token} ${at}: ${bal === null ? "null" : `total ${bal?.total}`} at block ${r.block_height}`);
+  } catch (e) {
+    say(false, `storage_balance_of(${account}) on ${token} ${at}: ${e.message}`);
+  }
+}
+
+export async function check({ network, account, deployment, fetchFn = fetch, rpcs = NETWORKS[network]?.rpcs, write = {}, wait = 3000, sleep = pause, registered = false }) {
   const lines = [];
   let ok = true;
   const say = (good, text) => {
@@ -155,6 +170,7 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
   say(deployment.asset === net.token, `the record's asset is the ${network} token ${net.token}: ${deployment.asset}`);
   const configs = [];
   for (const url of rpcs) configs.push((await readVault({ fetchFn, url, account, deployment, token: net.token, version: net.version, say, sleep })).config);
+  if (registered) for (const url of rpcs) await readRegistration({ fetchFn, url, token: net.token, account, say, sleep });
 
   // the write, only on a vault whose every read passed
   const bytes = configs[0]?.deposit_storage_bytes;
@@ -188,9 +204,11 @@ export async function check({ network, account, deployment, fetchFn = fetch, rpc
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2);
   const known = new Set(["--network", "--account", "--signer", "--deployment", "--tx", "--precommitment", "--record"]);
+  const flags = new Set(["--registered"]); // no value
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    for (let i = 0; i < a.length; i += 2) if (!known.has(a[i]) || a[i + 1] === undefined || a[i + 1].startsWith("--")) throw new Error(`argument ${a[i]}: want ${[...known].join(", ")}, each with a value`);
+    for (let i = 0; i < a.length; i += flags.has(a[i]) ? 1 : 2) if (!flags.has(a[i]) && (!known.has(a[i]) || a[i + 1] === undefined || a[i + 1].startsWith("--"))) throw new Error(`argument ${a[i]}: want ${[...known].join(", ")}, each with a value, or ${[...flags].join(", ")}`);
+    const registered = a.includes("--registered");
     const network = opt("--network");
     const net = NETWORKS[network];
     if (!net) throw new Error("--network testnet|mainnet is required");
@@ -207,7 +225,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (tx && !precommitment) throw new Error("--tx needs --precommitment <P>: the one the write line printed");
     if (precommitment && !isPrecommitment(precommitment)) throw new Error("--precommitment: want one canonical decimal below p");
     const rec = recorder();
-    const r = await check({ network, account, deployment, fetchFn: opt("--record") ? rec.fetchFn : fetch, write: { signer, tx, precommitment } });
+    const r = await check({ network, account, deployment, fetchFn: opt("--record") ? rec.fetchFn : fetch, write: { signer, tx, precommitment }, registered });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(rec.answers) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     if (r.pending) {
@@ -215,7 +233,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       console.log(r.line);
       console.log(`live-check ${KEY}: or with a Ledger:`);
       console.log(r.ledgerLine);
-      console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs --network ${network} --account ${account} --signer ${signer}${opt("--deployment") ? ` --deployment ${shq(opt("--deployment"))}` : ""} --precommitment ${r.prepay.precommitment} --tx <its Transaction Id>`);
+      console.log(`live-check ${KEY}: then: node scripts/live-checks/vault-mainnet.mjs --network ${network} --account ${account} --signer ${signer}${opt("--deployment") ? ` --deployment ${shq(opt("--deployment"))}` : ""}${registered ? " --registered" : ""} --precommitment ${r.prepay.precommitment} --tx <its Transaction Id>`);
       process.exit(3);
     }
     console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"}`);
