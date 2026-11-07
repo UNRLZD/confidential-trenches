@@ -44,9 +44,11 @@
 //     outcome tells the caller to open the way out (withdraw.open, U's own plain ft_transfer; V 2.12 step 5).
 //   - Never storage_unregister on U, and never DeleteAccount while a call U signed can land (W:471-480, V:682-686):
 //     checkCleanup, which the clean-up signer must call first, reads every call from the note store.
-// A P the pages hold for another deposit (a front-run naming P, W:456-458 and point 9) is still this device's note:
-// its leaf hashes from our P, so the note goes UNSPENT with that leaf and the outcome says front_run; the caller signs
-// the amount again on U's next second-arrival note.
+// A P the pages hold for another deposit (a front-run naming P, W:456-458 and point 9; audit V-01, a stranger who reads
+// the relayer's storage_prepay(P) and deposits first, U's call refunded in full) is still this device's note: its leaf
+// hashes from our P, so the note goes UNSPENT with that leaf and the outcome says front_run; the caller signs the amount
+// again on U's next second-arrival note. Another deposit is told by value as well as depositor (ownRow): the vault takes
+// the depositor from the message, so the stranger may name U.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
 import { HELPER_RPC_METHODS, type VaultDepositRow, vaultSync, type VaultSyncCursor, vaultSyncStart, VaultSyncStopped } from "@blindfill/kit";
@@ -150,6 +152,17 @@ const running = new Map<string, number>(); // U -> binds running for it in this 
 // note id -> the call the relayer refused for now (prepay_open, a retry code), so a bind that ended on its wait (onWait
 // threw) sends the same bytes again while ahead of max_block_height, as one that waited would; a reload settles it
 const resend = new Map<string, { nonce: bigint; code: string }>();
+// note id -> the calls of it the relayer answered amount_above_balance (each signed from U's USDC read at or above its
+// amount on both RPCs), by their signed bytes: one per window
+const short = new Map<string, Set<string>>();
+/**
+ * The calls of one note the relayer may answer amount_above_balance before the bind ends refused (held, with that
+ * reason). The honest relayer reads U's USDC at final, so it reads it short of a call the device signed only while a
+ * ran call's debit is in and its refund is not (3 heights on NEAR, REFUND_HEIGHTS in follow.ts); each later call is
+ * signed a lapsed window on (DEPOSIT_WINDOW + LAPSE_MARGIN + 1 = 126 heights, about 76 s). So 3 calls hold a refund
+ * delayed two windows (about 2.5 min) by congestion, and a relayer that reads short past that is refused, not followed.
+ */
+export const SHORT_READ_CALLS = 3;
 
 // ---------- reads on two RPCs ----------
 type Obj = Record<string, unknown>;
@@ -402,6 +415,28 @@ export async function txCarriesFinal(rpc: BindRpc, hash: string, relayer: string
   }
 }
 
+/** The amount a deposit call signed: its one ft_transfer_call's args.amount, read from the call's own bytes. */
+export function callAmount(call: Pick<CallBytes, "signed_delegate">): bigint {
+  const args: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(base64.decode(innerOf(call as CallBytes).args)));
+  const a = isObj(args) ? args.amount : undefined;
+  if (typeof a !== "string" || !DIGITS.test(a)) throw new DepositBindRefused("note", "the note's call names no amount");
+  return BigInt(a);
+}
+
+/**
+ * Whether a pages row under the note's P is this deposit: U the depositor and the value one of the note's calls signed
+ * (no call written: `amount`, the bind's; none given either, U the depositor alone, as for a note another device on the
+ * seed landed). The vault takes the depositor from the message (contracts/vault/src/deposit.rs:80-93), so a stranger
+ * who takes P after the relayer's prepay (audit V-01) may name U; the value is the stranger's own. Any other row is a
+ * stranger's deposit on our P: the user's note, spendable with our secrets, and never this deposit done.
+ */
+export function ownRow(row: Pick<DepositRow, "depositor" | "value">, u: string, note: Pick<NoteRecord, "calls">, amount?: bigint): boolean {
+  if (row.depositor !== u) return false;
+  const calls = note.calls ?? [];
+  if (calls.length > 0) return calls.some((c) => callAmount(c) === row.value);
+  return amount === undefined || row.value === amount;
+}
+
 const callOf = (c: BindCall): SignedDepositDelegate => ({
   signed_delegate: c.signed_delegate, sender_id: c.sender_id, receiver_id: c.receiver_id, nonce: c.nonce, max_block_height: c.max_block_height, public_key: c.public_key, balance: c.balance,
 });
@@ -433,8 +468,11 @@ function previousRef(ref: NoteRef): NoteRef | null {
 const isUs = (ref: NoteRef, s: bigint, i: number) =>
   (ref.kind === "deposit" && ref.s === s && ref.i === i) || (ref.kind === "second" && ref.id.id === "U" && ref.id.s === s && ref.id.i === i);
 
-// Codes that say the call may still be (or have been) carried: the pages and U's nonce settle it.
-const SETTLE = new Set(["in_flight", "expired", "bad_nonce", "p_used"]);
+// Codes that say the call may still be (or have been) carried: the pages and U's nonce settle it. amount_above_balance
+// too: the device signed only after reading U's USDC at or above the amount on both RPCs, so a relayer's read short of
+// it is stale (a ran call's debit before its refund, audit V-01) or hostile, and the chain decides: the call lapses
+// and is signed again at its nonce once U holds the amount.
+const SETTLE = new Set(["in_flight", "expired", "bad_nonce", "p_used", "amount_above_balance"]);
 // Codes that say wait and send the same bytes again while their window is ahead.
 const RETRY = new Set(["token_halted", "relayer_low"]);
 // Codes on which the device's own reads may continue (one RPC behind or down, a halt, USDC not back yet).
@@ -536,7 +574,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       if (cur.state === "INCOMING") cur = await step("INCOMING", "UNSPENT", { leaf });
       if (cur.leaf === undefined || cur.leaf.leafIndex !== leaf.leafIndex || cur.leaf.commitment !== leaf.commitment)
         throw new DepositBindRefused("note", `the note is ${cur.state} with another leaf`);
-      return { kind: r.depositor === U && r.value === own.amount ? "deposited" : "front_run", note: cur };
+      return { kind: ownRow(r, U, cur, own.amount) ? "deposited" : "front_run", note: cur };
     };
     // A sign that the device's own reads refuse for now (an RPC behind, USDC not back) waits and reads again.
     const signing = async (f: () => Promise<SignedDepositDelegate>): Promise<SignedDepositDelegate | null> => {
@@ -699,6 +737,11 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         continue;
       }
       const answer = await send(out);
+      if (answer !== null && !answer.ok && answer.code === "amount_above_balance") {
+        const seen = short.get(own.noteId) ?? new Set<string>();
+        short.set(own.noteId, seen.add(out.signed_delegate));
+        if (seen.size >= SHORT_READ_CALLS) return { kind: "refused", code: answer.code };
+      }
       if (answer === null || answer.ok || SETTLE.has(answer.code)) step = await settle(out);
       else if (answer.code === "sender_struck") return strike();
       else if (answer.code === "resign_needed") {
@@ -731,4 +774,5 @@ export function resetBindSession(): void {
   struck.clear();
   running.clear();
   resend.clear();
+  short.clear();
 }
