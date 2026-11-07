@@ -54,8 +54,17 @@ const W = (l: bigint, j: number) => {
 };
 
 /** The seeded chain: a stranger's deposits, two of ours and a second arrival, a buy of deposit 0 paying W0, a return
- * deposit, and a withdraw of its change paying W1; Transfer logs to W0 and W1 and to a stranger. */
+ * deposit, and a withdraw of its change paying W1; Transfer logs to W0 and W1 and to a stranger. Its notes are the
+ * seed's, the same on every call, so it is made once per scope (card fresh-run-margin); each call gets its own copy of
+ * the chain's events and logs, which a test may change. */
+const SEEDED = new Map<bigint, ReturnType<typeof seededOnce>>();
 function seeded(scope = SCOPE) {
+  let s = SEEDED.get(scope);
+  if (s === undefined) SEEDED.set(scope, (s = seededOnce(scope)));
+  const { world, ...rest } = s;
+  return { world: { ...world, pool: world.pool.map((e) => ({ ...e })), xfers: world.xfers.map((x) => ({ ...x })) }, ...rest };
+}
+function seededOnce(scope: bigint) {
   let nonce = 0n;
   const pool: PoolEv[] = [];
   const dep = (block: number, pre: bigint, value: bigint): bigint => {
@@ -107,13 +116,22 @@ function xferLogs(w: World): Record<string, unknown>[] {
     blockNumber: q(x.block), blockHash: w.hashOf(x.block), logIndex: q(1), transactionHash: h32(`xfer tx ${i}`), transactionIndex: q(1), removed: false,
   }));
 }
+/** The pool's views at block n, from its leaves up to n. The trees are made once per list of leaves (card
+ * fresh-run-margin): every view call of every restore asks the same few. */
+const VIEWS = new Map<string, { root: bigint; size: bigint; labelRoot: bigint; labelSize: bigint }>();
 function viewsAt(w: World, n: number) {
-  const st = new VaultTree(), lt = new VaultTree();
-  for (const e of w.pool.filter((e) => e.block <= n)) {
-    st.append([e.state]);
-    if (e.label !== undefined) lt.append([e.label]);
+  const evs = w.pool.filter((e) => e.block <= n);
+  const key = evs.map((e) => `${e.state}/${e.label ?? ""}`).join(",");
+  let v = VIEWS.get(key);
+  if (v === undefined) {
+    const st = new VaultTree(), lt = new VaultTree();
+    for (const e of evs) {
+      st.append([e.state]);
+      if (e.label !== undefined) lt.append([e.label]);
+    }
+    VIEWS.set(key, (v = { root: st.root ?? 0n, size: BigInt(st.size), labelRoot: lt.root ?? 0n, labelSize: BigInt(lt.size) }));
   }
-  return { root: st.root ?? 0n, size: BigInt(st.size), labelRoot: lt.root ?? 0n, labelSize: BigInt(lt.size) };
+  return v;
 }
 
 type Over = {
@@ -184,6 +202,13 @@ const wpair = (a: World, b: World = a, oa: Over = {}, ob: Over = {}): [EvmRpc, E
 type Extra = { sleep?: (ms: number) => Promise<void>; pick?: (n: number) => number };
 const restore = (rpcs: readonly EvmRpc[], walletRpcs: readonly EvmRpc[], extra: Extra = {}) =>
   evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs, walletRpcs, gap: 4, sleep: async () => {}, ...extra });
+/** The seeded chain's restore on clean pairs, run once (card fresh-run-margin): the tests that hold a restore under a
+ *  fault to the clean one share it. The same chain on the same pairs gives the same result; no test changes it. */
+let CLEAN: ReturnType<typeof restore> | undefined;
+const clean = (): ReturnType<typeof restore> => (CLEAN ??= (() => {
+  const { world } = seeded();
+  return restore(pair(world, world), wpair(world));
+})());
 const isXfer = (c: { method: string; params: unknown }) => c.method === "eth_getLogs" && (c.params as [{ address?: string }])[0].address === undefined;
 const namedIn = (log: NonNullable<Over["log"]>) => log.filter(isXfer).map((c) => (c.params as [{ topics: string[] }])[0].topics[2]!);
 const byKey = (r: { notes: { ref: NoteRef; state: string }[] }) => new Map(r.notes.map((n) => [refKey(n.ref), n.state]));
@@ -259,7 +284,7 @@ test("the Transfer RPCs are their own list: a provider of the pool's list is dro
   await assert.rejects(restore(pair(world, world), [rpc(world, { url: "https://c.example" }), rpc(world, { url: "https://b.example" })]), /walletRpcs \(no provider of the pool's rpcs\): two or more/);
   await assert.rejects(evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world), gap: 4 } as unknown as Parameters<typeof evmRestoreNotes>[0]), /walletRpcs: two or more/);
   // card evm-transfer-rpc-spares: Robinhood testnet's own RPC is in both lists there; the W reads go to the other two
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   const shared: Over["log"] = [];
   const r = await restore(pair(world, world), [rpc(world, { url: "https://c.example" }), rpc(world, { url: "https://b.example", log: shared }), rpc(world, { url: "https://d.example" })]);
   assert.deepEqual(r.wallets, want.wallets);
@@ -268,7 +293,7 @@ test("the Transfer RPCs are their own list: a provider of the pool's list is dro
 
 test("paging past a provider's range cap and its result cap still reads every log, under each cap", async () => {
   const { world } = seeded();
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   const la: Over["log"] = [], lb: Over["log"] = [];
   const got = await restore(pair(world, world, { cap: 7, log: la }, { resultCap: 1, log: lb }), wpair(world, world, { cap: 7, log: la }, { resultCap: 1, log: lb }));
   assert.deepEqual(got.wallets, want.wallets);
@@ -565,7 +590,7 @@ test("hex in either case: the Transfer pair on drpc's upper case (eth_chainId \"
   await evmHoldsAnchor([drpc(rh("https://c.example")), rh("https://d.example")], 46630n, anchor);
   await evmHoldsAnchor([rh("https://c.example"), drpc(rh("https://d.example"))], 46630n, anchor);
   // the whole restore, one side of each pair upper-cased: the same notes and the same tokens as lower case
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   assert.ok(want.wallets.every((w) => w.tokens !== null && w.tokens.length > 0));
   const [a, b] = pair(world, world), [c, d] = wpair(world);
   for (const [rpcs, wallets] of [[[a, b], [drpc(c), d]], [[drpc(a), b], [c, drpc(d)]], [[a, drpc(b)], [drpc(c), drpc(d)]]] as [[EvmRpc, EvmRpc], [EvmRpc, EvmRpc]][]) {
@@ -623,7 +648,7 @@ const tiles = (pages: { w: string; from: number; to: number }[], w: string, from
 
 test("D1 dRPC's real range refusal through the kit's client (HTTP 400, code 35) is paged under: every W's tokens read, every block of each W read", async () => {
   const { world, W0, W1 } = seeded();
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   const refused: number[] = [], pages: { w: string; from: number; to: number }[] = [];
   const capped = (b: Body) => {
     if (b.method !== "eth_getLogs") return undefined;
@@ -702,7 +727,7 @@ const UNKNOWN_CAPS: [string, number, Record<string, unknown>][] = [
 
 test("R1 a provider's cap in words never read before (Tenderly, Robinhood's own, Pocket, blockmachine, 1RPC; read live 5 Nov) is paged under: every W's tokens read, every block of each W read", async () => {
   const { world, W0, W1 } = seeded();
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   for (const [name, status, error] of UNKNOWN_CAPS) {
     const refused: number[] = [], pages: { w: string; from: number; to: number }[] = [];
     const capped = (b: Body) => {
@@ -763,7 +788,7 @@ const timedOut = () => Promise.reject(new DOMException("The operation timed out.
 
 test("T1 a throttle (429 with Retry-After, -32005 naming no cap, a kit throttle code; through the kit's client with and without its retry) keeps the page: the same page again after the wait, every W's tokens and every block read", async () => {
   const { world, W0, W1 } = seeded();
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   for (const [name, throttle] of THROTTLES) {
     for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {
       const sizes: number[] = [], pages: { w: string; from: number; to: number }[] = [], waits: number[] = [];
@@ -812,7 +837,7 @@ test("T2 throttles past the bound end that W unread, never an empty list: EVM_LO
 
 test("T5 a provider's one-minute window outlasted: Robinhood's own HTTP 429 \"Too Many Requests\" with no Retry-After (read 5 Nov 13:55Z) on every page for 60 s, then answers: every W read, the page never smaller", async () => {
   const { world, W0, W1 } = seeded();
-  const want = await restore(pair(world, world), wpair(world));
+  const want = await clean();
   for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {
     const sizes: number[] = [], waits: number[] = [];
     let slept = 0;
@@ -834,7 +859,7 @@ test("T6 the Transfer pair's own reads before any W (its chain id, the anchor's 
   for (const [name, throttle] of [...THROTTLES, ["no answer in time", timedOut] as const]) {
     for (const method of ["eth_chainId", "eth_getBlockByNumber"]) {
       const { world, W0, W1 } = seeded();
-      const want = await restore(pair(world, world), wpair(world));
+      const want = await clean();
       let n = 0;
       const waits: number[] = [];
       // the pair's first two reads of `method` throttled, then answered
@@ -896,7 +921,7 @@ test("T4 no answer in time halves a page over one block (Pocket's 10,000-block p
   for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {
     // a page over 7 blocks never answers in time: halved under it, every W's tokens and every block read
     const { world, W0, W1 } = seeded();
-    const want = await restore(pair(world, world), wpair(world));
+    const want = await clean();
     const pages: { w: string; from: number; to: number }[] = [], waits: number[] = [];
     const slow = (b: Body) => (b.method === "eth_getLogs" && (b.params[0] as { address?: string }).address === undefined && span(b).to - span(b).from + 1 > 7 ? (timedOut() as unknown as Response) : undefined);
     const r = await restore(pair(world, world), [viaKitClient("https://c.example", rpc(world), () => undefined), via("https://d.example", answered(rpc(world), pages, "https://m.example"), slow)], { sleep: async (ms) => void waits.push(ms) });
@@ -932,7 +957,7 @@ const QUOTA_OUT = (b: Body) => new Response(JSON.stringify({ jsonrpc: "2.0", id:
 test("S0 every testnet's pinned Transfer list (EVM_TRANSFER_RPCS) reads every W while thirdweb's keyless daily quota is out (HTTP 429, Retry-After 26,741 s, 5 Nov 16:28Z and 17:29Z): no wait begun", async () => {
   for (const [net, urls] of Object.entries(EVM_TRANSFER_RPCS)) {
     const { world } = seeded();
-    const want = await restore(pair(world, world), wpair(world));
+    const want = await clean();
     const waits: number[] = [];
     const list = urls.map((u) => (new URL(u).hostname.endsWith(".thirdweb.com") ? viaRetryClient(u, rpc(world, { url: u }), QUOTA_OUT) : viaKitClient(u, rpc(world, { url: u }), () => undefined)));
     const r = await restore(pair(world, world), list, { sleep: async (ms) => void waits.push(ms) });
@@ -944,7 +969,7 @@ test("S0 every testnet's pinned Transfer list (EVM_TRANSFER_RPCS) reads every W 
 test("S1 a Transfer provider out for hours (thirdweb's daily quota, Retry-After 26,741 s) is swapped for the list's spare at once: every W read, no wait begun, the out provider asked once", async () => {
   for (const [name, at] of [["a seat", 0], ["the other seat", 1]] as const) {
     const { world } = seeded();
-    const want = await restore(pair(world, world), wpair(world));
+    const want = await clean();
     let asked = 0;
     const out = viaRetryClient("https://out.example", rpc(world), (b) => (asked++, QUOTA_OUT(b)));
     const list = [viaKitClient("https://c.example", rpc(world), () => undefined), viaKitClient("https://d.example", rpc(world), () => undefined)];
@@ -991,9 +1016,47 @@ async function withFetch<T>(f: typeof fetch, run: () => Promise<T>): Promise<T> 
   const was = globalThis.fetch;
   globalThis.fetch = f;
   try {
-    return await run();
+    return await onPaceClock(run);
   } finally {
     globalThis.fetch = was;
+  }
+}
+/** `run` with setTimeout, clearTimeout and performance.now on a clock of the test's own (card fresh-run-margin). The
+ *  helper's route is paced (HOLDINGS_RPC_LIMIT, 3 calls in 3 s, through the kit's solanaPacedRpc, which waits on
+ *  setTimeout and reads performance.now), so its reads waited in real time, 1.5 s a call. Here a timer fires once the
+ *  work before it has settled (the next setImmediate), in the order of its time, ties in the order set, and the clock
+ *  jumps to that time: every call still waits its turn under the limit, in no real time. Each M test's route origin is
+ *  its own, so no paced queue is used outside its window; a timer still set when `run` ends goes to the real clock. */
+async function onPaceClock<T>(run: () => Promise<T>): Promise<T> {
+  const g = globalThis as unknown as Record<"setTimeout" | "clearTimeout", unknown>;
+  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, now: Object.getOwnPropertyDescriptor(performance, "now") };
+  const t0 = performance.now();
+  let at = 0, id = 0, driving = false;
+  const timers = new Map<number, { due: number; fire: () => void }>();
+  const drive = () => {
+    let next: [number, { due: number; fire: () => void }] | undefined;
+    for (const e of timers) if (next === undefined || e[1].due < next[1].due) next = e;
+    if (next === undefined) return void (driving = false);
+    timers.delete(next[0]);
+    at = Math.max(at, next[1].due);
+    setImmediate(drive);
+    next[1].fire();
+  };
+  g.setTimeout = (f: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+    timers.set(++id, { due: at + Math.max(0, Number(ms) || 0), fire: () => f(...a) });
+    if (!driving) (driving = true), setImmediate(drive);
+    return id;
+  };
+  g.clearTimeout = (h: unknown) => void timers.delete(h as number);
+  Object.defineProperty(performance, "now", { value: () => t0 + at, configurable: true, writable: true });
+  try {
+    return await run();
+  } finally {
+    g.setTimeout = real.setTimeout;
+    g.clearTimeout = real.clearTimeout;
+    if (real.now === undefined) delete (performance as { now?: unknown }).now;
+    else Object.defineProperty(performance, "now", real.now);
+    for (const t of timers.values()) real.setTimeout(t.fire, Math.max(0, t.due - at));    timers.clear();
   }
 }
 const namedBy = (seen: Body[]) => seen.filter((b) => isXfer(b)).map((b) => (b.params[0] as { topics: string[] }).topics[2]!);
@@ -1053,7 +1116,7 @@ test("M3 the helper's route that does not hold the restore's block (another fork
 // card pool-restore-wired (review L2): the signing page keeps the notes alone, so its restore names no W to anyone
 test("W0 wallets: false reads the notes alone: no W named to any provider, no Transfer list or helper asked for, every note the full restore finds", async () => {
   const { world } = seeded();
-  const full = await restore(pair(world, world), wpair(world));
+  const full = await clean();
   const poolLog: NonNullable<Over["log"]> = [];
   const r = await evmRestoreNotes({ seed64: SEED, pin: PIN, rpcs: pair(world, world, { log: poolLog }, { log: poolLog }), wallets: false, gap: 4, sleep: async () => {} });
   assert.deepEqual(namedIn(poolLog), []);
