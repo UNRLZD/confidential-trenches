@@ -6,6 +6,7 @@
 //   node packages/kit/test/svm/pool-next-page.svm.mjs [--record <file>]
 // - A fresh program id runs the pinned bytes; tag 0 makes the pool; 1,023 deposits by the kit (solanaPoolDepositTx at the
 //   trees' sizes read from the pool account) fill each tree to entry 1,022.
+//   Deposits 0 and 511 of them are today's six-account form, away from a page's end: each lands (else the run stops).
 // - At sizes 1,023 / 1,023 three deposits are built from the same read: B (the kit's, eight accounts), A6 (the same
 //   note as A, the first six accounts only: the form before this card) and A (the kit's). B lands first and takes
 //   slot 1,023 of page 0 of each tree; A6 then fails (its entries are index 1,024, page 1, which it does not name); A
@@ -82,9 +83,11 @@ const depositWire = (note, s, six = false, u = depositor) => {
   return signed(wire, u);
 };
 const t0 = Date.now();
+// deposits 0 and 511 are today's six-account form (no next page named), away from a page's end: the program still takes it
+const SIX = [0, 511];
 for (let i = 0; i < 1023; i++) {
-  const r = send(depositWire({ value: VALUE, precommitment: pre() }, sizes()));
-  if (failed(r)) throw new Error(`deposit ${i} failed: ${r.err()} ${r.meta().logs().join("\n")}`);
+  const r = send(depositWire({ value: VALUE, precommitment: pre() }, sizes(), SIX.includes(i)));
+  if (failed(r)) throw new Error(`deposit ${i}${SIX.includes(i) ? " (six accounts)" : ""} failed: ${r.err()} ${r.meta().logs().join("\n")}`);
   if (i % 256 === 255) svm.expireBlockhash();
 }
 const at = sizes();
@@ -110,7 +113,7 @@ const A = depositWire(noteA, at, false, uA);
 const rB = send(B);
 const exists = (k) => { const a = svm.getAccount(addr(k)); return Boolean(a && a.exists !== false); };
 const page1 = [kit.solanaPoolPage(PROGRAM, 0, 1024), kit.solanaPoolPage(PROGRAM, 1, 1024)];
-const out = { program: PROGRAM, so_sha256: sha, filled: at, price: String(price), exact: String(exact), opened: String(opened), steps: [] };
+const out = { program: PROGRAM, so_sha256: sha, six_away_from_end_landed: SIX, filled: at, price: String(price), exact: String(exact), opened: String(opened), steps: [] };
 out.steps.push({ tx: "B (kit, 8 accounts) at 1023/1023, lands first", landed: !failed(rB), sizes: sizes(), u_left: String(bal(uB)) });
 log(`price at 1023/1023: ${price} (exact ${exact}, with both next pages opened ${opened})`);
 log(`B: ${failed(rB) ? `FAILED ${rB.err()}` : "landed"} on page 0, sizes ${JSON.stringify(sizes())}; its U ends at ${bal(uB)}, the unspent rest ${price - exact} (M350 (4): it stays for U's next deposit)`);
