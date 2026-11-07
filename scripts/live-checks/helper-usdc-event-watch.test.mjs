@@ -1,9 +1,10 @@
 // node --test scripts/live-checks/helper-usdc-event-watch.test.mjs: the live check replays recorded runs
-// (helper-usdc-event-watch.answers.json). good: the deployed helper with testnet carried, and mainnet USDC (the v1
-// record's vault the account whose block is read) and the testnet token on FastNEAR and dRPC, the indexer and the
-// archival provider, and the probe's halted-then-open run on FastNEAR's testnet archive, read 2026-11-07: PASS.
-// bad_deployed_before: the deployed helper at 350a7db, whose watch never answered caught up, its mainnet block read for
-// the account USDC once blocklisted (before the v1 vault): FAIL on those two lines.
+// (helper-usdc-event-watch.answers.json). good: apps/helper at card/vault-mainnet-record run locally with mainnet (the
+// v1 record's vault) and testnet carried, and mainnet USDC and the testnet token on FastNEAR and dRPC, the indexer and
+// the archival provider, and the probe's halted-then-open run on FastNEAR's testnet archive, read 2026-11-07: PASS.
+// bad_mainnet_not_carried: the deployed helper before the v1 release, its env naming no mainnet vault: FAIL on mainnet's
+// caught_up line alone. bad_deployed_before: the deployed helper at 350a7db, whose watch never answered caught up, its
+// mainnet block read for the account USDC once blocklisted (before the v1 vault): FAIL on those three lines.
 // bad_provider_mismatch: dRPC's is_blocklisted answers
 // true where FastNEAR's answers false: FAIL on that line alone. bad_history_mismatch: the archival view at the blocklist's
 // block disagrees with the indexer's event: FAIL on that line alone. Made from the good run: a halted answer, an unknown
@@ -22,7 +23,7 @@ const copy = (o) => JSON.parse(JSON.stringify(o));
 const DRPC = NETS.mainnet.pair[1];
 // the recorded bad runs were read before the probe ran (2026-11-03); each is judged with the good run's probe reads, so
 // its own fault stays the one line that fails
-for (const k of ["bad_deployed_before", "bad_provider_mismatch", "bad_history_mismatch"]) A[k].probe ??= A.good.probe;
+for (const k of ["bad_mainnet_not_carried", "bad_deployed_before", "bad_provider_mismatch", "bad_history_mismatch"]) A[k].probe ??= A.good.probe;
 
 test("mainnet's block is read for the v1 record's vault; the history for the one account USDC ever blocklisted", () => {
   const record = JSON.parse(readFileSync(path.join(HERE, "../../contracts/vault/deployments/mainnet-v1.json"), "utf8"));
@@ -41,17 +42,24 @@ test("mainnet's block is read for the v1 record's vault; the history for the one
 test("recorded good run: both networks' code, halt, block and code hash on two providers, and the history: PASS", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 41);
+  assert.equal(r.lines.length, 42);
+  assert.ok(r.lines.includes("ok  [mainnet] helper: caught_up true, halted false, vault_blocked false, code_hash_ok true, code_hash the pin"));
   assert.ok(r.lines.includes("ok  [testnet] helper: caught_up true, halted false, vault_blocked false, code_hash_ok true, code_hash the pin"));
 });
 
-test("recorded bad run: the deployed helper before this card (350a7db) never answers caught up on testnet, and read mainnet's block for another account: FAIL on those two lines", () => {
-  const r = judge(A.bad_deployed_before);
+test("recorded bad run: the deployed helper before the v1 release does not carry mainnet: FAIL on mainnet's caught_up line alone", () => {
+  const r = judge(A.bad_mainnet_not_carried);
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r), [`BAD [mainnet] the block read for ${HISTORY_ACCOUNT}, not ${NETS.mainnet.watched}`, "BAD [testnet] helper: caught_up false, halted null, vault_blocked null, code_hash_ok null, code_hash the pin"]);
+  assert.deepEqual(bad(r), ["BAD [mainnet] helper: caught_up false, halted null, vault_blocked null, code_hash_ok null, code_hash the pin"]);
 });
 
-test("made from the good run: the helper halted, blocked, on another code, far behind, or mainnet answering caught up with nulls: each FAIL", () => {
+test("recorded bad run: the deployed helper before this card (350a7db) never answers caught up, and read mainnet's block for another account: FAIL on those three lines", () => {
+  const r = judge(A.bad_deployed_before);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r), [`BAD [mainnet] the block read for ${HISTORY_ACCOUNT}, not ${NETS.mainnet.watched}`, "BAD [mainnet] helper: caught_up false, halted null, vault_blocked null, code_hash_ok null, code_hash the pin", "BAD [testnet] helper: caught_up false, halted null, vault_blocked null, code_hash_ok null, code_hash the pin"]);
+});
+
+test("made from the good run: the helper halted, blocked, on another code, far behind, or mainnet not caught up or halted: each FAIL", () => {
   const withHelper = (net, f) => {
     const r = copy(A.good);
     r.helper[net].body = JSON.stringify(f(JSON.parse(r.helper[net].body)));
@@ -61,7 +69,8 @@ test("made from the good run: the helper halted, blocked, on another code, far b
   assert.equal(withHelper("testnet", (b) => ({ ...b, vault_blocked: true })).ok, false);
   assert.equal(withHelper("testnet", (b) => ({ ...b, code_hash: "GT71B8i42Z2xegTKpA6TUJQYghRqZfyJUNJG6rKf21DT" })).ok, false);
   assert.equal(withHelper("testnet", (b) => ({ ...b, block_height: b.block_height - 101 })).ok, false);
-  assert.equal(withHelper("mainnet", (b) => ({ ...b, caught_up: true })).ok, false);
+  assert.equal(withHelper("mainnet", (b) => ({ ...b, caught_up: false })).ok, false);
+  assert.equal(withHelper("mainnet", (b) => ({ ...b, halted: true })).ok, false);
   const gone = copy(A.good);
   gone.helper.testnet = { status: 404, body: "{}" };
   assert.equal(judge(gone).ok, false);

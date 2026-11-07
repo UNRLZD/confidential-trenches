@@ -41,8 +41,8 @@ export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
-/** The networks the helper carries, so its watch must answer caught up there; mainnet joins at its vault's deploy. */
-export const CARRIED = ["testnet"];
+/** The networks the helper carries, so its watch must answer caught up there: a helper from the v1 release starts only with the mainnet vault named (withdraw/send.ts MAINNET_VAULT), so it carries mainnet too. */
+export const CARRIED = ["testnet", "mainnet"];
 export const MAX_LAG = 100; // blocks (about 60 s) the helper's answer may trail the providers' final reads after it
 export const MAX_SKEW = 30; // blocks between the two providers' final answers (about 18 s): more is a provider behind
 const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
