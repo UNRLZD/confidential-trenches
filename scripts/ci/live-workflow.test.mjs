@@ -159,7 +159,7 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   assert.deepEqual(fee.RELEASE_RELAYER, { mainnet: null, testnet: null }, "the release names a relayer now: run the check, drop the skip");
   assert.deepEqual(Object.keys(SKIPPED).sort(), ["helper-proxy", "relayer-withdraw-fee"], "a new skip needs a reason this test checks");
   const plan = await planFor("helper", { commit: COMMIT });
-  const na = existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"];
+  const na = (await import("./helper-live-checks.mjs")).poolSenderPlan().notApplicable === null ? [] : ["skipped-not-applicable: helper-pool-senders"];
   assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
   assert.ok(!plan.include.some((e) => SKIPPED[e.key]), "a skipped check is never in the matrix");
   for (const key of ["solana-jupiter-build", "wallet-per-buy"]) assert.ok(plan.include.some((e) => e.key === key && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
@@ -256,8 +256,13 @@ test("planted: a check that needs --pool listed bare, or with --pool and no valu
   }
 });
 
-test("the helper's list gives helper-pool-senders the pool each cluster's deploy record names, read from the record's file", async () => {
-  const { POOL_SOLANA_CLUSTERS, liveList, poolRecord, poolSenderPlan } = await import("./helper-live-checks.mjs");
+test("the helper's list gives helper-pool-senders the pool each cluster's and EVM network's deploy record names, read from the record's file", async () => {
+  const { POOL_EVM_NETWORKS, POOL_SOLANA_CLUSTERS, evmPoolRecord, liveList, poolRecord, poolSenderPlan } = await import("./helper-live-checks.mjs");
+  // card helper-evm-sender-2: one run for each EVM network a pool deploys to, its record where the deploy writes it
+  const deploy = await import("../live-checks/pool-evm-deploy.mjs");
+  assert.deepEqual([...POOL_EVM_NETWORKS].sort(), [...Object.keys(deploy.CHAINS), ...Object.keys(deploy.MAINNETS)].sort(), "each network pool-evm-deploy.mjs deploys a pool to");
+  for (const n of POOL_EVM_NETWORKS) assert.equal(evmPoolRecord(n), path.relative(ROOT, deploy.deploymentFile(n)), n);
+  const EVM_NA = POOL_EVM_NETWORKS.map((n) => `no EVM ${n} pool is deployed: ${evmPoolRecord(n)} does not exist`).join("; ");
   const env = /export const POOL_SOLANA_ENV = \{([^}]*)\}/.exec(readFileSync(path.join(ROOT, "apps/helper/src/pool/solana.ts"), "utf8"))?.[1];
   assert.ok(env, "apps/helper/src/pool/solana.ts has POOL_SOLANA_ENV");
   assert.deepEqual([...env.matchAll(/^\s*"?([a-z-]+)"?:/gm)].map((m) => m[1]), POOL_SOLANA_CLUSTERS, "one run for each cluster the helper may serve");
@@ -268,6 +273,11 @@ test("the helper's list gives helper-pool-senders the pool each cluster's deploy
     if (existsSync(f)) assert.ok(list.runs["helper-pool-senders"].includes(`scripts/live-checks/helper-pool-senders.mjs --pool ${JSON.parse(readFileSync(f, "utf8")).pool}`), c);
     else assert.match(list.notApplicable["helper-pool-senders"], new RegExp(`no Solana ${c} pool is deployed: ${poolRecord(c).replace(/[.]/g, "\\.")} does not exist`));
   }
+  for (const n of POOL_EVM_NETWORKS) {
+    const f = path.join(ROOT, evmPoolRecord(n));
+    if (existsSync(f)) assert.ok(list.runs["helper-pool-senders"].includes(`scripts/live-checks/helper-pool-senders.mjs --pool ${JSON.parse(readFileSync(f, "utf8")).contracts.PrivacyPoolSimple.address.toLowerCase()}`), n);
+    else assert.ok(list.notApplicable["helper-pool-senders"].includes(`no EVM ${n} pool is deployed: ${evmPoolRecord(n)} does not exist`), n);
+  }
   // planted records under a copy of the repository
   const root = mkdtempSync(path.join(tmpdir(), "pool-records-"));
   const rec = (c, body) => {
@@ -275,12 +285,30 @@ test("the helper's list gives helper-pool-senders the pool each cluster's deploy
     writeFileSync(path.join(root, poolRecord(c)), typeof body === "string" ? body : JSON.stringify(body));
   };
   try {
-    assert.deepEqual(poolSenderPlan(root), { runs: [], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; no Solana devnet pool is deployed: scripts/live-checks/pool-sol-deploy.devnet.json does not exist" });
+    assert.deepEqual(poolSenderPlan(root), { runs: [], notApplicable: `no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; no Solana devnet pool is deployed: scripts/live-checks/pool-sol-deploy.devnet.json does not exist; ${EVM_NA}` });
     rec("devnet", { cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" });
-    assert.deepEqual(poolSenderPlan(root), { runs: ["scripts/live-checks/helper-pool-senders.mjs --pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist" });
+    assert.deepEqual(poolSenderPlan(root), { runs: ["scripts/live-checks/helper-pool-senders.mjs --pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"], notApplicable: `no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; ${EVM_NA}` });
     rec("mainnet", { cluster: "mainnet", pool: "D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef" });
     assert.deepEqual(poolSenderPlan(root).runs.length, 2);
-    assert.equal(poolSenderPlan(root).notApplicable, null);
+    assert.equal(poolSenderPlan(root).notApplicable, EVM_NA);
+    // the EVM records: a testnet's beside the checks, a mainnet's in contracts/pool-evm/deployments; the pool in lower case
+    const evm = (n, body) => {
+      mkdirSync(path.dirname(path.join(root, evmPoolRecord(n))), { recursive: true });
+      writeFileSync(path.join(root, evmPoolRecord(n)), typeof body === "string" ? body : JSON.stringify(body));
+    };
+    const B = "0xB239A38AF69B68E6C5C305DF64985F283B5D5FE5";
+    for (const n of POOL_EVM_NETWORKS) evm(n, { chain: n, contracts: { PrivacyPoolSimple: { address: B } } });
+    assert.deepEqual(poolSenderPlan(root), { runs: [...poolSenderPlan(root).runs.slice(0, 2), ...POOL_EVM_NETWORKS.map(() => `scripts/live-checks/helper-pool-senders.mjs --pool ${B.toLowerCase()}`)], notApplicable: null });
+    evm("base", { chain: "base-sepolia", contracts: { PrivacyPoolSimple: { address: B } } });
+    assert.throws(() => poolSenderPlan(root), /contracts\/pool-evm\/deployments\/base\.json names chain base-sepolia, not base/);
+    evm("base", { chain: "base", contracts: { PrivacyPool: { address: B } } });
+    assert.throws(() => poolSenderPlan(root), /deployments\/base\.json names no PrivacyPoolSimple address/);
+    evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: "0x1234" } } });
+    assert.throws(() => poolSenderPlan(root), /names no PrivacyPoolSimple address/);
+    evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: B } } });
+    evm("robinhood-testnet", "{");
+    assert.throws(() => poolSenderPlan(root), /pool-evm-deploy\.robinhood-testnet\.json is not JSON/);
+    evm("robinhood-testnet", { chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: B } } });
     rec("mainnet", { cluster: "devnet", pool: "D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef" });
     assert.throws(() => poolSenderPlan(root), /pool-sol-deploy\.mainnet\.json names cluster devnet, not mainnet/);
     rec("mainnet", { cluster: "mainnet", pool: "not a pool" });
@@ -301,14 +329,18 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
       edit(r);
     });
   const none = real(() => {});
-  const devnet = real((r) => writeFileSync(path.join(r, "scripts/live-checks/pool-sol-deploy.devnet.json"), JSON.stringify({ cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" })));
+  const devnet = real((r) => {
+    writeFileSync(path.join(r, "scripts/live-checks/pool-sol-deploy.devnet.json"), JSON.stringify({ cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }));
+    cpSync(path.join(ROOT, "scripts/live-checks/pool-evm-deploy.base-sepolia.json"), path.join(r, "scripts/live-checks/pool-evm-deploy.base-sepolia.json"));
+  });
+  const EVM_NA = (except) => ["base", "robinhood", "base-sepolia", "robinhood-testnet"].filter((n) => n !== except).map((n) => `no EVM ${n} pool is deployed: ${["base", "robinhood"].includes(n) ? `contracts/pool-evm/deployments/${n}.json` : `scripts/live-checks/pool-evm-deploy.${n}.json`} does not exist`).join("; ");
   try {
     const a = await planFor("helper", { commit: COMMIT, root: none });
     assert.ok(!a.include.some((e) => e.key === "helper-pool-senders"), "no pool: no run, so nothing crashes on a missing --pool");
-    assert.match(a.skipped.find((s) => s.key === "helper-pool-senders" && s.reason === "not-applicable")?.detail ?? "", /no Solana mainnet pool .* no Solana devnet pool/);
+    assert.equal(a.skipped.find((s) => s.key === "helper-pool-senders" && s.reason === "not-applicable")?.detail, `no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; no Solana devnet pool is deployed: scripts/live-checks/pool-sol-deploy.devnet.json does not exist; ${EVM_NA()}`);
     const b = await planFor("helper", { commit: COMMIT, root: devnet });
-    assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]);
-    assert.deepEqual(b.skipped.filter((s) => s.key === "helper-pool-senders").map((s) => s.detail), ["no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist"]);
+    assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr", "--pool 0xb239a38af69b68e6c5c305df64985f283b5d5fe5"]);
+    assert.deepEqual(b.skipped.filter((s) => s.key === "helper-pool-senders").map((s) => s.detail), [`no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; ${EVM_NA("base-sepolia")}`]);
     assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-pool-senders", "helper-proxy", "relayer-withdraw-fee"], "the whole skips stay skipped");
   } finally {
     for (const r of [none, devnet]) rmSync(r, { recursive: true, force: true });
