@@ -53,8 +53,8 @@
 //   leaf not its nonce's, the commitment not once in the state tree) answers "sent" with the send, never failed: the
 //   note stays INCOMING and settles at the next load (card pool-answer-unknown). Signature statuses only name the tx
 //   that landed, in the answer; a rung that landed with no tx named still counts (part_filled, never failed or down).
-//   A send's last valid height is the higher of each RPC's own bound (RPC 0's word capped by its height + 151, RPC 1's
-//   height + 151), so no one RPC reads a live send expired, nor keeps one alive past + 151 alone.
+//   A send's last valid height is the higher of each RPC's own bound (RPC 0's word capped by its height + 2 x 151, RPC
+//   1's height + 151), so no one RPC reads a live send expired, nor keeps one alive past + 2 x 151 alone.
 // - An INCOMING note of the pool's scope (a run a reload cut short) is read once at the start of every run, as its own
 //   move, never waited on: settled, taken, sent again, or left INCOMING with its U not a source this run (a resend U
 //   cannot pay leaves it so, and `short` names the top-up). settlePoolDeposits does that pass with no ask, on page load

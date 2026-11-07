@@ -224,7 +224,9 @@ export function solanaSameProvider(a: SolanaRpc, b: SolanaRpc): boolean {
   return (bareOf.get(a) ?? a) === (bareOf.get(b) ?? b) || (a.url !== undefined && b.url !== undefined && urlKey(a.url) === urlKey(b.url));
 }
 /** `call` as the provider `rpc` under a wrapper of the caller's (a fault watch): the same provider to
- *  solanaSameProvider and in the same shared queue, its URL carried. */
+ *  solanaSameProvider and in the same shared queue, its URL carried. `call` calls the provider once, synchronously: a
+ *  paced call of the same queue made synchronously inside a slot's call is that slot's own, so a second one would go
+ *  out on the first one's turn, past the queue. */
 export function solanaWrappedRpc(rpc: SolanaRpc, call: (method: string, params: readonly unknown[]) => Promise<unknown>): SolanaRpc {
   const bare = bareOf.get(rpc) ?? rpc;
   const out: SolanaRpc = rpc.url === undefined ? call : Object.assign(call, { url: rpc.url });

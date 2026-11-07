@@ -1532,3 +1532,14 @@ test("pacing calls the outermost wrapper it was given (card pool-answer-unknown 
   assert.equal(ran, 1);
   assert.equal(size(ok2).started, 1);
 });
+
+test("a slot's call is its own queue's only (card pool-answer-unknown r2): another provider paced inside it still books a turn in its own queue", async () => {
+  const { solanaPacedRpc: paced, solanaRpcQueueSize: size } = await import("../src/trade/solana/send.ts");
+  const b = async (_m: string, _p: readonly unknown[]): Promise<unknown> => "b";
+  const pacedB = paced(b);
+  // provider A's call, run in A's slot, calls the other provider's paced wrapper synchronously
+  const a = async (m: string, p: readonly unknown[]): Promise<unknown> => pacedB(m, p);
+  assert.equal(await paced(a)("getSlot", []), "b");
+  assert.equal(size(a).started, 1);
+  assert.equal(size(b).started, 1, "the other provider's call rode A's slot, outside its own queue");
+});
