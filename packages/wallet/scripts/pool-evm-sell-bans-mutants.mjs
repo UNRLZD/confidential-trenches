@@ -9,10 +9,17 @@ const T = "test/pool-evm-sell-bans.test.ts";
 const M = [
   // the record: kept per chain and token, each pool once, oldest first, its shape checked on read
   [B, "return `${WALLET_BAN_PREFIX}${chain}/${t}`;", "return `${WALLET_BAN_PREFIX}${t}`;", T, "a ban is kept per chain"],
-  [B, "    for (const p of add) if (!next.includes(p)) next.push(p);", "    for (const p of add) next.push(p);", T, "a ban is kept per chain"],
+  [B, "      if (old !== undefined && old.until > now) continue;\n", "", T, "a ban is kept per chain"],
+  [B, "      if (old !== undefined && old.until > now) continue;\n", "", T, "a ban lasts an hour"],
   [B, "  const add = [...pools].map((p) => (typeof p === \"string\" ? p.toLowerCase() : \"\"));", "  const add = [...pools].map((p) => (typeof p === \"string\" ? p : \"\"));", T, "a ban is kept per chain"],
   [B, "  const t = typeof token === \"string\" ? token.toLowerCase() : \"\";", "  const t = typeof token === \"string\" ? token : \"\";", T, "a ban is kept per chain"],
-  [B, "  if ((rec as { v?: unknown } | undefined)?.v !== 1 || !Array.isArray(pools)) return [];", "  if (!Array.isArray(pools)) return [];", T, "a ban is kept per chain"],
+  [B, "  if ((rec as { v?: unknown } | undefined)?.v !== 2 || !Array.isArray(pools)) return [];", "  if (!Array.isArray(pools)) return [];", T, "a ban is kept per chain"],
+  [B, "typeof id === \"string\" && POOL_ID.test(id) && Number.isSafeInteger(until)", "typeof id === \"string\" && POOL_ID.test(id)", T, "a ban is kept per chain"],
+  // a ban expires (review of 919742f5, F2): an hour, doubled on each repeat after it expired, at most seven days
+  [B, "(await store.get(\"meta\", evmSellBanKey(chain, token))).filter((b) => b.until > now)", "(await store.get(\"meta\", evmSellBanKey(chain, token)))", T, "a ban lasts an hour"],
+  [B, "next.push({ id, until: now + evmSellBanMs(n), n });", "next.push({ id, until: now + EVM_SELL_BAN_FIRST_MS, n });", T, "a ban lasts an hour"],
+  [B, "(n >= 9 ? EVM_SELL_BAN_MAX_MS : Math.min(EVM_SELL_BAN_FIRST_MS * 2 ** (n - 1), EVM_SELL_BAN_MAX_MS))", "(EVM_SELL_BAN_FIRST_MS * 2 ** (n - 1))", T, "a ban lasts an hour"],
+  [B, "export const EVM_SELL_BAN_FIRST_MS = 60 * 60 * 1000;", "export const EVM_SELL_BAN_FIRST_MS = 60 * 60 * 1000 * 24 * 365;", T, "a ban lasts an hour"],
   // refused before any write
   [B, "  if (add.some((p) => !POOL_ID.test(p))) throw", "  if (false) throw", T, "a ban refuses"],
   [B, "if (typeof chain !== \"string\" || !CHAIN.test(chain) || !TOKEN.test(t)) throw", "if (false) throw", T, "a ban refuses"],

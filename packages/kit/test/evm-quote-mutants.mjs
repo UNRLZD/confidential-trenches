@@ -486,6 +486,22 @@ export const MUTANTS = [
   [QUOTE, "const hooked = Object.freeze(pick.route.venue === \"uniswap-v4\" ?", "const hooked = Object.freeze(false ?", R, "HC1 "],
   [QUOTE, ".filter((k) => k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing)).map((k) => \"0x\" + poolId(k))", ".filter((k) => k.hooks !== NATIVE).map((k) => \"0x\" + poolId(k))", S, "planted: an unlisted hook"],
   [QD, "nonce }, hooked.length > 0);", "nonce });", R, "HC6 "],
+  // the evidence for a ban (review of 919742f5, F2): the trigger is the device's own evidence, never a revert alone (a
+  // moved price bans nothing); its scope is the one pool whose hook alone explains the revert, never every hooked pool
+  // of the route; the replay runs at the sale's block number and time; the market held at the parent block; the sale
+  // reverted, went to W and the replay reverts too; providers that disagree ban nothing; a hook behind two pools of the
+  // route explains neither
+  [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
+  [QUOTE, "      if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);", "      out.push(id);", R, "RV4 "],
+  [QUOTE, "      if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);", "      out.push(id);", R, "RV7 "],
+  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }] }]", R, "HC1 "],
+  [QUOTE, "    if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return NONE;\n", "", R, "RV9 "],
+  [QUOTE, "    if ((await replay({})).ok) return NONE;\n", "", R, "HC2 "],
+  [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return NONE;", " || sale.to !== lower(w)) return NONE;", R, "RV8 "],
+  [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return NONE;", " || BigInt(sale.status) !== 0n) return NONE;", R, "RV8 "],
+  [QUOTE, "    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return NONE;\n", "", R, "RV8 "],
+  [QUOTE, "(x, y) => x.ok === y.ok && (x.ok || x.data === (y as { data: string }).data),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
+  [QUOTE, " || keys.filter((x) => x.hooks === k.hooks).length !== 1) continue;", ") continue;", R, "RV10 "],
   [SELLU, "if (swapData(chain, token, route, target, w, amount, minOut, true) !== lower(data))", "if (swapData(chain, token, route, target, w, amount, minOut) !== lower(data))", R, "HC6 "],
   [SELLU, "  evmSellRouteCheck(chain, token, route, true);\n  return route;", "  evmSellRouteCheck(chain, token, route);\n  return route;", R, "HC6 "],
   [SELLU, "return v4Data(chain, token, (route as Record<string, unknown>).hops, anyHook);", "return v4Data(chain, token, (route as Record<string, unknown>).hops, true);", R, "HC6 "],
@@ -544,7 +560,7 @@ export const MUTANTS = [
   [QD, "if (feeCap > feeMax) throw", "if (feeCap > feeMax + 1n) throw", S, "planted: the sender's fee cap"],
   [QD, "const feeCap = asked === undefined ? feeMax : asked;", "const feeCap = asked === undefined ? feeMax - 1n : asked;", S, "planted: the sender's fee cap"],
   // the fee recipient is the caller's, the one its pin names (card pool-review-3, L-1), never another
-  [QD, "precommitment, feeCap, feeRecipient, deadline, nonce });", 'precommitment, feeCap, feeRecipient: "0x000000000000000000000000000000000000beef", deadline, nonce });', S, "planted: the sender's fee cap"],
+  [QD, "precommitment, feeCap, feeRecipient, deadline, nonce }, hooked", 'precommitment, feeCap, feeRecipient: "0x000000000000000000000000000000000000beef", deadline, nonce }, hooked', S, "planted: the sender's fee cap"],
   [SELLU, "feeCap: 0n, feeRecipient: EVM_SELL_SIM,", "feeCap: 0n, feeRecipient: lower(w),", S, "planted: the sim signer"],
   [QUOTE, 'if (typeof boughtBlock !== "bigint" || boughtBlock < 1n) return refuse(', "if (false) return refuse(", S, "planted: a sell quote takes the buy's block"],
   [QUOTE, "boughtBlock < 1n) return refuse(", "boughtBlock < 0n) return refuse(", S, "planted: a sell quote takes the buy's block"],

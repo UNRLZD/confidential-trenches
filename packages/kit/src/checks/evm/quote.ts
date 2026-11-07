@@ -65,7 +65,7 @@ import {
   type EvmV4Route,
 } from "../../trade/evm/buy-unpinned.ts";
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
-import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
+import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -2400,8 +2400,8 @@ export const evmIsDeviceQuote = (q: unknown): q is EvmPoolBuyQuote => typeof q =
 // sell builder's or not: a pick more than the slippage below it is refused (below_reference), so a seeded pool is
 // never picked over the token's real market (review of evm-sell-device-quote, H1), except where the reference is a route
 // through a hook the venue does not list: that route is then the pick (card evm-sell-hook-converge), the quote names
-// its pools (`hooked`) for the caller to ban if the real sale reverts, and a banned pool (`banned`) is no route at
-// all. Then, at the same block on both
+// its pools (`hooked`), where the real sale reverts the caller bans those its revert proves at fault
+// (evmSellRevertedPools, below), and a banned pool (`banned`) is no route at all. Then, at the same block on both
 // providers, the fee-on-transfer probe: W's code is replaced
 // (eth_call's state override) by EVM_SELL_PROBE_CODE, which transfers the amount from W to the pool's own address (the
 // PoolManager for v4, the v3 pool from the quoter's factory().getPool for v3) and returns what that address received,
@@ -2432,8 +2432,9 @@ export type EvmPoolSellQuoteRequest = {
    *  only where a route through a hook the venue does not list would set the reference (card evm-quote-exec-sim). */
   signSim?: (sim: EvmSellSim, blockTimestamp: bigint) => Uint8Array;
   /** (optional) The v4 pools this device banned for this token on this chain (card evm-sell-hook-converge): each a
-   *  PoolId, 0x and 64 hex digits, from a quote's `hooked` whose real sale reverted (the wallet's store keeps them,
-   *  wallet pool/evm-sell-bans.ts). A route through any of them is neither picked nor a reference. */
+   *  PoolId, 0x and 64 hex digits, that evmSellRevertedPools proved at fault for a reverted sale (the wallet's store
+   *  keeps them, for an hour at first, wallet pool/evm-sell-bans.ts). A route through any of them is neither picked nor
+   *  a reference. */
   banned?: readonly string[];
 };
 
@@ -2459,7 +2460,8 @@ export type EvmPoolSellQuote = {
    *  empty for a route with none. Such a route is picked only where it sets the reference and no route through listed
    *  pools is within the slippage of it (card evm-sell-hook-converge): a hook may honour a quote and a sim and revert the
    *  real sale (one that honours only some blocks, or flips on per-block state), so where the real sale reverts the
-   *  caller bans these pools (`banned` on the next quote) and the sale goes on through the rest. */
+   *  caller asks evmSellRevertedPools which of these the revert proves at fault, bans those (`banned` on the next
+   *  quote), and the sale goes on through the rest. */
   readonly hooked: readonly string[];
 };
 
@@ -2563,8 +2565,8 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   // the slippage of it, is the pick itself, at the reference's minOut (card evm-sell-hook-converge): its price held on
   // both providers (and, where the chain pins a sell delegate and sender, in W's own sim), yet a hook can still honour
   // only some blocks or flip on per-block state, which no read before the sale can see. Refusing would let such a pool
-  // freeze the token's sales; taking it costs at most one reverted sale, after which the caller bans its pools
-  // (`hooked`, then `banned`) and the next quote leaves through the rest. A builder is still never paid less than a
+  // freeze the token's sales; taking it costs a reverted sale, after which the caller bans the pools its revert proves
+  // at fault (evmSellRevertedPools, then `banned`) and the next quote leaves through the rest. A builder is still never paid less than a
   // route the sale can take: minOut is the reference's
   if (under(pick) && reference !== null && evmSellExits(chain, t, reference.route, true)) pick = { route: reference.route, amountOut: reference.amountOut };
   if (pick === null) return refuse("no_quote", "no pool the sell can leave through fills it", reference);
@@ -2609,7 +2611,8 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   // the sale's proceeds less the sender's most go back into the pool as a deposit, which the pool refuses under its
   // MIN_DEPOSIT: a sale that could land only as a revert is never quoted (review fold 1, L5)
   if (minOut - feeMax < EVM_POOL_MIN_DEPOSIT) return refuse("below_minimum", `the sale's ${minOut} at least, less the fee's ${feeMax} at most, is under the pool's least deposit of ${EVM_POOL_MIN_DEPOSIT}`);
-  // the pools of the pick behind a hook the venue does not list: the caller bans these where the real sale reverts
+  // the pools of the pick behind a hook the venue does not list: where the real sale reverts, evmSellRevertedPools
+  // names those of them the revert proves at fault
   const hooked = Object.freeze(pick.route.venue === "uniswap-v4" ? hopKeys(pick.route).filter((k) => k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing)).map((k) => "0x" + poolId(k)) : []);
   const quote: EvmPoolSellQuote = Object.freeze({ chain, token: t, w: lower(w), amountIn, route, target, block: Object.freeze(block), amountOut: pick.amountOut, minOut, feeMax, hooked });
   QUOTED_SELLS.add(quote);
@@ -2620,6 +2623,170 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
 const QUOTED_SELLS = new WeakSet<EvmPoolSellQuote>();
 /** True when `q` is a quote evmPoolSellQuote returned, unchanged (it is frozen). */
 export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeof q === "object" && q !== null && QUOTED_SELLS.has(q as EvmPoolSellQuote);
+
+// The evidence for a ban (card evm-sell-hook-converge; review of 919742f5, F2). A quote's route through a hook the venue
+// does not list (its `hooked` pools) may revert the real sale. The device bans a pool only on evidence from its own
+// reads on the chain's pinned providers, each answer the same on two of them (agreeing), never on a revert alone and
+// never on a server's word:
+// 1. the sale: the transaction and its receipt agree; its status is 0x0, it went to the quote's W, and its call reads
+//    back as the quote's own sale (SellDelegate.sell of the quote's token, amount, minOut and target, its data the
+//    route the quote holds: the sell builder's bytes, sell-unpinned.ts evmSellRouteOf);
+// 2. the replay: the transaction as an eth_call at its block's parent, from its sender with its gas (less its
+//    authorizations' intrinsic cost) and fees, W's code the 7702 designator of the chain's pinned sell delegate (the
+//    sale carries its own authorization), and the block's number and time set to the sale's own (eth_call's block
+//    override: every pinned Base and Robinhood provider ran Multicall3's getBlockNumber and getCurrentBlockTimestamp
+//    under one, 2026-11-07 04:44Z), so a hook that flips by block number or time flips here too: it reverts on both
+//    providers with the same data;
+// 3. the market held: V4Quoter, at the parent block, prices the quote's route with its hooks as they are at the
+//    quote's minOut or more, so the price did not move: the hooks treated the sale and the quoter apart. A price that
+//    moved, by the market or by an attacker before the sale, bans nothing, even where an honest hook's own fee (one
+//    taken through a delta, which the quoter sees) is more than the miss;
+// 4. one pool: for each pool of `hooked` whose hook serves no other pool of the route, the replay with that hook's code
+//    alone replaced by EVM_NOOP_HOOK_CODE succeeds on both providers (SellDelegate held its minOut). That pool is
+//    banned: its hook alone stood between the sale and its minOut (a hook's error, WrappedError; a fee taken from the
+//    sale alone through a delta, MinOutNotMet; a malformed answer; gas burned).
+// Anything else bans nothing: providers that disagree, a sale that did not revert, a replay that does not revert, a
+// pool whose hook alone does not explain the revert, a chain with no pinned sell delegate. A provider that does not
+// answer (rpc_error) is thrown, so the caller may ask again. What no replay at the parent block can see, a hook flipped
+// by a transaction earlier in the sale's own block, is not banned: it costs the sender that sale's gas, within the
+// helper's unpaid-gas caps, and the device tries again.
+
+/** The PoolIds of the quote's `hooked` pools that the sale `txHash`'s revert proves at fault (see above), on the
+ *  chain's pinned providers; [] where nothing is proved. The caller bans these (wallet pool/evm-sell-bans.ts). */
+export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: string): Promise<readonly string[]> {
+  if (!evmIsDeviceSellQuote(quote)) return refuse("bad_request", "a ban is proved only against a quote evmPoolSellQuote returned");
+  const p = venue(quote.chain).providers;
+  if (p === undefined) return refuse("no_quoter", `${quote.chain} has no pinned providers`);
+  return evmSellRevertedPoolsWith(quote, txHash, evmProviders(evmRanked(p), fetch));
+}
+
+const SEL_SELL = bytesToHex(keccak_256(new TextEncoder().encode("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)"))).slice(0, 8);
+const NONE: readonly string[] = Object.freeze([]);
+/** One provider's answer to a replay: success, or a revert with its data ("" for none); anything else is a refusal. */
+type Replay = { ok: true } | { ok: false; data: string };
+function replayOf(a: unknown, who: string): Replay {
+  const hex = (x: unknown): x is string => typeof x === "string" && x.length <= MAX_ANSWER_HEX && /^0x([0-9a-fA-F]{2})*$/.test(x);
+  if (typeof a !== "object" || a === null) return refuse("rpc_error", `${who} answered no object`);
+  const o = a as { result?: unknown; error?: { data?: unknown } };
+  if (Object.hasOwn(o, "result")) return hex(o.result) ? { ok: true } : refuse("rpc_error", `${who} answered a replay with a result that is not hex`);
+  if (reverted(a)) return { ok: false, data: hex(o.error?.data) ? o.error!.data.toLowerCase() : "" };
+  return refuse("rpc_error", `${who} answered a replay with an error that is no revert: ${String((o.error as { message?: unknown } | undefined)?.message).slice(0, 120)}`);
+}
+/** A JSON-RPC answer's result as an object, or a refusal. */
+function resultOf(a: unknown, who: string, what: string): Record<string, unknown> {
+  const r = (a as { result?: unknown } | null)?.result;
+  if (typeof r !== "object" || r === null) return refuse("rpc_error", `${who} holds no ${what}`);
+  return r as Record<string, unknown>;
+}
+const str = (r: Record<string, unknown>, k: string, who: string): string => {
+  const v = r[k];
+  if (typeof v !== "string" || !/^0x[0-9a-fA-F]*$/.test(v) || v.length > 2 + 2 * 65536) return refuse("rpc_error", `${who}'s ${k} is not hex`);
+  return v.toLowerCase();
+};
+
+/** evmSellRevertedPools on the providers `rpcsIn` and the venue list `venues` (tests only). Not in the index. */
+export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: string, rpcsIn: readonly EvmRpc[], venues?: EvmPoolVenueList): Promise<readonly string[]> {
+  if (!evmIsDeviceSellQuote(quote)) return refuse("bad_request", "a ban is proved only against a quote evmPoolSellQuote returned");
+  if (typeof txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) return refuse("bad_request", "a sale's hash is 0x and 64 hex digits");
+  if (!Array.isArray(rpcsIn) || rpcsIn.length < 2) return refuse("bad_request", "a ban is proved on two providers or more");
+  const { chain, route, w, token } = quote;
+  const v = venue(chain, venues);
+  if (quote.hooked.length === 0 || route.venue !== "uniswap-v4" || v.sellDelegate === undefined || v.v4 === undefined) return NONE;
+  const h = txHash.toLowerCase();
+  const rpcs = [...rpcsIn];
+  try {
+    // 1. the sale: its transaction and receipt, the same on two providers
+    const { a: sale } = await agreeing(
+      rpcs,
+      async (rpc, k) => {
+        const who = `provider ${k + 1}`;
+        const [t, r] = await askAt(rpc, [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }]);
+        const tx = resultOf(t, who, "transaction"), rc = resultOf(r, who, "receipt");
+        const auths = tx.authorizationList;
+        const fees: Record<string, string> = typeof tx.maxFeePerGas === "string" ? { maxFeePerGas: str(tx, "maxFeePerGas", who), maxPriorityFeePerGas: str(tx, "maxPriorityFeePerGas", who) } : { gasPrice: str(tx, "gasPrice", who) };
+        return {
+          hash: str(tx, "hash", who), from: str(tx, "from", who), to: typeof tx.to === "string" ? str(tx, "to", who) : "", input: str(tx, "input", who), gas: str(tx, "gas", who), value: str(tx, "value", who), fees,
+          auths: Array.isArray(auths) ? auths.length : 0, blockHash: str(tx, "blockHash", who), blockNumber: str(tx, "blockNumber", who),
+          status: str(rc, "status", who), rcHash: str(rc, "transactionHash", who), rcBlock: str(rc, "blockHash", who),
+        };
+      },
+      (x, y) => JSON.stringify(x) === JSON.stringify(y),
+      () => refuse("rpc_disagree", `the providers answer the sale ${h} differently`),
+    );
+    if (sale.hash !== h || sale.rcHash !== h || sale.rcBlock !== sale.blockHash || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return NONE;
+    // the sale is the quote's own: SellDelegate.sell(sell, fee, signature), its Sell's token, amount, target and minOut
+    // the quote's, its data the route the quote holds
+    const d = sale.input.slice(2);
+    if (!d.startsWith(SEL_SELL)) return NONE;
+    const at = (i: number) => (8 + 64 * i + 64 <= d.length ? BigInt("0x" + d.slice(8 + 64 * i, 8 + 64 * i + 64)) : -1n);
+    const t0 = at(0);
+    if (t0 < 0n || t0 % 32n !== 0n || t0 > 0x10000n) return NONE;
+    const t = Number(t0 / 32n);
+    const [sToken, sAmount, sTarget, sData, sMinOut] = [at(t), at(t + 1), at(t + 2), at(t + 3), at(t + 4)];
+    if (sData < 0n || sData % 32n !== 0n || sData > 0x10000n) return NONE;
+    const dl = at(t + Number(sData / 32n));
+    if (dl < 0n || dl > 4096n || 8 + 64 * (t + Number(sData / 32n) + 1) + Number(dl) * 2 > d.length) return NONE;
+    const off = 8 + 64 * (t + Number(sData / 32n) + 1);
+    const data = "0x" + d.slice(off, off + Number(dl) * 2);
+    if (sToken !== BigInt(token) || sAmount !== quote.amountIn || sTarget !== BigInt(quote.target) || sMinOut !== quote.minOut) return NONE;
+    let signed: EvmSellRoute;
+    try {
+      signed = evmSignedSellRouteOf(chain, { w, token, amount: sAmount, minOut: sMinOut, target: quote.target, data });
+    } catch {
+      return NONE;
+    }
+    if (JSON.stringify(signed) !== JSON.stringify(route)) return NONE;
+    // 2. the sale's block: its parent, number and time, the same on two providers
+    const { a: blk } = await agreeing(
+      rpcs,
+      async (rpc, k) => {
+        const who = `provider ${k + 1}`;
+        const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }]);
+        const r = resultOf(b, who, "block of the sale");
+        return { hash: str(r, "hash", who), number: str(r, "number", who), timestamp: str(r, "timestamp", who), parentHash: str(r, "parentHash", who) };
+      },
+      (x, y) => JSON.stringify(x) === JSON.stringify(y),
+      () => refuse("rpc_disagree", `the providers answer the sale's block ${sale.blockHash} differently`),
+    );
+    if (blk.hash !== sale.blockHash || BigInt(blk.number) !== BigInt(sale.blockNumber) || !/^0x[0-9a-f]{64}$/.test(blk.parentHash)) return NONE;
+    const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);
+    if (gas <= 0n) return NONE;
+    const asW = { [lower(w)]: { code: designator(v.sellDelegate) } };
+    const parent = { blockHash: blk.parentHash, requireCanonical: true };
+    const env = { number: qty(BigInt(blk.number)), time: qty(BigInt(blk.timestamp)) };
+    // the sale's own call: its sender, value, gas and fees, to W
+    const call = { from: sale.from, to: lower(w), data: sale.input, gas: qty(gas), value: sale.value, ...sale.fees };
+    const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
+      const { a } = await agreeing(
+        rpcs,
+        async (rpc, k) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, { ...asW, ...extra }, env] }]))[0], `provider ${k + 1}`),
+        (x, y) => x.ok === y.ok && (x.ok || x.data === (y as { data: string }).data),
+        () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
+      );
+      return a;
+    };
+    // the replay as the sale ran: it reverts, the same on both
+    if ((await replay({})).ok) return NONE;
+    // 3. the market held: the quoter prices the route, its hooks as they are, at minOut or more at the parent block
+    const n = route.hops.length;
+    const bought: EvmRoute = { venue: "uniswap-v4", currencyIn: route.hops[n - 1]!.currency, hops: route.hops.map((_, i) => { const s = route.hops[n - 1 - i]!; return { currency: i === n - 1 ? token : route.hops[n - 2 - i]!.currency, fee: s.fee, tickSpacing: s.tickSpacing, hooks: s.hooks, hookData: "0x" }; }) };
+    if (JSON.stringify(evmSellRouteOf(bought)) !== JSON.stringify(route)) return NONE;
+    const [held] = await readBoth(rpcs, blk.parentHash, [sellRead(v, token, bought, quote.amountIn)]);
+    if (held!.kind !== "out" || held!.amountOut < quote.minOut) return NONE;
+    // 4. one pool: the replay with that pool's hook alone a no-op succeeds
+    const keys = hopKeys(bought);
+    const out: string[] = [];
+    for (const k of keys) {
+      const id = "0x" + poolId(k);
+      if (!quote.hooked.includes(id) || keys.filter((x) => x.hooks === k.hooks).length !== 1) continue;
+      if ((await replay({ [k.hooks]: { code: EVM_NOOP_HOOK_CODE } })).ok) out.push(id);
+    }
+    return Object.freeze(out);
+  } catch (e) {
+    if (e instanceof EvmQuoteError && e.code === "rpc_disagree") return NONE;
+    throw e;
+  }
+}
 
 /** A provider's 429: ask asks again, a little later. `afterMs`: the wait its Retry-After named, if any. */
 class RateLimited extends Error {

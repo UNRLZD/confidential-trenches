@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, openWalletStoreReader, WALLET_BAN_PREFIX, walletSeedMoved, type WalletEvent, type WalletStore } from "../src/store/index.ts";
-import { EVM_SELL_BANS_MAX, evmSellBan, evmSellBanKey, evmSellBanned } from "../src/pool/evm-sell-bans.ts";
+import { EVM_SELL_BAN_FIRST_MS, EVM_SELL_BAN_MAX_MS, EVM_SELL_BANS_MAX, evmSellBan, evmSellBanKey, evmSellBanned } from "../src/pool/evm-sell-bans.ts";
 
 const opened: WalletStore[] = [];
 after(() => opened.forEach((s) => s.close()));
@@ -29,8 +29,10 @@ test("a ban is kept per chain and token, read back oldest first, each pool once;
   assert.deepEqual(await evmSellBanned(s, "robinhood", TOKEN), []);
   assert.deepEqual(await evmSellBanned(s, "base", "0x2222222222222222222222222222222222222222"), []);
   assert.equal(evmSellBanKey("base", TOKEN), `${WALLET_BAN_PREFIX}base/${TOKEN}`);
-  // a record not in its shape holds no pool, and is replaced by the next ban
-  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 2, pools: [P(9)] });
+  // a record not in its shape holds no pool (the permanent v1 bans of 919742f5 among them), and is replaced by the next ban
+  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 1, pools: [P(9)] });
+  assert.deepEqual(await evmSellBanned(s, "base", TOKEN), []);
+  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 2, pools: [P(9), { id: P(9), until: "never", n: 1 }] });
   assert.deepEqual(await evmSellBanned(s, "base", TOKEN), []);
   assert.deepEqual(await evmSellBan(s, "base", TOKEN, [P(3)]), [P(3)]);
 });
@@ -75,4 +77,30 @@ test("a ban's write is no seed move, and the frame's reader neither reads nor li
   await assert.rejects(reader.get("meta", evmSellBanKey("base", TOKEN)), /reader opens meta\/status/);
   assert.ok(!(await reader.keys("meta")).some((k) => k.startsWith(WALLET_BAN_PREFIX)), "the reader lists no ban");
   reader.close();
+});
+
+test("a ban lasts an hour, then the pool is quoted again; each repeat after it expired lasts twice the one before, at most seven days (review of 919742f5, F2)", async () => {
+  const s = await open(new IDBFactory());
+  const t0 = 1_793_732_153_000;
+  const H = EVM_SELL_BAN_FIRST_MS;
+  assert.equal(H, 3_600_000);
+  assert.deepEqual(await evmSellBan(s, "base", TOKEN, [P(1)], t0), [P(1)]);
+  assert.deepEqual(await evmSellBanned(s, "base", TOKEN, t0 + H - 1), [P(1)]);
+  // expired: the next quote's banned leaves it out, so the quote reads the pool again
+  assert.deepEqual(await evmSellBanned(s, "base", TOKEN, t0 + H), []);
+  // banned again while still banned: as it was, never longer
+  await evmSellBan(s, "base", TOKEN, [P(1)], t0 + H - 1);
+  assert.deepEqual(await evmSellBanned(s, "base", TOKEN, t0 + H), []);
+  // each repeat after expiry doubles: 2 h, 4 h, ... up to 7 days, never past it
+  let at = t0 + H;
+  for (const ms of [2 * H, 4 * H, 8 * H, 16 * H, 32 * H, 64 * H, 128 * H, EVM_SELL_BAN_MAX_MS, EVM_SELL_BAN_MAX_MS]) {
+    assert.deepEqual(await evmSellBan(s, "base", TOKEN, [P(1)], at), [P(1)]);
+    assert.deepEqual(await evmSellBanned(s, "base", TOKEN, at + ms - 1), [P(1)], String(ms));
+    assert.deepEqual(await evmSellBanned(s, "base", TOKEN, at + ms), [], String(ms));
+    at += ms;
+  }
+  assert.equal(EVM_SELL_BAN_MAX_MS, 7 * 24 * H);
+  // another pool's first ban is an hour, beside it
+  assert.deepEqual(await evmSellBan(s, "base", TOKEN, [P(2)], at), [P(2)]);
+  assert.deepEqual(await evmSellBanned(s, "base", TOKEN, at + H), []);
 });

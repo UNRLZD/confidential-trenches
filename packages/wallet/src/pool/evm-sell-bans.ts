@@ -1,24 +1,38 @@
 // The EVM sale pools this device banned (card evm-sell-hook-converge). The kit's sell quote (checks/evm/quote.ts
 // evmPoolSellQuote) picks a route through a v4 hook the venue does not list where that route sets the token's reference
 // and no route through listed pools is within the slippage of it, and names that route's unlisted-hook pools in the
-// quote's `hooked`. A hook can honour the quote and the sim and still revert the real sale (one that honours only some
-// blocks, or flips on per-block state, which no read before the sale can see), so where the real sale reverts the
-// caller bans those pools here, and passes evmSellBanned's list as the next quote's `banned`: a banned pool never sets
-// the token's reference on this device again, and the sale leaves through the rest. Each pool costs at most one failed
-// try; a refusal would have frozen the token's sales.
+// quote's `hooked`. A hook can honour the quote and the sim and still revert the real sale. Where the real sale
+// reverts, the caller asks the kit's evmSellRevertedPools(quote, txHash) which pools the device's own reads blame (the
+// sale's replay reverts, the quoter still prices the route at minOut, and the replay with that pool's hook alone made a
+// no-op succeeds, on both providers), bans those here, and passes evmSellBanned's list as the next quote's `banned`.
+// A revert with no such evidence (a price that moved, providers that disagree) bans nothing.
 //
-// One record per (chain, token): meta evm-bans/<chain>/<token> (../store/index.ts WALLET_BAN_PREFIX), { v: 1, pools },
-// the pools' PoolIds (0x and 64 lower-case hex digits) in the order they were banned, each once. A ban is a
+// A ban expires (review of 919742f5, F2: a permanent ban let one bad read cost a token its honest market on this device
+// for good): the first lasts EVM_SELL_BAN_FIRST_MS, each repeat after it expired lasts twice the one before, at most
+// EVM_SELL_BAN_MAX_MS. So a hostile pool costs at most one failed try per ban, and a pool banned in error is quoted again
+// within the hour.
+//
+// One record per (chain, token): meta evm-bans/<chain>/<token> (../store/index.ts WALLET_BAN_PREFIX),
+// { v: 2, pools: [{ id, until, n }] }: each pool's PoolId (0x and 64 lower-case hex digits), the ms its ban ends, and
+// how many times it was banned, in the order last banned, each once. An expired entry is kept for its count. A ban is a
 // read-modify-write in one compare-and-set (WalletStore.update), so two tabs banning at once keep both. At most
-// EVM_SELL_BANS_MAX are kept, the oldest dropped first: the kit's quote takes no longer list, and an old ban dropped
-// costs at most one more failed try, never a frozen sale.
+// EVM_SELL_BANS_MAX are kept, the least recently banned dropped first: the kit's quote takes no longer list, and an old
+// ban dropped costs at most one more failed try, never a frozen sale. A record of any other shape (the permanent v1
+// bans included) holds none.
 import { WALLET_BAN_PREFIX, type WalletStore } from "../store/index.ts";
 
 /** The most pools kept banned for one token: the kit's EVM_SELL_BANNED_MAX (checks/evm/quote.ts). */
 export const EVM_SELL_BANS_MAX = 4096;
+/** A pool's first ban: one hour. */
+export const EVM_SELL_BAN_FIRST_MS = 60 * 60 * 1000;
+/** The longest ban: seven days. */
+export const EVM_SELL_BAN_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAIN = /^[a-z0-9-]{1,40}$/;
 const TOKEN = /^0x[0-9a-f]{40}$/;
 const POOL_ID = /^0x[0-9a-f]{64}$/;
+
+/** One pool's ban: its PoolId, the ms (device clock) it ends, and its count. */
+export type EvmSellBan = { readonly id: string; readonly until: number; readonly n: number };
 
 /** The meta key of the bans of `token` on `chain`; refuses a chain or a token not in their shape. */
 export function evmSellBanKey(chain: string, token: string): string {
@@ -27,34 +41,60 @@ export function evmSellBanKey(chain: string, token: string): string {
   return `${WALLET_BAN_PREFIX}${chain}/${t}`;
 }
 
-/** The pools a record holds; anything not in the record's shape holds none. */
-const poolsOf = (rec: unknown): string[] => {
+/** How long the `n`th ban of a pool lasts: the first EVM_SELL_BAN_FIRST_MS, each after twice the one before, at most
+ *  EVM_SELL_BAN_MAX_MS. */
+export const evmSellBanMs = (n: number): number => (n >= 9 ? EVM_SELL_BAN_MAX_MS : Math.min(EVM_SELL_BAN_FIRST_MS * 2 ** (n - 1), EVM_SELL_BAN_MAX_MS));
+
+/** The bans a record holds; anything not in the record's shape holds none. */
+const bansOf = (rec: unknown): EvmSellBan[] => {
   const pools = (rec as { v?: unknown; pools?: unknown } | undefined)?.pools;
-  if ((rec as { v?: unknown } | undefined)?.v !== 1 || !Array.isArray(pools)) return [];
-  return pools.filter((p): p is string => typeof p === "string" && POOL_ID.test(p));
+  if ((rec as { v?: unknown } | undefined)?.v !== 2 || !Array.isArray(pools)) return [];
+  return pools.filter((b): b is EvmSellBan => {
+    const { id, until, n } = (b ?? {}) as Partial<EvmSellBan>;
+    return typeof id === "string" && POOL_ID.test(id) && Number.isSafeInteger(until) && Number.isSafeInteger(n) && n! >= 1;
+  });
 };
 
-/** The pools banned for `token` on `chain`, oldest first: the next sell quote's `banned`. */
-export async function evmSellBanned(store: Pick<WalletStore, "get">, chain: string, token: string): Promise<string[]> {
-  return poolsOf(await store.get("meta", evmSellBanKey(chain, token)));
+const clock = (nowMs: number): number => {
+  if (!Number.isFinite(nowMs)) throw new Error("the device's clock is a number of ms");
+  return nowMs;
+};
+
+/** The pools banned for `token` on `chain` at `nowMs` (the device's clock), least recently banned first: the next sell
+ *  quote's `banned`. An expired ban is not among them. */
+export async function evmSellBanned(store: Pick<WalletStore, "get">, chain: string, token: string, nowMs: number = Date.now()): Promise<string[]> {
+  const now = clock(nowMs);
+  return bansOf(await store.get("meta", evmSellBanKey(chain, token))).filter((b) => b.until > now).map((b) => b.id);
 }
 
-/** Bans `pools` (a reverted sale's quote's `hooked`) for `token` on `chain`; resolves with every pool banned for it
- *  afterwards. A pool already banned stays where it was; a PoolId not 0x and 64 hex digits is refused before any
- *  write. */
-export async function evmSellBan(store: Pick<WalletStore, "update">, chain: string, token: string, pools: readonly string[]): Promise<string[]> {
+/** Bans `pools` (evmSellRevertedPools' answer for a reverted sale) for `token` on `chain` at `nowMs`; resolves with
+ *  every pool banned for it afterwards. A pool still banned keeps its ban; one whose ban expired is banned again for
+ *  twice as long (at most EVM_SELL_BAN_MAX_MS); a new one for EVM_SELL_BAN_FIRST_MS. A PoolId not 0x and 64 hex digits
+ *  is refused before any write. */
+export async function evmSellBan(store: Pick<WalletStore, "update">, chain: string, token: string, pools: readonly string[], nowMs: number = Date.now()): Promise<string[]> {
   const key = evmSellBanKey(chain, token);
+  const now = clock(nowMs);
   if (!Array.isArray(pools)) throw new Error("the pools to ban are a list");
   const add = [...pools].map((p) => (typeof p === "string" ? p.toLowerCase() : ""));
   if (add.some((p) => !POOL_ID.test(p))) throw new Error("a banned pool is its PoolId: 0x and 64 hex digits");
-  let after: string[] = [];
+  let after: EvmSellBan[] = [];
   await store.update("meta", key, (rec) => {
-    const was = poolsOf(rec);
+    const was = bansOf(rec);
     const next = [...was];
-    for (const p of add) if (!next.includes(p)) next.push(p);
+    let changed = false;
+    for (const id of add) {
+      const i = next.findIndex((b) => b.id === id);
+      const old = i >= 0 ? next[i]! : undefined;
+      // still banned: as it was
+      if (old !== undefined && old.until > now) continue;
+      const n = old === undefined ? 1 : old.n + 1;
+      if (i >= 0) next.splice(i, 1);
+      next.push({ id, until: now + evmSellBanMs(n), n });
+      changed = true;
+    }
     after = next.slice(-EVM_SELL_BANS_MAX);
     // nothing new: no write
-    return after.length === was.length && after.every((p, i) => p === was[i]) ? undefined : { v: 1, pools: after };
+    return changed || after.length !== was.length ? { v: 2, pools: after } : undefined;
   });
-  return after;
+  return after.filter((b) => b.until > now).map((b) => b.id);
 }
