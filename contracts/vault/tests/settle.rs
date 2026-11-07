@@ -25,16 +25,16 @@
 //!
 //! Prints the gas of each settle (the vault's receipt, with the trees' depths) and the gas table.
 //!
-//! kit_settle_mock (card vault-kit-settle): the kit's own settle, `vaultSettleOwn`, driven through its CLI
-//! (`node packages/kit/test/vault-settle-cli.mjs`, one process per run) on the mock token. fee_bounces and
-//! recipient_bounces as in 1 and 2 above, so the state tree holds 8 leaves at depth 3 and fee_bounces' 7,000,000 is
-//! refund_pending on a reserve of exactly 389 B. The device's own account ("device") runs the kit's settle: the kit reads
-//! the spend refund_pending, sends settle with its 150 Tgas and 148 B x 1e19, reads it settled and writes the refund
-//! note of exactly 7,000,000 (the fixture's refunds[0], leaf 8, its label) into the store. That note is the 9th leaf,
-//! so the tree grows a level: settle uses 74 B of the 148 B attached and the other 74 B come back to the device, the
-//! payer (the relayer) getting nothing. A second settle by hand is refused AlreadySettled with nothing changed; the kit's second run sends nothing
-//! and writes nothing. Every outcome is read on chain through the harness's RPC, never taken from the CLI's answer
-//! alone.
+//! kit_settle_mock (card vault-kit-settle): the kit's own settle, `vaultSettleOwn`, driven through its CLI (`node
+//! packages/kit/test/vault-settle-cli.mjs`, one process per run) on the mock token. fee_bounces and recipient_bounces
+//! as in 1 and 2 above, so the state tree holds 8 leaves at depth 3 and fee_bounces' 7,000,000 is refund_pending on a
+//! reserve of exactly 389 B. The device's own account ("device") runs the kit's settle: the kit reads the spend
+//! refund_pending, sends settle with its 150 Tgas and 148 B x 1e19, reads it settled and writes the refund note of
+//! exactly 7,000,000 (the fixture's refunds[0], leaf 8, its label) into the store. That note is the 9th leaf, so the
+//! tree grows a level: settle uses 74 B of the 148 B attached and the other 74 B come back to the device, the payer
+//! (the relayer) getting nothing. A second settle by hand is refused AlreadySettled with nothing changed; the kit's
+//! second run sends nothing and writes nothing. Every outcome is read on chain through the harness's RPC, never taken
+//! from the CLI's answer alone.
 #![cfg(feature = "sandbox")]
 
 mod harness;

@@ -22,7 +22,9 @@
 //   UNSPENT naming its parent through the note store's add (packages/wallet notes/store.ts), once: a store that already
 //   holds that very leaf on R is left as it is, and a store that holds any other note on R stops the call, since the
 //   store takes one note per precommitment and spending that other note would strand the refund (review F3). Two calls
-//   at once on one store: the one whose add is refused reads the store again and reports the note held (F6).
+//   at once on one store: the one whose add is refused reads the store again and reports the note held (F6). Such a
+//   refusal stops the whole call, by design, and every spend after it waits too: stop, never a quiet loss. The caller
+//   sees why, and repairs or drops that spend before calling again (review L2).
 // - One call never waits long: it waits only for the settles it sent, never for a spend in flight (a callback that
 //   failed, 2.5.4, VT-S17, stays in flight for good); such a spend is reported in_flight and the caller comes back.
 // - Every input is hostile: the vault id, the fields, the device's spends (two of one nullifier hash or one R are

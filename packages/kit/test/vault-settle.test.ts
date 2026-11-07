@@ -348,3 +348,39 @@ test("a settle that lands by the leaves read is taken with it, not reported sent
   assert.deepEqual(r.outcomes.map((o) => o.state), ["refund_note", "refund_note"]);
   assert.equal(st.notes.length, 2);
 });
+
+test("an add refused for another reason, with R still not held after, is thrown, never reported written:false (F6)", async () => {
+  const v = vault({ leaves: deposits(5), labels: deposits(5), spends: [row(0, NF, R, "refund_pending", REFUND)] });
+  v.settle(NF);
+  const st = { async list() { return []; }, async add() { throw new Error("parent note-1 is not a landed note"); } };
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: st, waitsMs: NOOP_WAITS }), /not a landed note/);
+});
+
+test("refund by leaf: a held note on R with the row's value, label and commitment but another leaf index is refused (F3)", async () => {
+  const v = vault({ leaves: deposits(5), labels: deposits(5), spends: [row(0, NF, R, "refund_pending", REFUND)] });
+  v.settle(NF);
+  const label = BigInt(v.now().spends[0]!.refund_label);
+  const st = store();
+  st.notes.push({ ref: ME.ref, scope: SCOPE, precommitment: R, state: "UNSPENT", parent: "note-1", leaf: { value: REFUND, label, commitment: vaultCommitment(REFUND, label, R), leafIndex: 3n } });
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: st, waitsMs: NOOP_WAITS }), /holds another note/);
+});
+
+test("refund by leaf: a held note on R with no leaf (not landed) is refused (F3)", async () => {
+  const v = vault({ leaves: deposits(5), labels: deposits(5), spends: [row(0, NF, R, "refund_pending", REFUND)] });
+  v.settle(NF);
+  const st = { async list() { return [{ precommitment: R }]; }, async add() { throw new Error("that precommitment is already in the store"); } };
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: st, waitsMs: NOOP_WAITS }), /holds another note/);
+});
+
+test("one poisoned R stops the whole call, by design: a later spend's note is not written and the caller sees why (review L2)", async () => {
+  const NF2 = 555n;
+  const R2 = 666n;
+  const ME2 = { nullifierHash: NF2, refundPrecommitment: R2, ref: { kind: "refund", l: 33n, j: 0 }, parent: "note-3" };
+  const v = vault({ leaves: deposits(5), labels: deposits(5), spends: [row(0, NF, R, "refund_pending", REFUND), row(1, NF2, R2, "refund_pending", 3_000_000n)] });
+  v.settle(NF);
+  v.settle(NF2);
+  const st = store();
+  st.notes.push({ ref: ME.ref, scope: SCOPE, precommitment: R, state: "UNSPENT", parent: "note-1", leaf: { value: 1n, label: 10_002n, commitment: vaultCommitment(1n, 10_002n, R), leafIndex: 2n } });
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME, ME2], send: v.send, store: st, waitsMs: NOOP_WAITS }), /holds another note/);
+  assert.equal(st.notes.some((n) => n.precommitment === R2), false);
+});

@@ -38,6 +38,10 @@ const M = [
   ["no abort check before a send", "      a.signal?.throwIfAborted();\n", "", null],
   ["leaves read from 0", "leaves: Number(from) }", "leaves: 0 }", null],
   ["the step-1 rows kept past the leaves read", "    rows = ours(s); // a settle that landed by this read is taken too\n", "", null],
+  // the second review's survivors (L1): each against the whole test file
+  ["F6: any add refusal taken as the note held", "        if (!held.has(rP)) throw e;\n", "", null],
+  ["sameLeaf ignoring the leaf index", " && h.leafIndex === l.leafIndex;", ";", null],
+  ["sameLeaf letting a held note with no leaf pass", "  return h !== undefined && h.value === l.value && h.label === l.label && h.commitment === l.commitment && h.leafIndex === l.leafIndex;", "  return h === undefined || (h.value === l.value && h.label === l.label && h.commitment === l.commitment && h.leafIndex === l.leafIndex);", null],
 ];
 // a sweep run inside node --test (test/mutants/vault-settle-mutants.test.mjs) must not hand its test context on: the
 // child's own runner then reports to its parent, not on stdout
@@ -65,7 +69,9 @@ for (const [name, from, repl, pat] of M) {
   const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
   const killed = r.status !== 0 && Number(fail) > 0;
   if (killed) ok++;
-  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
+  // the tests that killed it, each named once (the runner repeats them under "failing tests")
+  const by = [...new Set(r.stdout.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("✖ ") && l !== "✖ failing tests:").map((l) => l.slice(2).replace(/ \([\d.]+ms\)$/, "")))];
+  console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? `: ${by.join(" | ")}` : ""}`);
 }
 console.log(`${ok}/${M.length} killed`);
 if (ok !== M.length) process.exitCode = 1;
