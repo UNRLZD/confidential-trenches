@@ -1,6 +1,7 @@
 // Replays evm-sell-hook-intrablock.answers.json through the live check. The good answer is the check's own run on the
-// card's branch (7 Nov 16:40Z): both trace providers answer each transaction's prestate and call traces, equal, holding
-// ArbOS's state, and the replay at the prestate without ArbOS runs on two quote providers; it passes. The bad answer is
+// card's branch (7 Nov 19:10Z, the prestate asked with disableCode, each trace its own request): both trace providers
+// answer each transaction's prestate and call traces, equal, holding ArbOS's state, and the replay at the prestate
+// without ArbOS runs on two quote providers; it passes. The bad answer is
 // a real read of the same kind with the override as before the card's exclusion (ArbOS's state kept in): Nitro refuses
 // it on every replay; it fails on those lines alone.
 //   node --test scripts/live-checks/evm-sell-hook-intrablock.test.mjs

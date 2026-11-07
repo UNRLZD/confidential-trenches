@@ -4,8 +4,9 @@
 // replays at that prestate with ArbOS's state left out (packages/kit/src/checks/evm/quote.ts tracedPre, preOverOf). Bans
 // there hold only while both providers serve the trace and the replay is taken, so this reads, for the newest Robinhood
 // transactions that call a contract (no transaction of ours, nothing signed):
-//   - each trace provider's debug_traceTransaction, prestateTracer and callTracer in one request, both answering, the
-//     two prestates equal as JSON and holding ArbOS's state account (Nitro's block-start state is in the trace);
+//   - each trace provider's debug_traceTransaction, prestateTracer (disableCode) and callTracer, each its own request as
+//     the kit asks them, both answering, the two prestates equal as JSON and each holding ArbOS's state account (Nitro's
+//     block-start state is in the trace);
 //   - the replay: an eth_call at the transaction's parent with the block's number, time and base fee and its prestate,
 //     ArbOS's state left out, as the state override, on two of the venue's quote providers: each runs it (an output or
 //     an execution revert), never a refusal of the override or the state. The outcome itself is shown, not judged: a
@@ -99,7 +100,10 @@ export async function read(fetchFn = fetch, over = overOf) {
       if (txs.length >= COUNT || tx.type === "0x6a" || tx.to === null || tx.input === "0x") continue;
       const traces = [];
       const answers = [];
-      for (const url of trace) answers.push({ url, answer: await post(url, [{ jsonrpc: "2.0", id: 1, method: "debug_traceTransaction", params: [tx.hash, { tracer: "prestateTracer" }] }, { jsonrpc: "2.0", id: 2, method: "debug_traceTransaction", params: [tx.hash, { tracer: "callTracer" }] }], fetchFn) });
+      for (const url of trace) {
+        const one = async (id, tracer) => ({ ...(await post(url, { jsonrpc: "2.0", id, method: "debug_traceTransaction", params: [tx.hash, tracer] }, fetchFn)), id });
+        answers.push({ url, answer: [await one(1, { tracer: "prestateTracer", tracerConfig: { disableCode: true } }), await one(2, { tracer: "callTracer" })] });
+      }
       for (const { url, answer } of answers) traces.push({ url, digest: digestOf(answer) });
       const pre = Array.isArray(answers[0]?.answer) ? answers[0].answer.find((x) => x.id === 1)?.result : undefined;
       const call = { from: tx.from, to: tx.to, data: tx.input, gas: tx.gas, value: tx.value, ...(tx.maxFeePerGas ? { maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : { gasPrice: tx.gasPrice }) };
