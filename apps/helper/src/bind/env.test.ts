@@ -133,3 +133,22 @@ test("fold 4: a creation's log line names its code and our Transfer's hash only:
   }
   assert.equal(createLine(null), null);
 });
+
+test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate answers before the relayer starts or any chain is read; a quote and a status the proxy carried make a signer seen", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "benv-intents-"));
+  const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
+  let fetched = 0;
+  const s = bindSenderFromEnv(env, {}, (async () => (fetched++, new Response("{}", { status: 500 }))) as typeof fetch);
+  const u = "c".repeat(64);
+  const body = (to: string) => ({ signed_intent: { standard: "raw_ed25519", payload: JSON.stringify({ signer_id: u, verifying_contract: "intents.near", deadline: "2026-11-07T18:02:00.000Z", nonce: Buffer.alloc(32).toString("base64"), intents: [{ intent: "ft_withdraw", token: "usdc.near", receiver_id: to, amount: "1" }] }), public_key: `ed25519:${"1".repeat(32)}`, signature: `ed25519:${"1".repeat(64)}` } });
+  const a = await s.intents!(body("alice.near"));
+  assert.deepEqual([a.status, code(a)], [403, "id_not_ours"]);
+  // the proxy's hooks: our quote with U as refundTo, then 1Click's REFUNDED status for it
+  const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
+  s.quoted!(JSON.stringify(q));
+  s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  const v = await s.intents!(body(MAINNET_VAULT));
+  assert.deepEqual([v.status, code(v)], [403, "receiver_is_vault"]);
+  assert.equal(fetched, 0, "no chain read and no relayer start");
+  s.stop();
+});
