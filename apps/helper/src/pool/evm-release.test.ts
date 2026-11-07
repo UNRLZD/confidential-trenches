@@ -12,7 +12,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, evmPoolRouteData, evmPoolVenues } from "@blindfill/kit";
 import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
-import { BOUGHT_TOPIC, BUY_SELECTOR, BUY_SIGNATURE, EVM_BODY_DATA_MAX, evmAddressOf, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
+import { BOUGHT_TOPIC, BUY_SELECTOR, BUY_SIGNATURE, EVM_BODY_DATA_MAX, EVM_GAS_MAX, EVM_WITHDRAW_RESERVE_SENDS, evmAddressOf, evmBuyLanded, evmBuyUnpaid, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const CAST = JSON.parse(readFileSync(new URL("./fixtures/release-cast.json", import.meta.url), "utf8")) as {
@@ -37,7 +37,7 @@ const NOW = 2_000_000_000_000 - 100_000;
 const EPOCH = 1_999_999_860_000;
 const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("currentTreeDepth()"))).subarray(0, 4).toString("hex")}`;
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }): EvmRpc {
+function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance = 10n ** 20n): EvmRpc {
   const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
   return async (method, params) => {
     calls.push({ method, params });
@@ -55,12 +55,13 @@ function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1"
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
       case "eth_getTransactionReceipt": return receipt;
+      case "eth_getBalance": return `0x${balance.toString(16)}`;
       default: throw new Error(`unexpected ${method}`);
     }
   };
 }
-const senderOf = (calls: Calls, network = "base-sepolia", chain = "0x14a34", venues?: Parameters<typeof evmPoolSender>[0]["venues"], receipts?: [unknown, unknown]) =>
-  evmPoolSender({ network, pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, ...(venues ? { venues } : {}) }, [rpc(calls, chain, receipts?.[0]), rpc([], chain, receipts?.[1])], () => NOW);
+const senderOf = (calls: Calls, network = "base-sepolia", chain = "0x14a34", venues?: Parameters<typeof evmPoolSender>[0]["venues"], receipts?: [unknown, unknown], balances?: [bigint, bigint]) =>
+  evmPoolSender({ network, pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, ...(venues ? { venues } : {}) }, [rpc(calls, chain, receipts?.[0], balances?.[0]), rpc([], chain, receipts?.[1], balances?.[1])], () => NOW);
 const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
 const sends = (calls: Calls) => calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
 
@@ -308,6 +309,12 @@ test("a buy's worst gas is held against W, the client and the token until it lan
   // L2: the reverted set is keyed by method); the reverted buy itself is never sent again in its epoch
   assert.equal(code(await reverted.carry({ pool: POOL, data: CAST.cases.withdrawBaseSepolia!.callData, epoch: EPOCH }, "203.0.113.7")), "ok", "the same proof's withdraw, from the same client");
   assert.equal(code(await reverted.carry({ pool: POOL, data: first, epoch: EPOCH }, "198.51.100.200")), "reverted", "the reverted buy again");
+  // the same buy at an earlier epoch's fee is its own send, held by W's cap before it is sent (review of 7d210cb5 L1)
+  const sims = () => rc.filter((c) => c.method === "eth_estimateGas" || c.method === "eth_getBalance").length;
+  const simsBefore = sims();
+  const later = await reverted.carry({ pool: POOL, data: first, epoch: EPOCH - 60_000 }, "198.51.100.201");
+  assert.match(JSON.stringify(later.body), /unpaid buy gas \d+ wei for W/, JSON.stringify(later.body));
+  assert.equal(sims(), simsBefore, "refused before the send's reads (no simulation, no balance read)");
   // a cheap revert held, then a buy whose worst would pass W's cap: refused at the worst's check, after the reads
   const cheap = senderOf([], "base-sepolia", "0x14a34", undefined, [receiptOf(first, "0x0", false, "0x5208"), receiptOf(first, "0x0", false, "0x5208")]);
   assert.equal(code(await cheap.carry({ pool: POOL, data: first, epoch: EPOCH })), "ok");
@@ -326,5 +333,73 @@ test("a buy's worst gas is held against W, the client and the token until it lan
     await settle();
     const a = await s.carry({ pool: POOL, data: buyAs({ n: 1n }), epoch: EPOCH });
     assert.equal(code(a), held ? "rate_limited" : "ok", `${what}: ${JSON.stringify(a.body)}`);
+  }
+});
+
+// ---- review of 7d210cb5 M1: the withdraws' reserve; buys stop before the float the withdraws need is spent ----
+test("a buy is refused (429) when the sender's lower pending balance, less the buys in flight and this buy's worst, would fall under the withdraws' reserve; a withdraw still goes; at the reserve plus one buy's worst the buy goes", async () => {
+  // the mock chain: base 1 gwei, tip 0.1 gwei, estimateGas 0x95433 x 1.2
+  const reserve = BigInt(EVM_WITHDRAW_RESERVE_SENDS) * EVM_GAS_MAX * 2_100_000_000n;
+  assert.equal(EVM_WITHDRAW_RESERVE_SENDS, 64);
+  const data = buyAs();
+  const gas = (0x95433n * 12n) / 10n; // 611,379
+  const fee = evmReadRelease(bytes(data)).fee;
+  const worst = gas * (fee / gas < 2_100_000_000n ? fee / gas : 2_100_000_000n);
+  const pending = [null, null] as [unknown, unknown]; // no receipt yet: the buy stays in flight
+  // one short of the reserve plus this buy's worst, on the lower provider: the buy waits, a withdraw goes
+  const short = senderOf([], "base-sepolia", "0x14a34", undefined, pending, [10n ** 20n, reserve + worst - 1n]);
+  const r = await short.carry({ pool: POOL, data, epoch: EPOCH });
+  assert.deepEqual([r.status, code(r)], [429, "rate_limited"], JSON.stringify(r.body));
+  assert.match(JSON.stringify(r.body), new RegExp(`the sender keeps ${reserve} wei for withdraws: balance ${reserve + worst - 1n}, buys in flight 0, this buy ${worst}`));
+  assert.equal(r.retryAfterS, 60);
+  assert.equal(code(await short.carry({ pool: POOL, data: CAST.cases.withdrawBaseSepolia!.callData, epoch: EPOCH })), "ok", "a withdraw at the same balance");
+  // exactly the reserve plus one buy's worst: it goes; a second, while the first is in flight, waits
+  const enough = senderOf([], "base-sepolia", "0x14a34", undefined, pending, [reserve + worst, 10n ** 20n]);
+  assert.equal(code(await enough.carry({ pool: POOL, data, epoch: EPOCH })), "ok");
+  const second = await enough.carry({ pool: POOL, data: buyAs({ n: 1n, key: new Uint8Array(createHash("sha256").update("helper-evm-sender-2/test-key/W3").digest()), coin: "0x0000000000000000000000000000000000007070" }), epoch: EPOCH }, "198.51.100.77");
+  assert.match(JSON.stringify(second.body), new RegExp(`buys in flight ${worst}, this buy`), "the first buy's worst counts as spent while it flies");
+});
+
+// ---- review of 7d210cb5 L1: a retry of a buy already sent gets its first hash, even when its own worst fills a cap ----
+test("a device's retry of its own in-flight buy gets the first hash, never 429, though that buy's held worst fills W's cap", async () => {
+  const data = buyAs();
+  const s = senderOf([], "base-sepolia", "0x14a34", undefined, [null, null]);
+  const first = await s.carry({ pool: POOL, data, epoch: EPOCH });
+  assert.equal(first.status, 200);
+  const again = await s.carry({ pool: POOL, data, epoch: EPOCH });
+  assert.deepEqual(again, first, JSON.stringify(again.body));
+  // another buy by the same W is held by the first's worst
+  assert.equal(code(await s.carry({ pool: POOL, data: buyAs({ n: 1n }), epoch: EPOCH })), "rate_limited");
+});
+
+// ---- review of 7d210cb5 L2 and L3: a proven buy holds its cost less the fee; each field of the Bought proof is read ----
+test("evmBuyUnpaid: a proven buy whose receipt cost passes its fee (an l1Fee) holds the difference; evmBuyLanded reads every field of the pool's Bought log", () => {
+  const data = buyAs();
+  const r = evmReadRelease(bytes(data));
+  const buy = { pool: POOL, w: r.recipient, feeRecipient: r.feeRecipient, fee: r.fee, nullifier: r.nullifier, token: r.buy!.token, gas: 733_669n, maxFeePerGas: 1_880_000_000n };
+  const ok = receiptOf(data, "0x1", true);
+  const cost = 0x95433n * buy.maxFeePerGas; // gasUsed at the lower of its price (2.1 gwei) and maxFeePerGas
+  assert.deepEqual(evmBuyUnpaid(ok, ok, buy, 10n ** 18n), { proven: true, unpaid: cost > r.fee ? cost - r.fee : 0n });
+  const l1 = { ...ok, l1Fee: `0x${r.fee.toString(16)}` };
+  assert.deepEqual(evmBuyUnpaid(l1, ok, buy, 10n ** 18n), { proven: true, unpaid: cost }, "the l1Fee past the fee is held");
+  assert.equal(evmBuyLanded(ok, buy), true);
+  const log = ok.logs[0]!;
+  const word = (i: number) => log.data.slice(2 + 64 * i, 2 + 64 * (i + 1));
+  const withWord = (i: number, w: string) => `0x${[0, 1, 2, 3, 4, 5, 6].map((k) => (k === i ? w : word(k))).join("")}`;
+  const one = (l: object) => ({ ...ok, logs: [l] });
+  const rows: [string, object][] = [
+    ["from another address", { ...log, address: "0x000000000000000000000000000000000000dead" }],
+    ["another W topic", { ...log, topics: [BOUGHT_TOPIC, `0x${"0".repeat(24)}${"1".repeat(40)}`] }],
+    ["another event", { ...log, topics: [`0x${"ab".repeat(32)}`, log.topics[1]] }],
+    ["another fee recipient", { ...log, data: withWord(0, w32(0xdeadn)) }],
+    ["another fee", { ...log, data: withWord(2, w32(r.fee + 1n)) }],
+    ["another nullifier", { ...log, data: withWord(3, w32(BigInt(`0x${r.nullifier}`) + 1n)) }],
+    ["another token", { ...log, data: withWord(5, w32(0x7070n)) }],
+    ["removed", { ...log, removed: true }],
+    ["a word short", { ...log, data: log.data.slice(0, -64) }],
+  ];
+  for (const [what, l] of rows) {
+    assert.equal(evmBuyLanded(one(l), buy), false, what);
+    assert.deepEqual(evmBuyUnpaid(one(l), ok, buy, 10n ** 18n).proven, false, `${what}: unproven, its whole cost held`);
   }
 });

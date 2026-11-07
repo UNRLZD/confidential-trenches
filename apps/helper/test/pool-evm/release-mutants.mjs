@@ -5,7 +5,7 @@
 // resolves the same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named
 // test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
 // once (the style of sell-mutants.mjs).
-//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 54 test runs, one per mutant)
+//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 68 test runs, one per mutant)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check, as the pool's own
 // ecrecover makes it): the v test (a v but 27 or 28 gives a recovery id below 0 or above 1, which recovers no key or
@@ -46,6 +46,9 @@ const PIN = "the chain id is the kit's pin";
 const DIRTY = "a dirty processooor, recipient or feeRecipient high bit";
 const ROUTE = "a buy through any adapter but the kit's pinned two";
 const HOLD = "a buy's worst gas is held against W, the client and the token";
+const RESERVE = "a buy is refused (429) when the sender's lower pending balance";
+const RETRY = "a device's retry of its own in-flight buy";
+const PROOF = "evmBuyUnpaid: a proven buy whose receipt cost";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -98,17 +101,34 @@ export const MUTANTS = [
   [EVM, ...movedAfter(ROUTE_CHECK, FEE_CAP_LINE), T, ROUTE],
   [EVM, "evmBuyRouteOf(sellChain!, { adapter: w.buy.adapter, data: `0x${hex(w.buy.data)}`", "evmBuyRouteOf(sellChain!, { adapter: w.buy.adapter, data: `0x${hex(w.buy.data).slice(0, 640)}`", T, ROUTE],
   // H1: a buy's worst gas held until it lands, by W, client, token and the buys' budget
-  [EVM, "    if (keys !== undefined) {\n      const capped = overCap(keys, 1n);", "    if (false) {\n      const capped = overCap(keys, 1n);", T, HOLD],
+  [EVM, "    if (keys !== undefined && once.get(w.nullifier) === undefined) {\n      const capped = overCap(keys, 1n);", "    if (false) {\n      const capped = overCap(keys, 1n);", T, HOLD],
   [EVM, "    if (keys !== undefined) {\n      const capped = overCap(keys, worst);", "    if (false) {\n      const capped = overCap(keys, worst);", T, HOLD],
-  [EVM, "landedBuy(charge(keys, worst), w, gas", "landedBuy({ at: now(), wei: worst }, w, gas", T, HOLD],
+  [EVM, "      const held = charge(keys, worst);", "      const held = { at: now(), wei: worst };", T, HOLD],
   [EVM, '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', "  const ok = true;", T, HOLD],
   [EVM, '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1");', T, HOLD],
   [EVM, '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', '  const ok = [ra].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', T, HOLD],
-  [EVM, " && at(3) === buy.nullifier", "", T, HOLD],
   [EVM, '["buys", `w:${w}`, `t:${token}`, ...(client', '["buys", `w:${w}`, ...(client', T, HOLD],
   [EVM, '["buys", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])]', '["buys", `w:${w}`, `t:${token}`]', T, HOLD],
   [EVM, '  const budget = k === "all" || k === "buys";', '  const budget = k === "all";', T, HOLD],
   [EVM, "      if (sum > 0n && sum + extra > cap) {", "      if (sum + extra > cap) {", T, GOOD],
+  // review of 7d210cb5 M1: the withdraws' reserve
+  [EVM, "      if (low < reserve + flying + worst) return", "      if (false) return", T, RESERVE],
+  [EVM, "      if (low < reserve + flying + worst) return", "      if (low < reserve + worst) return", T, RESERVE],
+  [EVM, "      const low = balA < balB ? balA : balB;", "      const low = balA;", T, RESERVE],
+  [EVM, "      buysInFlight.add(held);\n", "", T, RESERVE],
+  // review of 7d210cb5 L1: a repeat of a sent buy gets its hash; a repeat after it ended is held before its new send
+  [EVM, "    if (keys !== undefined && once.get(w.nullifier) === undefined) {", "    if (keys !== undefined) {", T, RETRY],
+  [EVM, "      if (keys !== undefined) {\n        const capped = overCap(keys, 1n);", "      if (false) {\n        const capped = overCap(keys, 1n);", T, HOLD],
+  // review of 7d210cb5 L2 and L3: a proven buy holds its cost less the fee; every field of the Bought proof
+  [EVM, "unpaid: ok ? (cost > buy.fee ? cost - buy.fee : 0n) : cost }", "unpaid: ok ? 0n : cost }", T, PROOF],
+  [EVM, " || evmRpcHex(address) !== buy.pool || ", " || ", T, PROOF],
+  [EVM, "    if (removed === true || evmRpcHex(address) !== buy.pool", "    if (evmRpcHex(address) !== buy.pool", T, PROOF],
+  [EVM, " || evmRpcHex(topics[1]) !== `0x${pad(buy.w)}`) return false;", ") return false;", T, PROOF],
+  [EVM, "    return at(0) === pad(buy.feeRecipient) && ", "    return ", T, PROOF],
+  [EVM, " && BigInt(`0x${at(2)}`) === buy.fee", "", T, PROOF],
+  [EVM, " && at(3) === buy.nullifier", "", T, PROOF],
+  [EVM, " && at(5) === pad(buy.token);", ";", T, PROOF],
+  [EVM, "    if (d === null || d.length !== 2 + 7 * 64) return false;", "    if (d === null) return false;", T, PROOF],
   // review a2ff5521 L2: a revert is held against its method, so the same proof still withdraws in its epoch
   [EVM, "        if (was === epoch && how === w.method) return no(422, \"reverted\");", "        if (was === epoch) return no(422, \"reverted\");", T, HOLD],
   // a withdraw's request read as before (evm.test.ts's signed requests)

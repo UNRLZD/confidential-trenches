@@ -51,7 +51,10 @@
 //                    EVM_SELL_UNPAID_CAP_WEI, shared with the sales) or the withdraw sender's whole buy budget
 //                    (EVM_SELL_UNPAID_BUDGET_WEI) in EVM_SELL_UNPAID_WINDOW_MS would pass its cap, before any read and
 //                    again with this buy's worst cost, Retry-After until the oldest leaves it (a key holding nothing
-//                    takes one buy whatever its worst); withdraws are never held by these;
+//                    takes one buy whatever its worst); a repeat of a release already sent gets its first hash, never
+//                    this; or the sender's lower pending balance on the two providers, less the buys in flight at
+//                    their worst and this one's, would fall under the withdraws' reserve (EVM_WITHDRAW_RESERVE_SENDS x
+//                    EVM_GAS_MAX x (2 x base + tip)), Retry-After EVM_LANE_RETRY_S; withdraws are never held by these;
 //   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
 //                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
 //   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error),
@@ -64,8 +67,8 @@
 // the price moves), and then the sender pays its gas and gets no fee: so a buy's worst cost (gas x maxFeePerGas) is held
 // against its caps from the send, and its receipts, read in the background on both providers, release it only when both
 // read status 1 and each carries the pool's Bought log of this buy (from the pool, recipient W, this fee recipient,
-// fee, nullifier and token); any other receipt pair is charged its whole cost (evmBuyUnpaid), and a proven buy marks its
-// W and client as a paid sale does.
+// fee, nullifier and token), to its cost less the fee, at least 0; any other receipt pair is charged its whole cost
+// (evmBuyUnpaid), and a proven buy marks its W and client as a paid sale does.
 // Answer: 200 { hash }. A buy runs every rule a withdraw does, on the same lane and once key (one proof serves either
 // method, and W's signature picks which; one send in flight per nullifier).
 //
@@ -125,8 +128,9 @@
 //   rate_limited (429) the sell lane's queue is full; or the unpaid gas held against W, the client, the token (each
 //                    EVM_SELL_UNPAID_CAP_WEI) or the sender's whole sell budget (EVM_SELL_UNPAID_BUDGET_WEI) in the
 //                    window would pass its cap with this sale's worst cost, each with Retry-After until the oldest
-//                    leaves it; a caller (W or client) whose own sale landed and paid in the window is held by its own
-//                    W and client caps and the budget, never by the token's, so unpaid gas never passes the budget.
+//                    leaves it (a cap holding nothing takes one sale: its worst is at most the cap); a caller (W or
+//                    client) whose own sale landed and paid in the window is held by its own W and client caps and the
+//                    budget, never by the token's, so unpaid gas never passes the budget by more than one sale.
 //                    Withdraws are never held by these; buys are, by the same W, client and token caps and their own
 //                    budget (above);
 //   in_flight (429)  as the withdraw: one held limit per client across both routes.
@@ -456,6 +460,17 @@ export const EVM_IN_FLIGHT_MAX = 2;
 /** The wait a full queue or a client's held limit names [design: a send's reads and send take about a second]. */
 export const EVM_BUSY_RETRY_S = 2;
 /**
+ * The withdraws whose gas the withdraw sender always keeps for them, at their worst (EVM_GAS_MAX x (2 x base + tip)):
+ * a buy is refused (429) when the lower of the two providers' pending balances, less every buy still in flight at its
+ * worst and this buy's worst, would fall under it (review of 7d210cb5, M1). A buy whose coin or hook reverts on
+ * chain after its simulation passed costs its sender gas and pays no fee, so buys could spend the float the withdraws
+ * need; with this reserve they stop first and every withdraw still goes. N = EVM_QUEUE_MAX: every withdraw the lane can
+ * hold at once, so a full lane of withdraws is paid at the worst price any of them can be sent at; the fees those
+ * withdraws pay go to the fee recipient (the sender itself unless POOL_EVM_FEE_RECIPIENT_<NETWORK> names another), and
+ * the operator refills the sender from that.
+ */
+export const EVM_WITHDRAW_RESERVE_SENDS = EVM_QUEUE_MAX;
+/**
  * How long past a Sell's deadline, on our clock, a sale with no receipt and no transaction on either provider still
  * holds its (W, Sell nonce): SellDelegate checks the deadline against the block's time, so a helper whose clock runs up
  * to this far ahead of the chain's would otherwise free the nonce, and send a second tx at it, while the first can still
@@ -575,9 +590,9 @@ export function evmBuyLanded(r: unknown, buy: { pool: string; w: string; feeReci
 /**
  * What a sent buy left unpaid, from its two receipts, one per provider, read as hostile (card helper-evm-sender-2, review
  * a2ff5521 H1): the adapter runs code the sender cannot vet, so a buy can revert on chain after its simulation passed.
- * Proven only when both read status 1 and each carries the pool's Bought log of this buy (evmBuyLanded): then the fee,
- * which caps the gas (maxFeePerGas at most fee / gas), was paid and nothing is held. Any other pair is charged its whole
- * cost: the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee, each part held to what the buy can cost
+ * Proven only when both read status 1 and each carries the pool's Bought log of this buy (evmBuyLanded): then the fee
+ * was paid and what is held is the cost less the fee, at least 0 (the fee caps the gas, maxFeePerGas at most fee / gas,
+ * but not the receipt's l1Fee), as evmSaleUnpaid holds a sale. Any other pair is charged its whole cost: the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee, each part held to what the buy can cost
  * (gasUsed at most the gas it was sent with, effectiveGasPrice at most its maxFeePerGas, l1Fee at most `worst`); a
  * receipt whose cost cannot be read counts `worst`.
  */
@@ -590,10 +605,10 @@ export function evmBuyUnpaid(ra: Record<string, unknown>, rb: Record<string, unk
       return worst;
     }
   };
-  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));
-  if (ok) return { proven: true, unpaid: 0n };
   const [ca, cb] = [costOf(ra), costOf(rb)];
-  return { proven: false, unpaid: ca > cb ? ca : cb };
+  const cost = ca > cb ? ca : cb;
+  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));
+  return { proven: ok, unpaid: ok ? (cost > buy.fee ? cost - buy.fee : 0n) : cost };
 }
 /** The first wait before a sent transaction's receipt is read, doubling each read up to EVM_RECEIPT_POLL_BACKOFF times
  *  it (400 ms to 30 s), until its deadline plus the send margin [design: two of Base's 200 ms blocks (2 s, one block,
@@ -796,6 +811,8 @@ export function evmPoolSender(
    *  every key of its sale, so its receipt updates them all at once. */
   type Charge = { at: number; wei: bigint };
   const unpaid = new Map<string, Charge[]>();
+  /** Each buy sent whose two receipts are not yet read, its worst held: the withdraws' reserve counts them as spent. */
+  const buysInFlight = new Set<Charge>();
   const live = (k: string, t: number): Charge[] => {
     const l = (unpaid.get(k) ?? []).filter((c) => c.at > t - EVM_SELL_UNPAID_WINDOW_MS);
     if (l.length === 0) unpaid.delete(k);
@@ -815,7 +832,9 @@ export function evmPoolSender(
       const cap = budget ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;
       const sum = l.reduce((x, c) => x + c.wei, 0n);
       // a key with nothing held takes one send whatever its worst (a buy's worst is at most its fee, which a gas spike
-      // can lift past a cap: one buy is never refused for its own size), so a key holds at most its cap plus one send
+      // can lift past a cap: one buy is never refused for its own size). So a key holds at most its cap plus the one
+      // send that found it empty: a W, client or token key, which buys and sales share, its cap plus one buy and one
+      // sale (each may find it empty at once); a sale's worst is at most the cap (EVM_SELL_MAX_FEE_PER_GAS)
       if (sum > 0n && sum + extra > cap) {
         const oldest = l.length > 0 ? l[0]!.at : t;
         return { ...no(429, "rate_limited", `unpaid ${keys[0] === "buys" ? "buy" : "sell"} gas ${sum} wei for ${budget ? "this sender" : k.slice(0, 1) === "w" ? "W" : k.slice(0, 1) === "c" ? "this client" : "this token"}, cap ${cap}`), retryAfterS: Math.max(1, Math.ceil((oldest + EVM_SELL_UNPAID_WINDOW_MS - t) / 1000)) };
@@ -946,9 +965,11 @@ export function evmPoolSender(
     if (epoch < deadline - POOL_LIFE_MAX_MS || epoch >= deadline || epoch > epochStartOf(t) || epoch < t - POOL_LIFE_MAX_MS) return no(422, "epoch_off");
     if (deadline < t + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${deadline}, now ${t}`);
     if (reverted.has(`${epoch}:${w.method}:${w.nullifier}`)) return no(422, "reverted");
-    // a buy's unpaid-gas caps, before any read: a W, client or token already at its cap, or the buys' budget spent, waits
+    // a buy's unpaid-gas caps, before any read: a W, client or token already at its cap, or the buys' budget spent, waits;
+    // a repeat of a release already sent is not held here (its own held worst may fill the cap): it gets its first hash
+    // below, and a repeat after that send ended is held just before its new send
     const keys = w.buy === undefined ? undefined : buyKeys(w.recipient, client, w.buy.token);
-    if (keys !== undefined) {
+    if (keys !== undefined && once.get(w.nullifier) === undefined) {
       const capped = overCap(keys, 1n);
       if (capped !== null) return capped;
     }
@@ -981,6 +1002,10 @@ export function evmPoolSender(
         once.forget(w.nullifier, prior);
         if (was === epoch && how === w.method) return no(422, "reverted");
       } else once.forget(w.nullifier, prior);
+      if (keys !== undefined) {
+        const capped = overCap(keys, 1n);
+        if (capped !== null) return capped;
+      }
     }
     const entry = once.run(w.nullifier, () => enqueue(withdrawLane, () => simulateSignSend(data, bytes, w, keys)));
     sentIn.set(entry, epoch);
@@ -993,6 +1018,7 @@ export function evmPoolSender(
     if (Number(w.deadlineMs) < now() + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${w.deadlineMs}, now ${now()} after the queue`);
     const call = { from: sender, to: pool, data, value: "0x0" };
     let id: bigint, base: bigint, tip: bigint, pa: bigint, pb: bigint;
+    let balA = 0n, balB = 0n;
     try {
       const stuck = await laneHeld(withdrawLane);
       if (stuck !== null) return stuck;
@@ -1003,10 +1029,12 @@ export function evmPoolSender(
       // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
       const codes = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map((at) => r("eth_getCode", [w.recipient, at]))));
       if (codes.some((c) => c !== "0x")) return no(422, "recipient_code");
-      const [block, t, n, m, ln, lm] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), a("eth_getTransactionCount", [sender, "pending"]), b("eth_getTransactionCount", [sender, "pending"]), a("eth_getTransactionCount", [sender, "latest"]), b("eth_getTransactionCount", [sender, "latest"])]);
+      // a buy reads the sender's pending balance on both providers too (the withdraws' reserve)
+      const [block, t, n, m, ln, lm, ...bal] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), a("eth_getTransactionCount", [sender, "pending"]), b("eth_getTransactionCount", [sender, "pending"]), a("eth_getTransactionCount", [sender, "latest"]), b("eth_getTransactionCount", [sender, "latest"]), ...(keys === undefined ? [] : [a("eth_getBalance", [sender, "pending"]), b("eth_getBalance", [sender, "pending"])])]);
       base = qty((block as { baseFeePerGas?: unknown })?.baseFeePerGas);
       tip = qty(t);
       [pa, pb] = [qty(n), qty(m)];
+      if (bal.length === 2) [balA, balB] = [qty(bal[0]), qty(bal[1])];
       behindOf(withdrawLane, qty(ln), qty(lm));
     } catch (e) {
       return unread(e);
@@ -1031,6 +1059,13 @@ export function evmPoolSender(
     if (keys !== undefined) {
       const capped = overCap(keys, worst);
       if (capped !== null) return capped;
+      // the withdraws' reserve: buys stop before the float the withdraws need is spent (EVM_WITHDRAW_RESERVE_SENDS)
+      const t = now();
+      for (const c of buysInFlight) if (c.at <= t - EVM_SELL_UNPAID_WINDOW_MS) buysInFlight.delete(c);
+      const flying = [...buysInFlight].reduce((x, c) => x + c.wei, 0n);
+      const reserve = BigInt(EVM_WITHDRAW_RESERVE_SENDS) * EVM_GAS_MAX * (2n * base + tip);
+      const low = balA < balB ? balA : balB;
+      if (low < reserve + flying + worst) return { ...no(429, "rate_limited", `the sender keeps ${reserve} wei for withdraws: balance ${low}, buys in flight ${flying}, this buy ${worst}`), retryAfterS: EVM_LANE_RETRY_S };
     }
     // the simulation is the transaction as it will be signed: at pending, from the sender, with its gas and fee fields
     // (a call that reverts only at a real gas price is caught here, not paid for on chain)
@@ -1046,7 +1081,13 @@ export function evmPoolSender(
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(w.deadlineMs) + EVM_POOL_SEND_MARGIN_MS;
     sentAt(withdrawLane, nonce, until, maxFeePerGas, maxPriorityFeePerGas, hash, false);
-    watch(withdrawLane, nonce, hash, until, keys === undefined || w.buy === undefined ? undefined : landedBuy(charge(keys, worst), w, gas, maxFeePerGas, keys));
+    let landed: ((ra: Record<string, unknown>, rb: Record<string, unknown>) => void) | undefined;
+    if (keys !== undefined && w.buy !== undefined) {
+      const held = charge(keys, worst);
+      buysInFlight.add(held);
+      landed = landedBuy(held, w, gas, maxFeePerGas, keys);
+    }
+    watch(withdrawLane, nonce, hash, until, landed);
     return { status: 200, body: { hash } };
   }
   /** POST /v1/pool/evm/sell: the static checks, none of which reads a provider, then one send per (W, Sell nonce). */
@@ -1462,6 +1503,7 @@ export function evmPoolSender(
    *  read status 1 and the pool's Bought log of this buy, which marks its W and client as a paid sale does; else its whole
    *  cost. A buy whose receipt both providers never return keeps its worst cost held for the window. */
   const landedBuy = (held: Charge, w: EvmRelease, gas: bigint, maxFeePerGas: bigint, keys: readonly string[]) => (ra: Record<string, unknown>, rb: Record<string, unknown>): void => {
+    buysInFlight.delete(held);
     const r = evmBuyUnpaid(ra, rb, { pool, w: w.recipient, feeRecipient: w.feeRecipient, fee: w.fee, nullifier: w.nullifier, token: w.buy!.token, gas, maxFeePerGas }, held.wei);
     held.wei = r.unpaid;
     if (!r.proven) return;
