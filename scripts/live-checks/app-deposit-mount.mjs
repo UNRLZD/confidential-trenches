@@ -23,6 +23,7 @@
 //     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
+// Runs: pending app-deposit-mount, it fails on today's deployed app (the header's Deposit opens nothing) until this card deploys
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
