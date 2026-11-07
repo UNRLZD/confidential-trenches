@@ -5,7 +5,7 @@
 //   node --test apps/helper/src/withdraw/send.test.ts
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -21,6 +21,7 @@ import {
   FEE_ACCOUNT_NOT_READY,
   FUND_MARGIN_MS,
   INTENTS,
+  MAINNET_VAULT,
   SEND_MARGIN_MS,
   SETTLE_FLOOR_YOCTO,
   SETTLE_REFUND_ATTACH,
@@ -889,6 +890,89 @@ test("the host's configuration: nothing set carries nothing (bad_shape); a netwo
   assert.equal(code(await withdrawSenderFromEnv(good, quoter, {}).carry({ ...req(), token: VAULT_CONSTANTS.TOKEN })), "bad_shape");
 });
 
+// The pin follows the kit's rule (packages/wallet/test/deposit-delegate.test.ts): mainnet-v1.json's account_id once the
+// mainnet deploy writes that file, else mainnet-test.json's; one case for each, the other skipped.
+const DEPLOYMENTS = join(import.meta.dirname, "../../../../contracts/vault/deployments");
+const recordOf = (name: string) => JSON.parse(readFileSync(join(DEPLOYMENTS, `${name}.json`), "utf8")) as { network: string; account_id: string };
+const HAS_V1 = existsSync(join(DEPLOYMENTS, "mainnet-v1.json"));
+
+test("while mainnet-v1.json is absent, MAINNET_VAULT is mainnet-test.json's account_id", { skip: HAS_V1 && "mainnet-v1.json exists" }, () => {
+  const record = recordOf("mainnet-test");
+  assert.equal(record.network, "mainnet");
+  assert.equal(MAINNET_VAULT, record.account_id);
+});
+
+test("once mainnet-v1.json exists, MAINNET_VAULT is its account_id, never the test vault's", { skip: !HAS_V1 && "mainnet-v1.json does not exist yet" }, () => {
+  const record = recordOf("mainnet-v1");
+  assert.equal(record.network, "mainnet");
+  assert.equal(MAINNET_VAULT, record.account_id);
+  assert.notEqual(MAINNET_VAULT, recordOf("mainnet-test").account_id);
+});
+
+test("mainnet carries only the vault its deploy record names: any other WITHDRAW_VAULT_MAINNET stops the helper at start", async () => {
+  const record = { account_id: MAINNET_VAULT };
+  const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
+  const seed = Buffer.alloc(32, 5);
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+  const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+  const relayer = pub.toString("hex"); // an implicit account, as deploy/withdraw-relayer-key.mjs makes it
+  const env = {
+    WITHDRAW_RELAYER_MAINNET: relayer,
+    WITHDRAW_FEE_RECIPIENT_MAINNET: relayer,
+    HELPER_RELEASE: "1",
+    HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "wpin-")),
+    WITHDRAW_RELAYER_KEYS_MAINNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`,
+  };
+  assert.doesNotThrow(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: record.account_id }, quoter, {}).stop());
+  const pin = MAINNET_VAULT.replaceAll(".", "\\.");
+  for (const other of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", `${MAINNET_VAULT}.evil.near`, `x.${MAINNET_VAULT}`, "vault.bf-vt-20261102t071444.testnet"].filter((v) => v !== MAINNET_VAULT)) {
+    assert.throws(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: other }, quoter, {}), new RegExp(`WITHDRAW_VAULT_MAINNET must be ${pin},`), other);
+  }
+  // testnet is not pinned here: its vault is the testnet deploy's (VT-T02), read from config() as before
+  assert.doesNotThrow(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: "", WITHDRAW_RELAYER_KEYS_MAINNET: "", WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_FEE_RECIPIENT_TESTNET: "relay.test.testnet", WITHDRAW_VAULT_TESTNET: "vault.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: env.WITHDRAW_RELAYER_KEYS_MAINNET }, quoter, {}).stop());
+});
+
+test("a relayer key the account does not hold (or an account that does not exist) answers 503 upstream at every carry, nothing signed", async () => {
+  const seed = Buffer.alloc(32, 11);
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+  const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+  const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
+  for (const answer of ["no_key", "no_account", "function_call"] as const) {
+    const env = {
+      WITHDRAW_RELAYER_TESTNET: "relay.test.testnet",
+      WITHDRAW_FEE_RECIPIENT_TESTNET: "relay.test.testnet",
+      HELPER_RELEASE: "1",
+      HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "wkey-")),
+      WITHDRAW_VAULT_TESTNET: "vault.test.testnet",
+      WITHDRAW_RELAYER_KEYS_TESTNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`,
+    };
+    const sent: string[] = [];
+    const fetchFn = (async (_url: string, init: { body: string }) => {
+      const { method, params } = JSON.parse(init.body) as { method: string; params: Record<string, unknown> };
+      const h = 1000;
+      const head = { header: { height: h, hash: hashOf(h), prev_height: h - 1, gas_price: "100000000", timestamp_nanosec: (BigInt(Date.now()) * 1_000_000n).toString() } };
+      const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", result }));
+      if (method === "send_tx") sent.push(method);
+      if (method === "block") return ok(head);
+      if (method === "query" && params.method_name === "config") return ok({ result: [...Buffer.from(JSON.stringify({ scope: "7", asset: TESTNET_TOKEN }))], block_height: h, block_hash: hashOf(h), logs: [] });
+      if (method === "EXPERIMENTAL_protocol_config") return ok({ transaction_validity_period: 86400 });
+      if (method === "query" && params.request_type === "view_access_key") {
+        if (answer === "no_account") return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } }));
+        if (answer === "no_key") return ok({ block_height: h, block_hash: hashOf(h), error: `access key ${String(params.public_key)} does not exist while viewing`, logs: [] });
+        return ok({ nonce: 5, permission: { FunctionCall: { allowance: null, receiver_id: "vault.test.testnet", method_names: [] } }, block_height: h, block_hash: hashOf(h) });
+      }
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", error: { name: "HANDLER_ERROR", cause: { name: "NOT_SERVED" } } }));
+    }) as unknown as typeof fetch;
+    const sender = withdrawSenderFromEnv(env, quoter, {}, fetchFn);
+    for (let i = 0; i < 2; i++) {
+      const a = await sender.carry({ ...req(), token: TESTNET_TOKEN });
+      assert.deepEqual([a.status, code(a)], [503, "upstream"], `${answer}, try ${i}`);
+    }
+    assert.deepEqual(sent, [], answer);
+    sender.stop();
+  }
+});
+
 // ---- Planted removals that survived the review, each held here ----
 
 test("check 9's time: two finals more than 30 blocks apart are refused; 30 apart is read", async () => {
@@ -954,6 +1038,7 @@ test("a start that fails after the stores open closes them: the next try starts"
     let result: unknown;
     if (method === "block") result = head;
     else if (method === "query" && params.method_name === "config") result = { result: [...Buffer.from(JSON.stringify({ scope: "7", asset: TESTNET_TOKEN }))], block_height: h, block_hash: hashOf(h), logs: [] };
+    else if (method === "query" && params.request_type === "view_access_key") result = { nonce: 5, permission: "FullAccess", block_height: h, block_hash: hashOf(h) };
     else if (method === "EXPERIMENTAL_protocol_config") {
       if (protocolReads++ === 0) return new Response(JSON.stringify({ jsonrpc: "2.0", id: "r", error: { name: "INTERNAL_ERROR", cause: { name: "INTERNAL_ERROR" } } }));
       result = { transaction_validity_period: 86400 };
