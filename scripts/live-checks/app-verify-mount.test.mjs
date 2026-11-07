@@ -6,8 +6,12 @@
 //               vault.bf-vt-20261102t071444.testnet on test.rpc.fastnear.com (FastNEAR) and near-testnet.drpc.org
 //               (dRPC), every check ok at both widths, each open leaving loading only once both RPCs answered it, every
 //               NEAR request to the pair and of the release's accounts, and the pill's second open read afresh: PASS;
-//   noVault:    the same tree built for mainnet (VITE_NEAR_NETWORK unset), as APP_HOST serves it until the mainnet vault
-//               is deployed: every check Unverified, no RPC named, no NEAR request: PASS (that network's end state);
+//   goodMainnet: this card's build for mainnet (VITE_NEAR_NETWORK unset), served locally on the hosts' names: Verify drawn
+//               from a live read of vault.confidential.unrlzd.near on rpc.mainnet.fastnear.com (FastNEAR) and near.drpc.org
+//               (dRPC) against contracts/vault/deployments/mainnet-v1.json, every check ok at both widths: PASS;
+//   noVault:    the tree before the mainnet vault's deploy, built for mainnet, as APP_HOST served it then: every check
+//               Unverified, no RPC named, no NEAR request: PASS against its own time (no record); FAIL once the record
+//               exists (planted);
 //   notMounted: the build of main before this card (Screen.tsx draws an empty main for /verify): FAIL, no panel;
 //   cached:     this card's build with one change in VerifyRoute.tsx: each read kept in a module-level LAST and drawn at
 //               once on the next open before it reads (`if (LAST) setView(LAST);`): FAIL, the pill's open leaves loading
@@ -21,7 +25,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 import * as check from "./app-verify-mount.mjs";
-import { APP_HOST, CHECKS, judge, pinsOf, pinsProblems, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
+import { APP_HOST, CHECKS, judge, pinsOf, pinsProblems, recorded, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-verify-mount.answers.json"), "utf8"));
@@ -38,7 +42,9 @@ test("the release's pins are each network's vault deploy record, and none exactl
     assert.deepEqual(pinsProblems(network, pinsOf(r.pins), releaseRecord(network)), [], network);
   }
   assert.equal(releaseRecord("testnet").account_id, VERIFY_RELEASES.testnet.pins.vault);
-  assert.equal(releaseRecord("mainnet"), null);
+  // mainnet's record exists since the vault's deploy on 7 Nov (contracts/vault/deployments/mainnet-v1.json): its vault is named
+  assert.equal(releaseRecord("mainnet").account_id, VERIFY_RELEASES.mainnet.pins.vault);
+  assert.equal(releaseRecord("mainnet").code_hash, VERIFY_RELEASES.mainnet.pins.release);
 });
 
 test("a deploy record that moves, appears or goes, against the release's pins, is a problem", () => {
@@ -66,6 +72,37 @@ test("recorded good answer: Verify read live on two operators, every check ok at
   assert.equal(d.footer.firstState, "loading");
   for (const u of d.panel.rpcs) assert.ok(d.requests.some((q) => q.phase === "reopen" && q.method === "POST" && q.url.startsWith(u) && q.status === 200), u);
   assert.ok(r.lines.includes("ok  desktop /verify again: panel read, code ok, funds ok; checks " + CHECKS.map((c) => `${c} ok`).join(", ")));
+});
+
+test("recorded good answer, mainnet: Verify read live on its own pair against its vault's deploy record, every check ok at both widths: PASS", () => {
+  const rec = ANSWERS.goodMainnet;
+  const r = judge(rec);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(rec.network, "mainnet");
+  assert.deepEqual(rec.pins, pinsOf(VERIFY_RELEASES.mainnet.pins));
+  assert.deepEqual(rec.record, releaseRecord("mainnet"));
+  for (const w of WIDTHS) {
+    const run = rec.runs.find((x) => x.width === w.name);
+    assert.deepEqual(run.panel.rpcs, VERIFY_RELEASES.mainnet.rpcs);
+    assert.ok(r.lines.includes(`ok  ${w.name} /verify: panel read, code ok, funds ok; checks ${CHECKS.map((c) => `${c} ok`).join(", ")}`), w.name);
+  }
+  assert.ok(r.lines.includes("ok  desktop /verify again: panel read, code ok, funds ok; checks " + CHECKS.map((c) => `${c} ok`).join(", ")));
+});
+
+test("a recorded run writes each market read's token as <mint>, and every recorded answer holds none bare", () => {
+  const mint = "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"; // a public Solana mint the page reads
+  const rec = { runs: [{ requests: [{ url: `https://${APP_HOST}/v1/market/token?chain=solana&token=${mint}`, rpcId: null }] }] };
+  const out = recorded(rec);
+  assert.ok(!out.includes(mint), out);
+  assert.ok(out.includes("/v1/market/token?chain=solana&token=<mint>"), out);
+  assert.equal(recorded({ u: "https://x/a?token=<mint>&b=1" }).includes("token=<mint>&b=1"), true);
+  for (const [k, a] of Object.entries(ANSWERS)) assert.deepEqual(JSON.stringify(a).match(/[?&]token=(?!<)[^&"\\]+/g), null, k);
+});
+
+test("planted: mainnet's build with no vault named, once the vault's deploy record exists: FAIL", () => {
+  const stale = mut("noVault", (rec) => (rec.record = releaseRecord("mainnet")));
+  assert.equal(stale.ok, false);
+  assert.ok(bad(stale).some((l) => l.includes("a deploy record names vault vault.confidential.unrlzd.near on mainnet, but release.ts names none")), stale.lines.join("\n"));
 });
 
 test("recorded good answer, mainnet with no vault yet: every check Unverified, no RPC named, no NEAR request: PASS", () => {

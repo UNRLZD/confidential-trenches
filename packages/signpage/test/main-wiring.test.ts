@@ -5,12 +5,12 @@
 // - a notes change (another tab: money reached the index) names again, so the next quote names the next index;
 // - another tab's sign out and sign-in: a quote asked as the resync starts waits for the resync's naming (resyncing).
 // - state.pools (card balances-per-chain): the shell's state carries the balance of this page's own notes per chain of
-//   the page's pool table, which a second hook gives one pool of this test's scope (mainnet has none yet); a note that
+//   the page's pool table, which a second hook gives one pool of the vault's scope (mainnet's table has no NEAR entry); a note that
 //   lands is counted in the next state. The state read never writes: pageNotes reads with the wallet's readNotes and
 //   never opens the note store (whose open and list free a dead tab's notes and finish a parent); a third hook records
 //   who calls each of the two. The framed side is test/main-framed-pools.test.ts.
-// The release names no vault on the page's network yet (vaultScope is null on mainnet), so a load hook makes checks.ts's
-// vaultScope answer this test's scope; nothing else of main.ts or its imports is changed. The helper is a fetch that
+// The scope is mainnet's real one: the v1 deploy record's (contracts/vault/deployments/mainnet-v1.json), which
+// checks.ts's vaultScope answers unhooked for the page's network (the first test holds the two equal). The helper is a fetch that
 // records each request and answers 503, so a quote that reached it answers "down" and carries U in its body.
 //   node --test test/main-wiring.test.ts      (from packages/signpage)
 /// <reference types="node" />
@@ -26,10 +26,9 @@ import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 
-const SCOPE = 4242n;
+const SCOPE = BigInt(JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/mainnet-v1.json", import.meta.url), "utf8")).scope as string);
 // Solana's USDC: this test's helper answers 503, so no 1Click answer is checked and no mock key is needed
 const SOL_USDC = ONECLICK_USDC_ASSETS[1]!;
-const ANCHOR = "export function vaultScope(network: NearNetwork): bigint | null {";
 const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");';
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from
 const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
@@ -59,10 +58,7 @@ registerHooks({
 export function depositFollows(h) { const api = depositFollows__recorded(h); const log = (globalThis.__ctFollowCalls ??= []); for (const k of ["storeClosed", "settle"]) { const f = api[k]; api[k] = (...a) => (log.push(k === "settle" && /at open \\(.*\\/src\\/main\\.ts/.test(String(new Error().stack)) ? "settle:open" : k), f(...a)); } return api; }
 ` };
     }
-    if (!url.endsWith("/src/withdraw/checks.ts")) return r;
-    const src = String(r.source);
-    if (!src.includes(ANCHOR)) throw new Error("checks.ts: vaultScope's line moved; update this test's hook");
-    return { ...r, source: src.replace(ANCHOR, `${ANCHOR}\n  if (network === "mainnet") return ${SCOPE}n;`) };
+    return r;
   },
 });
 
@@ -207,6 +203,9 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   let other = await openWalletStore({});
   await other.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 1 });
 
+  // the page's own scope, read unhooked, is the v1 record's
+  const { vaultScope } = await import("../src/withdraw/checks.ts");
+  assert.equal(vaultScope("mainnet"), SCOPE);
   await import("../src/main.ts");
   const app = doc.body.children.find((c) => c.tagName === "iframe");
   assert.ok(app, "the shell framed APP_HOST");

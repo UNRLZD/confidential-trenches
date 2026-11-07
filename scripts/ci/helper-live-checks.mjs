@@ -56,6 +56,7 @@ export const LIVE_CHECKS = [
   "evm-testnet-delegate-review3",
   "robinhood-mainnet-rpcs",
   "helper-usdc-pending-pause",
+  "helper-id-intents",
   "helper-rpc-sell-methods",
   "robinhood-listed-tape-opens",
   "rpc-keyed-lists",

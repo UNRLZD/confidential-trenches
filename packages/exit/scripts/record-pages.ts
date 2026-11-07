@@ -7,7 +7,6 @@ import { recordRpc, type PagesFile, type Recording } from "../test/replay.ts";
 
 const out = process.argv[2] ?? new URL("../test/fixtures/testnet-pages.json", import.meta.url).pathname;
 const net = EXIT_NETWORKS.testnet;
-if (net.vault === null) throw new Error("no testnet vault");
 const recs: [Recording, Recording] = [
   { url: net.rpcs[0], answers: [] },
   { url: net.rpcs[1], answers: [] },

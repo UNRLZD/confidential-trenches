@@ -5,12 +5,13 @@
 // way the wiring can break. It also holds scripts/ci/test-shards.mjs's split of the terminal's browser runs.
 //   node --test scripts/ci/test-shards.test.mjs
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync as realpath, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { e2ePart } from "./test-shards.mjs";
+import { e2ePart, mutantCommands, mutantParts, mutantsPart, runPart, MUTANT_SECONDS, MUTANTS_ELSEWHERE, NEW_SWEEP_SECONDS, PART_BUDGET_SECONDS } from "./test-shards.mjs";
 import { withoutHeldRetries } from "./download-retry.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -87,6 +88,37 @@ export function shardProblems(ci) {
     }
     if (!browser.includes('node scripts/ci/test-shards.mjs e2e "$INDEX" "$TOTAL"')) p.push("test-browser does not run scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"");
   }
+  p.push(...mutantJobProblems(all, ci, mutantCommands(ROOT)));
+  return p;
+}
+
+// card ci-mutants-sharded: test-mutants runs the split across its matrix, enough parts that the heaviest is planned
+// inside PART_BUDGET_SECONDS, each package left out of the split runs its sweeps in its own job, and no line runs the
+// sweeps whole besides
+function mutantJobProblems(all, ci, commands) {
+  const p = [];
+  const mutants = all["test-mutants"];
+  if (!mutants) return ["ci.yml has no test-mutants shard for the mutant sweeps"];
+  if (!/^ {10}INDEX: \$\{\{ strategy\.job-index \}\}$/m.test(mutants) || !/^ {10}TOTAL: \$\{\{ strategy\.job-total \}\}$/m.test(mutants)) {
+    p.push("test-mutants does not take its part from strategy.job-index and strategy.job-total");
+  }
+  if (!/^ {8}run: node scripts\/ci\/test-shards\.mjs mutants "\$INDEX" "\$TOTAL"$/m.test(mutants)) p.push("test-mutants does not run scripts/ci/test-shards.mjs mutants \"$INDEX\" \"$TOTAL\"");
+  const parts = /^ {8}part:\s*\[([^\]]*)\]\s*$/m.exec(mutants)?.[1].split(",").map((s) => s.trim());
+  if (!parts?.length || parts.some((s, i) => s !== String(i + 1))) p.push("test-mutants has no matrix part: [1, ..., N]");
+  else {
+    try {
+      const worst = Math.max(...mutantParts(commands, parts.length).map((x) => x.seconds));
+      if (worst > PART_BUDGET_SECONDS) p.push(`test-mutants' heaviest of ${parts.length} part(s) is planned at ${worst} s, over ${PART_BUDGET_SECONDS} s: add a part`);
+    } catch (e) {
+      p.push(`test-mutants: ${e.message}`);
+    }
+  }
+  for (const [name, job] of Object.entries(MUTANTS_ELSEWHERE)) {
+    if (!new RegExp(`^ +run: pnpm --filter ${name} run test:mutants$`, "m").test(all[job] ?? "")) {
+      p.push(`${name}'s test:mutants runs nowhere: the split leaves it to ${job}, which does not run it`);
+    }
+  }
+  if (/^ +(- )?run: .*pnpm -r\b.*\brun test:mutants\b/m.test(ci)) p.push("a ci.yml line runs test:mutants with pnpm -r beside the split, so a sweep runs twice");
   return p;
 }
 
@@ -105,7 +137,15 @@ const PLANTED = {
   "a step that may fail in a shard": ["      - name: the EVM pool's tests\n", "      - name: the EVM pool's tests\n        continue-on-error: true\n", "test-scripts has continue-on-error"],
   "a foundry install that may fail with no second run": [/      - name: Foundry once more\n(?:.*\n){4}/, "", "test-scripts has continue-on-error"],
   "a shard with no timeout": [/(\n  test-vault:\n(?:.*\n){2}) {4}timeout-minutes: \d+\n/, "$1", "test-vault has no timeout of its own"],
-  "a browser part count set by hand": ["TOTAL: ${{ strategy.job-total }}", "TOTAL: 2", "test-browser does not take its part"],
+  "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: \|)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
+  "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
+  "the mutant sweeps run whole in every part": ['run: node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants", "test-mutants does not run scripts/ci/test-shards.mjs mutants"],
+  "the whole sweep run again beside the split": ["      - name: the wallet package's test:mutants script\n", "      - run: pnpm -r --filter '!@blindfill/wallet' --if-present run test:mutants\n      - name: the wallet package's test:mutants script\n", "a ci.yml line runs test:mutants with pnpm -r"],
+  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
+  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
+  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]", "test-mutants: the sweeps are"],
+  "the wallet's own sweep dropped": ["      - name: the wallet package's test:mutants script\n        run: pnpm --filter @blindfill/wallet run test:mutants\n", "", "@blindfill/wallet's test:mutants runs nowhere"],
+  "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
 };
 for (const [name, [from, to, want]] of Object.entries(PLANTED)) {
@@ -162,4 +202,175 @@ test("the command line: a missing or non-number part is refused with exit 1", ()
   const ok = spawnSync(process.execPath, [script, "e2e", "0", "1"], { encoding: "utf8" });
   assert.equal(ok.status, 0);
   assert.equal(ok.stdout.trim(), E2E.split("&&").map((c) => c.trim()).join(" && "));
+});
+
+// card ci-mutants-sharded: the mutant sweeps' split. SWEEPS is read here from git's own list of package.json files,
+// apart from the split's reader, so a reader that misses a package fails against it.
+const key = (c) => `${c.dir}: ${c.command}`;
+function sweepsFromGit(root) {
+  const files = execFileSync("git", ["ls-files", "-z", "--", ":(glob)apps/*/package.json", ":(glob)packages/*/package.json"], { cwd: root, encoding: "utf8" })
+    .split("\0").filter(Boolean).toSorted();
+  return files.flatMap((f) => {
+    const { name, scripts } = JSON.parse(readFileSync(path.join(root, f), "utf8"));
+    const script = scripts?.["test:mutants"];
+    if (!script || Object.hasOwn(MUTANTS_ELSEWHERE, name)) return [];
+    return script.split(" && ").map((command) => ({ dir: path.posix.dirname(f), name, command: command.trim() }));
+  });
+}
+const SWEEPS = sweepsFromGit(ROOT);
+
+// each sweep in exactly one part of every total from 1 to one part per sweep, no part empty, and no sweep that is not
+// one; split(index, total) is the split under test
+function splitProblems(sweeps, split) {
+  const p = [];
+  const want = new Set(sweeps.map(key));
+  for (let total = 1; total <= sweeps.length; total++) {
+    const parts = Array.from({ length: total }, (_, i) => {
+      try {
+        return split(i, total).map(key);
+      } catch (e) {
+        p.push(`part ${i} of ${total}: ${e.message}`);
+        return [];
+      }
+    });
+    for (const [i, part] of parts.entries()) if (!part.length) p.push(`part ${i} of ${total} runs nothing`);
+    for (const k of want) {
+      const n = parts.flat().filter((x) => x === k).length;
+      if (n !== 1) p.push(`${k} runs in ${n} part(s) of ${total}`);
+    }
+    for (const k of new Set(parts.flat())) if (!want.has(k)) p.push(`${k} is no sweep, in a part of ${total}`);
+  }
+  return p;
+}
+
+test("the mutant sweeps: the split reads every package's test:mutants, each command in its package's folder", () => {
+  assert.ok(SWEEPS.length >= 2, "this tree has mutant sweeps to split");
+  assert.deepEqual(mutantCommands(ROOT), SWEEPS);
+  assert.ok(!SWEEPS.some((c) => Object.hasOwn(MUTANTS_ELSEWHERE, c.name)), "a package left to its own job is not split");
+});
+
+test("the mutant sweeps: the union of all parts is every command, each in exactly one part, for every count of parts", () => {
+  assert.deepEqual(splitProblems(SWEEPS, (i, n) => mutantsPart(SWEEPS, i, n)), []);
+  for (let total = 1; total <= SWEEPS.length; total++) {
+    const parts = mutantParts(SWEEPS, total);
+    assert.deepEqual(parts.map((x) => x.commands), parts.map((_, i) => mutantsPart(SWEEPS, i, total)));
+    assert.equal(parts.reduce((s, x) => s + x.seconds, 0), SWEEPS.reduce((s, c) => s + (MUTANT_SECONDS[key(c)] ?? NEW_SWEEP_SECONDS), 0));
+  }
+});
+
+test("planted: a command added to any package's test:mutants, or a new package's, lands in exactly one part", () => {
+  const added = [...new Set(SWEEPS.map((c) => c.dir)), "packages/new"].map((dir) => ({ dir, name: dir, command: "node --test test/new-mutants.test.mjs" }));
+  for (const c of added) {
+    const sweeps = [...SWEEPS, c];
+    assert.deepEqual(splitProblems(sweeps, (i, n) => mutantsPart(sweeps, i, n)), [], key(c));
+  }
+  const all = [...SWEEPS, ...added];
+  assert.deepEqual(splitProblems(all, (i, n) => mutantsPart(all, i, n)), []);
+});
+
+test("planted: a part added to the matrix drops nothing and doubles nothing; past one part per sweep it is refused", () => {
+  const n = Number(/\n {2}test-mutants:\n(?:.*\n)*? {8}part: \[([^\]]*)\]/.exec(CI)[1].split(",").length);
+  for (const total of [n, n + 1]) {
+    const seen = Array.from({ length: total }, (_, i) => mutantsPart(SWEEPS, i, total)).flat().map(key);
+    assert.deepEqual(seen.toSorted(), SWEEPS.map(key).toSorted(), `${total} parts`);
+  }
+  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4)\]/, `$1, 5]`);
+  assert.notEqual(more, CI);
+  assert.deepEqual(shardProblems(more), []);
+  assert.throws(() => mutantsPart(SWEEPS, 0, SWEEPS.length + 1), /fewer than/);
+  assert.throws(() => mutantsPart(SWEEPS, 4, 4), /not a part of 4/);
+  assert.throws(() => mutantsPart(SWEEPS, -1, 4), /not a part of 4/);
+  assert.throws(() => mutantsPart(SWEEPS, 0, 0), /not a count of parts/);
+  assert.throws(() => mutantsPart([], 0, 1), /no workspace package/);
+});
+
+test("planted: a split that misses a package, drops, doubles or moves a command fails", () => {
+  const last = SWEEPS.at(-1);
+  const pkg = SWEEPS[0].dir;
+  for (const [name, split, want] of [
+    ["a package missed", (i, n) => mutantsPart(SWEEPS.filter((c) => c.dir !== pkg), i, n), `${pkg}: `],
+    ["the last command dropped", (i, n) => mutantsPart(SWEEPS, i, n).filter((c) => c !== last), key(last)],
+    ["a command in every part", (i, n) => [...new Set([...mutantsPart(SWEEPS, i, n), last])], `${key(last)} runs in`],
+    ["a command in another folder", (i, n) => mutantsPart(SWEEPS, i, n).map((c) => (c === last ? { ...c, dir: "." } : c)), `${key(last)} runs in 0`],
+  ]) {
+    const found = splitProblems(SWEEPS, split);
+    assert.ok(found.some((f) => f.startsWith(want)), `${name}: want "${want}", found ${JSON.stringify(found)}`);
+  }
+});
+
+test("planted: the split's reader takes every workspace package's test:mutants but those left to their own job", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "test-shards-mutants-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    const pkg = (name, mutants) => JSON.stringify({ name, scripts: { test: "node --test", ...(mutants === undefined ? {} : { "test:mutants": mutants }) } });
+    put("pnpm-workspace.yaml", 'packages:\n  - "apps/*"\n  - "packages/*"\nminimumReleaseAge: 10080\n');
+    put("package.json", pkg("root", "node root-mutants.mjs"));
+    put("packages/a/package.json", pkg("@x/a", 'node --test "test/mutants/*.test.mjs" && node test/q-mutants.mjs'));
+    put("apps/b/package.json", pkg("b", "node --test test/b-mutants.test.mjs"));
+    put("packages/n/package.json", pkg("@x/n"));
+    put("packages/w/package.json", pkg(Object.keys(MUTANTS_ELSEWHERE)[0], "FULL_RUNS=1 node --test test/w.test.ts"));
+    put("other/c/package.json", pkg("c", "node c-mutants.mjs"));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["add", "."], { cwd: dir });
+    const want = [
+      { dir: "apps/b", name: "b", command: "node --test test/b-mutants.test.mjs" },
+      { dir: "packages/a", name: "@x/a", command: 'node --test "test/mutants/*.test.mjs"' },
+      { dir: "packages/a", name: "@x/a", command: "node test/q-mutants.mjs" },
+    ];
+    assert.deepEqual(mutantCommands(dir), want);
+    assert.deepEqual(sweepsFromGit(dir), want);
+    // a command added to a package's script is read, and lands in exactly one part
+    put("packages/a/package.json", pkg("@x/a", 'node --test "test/mutants/*.test.mjs" && node test/q-mutants.mjs && node test/r-mutants.mjs'));
+    const more = mutantCommands(dir);
+    assert.deepEqual(more.map(key), [...want.map(key), "packages/a: node test/r-mutants.mjs"]);
+    assert.deepEqual(splitProblems(more, (i, n) => mutantsPart(more, i, n)), []);
+    // a script the split cannot read whole is refused, never split wrong
+    for (const bad of ["node a.mjs || node b.mjs", "node a.mjs; node b.mjs", "node a.mjs &&  && node b.mjs", ""]) {
+      put("apps/b/package.json", pkg("b", bad));
+      assert.throws(() => mutantCommands(dir), /apps\/b('s test:mutants is not a plain|'s test:mutants has an empty command| has an empty test:mutants script)/, JSON.stringify(bad));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the measured times: each one names a sweep of this tree, and a stale one fails", () => {
+  const stale = (seconds) => Object.keys(seconds).filter((k) => !SWEEPS.some((c) => key(c) === k));
+  assert.deepEqual(stale(MUTANT_SECONDS), [], "a MUTANT_SECONDS key in scripts/ci/test-shards.mjs names no sweep: rename it to the sweep's new command, or remove it");
+  assert.deepEqual(stale({ ...MUTANT_SECONDS, "packages/kit: node test/gone-mutants.mjs": 10 }), ["packages/kit: node test/gone-mutants.mjs"]);
+  for (const [k, s] of Object.entries(MUTANT_SECONDS)) assert.ok(Number.isInteger(s) && s > 0, k);
+});
+
+test("a part runs every one of its sweeps in its package's folder, after a failed one too, and reports which failed", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "test-shards-run-"));
+  try {
+    for (const d of ["packages/a", "apps/b"]) {
+      mkdirSync(path.join(dir, d), { recursive: true });
+      writeFileSync(path.join(dir, d, "package.json"), JSON.stringify({ name: d }));
+    }
+    const lines = [];
+    const ran = runPart([
+      { dir: "packages/a", command: "pwd > ran.txt && exit 3" },
+      { dir: "apps/b", command: "pwd > ran.txt" },
+    ], dir, (l) => lines.push(l));
+    assert.deepEqual(ran.map((r) => [r.dir, r.ok]), [["packages/a", false], ["apps/b", true]]);
+    for (const d of ["packages/a", "apps/b"]) {
+      assert.equal(readFileSync(path.join(dir, d, "ran.txt"), "utf8").trim(), path.join(realpath(dir), d));
+    }
+    assert.ok(lines.some((l) => /failed \(exit 3\) in [\d.]+ s: packages\/a: /.test(l)), lines.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the mutants command line: a missing, non-number or out-of-range part is refused with exit 1 and runs nothing", () => {
+  const script = path.join(ROOT, "scripts/ci/test-shards.mjs");
+  for (const args of [["mutants"], ["mutants", "0"], ["mutants", "x", "4"], ["mutants", "4", "4"], ["mutants", "0", "0"], ["mutants", "0", "99"]]) {
+    const r = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+    assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}`);
+    assert.equal(r.stdout, "");
+  }
 });
