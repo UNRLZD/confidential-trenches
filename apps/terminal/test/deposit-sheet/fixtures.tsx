@@ -80,6 +80,8 @@ const src: DepositSource = {
   snapshot,
   moneyOn: true,
   assets: fx.assets === undefined ? [NEAR] : fx.assets,
+  assetsRefused: null,
+  retryAssets: () => {},
   dryQuote: (asset, amount) => {
     window.__calls.push({ kind: "dry", asset: asset.id, amount });
     return fx.dry === "never" ? new Promise(() => {}) : Promise.resolve(fx.dry ?? { ok: true, value: DRY });

@@ -26,6 +26,11 @@
 .dpick .lb { margin-bottom: 8px; color: var(--text-2); }
 .drow { height: 56px; border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-panel); display: flex; align-items: center; gap: 12px; padding: 0 14px; }
 .drow .nm { font: 600 15px var(--font-ui); }
+.drow select.nm { appearance: none; -webkit-appearance: none; background: none; border: 0; color: var(--text-1); padding: 0; flex: 1; min-width: 0; height: 100%; cursor: pointer; outline: none; } /* the picker's native select fills the row; the chevron after it */
+.drow select.nm:disabled { cursor: default; opacity: 1; }
+.drow select.nm:focus-visible { box-shadow: 0 0 0 2px var(--border-panel); border-radius: 6px; }
+.drow select.nm option { background: var(--bg-panel); color: var(--text-1); }
+.drow svg { flex: none; color: var(--text-3); pointer-events: none; }
 .dep .sk { display: block; width: 70px; height: 14px; background: #181818; border-radius: 6px; animation: dep-skp 1.2s linear infinite; }
 @keyframes dep-skp { 50% { opacity: .55; } }
 .damt { border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-drawer); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
@@ -53,14 +58,21 @@
 .dstat .retry { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--m-ink-pill); box-shadow: inset 0 0 0 1px var(--m-line-strong); color: var(--text-1); font: 600 14px var(--font-ui); }
 .dline { margin: 0; font: 13px/1.4 var(--font-ui); color: var(--text-2); padding: 0 2px; }
 .addrb { border-radius: 14px; border: 1px solid var(--border-panel); background: var(--bg-panel); padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.addrb .qr { background: var(--bg-page); border-radius: 12px; padding: 12px; box-shadow: inset 0 0 0 1px var(--border-panel); color: var(--text-1); line-height: 0; } /* R5 proto.css:756; the modules in the text colour (DepositSheet Qr) */
+.addrb .qr svg { display: block; width: 200px; height: 200px; }
 .addrb .ca { font: 600 13px var(--font-ui); color: var(--text-1); display: flex; align-items: center; gap: 6px; }
-.addrb .ca .gap { width: 10px; }
+.addrb .ca .c { margin-left: 10px; } /* the chain, after the asset, only when its name is not the asset's (model.ts addressHeading) */
 .addrb .hex { font: 14px/1.55 var(--font-num); color: var(--text-1); text-align: center; letter-spacing: 0.02em; word-spacing: 0.35em; overflow-wrap: anywhere; }
 .addrb .kv { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr; border-top: 1px solid var(--border-row); padding-top: 10px; }
 .addrb .kv .k { font: 11px var(--font-ui); color: var(--text-3); height: 14px; display: flex; align-items: center; }
 .addrb .kv .r { text-align: right; }
 .addrb .kv .r .k { justify-content: flex-end; }
 .addrb .kv .v { font: 500 13px var(--font-num); margin-top: 4px; }
+.drecent { flex: 1; min-height: 0; overflow: hidden; } /* R5 proto.css:764-766, 820; under the form it takes the room left, the sheet's height fixed (BAR-05) */
+.drecent .hd { display: flex; justify-content: space-between; align-items: center; font: 600 15px var(--font-ui); height: 28px; color: var(--text-1); }
+.drecent .it { height: 52px; display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--border-row); font: 13px var(--font-ui); color: var(--text-1); }
+.drecent .it .num { margin-left: auto; text-align: right; }
+.drecent .empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 14px 0 8px; color: var(--text-2); font: 13px var(--font-ui); }
 .ddone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 0 8px; }
 .damt-done { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); }
 .dsub { font: 14px var(--font-ui); color: var(--text-2); }
@@ -86,6 +98,7 @@
   .dstat .retry { height: 44px; border-radius: 14px; }
   .dstat.row { padding-right: 0; border: 0; }
   .addrb { padding: 14px; gap: 10px; }
+  .addrb .qr svg { width: 212px; height: 212px; } /* R5 app.js:645, 212 on the phone */
   .dfoot { height: 76px; padding: 8px 16px 12px; border-top: 0; }
   .dbtn { height: 56px; border-radius: 16px; font-size: 17px; }
 }
