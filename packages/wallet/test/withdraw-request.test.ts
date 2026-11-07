@@ -379,7 +379,7 @@ function nullRegistration(net: NearNetwork, seen: unknown[]): [NearRpc, NearRpc]
   return [side("a", NEAR_NETWORKS[net].fastnear[0]), side("b", NEAR_NETWORKS[net].drpc)];
 }
 
-test("A's registration is read on the withdrawal's own token: another network's read is refused, nothing read, written or proved", async () => {
+test("the register_deposit is read on the withdrawal's own token: another network's read is refused, nothing read, written or proved", async () => {
   const v = await vaultWith();
   const seen: unknown[] = [];
   let writes = 0;
@@ -391,9 +391,10 @@ test("A's registration is read on the withdrawal's own token: another network's 
   assert.equal(writes, 0, "no write");
   assert.deepEqual(p.log, [], "no proof");
   assert.deepEqual((await v.ns.list()).map((n) => n.state), ["UNSPENT", "UNSPENT", "UNSPENT"]);
-  // on its own network the read is made for the request's own A, and its register_deposit is the one bound
+  // on its own network: the token's minimum on both RPCs, a read that names no account (review F2), and it is the
+  // register_deposit bound
   const r = await withdrawRequest(argsFor(v, signalsProver(), { registerDepositOf: armingRegisterDepositOf("mainnet", nullRegistration("mainnet", seen)) }));
-  assert.equal(seen.length, 4);
-  for (const q of seen as { account_id: string }[]) assert.equal(q.account_id, TOKEN);
+  assert.equal(seen.length, 2);
+  for (const q of seen as { account_id: string; method_name: string }[]) assert.deepEqual([q.account_id, q.method_name], [TOKEN, "storage_balance_bounds"]);
   assert.equal(r.body.withdrawal.register_deposit, "1250000000000000000000");
 });

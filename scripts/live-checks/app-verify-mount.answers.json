@@ -1018,6 +1018,1190 @@
       }
     ]
   },
+  "goodMainnet": {
+    "check": "app-verify-mount",
+    "at": "2026-11-07T18:38:37.448Z",
+    "source": "harness, terminal build dist/build-mainnet-pins, the release's mainnet RPCs live",
+    "network": "mainnet",
+    "rpcs": [
+      "https://rpc.mainnet.fastnear.com",
+      "https://near.drpc.org"
+    ],
+    "pins": {
+      "vault": "vault.confidential.unrlzd.near",
+      "asset": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "release": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u"
+    },
+    "record": {
+      "network": "mainnet",
+      "account_id": "vault.confidential.unrlzd.near",
+      "asset": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "code_hash": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u"
+    },
+    "browser": "157.0.8103.38",
+    "runs": [
+      {
+        "width": "phone",
+        "frame": "https://ct-app.unrealized.trade/verify",
+        "panel": {
+          "state": "read",
+          "code": "ok",
+          "funds": "ok",
+          "checks": {
+            "keys": "ok",
+            "code": "ok",
+            "asset": "ok",
+            "registration": "ok",
+            "tokenCode": "ok",
+            "balance": "ok"
+          },
+          "rpcs": [
+            "https://rpc.mainnet.fastnear.com",
+            "https://near.drpc.org"
+          ],
+          "block": "223,504,432",
+          "words": [
+            "Verify",
+            "Code",
+            "Vault keys",
+            "Code hash",
+            "Funds",
+            "Asset",
+            "Registration",
+            "Token code",
+            "Balance",
+            "Block",
+            "RPCs"
+          ]
+        },
+        "requests": [
+          {
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/index-DhSk9s6H.js",
+            "method": "GET",
+            "type": "script",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/style-C0QWG-I6.css",
+            "method": "GET",
+            "type": "stylesheet",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-cool-CyRdqxKi.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-DCJZ3gWM.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "method": "GET",
+            "type": "fetch",
+            "status": null,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          }
+        ],
+        "violations": [],
+        "errors": [],
+        "timeline": [
+          {
+            "open": 0,
+            "t": 96.5,
+            "state": "loading"
+          },
+          {
+            "open": 0,
+            "t": 712.3000000119209,
+            "state": "read"
+          }
+        ],
+        "rpcTiming": [
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "start": 106.39999997615814,
+            "end": 110
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 108.09999996423721,
+            "end": 270.5999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 108.30000001192093,
+            "end": 437.5
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "start": 117.30000001192093,
+            "end": 118.69999998807907
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "start": 141.89999997615814,
+            "end": 143
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.30000001192093,
+            "end": 526.5
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.30000001192093,
+            "end": 526.5999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.39999997615814,
+            "end": 528.8999999761581
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.5,
+            "end": 526.5999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.5,
+            "end": 533.0999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.5999999642372,
+            "end": 527.5999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 438.5999999642372,
+            "end": 527.6999999880791
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.69999998807907,
+            "end": 694.8999999761581
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.69999998807907,
+            "end": 695
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.69999998807907,
+            "end": 709.8999999761581
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.80000001192093,
+            "end": 708.5999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.89999997615814,
+            "end": 695
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.89999997615814,
+            "end": 695.0999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 438.89999997615814,
+            "end": 695.0999999642372
+          }
+        ]
+      },
+      {
+        "width": "desktop",
+        "frame": "https://ct-app.unrealized.trade/verify",
+        "panel": {
+          "state": "read",
+          "code": "ok",
+          "funds": "ok",
+          "checks": {
+            "keys": "ok",
+            "code": "ok",
+            "asset": "ok",
+            "registration": "ok",
+            "tokenCode": "ok",
+            "balance": "ok"
+          },
+          "rpcs": [
+            "https://rpc.mainnet.fastnear.com",
+            "https://near.drpc.org"
+          ],
+          "block": "223,504,433",
+          "words": [
+            "Verify",
+            "Code",
+            "Vault keys",
+            "Code hash",
+            "Funds",
+            "Asset",
+            "Registration",
+            "Token code",
+            "Balance",
+            "Block",
+            "RPCs"
+          ]
+        },
+        "requests": [
+          {
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "method": "GET",
+            "type": "font",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/index-DhSk9s6H.js",
+            "method": "GET",
+            "type": "script",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/style-C0QWG-I6.css",
+            "method": "GET",
+            "type": "stylesheet",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+            "method": "GET",
+            "type": "image",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "method": "GET",
+            "type": "fetch",
+            "status": null,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "open",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "between"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "between"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "method": "GET",
+            "type": "fetch",
+            "status": null,
+            "phase": "between"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "method": "GET",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "method": "GET",
+            "type": "fetch",
+            "status": null,
+            "phase": "reopen"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "vault.confidential.unrlzd.near",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "type": "fetch",
+            "status": 200,
+            "phase": "reopen",
+            "account": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "rpcId": "verify"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "type": "fetch",
+            "status": null,
+            "phase": "after"
+          }
+        ],
+        "violations": [],
+        "errors": [],
+        "footer": {
+          "opened": true,
+          "firstState": "loading",
+          "panel": {
+            "state": "read",
+            "code": "ok",
+            "funds": "ok",
+            "checks": {
+              "keys": "ok",
+              "code": "ok",
+              "asset": "ok",
+              "registration": "ok",
+              "tokenCode": "ok",
+              "balance": "ok"
+            },
+            "rpcs": [
+              "https://rpc.mainnet.fastnear.com",
+              "https://near.drpc.org"
+            ],
+            "block": "223,504,436",
+            "words": [
+              "Verify",
+              "Code",
+              "Vault keys",
+              "Code hash",
+              "Funds",
+              "Asset",
+              "Registration",
+              "Token code",
+              "Balance",
+              "Block",
+              "RPCs"
+            ]
+          },
+          "closedTo": "/",
+          "openIndex": 1,
+          "clickAt": 1120.3999999761581,
+          "newOpens": 1
+        },
+        "timeline": [
+          {
+            "open": 0,
+            "t": 85.29999995231628,
+            "state": "loading"
+          },
+          {
+            "open": 0,
+            "t": 702.2999999523163,
+            "state": "read"
+          },
+          {
+            "open": 1,
+            "t": 1171.2999999523163,
+            "state": "loading"
+          },
+          {
+            "open": 1,
+            "t": 1837,
+            "state": "read"
+          }
+        ],
+        "rpcTiming": [
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "start": 92.19999998807907,
+            "end": 94.09999996423721
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 92.39999997615814,
+            "end": 246.69999998807907
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 92.59999996423721,
+            "end": 440.69999998807907
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "start": 96.09999996423721,
+            "end": 98
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "start": 116.5,
+            "end": 118.39999997615814
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.19999998807907,
+            "end": 526.2999999523163
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.2999999523163,
+            "end": 532.5
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.2999999523163,
+            "end": 545.5999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.39999997615814,
+            "end": 537.2999999523163
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.5,
+            "end": 535.5
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.5,
+            "end": 535.5
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 442.5999999642372,
+            "end": 533.7999999523163
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.5999999642372,
+            "end": 692.6999999880791
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.69999998807907,
+            "end": 696.3999999761581
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.69999998807907,
+            "end": 700.8999999761581
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.7999999523163,
+            "end": 696
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.7999999523163,
+            "end": 696.1999999880791
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.7999999523163,
+            "end": 699.3999999761581
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 442.89999997615814,
+            "end": 696.0999999642372
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "start": 1075.7999999523163,
+            "end": 1077.7999999523163
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "start": 1078.199999988079,
+            "end": 1079.0999999642372
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "start": 1080.8999999761581,
+            "end": 1081.8999999761581
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "start": 1171.8999999761581,
+            "end": 1174.199999988079
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1172.0999999642372,
+            "end": 1257.7999999523163
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1172.2999999523163,
+            "end": 1488.0999999642372
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "start": 1174.5,
+            "end": 1175.2999999523163
+          },
+          {
+            "name": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "start": 1176.8999999761581,
+            "end": 1177.5999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1488.7999999523163,
+            "end": 1575
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1488.7999999523163,
+            "end": 1575
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1488.8999999761581,
+            "end": 1575.2999999523163
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1489,
+            "end": 1569.7999999523163
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1489,
+            "end": 1575.0999999642372
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1489.0999999642372,
+            "end": 1575
+          },
+          {
+            "name": "https://rpc.mainnet.fastnear.com/",
+            "start": 1489.199999988079,
+            "end": 1575.199999988079
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.199999988079,
+            "end": 1733.5999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.2999999523163,
+            "end": 1733.5999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.2999999523163,
+            "end": 1780.0999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.2999999523163,
+            "end": 1836.0999999642372
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.3999999761581,
+            "end": 1733.699999988079
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.3999999761581,
+            "end": 1736.8999999761581
+          },
+          {
+            "name": "https://near.drpc.org/",
+            "start": 1489.3999999761581,
+            "end": 1739.5
+          }
+        ]
+      }
+    ]
+  },
   "noVault": {
     "check": "app-verify-mount",
     "at": "2026-11-02T17:49:51.111Z",

@@ -13,21 +13,25 @@
 import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { evmOrigins } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "app-host-gate";
 export const URL_ = "https://ct-app.unrealized.trade/";
 const SIGN = "https://confidential.unrealized.trade";
 const HELPER = "ct-api.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
+// the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists, before the NEAR RPCs, which
+// a testnet build swaps as the connect-src's last sources (apps/terminal/build/network.mjs)
+const EVM = evmOrigins().join(" ");
 
-// the app paper's block (app.md 2.3) with HELPER_HOST, SIGN_HOST and RPC_A, RPC_B, RPC_C put in
+// the app paper's block (app.md 2.3) with HELPER_HOST, SIGN_HOST, the kit's EVM providers and RPC_A, RPC_B, RPC_C put in
 export const CSP = [
   ["default-src", "'none'"],
   ["script-src", "'self'"],
   ["style-src", "'self'"],
   ["img-src", `'self' data: https://${HELPER}`],
   ["font-src", "'self'"],
-  ["connect-src", `'self' https://${HELPER} wss://${HELPER} ${SIGN} ${RPCS}`],
+  ["connect-src", `'self' https://${HELPER} wss://${HELPER} ${SIGN} ${EVM} ${RPCS}`],
   ["manifest-src", "'self'"],
   ["worker-src", "'none'"],
   ["frame-src", "'none'"],

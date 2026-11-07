@@ -2,8 +2,10 @@
 // `node --test` command in a ci.yml run: line, in a root script such a line runs (`pnpm run <name>`), or in a workspace
 // package's script (resolved from the package's folder) while a ci.yml line runs `pnpm ... run <that script>` for that
 // package (`-r`, or a --filter that selects it): `test`, or `test:mutants`, the sweeps CI runs after the tests and the
-// README's fresh run leaves out (card fresh-run-margin). Each tracked Foundry test (*.t.sol) is under the test/ folder of a
-// `forge test` that names no filter, at its --root or else its folder. A test file that nothing runs passes review as
+// README's fresh run leaves out (card fresh-run-margin). A ci.yml line that runs `node scripts/ci/test-shards.mjs
+// mutants` runs every command that script's split shares out, each in its package's folder (card ci-mutants-sharded;
+// scripts/ci/test-shards.test.mjs holds that the parts together run each one). Each tracked Foundry test (*.t.sol) is
+// under the test/ folder of a `forge test` that names no filter, at its --root or else its folder. A test file that nothing runs passes review as
 // coverage it does not give (net-window.test.mjs on main bb4eafd, 1 Nov 06:30Z).
 //   node --test scripts/ci/tests-run.test.mjs
 import assert from "node:assert/strict";
@@ -13,6 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { mutantCommands } from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -78,6 +81,10 @@ export function unrun(root) {
   const rootScripts = JSON.parse(read("package.json")).scripts ?? {};
   const lines = runLines(read(".github/workflows/ci.yml"));
   const args = lines.flatMap((l) => testArgs(l, root, rootScripts));
+  const split = (seg) => /^\s*(\w+=\S*\s+)*node\s+scripts\/ci\/test-shards\.mjs\s+mutants(\s|$)/.test(seg);
+  if (lines.flatMap((l) => l.split(/&&|\|\||[;|\n]/)).some(split)) {
+    for (const c of mutantCommands(root)) args.push(...testArgs(c.command, path.join(root, c.dir), {}));
+  }
   // each `pnpm ... run <script>`: the script it names and the packages it selects
   const selections = lines.flatMap((l) => l.split(/&&|\|\||[;\n]/)).flatMap((seg) => {
     const m = /\bpnpm\b.*\brun\s+([^\s'"]+)/.exec(seg);
@@ -227,6 +234,18 @@ test("planted: a sweep in test:mutants that no ci.yml line runs fails; run by -r
     assert.deepEqual(unrunWith(ci("pnpm -r --if-present run test:mutants")), ["packages/k/test/b.test.mjs"]);
     // a test:mutants line for a package whose script is test:mutant (a typo) vouches for nothing
     assert.deepEqual(unrunWith(ci("pnpm -r --if-present --no-bail run test", "pnpm -r --if-present run test:mutant")), ["packages/k/test/mutants/m.test.mjs"]);
+    // the matrix split (card ci-mutants-sharded): its line runs every package's sweeps but the wallet's, each from its
+    // package's folder; the wallet's own line still runs its, and a split line inside an echo runs nothing
+    put("packages/w/package.json", JSON.stringify({ name: "@blindfill/wallet", scripts: { test: 'node --test "test/*.test.ts"', "test:mutants": "FULL_RUNS=1 node --test test/a.test.ts test/mutants/wm.test.mjs" } }));
+    put("packages/w/test/mutants/wm.test.mjs", "");
+    execFileSync("git", ["add", "--", "packages/w/test/mutants/wm.test.mjs"], { cwd: dir });
+    const tests = "pnpm -r --if-present --no-bail run test";
+    const shard = 'node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"';
+    assert.deepEqual(unrunWith(ci(tests, shard, "pnpm --filter @blindfill/wallet run test:mutants")), []);
+    assert.deepEqual(unrunWith(ci(tests, shard)), ["packages/w/test/mutants/wm.test.mjs"]);
+    assert.deepEqual(unrunWith(ci(tests, "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
+    assert.deepEqual(unrunWith(ci(tests, `echo ${shard}`, "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
+    assert.deepEqual(unrunWith(ci(tests, "node scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"", "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

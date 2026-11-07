@@ -3,9 +3,9 @@
 // that answers failed (run 6: a devnet provider's 429 burst).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
-import { testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -130,6 +130,37 @@ test("a page RPC that stays throttled rejects naming the fault and the host, nev
     assert.ok(e instanceof SolanaRpcTransportError);
     assert.equal(e.fault, "http_429");
     assert.equal(e.host, "api.devnet.solana.com");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+// Card solana-release-reads-paced: the page's Solana pair is paced where it is made (the release's trade deps and
+// pageSolanaRpcs, which every pool buy, sell, withdraw, settle and restore read takes), so each call waits its turn in
+// the provider's one queue (the kit's solanaPacedRpc), never goes out past a full pace. Last in this file: the tight
+// limit named here stays on these providers for the rest of the process.
+test("card solana-release-reads-paced: the page's Solana pair waits its turn behind a full pace, on both providers", async () => {
+  const real = globalThis.fetch;
+  const sent: { url: string; at: number }[] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    sent.push({ url: u instanceof Request ? u.url : String(u), at: performance.now() });
+    const id = (JSON.parse(String(init?.body)) as { id: string }).id;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: 42 }), { status: 200 });
+  }) as typeof fetch;
+  const tight = { windowMs: 400, total: 1, perMethod: 1 };
+  try {
+    for (const [name, pair] of [["releaseTradeDeps", () => releaseTradeDeps().providers], ["pageSolanaRpcs", pageSolanaRpcs]] as const) {
+      for (const p of [0, 1] as const) {
+        const rpc = pair()[p];
+        // the pace full: a caller holding this provider under 1 call in any 400 ms has made its call
+        await solanaPacedRpc(rpc, tight)("getSlot", []);
+        const full = sent.at(-1)!;
+        assert.equal(await rpc("getHealth", []), 42);
+        const next = sent.at(-1)!;
+        assert.equal(next.url, full.url, `${name} ${p}: the same provider`);
+        assert.ok(next.at - full.at >= 390, `${name} provider ${p}: went out ${Math.round(next.at - full.at)} ms after the full pace's call, inside its 400 ms window`);
+      }
+    }
   } finally {
     globalThis.fetch = real;
   }

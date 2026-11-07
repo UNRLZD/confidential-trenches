@@ -32,17 +32,19 @@ import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solan
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
+import { dayFiles } from "./limits/day-spend.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
-import { createRpc } from "./rpc/rpc.ts";
+import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
+import { INTENTS_BODY_MAX } from "./intents/carry.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
 import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
-import { clientOf, clientWindow, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
+import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
@@ -65,10 +67,13 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // routes are mounted.
 /** The proxy path whose answers create a delivered deposit's id (card helper-create-u, bind/create.ts). */
 const ONECLICK_STATUS = "oneclick/v0/status";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+/** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
+const ONECLICK_QUOTE = "oneclick/v0/quote";
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
+const [INTENTS] = MOUNTED.intents;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
 /** POST /v1/bind's body limit: the kit's HELPER_V1_PATHS row, as bind/checks.ts reads it (4 KB). */
@@ -212,6 +217,9 @@ export function handler(
   refusals: { count(route: string, why: string): void } = refusalLog(),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
+  // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
+  // /v1/intents (the gate's second path)
+  withdraw.onLanded?.((recipient) => bind.armed?.(recipient));
   // GET /v1/token-status serves each network's token from that network's own watch
   const watchOf = new Map<string, TokenWatch>(Object.values(watches).map((w) => [w.token, w]));
   // the per-client limits (limits/limits.ts): in memory for one window, the client's address never logged; the RPC
@@ -261,7 +269,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready(), solana()), cors(req));
+        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), cors(req));
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -407,6 +415,29 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      if (path === INTENTS) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // card helper-id-intents: an id's signed intent (bind/env.ts intents, intents/carry.ts), within the bind's
+        // answer bound, the wait for the senders inside it, as /v1/bind; a body that is not one JSON value is bad_shape
+        void readBody(req, INTENTS_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            if (bind.intents === undefined) return SENDERS_LATE;
+            const t0 = now();
+            if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
+            const a = await bindAnswerWithin(bind.intents(body), BIND_LATE, HELPER_BIND_ANSWER_MS - (now() - t0));
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
       if (path === MARKET_LISTS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         // Discover's lists: exactly one chain, Solana (src/data/solana/lists.ts) or an EVM chain this helper serves
@@ -502,6 +533,21 @@ export function handler(
             // senders as /v1/bind does: the deposit store is the senders' holder's, and opening its lock while the
             // helper this one replaces still holds it would stall the event loop. Not held in time: dropped (the
             // device polls again).
+            // card helper-id-intents: a live 1Click quote the device was just answered is recorded the same way, off its
+            // path, for POST /v1/intents's quote check (bind/env.ts quoted)
+            if ((a.status === 200 || a.status === 201) && rest === ONECLICK_QUOTE && bind.quoted !== undefined) {
+              const body = a.body;
+              void heldWithin(senders).then((held) => {
+                if (!held) return;
+                setImmediate(() => {
+                  try {
+                    bind.quoted?.(body);
+                  } catch {
+                    // the answer went; a failed hook changes nothing
+                  }
+                });
+              });
+            }
             if (a.status === 200 && rest === ONECLICK_STATUS && bind.delivered !== undefined) {
               const body = a.body;
               void heldWithin(senders).then((held) => {
@@ -535,7 +581,9 @@ export function handler(
               ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
               : rpc.handle(chain, req.headers["content-type"], body, clientOf(req)),
           )
-          .then(reply)
+          // card solana-quote-under-1s: every answer's waits, its send and the provider's environment name (rpc.ts Trace),
+          // in the standard Server-Timing header, 429 and 503 included
+          .then((a) => reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...(a as { headers?: Headers }).headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a))
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
@@ -566,15 +614,13 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
 
 /**
  * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
- * served only when its chain's Discover lists hold it. Base's providers are the host's BASE_RPC_URL when set (a keyed
- * one, asked first), then the public ones (SWAP_RPCS); Robinhood's are the public ones.
+ * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
 export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
     if (lists === undefined) continue;
-    const url = chain === "base" ? env.BASE_RPC_URL : undefined;
     let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string> } | null = null;
     // the lists' newest answer, read once per answer: its tokens, and each one's pool as the list names it
     const snapshot = async () => {
@@ -589,7 +635,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
     const swaps = createSwaps(chain, {
       gecko,
       holds,
-      rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
+      rpcs: evmSwapRpcs(env, chain),
       index: INDEX_RPCS[chain],
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens)
@@ -609,6 +655,26 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
 }
 
 /**
+ * An EVM chain's swap read providers, in order: Base's BASE_RPC_URL when set (a keyed one, asked first; Robinhood's
+ * ROBINHOOD_RPC_URL is /v1/rpc's alone, as before), the chain's QuickNode and dRPC URLs when set (card rpc-keyed-lists,
+ * each under its company's pace: limits.ts KEYED_PACE), then the public ones (SWAP_RPCS).
+ */
+export function evmSwapRpcs(env: Record<string, string | undefined>, chain: "base" | "robinhood"): string[] {
+  const own = chain === "base" ? env.BASE_RPC_URL : undefined;
+  return [...new Set([...(own === undefined || own === "" ? [] : [own]), ...keyedSpares(env, chain), ...SWAP_RPCS[chain]])];
+}
+
+/**
+ * Solana's trade walk providers, in order: SOLANA_TRADES_RPC_URL when set (its slot's key), the QuickNode and dRPC URLs
+ * when set (card rpc-keyed-lists: each read under its company's pace as a background read, rpc.ts background), then
+ * the public ones (TRADES_RPCS).
+ */
+export function solanaTradesRpcs(env: Record<string, string | undefined>): string[] {
+  const own = env.SOLANA_TRADES_RPC_URL;
+  return [...new Set([...(own === undefined || own === "" ? [] : [own]), ...keyedSpares(env, "solana"), ...TRADES_RPCS])];
+}
+
+/**
  * Solana's own trade reads (src/data/solana/trades.ts): the candles and tape of a token on the Solana Discover lists,
  * the bars before our first from the token page's GeckoTerminal candles. The stream is SOLANA_STREAM_WS_URL when set (a
  * keyed provider's websocket), else the public one; requests go to SOLANA_TRADES_RPC_URL first when set.
@@ -624,7 +690,7 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     slot,
     streamSlot,
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
-    rpcs: url === undefined || url === "" ? TRADES_RPCS : [url, ...TRADES_RPCS],
+    rpcs: solanaTradesRpcs(env),
     history: (mint, tf, to, limit) => token.candles(mint, tf, to, limit),
     log: (line) => console.log(`helper: ${line}`),
     // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
@@ -868,13 +934,20 @@ if (import.meta.main) {
   try {
     checkVendorPlans(process.env);
     // card helper-deploy-reads-fast: a deploy's two helpers draw on one key per vendor, so each counts the other's calls
-    const proxy = createProxy(process.env, { peers: callsFiles(storeDir, randomUUID()) });
+    const id = randomUUID();
+    const proxy = createProxy(process.env, { peers: callsFiles(storeDir, id) });
     // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
     // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
-    const holds = providerHolds();
+    // card rpc-keyed-lists: with every keyed URL's company pace (limits.ts KEYED_PACE), each account's daily spend kept
+    // in the store and shared with the helper this one replaces (limits/day-spend.ts, review H1)
+    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env) }, dayFiles(storeDir, id));
     // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
     // (rpc.ts callEvm): a user's call never pays for the helper's background load
     const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
+    // card rpc-keyed-lists: every keyed URL's identity read, now and then each once it is KEYED_PROBE_MS old (one that
+    // did not answer its chain, KEYED_RETRY_MS), for /v1/health
+    void rpc.probe().catch(() => undefined);
+    setInterval(() => void rpc.probe().catch(() => undefined), KEYED_RETRY_MS).unref();
     const lists = createSolanaLists(proxy, rpc);
     // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
     const senders = sendersFromEnv(process.env);

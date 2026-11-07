@@ -119,8 +119,8 @@ export async function withPools(
       const p = price?.(e.chain) ?? null;
       return p === null ? e : { ...e, price: p };
     });
-    const out: SignpageState = { ...state, pools: sums };
-    if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) out.ops = pickOps({ ...out, ops: [] }, state.ops.map((op, t) => ({ op, t })));
+    let out: SignpageState = { ...state, pools: sums };
+    if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) out = { ...out, ops: pickOps({ ...out, ops: [] }, state.ops.map((op, t) => ({ op, t }))) };
     // the ops gave all they hold and the rest of the state still leaves pools no room: the state as it was, which fits
     if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) return state;
     return SIGNPAGE_RESULT_SCHEMAS.state(out) ? out : state;

@@ -243,16 +243,31 @@ jobs:
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
+      # Every SIGN_HOST and APP_HOST live check that reads only what the host serves from the build runs its own read
+      # and judge on this pull request's build: SIGN_HOST's committed index.html and public/ (the bytes its deploy
+      # serves, held to a fresh build-app.mjs build by the signpage tests above) and the terminal's vite build. A change
+      # that breaks one of their facts, or reshapes the code a check reads, fails here and not on the live host (card
+      # signpage-check-shapes-on-build; scripts/ci/bundle-checks.mjs lists the checks left out, and why).
+      - name: every bundle-reading SIGN_HOST and APP_HOST live check passes on this build
+        run: pnpm --filter terminal build && node scripts/ci/bundle-checks.mjs
 
   # The mutant sweeps: each package's test:mutants but the wallet's (card fresh-run-margin), a shard of their own (card
   # mutant-sweep-no-orphans): in test-packages, after its tests, they grew from 351 s to 502 s and the job hit its
   # 15 minutes at f3a9cbb (run 42009584431, 904 s), cutting off the live replays. The README's test command runs a
-  # package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes; no sweep is
-  # lost, as scripts/ci/tests-run.test.mjs reads this line too.
+  # package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes.
+  # Split across the matrix (card ci-mutants-sharded): in one job they reached 838 s of its 900 at d208a681 (run
+  # 42399498783) and were cancelled at the limit on PR #420 (run 42396730156). scripts/ci/test-shards.mjs splits each
+  # package's test:mutants into its commands and gives each to exactly one part, by the job's own strategy.job-index
+  # of strategy.job-total, balanced by the seconds each took on CI; its test fails when the heaviest part of this
+  # matrix is planned over 540 s, and scripts/ci/tests-run.test.mjs reads the split, so no sweep is lost.
   test-mutants:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -262,8 +277,11 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      - name: every other workspace package's mutant sweeps
-        run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants
+      - name: every other workspace package's mutant sweeps, this part's share
+        env:
+          INDEX: ${{ strategy.job-index }}
+          TOTAL: ${{ strategy.job-total }}
+        run: node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"
 
   # The terminal's browser runs, split across the matrix: scripts/ci/test-shards.mjs reads apps/terminal's test:e2e,
   # runs its first command (the build) in every part and gives each later command to exactly one part, by the job's

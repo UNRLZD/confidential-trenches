@@ -1,0 +1,413 @@
+{
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "near": {
+   "mainnet": {
+    "quote": {
+     "readAt": "2026-11-07T19:58:24.694Z",
+     "status": 404,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "30",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:24 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "bounds": [
+     {
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "block_height": 223512387,
+      "block_hash": "5Hnxw8oQUwqX5Hucz86LG9ikjMCwvzdFT88Zndg9acL2",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     },
+     {
+      "rpc": "https://near.drpc.org",
+      "block_height": 223512387,
+      "block_hash": "5Hnxw8oQUwqX5Hucz86LG9ikjMCwvzdFT88Zndg9acL2",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     }
+    ]
+   },
+   "testnet": {
+    "quote": {
+     "readAt": "2026-11-07T19:58:25.880Z",
+     "status": 200,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "234",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:25 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"relayer_account\":\"r-2b700409.bf-vt-20261102t071444.testnet\",\"fee_recipient\":\"f-2b700409.bf-vt-20261102t071444.testnet\",\"relay_fee\":\"183202\",\"gp\":\"100000000\",\"px\":\"3.649570437474\",\"g_w\":\"92505000000000\",\"valid_until_block\":276676709}"
+    },
+    "bounds": [
+     {
+      "rpc": "https://test.rpc.fastnear.com",
+      "block_height": 276676609,
+      "block_hash": "933cgfeKuyTkc9YDU9iXmv7AMMnChfz5NKfDZCNjndSF",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     },
+     {
+      "rpc": "https://near-testnet.drpc.org",
+      "block_height": 276676609,
+      "block_hash": "933cgfeKuyTkc9YDU9iXmv7AMMnChfz5NKfDZCNjndSF",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     }
+    ]
+   }
+  },
+  "solana": [
+   {
+    "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+    "fee": {
+     "readAt": "2026-11-07T19:58:27.046Z",
+     "status": 200,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "287",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:26 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794081480000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    "posts": [
+     {
+      "asked": "zero_fee",
+      "readAt": "2026-11-07T19:58:27.463Z",
+      "status": 422,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "70",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sat, 07 Nov 2026 19:58:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+      },
+      "body": "{\"error\":{\"code\":\"fee_off\",\"detail\":\"relay_fee 0, published 1300000\"}}"
+     },
+     {
+      "asked": "program_fails",
+      "readAt": "2026-11-07T19:58:28.057Z",
+      "status": 422,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sat, 07 Nov 2026 19:58:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+      },
+      "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"{\\\"InstructionError\\\":[1,{\\\"Custom\\\":9}]}\"}}"
+     }
+    ]
+   }
+  ],
+  "note": "ct-api.unrealized.trade at af75100a (X-Helper-Commit), read 2026-11-07T19:58:25.880Z with node scripts/live-checks/relayer-cost-guards.mjs --record (no --commit: the deployed helper predates this card; its quote and Solana answers are the ones this card keeps): the token minimum equal to the pin on FastNEAR and dRPC on both networks, mainnet withdrawals not carried (404), the testnet token quoted; the devnet pool refusing a zero-fee release (fee_off) and a release whose pool instruction fails in the simulation (simulation_failed, InstructionError), neither signed"
+ },
+ "bad_cap": {
+  "base": "https://ct-api.unrealized.trade",
+  "near": {
+   "mainnet": {
+    "quote": {
+     "readAt": "2026-11-07T19:58:24.694Z",
+     "status": 404,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "30",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:24 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "bounds": [
+     {
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "block_height": 223512387,
+      "block_hash": "5Hnxw8oQUwqX5Hucz86LG9ikjMCwvzdFT88Zndg9acL2",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     },
+     {
+      "rpc": "https://near.drpc.org",
+      "block_height": 223512387,
+      "block_hash": "5Hnxw8oQUwqX5Hucz86LG9ikjMCwvzdFT88Zndg9acL2",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     }
+    ]
+   },
+   "testnet": {
+    "quote": {
+     "readAt": "2026-11-07T19:58:25.880Z",
+     "status": 200,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "234",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:25 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"relayer_account\":\"r-2b700409.bf-vt-20261102t071444.testnet\",\"fee_recipient\":\"f-2b700409.bf-vt-20261102t071444.testnet\",\"relay_fee\":\"183202\",\"gp\":\"100000000\",\"px\":\"3.649570437474\",\"g_w\":\"92505000000000\",\"valid_until_block\":276676709}"
+    },
+    "bounds": [
+     {
+      "rpc": "https://test.rpc.fastnear.com",
+      "block_height": 276676609,
+      "block_hash": "933cgfeKuyTkc9YDU9iXmv7AMMnChfz5NKfDZCNjndSF",
+      "result": "{\"min\":\"1250000000000000000001\",\"max\":\"1250000000000000000001\"}"
+     },
+     {
+      "rpc": "https://near-testnet.drpc.org",
+      "block_height": 276676609,
+      "block_hash": "933cgfeKuyTkc9YDU9iXmv7AMMnChfz5NKfDZCNjndSF",
+      "result": "{\"min\":\"1250000000000000000001\",\"max\":\"1250000000000000000001\"}"
+     }
+    ]
+   }
+  },
+  "solana": [
+   {
+    "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+    "fee": {
+     "readAt": "2026-11-07T19:58:27.046Z",
+     "status": 200,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "287",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:26 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794081480000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    "posts": [
+     {
+      "asked": "zero_fee",
+      "readAt": "2026-11-07T19:58:27.463Z",
+      "status": 422,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "70",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sat, 07 Nov 2026 19:58:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+      },
+      "body": "{\"error\":{\"code\":\"fee_off\",\"detail\":\"relay_fee 0, published 1300000\"}}"
+     },
+     {
+      "asked": "program_fails",
+      "readAt": "2026-11-07T19:58:28.057Z",
+      "status": 422,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sat, 07 Nov 2026 19:58:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+      },
+      "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"{\\\"InstructionError\\\":[1,{\\\"Custom\\\":9}]}\"}}"
+     }
+    ]
+   }
+  ],
+  "note": "the good run with the testnet token minimum read one yocto above the pin on both RPCs: USDC changed its bounds, so the one register_deposit the relayer carries no longer matches the chain (an alarm, whatever the quote answers)"
+ },
+ "bad_signed": {
+  "base": "https://ct-api.unrealized.trade",
+  "near": {
+   "mainnet": {
+    "quote": {
+     "readAt": "2026-11-07T19:58:24.694Z",
+     "status": 404,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "30",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:24 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "bounds": [
+     {
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "block_height": 223512387,
+      "block_hash": "5Hnxw8oQUwqX5Hucz86LG9ikjMCwvzdFT88Zndg9acL2",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     },
+     {
+      "rpc": "https://near.drpc.org",
+      "block_height": 223512387,
+      "block_hash": "5Hnxw8oQUwqX5Hucz86LG9ikjMCwvzdFT88Zndg9acL2",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     }
+    ]
+   },
+   "testnet": {
+    "quote": {
+     "readAt": "2026-11-07T19:58:25.880Z",
+     "status": 200,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "234",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:25 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"relayer_account\":\"r-2b700409.bf-vt-20261102t071444.testnet\",\"fee_recipient\":\"f-2b700409.bf-vt-20261102t071444.testnet\",\"relay_fee\":\"183202\",\"gp\":\"100000000\",\"px\":\"3.649570437474\",\"g_w\":\"92505000000000\",\"valid_until_block\":276676709}"
+    },
+    "bounds": [
+     {
+      "rpc": "https://test.rpc.fastnear.com",
+      "block_height": 276676609,
+      "block_hash": "933cgfeKuyTkc9YDU9iXmv7AMMnChfz5NKfDZCNjndSF",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     },
+     {
+      "rpc": "https://near-testnet.drpc.org",
+      "block_height": 276676609,
+      "block_hash": "933cgfeKuyTkc9YDU9iXmv7AMMnChfz5NKfDZCNjndSF",
+      "result": "{\"min\":\"1250000000000000000000\",\"max\":\"1250000000000000000000\"}"
+     }
+    ]
+   }
+  },
+  "solana": [
+   {
+    "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+    "fee": {
+     "readAt": "2026-11-07T19:58:27.046Z",
+     "status": 200,
+     "headers": {
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
+      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "cache-control": "no-store",
+      "content-length": "287",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 07 Nov 2026 19:58:26 GMT",
+      "vary": "Origin",
+      "via": "1.1 Caddy",
+      "x-content-type-options": "nosniff",
+      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+     },
+     "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794081480000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    },
+    "posts": [
+     {
+      "asked": "zero_fee",
+      "readAt": "2026-11-07T19:58:27.463Z",
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "70",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sat, 07 Nov 2026 19:58:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+      },
+      "body": "{\"signature\":\"5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555\"}"
+     },
+     {
+      "asked": "program_fails",
+      "readAt": "2026-11-07T19:58:28.057Z",
+      "status": 422,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sat, 07 Nov 2026 19:58:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a"
+      },
+      "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"{\\\"InstructionError\\\":[1,{\\\"Custom\\\":9}]}\"}}"
+     }
+    ]
+   }
+  ],
+  "note": "the good run with the zero-fee release answered 200 with the fee payer signature: a helper that co-signs a release paying it nothing (audit I-6)"
+ }
+}

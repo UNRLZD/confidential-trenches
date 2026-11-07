@@ -7,8 +7,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { nearPairNetwork, nearPairRule, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
+import { nearPairNetwork, nearPairRule, VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { headersFor, MAINNET_RPCS, nearNetwork, networkOf, TESTNET_RPCS } from "../build/network.mjs";
+import { EVM_RPCS } from "../scripts/check-deploy.ts";
 import { liveVerify } from "../src/screens/verify/live.ts";
 import type { VerifyView } from "../src/screens/verify/model.ts";
 import { buildNetwork, VERIFY_RELEASES, type VerifyRelease } from "../src/screens/verify/release.ts";
@@ -54,7 +55,7 @@ function assertUnverified(v: VerifyView, rpcs: readonly string[]) {
   assert.deepEqual([v.height, v.blockHash, v.rpcs], ["—", null, [...rpcs]]);
 }
 
-test("the testnet pins are what the vault's own reads answered; mainnet names no vault yet", () => {
+test("the testnet pins are what the vault's own reads answered; mainnet's are its vault's deploy record", () => {
   // the recording read the vault's code hash, config().asset and the token's code hash on both RPCs at one block, and
   // the view judged each equal to its pin (contracts/vault/deployments/testnet-v1.json and testnet-usdc.json hold the same)
   assert.equal(REC.view.state, "read");
@@ -63,7 +64,15 @@ test("the testnet pins are what the vault's own reads answered; mainnet names no
   const k = REC.answers.find((a) => (a.params as { request_type?: string; account_id?: string }).request_type === "view_account" && (a.params as { account_id?: string }).account_id === TESTNET.pins!.vault);
   assert.equal((k?.answer as { result?: { code_hash?: string } }).result?.code_hash, TESTNET.pins!.release);
   assert.equal(TESTNET.pins!.assetRelease, VAULT_TOKEN_CODE_HASH);
-  assert.equal(VERIFY_RELEASES.mainnet.pins, null);
+  // mainnet names its vault: the vault, the asset and the release are its deploy record's (held to the record by
+  // scripts/live-checks/app-verify-mount.test.mjs, which reads contracts/vault/deployments/mainnet-v1.json; the terminal
+  // reaches no file of the contract's). Its asset is the kit's TOKEN, Circle's USDC, whose code is VAULT_TOKEN_CODE_HASH.
+  const M = VERIFY_RELEASES.mainnet.pins;
+  assert.ok(M, "mainnet names no vault");
+  assert.equal(M.asset, VAULT_CONSTANTS.TOKEN);
+  assert.deepEqual([M.assetRelease, M.assetSymbol, M.assetDecimals], [VAULT_TOKEN_CODE_HASH, "USDC", 6]);
+  assert.match(M.vault, /\.near$/);
+  assert.match(M.release, /^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
 });
 
 test("the releases are frozen all the way down: no write reaches a pin, a pair or a network", () => {
@@ -87,7 +96,8 @@ test("each network's pair is the kit's pair for that network, and the build's CS
   assert.equal(headersFor("mainnet", shipped), shipped);
   const t = headersFor("testnet", shipped);
   const connect = /connect-src ([^;]+);/.exec(t)![1]!.split(" ");
-  assert.deepEqual(connect.filter((s) => /rpc|drpc/.test(s)), [...TESTNET.rpcs]);
+  // the kit's EVM providers' origins (card page-evm-rpc-csp) are the same on both networks; every other RPC is the pair
+  assert.deepEqual(connect.filter((s) => /rpc|drpc/.test(s) && !EVM_RPCS.includes(s)), [...TESTNET.rpcs]);
   assert.equal(t.replace(TESTNET_RPCS, MAINNET_RPCS), shipped);
   assert.throws(() => headersFor("testnet", shipped.replace(MAINNET_RPCS, "https://near.drpc.org")), /exactly once/);
 });
@@ -181,10 +191,29 @@ test("a read one RPC fails keeps the other's answers and marks each check Unveri
   assert.deepEqual(logged, []);
 });
 
-test("mainnet with no vault named yet: every check Unverified, no RPC named or read, nothing logged", async () => {
+test("a network with no vault named: every check Unverified, no RPC named or read, nothing logged", async () => {
   const log: string[] = [];
-  const { out, logged } = await quiet(() => liveVerify(VERIFY_RELEASES.mainnet, recorded(log)));
+  const none: VerifyRelease = { ...VERIFY_RELEASES.mainnet, pins: null };
+  const { out, logged } = await quiet(() => liveVerify(none, recorded(log)));
   assertUnverified(out, []);
   assert.deepEqual(log, []);
   assert.deepEqual(logged, []);
+});
+
+test("mainnet reads its own vault on its own pair: every request to one of the two RPCs, of the vault or its asset", async () => {
+  const M = VERIFY_RELEASES.mainnet;
+  const seen: { url: string; account: string }[] = [];
+  const logging: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    seen.push({ url: String(input), account: (JSON.parse(String(init?.body)).params as { account_id: string }).account_id });
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  const { out } = await quiet(() => liveVerify(M, logging));
+  assert.ok(seen.length > 0, "mainnet reads nothing");
+  for (const s of seen) {
+    assert.ok(M.rpcs.includes(s.url), s.url);
+    assert.ok([M.pins!.vault, M.pins!.asset].includes(s.account), s.account);
+  }
+  assert.deepEqual(new Set(seen.map((s) => s.url)), new Set(M.rpcs));
+  // both RPCs failed here: every check is Unverified, never ok
+  if (out.state !== "loading") for (const c of [...out.code.checks, ...out.funds.checks]) assert.equal(c.status, "warn", c.id);
 });

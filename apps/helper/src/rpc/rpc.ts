@@ -41,7 +41,8 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
-import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, LIMIT_WINDOW_MS, LOGS_REFUSED, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type ProviderHolds } from "../limits/limits.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -86,6 +87,19 @@ export const PACE_SECOND_MS = 1_100;
  * SOLANA_CALL_TIMEOUT_MS (packages/kit/src/trade/solana/send.ts:61).]
  */
 export const HOLD_WAIT_MS = 1_500;
+/** The longest a caller's read spends walking its providers, from the read's start (review L4 of 424dce1e): each send
+ *  times out by it, and no send starts within WALK_SEND_MIN_MS of it, so a read whose providers hang one after another
+ *  is answered (503: the device reads its own) inside the server's 15 s request timeout (server.ts requestTimeout), never
+ *  cut off by it. [design: 12 s: the first send keeps its whole RPC_TIMEOUT_MS (NEAR's send_tx waits for execution), and
+ *  3 s is left for the answer's write.] */
+export const WALK_MS = 12_000;
+/** The least time left for a walk's next send to start. [design: a quarter second, about one provider's answer.] */
+const WALK_SEND_MIN_MS = 250;
+/** A send's timeout with `left` ms of its walk's time left: RPC_TIMEOUT_MS at most, whole ms (AbortSignal.timeout refuses
+ *  a fraction, and the clock is a monotonic one in fractional ms). */
+const sendMs = (left: number): number => Math.max(1, Math.floor(Math.min(RPC_TIMEOUT_MS, left)));
+/** A JSON-RPC answer (one, or a batch) whose error says the provider's plan is spent (slot.ts CREDITS). */
+const planSpent = (answer: unknown): boolean => (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")));
 /** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
  *  hold's length can wake 1 ms inside it (seen on the box: every caller of a crowd woke inside a 1 s hold). */
 const HOLD_MARGIN_MS = 5;
@@ -267,22 +281,81 @@ const ID_MAX = 128;
  * Mac on 2026-11-01 06:24Z (getBlockHeight, eth_blockNumber, block). A null fallback: the route is off with no URL set
  * (every call 503 upstream, nothing sent).
  */
-export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string | null }>> = {
-  solana: { env: "SOLANA_RPC_URL", fallback: "https://api.mainnet-beta.solana.com" },
-  base: { env: "BASE_RPC_URL", fallback: "https://mainnet.base.org" },
-  robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com" },
-  near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
+/**
+ * `keyed` (card rpc-keyed-lists): the chain's keyed URLs, in the order a read asks them, each name optional and one
+ * company each (three keys at one company fail together: on 5 Nov Base reads stopped about 10 min with two providers
+ * down at once), but dRPC's three keys, three accounts the owner made because each free key has its own allowance (7 Nov
+ * 09:16Z), each its own pace, hold and daily budget (keyedAccountOf). The chain's existing name first, then QuickNode, then
+ * dRPC's keys 1, 2 and 3; NEAR's FastNear first (the owner's pick, 7 Nov), then its existing names. The research repo's scripts/deploy/set-rpc-keys.sh writes the new names on the host;
+ * after them a read goes to the public spares (`fallback`, and an EVM chain's pinned list, server.ts SWAP_RPCS).
+ */
+export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string | null; keyed: readonly string[] }>> = {
+  solana: { env: "SOLANA_RPC_URL", fallback: "https://api.mainnet-beta.solana.com", keyed: ["SOLANA_RPC_URL", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"] },
+  base: { env: "BASE_RPC_URL", fallback: "https://mainnet.base.org", keyed: ["BASE_RPC_URL", "BASE_RPC_URL_QUICKNODE", "BASE_RPC_URL_DRPC_1", "BASE_RPC_URL_DRPC_2", "BASE_RPC_URL_DRPC_3"] },
+  robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com", keyed: ["ROBINHOOD_RPC_URL", "ROBINHOOD_RPC_URL_QUICKNODE", "ROBINHOOD_RPC_URL_DRPC_1", "ROBINHOOD_RPC_URL_DRPC_2", "ROBINHOOD_RPC_URL_DRPC_3"] },
+  near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com", keyed: ["NEAR_RPC_URL_FASTNEAR", "NEAR_RPC_URL", "NEAR_RPC_URL_B"] },
   // the testnet build's second provider: a keyed devnet URL of another operator than api.devnet.solana.com, which the
   // page reads itself as its first (packages/signpage/src/pool-testnet.ts TESTNET_RPCS); none set: off (503), never
   // a silent fallback to that same operator, which would make the page's two reads one provider's (review L-1)
-  "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: null },
+  "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: null, keyed: ["SOLANA_DEVNET_RPC_URL"] },
 };
+/** The company each new keyed name is (card rpc-keyed-lists), whose pace it reads under (limits.ts KEYED_PACE). The
+ *  existing names keep the pace they had (the chain's budget, rpc.ts createPacer). */
+export const KEYED_PROVIDER: Readonly<Record<string, KeyedProvider>> = {
+  SOLANA_RPC_URL_QUICKNODE: "quicknode",
+  BASE_RPC_URL_QUICKNODE: "quicknode",
+  ROBINHOOD_RPC_URL_QUICKNODE: "quicknode",
+  ...Object.fromEntries(["SOLANA", "BASE", "ROBINHOOD"].flatMap((c) => [1, 2, 3].map((n) => [`${c}_RPC_URL_DRPC_${n}`, "drpc" as const]))),
+  NEAR_RPC_URL_FASTNEAR: "fastnear",
+};
+/** The account a keyed name draws its pace, hold and daily budget from (the owner, 7 Nov 09:16Z and 09:27Z): each
+ *  QuickNode endpoint its own account ("quicknode-base", "quicknode-robinhood", "quicknode-solana"); each dRPC key its own
+ *  ("drpc-1", "drpc-2", "drpc-3": a key is account-wide, every chain's URL of key n is that one account); FastNear one. */
+export function keyedAccountOf(name: string): string | undefined {
+  const co = KEYED_PROVIDER[name];
+  if (co === undefined) return undefined;
+  const n = /_DRPC_([1-9])$/.exec(name)?.[1];
+  if (n !== undefined) return `${co}-${n}`;
+  const chain = /^([A-Z]+)_RPC_URL_QUICKNODE$/.exec(name)?.[1];
+  return chain === undefined ? co : `${co}-${chain.toLowerCase()}`;
+}
+/** A chain's new keyed URLs as set (card rpc-keyed-lists), in order, checked as readUpstreams checks them: the paths
+ *  with their own lists (server.ts: the EVM swap reads, Solana's trade walks) put them after the URL they already ask. */
+export function keyedSpares(env: Record<string, string | undefined>, chain: RpcChain): string[] {
+  return readUpstreams(env)[chain].keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined).map((k) => k.url);
+}
+/** Each new keyed URL set and its company's pace, for the helper's one providerHolds (server.ts): with its company's
+ *  daily budget (limits.ts KEYED_DAY, or RPC_DAY_<COMPANY>) and the units one call on its chain spends (KEYED_COST). */
+export function keyedPaces(env: Record<string, string | undefined>): Record<string, Pace> {
+  const out: Record<string, Pace> = {};
+  for (const chain of RPC_CHAINS) {
+    const family = chain === "near" ? "near" : EVM_CHAINS.has(chain) ? "evm" : "solana";
+    for (const k of readUpstreams(env)[chain].keyed) {
+      const co = KEYED_PROVIDER[k.env];
+      if (co !== undefined) out[k.url] = { ...KEYED_PACE[co], group: keyedAccountOf(k.env), day: keyedDayOf(env, co), cost: KEYED_COST[co][family] };
+    }
+  }
+  return out;
+}
+/** A company's daily budget: RPC_DAY_<COMPANY> when set (a whole number of its units, 1 to 13 digits; the start stops
+ *  on any other, naming the variable), else its plan's (KEYED_DAY). */
+export function keyedDayOf(env: Record<string, string | undefined>, co: KeyedProvider): number {
+  const name = keyedDayEnv(co);
+  const v = env[name];
+  if (v === undefined || v === "") return KEYED_DAY[co];
+  if (!/^[1-9][0-9]{0,12}$/.test(v)) throw new Error(`${name} must be a whole number of units a day`);
+  return Number(v);
+}
 
 /** Solana's public endpoint: a keyed SOLANA_RPC_URL's fallback (card helper-solana-failover, rpc/slot.ts). */
 export const SOLANA_PUBLIC = RPC_UPSTREAMS.solana.fallback as string;
 /** The budget key of the public endpoint when a keyed provider is set: its own budget, the public limits (RPC_BUDGETS
  *  solana: 100 per 10 s, 40 per method), never RPC_BUDGET_SOLANA, which is the keyed plan's. */
 const PUBLIC_KEY = "solana-public";
+/** The budget key of Solana's keyed spares (card rpc-keyed-lists): the chain's own limits (RPC_BUDGET_SOLANA), drawn
+ *  when a read goes straight to them (the first key held or fallen back), so a caller's share holds there too; never the
+ *  chain's key, which the first key's 429 holds. */
+const SPARES_KEY = "solana-spares";
 
 export type RpcAnswer = { status: number; body: string };
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -294,16 +367,34 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
  *  caller's read inside that hold either (a short one is waited out, holdOver; a longer one answers 429 with the seconds
  *  left); its throttle here holds it for those paths too. */
 /** `pinned`: an EVM chain's other providers, in order (server.ts: swaps.ts SWAP_RPCS), each of which may answer a
- *  caller's read when the configured one is held or has no room in its pace (callEvm). */
+ *  caller's read when the configured one is held or has no room in its pace (callList). */
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
 /** `sleep`: the waits' timer (card helper-rpc-wait-timing), a test's clock beside `now`. */
 type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
- *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint. */
+ *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint.
+ *  Every answer handle() gives has them (card solana-quote-under-1s: POST /v1/rpc sends them, 200, 429 and 503 alike). */
 type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timing?: string[] };
-/** `off`: no URL set for a route with no public fallback (RPC_UPSTREAMS); handle() answers 503 and sends nothing. */
-type Upstream = { url: string; forms: Buffer[]; off?: true };
+/** One read's waits and sends, as handle() names them in `timing` (card solana-quote-under-1s): `waitMs`, every hold's
+ *  and pace's wait before a send (rpc-wait); `keyedMs`, a keyed Solana provider's time before the read fell back
+ *  (rpc-keyed); `last`, the last send, the one that answered when the read did: its time and its provider's environment
+ *  NAME (rpc), never its URL, host or key. */
+type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number } };
+const traces = new AsyncLocalStorage<Trace>();
+/** A trace as Server-Timing entries: rpc-keyed when the read fell back, then rpc-wait and rpc always ("none": no send). */
+const timingOf = (t: Trace): string[] => [
+  ...(t.keyedMs === undefined ? [] : [`rpc-keyed;dur=${Math.round(t.keyedMs)};desc="fell back"`]),
+  `rpc-wait;dur=${Math.round(t.waitMs)}`,
+  `rpc;dur=${Math.round(t.last?.ms ?? 0)};desc="${t.last?.name ?? "none"}"`,
+];
+/** `off`: no URL set for a route with no public fallback (RPC_UPSTREAMS); handle() answers 503 and sends nothing.
+ *  `keyed`: every keyed URL set, in RPC_UPSTREAMS order, each with its name, its host and its secret forms; `url` and
+ *  `forms` are the first of them, else the public fallback's. */
+/** `keyless`: the URL holds no part where a provider puts a key (user, password, a query value, a path segment of 16
+ *  characters or more): a public endpoint set under a keyed name, which /v1/health marks so it is not counted as a key. */
+type KeyedUrl = { env: string; url: string; host: string; forms: Buffer[]; keyless: boolean };
+type Upstream = { url: string; forms: Buffer[]; off?: true; keyed: KeyedUrl[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 const REFUSED = () => error(400, "method_not_allowed");
@@ -327,21 +418,25 @@ function forms(secrets: string[]): Buffer[] {
 export function readUpstreams(env: Record<string, string | undefined>): Record<RpcChain, Upstream> {
   const out = {} as Record<RpcChain, Upstream>;
   for (const chain of RPC_CHAINS) {
-    const { env: name, fallback } = RPC_UPSTREAMS[chain];
-    const set = env[name];
-    if (set === undefined || set === "") {
-      out[chain] = fallback === null ? { url: "", forms: [], off: true } : { url: fallback, forms: [] };
-      continue;
+    const { fallback } = RPC_UPSTREAMS[chain];
+    const keyed: KeyedUrl[] = [];
+    for (const name of RPC_UPSTREAMS[chain].keyed) {
+      const set = env[name];
+      if (set === undefined || set === "") continue;
+      let u: URL;
+      try {
+        u = new URL(set);
+      } catch {
+        throw new Error(`${name} must be an http(s) URL`);
+      }
+      if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "" || /\s/.test(set)) throw new Error(`${name} must be an http(s) URL with no fragment`);
+      const secrets = [set, u.href, u.username, u.password, ...u.searchParams.values(), ...u.pathname.split("/").filter((s) => s.length >= 16)];
+      // the same URL under two names is one provider: asked once, at its first place
+      const keyless = u.username === "" && u.password === "" && [...u.searchParams.values()].every((v) => v === "") && u.pathname.split("/").every((s) => s.length < 16);
+      if (!keyed.some((k) => k.url === set)) keyed.push({ env: name, url: set, host: u.host, forms: forms(secrets.filter((s) => s.length >= 8)), keyless });
     }
-    let u: URL;
-    try {
-      u = new URL(set);
-    } catch {
-      throw new Error(`${name} must be an http(s) URL`);
-    }
-    if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "" || /\s/.test(set)) throw new Error(`${name} must be an http(s) URL with no fragment`);
-    const secrets = [set, u.href, u.username, u.password, ...u.searchParams.values(), ...u.pathname.split("/").filter((s) => s.length >= 16)];
-    out[chain] = { url: set, forms: forms(secrets.filter((s) => s.length >= 8)) };
+    const first = keyed[0];
+    out[chain] = first !== undefined ? { url: first.url, forms: first.forms, keyed } : fallback === null ? { url: "", forms: [], off: true, keyed } : { url: fallback, forms: [], keyed };
   }
   return out;
 }
@@ -444,11 +539,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
-  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : limits[k as RpcChain]);
+  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : limits[k as RpcChain]);
   const budget = upstreamBudget((key) => {
     const [k, method] = key.split(" ") as [string, string | undefined];
     const l = limitsOf(k);
-    return method === undefined ? l : { total: l.perMethod!, perClient: Infinity, reserve: k === PUBLIC_KEY ? RPC_RESERVE.solana : RPC_RESERVE[k as RpcChain], userRoom: userRoomOf(l.perMethod!) };
+    return method === undefined ? l : { total: l.perMethod!, perClient: Infinity, reserve: k === PUBLIC_KEY || k === SPARES_KEY ? RPC_RESERVE.solana : RPC_RESERVE[k as RpcChain], userRoom: userRoomOf(l.perMethod!) };
   }, now);
   /** The provider throttled `whose` read on `c` for `seconds`: the chain is held (every draw for a caller's, the
    *  background draws for a background read's), logged as one line with no caller in it. */
@@ -457,6 +552,41 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
   };
   const pacer = deps.pacer ?? createPacer();
+  // card rpc-keyed-lists: the one hold and pace per provider a list walk draws on (server.ts passes the helper's, with
+  // every keyed URL's company pace); a client made without one (a test, the holders client) keeps its own
+  const holdsAll: ProviderHolds = deps.holds ?? providerHolds(now, { ...PROVIDER_PACE, ...keyedPaces(env) });
+  /** Each keyed URL's secret forms, whatever chain it serves: an answer holding any of them is never kept. */
+  const formsByUrl = new Map<string, Buffer[]>(RPC_CHAINS.flatMap((ch) => upstreams[ch].keyed.map((k) => [k.url, k.forms] as const)));
+  /** The new keyed names' URLs (KEYED_PROVIDER), each under its company's pace and daily budget (holdsAll), never a
+   *  chain's pacer or budget key, whatever place it has in its list (review L2). */
+  /** A provider's environment name, the one its URL is set under; "public" for an endpoint set under none (a chain's
+   *  public fallback, an EVM chain's pinned public spares), whose URL holds no key. Never the URL or any part of it. */
+  const nameByUrl = new Map<string, string>(RPC_CHAINS.flatMap((ch) => upstreams[ch].keyed.map((k) => [k.url, k.env] as const)));
+  const sentTo = (url: string, from: number): void => {
+    const t = traces.getStore();
+    if (t !== undefined) t.last = { name: nameByUrl.get(url) ?? "public", ms: now() - from };
+  };
+  /** A wait before a send, counted as this read's rpc-wait. */
+  const waitFor = async (ms: number): Promise<void> => {
+    const t0 = now();
+    await sleep(ms);
+    const t = traces.getStore();
+    if (t !== undefined) t.waitMs += now() - t0;
+  };
+  const companyUrls = new Set(RPC_CHAINS.flatMap((ch) => upstreams[ch].keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined).map((k) => k.url)));
+  /** An existing name's URL on a chain whose reads were paced by its chain's pacer before the walk (NEAR_RPC_URL and
+   *  NEAR_RPC_URL_B; call() paces the first): its sends a second there, else 0. An EVM chain's walk never paced them. */
+  const ownPace = (c: RpcChain, url: string): number =>
+    !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(limits[c].total / (LIMIT_WINDOW_MS / 1000))) : 0;
+  /** Whether `c` has a new keyed name set (KEYED_PROVIDER): then every read walks its list (listOf). */
+  const walks = (c: RpcChain): boolean => upstreams[c].keyed.some((k) => KEYED_PROVIDER[k.env] !== undefined);
+  /** The providers a read on `c` asks, in order: its keyed URLs (else its public fallback first, as before), an EVM chain's
+   *  pinned ones, then its public fallback; each once. Solana's walk is call() on the first and solanaRest after it. */
+  const listOf = (c: RpcChain): string[] => {
+    const fb = RPC_UPSTREAMS[c].fallback;
+    const keyedUrls = upstreams[c].keyed.map((k) => k.url);
+    return [...new Set([...(keyedUrls.length > 0 ? keyedUrls : fb === null ? [] : [fb]), ...(deps.pinned?.[c] ?? []), ...(fb === null ? [] : [fb])])];
+  };
   /** A keyed provider's URL and its sends a second, or null for the public endpoint and a chain on its default
    *  provider, which are not paced (their published limits are per 10 s). */
   const pacedOf = (key: string): { url: string; perSecond: number } | null =>
@@ -523,6 +653,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * holds room for (Discover's), which alone may draw it.
    */
   async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false): Promise<Answer> {
+    const t: Trace = { waitMs: 0 };
+    const a = await traces.run(t, () => route(chain, contentType, body, client, reserved));
+    return { ...a, timing: timingOf(t) };
+  }
+
+  async function route(chain: string, contentType: string | undefined, body: string, client: string | undefined, reserved: boolean): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
     if (upstreams[c].off) return UPSTREAM();
@@ -554,13 +690,38 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
 
     const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
-    if (c === "solana" && keyed && !slot.useKeyed()) return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : UPSTREAM();
-    if (EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) return callEvm(c, forward, methods, client, reserved, deps.holds);
-    return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved);
+    // card rpc-keyed-lists: past the first (fallen back, or held by its 429), its keyed spares on their own budget, then
+    // the public endpoint
+    // review L2: a company's URL first (SOLANA_RPC_URL unset): the whole keyed list is walked under each company's pace
+    // review L4: the read's whole walk, every path below, ends by `by`
+    const by = now() + WALK_MS;
+    if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, by, c, 0);
+    if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY);
+    if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved, by);
+    if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved, by);
+    return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved, by);
   }
 
   /**
-   * A caller's read on an EVM chain with pinned providers (card helper-robinhood-capacity fold 2): a user's call never
+   * A Solana read the first keyed provider did not serve (its slot fallen back, or it failed this read; card
+   * rpc-keyed-lists): the keyed spares in order (callList, the read already drawn on the chain's budget), and only when
+   * none of them answers, the public endpoint on its own budget (or 503 for a slot with no public fallback). `key`: the
+   * budget the spares draw on (SPARES_KEY) when the read drew on none yet; none when it already drew on the chain's.
+   * `from`: the first keyed URL asked (0 when a company's URL is first, review L2). `by`: the read's walk's end (WALK_MS).
+   */
+  async function solanaRest(forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = null, from = 1): Promise<Answer> {
+    const spares = upstreams.solana.keyed.slice(from).map((k) => k.url);
+    if (spares.length > 0) {
+      const a = await callList("solana", spares, forward, methods, client, reserved, by, key);
+      // a spare's answer; a 429 or 503 here is ours (every spare held, out of pace or down), never a provider's
+      if (a.status !== 429 && a.status !== 503) return a;
+    }
+    return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved, by) : UPSTREAM();
+  }
+
+  /**
+   * A caller's read on a list of providers (card helper-robinhood-capacity fold 2, an EVM chain's pinned ones; card
+   * rpc-keyed-lists, any chain's keyed URLs and public spares, listOf): a user's call never
    * pays for the helper's background load. It draws on the chain's budget once (a caller's share, as call() does), then
    * goes to the first of the configured provider and the pinned ones that is not held and has room in its pace for a
    * caller (limits.ts take: background reads leave CALLER_ROOM of it); one that refuses it (its 429, or a throttle in its
@@ -573,16 +734,25 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * helper-evm-range-cap-walk); a shape refusal only when no provider is held. An answer holding the provider's key is
    * never kept.
    */
-  async function callEvm(c: RpcChain, forward: string, methods: string[], client: string | undefined, reserved: boolean, holds: ProviderHolds): Promise<Answer> {
+  // card rpc-keyed-lists: the walk of any chain's list (listOf: its keyed URLs, then the public spares; Solana's spares
+  // after its first keyed one). `key`: the budget the read draws on, the chain's by default; null when it already drew
+  // (Solana's first key failed it after its draw). `by`: the read's walk's end (WALK_MS, review L4)
+  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = c): Promise<Answer> {
+    const holds = holdsAll;
+    // review L4: a read that drew on the chain's budget before (Solana's first key failed it) draws its retry on the
+    // spares' budget, never the chain's, which that key's 429 holds
+    const bk = key ?? (c === "solana" ? SPARES_KEY : c);
     // card helper-crowd-429's rule on this path too: a hold that ends within HOLD_WAIT_MS and by `deadline` is waited out
     // (the chain's, or the soonest of its providers' when none could take the read), then the read is asked once more
     const deadline = now() + HOLD_WAIT_MS + PACE_MAX_MS;
-    if (!(await holdOver(c, deadline))) return throttled(budget.heldFor(c), undefined, `${c} held`);
-    const wait = budget.takeEach(drawsOf(c, methods), client, false, reserved);
-    if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+    if (key !== null) {
+      if (!(await holdOver(key, deadline, undefined, waitFor))) return throttled(budget.heldFor(key), undefined, `${key} held`);
+      const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
+      if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+    }
     // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
     // it does answer
-    const list = [...new Set([upstreams[c].url, ...(deps.pinned?.[c] ?? [])])].filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
+    const list = providers.filter((u) => !(methods.includes("eth_getLogs") && LOGS_REFUSED.has(u)));
     for (let tries = 0; ; tries++) {
       let soonestMs = Infinity;
       let down = false;
@@ -590,10 +760,34 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let shaped: { status: number; body: string } | undefined;
       let capped: { span: bigint; status: number; body: string } | undefined;
       for (const url of list) {
-        const secretForms = url === upstreams[c].url ? upstreams[c].forms : [];
+        // review L4: no send starts once the walk's time is nearly spent; the read is answered inside the server's timeout
+        if (by - now() < WALK_SEND_MIN_MS) {
+          down = true;
+          break;
+        }
+        const secretForms = formsByUrl.get(url) ?? [];
+        // review M1, L3: a URL whose plan takes fewer requests a post than this read carries (dRPC free: 3, its HTTP 400
+        // code 31 past it), or whose second's bucket is smaller than the read, is out for this read: the next is asked
+        const p = holds.paceOf(url);
+        if (p !== undefined && (methods.length > (p.batch ?? Infinity) || (p.unit === "call" && methods.length > p.burst))) {
+          down = true;
+          continue;
+        }
+        // review M3: a URL past its day's budget is out until the next UTC day, which is no wait: down for this read
+        if (holds.dayOut(url, methods.length)) {
+          down = true;
+          continue;
+        }
         const h = holds.heldMs(url);
         if (h > 0) {
           soonestMs = Math.min(soonestMs, h);
+          continue;
+        }
+        // review L2: NEAR's existing names keep their chain's pacer on the walk, as call() paced them
+        const own = ownPace(c, url);
+        const gate = own > 0 ? pacer.go(url, methods.length, own) : 0;
+        if (gate > 0) {
+          soonestMs = Math.min(soonestMs, gate);
           continue;
         }
         const room = holds.take(url, methods.length, false);
@@ -604,22 +798,27 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         let r: Response;
         let text: string | undefined;
         sent = true;
+        const from = now();
         try {
-          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
           if (r.status === 429) {
             await r.body?.cancel();
+            sentTo(url, from);
             const s = upstreamRetryAfterS(r.headers, now());
             holds.hold(url, s);
-            log(`rpc hold ${c} ${new URL(url).host} caller ${s} s`);
+            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${s} s`);
             soonestMs = Math.min(soonestMs, holds.heldMs(url));
             continue;
           }
           text = await readAnswer(r);
+          sentTo(url, from);
         } catch {
+          sentTo(url, from);
           down = true;
           continue;
         }
-        if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400) || text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) {
+        // review M1: a keyed URL's other 4xx (400, 402, 413: its plan refusing the read) is that URL down for this read
+        if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400) || (r.status >= 400 && formsByUrl.has(url)) || text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) {
           down = true;
           continue;
         }
@@ -630,10 +829,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           down = true;
           continue;
         }
+        // review M2: a keyed URL whose plan is spent may answer 200 with a JSON-RPC error naming it: that URL is down for
+        // this read, as call() takes it for Solana's first key, and the next is asked
+        if (formsByUrl.has(url) && planSpent(answer)) {
+          down = true;
+          continue;
+        }
         const limited = evmLimited(c, answer);
         if (limited > 0) {
           holds.hold(url, limited);
-          log(`rpc hold ${c} ${new URL(url).host} caller ${limited} s`);
+          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${limited} s`);
           soonestMs = Math.min(soonestMs, holds.heldMs(url));
           continue;
         }
@@ -655,16 +860,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           else shaped = { status: r.status, body: text };
           continue;
         }
-        if (leaks) return UPSTREAM();
+        // review L3: an answer echoing the key is that provider down for this read (never forwarded); the next is asked
+        if (leaks) {
+          down = true;
+          continue;
+        }
         return { status: r.status, body: text };
       }
       // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
       // read sent and refused draws on the budget once more, as any send does)
       const waitMs = soonestMs + HOLD_MARGIN_MS;
       if (tries < 2 && soonestMs <= HOLD_WAIT_MS && now() + waitMs <= deadline) {
-        await sleep(waitMs);
+        await waitFor(waitMs);
         if (!sent) continue;
-        const again = budget.takeEach(drawsOf(c, methods), client, false, reserved);
+        const again = budget.takeEach(drawsOf(bk, methods), client, false, reserved);
         if (again === 0) continue;
         return throttled(again, undefined, budget.refusedBy());
       }
@@ -674,8 +883,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       // read's answer)
       if (capped !== undefined) return { status: capped.status, body: capped.body };
       if (shaped !== undefined && soonestMs === Infinity) return { status: shaped.status, body: shaped.body };
-      // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
-      return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.max(1, Math.ceil(soonestMs / 1000)), undefined, `${c} every provider held`);
+      // every provider failed (none held or out of room; a company past its day's budget is down, review M3): upstream,
+      // so the device reads its own; else the soonest wait
+      return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.min(RETRY_AFTER_MAX_S, Math.max(1, Math.ceil(soonestMs / 1000))), undefined, `${c} every provider held`);
     }
   }
 
@@ -686,23 +896,22 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * one per request in it, all or none. A keyed Solana provider that fails the call (rpc/slot.ts) has it carried to the
    * public endpoint at once, so its fall never reaches the caller as an error.
    */
-  async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean): Promise<Answer> {
+  async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number): Promise<Answer> {
     const c = (key === PUBLIC_KEY ? "solana" : key) as RpcChain;
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
     const begun = now();
     // card helper-rpc-wait-timing: the time this call spent in a hold's or the pace's wait, its rpc-wait; the call's
     // own work between them is not (sent - begun read a slow runner's 0.5 ms of it as rpc-wait;dur=1)
-    let waitedMs = 0;
-    const rest = async (ms: number): Promise<void> => {
-      const t = now();
-      await sleep(ms);
-      waitedMs += now() - t;
+    // card solana-quote-under-1s: the waits are the read's trace's (handle), the rpc-wait of every answer
+    const rest = waitFor;
+    /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). Its
+     *  time before the fall is the read's rpc-keyed, and the waits and send after it are the fallback's own. */
+    const fellBack = (): Promise<Answer> => {
+      if (!publicFallback) return Promise.resolve(UPSTREAM());
+      const t = traces.getStore();
+      if (t !== undefined) Object.assign(t, { keyedMs: now() - begun, waitMs: 0, last: undefined });
+      return solanaRest(forward, methods, client, reserved, by);
     };
-    /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
-    const fellBack = (): Promise<Answer> =>
-      publicFallback
-        ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved).then((a) => ({ ...a, timing: [`rpc-keyed;dur=${Math.round(now() - begun)};desc="fell back"`, ...(a.timing ?? [])] }))
-        : Promise.resolve(UPSTREAM());
     // card helper-crowd-429: a hold that ends within HOLD_WAIT_MS is waited out and the send paced from its end, and a
     // send the provider throttles is sent once more after its short hold, all by `deadline`; a longer hold is the
     // caller's 429 with its seconds. An EVM chain's provider is held for every path of the helper that reads it (Deps
@@ -738,6 +947,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         gate = pacer.go(p!.url, methods.length, p!.perSecond);
       }
       if (heldAt() > 0) return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
+      // review L4: the public endpoint after a walk's spares is sent only inside the read's walk time
+      if (by - now() < WALK_SEND_MIN_MS) return UPSTREAM();
       sent = now();
       try {
         r = await doFetch(url, {
@@ -745,13 +956,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           headers: { accept: "application/json", "content-type": "application/json" },
           body: forward,
           redirect: "error",
-          signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+          signal: AbortSignal.timeout(sendMs(by - now())),
         });
         if (r.status === 429) {
           const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
+          sentTo(url, sent);
           const waitS = upstreamRetryAfterS(r.headers, now());
           if (viaSlot && (CREDITS.test(body) ? (slot.fail("credits"), true) : slot.throttled(waitS))) return fellBack();
           hold(key, waitS, "caller");
+          // card rpc-keyed-lists: the first key throttled us: this read goes on to its keyed spares now, and the next
+          // reads too while its hold lasts (handle)
+          if (viaSlot && upstreams.solana.keyed.length > 1) return fellBack();
           if (shared !== undefined) deps.holds?.hold(url, waitS);
           // sent once more after a short hold, drawing on the budget as any send does
           if (tries < 2 && (await holdOver(key, deadline, shared, rest))) {
@@ -762,7 +977,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           return throttled(Math.max(1, heldAt()), undefined, `${key} provider 429`);
         }
         text = await readAnswer(r);
+        sentTo(url, sent);
       } catch {
+        sentTo(url, sent);
         if (viaSlot) return slot.unanswered(sent), fellBack();
         return UPSTREAM();
       }
@@ -772,6 +989,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (viaSlot && r.status >= 400 && CREDITS.test(text ?? "")) return slot.fail("credits"), fellBack();
     if (viaSlot && r.status >= 500) return slot.unanswered(sent), fellBack();
     if (r.status === 401 || r.status === 403 || r.status >= 500 || r.status < 200 || (r.status >= 300 && r.status < 400)) return UPSTREAM();
+    // review M1: a keyed Solana URL's other 4xx (its plan refusing the read) is that URL down for this read: it goes on to
+    // the keyed spares and the public endpoint (the key is not failed: it serves other reads). A chain read here has no
+    // other provider to ask (its list walks in callList), so its provider's 4xx stays the caller's answer, as before
+    if (viaSlot && r.status >= 400) return fellBack();
     if (text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return viaSlot ? (slot.unanswered(sent), fellBack()) : UPSTREAM();
     let answer: unknown;
     try {
@@ -780,7 +1001,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return viaSlot ? (slot.unanswered(sent), fellBack()) : UPSTREAM();
     }
     // a JSON-RPC error that says the plan is spent is the key's end, as a 401 is
-    if (viaSlot && (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")))) return slot.fail("credits"), fellBack();
+    if (viaSlot && planSpent(answer)) return slot.fail("credits"), fellBack();
     // an EVM provider's throttle in any answer (evmLimited: -32005 or a rate or request limit message) is its throttle, as
     // its 429 is: the chain is held for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
@@ -792,8 +1013,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const b = Buffer.from(text, "utf8");
     if (secretForms.some((f) => b.includes(f))) return UPSTREAM();
     if (viaSlot) slot.ok();
-    const waited = Math.round(waitedMs);
-    return { status: r.status, body: text, timing: [...(waited > 0 ? [`rpc-wait;dur=${waited}`] : []), `rpc;dur=${Math.round(now() - sent)};desc="${key === PUBLIC_KEY ? "public" : key}"`] };
+    return { status: r.status, body: text };
   }
 
   /**
@@ -804,7 +1024,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    */
   function background(chain: RpcChain, url: string, method: string): number {
     const key = keyOf(chain, url);
-    if (key === null) return 0;
+    // card rpc-keyed-lists: a keyed spare of this chain (not its first) is read under its company's pace and hold, as a
+    // background read (limits.ts take: it leaves CALLER_ROOM for callers' reads)
+    if (key === null) {
+      if (!isSpare(chain, url)) return 0;
+      const ms = holdsAll.heldMs(url) || holdsAll.take(url, 1, true);
+      return ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : 0;
+    }
     // card helper-crowd-429: on a paced provider the read also takes a place in its second, now or never (a wait skips
     // it to the next provider), behind every send booked before and in at most half the second's room, so callers
     // always find the rest
@@ -820,10 +1046,112 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   function backgroundThrottled(chain: RpcChain, url: string, headers: Headers): void {
     const key = keyOf(chain, url);
     if (key !== null) hold(key, upstreamRetryAfterS(headers, now()), "background");
+    else if (isSpare(chain, url)) {
+      const s = upstreamRetryAfterS(headers, now());
+      holdsAll.hold(url, s);
+      log(`rpc hold ${chain} ${companyOf(new URL(url).host)} background ${s} s`);
+    }
+  }
+  const isSpare = (chain: RpcChain, url: string): boolean => (url !== upstreams[chain].url || companyUrls.has(url)) && upstreams[chain].keyed.some((k) => k.url === url);
+
+  /** Each keyed URL's last probe (card rpc-keyed-lists), for /v1/health: "unread" until its first; and when it was. */
+  const probed = new Map<string, KeyedState>();
+  const probedAt = new Map<string, number>();
+  /** Every keyed URL each mainnet chain's list holds, in order, as "<company's domain> <last probe>" (companyOf), a
+   *  URL with no key in it as "<company's domain> keyless <last probe>" (review M3: not a second key of its company);
+   *  never a path, a query or a key. */
+  function keyedHealth(): Record<KeyedChain, string[]> {
+    return Object.fromEntries(KEYED_CHAINS.map((c) => [c, upstreams[c].keyed.map((k) => `${companyOf(k.host)}${keyTag(k.env)}${k.keyless ? " keyless" : ""} ${probed.get(k.url) ?? "unread"}`)])) as Record<KeyedChain, string[]>;
+  }
+  /**
+   * One identity read of every keyed URL (KEYED_IDENTITY: the chain id or genesis it must answer), each under its
+   * company's pace as a background read (one skipped while its pace, its day's budget or any hold on it says wait, its
+   * last state kept: review L5, the chain's hold on its first URL included). A URL is read again once its last read is
+   * KEYED_PROBE_MS old, or KEYED_RETRY_MS when it did not answer its chain (review L6: a deploy's live check sees a
+   * passing 429 or timeout cleared within minutes). Nothing a provider answers leaves here but the state.
+   */
+  async function probe(): Promise<void> {
+    await Promise.all(
+      KEYED_CHAINS.flatMap((c) =>
+        upstreams[c].keyed.map(async (k) => {
+          const age = now() - (probedAt.get(k.url) ?? -Infinity);
+          if (age < (probed.get(k.url) === "answers" ? KEYED_PROBE_MS : KEYED_RETRY_MS)) return;
+          if (k.url === upstreams[c].url && budget.heldFor(c, true) > 0) return;
+          if (holdsAll.heldMs(k.url) > 0 || holdsAll.take(k.url, 1, true) > 0) return;
+          probedAt.set(k.url, now());
+          let state: KeyedState = "down";
+          try {
+            const r = await doFetch(k.url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: KEYED_IDENTITY[c].body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+            if (r.status === 429) {
+              await r.body?.cancel();
+              holdsAll.hold(k.url, upstreamRetryAfterS(r.headers, now()));
+              state = "held";
+            } else {
+              const text = await readAnswer(r);
+              if (r.status === 200 && text !== undefined) state = KEYED_IDENTITY[c].ok(JSON.parse(text)) ? "answers" : "wrong chain";
+            }
+          } catch {
+            state = "down";
+          }
+          probed.set(k.url, state);
+        }),
+      ),
+    );
   }
   /** The budget a background read of `url` draws: the chain's provider's, the public endpoint's own when a keyed
    *  Solana provider is set (its fallback, whose budget every reader of it shares), else none (another provider). */
-  const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
+  const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url && !companyUrls.has(url) ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
 
-  return { handle, background, backgroundThrottled, slot, pacer };
+  return { handle, background, backgroundThrottled, slot, pacer, keyed: keyedHealth, probe };
 }
+
+/**
+ * A keyed URL's company as /v1/health names it: its host's last two labels (quiknode.pro, drpc.org, fastnear.com,
+ * helius-rpc.com), an IP address or a one-label host as it is. Not the whole host: /v1/health answers 1 KB at most (the
+ * kit's HELPER_V1_PATHS row), and twelve QuickNode endpoint names (about 45 characters each) would pass it; the company
+ * is what one key per company needs to show.
+ */
+export function companyOf(host: string): string {
+  const h = host.replace(/:\d+$/, "");
+  if (/^[\d.]+$/.test(h) || h.startsWith("[")) return h;
+  return h.split(".").slice(-2).join(".");
+}
+/** Each company's other domain, folded into the one companyOf names for it: dRPC's keyed endpoints are lb.drpc.live
+ *  (drpc.org/docs/gettingstarted/firstrequest), its keyless ones *.drpc.org. */
+const SAME_COMPANY: Readonly<Record<string, string>> = { "drpc.live": "drpc.org" };
+/** The company that runs a provider URL (companyOf, its other domains folded in): two answers "agree" only from two of
+ *  these (review M1 of 424dce1e: dRPC's key 1 and key 2 are one operator answering twice). */
+export function operatorOf(url: string): string {
+  const c = companyOf(new URL(url).host);
+  return SAME_COMPANY[c] ?? c;
+}
+/** A keyed name's key of several at one company, as /v1/health names it (" key2" for a chain's _DRPC_2), else none: each
+ *  is its own account, so the live check counts each as its own keyed provider. */
+const keyTag = (name: string): string => {
+  const n = /_DRPC_([1-9])$/.exec(name)?.[1];
+  return n === undefined ? "" : ` key${n}`;
+};
+/** The chains whose keyed lists /v1/health names (card rpc-keyed-lists): mainnet's four. */
+export const KEYED_CHAINS = ["solana", "base", "robinhood", "near"] as const;
+export type KeyedChain = (typeof KEYED_CHAINS)[number];
+/** A keyed URL's last probe: it answered its chain, answered another chain, refused us for a while (429), failed (an
+ *  error, a timeout, not 200 JSON), or is not probed yet. */
+export type KeyedState = "answers" | "wrong chain" | "held" | "down" | "unread";
+/** How old a keyed URL's identity read may get while it answers its chain (review M2). [design: 10 min: 144 reads a
+ *  day per URL, QuickNode's three 10,080 credits a day, 3% of its daily budget (limits.ts KEYED_DAY), against the 60 s
+ *  probe's 100,800, 30% of the trial.] */
+export const KEYED_PROBE_MS = 600_000;
+/** How often the probe runs (server.ts), and so how soon a URL that did not answer its chain is read again (review L6).
+ *  [design: a minute: a down URL's read a minute, and a deploy's live check, re-reading /v1/health for 3 min, sees a
+ *  passing 429 or timeout cleared.] */
+export const KEYED_RETRY_MS = 60_000;
+/** Each chain's identity read and the answer it must give: the chain ids and Solana's genesis hash research
+ *  scripts/deploy/set-rpc-keys.sh checks a URL against before it writes it (Base 0x2105 = 8453, Robinhood 0x1237 =
+ *  4663, NEAR's status chain_id "mainnet"). */
+const SOLANA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+const KEYED_IDENTITY: Readonly<Record<KeyedChain, { body: string; ok: (a: unknown) => boolean }>> = {
+  base: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === "0x2105" },
+  robinhood: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }), ok: (a) => (a as { result?: unknown } | null)?.result === "0x1237" },
+  solana: { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getGenesisHash" }), ok: (a) => (a as { result?: unknown } | null)?.result === SOLANA_GENESIS },
+  near: { body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "status", params: [] }), ok: (a) => (a as { result?: { chain_id?: unknown } } | null)?.result?.chain_id === "mainnet" },
+};

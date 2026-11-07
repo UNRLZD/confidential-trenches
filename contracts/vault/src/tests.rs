@@ -189,6 +189,24 @@ fn spend(i: u64) -> Spend {
     }
 }
 
+// spends() shares page() with deposits(): a limit past PAGE_MAX is capped, and the next page starts where it stopped.
+#[test]
+fn spends_pages_are_capped_and_never_skip_a_row() {
+    at("vault.skeleton.testnet");
+    let mut v = Vault::default();
+    for i in 0..1_005u64 {
+        v.spends.push(&spend(i));
+    }
+    let all = v.spends(0, u64::MAX);
+    assert_eq!(all.len() as u64, PAGE_MAX, "capped at PAGE_MAX");
+    assert_eq!((all[0].index, all[999].index, all[999].new_leaf_index), (0, 999, 999));
+    let rest = v.spends(PAGE_MAX, u64::MAX);
+    assert_eq!(rest.iter().map(|s| s.index).collect::<Vec<_>>(), vec![1_000, 1_001, 1_002, 1_003, 1_004]);
+    assert_eq!(rest[4].nullifier_hash, "1004");
+    assert!(v.spends(1_005, 10).is_empty());
+    assert!(v.spends(u64::MAX, u64::MAX).is_empty());
+}
+
 // deposits and spends are append-only Vectors: a push writes the row and its count together, so a row can never be
 // written without its count (or a count without its row), and each row sits at the key 2.3 counts: the collection's
 // one-byte prefix, then the index as 8 little-endian bytes (near-sdk 5.29.1 collections/vector.rs l.98-99).

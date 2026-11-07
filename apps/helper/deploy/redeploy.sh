@@ -2,8 +2,8 @@
 # Redeploys the helper on its server at one commit of the public repo (card helper-release-bump). Run on the server,
 # from the checkout it updates:
 #   apps/helper/deploy/redeploy.sh <40-hex commit>
-# In order, stopping at the first failure (the .env and the budgets are read before step 1, so a refused one changes
-# nothing):
+# In order, stopping at the first failure (the .env, the budgets and Caddy's admin socket are read before step 1, so a
+# refused one changes nothing):
 #   0. every RPC_BUDGET_* and PROXY_BUDGET_* compose may pass, from deploy/.env and from this shell, is checked with the
 #      rule the helper's start applies (src/limits/limits.ts budgetFromEnv): a value it would refuse stops here, naming
 #      the variable only, instead of leaving the container restarting; and each vendor's key (JUPITER_API_KEY,
@@ -16,15 +16,27 @@
 #      for byte, the file is replaced in one rename and stays mode 600. A HELPER_COMMIT or HELPER_RELEASE line not in
 #      the plain NAME=value form, or written twice, is refused with nothing changed;
 #   3. swaps the helper with no gap, with those two values: builds the image (docker compose build helper) and runs its
-#      pool senders' settings check (src/env-check.ts, the start's own readers) in a one-off container with the
-#      environment compose gives the helper: a network set only in part, or a value the start would refuse, stops here,
-#      with no helper started or stopped; with no helper
+#      senders' settings check (src/env-check.ts, the start's own readers: the pool senders, the withdrawal relayer and
+#      the deposit carry, with the new image's mainnet vault pin) in a one-off container with the environment compose
+#      gives the helper: a network set only in part, a value the start would refuse, or a WITHDRAW_VAULT_MAINNET or
+#      BIND_VAULT_MAINNET left on the vault before (deploy/vault-lines.sh moves them), stops here, with no helper
+#      started or stopped, not after the bound below; with no helper
 #      running (a first deploy) docker compose up -d --wait brings the stack up; otherwise starts the new helper beside the
 #      old one (docker compose up --no-deps --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck
 #      (compose.yaml: /v1/health says ready), and only then stops (30 s) and removes each old container. Past the bound
-#      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1.
-#   4. caddy: made again (--force-recreate, its certificates kept in the caddy_data volume) when the HELPER_SITE compose
-#      resolves differs from the running caddy's, since nothing else ever makes it read a new one (card hosts-main-on-top).
+#      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1;
+#   4. reloads Caddy with this checkout's Caddyfile through its admin socket inside the container (Caddyfile: admin
+#      unix//config/caddy-admin.sock): Caddy swaps to the new config with no gap and skips a config that is unchanged. The
+#      file goes in on stdin, since compose mounts the one file and a checkout writes a new one, which the running
+#      container's mount never sees. A Caddy that step 3 started (none ran before) read this checkout's file at its start
+#      and is not reloaded. A refused reload (a bad Caddyfile) leaves Caddy on the config it had and exits 1. When the
+#      HELPER_SITE compose resolves differs from the running Caddy's (card hosts-main-on-top: the helper's move to ct-api,
+#      served beside the old name through the switch), Caddy is made again instead (--force-recreate), since a reload
+#      adapts the file with the container's own environment, set when it was made; the new container reads this
+#      checkout's Caddyfile and keeps its certificates in the caddy_data volume.
+#   Before step 1, once the commit is fetched (objects only: no checkout, no .env), the socket is read: a running Caddy
+#   with no socket (one started from a Caddyfile with `admin off`), or a helper running with no Caddy, is refused, naming
+#   the one command that fixes it, with nothing changed, so a redeploy never ends with a new helper behind the old Caddy.
 # It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
@@ -54,6 +66,8 @@ main() {
   check_budgets "$env" || exit 1
 
   git -C "$root" fetch -q --depth 1 "$remote" "$sha"
+  local caddy_ran
+  caddy_ran="$(cd "$deploy" && caddy_socket)" || exit 1
   git -C "$root" checkout -q --detach "$sha"
   if [[ "$(git -C "$root" rev-parse HEAD)" != "$sha" ]]; then
     echo "redeploy: the checkout is not the commit" >&2
@@ -65,7 +79,39 @@ main() {
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
   swap_helper "$wait_s" "$sha"
-  caddy_site "$wait_s"
+  if [[ "$caddy_ran" == yes ]]; then
+    caddy_site "$wait_s" || reload_caddy
+  else
+    echo "redeploy: Caddy started with this checkout's Caddyfile (none ran before); no reload"
+  fi
+}
+
+# Before step 1: whether the running Caddy has its admin socket (prints yes), or no Caddy and no helper run (a first
+# deploy: prints no). Any other state is refused before anything changes, naming the one command that fixes it, run from
+# a checkout whose Caddyfile names the socket (this one's, once the redeploy is at a commit that has this check).
+caddy_socket() {
+  if [[ -n "$(docker compose ps -q caddy)" ]]; then
+    if ! docker compose exec -T caddy sh -c 'test -S /config/caddy-admin.sock'; then
+      echo "redeploy: the running Caddy has no admin socket (started from a Caddyfile with admin off), so it could not take this Caddyfile after the swap; nothing changed. Recreate it once from this checkout, then run this again: cd apps/helper/deploy && docker compose up -d --no-deps --force-recreate caddy" >&2
+      return 1
+    fi
+    echo yes
+  elif [[ -n "$(docker compose ps -q helper)" ]]; then
+    echo "redeploy: a helper runs with no Caddy in front of it; nothing changed. Start it from this checkout, then run this again: cd apps/helper/deploy && docker compose up -d --no-deps caddy" >&2
+    return 1
+  else
+    echo no
+  fi
+}
+
+# Step 4. Caddy validates the new config before it swaps to it; on any refusal it keeps serving the one it had.
+reload_caddy() {
+  echo "redeploy: docker compose exec -T caddy caddy reload (the Caddyfile, through the admin socket)"
+  if ! docker compose exec -T caddy caddy reload --config - --adapter caddyfile --address unix//config/caddy-admin.sock <Caddyfile; then
+    echo "redeploy: Caddy did not reload the Caddyfile (above); it keeps the config it had, and the new helper serves behind it" >&2
+    exit 1
+  fi
+  echo "redeploy: Caddy reloaded the Caddyfile (unchanged: Caddy kept its config)"
 }
 
 # Step 3. The new helper starts next to the old one (docker-rollout's pattern: --no-recreate keeps the running container
@@ -80,7 +126,7 @@ swap_helper() {
   # the new image's own readers, with the environment compose passes it (the reader names variables, never values)
   echo "redeploy: docker compose run --rm --no-deps -T helper node src/env-check.ts"
   if ! docker compose run --rm --no-deps -T helper node src/env-check.ts; then
-    echo "redeploy: the new helper refuses its pool senders' settings (above); no helper was started or stopped" >&2
+    echo "redeploy: the new helper refuses its senders' settings (above; a vault line on the vault before: apps/helper/deploy/vault-lines.sh); no helper was started or stopped" >&2
     exit 1
   fi
   # a stopped container of the service (a start that failed, a crash) is counted by --scale and started again in place
@@ -128,13 +174,15 @@ swap_helper() {
   echo "redeploy: swapped: the new helper $(printf '%s' "$new" | tr '\n' ' ' | sed 's/ $//') is ready; stopped and removed the old $(printf '%s' "$old" | tr '\n' ' ' | sed 's/ $//')"
 }
 
-# Step 4 (card hosts-main-on-top). Caddy serves the names in HELPER_SITE, read once when its container is made: the
-# helper's swap never touches it (--no-deps --no-recreate), and the Caddyfile turns the admin endpoint off, so nothing
-# reloads it. The value compose resolves now (this shell's HELPER_SITE, else deploy/.env's, else compose.yaml's default,
-# read with `docker compose config caddy`) is compared with the running container's (its Config.Env); when they differ,
-# or no caddy runs, caddy is made again from the same image. Its certificates live in the named volume caddy_data
-# (compose.yaml: caddy_data:/data, and caddy_data under volumes:), so a recreate keeps them and asks the CA only for a
-# name it has none for. Prints that it changed, never the names.
+# Step 4, when Caddy's names change (card hosts-main-on-top). Caddy adapts the Caddyfile's {$HELPER_SITE} with the
+# environment of the process that reads it: at its start, the container's, and on a reload through `docker compose
+# exec`, the container's too, set when the container was made. So a new HELPER_SITE reaches Caddy only in a new
+# container. The value compose resolves now (this shell's HELPER_SITE, else deploy/.env's, else compose.yaml's default,
+# read with `docker compose config caddy`) is compared with the running container's (its Config.Env): when they differ,
+# Caddy is made again from the same image and this checkout's Caddyfile; its certificates live in the named volume
+# caddy_data (compose.yaml: caddy_data:/data, and caddy_data under volumes:), so a recreate keeps them and asks the CA
+# only for a name it has none for. Returns 1 when they are the same (the caller reloads). Prints that it changed, never
+# the names.
 caddy_site() {
   local wait_s="$1" id want have
   # compose prints the value plain, or quoted when YAML needs it: the quotes are taken off
@@ -144,16 +192,12 @@ caddy_site() {
     exit 1
   fi
   id="$(docker compose ps -q caddy | head -n 1)"
-  if [[ -n "$id" ]]; then
-    have="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$id" | sed -n 's/^HELPER_SITE=//p' | head -n 1)"
-    if [[ "$have" == "$want" ]]; then
-      echo "redeploy: caddy's HELPER_SITE is unchanged; caddy left running"
-      return 0
-    fi
-    echo "redeploy: caddy's HELPER_SITE changed; docker compose up -d --no-deps --force-recreate --wait caddy"
-  else
-    echo "redeploy: no caddy running; docker compose up -d --no-deps --force-recreate --wait caddy"
+  have="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$id" | sed -n 's/^HELPER_SITE=//p' | head -n 1)"
+  if [[ "$have" == "$want" ]]; then
+    echo "redeploy: caddy's HELPER_SITE is unchanged"
+    return 1
   fi
+  echo "redeploy: caddy's HELPER_SITE changed; docker compose up -d --no-deps --force-recreate --wait caddy"
   if ! docker compose up -d --no-deps --force-recreate --wait --wait-timeout "$wait_s" caddy; then
     echo "redeploy: caddy was not running within $wait_s s" >&2
     exit 1

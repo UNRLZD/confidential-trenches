@@ -160,6 +160,50 @@ test("harness: GET /v1/market/lists and /v1/market/token are answered from the r
   }
 });
 
+// Verify on mainnet reads the release's two NEAR RPCs; the harness answers them from a recorded real read of the mainnet
+// vault (apps/terminal/test/verify-mount/answers-mainnet.json), by RPC and params, so the panel draws its true state and
+// no console error comes of an aborted read. A read the recording does not hold, another RPC and any other origin stay
+// aborted.
+test("harness: Verify's mainnet reads are answered from the recorded read of the release's vault on its pair; nothing else is", async () => {
+  const { mkdtempSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { harnessRoute } = await import("./app-in-shell.mjs");
+  const { VERIFY_RELEASES } = await import("../../apps/terminal/src/screens/verify/release.ts");
+  const REC = JSON.parse(readFileSync(path.join(HERE, "../../apps/terminal/test/verify-mount/answers-mainnet.json"), "utf8"));
+  const M = VERIFY_RELEASES.mainnet;
+  assert.deepEqual([REC.vault, REC.rpcs], [M.pins.vault, M.rpcs]);
+  assert.deepEqual([REC.view.state, REC.view.code.status, REC.view.funds.status], ["read", "ok", "ok"]);
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-harness-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  try {
+    const route = await harnessRoute(dir, "signed");
+    const ask = async (url, body) => {
+      let out = null;
+      await route({ request: () => ({ url: () => url, postData: () => body }), fulfill: async (a) => void (out = { kind: "fulfill", ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
+      return out;
+    };
+    for (const u of M.rpcs) {
+      const asked = REC.answers.filter((a) => new URL(a.url).origin === new URL(u).origin);
+      assert.ok(asked.length > 0, u);
+      for (const a of asked) {
+        const got = await ask(`${u}/`, JSON.stringify({ jsonrpc: "2.0", id: "verify", method: "query", params: a.params }));
+        assert.equal(got.kind, "fulfill", u);
+        assert.equal(got.status, 200);
+        assert.equal(got.headers["access-control-allow-origin"], APP_HOST);
+        assert.deepEqual(JSON.parse(got.body), a.answer);
+      }
+      const unheld = await ask(`${u}/`, JSON.stringify({ jsonrpc: "2.0", id: "verify", method: "query", params: { request_type: "view_account", finality: "final", account_id: "other.near" } }));
+      assert.deepEqual(unheld, { kind: "abort", error: "namenotresolved" }, u);
+      assert.deepEqual(await ask(`${u}/`, "not json"), { kind: "abort", error: "namenotresolved" }, u);
+    }
+    const p = REC.answers[0].params;
+    assert.deepEqual(await ask("https://rpc.mainnet.near.org/", JSON.stringify({ jsonrpc: "2.0", id: "verify", method: "query", params: p })), { kind: "abort", error: "namenotresolved" });
+    assert.deepEqual(await ask("https://example.com/", undefined), { kind: "abort", error: "namenotresolved" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
   const text = "Failed to load resource: the server responded with a status of 429 ()";
   const helper = "https://ct-api.unrealized.trade";

@@ -38,6 +38,8 @@ export const PATHS = [
   // the relayer's withdraw send, which sandbox tests will drive as bind-send is driven
   "apps/helper/src/withdraw/",
   "apps/helper/test/withdraw-send/",
+  // settle.rs's kit_settle_mock: the kit's settle CLI (it imports the kit's src/ and contracts/vault/scripts/near-tx.mjs)
+  "packages/kit/test/vault-settle-cli.mjs",
   "scripts/live-checks/vault-",
   "scripts/ci/near-rpc-operators.mjs",
   // the shared read that waits out a rate limit, which vault-skeleton.mjs and vault-testnet-t01.mjs read through
@@ -76,8 +78,9 @@ export function matches(file, paths = PATHS) {
 // sandboxes in parallel) ran 46 s on the Mac (2026-11-07) and joins shard 2, the lightest, for about 458.
 // tree_prop's long run (VT-P01's 100,000 inserts through the on-chain store, which run.sh's --include-ignored runs)
 // took 47 s on the Mac (2026-11-07); tree_prop stays in shard 4, for about 510, under shard 3's 528.
-// p02 (VT-P02, 24 cases of 48 steps, real proofs in the mocked VM) ran 118 s on the box (4 threads, 2026-11-07) and
-// joins shard 1, then the lightest at 430, for about 556 with its 8 s of compile and link.
+// p02 (VT-P02, 24 cases of 48 steps, real proofs in the mocked VM) joins shard 1, then the lightest at 430. Its long
+// run took 402 s on the box (debug build, 2026-11-07, card vault-final-sha) and its other four tests 39 s, in
+// parallel with it; CI run #406's shard 1 took 16m47s with the long run before that card (about 560 s on the box).
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "p02"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16"],

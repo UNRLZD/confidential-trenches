@@ -18,7 +18,10 @@ import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RP
 import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
-import { OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
+import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
+import { createIntentsCarry, parseBody, type IntentsAnswer, type IntentsCarry } from "../intents/carry.ts";
+import { intentsReads } from "../intents/reads.ts";
+import { createIntentsStore, onArmed, onQuoteAnswer, onStatusAnswer as onIntentsStatus, type IntentsStore } from "../intents/records.ts";
 
 /** Per network: the release's vault, the gas account that sends deposits (bind.<ours>) and its one full-access key. */
 export const BIND_ENV = {
@@ -35,11 +38,28 @@ export type BindSender = {
   warm(): void;
   stop(): void;
   /**
+   * POST /v1/intents for a parsed body (card helper-id-intents, intents/carry.ts): mainnet's carry (intents.near is a
+   * mainnet contract), sent by mainnet's bind relayer with its key and nonce counter. With mainnet not carried, nothing
+   * is recorded, so every signer answers id_not_ours.
+   */
+  intents?(body: unknown): Promise<IntentsAnswer>;
+  /** A 1Click /v0/quote answer the proxy carried, after it was answered: a live quote recorded (intents/records.ts). */
+  quoted?(body: string): void;
+  /** A mainnet withdrawal our relayer carried landed to `recipient` (withdraw/send.ts onLanded): an arming A is seen. */
+  armed?(recipient: string): void;
+  /**
    * A 1Click /v0/status answer the proxy carried, after it was answered (create.ts onStatusAnswer): a delivery to a
    * one-time id on a carried network's token creates that id once. Returns at once; nothing it does reaches the
    * answer, and a failure is logged only.
    */
   delivered?(body: string): void;
+  /**
+   * Each carried network's gas account (public, on chain with every deposit it signs), for /v1/health (card
+   * helper-bind-relayer-mainnet): set at start from the host's lines, whether or not the account exists or is funded
+   * yet. The vault is not listed: mainnet's is the release's pin (MAINNET_VAULT, checked at start above), and the
+   * health body must stay within the kit's 1 KB (review FIX 1).
+   */
+  carried?(): Partial<Record<TokenNetwork, string>>;
 };
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
@@ -85,7 +105,7 @@ export function watchDeps(watch: Pick<TokenWatch, "statusAt" | "pausedAt"> | und
 /**
  * The route's sender. A network is carried only when its vault, gas account and key, the release number, the store
  * folder and the margin K are all set; one set in part stops the helper at start, as does a key that does not parse or
- * a vault that is not the one WITHDRAW_VAULT_<NETWORK> names. Every name is read, set or not, so the deploy gate sees
+ * a vault that is not the one WITHDRAW_VAULT_<NETWORK> names, or a mainnet vault other than MAINNET_VAULT. Every name is read, set or not, so the deploy gate sees
  * them all. On the first request (and again after a failure) it reads the vault's config() on both providers (its asset
  * the network's token), opens the network's store under HELPER_STORE_DIR, starts the relayer and the lock rounds.
  */
@@ -93,6 +113,9 @@ export function bindSenderFromEnv(
   env: Record<string, string | undefined>,
   watches: Partial<Record<TokenNetwork, Pick<TokenWatch, "statusAt" | "pausedAt">>> = tokenWatchesFromEnv(env),
   fetchFn: typeof fetch = fetch,
+  // the one mainnet vault carried: the release's pin (withdraw/send.ts MAINNET_VAULT), never read from the host's
+  // environment (a test passes its own)
+  mainnetVault: string = MAINNET_VAULT,
 ): BindSender {
   const release = env[RELEASE_ENV] ?? "";
   const storeDir = env[STORE_ENV] ?? "";
@@ -110,6 +133,7 @@ export function bindSenderFromEnv(
     const [vault, account, key] = set[n] as [string, string, string];
     if (vault === "" && account === "" && key === "") continue;
     if (!isAccountId(vault) || !isAccountId(account) || !/^ed25519:[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(key)) throw new Error(`${BIND_ENV[n].join(", ")} must be a NEAR account id, a NEAR account id and one ed25519 key`);
+    if (n === "mainnet" && vault !== mainnetVault) throw new Error(`${BIND_ENV.mainnet[0]} must be ${mainnetVault}, the vault of the mainnet deploy record`);
     if (withdrawVault[n] !== "" && withdrawVault[n] !== vault) throw new Error(`${BIND_ENV[n][0]} and ${SEND_ENV[n][0]} must name the same vault`);
     if (!/^[1-9][0-9]{0,8}$/.test(release)) throw new Error(`${RELEASE_ENV} must be a whole number, 1 or more, to carry deposits`);
     if (storeDir === "") throw new Error(`${STORE_ENV} must be set to carry deposits`);
@@ -171,6 +195,30 @@ export function bindSenderFromEnv(
     }
     return p;
   };
+  // card helper-id-intents: POST /v1/intents on mainnet's bind relayer, and its records under HELPER_STORE_DIR/intents-mainnet
+  const mainnet = carried.get(WATCHED.mainnet.token);
+  let intentsStore: IntentsStore | null = null;
+  const openIntents = (): IntentsStore | null => {
+    if (mainnet === undefined) return null;
+    if (intentsStore === null) intentsStore = createIntentsStore(join(storeDir, "intents-mainnet"));
+    return intentsStore;
+  };
+  // the carry's relayer is mainnet's bind relayer, started only at the first send: the gate and the checks before the
+  // simulation answer with no start and no chain read (intents/carry.ts)
+  let intentsCarry: IntentsCarry | null = null;
+  const intentsOf = (net: Net): IntentsCarry => {
+    if (intentsCarry === null) {
+      const relayer = async () => (await started(net)).relayer;
+      intentsCarry = createIntentsCarry({
+        vault: net.vault,
+        usdc: WATCHED.mainnet.token,
+        store: openIntents()!,
+        reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]),
+        relayer: { send: async (...a) => (await relayer()).send(...a), resolve: async (...a) => (await relayer()).resolve(...a), balance: async () => (await relayer()).balance() },
+      });
+    }
+    return intentsCarry;
+  };
   let stopped = false;
   const warmNet = (net: Net) =>
     started(net).catch(() => {
@@ -191,7 +239,44 @@ export function bindSenderFromEnv(
       return carryDeposit(body, deps);
     },
     warm: () => carried.forEach((net) => void warmNet(net)),
+    async intents(body) {
+      if (mainnet === undefined) {
+        const code = parseBody(body) === null ? "bad_shape" : "id_not_ours";
+        return { status: STATUS[code] ?? 400, body: { error: { code } } };
+      }
+      let c: IntentsCarry;
+      try {
+        c = intentsOf(mainnet); // opens the store (no chain read); a store another process holds answers upstream
+      } catch {
+        return { status: STATUS.upstream ?? 503, body: { error: { code: "upstream" } } };
+      }
+      return c.carry(body);
+    },
+    quoted(body) {
+      const fail = () => console.error("helper: intents quote_record_failed");
+      try {
+        const s = openIntents();
+        if (s !== null) void onQuoteAnswer(body, s).catch(fail);
+      } catch {
+        fail();
+      }
+    },
+    armed(recipient) {
+      try {
+        const s = openIntents();
+        if (s !== null) onArmed(recipient, s);
+      } catch {
+        console.error("helper: intents armed_record_failed");
+      }
+    },
+    carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, net.account])),
     delivered(body) {
+      try {
+        const s = openIntents();
+        if (s !== null) onIntentsStatus(body, s);
+      } catch {
+        console.error("helper: intents status_record_failed");
+      }
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
       void onStatusAnswer(body, nets).then(
         (a) => ((l) => l !== null && console.log(l))(createLine(a)),

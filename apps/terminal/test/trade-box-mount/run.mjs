@@ -11,7 +11,8 @@
 //         opens the sign-in sheet (S2.1) and Escape closes it; a preset opens it too; no dialog, no confirm.
 //   390:  no box on the page behind; the bar's Buy opens the trade sheet (its name `Buy <symbol>`, the box and the grid in
 //         it, inside the window), the button there opens the sign-in sheet over it, whose Escape closes only that, then the
-//         scrim and Escape close the sheet and the page scrolls again; the bar's Sell and a quick buy open the sheet too.
+//         scrim and Escape close the sheet (hidden, its box still mounted) and the page scrolls again; the bar's Sell and a
+//         quick buy open the sheet too.
 // Per state: app-shell's own rules (no text under 11 px, a phone tap box of 44 px, no horizontal scroll, no CSP
 // violation), the page's colour is the dark page. Requests to any other host are refused and listed. Draft words drawn
 // are listed.
@@ -192,6 +193,11 @@ const sheetOpens = async (tag, f, then) => {
   return ok;
 };
 const closed = (f, q) => f.locator(q).waitFor({ state: "detached", timeout: 3_000 }).then(() => true, () => false);
+// the trade sheet is only hidden when it closes (card app-phone-trade-sheet): its box stays mounted, so a running buy is
+// drawn where it is on the next open
+const sheetClosed = async (f) =>
+  (await f.locator('[data-sheet="trade"]').waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false)) &&
+  (await f.locator('[data-sheet="trade"] [data-testid="trade-box"]').count()) === 1;
 
 try {
   for (const w of WIDTHS) {
@@ -246,7 +252,7 @@ try {
           const got = await judgeBox(`${tag} sheet`, f, '[data-sheet="trade"]');
           await rules(`${tag} sheet`, f, w, errors, dialogs, page);
           await shot(page, "trade-sheet", w, scheme);
-          const sb = await sheet.locator(".tkp-sheetbox").boundingBox();
+          const sb = await sheet.locator(".tsh-box").boundingBox();
           check(!!sb && sb.x >= 0 && sb.x + sb.width <= w.viewport.width + 0.5 && sb.y + sb.height <= w.viewport.height + 0.5 && sb.y >= 0, `${tag}: the sheet is outside the window (${JSON.stringify(sb)})`);
           const gb = await sheet.locator('[data-testid="safety-grid"]').boundingBox();
           check(!!gb && gb.x >= 0 && gb.x + gb.width <= w.viewport.width + 0.5, `${tag}: the grid is outside the window`);
@@ -265,8 +271,8 @@ try {
             check(await closed(f, '[data-sheet="signin"]'), `${tag}: Escape did not close the sign-in sheet`);
             check(await sheet.isVisible(), `${tag}: Escape on the sign-in sheet closed the trade sheet too`);
           }
-          await f.locator(".tkp-scrim").click({ position: { x: 20, y: 20 } });
-          check(await closed(f, '[data-sheet="trade"]'), `${tag}: the scrim did not close the trade sheet`);
+          await f.locator(".tsh-scrim").click({ position: { x: 20, y: 20 } });
+          check(await sheetClosed(f), `${tag}: the scrim did not close the trade sheet`);
           check((await f.evaluate(() => document.body.style.overflow)) === "", `${tag}: the page stays locked after the sheet closed`);
         }
         // Sell, a quick buy and Escape
@@ -275,12 +281,12 @@ try {
           const o = await f.locator('[data-sheet="trade"]').waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false);
           check(o, `${tag}: ${what} did not open the trade sheet`);
           await page.keyboard.press("Escape");
-          check(await closed(f, '[data-sheet="trade"]'), `${tag}: Escape did not close the sheet opened by ${what}`);
+          check(await sheetClosed(f), `${tag}: Escape did not close the sheet opened by ${what}`);
         }
         // the grab handle closes it too
         await f.locator(".tkp-buy").click();
-        await f.locator(".tkp-grab").click();
-        check(await closed(f, '[data-sheet="trade"]'), `${tag}: the grab handle did not close the sheet`);
+        await f.locator(".tsh-grab").click();
+        check(await sheetClosed(f), `${tag}: the grab handle did not close the sheet`);
         await rules(`${tag} closed`, f, w, errors, dialogs, page);
       }
       await ctx.close();

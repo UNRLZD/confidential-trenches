@@ -205,7 +205,7 @@ const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
  * deadline 1 s away), "tip_low" (tag 3 tipping SOLANA_JITO_TIP_MIN - 1); "ok" plants none. A tag 3 tips
  * SOLANA_JITO_TIP_MIN to the first Jito tip account, a static key (M369 (M2)).
  */
-export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "ok", nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey }) {
+export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "ok", nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey, blockhash = Buffer.alloc(32, 1) }) {
   const wPub = createPublicKey(w).export({ format: "der", type: "spki" }).subarray(-32);
   const other = () => createPublicKey(generateKeyPairSync("ed25519").privateKey).export({ format: "der", type: "spki" }).subarray(-32);
   const [mark, page, root, label, foreign] = [other(), other(), other(), other(), other()];
@@ -244,7 +244,7 @@ export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "
   const message = Buffer.concat([
     Buffer.from([0x80, 2, 0, 6, keys.length]),
     ...keys,
-    Buffer.alloc(32, 1), // blockhash
+    Buffer.from(blockhash), // blockhash: none the cluster has unless the caller gives a recent one (relayer-cost-guards)
     Buffer.from(compact(ixs.length)),
     ...ixs,
     Buffer.from([0]), // no lookup table

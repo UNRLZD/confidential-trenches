@@ -1,5 +1,27 @@
 {
  "good": {
+  "url": "http://127.0.0.1:8790/",
+  "status": 200,
+  "headers": {
+   "access-control-allow-origin": "*",
+   "cache-control": "public, max-age=0, must-revalidate",
+   "content-encoding": "gzip",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sat, 07 Nov 2026 05:38:07 GMT",
+   "etag": "\"b7001052cf61f1aef170dcb0057a689e\"",
+   "integrity-policy": "blocked-destinations=(script)",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff",
+   "x-server-env": "dev"
+  }
+ },
+ "beforeEvm": {
   "url": "http://127.0.0.1:8788/",
   "status": 200,
   "headers": {

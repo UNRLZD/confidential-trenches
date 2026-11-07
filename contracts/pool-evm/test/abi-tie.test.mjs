@@ -172,6 +172,10 @@ const MONEY_PATHS = {
     "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
     "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",
   ],
+  "packages/signpage/src/pool-deposit-evm.ts": [
+    "currentLabelTreeDepth()", // the deposit's gas headroom reads both trees' depths (card pool-deposits)
+    "currentTreeDepth()",
+  ],
   "packages/signpage/src/rules/pool.ts": [
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
     "Withdraw(uint256 nullifier,uint256 context,uint256 value)",

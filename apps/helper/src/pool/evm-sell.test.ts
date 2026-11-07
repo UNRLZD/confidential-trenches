@@ -452,13 +452,21 @@ test("the authorization: chainId 0, another chain's id, another delegate, anothe
   const digest = keccak_256(cat(Uint8Array.of(5), enc([int(CHAIN_ID), unhex(DELEGATE), int(W_NONCE)])));
   const flipped = secp256k1.Signature.fromBytes(unhex(`${high.r}${high.s.slice(2)}`), "compact").addRecoveryBit(Number(BigInt(high.yParity)));
   assert.equal(hex(flipped.recoverPublicKey(digest).toBytes(true)), hex(secp256k1.getPublicKey(W_KEY, true)));
-  // base (mainnet) pins no sell delegate yet: every sell there is refused, fail closed
+  // a network whose venue pins no sell delegate (a list without Base's: the kit pins it since card
+  // pool-evm-deploy-mainnet): every sell there is refused, fail closed
   const calls: Calls = [];
-  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR }, [rpc(calls), rpc(calls)], () => NOW);
-  assert.equal(Object.hasOwn(evmPoolVenues().base, "sellDelegate"), false);
+  const { sellDelegate: _d, ...baseNoDelegate } = evmPoolVenues().base;
+  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, venues: { ...evmPoolVenues(), base: baseNoDelegate } }, [rpc(calls), rpc(calls)], () => NOW);
   const a = await m.sell(body({ auth: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) }));
   assert.equal(code(a), "bad_authorization", detail(a));
   assert.equal(calls.length, 0);
+  // the kit's own Base pin: an authorization naming any other delegate is refused, nothing read
+  assert.notEqual(evmPoolVenues().base.sellDelegate!.toLowerCase(), DELEGATE.toLowerCase());
+  const pinnedCalls: Calls = [];
+  const mp = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR }, [rpc(pinnedCalls), rpc(pinnedCalls)], () => NOW);
+  const ap = await mp.sell(body({ auth: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) }));
+  assert.equal(code(ap), "bad_authorization", detail(ap));
+  assert.equal(pinnedCalls.length, 0);
   // a network the kit does not list: no sender starts on it (the kit has no chain fee rule for it)
   assert.throws(() => senderOf([], {}, [], {}, "unlisted"), /unlisted: no chain fee rule/);
 });
@@ -2029,15 +2037,30 @@ test("the receipt watch backs off: from the poll interval, doubling, to 15 times
 async function untilHeld(make: (calls: Calls) => [Opts, Opts], label: string) {
   const x: Calls = [];
   const [oa, ob] = make(x);
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => NOW);
+  // card fresh-run-margin: the clock stands at NOW while the sales go, then moves past every watch's bound, as a live
+  // helper's does, so a watch that never gets both receipts ends instead of reading on for the rest of the file
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => clock);
   let sent = 0;
   let last: Awaited<ReturnType<typeof s.sell>> | undefined;
   for (let i = 0; i < 60 && last?.status !== 429; i++) {
     last = await s.sell(freshBody(`W-${label}-${i}`, { sell: { token: `0x${(0xe000 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.77");
-    if (last.status === 200) sent++;
-    await settle(() => false, 4);
+    if (last.status === 200) {
+      sent++;
+      await readBack(x);
+    }
   }
+  clock = PAST_EVERY_WATCH;
   return { sent, last: last! };
+}
+/** Past every bound a watch started at NOW can hold: its send's margin and EVM_LANE_WATCH_MS, a day over. */
+const PAST_EVERY_WATCH = NOW + 86_400_000;
+/** Until the sale just sent has had its first receipt read on both providers and what that read decides has run (its
+ *  `landed`, when both answered): the watch's own first read, never a fixed wait (card fresh-run-margin). */
+async function readBack(x: Calls) {
+  const hash = `0x${hex(keccak_256(unhex(sends(x).at(-1)!)))}`;
+  while (!x.some((c) => c.method === "eth_getTransactionReceipt" && c.params[0] === hash)) await new Promise((ok) => setTimeout(ok, 1));
+  await new Promise((ok) => setImmediate(ok));
 }
 const WORST = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1; // the receipts' cost here too: gas 1,000,000 at 2 x base + tip
 

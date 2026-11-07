@@ -1,0 +1,18 @@
+{
+ "note": "Recorded in-process on 2026-11-07: good is this card's helper (createRpc's probe and health(), server.ts /v1/health's two calls) with made-up Helius, QuickNode, three dRPC keys (lb.drpc.live) and FastNear URLs and NEAR_RPC_URL=free.rpc.fastnear.com (keyless), each probe answered its own chain; Solana holds no dRPC key, since dRPC's free plan serves no Solana (solana.drpc.org getSlot, 7 Nov 15:57Z: error 35 \"chain is not available on free plan\"). bad_pre_card: origin/main 2b88074e's helper with the same URLs set: no rpc in /v1/health. deploy: the deployed helper af75100a after the owner's set-rpc-keys.sh run, recorded with --record on 7 Nov 15:59Z.",
+ "good": {
+  "base": "in-process",
+  "status": 200,
+  "body": "{\"ok\":true,\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"fastnear.com keyless answers\"]}}"
+ },
+ "bad_pre_card": {
+  "base": "in-process",
+  "status": 200,
+  "body": "{\"ok\":true,\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\"}}"
+ },
+ "deploy": {
+  "base": "https://ct-api.unrealized.trade",
+  "status": 200,
+  "body": "{\"ok\":true,\"commit\":\"af75100a34cbd641835ccd30fe4de36509436d5a\",\"release\":93,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\"]}}"
+ }
+}

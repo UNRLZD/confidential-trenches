@@ -95,7 +95,8 @@ export const SOLANA_JUPITER_RETRY_MAX_ACCOUNTS = SOLANA_JUPITER_CAP_UP[SOLANA_JU
  * a cap with no step up (60, the top) goes half way only below a cap known too large, else ends the search.
  */
 export function solanaNextCap(cap: number, outcome: "no_route" | "too_large", lo: number, hi: number): number | null {
-  let next = outcome === "no_route" ? SOLANA_JUPITER_CAP_UP[cap] : cap === SOLANA_JUPITER_MAX_ACCOUNTS ? SOLANA_JUPITER_CAP_BELOW_FIRST : cap - SOLANA_JUPITER_CAP_DOWN;
+  // an own key only: a polluted Object.prototype names no step up
+  let next = outcome === "no_route" ? (Object.hasOwn(SOLANA_JUPITER_CAP_UP, cap) ? SOLANA_JUPITER_CAP_UP[cap] : undefined) : cap === SOLANA_JUPITER_MAX_ACCOUNTS ? SOLANA_JUPITER_CAP_BELOW_FIRST : cap - SOLANA_JUPITER_CAP_DOWN;
   if (next === undefined && outcome === "no_route" && hi > 64) return null;
   if (next === undefined || next <= lo || next >= hi) next = Math.floor((lo + hi) / 2);
   return next > lo && next < hi && next >= 1 && next <= 64 ? next : null;

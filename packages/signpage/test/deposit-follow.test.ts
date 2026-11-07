@@ -505,3 +505,56 @@ test("G2c: a note store that never opens is retried at a pace that doubles acros
   await f.idle();
   assert.deepEqual(sleeps.slice(0, 9), [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000, 60_000], `the pauses: ${sleeps.slice(0, 9).join()}`);
 });
+
+// ---------- audit V-01 (card wallet-near-prepay-taken): a stranger takes P after the relayer's prepay ----------
+for (const [what, lose] of [["", null], [", the first call's answer lost and the call carried 3 blocks later", 3n]] as const)
+test(`V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min${what}; U's refund lands on P' with no tap, both notes the user's, the op only U's own`, async () => {
+  const { V01World, CREDIT, MIN_OUT } = await import("../../wallet/test/prepay-taken-world.ts");
+  const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
+  const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
+  const { usdOf } = await import("../../wallet/src/deposit/follow.ts");
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(() => w.close());
+  const notes = await openNoteStore(w);
+  closers.push(() => notes.close());
+  const note = await notes.planDeposit(1n, (ref) => noteSecrets(SEED, ref).precommitment);
+  const i = (note.ref as { i: number }).i;
+  const u = depositAccount(SEED, 1n, i).account;
+  const v01 = new V01World(u, { depositor: u, value: BigInt(MIN_OUT) });
+  v01.balance = CREDIT;
+  v01.loseFirst = lose;
+  const sleeps: number[] = [];
+  const f = depositFollows({
+    network: () => "testnet",
+    store: async () => w,
+    seed64: async () => Uint8Array.from(SEED),
+    rpcs: () => v01.rpcs(),
+    fetch: v01.fetchFn,
+    // a block a pause, and 10 min of block time, so the quote's deadline passes and the follow ends (untilFinal)
+    sleep: async (ms) => (sleeps.push(ms), v01.tick(), (v01.timeMs += 600_000), await new Promise<void>((ok) => setImmediate(ok))),
+    locks: () => null,
+    now: () => 1_762_400_000_000,
+  });
+  await f.quoted("dq-v01", RESULT, { scope: 1n, index: i, u });
+  // the wait is on the follow's own rounds (each a block), never the wall clock: a loaded runner only makes it slower.
+  // It ends at final, at 3000 rounds, or when no round comes in 2000 checks (a follow stopped without its end)
+  for (let still = 0; ((await w.get("ops", "dq-v01")) as { follow: { final?: true } }).follow.final !== true && sleeps.length < 3000 && still < 2000; ) {
+    const n = sleeps.length;
+    await new Promise((ok) => setTimeout(ok, 5));
+    still = sleeps.length === n ? still + 1 : 0;
+  }
+  f.signedOut();
+  await f.idle();
+  const op = (await w.get("ops", "dq-v01")) as { stage: string; amount_usd: string; follow: { final?: true; notes: string[] } };
+  const P2 = noteSecrets(SEED, { kind: "second", id: { id: "U", s: 1n, i }, n: 0 }).precommitment;
+  assert.equal(op.stage, "done");
+  assert.equal(op.follow.final, true);
+  assert.deepEqual(v01.carried.map((c) => [c.fate, c.p]), [["refunded", note.precommitment], ["landed", P2]], "U's call on P refunded, then landed on P'");
+  assert.deepEqual(v01.prepays, [note.precommitment, P2]);
+  assert.ok(!v01.answers.some((a) => a === "bad_nonce" || a === "in_flight"), `nothing signed while U's call on P was out: ${v01.answers.join()}`);
+  assert.equal(v01.balance, 0n, "nothing waits in U");
+  assert.equal(op.amount_usd, usdOf(CREDIT), "the op shows U's own deposit, never the stranger's");
+  const all = await notes.list();
+  assert.deepEqual(op.follow.notes, [all.find((n) => n.precommitment === P2)!.id]);
+  assert.deepEqual(all.map((n) => [n.state, n.leaf?.value]).sort(), [["UNSPENT", BigInt(MIN_OUT)], ["UNSPENT", CREDIT]], "the stranger's note on our P is the user's");
+});

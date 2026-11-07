@@ -9,17 +9,20 @@
 //     unblocklist; upgrade) and the views the watch reads (ft_balance_of, is_blocklisted), with the x-fiat-token event
 //     names and the paused panic in its data;
 //   - on each provider, at the block its final ft_balance_of answered at: ft_balance_of answers a balance (not halted),
-//     is_blocklisted of the watched account answers false, and view_account names the pin; the two providers' blocks
-//     are within MAX_SKEW of each other;
+//     is_blocklisted of the network's vault (mainnet's the v1 deploy record's) answers false, and view_account names
+//     the pin; the two providers' blocks are within MAX_SKEW of each other;
 // and on mainnet, that a view at a height equals the event history: the indexer's list of USDC's blocklist and
 // unblocklist receipts (NearBlocks) holds the one pair, each receipt's log on the archival provider is that x-fiat-token
 // event for the same account, and is_blocklisted of that account reads false, true, true, false at the blocklist's block
 // less one, its block, the unblocklist's block less one and its block (a view at block h includes h's receipts).
 // Then the helper itself (HELPER_HOST's GET /v1/token-status, read with Origin APP_HOST before the providers): on each
-// network it carries (CARRIED), caught_up true, not halted, the vault not blocked, the pin, at a block no more than
-// MAX_LAG behind the providers' final reads that follow it; on a network it does not carry yet (mainnet until its vault
-// is deployed: the watch reads the vault's own block, so with no vault it never answers caught up), the kit's
-// not-caught-up answer, halted, vault_blocked and code_hash_ok null.
+// network it carries (CARRIED: both, mainnet's watch on the v1 vault the host's WITHDRAW_VAULT_MAINNET names once the
+// env cutover moves it, apps/helper/deploy/vault-lines.sh), caught_up true, not halted, the vault not blocked, the pin,
+// at a block no more than MAX_LAG behind the providers' final reads that follow it. A network not in CARRIED would be
+// read for the kit's not-caught-up answer (halted, vault_blocked and code_hash_ok null: with no vault named the watch
+// never answers caught up); CARRIED names both today, so that branch runs on none. Until the env cutover the
+// deployed helper answers no caught-up watch on the v1 vault, and this check FAILs on it (as its recorded
+// bad_mainnet_not_carried run does), so the helper redeploy for it goes with the cutover, never before.
 // And the halt itself, seen once (PROBE): testnet's probe token, mainnet USDC's pinned code made with two pausers
 // (contracts/vault/deployments/testnet-usdc-probe.json), paused and unpaused at once by its pausers' multisig on
 // 2026-11-03. On FastNEAR's testnet archive (the one keyless archive), the four transactions read succeeded, and the
@@ -30,7 +33,9 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { haltOf, pausedFrom, viewOutcome } from "../../apps/helper/src/token-status/status.ts";
 export { haltOf, viewOutcome };
 
@@ -39,18 +44,24 @@ export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-/** The networks the helper carries, so its watch must answer caught up there; mainnet joins at its vault's deploy. */
-export const CARRIED = ["testnet"];
+/** The networks the helper carries, so its watch must answer caught up there. Mainnet is carried because the host names
+ *  its vault (WITHDRAW_VAULT_MAINNET, BIND_VAULT_MAINNET: token-status/status.ts vaultOf), not because the release forces
+ *  it: withdraw/send.ts starts a helper that names no mainnet vault and refuses only one other than MAINNET_VAULT. The
+ *  env cutover names the v1 record's. */
+export const CARRIED = ["testnet", "mainnet"];
 export const MAX_LAG = 100; // blocks (about 60 s) the helper's answer may trail the providers' final reads after it
 export const MAX_SKEW = 30; // blocks between the two providers' final answers (about 18 s): more is a provider behind
 const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
-/** Per network: the token, its two providers (two operators, scripts/ci/near-rpc-operators.mjs), the account whose block is read. */
+/** Mainnet's vault: the v1 deploy record's account (contracts/vault/deployments/mainnet-v1.json), the kit's and the helper's. */
+const MAINNET_VAULT = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../contracts/vault/deployments/mainnet-v1.json"), "utf8")).account_id;
+/** The one account USDC ever blocklisted on mainnet, unblocklisted since: the event history below is read for it. */
+export const HISTORY_ACCOUNT = "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d";
+/** Per network: the token, its two providers (two operators, scripts/ci/near-rpc-operators.mjs), the vault whose block is read. */
 export const NETS = {
   mainnet: {
     token: USDC,
     pair: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"],
-    // no mainnet vault yet: the one account USDC ever blocklisted, unblocklisted since (the history read below)
-    watched: "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d",
+    watched: MAINNET_VAULT,
   },
   testnet: {
     token: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (contracts/vault/deployments/testnet-usdc.json)
@@ -92,6 +103,7 @@ export function judge(run) {
       say(false, `[${net}] not read`);
       continue;
     }
+    say(n.watched === watched, `[${net}] the block read for ${n.watched}${n.watched === watched ? "" : `, not ${watched}`}`);
     const codes = pair.map((u) => n.code?.[u]);
     for (const [i, c] of codes.entries()) {
       say(c?.sha256 === PIN_SHA256 && c?.hash === PIN, `[${net}] ${pair[i]} view_code of ${token}: sha256 ${show(c?.sha256)}, hash ${show(c?.hash)} is the pin`);
@@ -141,7 +153,7 @@ export function judge(run) {
   const h = run.history;
   const bl = h?.indexer?.blocklist ?? [];
   const ub = h?.indexer?.unblocklist ?? [];
-  const who = NETS.mainnet.watched;
+  const who = HISTORY_ACCOUNT;
   say(bl.length === 1 && ub.length === 1 && bl[0].account === who && ub[0].account === who && bl[0].height < ub[0].height, `[mainnet] the indexer lists one blocklist ${show(bl[0]?.height)} and one unblocklist ${show(ub[0]?.height)} of ${who}`);
   for (const [name, rec] of [["blocklist", bl[0]], ["unblocklist", ub[0]]]) {
     const log = h?.logs?.[name];
@@ -200,7 +212,7 @@ export async function read(fetchFn = fetch, sleep = wait, base = BASE) {
     // the helper's answer first, so the providers' final reads after it bound how far it trails
     const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/token-status?token=${encodeURIComponent(token)}`, { method: "GET", redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" }, signal: AbortSignal.timeout(30000) });
     run.helper[net] = { status: r.status, body: (await r.text()).slice(0, 4096) };
-    const n = (run.nets[net] = { code: {}, state: {} });
+    const n = (run.nets[net] = { watched, code: {}, state: {} });
     // the two final reads first, back to back, so their blocks compare; then each provider's reads at its own block
     for (const u of pair) n.state[u] = { halt: viewOutcome(await post(fetchFn, u, "query", call(token, "ft_balance_of", { account_id: watched }, { finality: "final" }), sleep)) };
     for (const u of pair) {
@@ -249,7 +261,7 @@ export async function read(fetchFn = fetch, sleep = wait, base = BASE) {
   h.views = [];
   if (rec.blocklist && rec.unblocklist) {
     for (const at of [rec.blocklist.height - 1, rec.blocklist.height, rec.unblocklist.height - 1, rec.unblocklist.height]) {
-      h.views.push(viewOutcome(await post(fetchFn, ARCHIVAL, "query", call(USDC, "is_blocklisted", { account_id: NETS.mainnet.watched }, { block_id: at }), sleep)));
+      h.views.push(viewOutcome(await post(fetchFn, ARCHIVAL, "query", call(USDC, "is_blocklisted", { account_id: HISTORY_ACCOUNT }, { block_id: at }), sleep)));
     }
   }
   // the probe on FastNEAR's testnet archive: each transaction's outcome; each switch block's header, then ft_balance_of

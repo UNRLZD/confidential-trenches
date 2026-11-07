@@ -116,14 +116,15 @@ deepFreeze(SIGNPAGE_CLIENT_CODES);
 export type SignpageClientStatus = "connecting" | "ready" | "down" | "update";
 export type SignpageDropReason = "origin" | "source" | "shape" | "id";
 
+/** Read-only, and frozen at run time: every caller shares one snapshot per change (card oneclick-fee-path-own-key). */
 export interface SignpageClientSnapshot {
-  status: SignpageClientStatus;
+  readonly status: SignpageClientStatus;
   /** The page's release tag from its handshake. */
-  release: string | null;
+  readonly release: string | null;
   /** The last state the page sent. */
-  state: SignpageState | null;
+  readonly state: SignpageState | null;
   /** True when `state` is not this frame's latest: a `state` request timed out, or the frame went down or was replaced. */
-  stale: boolean;
+  readonly stale: boolean;
 }
 
 export type SignpageOutcome<K extends SignpageKind = SignpageKind> =
@@ -183,8 +184,16 @@ export interface SignpageClient {
  */
 export function signpageBuildRequest<K extends SignpageKind>(kind: K, params: SignpageParams[K], id: string): SignpageRequest<K> {
   if (!signpageIsKind(kind)) throw new TypeError(`signpage: no such kind ${String(kind)}`);
-  if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) throw new TypeError(`signpage: params are not exactly ${kind}'s`);
-  const msg = { ...params, v: 1, id, type: kind } as SignpageRequest<K>;
+  // the request's own copy, taken before the check: what is checked is what is posted, whatever the caller does to its
+  // params after (card oneclick-fee-path-own-key; the client posts after the handshake, which can be seconds later)
+  let own: SignpageParams[K];
+  try {
+    own = structuredClone(params);
+  } catch {
+    throw new TypeError(`signpage: params are not exactly ${kind}'s`);
+  }
+  if (!SIGNPAGE_PARAM_SCHEMAS[kind](own)) throw new TypeError(`signpage: params are not exactly ${kind}'s`);
+  const msg = { ...own, v: 1, id, type: kind } as SignpageRequest<K>;
   if (new TextEncoder().encode(JSON.stringify(msg)).length > SIGNPAGE_MAX_REQUEST_BYTES) {
     throw new TypeError(`signpage: ${kind} is over ${SIGNPAGE_MAX_REQUEST_BYTES} bytes`);
   }
@@ -249,14 +258,39 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let tries = 0;
   let destroyed = false;
 
+  /** What every caller gets: one deep-frozen copy of `snap` per change, the same object from snapshot(), to every
+   *  listener and as a state request's result until the next change (card oneclick-fee-path-own-key). Stable between
+   *  changes, as useSyncExternalStore needs; a write throws; and none of it is `snap`, which the client reads to decide
+   *  whether a request may go. */
+  let view: SignpageClientSnapshot = deepFreeze(structuredClone(snap));
+  /** Calls every listener in `fns` with `args`, each on its own: a listener's throw (a write into its frozen snapshot
+   *  among them) stops no other listener and none of the client's own steps around the call, and is reported after, on
+   *  its own microtask, as a browser reports an event listener's error (card oneclick-fee-path-own-key, delta review).
+   *  The list is the one at the change's start, so a listener added during it hears the next change; and a listener
+   *  removed during it (an unsubscribe, or a destroy) is skipped, as EventTarget skips a removed listener (review r3). */
+  const tell = <A extends unknown[]>(fns: ReadonlySet<(...a: A) => void>, ...args: A): void => {
+    for (const f of [...fns]) {
+      if (!fns.has(f)) continue;
+      try {
+        f(...args);
+      } catch (e) {
+        queueMicrotask(() => {
+          throw e;
+        });
+      }
+    }
+  };
   const set = (patch: Partial<SignpageClientSnapshot>) => {
     snap = { ...snap, ...patch };
+    view = deepFreeze(structuredClone(snap));
+    // the client keeps the view's frozen state, never an object from a message or a caller
+    snap = { ...snap, state: view.state };
     if (snap.status !== "connecting") {
       const w = waiters;
       waiters = [];
       for (const f of w) f();
     }
-    for (const f of listeners) f(snap);
+    tell(listeners, view);
   };
 
   const clearTimer = (t: Timer | null) => {
@@ -292,6 +326,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const down = () => {
     if (destroyed || snap.status === "update") return;
     leave("down");
+    // a "down" listener may have destroyed the client: then no retry is set
+    if (destroyed) return;
     if (retryMs > 0 && retryTimer === null) {
       const wait = Math.min(RETRY_FIRST_MS * 2 ** tries, retryMs);
       tries++;
@@ -447,7 +483,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       // a state's op this client cannot read is left out, never the whole state (card kit-frame-version)
       const result = signpageAnswerOkSchema(m) ? (p.kind === "state" ? signpageReadableOps(m.result) : m.result) : undefined;
       if (result !== undefined && SIGNPAGE_RESULT_SCHEMAS[p.kind](result)) {
-        if (p.kind === "state") set({ state: result as SignpageState, stale: false });
+        if (p.kind === "state") {
+          set({ state: result as SignpageState, stale: false });
+          return settle(m.id as string, { ok: true, result: view.state as SignpageResults[SignpageKind] });
+        }
         return settle(m.id as string, { ok: true, result: result as SignpageResults[SignpageKind] });
       }
       if (signpageAnswerErrorSchema(m)) return settle(m.id as string, { ok: false, error: m.error as { code: ErrorCode } });
@@ -460,12 +499,13 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       if (signpageStateEventSchema(ev)) return set({ state: ev.state as SignpageState, stale: false });
     }
     if (signpageProgressSchema(m)) {
-      for (const f of progressListeners) f(m.id as string, m.stage as Stage);
+      tell(progressListeners, m.id as string, m.stage as Stage);
       return;
     }
     if (signpageProgressRouteSchema(m)) {
       const { v: _v, type: _t, id, ...route } = m;
-      for (const f of routeListeners) f(id as string, route as BuyRoute);
+      // frozen as the snapshot is: listeners share one route object, and a write into it throws
+      tell(routeListeners, id as string, deepFreeze(route) as BuyRoute);
       return;
     }
     drops.shape++;
@@ -478,7 +518,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   };
 
   const client: SignpageClient = {
-    snapshot: () => snap,
+    snapshot: () => view,
     subscribe(fn) {
       listeners.add(fn);
       return () => void listeners.delete(fn);
@@ -510,10 +550,11 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     dropped: () => ({ ...drops }),
     destroy() {
       if (destroyed) return;
+      // destroyed first: a "down" listener that destroys again returns at once, and down() sets no retry after it
+      destroyed = true;
       clearTimer(retryTimer);
       retryTimer = null;
       leave("down");
-      destroyed = true;
       host.window.removeEventListener("message", onMessage);
       host.window.removeEventListener("online", wake);
       host.window.removeEventListener("visibilitychange", wake);

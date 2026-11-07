@@ -3,7 +3,8 @@
 // compares the response headers with the policy written out below, which is held here and not read from the repo's
 // _headers file, so a change to that file cannot pass this check by changing what it is compared with:
 //   - the answer is 200;
-//   - the CSP equals the wallet paper's block (2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C and the Solana trade's hosts put in: every directive
+//   - the CSP equals the wallet paper's block (2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C, the Solana trade's hosts and the
+//     kit's EVM providers (card page-evm-rpc-csp) put in: every directive
 //     equal, none missing, none added, one policy only;
 //   - SIGN_HOST is the top window and frames APP_HOST (card signpage-shell): frame-ancestors 'none' blocks every
 //     framing page, APP_HOST and https://example.com included, and frame-src names APP_HOST only;
@@ -16,6 +17,7 @@
 import "../net-window.mjs";
 import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { evmOrigins } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "signpage-skeleton";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -27,13 +29,15 @@ const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org http
 // the Solana trade's own (card signpage-solana-trade): provider A of LD1 and the kit's three device-direct send paths
 // (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps
 const SOLANA = "https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com";
+// the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists
+const EVM = evmOrigins().join(" ");
 
 // the wallet paper's block (wallet.md 2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C and APP_HOST put in, plus font-src 'self'
 export const CSP = [
   ["default-src", "'none'"],
   ["script-src", "'self' 'wasm-unsafe-eval'"],
   ["worker-src", "'self'"],
-  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA}`],
+  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA} ${EVM}`],
   ["style-src", "'self'"],
   ["img-src", "'self' data:"],
   ["font-src", "'self'"], // app.md finding 1 (l.1085): the top-level SIGN_HOST screens draw in the brand fonts

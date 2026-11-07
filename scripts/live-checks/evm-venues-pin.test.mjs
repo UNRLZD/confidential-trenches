@@ -1,5 +1,7 @@
-// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-07 for card pool-evm-buy-pays-revert, the testnets' new pools; 2026-11-06 for card
-// evm-testnet-delegate-review3) through the live check: the recorded good answers pass on both testnets; the same recording with one
+// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-07 13:3xZ for card pool-evm-deploy-mainnet,
+// the testnets and both mainnets, after the owner's pastes; before it for card pool-evm-buy-pays-revert and card
+// evm-testnet-delegate-review3) through the live check: the recorded good answers pass on both testnets and both
+// mainnets; the kit before card pool-evm-deploy-mainnet (no mainnet pin, the records there) fails each mainnet pin; the same recording with one
 // thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH
 // with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is the newest
 // redeploy's, card evm-testnet-delegate-review3's; the fee collector's is card evm-fee-collector's; the PoolManager is
@@ -13,10 +15,11 @@ import path from "node:path";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check, deployed, recordOf } from "./evm-venues-pin.mjs";
-import { CHAINS, EIP1967, pinnedBuild } from "./pool-evm-deploy.mjs";
+import { CHAINS, EIP1967, MAINNETS, chainOf, pinnedBuild } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-venues-pin.answers.json", import.meta.url), "utf8"));
 const RECORD = Object.fromEntries(deployed());
+const TESTNETS = A.chains.filter((c) => Object.hasOwn(CHAINS, c));
 
 function replay(answers) {
   const used = new Set();
@@ -29,7 +32,7 @@ function replay(answers) {
     return { ok: a.status === 200, status: a.status, json: async () => a.json };
   };
 }
-const run = (chain, { answers = A.good, venue = evmPoolVenues()[chain], rpcs = CHAINS[chain].rpcs, deployment = RECORD[chain] } = {}) =>
+const run = (chain, { answers = A.good, venue = evmPoolVenues()[chain], rpcs = chainOf(chain).rpcs, deployment = RECORD[chain] } = {}) =>
   check({ chain, venue, deployment, fetchFn: replay(answers), rpcs, sleep: async () => {} });
 const lower = (s) => String(s).toLowerCase();
 /** the recording with every answer `pick(a)` selects changed by `f(a.json)`, on the RPCs `urls` */
@@ -47,20 +50,20 @@ const fails = (r, re) => {
   assert.match(r.lines.filter((l) => l.startsWith("FAIL")).join("\n"), re);
 };
 
-test("the recorded good answers pass on both testnets: every pin is the record's and holds the build's code on both RPCs", async () => {
-  assert.deepEqual(A.chains, ["base-sepolia", "robinhood-testnet"]);
+test("the recorded good answers pass on both testnets and both mainnets: every pin is the record's and holds the build's code on both RPCs", async () => {
+  assert.deepEqual(A.chains, ["base-sepolia", "robinhood-testnet", "base", "robinhood"]);
   assert.deepEqual(Object.keys(RECORD), A.chains);
   for (const chain of A.chains) {
     const r = await run(chain);
     assert.equal(r.ok, true, r.lines.join("\n"));
-    assert.equal(r.lines.filter((l) => / is the build's /.test(l)).length, chain === "base-sepolia" ? 6 : 5, chain); // the pins and the verifier
+    assert.equal(r.lines.filter((l) => / is the build's /.test(l)).length, chain === "robinhood-testnet" ? 5 : 6, chain); // the pins and the verifier (no v3 on Robinhood testnet, M365)
     assert.ok(r.lines.some((l) => l.startsWith("PASS the fee collector ") && l.includes("is the build's FeeCollector")), chain);
   }
 });
 
 test("a pin's code with one byte flipped, or other code on one RPC, fails", async () => {
   for (const chain of A.chains) {
-    const [u1, u2] = CHAINS[chain].rpcs;
+    const [u1, u2] = chainOf(chain).rpcs;
     for (const pin of [evmPoolVenues()[chain].pool, evmPoolVenues()[chain].sellDelegate, evmPoolVenues()[chain].adapters.v4, evmPoolVenues()[chain].feeCollector]) {
       // byte 1: outside every pin's immutables (the pool-review-3 delegate holds one at 200)
       fails(await run(chain, { answers: mutate([u1, u2], isCode(pin), (j) => (j.result = flip(j.result, 1))) }), /is the build's/);
@@ -96,7 +99,7 @@ test("WETH or the router with other code, another chain id, a kit pin that is no
 
 test("a kit pin whose code is a build the build file froze fails: main's pins at the exact-debit delegates, the 10-field sell, read 6 Nov (card evm-testnet-delegate-review3)", async () => {
   const F = A.frozenPin;
-  for (const chain of A.chains) {
+  for (const chain of TESTNETS) {
     const pin = F.pins[chain];
     // recorded 6 Nov, before card pool-evm-buy-pays-revert's pools: the pool and its verifier then (its record,
     // pool-evm-deploy.<chain>.json), whose reads the recording holds
@@ -141,9 +144,9 @@ test("a pin with the build's code but other immutables fails: the pool's verifie
 
 test("the pool's verifier, the PoolManager or Robinhood testnet WETH's implementation with other code, or another WETH implementation, fails", async () => {
   for (const chain of A.chains) {
-    const [u1] = CHAINS[chain].rpcs;
+    const [u1] = chainOf(chain).rpcs;
     fails(await run(chain, { answers: mutate(u1, isCode(RECORD[chain].contracts.WithdrawalVerifier.address), (j) => (j.result = flip(j.result, 100))) }), /WithdrawalVerifier/);
-    fails(await run(chain, { answers: mutate(u1, isCode(CHAINS[chain].poolManager.address), (j) => (j.result = flip(j.result, 100))) }), /PoolManager/);
+    fails(await run(chain, { answers: mutate(u1, isCode(chainOf(chain).poolManager.address), (j) => (j.result = flip(j.result, 100))) }), /PoolManager/);
   }
   const r = "robinhood-testnet";
   const [u1, u2] = CHAINS[r].rpcs;
@@ -152,7 +155,7 @@ test("the pool's verifier, the PoolManager or Robinhood testnet WETH's implement
 });
 
 test("a middle listed on a testnet fails", async () => {
-  for (const chain of A.chains) fails(await run(chain, { venue: { ...evmPoolVenues()[chain], middles: ["0x000000000000000000000000000000000000bad0"] } }), /middle/);
+  for (const chain of TESTNETS) fails(await run(chain, { venue: { ...evmPoolVenues()[chain], middles: ["0x000000000000000000000000000000000000bad0"] } }), /middle/);
 });
 
 test("one RPC's stale head does not hide a WETH upgrade: the implementation slot is read at latest (the review of ccee09a)", async () => {
@@ -192,6 +195,20 @@ test("the mainnets (card pool-evm-deploy-mainnet): a kit pin with a record is ch
   const f = path.join(mkdtempSync(path.join(tmpdir(), "venues-pin-")), "base.json");
   writeFileSync(f, JSON.stringify({ chain: "base", dryRun: true, contracts: {} }));
   assert.throws(() => recordOf("base", f), /is not base's real run/);
+});
+
+// card pool-evm-deploy-mainnet: the kit as it was at be1cfaef (the mainnet records in, no mainnet pin) against the same
+// recording fails each pin; and Robinhood mainnet's v3 adapter (M365 2: kept because its ROUTER() is the pinned
+// SwapRouter02) with another router in its code fails, as Base's
+test("the kit before card pool-evm-deploy-mainnet (no mainnet pin) fails each mainnet pin; a mainnet v3 adapter holding another router fails", async () => {
+  for (const chain of Object.keys(MAINNETS)) {
+    const { pool, adapters, sellDelegate, feeCollector, ...before } = evmPoolVenues()[chain];
+    assert.ok(pool && adapters && sellDelegate && feeCollector, chain);
+    const r = await run(chain, { venue: before });
+    for (const role of ["pool", "v3 adapter", "v4 adapter", "sell delegate", "fee collector"]) fails(r, new RegExp(`the ${role} pin \\(none\\) is the record's`));
+    const v = evmPoolVenues()[chain];
+    fails(await run(chain, { answers: swapImmutable(chain, v.adapters.v3, "UniswapV3Adapter", word(MAINNETS[chain].router.address)) }), /UniswapV3Adapter's immutables/);
+  }
 });
 
 // the fee collector's pin under the same rule as every other: the record's address, the current build, its one

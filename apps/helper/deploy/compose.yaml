@@ -39,6 +39,27 @@ services:
       NEAR_RPC_URL_B: ${NEAR_RPC_URL_B:-}
       NEAR_TESTNET_RPC_URL: ${NEAR_TESTNET_RPC_URL:-}
       NEAR_TESTNET_RPC_URL_B: ${NEAR_TESTNET_RPC_URL_B:-}
+      # each chain's keyed list after the names above (src/rpc/rpc.ts RPC_UPSTREAMS keyed; card rpc-keyed-lists), one
+      # company each but dRPC's three keys (three accounts), written by the research repo's scripts/deploy/set-rpc-keys.sh;
+      # empty: that slot is skipped
+      BASE_RPC_URL_QUICKNODE: ${BASE_RPC_URL_QUICKNODE:-}
+      BASE_RPC_URL_DRPC_1: ${BASE_RPC_URL_DRPC_1:-}
+      BASE_RPC_URL_DRPC_2: ${BASE_RPC_URL_DRPC_2:-}
+      BASE_RPC_URL_DRPC_3: ${BASE_RPC_URL_DRPC_3:-}
+      ROBINHOOD_RPC_URL_QUICKNODE: ${ROBINHOOD_RPC_URL_QUICKNODE:-}
+      ROBINHOOD_RPC_URL_DRPC_1: ${ROBINHOOD_RPC_URL_DRPC_1:-}
+      ROBINHOOD_RPC_URL_DRPC_2: ${ROBINHOOD_RPC_URL_DRPC_2:-}
+      ROBINHOOD_RPC_URL_DRPC_3: ${ROBINHOOD_RPC_URL_DRPC_3:-}
+      SOLANA_RPC_URL_QUICKNODE: ${SOLANA_RPC_URL_QUICKNODE:-}
+      SOLANA_RPC_URL_DRPC_1: ${SOLANA_RPC_URL_DRPC_1:-}
+      SOLANA_RPC_URL_DRPC_2: ${SOLANA_RPC_URL_DRPC_2:-}
+      SOLANA_RPC_URL_DRPC_3: ${SOLANA_RPC_URL_DRPC_3:-}
+      NEAR_RPC_URL_FASTNEAR: ${NEAR_RPC_URL_FASTNEAR:-}
+      # each keyed company's daily budget in its own unit (src/limits/limits.ts KEYED_DAY: QuickNode credits, dRPC compute
+      # units, FastNear requests; review M2), not a secret; empty: its smallest plan's month over 31 days
+      RPC_DAY_QUICKNODE: ${RPC_DAY_QUICKNODE:-}
+      RPC_DAY_DRPC: ${RPC_DAY_DRPC:-}
+      RPC_DAY_FASTNEAR: ${RPC_DAY_FASTNEAR:-}
       # each chain's RPC budget per 10 s, "<total>,<per client>" (src/rpc/rpc.ts; empty: the public provider's limit)
       RPC_BUDGET_SOLANA: ${RPC_BUDGET_SOLANA:-}
       RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}

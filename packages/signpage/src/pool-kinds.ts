@@ -5,9 +5,10 @@
 // - A sell's amount is in the token's decimals: the device reads the mint (Solana) or decimals() (EVM) on two
 //   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals. A
 //   read that fails on either provider is "down" (card pool-read-down), never not_allowed.
-// - Refused on Base and Robinhood whatever the pins, until a rule checks it: a pool.deposit (no EVM deposit check yet).
-//   A pool.withdraw goes to the flow: its onward send from W to the typed address is checked by rules/pool.ts
-//   checkEvmOnwardSend (card signpage-pool-withdraw-form); the page's EVM flows land with signpage-evm-pool-trade.
+// - On Base and Robinhood every kind goes to the flow once its pool is pinned: a pool.deposit's tx from the one-time
+//   wallet U is checked by rules/pool.ts checkEvmDeposit (card pool-deposits, src/pool-deposit-evm.ts), a pool.withdraw's
+//   onward send from W to the typed address by checkEvmOnwardSend (card signpage-pool-withdraw-form); the page's EVM
+//   flows land with signpage-evm-pool-trade.
 // - The flows that build, prove, sign and send each op land with the pools; until a pinned pool has its flow, a
 //   request that passed every check is refused not_allowed too, never half run.
 // - A sell is a trade: answered as one that runs (Running), so the api's queue never waits on its decimals read or
@@ -55,7 +56,6 @@ const NO: { error: "not_allowed" } = Object.freeze({ error: "not_allowed" as con
 /** A provider read that still fails after the page's own retry (card pool-read-down): "not now", never "no" (api.ts
  *  RETRY_CODES, so the same request again runs again). not_allowed comes only from a rule. */
 const DOWN: { error: "down" } = Object.freeze({ error: "down" as const });
-const EVM_REFUSED: ReadonlySet<PoolKind> = new Set(["pool.deposit"]);
 /** evmNextNote's wait for finality: "not now" (api.ts RETRY_CODES), never failed or not_allowed. */
 const BUSY: { error: "busy" } = Object.freeze({ error: "busy" as const });
 
@@ -103,7 +103,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
       if (kind !== "pool.sell") {
         const ask = checked(p);
         if (!ask) return NO;
-        if (!deps.pinned(ask.chain) || (ask.chain !== "solana" && EVM_REFUSED.has(kind)) || !deps.flow) return NO;
+        if (!deps.pinned(ask.chain) || !deps.flow) return NO;
         return runFlow(deps.flow, ask, ctx) as Answer<K>;
       }
       // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals read

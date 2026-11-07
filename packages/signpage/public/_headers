@@ -1,6 +1,7 @@
 # SIGN_HOST's header policy (Cloudflare Pages _headers, one rule for every path). The CSP and Integrity-Policy are
 # the wallet paper's block (2.7) with HELPER_HOST and RPC_A, RPC_B, RPC_C put in, plus font-src 'self' (app.md finding 1)
-# and the Solana trade's provider A and send paths (card signpage-solana-trade);
+# and the Solana trade's provider A and send paths (card signpage-solana-trade), and the origin of every provider in the
+# kit's EVM venue lists (card page-evm-rpc-csp, read from the kit by scripts/live-checks/page-evm-rpc-csp.mjs);
 # the other headers are the app paper's SIGN_HOST column (2.3). SIGN_HOST is the top window and frames APP_HOST (card
 # signpage-shell): no page may frame it, its one frame is APP_HOST, and it asks for its own agent cluster. No
 # X-Frame-Options (the CSP says it) and no COEP (it would make the APP_HOST frame need CORP and COEP of its own). The
@@ -12,7 +13,7 @@
 # thread code as one pinned same-origin file, never from a data: or blob: URL, which worker-src 'self' refuses. The
 # thread file gets its own policy too, joined to the /* rule's: it runs wasm and loads, fetches and starts nothing.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker
   Integrity-Policy: blocked-destinations=(script)
   Origin-Agent-Cluster: ?1
   Strict-Transport-Security: max-age=63072000; includeSubDomains

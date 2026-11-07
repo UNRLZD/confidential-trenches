@@ -12,6 +12,7 @@ export {
   EVM_QUOTE_MAX_AGE_MS,
   EVM_QUOTE_MAX_HINTS,
   EVM_SELL_PROBE_CODE,
+  evmBuyRevertedPools,
   evmIsDeviceQuote,
   evmIsDeviceSellQuote,
   evmPoolBuyQuote,
@@ -33,6 +34,8 @@ export * from "./prover/prove.ts";
 export { isProverDead, PROVER_DEAD_PREFIX } from "./prover/client.ts";
 export * from "./vault/inputs.ts";
 export * from "./vault/sync.ts";
+// the device's own settle of its refund-pending spends, each refund note written through the note store (card vault-kit-settle)
+export * from "./vault/settle.ts";
 export * from "./trade/solana/send.ts";
 export * from "./trade/solana/build.ts";
 export * from "./trade/solana/flow.ts";

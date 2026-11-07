@@ -782,6 +782,33 @@ for (const p of [0, 1] as const) {
   });
 }
 
+// Card solana-release-reads-paced: the release's reference reads on the pair the kit hands it (flow.ts gives its paced
+// providers, pacedDeps), never on a pair of its own that the trade's pace does not hold.
+test("card solana-release-reads-paced: the release's reference reads on the providers the kit hands it, and on no other", async () => {
+  const real = globalThis.fetch;
+  const fetched: string[] = [];
+  globalThis.fetch = (async (u: string | URL | Request) => {
+    fetched.push(u instanceof Request ? u.url : String(u));
+    throw new Error("no network in this test");
+  }) as typeof fetch;
+  const asked: string[] = [];
+  const given = (url: string): SolanaRpc =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      asked.push(`${url} ${method}`);
+      return { context: { slot: 1 }, value: (params[0] as string[]).map(() => null) };
+    }, { url });
+  try {
+    const deps = releaseTradeDeps();
+    const ref = await deps.reference({ side: "buy", token: MINT, amount: 10_000_000n, amounts: [10_000_000n] }, [given("https://given-a.example/"), given("https://given-b.example/")]);
+    assert.equal(ref, null, "no pool on the given pair's reads");
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual(fetched, [], "no read on the page's own pair");
+  assert.equal(asked.filter((x) => x.startsWith("https://given-a.example/ getMultipleAccounts")).length, 2, asked.join("; "));
+  assert.equal(asked.filter((x) => x.startsWith("https://given-b.example/ getMultipleAccounts")).length, 2, asked.join("; "));
+});
+
 test("card pool-read-down: a reference read down before any leg is signed answers down (its first read or the renewal's), never after a signature", async () => {
   for (const read of ["first", "renewal"] as const) {
     const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n) });
