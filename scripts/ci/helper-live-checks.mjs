@@ -58,6 +58,7 @@ export const LIVE_CHECKS = [
   "helper-rpc-sell-methods",
   "robinhood-listed-tape-opens",
   "rpc-keyed-lists",
+  "helper-mainnet-vault-env",
 ];
 
 // `{commit}` is the deployed commit

@@ -18,7 +18,7 @@ import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RP
 import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
-import { OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
+import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
 
 /** Per network: the release's vault, the gas account that sends deposits (bind.<ours>) and its one full-access key. */
 export const BIND_ENV = {
@@ -85,7 +85,7 @@ export function watchDeps(watch: Pick<TokenWatch, "statusAt" | "pausedAt"> | und
 /**
  * The route's sender. A network is carried only when its vault, gas account and key, the release number, the store
  * folder and the margin K are all set; one set in part stops the helper at start, as does a key that does not parse or
- * a vault that is not the one WITHDRAW_VAULT_<NETWORK> names. Every name is read, set or not, so the deploy gate sees
+ * a vault that is not the one WITHDRAW_VAULT_<NETWORK> names, or a mainnet vault other than MAINNET_VAULT. Every name is read, set or not, so the deploy gate sees
  * them all. On the first request (and again after a failure) it reads the vault's config() on both providers (its asset
  * the network's token), opens the network's store under HELPER_STORE_DIR, starts the relayer and the lock rounds.
  */
@@ -93,6 +93,9 @@ export function bindSenderFromEnv(
   env: Record<string, string | undefined>,
   watches: Partial<Record<TokenNetwork, Pick<TokenWatch, "statusAt" | "pausedAt">>> = tokenWatchesFromEnv(env),
   fetchFn: typeof fetch = fetch,
+  // the one mainnet vault carried: the release's pin (withdraw/send.ts MAINNET_VAULT), never read from the host's
+  // environment (a test passes its own)
+  mainnetVault: string = MAINNET_VAULT,
 ): BindSender {
   const release = env[RELEASE_ENV] ?? "";
   const storeDir = env[STORE_ENV] ?? "";
@@ -110,6 +113,7 @@ export function bindSenderFromEnv(
     const [vault, account, key] = set[n] as [string, string, string];
     if (vault === "" && account === "" && key === "") continue;
     if (!isAccountId(vault) || !isAccountId(account) || !/^ed25519:[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(key)) throw new Error(`${BIND_ENV[n].join(", ")} must be a NEAR account id, a NEAR account id and one ed25519 key`);
+    if (n === "mainnet" && vault !== mainnetVault) throw new Error(`${BIND_ENV.mainnet[0]} must be ${mainnetVault}, the vault of the mainnet deploy record`);
     if (withdrawVault[n] !== "" && withdrawVault[n] !== vault) throw new Error(`${BIND_ENV[n][0]} and ${SEND_ENV[n][0]} must name the same vault`);
     if (!/^[1-9][0-9]{0,8}$/.test(release)) throw new Error(`${RELEASE_ENV} must be a whole number, 1 or more, to carry deposits`);
     if (storeDir === "") throw new Error(`${STORE_ENV} must be set to carry deposits`);
