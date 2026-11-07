@@ -648,14 +648,20 @@ test("pool-deposit-sent-end review 4 (EVM): the end's reads back off (10 s doubl
   let ended = false;
   const stages: string[] = [];
   // at the run's end: dead on both, no Deposited; no pass runs, so it stays so
+  let cut = false;
   const dead = () => ((ch.c.finNonce = [1n, 1n]), (ch.c.nonce = 1n), (ended = true));
-  const kind = poolDepositEvmKind(() => ({ ...hostOf(ch, ns), wait: async (ms: number) => void (ended && waits.push(ms)), end: () => void dead() }));
+  const kind = poolDepositEvmKind(() => ({ ...hostOf(ch, ns), wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (ended) waits.push(ms);
+    }, end: () => void dead() }));
   const r = kind(ASK, { id: "e3", sha: "00", progress: (s) => void stages.push(String(s)) }) as { after: Promise<void> };
   await r.after;
-  for (let k = -1; k !== waits.length; ) {
+  // until the reads stop (a follow that never gives up is cut at 10 s, and fails below)
+  for (let k = -1, t0 = Date.now(); k !== waits.length && Date.now() - t0 < 10_000; ) {
     k = waits.length;
     await new Promise((ok) => setTimeout(ok, 100));
   }
+  cut = true;
   assert.deepEqual(stages, []);
   assert.deepEqual(waits.slice(0, 5), [10_000, 20_000, 40_000, 60_000, 60_000]);
   const total = waits.reduce((a, b) => a + b, 0);
@@ -697,4 +703,72 @@ test("pool-deposit-sent-end fold: the verdict reads U's finalized nonce before t
   assert.equal(ch.c.sent.length, 1, "never built again on a nonce read before its Deposited");
   assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] });
   assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+});
+
+// Card pool-deposit-sent-end review 8: the rules the reviewer's mutants showed unplanted (test/pool-deposit-mutants.mjs).
+test("review 8 E1: the follower reads U's finalized nonce before the round: a send that lands and finalizes between the two reads is filled at that read, never read dead (no pass started)", async () => {
+  const { ch, ns } = await funded(RUNG + FEE);
+  let plant = false;
+  const at = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>) => async (m: string, p: readonly unknown[]) => {
+    if (plant && m === "eth_getTransactionCount" && p[1] === "finalized") (plant = false), ch.land(ch.c.sent[0]!);
+    return rpc(m, p);
+  };
+  let kicks = 0;
+  const f = followedEvm(ch, ns, { rpcs: [at(ch.rpcs[0]), at(ch.rpcs[1])] as const, settle: () => void kicks++ });
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  plant = true;
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["filled"]);
+  assert.equal(kicks, 0, "never read dead");
+});
+
+test("review 8 E4 and E5: a Deposited at another value is no end while its block is not final, and once final a take (not_landed), never filled", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const f = followedEvm(ch, ns);
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  ch.deposit(planned.precommitment, EVM_POOL_MIN_DEPOSIT); // a front-runner's, at block 100
+  ch.c.fin = 90n;
+  f.go();
+  assert.equal(await f.parked(), true);
+  assert.deepEqual(f.stages, [], "a take not final yet tells nothing");
+  ch.c.fin = 100n;
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["not_landed"]);
+});
+
+test("review 8 E7: an ask whose run ended before all of it was sent ends part_filled when its sent note lands, never filled", async () => {
+  const { ch, ns } = await funded(3n * RUNG + 2n * FEE);
+  const f = followedEvm(ch, ns, {}, { ...ASK, amount: 3n * RUNG });
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(ch.c.sent.length, 1, "the run ends on its first note, pending");
+  assert.ok(sentOf(ch.c.sent[0]!).value < 3n * RUNG);
+  assert.equal(await f.parked(), true);
+  ch.land(ch.c.sent[0]!);
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["part_filled"]);
+});
+
+test("review 8 E8: a note built again at a new nonce is dead only past its highest send's nonce: the first send's nonce taken is no dead read (no pass started)", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  let kicks = 0;
+  const f = followedEvm(ch, ns, { settle: () => void kicks++ });
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  ch.c.finNonce = [1n, 1n]; // nonce 0 taken by a revert, final on both
+  ch.c.nonce = 1n;
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), null), { stage: "not_landed", txs: [] });
+  assert.deepEqual((await ns.get(planned.id))!.evmSends!.map((x) => x.nonce), [0n, 1n], "built again at nonce 1");
+  f.go();
+  assert.equal(await f.parked(), true);
+  assert.deepEqual(f.stages, []);
+  assert.equal(kicks, 0, "the live send at nonce 1 keeps the note from a dead read");
 });

@@ -1753,6 +1753,7 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
   const waits: number[] = [];
   let ended = false;
   let open!: () => void;
+  let cut = false;
   const gate = new Promise<void>((r) => (open = r));
   const stages: string[] = [];
   const shorts: bigint[] = [];
@@ -1762,6 +1763,7 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
     wait: async (ms: number) => {
       if (!ended) return;
       await gate;
+      if (cut) throw new Error("cut");
       waits.push(ms);
     },
     // the page's pass, one at a time (pool-testnet.ts settleSolana), as the kick starts it
@@ -1775,10 +1777,12 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
   c.height += 1_000;
   c.accounts.get(u.address)!.lamports = 1_000_000;
   open();
-  for (let n = -1; n !== waits.length; ) {
+  // until the reads stop (a follow that never gives up is cut at 10 s, and fails below)
+  for (let n = -1, t0 = Date.now(); n !== waits.length && Date.now() - t0 < 10_000; ) {
     n = waits.length;
     await new Promise((ok) => setTimeout(ok, 100));
   }
+  cut = true;
   await passing;
   assert.deepEqual(stages, [], "nothing told: the note may still land once U is topped up");
   assert.ok(shorts.length > 0, "the pass was started and named the top-up");
@@ -1928,4 +1932,154 @@ test("pool-deposit-sent-end review 5: the only send taken, then a raw store erro
   await f.runEnd;
   assert.equal(await f.staged(1), true, `no end told: ${JSON.stringify(f.stages)}`);
   assert.deepEqual(f.stages, ["not_landed"]);
+});
+
+// Card pool-deposit-sent-end review 8: the rules the reviewer's mutants showed unplanted, each planted here
+// (test/pool-deposit-mutants.mjs runs each mutant against its named test).
+/** The ask's send dropped and kept (`kept`), the run ended and the end's reads parked. */
+async function droppedAndFollowed(over: Partial<PoolDepositHost> = {}, a: PoolAsk = ask(RUNG), wrap?: (c: ReturnType<typeof chain>, rpc: SolanaRpc, k: number) => SolanaRpc) {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 100_000_000);
+  c.lands = false;
+  const kept: string[] = [];
+  const keep = (rpc: SolanaRpc, k: number): SolanaRpc => async (m, p) => {
+    if (k === 0 && m === "sendTransaction") kept.push(p[0] as string);
+    return rpc(m, p);
+  };
+  const rpcs = [0, 1].map((k) => keep(wrap ? wrap(c, c.rpc(), k) : c.rpc(), k)) as unknown as readonly [SolanaRpc, SolanaRpc];
+  let kicks = 0;
+  const f = followed(c, ns, { rpcs, settle: () => void kicks++, ...over }, a);
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  return { c, ns, u, f, kept, kicks: () => kicks };
+}
+
+test("review 8 S1: the follower reads the heights before the mark: a send that lands and finalizes between the two reads is filled at that read, never read dead (no pass started)", async () => {
+  let plant: (() => void) | null = null;
+  const d = await droppedAndFollowed({}, ask(RUNG), (_c, rpc) => async (m, p) => {
+    if (m === "getEpochInfo" && plant) (plant(), (plant = null));
+    return rpc(m, p);
+  });
+  plant = () => {
+    d.c.lands = true;
+    d.c.apply(base64.decode(d.kept[0]!));
+    d.c.height += 1_000;
+  };
+  d.f.go();
+  assert.equal(await d.f.staged(1), true, "filled at that read");
+  assert.deepEqual(d.f.stages, ["filled"]);
+  assert.equal(d.kicks(), 0, "never read dead");
+});
+
+test("review 8 S3: a mark one RPC holds and the other not yet is no end: nothing told until both hold it", async () => {
+  let hide = true;
+  const d = await droppedAndFollowed({}, ask(RUNG), (c, rpc, k) => (k === 1 ? async (m, p) => {
+    const r = await rpc(m, p);
+    if (hide && m === "getAccountInfo" && isMark(c)(p[0] as string)) return { ...(r as object), value: null };
+    return r;
+  } : rpc));
+  d.c.lands = true;
+  d.c.apply(base64.decode(d.kept[0]!));
+  d.f.go();
+  assert.equal(await d.f.parked(), true);
+  assert.deepEqual(d.f.stages, [], "one RPC's mark tells nothing");
+  hide = false;
+  d.f.go();
+  assert.equal(await d.f.staged(1), true);
+  assert.deepEqual(d.f.stages, ["filled"]);
+});
+
+test("review 8 S4: a note with a send dead and a send built again still live is no dead read: no pass started, the reads stay at their base wait", async () => {
+  const d = await droppedAndFollowed();
+  d.c.height += 1_000; // the first send past its life on both
+  assert.equal(((await settlePoolDeposits(host(d.c, d.ns))) as { stage: string }).stage, "not_landed", "the pass builds it again: a live second send");
+  assert.equal((await ours(d.ns))[0]!.sends!.length, 2);
+  d.f.go();
+  assert.equal(await d.f.parked(), true);
+  assert.deepEqual(d.f.stages, []);
+  assert.equal(d.kicks(), 0, "a live send of the note keeps it from a dead read");
+});
+
+test("review 8 S5 and S6: a mark of another value while both RPCs saying a send of the note succeeded is a contradiction, no end; a take read from the store (restored at another value) is not_landed, never filled", async () => {
+  // the chain read: a front-runner's MIN_DEPOSIT on the note's precommitment, and both RPCs saying the note's send succeeded
+  const d = await droppedAndFollowed();
+  const pre = (await ours(d.ns))[0]!.precommitment;
+  d.c.lands = true;
+  d.c.apply(attackerTx(d.c, pre, MIN_DEPOSIT));
+  assert.equal(d.c.accounts.get(markOf(pre))?.data.length, 17, "the front-runner's mark");
+  const sig = (await ours(d.ns))[0]!.sends![0]!.signature;
+  d.c.statuses.set(sig, { err: null, confirmationStatus: "finalized" });
+  d.f.go();
+  assert.equal(await d.f.parked(), true);
+  assert.deepEqual(d.f.stages, [], "a mark that contradicts both RPCs' word is no end");
+  d.c.statuses.delete(sig);
+  d.f.go();
+  assert.equal(await d.f.staged(1), true);
+  assert.deepEqual(d.f.stages, ["not_landed"], "taken: the rung's money stays in U");
+  // the store read: the pass restored the take (UNSPENT at MIN_DEPOSIT) before the end's read
+  const e = await droppedAndFollowed();
+  e.c.lands = true;
+  e.c.apply(attackerTx(e.c, (await ours(e.ns))[0]!.precommitment, MIN_DEPOSIT));
+  await settlePoolDeposits(host(e.c, e.ns));
+  assert.deepEqual((await ours(e.ns)).map((n) => [n.state, n.leaf?.value]), [["UNSPENT", MIN_DEPOSIT]]);
+  e.f.go();
+  assert.equal(await e.f.staged(1), true);
+  assert.deepEqual(e.f.stages, ["not_landed"], "restored at another value: never filled");
+});
+
+test("review 8 S7: a mark at the note's value whose leaf does not check out is no landing: nothing told", async () => {
+  const d = await droppedAndFollowed();
+  d.c.lands = true;
+  d.c.wrongLeaf = true; // the state leaf written is not the deposit's
+  d.c.apply(base64.decode(d.kept[0]!));
+  d.f.go();
+  assert.equal(await d.f.parked(), true);
+  assert.deepEqual(d.f.stages, [], "never filled on a mark whose leaf is not in the tree");
+});
+
+test("review 8 S9 and S13: an ask whose run ended before its last rung was sent ends part_filled when its sent rung lands, never filled", async () => {
+  const d = await droppedAndFollowed({}, ask(3n * RUNG)); // rungs 0.02 and 0.01: the run ends pending on the first
+  assert.equal(d.c.sent.length, 1, "rung 2 never sent");
+  d.c.lands = true;
+  d.c.apply(base64.decode(d.kept[0]!));
+  d.f.go();
+  assert.equal(await d.f.staged(1), true);
+  assert.deepEqual(d.f.stages, ["part_filled"]);
+});
+
+test("review 8 S12: the end reads only the sends the run left open: a taken send before the rung's next note is no part of it, and that note's landing fills the ask", async () => {
+  let sends = 0;
+  const d = await droppedAndFollowed({}, ask(RUNG), (c, rpc, k) => async (m, p) => {
+    // the first send is front-run (its rung goes on U's next note, in the run); that next send is dropped
+    if (k === 0 && m === "sendTransaction" && sends++ === 0) {
+      c.lands = true;
+      c.apply(attackerTx(c, preOf(base64.decode(p[0] as string)), MIN_DEPOSIT));
+      const r = await rpc(m, p);
+      c.lands = false;
+      return r;
+    }
+    return rpc(m, p);
+  });
+  assert.equal(d.c.sent.length, 2);
+  d.c.lands = true;
+  d.c.apply(base64.decode(d.kept[1]!));
+  d.f.go();
+  assert.equal(await d.f.staged(2), true);
+  assert.deepEqual(d.f.stages, ["sent", "filled"], "the next note's send, then the whole rung went in on it");
+});
+
+test("review 8 S11: a send no RPC accepted, with no end at the run's end, is answered sent with its signature and read on", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  const refuse = (rpc: SolanaRpc): SolanaRpc => async (m, p) => (m === "sendTransaction" ? Promise.reject(down()) : rpc(m, p));
+  const f = followed(c, ns, { rpcs: [refuse(c.rpc()), refuse(c.rpc())] });
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  const sig = (await ours(ns))[0]!.sends![0]!.signature;
+  assert.deepEqual((f.r as { answer(): unknown }).answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: sig }] } });
+  assert.equal(await f.parked(), true, "read on");
 });
