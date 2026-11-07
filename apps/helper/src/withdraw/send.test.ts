@@ -21,6 +21,7 @@ import {
   FEE_ACCOUNT_NOT_READY,
   FUND_MARGIN_MS,
   INTENTS,
+  MAINNET_VAULT,
   SEND_MARGIN_MS,
   SETTLE_FLOOR_YOCTO,
   SETTLE_REFUND_ATTACH,
@@ -887,6 +888,31 @@ test("the host's configuration: nothing set carries nothing (bad_shape); a netwo
   assert.throws(() => withdrawSenderFromEnv({ ...good, WITHDRAW_RELAYER_TESTNET: "" }, quoter, {}), /WITHDRAW_RELAYER_TESTNET/);
   // a token of another network, or none, is check 1's bad_shape, with nothing read
   assert.equal(code(await withdrawSenderFromEnv(good, quoter, {}).carry({ ...req(), token: VAULT_CONSTANTS.TOKEN })), "bad_shape");
+});
+
+test("mainnet carries only the vault its deploy record names: any other WITHDRAW_VAULT_MAINNET stops the helper at start", async () => {
+  // the record the owner's deploy wrote (vault-mainnet-test); the pin is its account_id, never a typed copy of the brief
+  const record = JSON.parse(readFileSync(join(import.meta.dirname, "../../../../contracts/vault/deployments/mainnet-test.json"), "utf8")) as { network: string; account_id: string };
+  assert.equal(record.network, "mainnet");
+  assert.equal(MAINNET_VAULT, record.account_id);
+  const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
+  const seed = Buffer.alloc(32, 5);
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+  const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+  const relayer = pub.toString("hex"); // an implicit account, as deploy/withdraw-relayer-key.mjs makes it
+  const env = {
+    WITHDRAW_RELAYER_MAINNET: relayer,
+    WITHDRAW_FEE_RECIPIENT_MAINNET: relayer,
+    HELPER_RELEASE: "1",
+    HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "wpin-")),
+    WITHDRAW_RELAYER_KEYS_MAINNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`,
+  };
+  assert.doesNotThrow(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: record.account_id }, quoter, {}).stop());
+  for (const other of ["vault.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", "vault-test.confidential.unrlzd.near.evil.near", "vault.bf-vt-20261102t071444.testnet"]) {
+    assert.throws(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: other }, quoter, {}), /WITHDRAW_VAULT_MAINNET must be vault-test\.confidential\.unrlzd\.near/, other);
+  }
+  // testnet is not pinned here: its vault is the testnet deploy's (VT-T02), read from config() as before
+  assert.doesNotThrow(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: "", WITHDRAW_RELAYER_KEYS_MAINNET: "", WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_FEE_RECIPIENT_TESTNET: "relay.test.testnet", WITHDRAW_VAULT_TESTNET: "vault.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: env.WITHDRAW_RELAYER_KEYS_MAINNET }, quoter, {}).stop());
 });
 
 // ---- Planted removals that survived the review, each held here ----
