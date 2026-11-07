@@ -1,0 +1,455 @@
+{
+ "good": {
+  "base": "https://api.confidential.unrealized.trade",
+  "at": "2026-11-07T04:08:21.178Z",
+  "methods": [
+   "getAccountInfo",
+   "getMultipleAccounts",
+   "getBalance",
+   "getTokenAccountsByOwner",
+   "getTokenLargestAccounts",
+   "getLatestBlockhash",
+   "simulateTransaction",
+   "sendTransaction",
+   "getSignatureStatuses",
+   "getTransaction",
+   "getBlockHeight",
+   "getMinimumBalanceForRentExemption",
+   "isBlockhashValid",
+   "getSlot",
+   "getSignaturesForAddress",
+   "getFeeForMessage",
+   "getBlockTime",
+   "getEpochInfo",
+   "getProgramAccounts"
+  ],
+  "program": null,
+  "reads": [
+   {
+    "method": "getAccountInfo",
+    "id": 1,
+    "ms": 689,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"object\"}"
+   },
+   {
+    "method": "getMultipleAccounts",
+    "id": 2,
+    "ms": 548,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"object\"}"
+   },
+   {
+    "method": "getBalance",
+    "id": 3,
+    "ms": 200,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"object\"}"
+   },
+   {
+    "method": "getTokenAccountsByOwner",
+    "id": 4,
+    "ms": 256,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":\"object\"}"
+   },
+   {
+    "method": "getTokenLargestAccounts",
+    "id": 5,
+    "ms": 236,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32602,\"message\":\"Invalid param: not a Token mint\"}}"
+   },
+   {
+    "method": "getLatestBlockhash",
+    "id": 6,
+    "ms": 195,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":\"object\"}"
+   },
+   {
+    "method": "simulateTransaction",
+    "id": 7,
+    "ms": 286,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":\"object\"}"
+   },
+   {
+    "method": "sendTransaction",
+    "id": 8,
+    "ms": 209,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"Transaction simulation failed: Transaction did not pass signature verification\"}}"
+   },
+   {
+    "method": "getSignatureStatuses",
+    "id": 9,
+    "ms": 195,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":\"object\"}"
+   },
+   {
+    "method": "getTransaction",
+    "id": 10,
+    "ms": 193,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":null}"
+   },
+   {
+    "method": "getBlockHeight",
+    "id": 11,
+    "ms": 257,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":11,\"result\":444391060}"
+   },
+   {
+    "method": "getMinimumBalanceForRentExemption",
+    "id": 12,
+    "ms": 195,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":12,\"result\":1488440}"
+   },
+   {
+    "method": "isBlockhashValid",
+    "id": 13,
+    "ms": 196,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":13,\"result\":\"object\"}"
+   },
+   {
+    "method": "getSlot",
+    "id": 14,
+    "ms": 194,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":14,\"result\":466372277}"
+   },
+   {
+    "method": "getSignaturesForAddress",
+    "id": 15,
+    "ms": 202,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":15,\"result\":\"array\"}"
+   },
+   {
+    "method": "getFeeForMessage",
+    "id": 16,
+    "ms": 261,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":16,\"result\":\"object\"}"
+   },
+   {
+    "method": "getBlockTime",
+    "id": 17,
+    "ms": 196,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":17,\"result\":null}"
+   },
+   {
+    "method": "getEpochInfo",
+    "id": 18,
+    "ms": 200,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":18,\"result\":\"object\"}"
+   }
+  ]
+ },
+ "bad_before": {
+  "base": "http://127.0.0.1:18080",
+  "at": "2026-11-07T04:08:15.115Z",
+  "methods": [
+   "getAccountInfo",
+   "getMultipleAccounts",
+   "getBalance",
+   "getTokenAccountsByOwner",
+   "getTokenLargestAccounts",
+   "getLatestBlockhash",
+   "simulateTransaction",
+   "sendTransaction",
+   "getSignatureStatuses",
+   "getTransaction",
+   "getBlockHeight",
+   "getMinimumBalanceForRentExemption",
+   "isBlockhashValid",
+   "getSlot",
+   "getSignaturesForAddress",
+   "getFeeForMessage",
+   "getBlockTime",
+   "getEpochInfo",
+   "getProgramAccounts"
+  ],
+  "program": null,
+  "reads": [
+   {
+    "method": "getAccountInfo",
+    "id": 1,
+    "ms": 1167,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"object\"}"
+   },
+   {
+    "method": "getMultipleAccounts",
+    "id": 2,
+    "ms": 333,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"object\"}"
+   },
+   {
+    "method": "getBalance",
+    "id": 3,
+    "ms": 371,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"object\"}"
+   },
+   {
+    "method": "getTokenAccountsByOwner",
+    "id": 4,
+    "ms": 335,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":\"object\"}"
+   },
+   {
+    "method": "getTokenLargestAccounts",
+    "id": 5,
+    "ms": 987,
+    "status": 429,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "retry-after": "10"
+    },
+    "body": "{\"error\":{\"code\":\"rate_limited\"}}"
+   },
+   {
+    "method": "getLatestBlockhash",
+    "id": 6,
+    "ms": 1025,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":\"object\"}"
+   },
+   {
+    "method": "simulateTransaction",
+    "id": 7,
+    "ms": 324,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":\"object\"}"
+   },
+   {
+    "method": "sendTransaction",
+    "id": 8,
+    "ms": 387,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"Transaction simulation failed\"}}"
+   },
+   {
+    "method": "getSignatureStatuses",
+    "id": 9,
+    "ms": 333,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":\"object\"}"
+   },
+   {
+    "method": "getTransaction",
+    "id": 10,
+    "ms": 519,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":null}"
+   },
+   {
+    "method": "getBlockHeight",
+    "id": 11,
+    "ms": 331,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":11,\"result\":444391041}"
+   },
+   {
+    "method": "getMinimumBalanceForRentExemption",
+    "id": 12,
+    "ms": 391,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":12,\"result\":1488440}"
+   },
+   {
+    "method": "isBlockhashValid",
+    "id": 13,
+    "ms": 325,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":13,\"result\":\"object\"}"
+   },
+   {
+    "method": "getSlot",
+    "id": 14,
+    "ms": 1,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "method": "getSignaturesForAddress",
+    "id": 15,
+    "ms": 1,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "method": "getFeeForMessage",
+    "id": 16,
+    "ms": 1,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "method": "getBlockTime",
+    "id": 17,
+    "ms": 0,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   },
+   {
+    "method": "getEpochInfo",
+    "id": 18,
+    "ms": 1,
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
+   }
+  ]
+ }
+}
