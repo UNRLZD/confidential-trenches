@@ -144,6 +144,10 @@
 .rs-toastLink { flex: none; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -4px -4px 0 0; color: var(--text-2); }
 .trb .trb-final { margin-left: 8px; padding: 2px 7px; border-radius: 6px; background: rgba(10, 10, 10, 0.16); font-size: 11px; font-weight: 600; line-height: 14px; }
 @media (max-width: 767.98px) { .rs-toastLink { width: 44px; height: 44px; margin: -14px -14px 0 0; } }
+/* the phone page's toast for a chip's buy (TradeToast.tsx): the run and the end in the box's words, Retry at the right */
+.rs-toast.qt { align-items: center; }
+.qt .trb-end { color: var(--text-1); }
+.qt-retry { flex: none; min-width: 72px; height: 44px; margin: -8px -6px -8px 0; padding: 0 14px; border: 0; border-radius: 10px; background: var(--acc); color: #04140b; font: 600 14px var(--font-ui); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .rs-n[data-state="active"] .rs-g, .rs-ck { animation: none; }
   .rs-ld > i, .rs-grp, .rs-toast, .rs-v, .rs-l { transition: none; }

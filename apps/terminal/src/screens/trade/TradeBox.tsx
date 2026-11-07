@@ -107,6 +107,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const on = at !== null;
   const src = useTradeSource();
   const { kit, moneyOn, snapshot } = src;
+  const { setOpen: openSignin } = useSigninSheet();
   // signed out as the header reads it (never for a user whose first `state` has not landed): Sign in opens the one sheet
   const account = headerModel(snapshot).kind;
   const signedOut = account === "out";
@@ -205,7 +206,16 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     });
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, preview };
+  // a preset, in the box or the phone bar's chip (card app-quick-buy-one-tap): one tap is one buy of its size, through
+  // buy() and its checks; signed out it opens the sign-in sheet
+  const presetOff = (p: Cents) => !signedOut && (!ready || !presetOn(p, max, balance, running) || !askable(p));
+  function tapPreset(p: Cents) {
+    if (signedOut) return openSignin(true);
+    setText(String(p / 100n));
+    buy(p);
+  }
+
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview };
 }
 
 /** A trade state as useTrade gives it. */
@@ -218,9 +228,24 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
   return <TradeView t={t} symbol={symbol} footer={footer} />;
 }
 
+/** The fill toast (S8.12) of a trade state's filled buy; nothing for any other phase. */
+export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
+  const { chain, phase, route, setDismissed } = t;
+  if (phase.k !== "filled") return null;
+  return (
+    <FillToast
+      symbol={symbol}
+      line={toastLine(phase.ms, route.out === null ? null : fmtOut(route.out), symbol, route.cents === null ? "" : usd2(route.cents))}
+      href={route.tx ? txLink([{ chain, hash: route.tx }]) : null}
+      chainName={chain === "solana" ? "solscan" : chain === "base" ? "basescan" : chain === "robinhood" ? "rhExplorer" : "nearblocks"}
+      onClose={() => setDismissed(phase.id)}
+    />
+  );
+}
+
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
-export function TradeView({ t, symbol, footer }: { t: Trade; symbol: string; footer?: ReactNode }) {
-  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, preview } = t;
+export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
@@ -289,12 +314,8 @@ export function TradeView({ t, symbol, footer }: { t: Trade; symbol: string; foo
             className="trb-preset"
             data-preset={centsToDecimal(p)}
             data-on={amount === p || undefined}
-            disabled={!signedOut && (!ready || !presetOn(p, max, balance, running) || !askable(p))}
-            onClick={() => {
-              if (signedOut) return openSignin(true);
-              setText(String(p / 100n));
-              buy(p);
-            }}
+            disabled={presetOff(p)}
+            onClick={() => tapPreset(p)}
           >
             <Bolt />
             {fmtUsd(p)}
@@ -343,15 +364,7 @@ export function TradeView({ t, symbol, footer }: { t: Trade; symbol: string; foo
         {label}
       </button>
       <RouteStrip route={route} symbol={symbol} outText={route.out === null ? null : fmtOut(route.out)} />
-      {phase.k === "filled" && dismissed !== phase.id && (
-        <FillToast
-          symbol={symbol}
-          line={toastLine(phase.ms, route.out === null ? null : fmtOut(route.out), symbol, route.cents === null ? "" : usd2(route.cents))}
-          href={route.tx ? txLink([{ chain, hash: route.tx }]) : null}
-          chainName={chain === "solana" ? "solscan" : chain === "base" ? "basescan" : chain === "robinhood" ? "rhExplorer" : "nearblocks"}
-          onClose={() => setDismissed(phase.id)}
-        />
-      )}
+      {toast && phase.k === "filled" && dismissed !== phase.id && <TradeFillToast t={t} symbol={symbol} />}
       <div className="trb-line">
         <button type="button" className="trb-row" aria-expanded="false" disabled>
           <Swap />
