@@ -569,10 +569,14 @@ export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, un
   return { proven: ok, paid: ok && cost <= sale.fee, unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };
 }
 export const BOUGHT_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)")))}`;
-/** Whether receipt `r` carries the pool's Bought log of this buy: from the pool, `_recipient` W (its one indexed
- *  field), and in its data (IPrivacyPool.sol Bought) the fee recipient, the fee, the spent nullifier and the token the
- *  buy signed. Only the pool emits it, and only after the adapter ran and W's balance rose by minOut
- *  (PrivacyPoolSimple.buy): the adapter's own logs, whatever code it runs, prove nothing. */
+export const WITHDRAWN_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)")))}`;
+/** Whether receipt `r` carries the pool's log of this buy landing: from the pool, `_recipient` W (its one indexed
+ *  field), and in its data the fee recipient, the fee and the spent nullifier. Either Bought (IPrivacyPool.sol), with
+ *  the token the buy signed, which the pool emits only after the adapter ran and W's balance rose by minOut; or
+ *  Withdrawn, which a buy emits when its swap failed (card pool-evm-buy-pays-revert, NOTICE change 18: the note is
+ *  spent, the fee paid and W paid the rest in ETH, as withdraw does), so a swap that fails after its simulation still
+ *  pays the fee. Only the pool emits either, and in the sender's own buy transaction only that buy can (the pool's
+ *  reentrancy guard): the adapter's own logs, whatever code it runs, prove nothing. */
 export function evmBuyLanded(r: unknown, buy: { pool: string; w: string; feeRecipient: string; fee: bigint; nullifier: string; token: string }): boolean {
   const logs = (r as { logs?: unknown } | null)?.logs;
   if (!Array.isArray(logs)) return false;
@@ -581,11 +585,12 @@ export function evmBuyLanded(r: unknown, buy: { pool: string; w: string; feeReci
     if (typeof l !== "object" || l === null) return false;
     const { address, topics, data, removed } = l as { address?: unknown; topics?: unknown; data?: unknown; removed?: unknown };
     if (removed === true || evmRpcHex(address) !== buy.pool || !Array.isArray(topics) || topics.length !== 2) return false;
-    if (evmRpcHex(topics[0]) !== BOUGHT_TOPIC || evmRpcHex(topics[1]) !== `0x${pad(buy.w)}`) return false;
+    const bought = evmRpcHex(topics[0]) === BOUGHT_TOPIC;
+    if ((!bought && evmRpcHex(topics[0]) !== WITHDRAWN_TOPIC) || evmRpcHex(topics[1]) !== `0x${pad(buy.w)}`) return false;
     const d = evmRpcHex(data);
-    if (d === null || d.length !== 2 + 7 * 64) return false;
+    if (d === null || d.length !== 2 + (bought ? 7 : 5) * 64) return false;
     const at = (i: number) => d.slice(2 + 64 * i, 2 + 64 * (i + 1));
-    return at(0) === pad(buy.feeRecipient) && BigInt(`0x${at(2)}`) === buy.fee && at(3) === buy.nullifier && at(5) === pad(buy.token);
+    return at(0) === pad(buy.feeRecipient) && BigInt(`0x${at(2)}`) === buy.fee && at(3) === buy.nullifier && (!bought || at(5) === pad(buy.token));
   });
 }
 /**

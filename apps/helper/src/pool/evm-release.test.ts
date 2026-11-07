@@ -12,7 +12,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, evmPoolRouteData, evmPoolVenues } from "@blindfill/kit";
 import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
-import { BOUGHT_TOPIC, BUY_SELECTOR, BUY_SIGNATURE, EVM_BODY_DATA_MAX, EVM_GAS_MAX, EVM_WITHDRAW_RESERVE_SENDS, evmAddressOf, evmBuyLanded, evmBuyUnpaid, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
+import { BOUGHT_TOPIC, BUY_SELECTOR, WITHDRAWN_TOPIC, BUY_SIGNATURE, EVM_BODY_DATA_MAX, EVM_GAS_MAX, EVM_WITHDRAW_RESERVE_SENDS, evmAddressOf, evmBuyLanded, evmBuyUnpaid, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const CAST = JSON.parse(readFileSync(new URL("./fixtures/release-cast.json", import.meta.url), "utf8")) as {
@@ -427,6 +427,42 @@ test("evmBuyUnpaid: a proven buy whose receipt cost passes its fee (an l1Fee) ho
     ["a word short", { ...log, data: log.data.slice(0, -64) }],
   ];
   for (const [what, l] of rows) {
+    assert.equal(evmBuyLanded(one(l), buy), false, what);
+    assert.deepEqual(evmBuyUnpaid(one(l), ok, buy, 10n ** 18n).proven, false, `${what}: unproven, its whole cost held`);
+  }
+});
+
+// ---- card pool-evm-buy-pays-revert: a buy whose swap fails lands with the pool's Withdrawn, its fee paid ----
+test("evmBuyLanded: a buy whose swap failed lands on the pool's Withdrawn of this buy (W, fee recipient, fee, nullifier), each field read", () => {
+  const data = buyAs();
+  const r = evmReadRelease(bytes(data));
+  const buy = { pool: POOL, w: r.recipient, feeRecipient: r.feeRecipient, fee: r.fee, nullifier: r.nullifier, token: r.buy!.token, gas: 733_669n, maxFeePerGas: 1_880_000_000n };
+  const pad = (a: string) => a.slice(2).padStart(64, "0");
+  const log = { address: POOL, topics: [WITHDRAWN_TOPIC, `0x${pad(r.recipient)}`], data: `0x${pad(r.feeRecipient)}${w32(r.value)}${w32(r.fee)}${r.nullifier}${w32(7n)}` };
+  const ok = { status: "0x1", gasUsed: "0x95433", effectiveGasPrice: "0x7d2b7500", logs: [log] };
+  assert.equal(evmBuyLanded(ok, buy), true);
+  const cost = 0x95433n * buy.maxFeePerGas;
+  assert.deepEqual(evmBuyUnpaid(ok, ok, buy, 10n ** 18n), { proven: true, unpaid: cost > r.fee ? cost - r.fee : 0n }, "proven: only the cost past the fee is held");
+  const word = (i: number) => log.data.slice(2 + 64 * i, 2 + 64 * (i + 1));
+  const withWord = (i: number, w: string) => `0x${[0, 1, 2, 3, 4].map((k) => (k === i ? w : word(k))).join("")}`;
+  const one = (l: object) => ({ ...ok, logs: [l] });
+  const rows: [string, object | null][] = [
+    ["from another address", { ...log, address: "0x000000000000000000000000000000000000dead" }],
+    ["another W topic", { ...log, topics: [WITHDRAWN_TOPIC, `0x${"0".repeat(24)}${"1".repeat(40)}`] }],
+    ["another event", { ...log, topics: [`0x${"ab".repeat(32)}`, log.topics[1]] }],
+    ["another fee recipient", { ...log, data: withWord(0, w32(0xdeadn)) }],
+    ["another fee", { ...log, data: withWord(2, w32(r.fee + 1n)) }],
+    ["another nullifier", { ...log, data: withWord(3, w32(BigInt(`0x${r.nullifier}`) + 1n)) }],
+    ["removed", { ...log, removed: true }],
+    ["a word short", { ...log, data: log.data.slice(0, -64) }],
+    ["a word long (Bought's length under Withdrawn's topic)", { ...log, data: `${log.data}${w32(0x7070n)}${w32(1n)}` }],
+    ["status 0", null],
+  ];
+  for (const [what, l] of rows) {
+    if (l === null) {
+      assert.deepEqual(evmBuyUnpaid({ ...ok, status: "0x0" }, ok, buy, 10n ** 18n).proven, false, what);
+      continue;
+    }
     assert.equal(evmBuyLanded(one(l), buy), false, what);
     assert.deepEqual(evmBuyUnpaid(one(l), ok, buy, 10n ** 18n).proven, false, `${what}: unproven, its whole cost held`);
   }

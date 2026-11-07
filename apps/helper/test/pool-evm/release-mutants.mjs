@@ -49,6 +49,7 @@ const HOLD = "a buy's worst gas is held against W, the client and the token";
 const RESERVE = "a buy is refused (429) when the sender's lower pending balance";
 const RETRY = "a device's retry of its own in-flight buy";
 const PROOF = "evmBuyUnpaid: a proven buy whose receipt cost";
+const PAYS_OUT = "evmBuyLanded: a buy whose swap failed lands on the pool's Withdrawn";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -128,8 +129,12 @@ export const MUTANTS = [
   [EVM, "    return at(0) === pad(buy.feeRecipient) && ", "    return ", T, PROOF],
   [EVM, " && BigInt(`0x${at(2)}`) === buy.fee", "", T, PROOF],
   [EVM, " && at(3) === buy.nullifier", "", T, PROOF],
-  [EVM, " && at(5) === pad(buy.token);", ";", T, PROOF],
-  [EVM, "    if (d === null || d.length !== 2 + 7 * 64) return false;", "    if (d === null) return false;", T, PROOF],
+  [EVM, " && (!bought || at(5) === pad(buy.token));", ";", T, PROOF],
+  [EVM, "    if (d === null || d.length !== 2 + (bought ? 7 : 5) * 64) return false;", "    if (d === null) return false;", T, PROOF],
+  // card pool-evm-buy-pays-revert: a buy whose swap failed lands on the pool's Withdrawn, each field read
+  [EVM, "    const bought = evmRpcHex(topics[0]) === BOUGHT_TOPIC;", "    const bought = false;", T, PROOF],
+  [EVM, "(!bought && evmRpcHex(topics[0]) !== WITHDRAWN_TOPIC)", "(!bought)", T, PAYS_OUT],
+  [EVM, "(bought ? 7 : 5)", "(bought ? 7 : 7)", T, PAYS_OUT],
   // review a2ff5521 L2: a revert is held against its method, so the same proof still withdraws in its epoch
   [EVM, "        if (was === epoch && how === w.method) return no(422, \"reverted\");", "        if (was === epoch) return no(422, \"reverted\");", T, HOLD],
   // a withdraw's request read as before (evm.test.ts's signed requests)
