@@ -64,7 +64,7 @@ export const MUTANTS = [
   ['const held = agreed([reads[0].held, reads[1].held], isU, "held");', "const held = reads[0].held;", TR],
   ["if (deadlineMs !== lowMs + ID_INTENT_WINDOW_MS || deadlineMs <= highMs)", "if (deadlineMs > lowMs + ID_INTENT_WINDOW_MS || deadlineMs <= highMs)", DL],
   ["|| deadlineMs <= highMs) return refuse", ") return refuse", DL],
-  ['if (Number.isNaN(prior) || !(lowMs > prior)) return refuse("prior_deadline");', 'if (Number.isNaN(prior) || !(highMs > prior)) return refuse("prior_deadline");', DL],
+  [' || !(lowMs > prior)) return refuse("prior_deadline");', ' || !(highMs > prior)) return refuse("prior_deadline");', DL],
   ['|| VERSIONED_NONCE_V1.some((b, k) => n[k] !== b)) return refuse("nonce");', ') return refuse("nonce");', DL],
   ['  if (new DataView(n.buffer, n.byteOffset).getBigUint64(9, true) !== BigInt(deadlineMs) * 1_000_000n) return refuse("nonce");\n', "", DL],
   ['if (!Array.isArray(p.intents) || p.intents.length !== 1 ||', "if (!Array.isArray(p.intents) ||", TR],
