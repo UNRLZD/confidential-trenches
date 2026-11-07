@@ -167,3 +167,50 @@ test("pool-deposit-sent-end fold review 3: the page wires each deposit kind's ho
   assert.equal(sol[0]!.host().signal?.aborted, false, "a follow after the next sign in reads on");
   assert.equal(evm[0]!.host().signal?.aborted, false);
 });
+
+test("pool-deposit-sent-end low 3: the page's deposit hosts read the notes read only (records): a record written to the page's store is returned, and no note store opens (no notes lock asked)", async () => {
+  type SolHost = import("../src/pool-deposit.ts").PoolDepositHost;
+  type EvmHost = import("../src/pool-deposit-evm.ts").PoolDepositEvmHost;
+  const { NOTES_LOCK, openNoteStore } = await import("../../wallet/src/notes/store.ts");
+  const idb = new IDBFactory();
+  const store = async () => {
+    const w = await openWalletStore({ indexedDB: idb });
+    stores.push(w);
+    return w;
+  };
+  // a note in the page's store (the record a pass rebuilt or restored, as the end's reads must see it)
+  const ns = await openNoteStore(await store());
+  const n = await ns.planDeposit(123n, () => 456n);
+  ns.close();
+  const sol: (() => SolHost)[] = [];
+  const evm: (() => EvmHost)[] = [];
+  const r = rpcs();
+  const t = testnetPool({ store, seed64: async () => SEED.slice() }, {
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: () => r.pair,
+    evmRound: () => async () => ({ events: [], finalBlock: 100n }),
+    depositKinds: {
+      solana: (host) => () => (sol.push(host), { error: "not_allowed" }),
+      evm: (host) => () => (evm.push(host), { error: "not_allowed" }),
+    },
+  });
+  t.flow({ ...ASK, chain: "solana", decimals: 9, amount: 10_000_000n }, ctx);
+  t.flow(ASK, ctx);
+  const locks = navigator.locks;
+  const asked: string[] = [];
+  const request = locks.request;
+  locks.request = function (this: LockManager, name: string, ...rest: unknown[]) {
+    asked.push(name);
+    return (request as (...a: unknown[]) => Promise<unknown>).call(locks, name, ...rest);
+  } as typeof locks.request;
+  try {
+    for (const [what, host] of [["Solana", sol[0]!], ["Base", evm[0]!]] as const) {
+      const got = await host().records();
+      assert.deepEqual(got.map((x) => [x.id, x.precommitment]), [[n.id, 456n]], `the ${what} host's records read the page's store`);
+    }
+  } finally {
+    delete (locks as { request?: unknown }).request;
+  }
+  assert.equal(locks.request, request, "the spy is gone");
+  assert.deepEqual(asked.filter((x) => x === NOTES_LOCK), [], "no note store opened: the notes lock never asked");
+});

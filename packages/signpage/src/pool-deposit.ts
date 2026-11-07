@@ -80,8 +80,9 @@
 //   failed on both, with no mark read at or past those heights' slots) is no end: the pass builds the note again from
 //   U's money, so the reads start the pass (`settle`) and follow the new send; never not_landed for it (review 1). Then:
 //   filled when every open note landed and every rung was sent, part_filled when any of the ask landed, else not_landed.
-//   The reads come every POOL_DEPOSIT_FOLLOW_MS while a send may land, back off to POOL_DEPOSIT_FOLLOW_MAX_MS while only
-//   the pass can move it (or a read fails), and stop only at sign out (`signal`), telling nothing: a deposit that waits an
+//   The reads come every POOL_DEPOSIT_FOLLOW_MS while a send may land inside its landing window, back off to
+//   POOL_DEPOSIT_FOLLOW_MAX_MS while only the pass can move it, a read fails, or a send stays "may land" past that window
+//   (delta review low 1), and stop only at sign out (`signal`, read before each read), telling nothing: a deposit that waits an
 //   hour on a top-up or a provider is still told when it lands, while the page lives (fold review 5; a reload drops the
 //   id's listener, and the note stays INCOMING for the load and state-read pass).
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
@@ -164,6 +165,26 @@ export const POOL_DEPOSIT_FOLLOW_MS = 2_000;
 /** The end's reads back off, doubling from POOL_DEPOSIT_FOLLOW_MS to this, while nothing can move without the pass
  *  (every send of each open note dead with no mark, or U short of its send again) or a read fails (a provider down). */
 export const POOL_DEPOSIT_FOLLOW_MAX_MS = 60_000;
+/** How long a note's send is read every POOL_DEPOSIT_FOLLOW_MS as one that may land: the run's own verdict window (two
+ *  finalizations and a blockhash's life). Past it, a read that stays "may land" (one RPC holding a mark the other never
+ *  does, or a finalized height that stops moving) backs off as a quiet one, never stopped (delta review low 1). Counted
+ *  per note from the end's first read, and again from each read that finds every send of it dead (the pass sends anew). */
+export const POOL_DEPOSIT_LANDING_MS = POOL_DEPOSIT_READS * POOL_DEPOSIT_WAIT_MS;
+
+/** The end's wait: ended early, its timer cleared, when `signal` aborts, so a sign out leaves no timer (delta review
+ *  low 4). */
+export function followWait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((ok) => {
+    if (signal?.aborted) return ok();
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      ok();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
 
 // "taken": the run's last taken note (a front-runner took as many as the ask has rungs, and one more), a verdict of its
 // own, never read as a send that may land
@@ -367,44 +388,63 @@ async function noteEnd(h: PoolDepositHost, sync: ReturnType<typeof solanaTreeSyn
   const rec = (await h.records()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
   if (rec !== undefined && rec.state !== "INCOMING") return rec.state === "PLANNED" ? null : rec.leaf?.value === value ? "landed" : "dead";
   const sends = rec?.sends?.length ? rec.sends : n.sends;
+  // the sign out read before each read, so no read naming U goes out after it (delta review low 4)
+  stopped(h);
   const fs = await finals(h);
   const expired = sends.map((x) => fs.every((y) => y.height > x.last_valid_block_height));
+  stopped(h);
   const dead = expired.every(Boolean) ? expired : await failedOnBoth(h, sends, expired);
+  stopped(h);
   const m = await markOf(h, n.precommitment, [fs[0].slot, fs[1].slot], wait);
   if (m === "one") return null;
   if (m === null) return dead.every(Boolean) ? "expired" : null;
+  stopped(h);
   if (m.value !== value) return (await bothLanded(h, sends)) ? null : "dead";
+  stopped(h);
   await leafOf(sync, scope, n.precommitment, m);
   return "landed";
 }
 
+/** A read of the end's after the sign out: refused before it goes out (the follower then tells nothing). */
+export function stopped(h: { signal?: AbortSignal }): void {
+  if (h.signal?.aborted) throw new Error("signed out");
+}
+
 /** The end of an ask whose run ended with no verdict: its open notes read until each is landed or dead (a read that
  *  fails or does not check out is read again), with no lock held and nothing written. Every POOL_DEPOSIT_FOLLOW_MS
- *  while a send may land; doubling to POOL_DEPOSIT_FOLLOW_MAX_MS while nothing can move without the pass (every send
- *  dead with no mark: the pass is started, `settle`) or a read fails. Null, telling nothing, once the page leaves the
- *  deposit (`signal`), never on a clock: a top-up that comes hours on is still told (fold review 5). */
+ *  while a send may land inside its landing window (POOL_DEPOSIT_LANDING_MS); doubling to POOL_DEPOSIT_FOLLOW_MAX_MS
+ *  while nothing can move without the pass (every send dead with no mark: the pass is started, `settle`), a read fails,
+ *  or a send stays "may land" past its window (delta review low 1). Null, telling nothing, once the page leaves the
+ *  deposit (`signal`, read before each read, and the wait ends with it: low 4), never on a clock: a top-up that comes
+ *  hours on is still told (fold review 5). */
 export async function followPoolDeposit(h: PoolDepositHost, left: PoolDepositLeft): Promise<"filled" | "part_filled" | "not_landed" | null> {
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const wait = h.wait ?? ((ms: number) => followWait(ms, h.signal));
   const sync = solanaTreeSync(h.rpcs, h.pin.program);
   const { scope } = solanaPoolOf(h.pin.program);
   const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
+  // the ms the end's reads have waited, and each note's landing window's start on that count
+  let waited = 0;
+  const since = left.notes.map(() => 0);
   let gap = POOL_DEPOSIT_FOLLOW_MS;
   for (;;) {
-    if (h.signal?.aborted) return null;
-    // quiet: no open note has a send that may land, so the next read can wait longer
+    // quiet: no open note has a send that may land inside its window, so the next read can wait longer
     let quiet = true;
     let kick = false;
     for (const [k, n] of left.notes.entries()) {
       if (ends[k] !== null) continue;
+      if (h.signal?.aborted) return null;
       const e = await noteEnd(h, sync, scope, n, wait).catch(() => "fault" as const);
       if (e === "landed" || e === "dead") ends[k] = e;
-      else if (e === "expired") kick = true;
-      else if (e === null) quiet = false;
+      else if (e === "expired") {
+        kick = true;
+        since[k] = waited; // the pass sends it anew: a new window
+      } else if (e === null && waited - since[k]! < POOL_DEPOSIT_LANDING_MS) quiet = false;
     }
     if (ends.every((e) => e !== null)) break;
     if (kick) h.settle?.();
     if (!quiet) gap = POOL_DEPOSIT_FOLLOW_MS;
     await wait(gap);
+    waited += gap;
     if (quiet) gap = Math.min(gap * 2, POOL_DEPOSIT_FOLLOW_MAX_MS);
   }
   if (h.signal?.aborted) return null;

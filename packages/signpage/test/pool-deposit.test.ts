@@ -20,13 +20,13 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { depositId, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
-import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, type NoteRecord, type NoteStore, type PoolSend } from "../../wallet/src/notes/store.ts";
 import { solanaPoolOf, SOL_POOLS } from "../../wallet/src/pool/solana.ts";
 import { solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
+import { followPoolDeposit, POOL_DEPOSIT_LANDING_MS, POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { pairDown } from "./outage.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -2148,4 +2148,147 @@ test("review 8 S11: a send no RPC accepted, with no end at the run's end, is ans
   const sig = (await ours(ns))[0]!.sends![0]!.signature;
   assert.deepEqual((f.r as { answer(): unknown }).answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: sig }] } });
   assert.equal(await f.parked(), true, "read on");
+});
+
+// ---- the delta review of 09542dc6 (five Lows): the reviewer's REV tests adopted as written, and the folds' own ----
+const settleMs = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+test("pool-deposit-sent-end low 2 (REV S1): every rung lands, answered at the first send: exactly one end reaches the app, and nothing after it", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const stages: string[] = [];
+  let ended!: () => void;
+  const done = new Promise<void>((r) => (ended = r));
+  const kind = poolDepositKind(() => ({ ...host(c, ns), end: ended }));
+  const r = kind(ask(30_000_000n), { id: "rv1", sha: "00", progress: (s) => stages.push(String(s)) });
+  assert.ok("running" in r);
+  await r.after;
+  await done;
+  await settleMs(500); // the follow, if any, runs after the run's end hook
+  assert.deepEqual(stages, ["sent", "filled"]);
+});
+test("pool-deposit-sent-end low 2 (REV S2): a two-rung ask, rung 2 short: part_filled once and nothing after it", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 100_000_000);
+  const stages: string[] = [];
+  let ended!: () => void;
+  const done = new Promise<void>((r) => (ended = r));
+  const kind = poolDepositKind(() => ({ ...host(c, ns, { landed: () => void (c.accounts.get(u.address)!.lamports = 0) }), end: ended }));
+  const r = kind(ask(3n * RUNG), { id: "rv2", sha: "00", progress: (s) => void stages.push(String(s)) });
+  await (r as { after: Promise<void> }).after;
+  await done;
+  await settleMs(500);
+  assert.deepEqual(stages, ["part_filled"]);
+});
+
+/** Open notes of an ask for followPoolDeposit, each with one made-up send (no record of them in the store). */
+const openLeft = (n: number, value = RUNG) => ({ notes: Array.from({ length: n }, (_, k) => ({ precommitment: 7_000n + BigInt(k), sends: [{ signature: "1".repeat(63) + String(k + 1), value, last_valid_block_height: 1_000_000n } as PoolSend] })), landed: false, whole: true });
+
+test("pool-deposit-sent-end low 2 R10: a sign out during the last read tells nothing, even when that read finds the note landed", async () => {
+  const c = chain();
+  const ns = await notes();
+  const stop = new AbortController();
+  const left = openLeft(1);
+  // the read finds the note's record UNSPENT at its value, and the sign out lands while it is read
+  const rec = { scope: SCOPE, precommitment: left.notes[0]!.precommitment, state: "UNSPENT", leaf: { value: RUNG } } as unknown as NoteRecord;
+  const h = { ...host(c, ns), signal: stop.signal, records: async () => (stop.abort(), [rec]) };
+  assert.equal(await followPoolDeposit(h, left), null, "no end after the sign out");
+  // the same read with no sign out: filled (the test reads the end it means to stop)
+  assert.equal(await followPoolDeposit({ ...host(c, ns), records: async () => [rec] }, left), "filled");
+});
+
+test("pool-deposit-sent-end low 1: a send that stays 'may land' (never landed, its blockhash never past on both RPCs) is read every 2 s through its landing window, then backs off as a quiet one, 4 s doubling to 60 s, and is never stopped", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false; // dropped, and the height never moves: no read can call it dead
+  const waits: number[] = [];
+  let ended = false;
+  let cut = false;
+  const kind = poolDepositKind(() => ({
+    ...host(c, ns),
+    wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (ended) waits.push(ms);
+    },
+    end: () => void (ended = true),
+  }));
+  await (kind(ask(RUNG), { id: "l1", sha: "00", progress: () => {} }) as { after: Promise<void> }).after;
+  const sum = () => waits.reduce((a, b) => a + b, 0);
+  for (const t0 = Date.now(); sum() < 6 * 3_600_000 && Date.now() - t0 < 30_000; ) await settleMs(20);
+  cut = true;
+  const inside = POOL_DEPOSIT_LANDING_MS / 2_000;
+  assert.equal(POOL_DEPOSIT_LANDING_MS, POOL_DEPOSIT_READS * POOL_DEPOSIT_WAIT_MS, "the window is the run's own verdict window");
+  // each read inside the window waits 2 s, and so does the first read past it (a quiet wait doubles after it is waited)
+  assert.ok(waits.slice(0, inside + 1).every((w) => w === 2_000), "every 2 s inside the window");
+  assert.deepEqual(waits.slice(inside + 1, inside + 8), [4_000, 8_000, 16_000, 32_000, 60_000, 60_000, 60_000], "past it, backed off and capped");
+  assert.ok(sum() >= 6 * 3_600_000, `still reading after 6 h: ${sum()} ms over ${waits.length} reads`);
+  assert.ok(waits.length < inside + 400, `the reads past the window come a minute apart: ${waits.length}`);
+});
+
+test("pool-deposit-sent-end low 4: a sign out during a pass's reads stops at once: no RPC read after it, for any open note", async () => {
+  const c = chain();
+  const ns = await notes();
+  const stop = new AbortController();
+  let after = 0;
+  const counted = (rpc: SolanaRpc): SolanaRpc => async (m, p) => (stop.signal.aborted && after++, rpc(m, p));
+  const h = { ...host(c, ns), rpcs: [counted(c.rpc()), counted(c.rpc())] as const, signal: stop.signal, records: async () => (stop.abort(), ns.list()), wait: async () => {} };
+  assert.equal(await followPoolDeposit(h, openLeft(3)), null);
+  assert.equal(after, 0, "no read naming U after the sign out");
+  // the same pass with no sign out reads each note on both RPCs (the count above means something)
+  let reads = 0;
+  const h2 = { ...host(c, ns), rpcs: [c.rpc(), c.rpc()].map((r) => (async (m, p) => (reads++, r(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc], wait: () => Promise.reject(new Error("cut")) };
+  await followPoolDeposit(h2, openLeft(3)).catch(() => null);
+  assert.ok(reads >= 6, `3 open notes read on both RPCs: ${reads}`);
+});
+
+test("pool-deposit-sent-end low 4: the end's own wait ends at the sign out, its timer cleared: the follow returns at once, not a wait later", async () => {
+  const c = chain();
+  const ns = await notes();
+  const stop = new AbortController();
+  const { wait: _no, ...bare } = host(c, ns); // the page's host: no wait of its own, so the follower's is used
+  const got = followPoolDeposit({ ...bare, signal: stop.signal }, openLeft(1));
+  await settleMs(300); // the first read done, the 2 s wait running
+  const t0 = Date.now();
+  stop.abort();
+  const end = await Promise.race([got, settleMs(1_200).then(() => "still waiting" as const)]);
+  assert.equal(end, null, "the follow ended with the sign out");
+  assert.ok(Date.now() - t0 < 1_000, `ended ${Date.now() - t0} ms after the sign out`);
+});
+
+test("pool-deposit-sent-end low 1: a note the pass sends anew gets a new landing window: past the window, a dead read starts the pass, and the new send is read every 2 s again", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  const waits: number[] = [];
+  let ended = false;
+  let cut = false;
+  let killed = -1;
+  let pass: Promise<unknown> | null = null;
+  const sum = () => waits.reduce((a, b) => a + b, 0);
+  const kind = poolDepositKind(() => ({
+    ...host(c, ns),
+    settle: () => void (pass ??= settlePoolDeposits(host(c, ns))),
+    wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (!ended) return;
+      waits.push(ms);
+      if (killed < 0 && sum() > POOL_DEPOSIT_LANDING_MS + 180_000) {
+        killed = waits.length;
+        c.height += 1_000; // the send past its blockhash's life on both: dead, with no mark
+      }
+      if (pass) await pass;
+    },
+    end: () => void (ended = true),
+  }));
+  await (kind(ask(RUNG), { id: "l1n", sha: "00", progress: () => {} }) as { after: Promise<void> }).after;
+  for (const t0 = Date.now(); (killed < 0 || waits.length < killed + 4) && Date.now() - t0 < 30_000; ) await settleMs(20);
+  cut = true;
+  assert.ok(killed > 0, "the reads went past the window");
+  assert.equal(waits[killed - 1], 60_000, "backed off past the window");
+  assert.equal((await ours(ns))[0]!.sends!.length, 2, "the pass sent the note anew");
+  assert.deepEqual(waits.slice(killed, killed + 3), [60_000, 2_000, 2_000], "the dead read waits quiet, then the new send is read every 2 s");
 });
