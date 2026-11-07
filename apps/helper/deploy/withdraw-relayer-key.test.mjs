@@ -14,7 +14,9 @@ import { MAINNET_VAULT } from "../src/withdraw/send.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "withdraw-relayer-key.sh");
-const RECORD = path.join(HERE, "../../../contracts/vault/deployments/mainnet-test.json");
+// the repo's mainnet deploy record by the kit's rule (the script's own): mainnet-v1.json once it exists, else mainnet-test.json
+const DEPLOYMENTS = path.join(HERE, "../../../contracts/vault/deployments");
+const RECORD = path.join(DEPLOYMENTS, existsSync(path.join(DEPLOYMENTS, "mainnet-v1.json")) ? "mainnet-v1.json" : "mainnet-test.json");
 const COMMIT = "a".repeat(40);
 const NAMES = ["WITHDRAW_VAULT_MAINNET", "WITHDRAW_RELAYER_MAINNET", "WITHDRAW_FEE_RECIPIENT_MAINNET", "WITHDRAW_RELAYER_KEYS_MAINNET"];
 
@@ -26,7 +28,7 @@ function server({ env = `HELPER_COMMIT=${COMMIT}\nHELPER_RELEASE=3\nJUPITER_API_
   chmodSync(path.join(deploy, "withdraw-relayer-key.sh"), 0o755);
   if (record !== null) {
     mkdirSync(path.join(dir, "contracts/vault/deployments"), { recursive: true });
-    writeFileSync(path.join(dir, "contracts/vault/deployments/mainnet-test.json"), record);
+    writeFileSync(path.join(dir, "contracts/vault/deployments", path.basename(RECORD)), record);
   }
   if (env !== null) writeFileSync(path.join(deploy, ".env"), env, { mode: 0o600 });
   const bin = path.join(dir, "bin");
