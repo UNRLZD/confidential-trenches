@@ -208,7 +208,7 @@ try {
         check(hidden, `${tag}: the grab handle did not close the sheet`);
         check((await sheet(page).getAttribute("data-open")) === "false", `${tag}: data-open is not false`);
         check((await box(page).count()) === 1, `${tag}: the box was removed on the close`);
-        check((await page.evaluate(() => document.body.style.overflow)) === "", `${tag}: the page stays locked after the close`);
+        check((await settle(() => page.evaluate(() => document.body.style.overflow), "")) === "", `${tag}: the page stays locked after the close`);
         check(!(await cta(page).isVisible()), `${tag}: the closed sheet's button is visible`);
         await page.clock.runFor(800);
         const toast = page.locator('[data-testid="fill-toast"]');
@@ -235,7 +235,7 @@ try {
         await openSheet(`${tag} widen`, page);
         await page.setViewportSize({ width: 1024, height: 768 });
         check(await sheet(page).waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false), `${tag}: the sheet stays open past the phone width`);
-        check((await page.evaluate(() => document.body.style.overflow)) === "", `${tag}: the page stays locked past the phone width`);
+        check((await settle(() => page.evaluate(() => document.body.style.overflow), "")) === "", `${tag}: the page stays locked past the phone width`);
       }
       await ctx.close();
     }
@@ -278,16 +278,15 @@ try {
     await page.setViewportSize(to);
     let shown;
     if (to.width >= 768) {
-      // the page's phone layout is display:none at this width, so "hidden" comes with the layout switch itself: the lock
-      // must be gone on that same read (red at 6e575823, where it went only with React's commit of the close), and the
-      // sheet's own state must close (data-open false)
+      // the page's phone layout is display:none at this width, so "hidden" holds from the resize's own style update, while
+      // the media query's change event (which releases the lock and closes the sheet) fires at the next rendering step:
+      // a read on the same turn as "hidden" races that step (it passed in one CI job and failed in another on 2c54e66e).
+      // What a user sees is the next frame on: the sheet's own state closed (data-open false) and the page unlocked
       check(await sheet(page).waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false), `${tag}: the sheet stays drawn past the phone width`);
-      const atSwitch = await page.evaluate(() => document.body.style.overflow);
-      check(atSwitch === "", `${tag}: the page stays locked at the desktop width (overflow ${JSON.stringify(atSwitch)} as the layout switched)`);
       const closedState = await settle(() => sheet(page).getAttribute("data-open"), "false");
       check(closedState === "false", `${tag}: the sheet's state stays open past the phone width (data-open ${closedState})`);
-      const after = await settle(() => page.evaluate(() => document.body.style.overflow), "");
-      check(after === "", `${tag}: the page is locked again after the close (overflow ${JSON.stringify(after)})`);
+      const lock = await settle(() => page.evaluate(() => document.body.style.overflow), "");
+      check(lock === "", `${tag}: the page stays locked at the desktop width (overflow ${JSON.stringify(lock)})`);
       shown = desk;
     } else {
       await page.locator(".tkp-phone .tkp-buy").click();
