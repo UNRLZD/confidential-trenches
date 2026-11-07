@@ -127,7 +127,7 @@ test("F4: the seed is written once, mode 600, by a temporary file, fsync and lin
   const d2 = path.join(fresh(), "r");
   stateDir(d2, ROOTS, { create: true });
   writeFileSync(path.join(d2, "seed"), "nope\n", { mode: 0o600 });
-  assert.throws(() => stateDir(d2, ROOTS, { create: false }), /holds no seed/);
+  assert.throws(() => stateDir(d2, ROOTS, { create: false }), /not a seed this driver wrote/);
   // inside the repository is refused
   assert.throws(() => stateDir(path.join(ROOT, "tmp-state"), ROOTS, { create: true }), /inside the repository/);
 });
@@ -150,6 +150,28 @@ test("F4: each step is its own file, written by temporary file, fsync and rename
   assert.deepEqual(st.read("deposit"), { amount: "1000000" });
   assert.equal(readFileSync(path.join(dir, "seed"), "utf8"), seed);
   assert.throws(() => st.write("seed" as never, {}), /no step/);
+});
+
+test("L1: the run step is written once, as the seed is: a second first plan on the folder is refused, the first kept", () => {
+  const dir = path.join(fresh(), "run");
+  const a = stateDir(dir, ROOTS, { create: true });
+  const b = stateDir(dir, ROOTS, { create: true });
+  a.writeOnce("run", { i: 2, U: "u2" });
+  assert.throws(() => b.writeOnce("run", { i: 5, U: "u5" }), /planned first[^]*paste the same line again/);
+  assert.deepEqual(b.read("run"), { i: 2, U: "u2" });
+  assert.equal(statSync(path.join(dir, "run.json")).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(dir).sort(), ["run.json", "seed"]);
+  assert.match(SRC, /st\.writeOnce\("run", run\)/);
+  assert.doesNotMatch(SRC, /st\.write\("run"/);
+});
+
+test("L1: a seed file not in this driver's own format (64 lowercase hex and one newline, mode 600) is refused", () => {
+  for (const text of ["A".repeat(64) + "\n", "a".repeat(64), "a".repeat(64) + "\n\n", " " + "a".repeat(64) + "\n", '{"seed":"' + "a".repeat(64) + '"}\n']) {
+    const dir = path.join(fresh(), "r");
+    stateDir(dir, ROOTS, { create: true });
+    writeFileSync(path.join(dir, "seed"), text, { mode: 0o600 });
+    assert.throws(() => stateDir(dir, ROOTS, { create: false }), /not a seed this driver wrote/, JSON.stringify(text));
+  }
 });
 
 test("F5: a step of another seed is told apart by its fingerprint; the driver checks it before U is used", () => {

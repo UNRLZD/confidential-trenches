@@ -221,9 +221,11 @@ export function stateDir(dir: string, roots: string[], { create, fs = REAL_FS }:
     }
   }
   if ((statSync(seedFile).mode & 0o077) !== 0) throw new Error(`${seedFile} is readable by others: chmod 600 it`);
-  const hex = readFileSync(seedFile, "utf8").trim();
-  if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error(`${seedFile} holds no seed: keep the folder and do not edit it`);
-  const seed = Buffer.from(hex, "hex");
+  // the driver's own format only (what it writes above): a seed file of any other shape, another tool's or an earlier
+  // version's, is never taken for this run's
+  const text = readFileSync(seedFile, "utf8");
+  if (!/^[0-9a-f]{64}\n$/.test(text)) throw new Error(`${seedFile} is not a seed this driver wrote: keep the folder and do not edit it`);
+  const seed = Buffer.from(text.slice(0, 64), "hex");
   const fileOf = (step: Step) => {
     if (!STEPS.includes(step)) throw new Error(`no step ${step}`);
     return path.join(real, `${step}.json`);
@@ -237,6 +239,15 @@ export function stateDir(dir: string, roots: string[], { create, fs = REAL_FS }:
     },
     write(step: Step, value: unknown): void {
       durable(fileOf(step), json(value) + "\n", "rename", fs);
+    },
+    /** Writes the step once (link, as the seed): another process that wrote it first wins, and this one is refused. */
+    writeOnce(step: Step, value: unknown): void {
+      try {
+        durable(fileOf(step), json(value) + "\n", "link", fs);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`another run on this folder planned first: nothing more is done here; paste the same line again and it goes on with that plan`);
+        throw e;
+      }
     },
   };
 }
@@ -457,7 +468,7 @@ async function go(argv: string[], create: boolean) {
     const first = await storeOfLane(null);
     const note = await first.ns.planDeposit(scope, (ref: unknown) => noteSecrets(seed64, ref).precommitment);
     run = { network, fingerprint: fp, i: note.ref.i, U: depositAccount(seed64, scope, note.ref.i).account, precommitment: String(note.precommitment), to };
-    st.write("run", run);
+    st.writeOnce("run", run);
     first.ns.close();
     first.w.close?.();
   }
