@@ -5455,6 +5455,15 @@ test("review of 72e28658, M1 (buy) an honest hook with a visible 5% fee and two 
   assert.equal(SALES.get(hash)!.bought, true, "the buy lands at 1.9");
 });
 
+test("review of 72e28658, M1 (full set) a route whose read with every unlisted hook replaced answers 0 (its liquidity in a hook alone) is refused no_quote, though a read with only some replaced answers", async () => {
+  const [token, x] = ["0x00000000000000000000000000000000000d1d24", xAt(0x9d4)];
+  const h1: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, RH(22)), give: (a) => a, lie: (a) => a };
+  const h2: ModelPool = { key: keyOf(token, x, 3000, 60, RH(23)), give: () => 0n, lie: (a) => a };
+  const route = v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: RH(22) }, { currency: token, fee: 3000, tickSpacing: 60, hooks: RH(23) }]);
+  const q = await hbQuote([seeded(token), h1, h2], token, [], route);
+  assert.ok("code" in q && q.code === "no_quote", show(q));
+});
+
 test("review of 72e28658, M1 (sell) the same three hooks on a three-hop sale: the route counts at 1.9, and the sale lands", async () => {
   const token = "0x00000000000000000000000000000000000d1d14";
   const [x, y] = [xAt(0x9c4), xAt(0x9c5)];
@@ -5533,6 +5542,10 @@ test("review of 72e28658, M3 (buy) a buy sent with too little gas for an honest 
   const hash = await landBuy(pools, q); // the model lands it at SALE_GAS - 25,000
   assert.equal(SALES.get(hash)!.bought, false);
   assert.deepEqual(await buyProved(pools, q, hash), []);
+  // a sender that holds only what its own gas cost: the replay sets its balance to cover the ample gas, so a node still
+  // runs it (one that cannot pay its gas is refused, never a revert)
+  const thin = { [SENDER]: SALE_GAS * (BASE_FEE + 1_000_000n) };
+  assert.deepEqual(await buyProved(pools, q, hash, [chain(pools, 0, undefined, undefined, thin), chain(pools, 1, undefined, undefined, thin)]), []);
   // a hook whose work needs more gas than any send the device's fee pays for (EVM_REPLAY_GAS, twice a release at the
   // deepest tree) fails at every honest sender's gas: its no-op's success blames it
   const t2 = "0x00000000000000000000000000000000000d1d2b";

@@ -510,7 +510,7 @@ export const MUTANTS = [
   [QUOTE, "const gas = own > EVM_REPLAY_GAS ? own : EVM_REPLAY_GAS;", "const gas = own;", R, "review of 72e28658, M3 (buy)"],
   [QUOTE, "const gas = own > EVM_REPLAY_GAS ? own : EVM_REPLAY_GAS;", "const gas = own;", R, "review of 72e28658, M3 (sell)"],
   [QUOTE, "export const EVM_REPLAY_GAS = 2n * evmPoolGas(EVM_POOL_MAX_DEPTH);", "export const EVM_REPLAY_GAS = 30_000_000n;", R, "review of 72e28658, M3 (buy)"],
-  [QUOTE, "params: [call, parent, { ...asW, ...pays, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }, env] }]", R, "HB1 "],
+  [QUOTE, "params: [call, parent, { ...asW, ...pays, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }, env] }]", R, "review of 72e28658, M3 (buy)"],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
   [QUOTE, "(r) => r.ok, (r) => !r.ok);\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => r.ok, (r) => !r.ok);\n  } catch (e) {\n", R, "RV8 "],
@@ -522,8 +522,7 @@ export const MUTANTS = [
   // only sets of one, never on one provider's word, never fewer than every smallest set's hooks, never a set holding a
   // smaller one that rescued it (an honest hook beside them is never banned)
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1)) {", R, "RVX "],
-  [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "review of 72e28658, H3 (buy)"],
-  [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "review of 72e28658, H3 (sell)"],
+  [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "N1D "],
   [QUOTE, "  const fault = new Set(rescued.flat());", "  const fault = new Set(rescued.slice(0, 1).flat());", R, "review of 72e28658, H3 (buy)"],
   [QUOTE, "    if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "N1D "],
   // review of 72e28658, L2: the RV4 mutant ("step 5 always") is not equivalent: a set holding the one hook that rescued
@@ -552,7 +551,7 @@ export const MUTANTS = [
   [QUOTE, "c.alone = subsetsOf(hs).filter((s) => s.length < hs.length).map(", "c.alone = subsetsOf(hs).filter((s) => s.length === 1).map(", R, "review of 72e28658, M1 (sell)"],
   // a proper set's read that reverts adds nothing; the read with every unlisted hook replaced still must answer
   [QUOTE, "    if ((x === null || x === 0n) && all) return refuse(", "    if (x === null || x === 0n) return refuse(", R, "review of 72e28658, L2 (RV4)"],
-  [QUOTE, "    if ((x === null || x === 0n) && all) return refuse(", "    if (false) return refuse(", R, "N1B (buy"],
+  [QUOTE, "    if ((x === null || x === 0n) && all) return refuse(", "    if (false) return refuse(", R, "review of 72e28658, M1 (full set)"],
   [QUOTE, "if (hs.length > 1) c.alone = ", "if (false) c.alone = ", R, "N1B (sell"],
   [QUOTE, "    for (const i of c.alone ?? []) {", "    for (const i of []) {", R, "N1C (sell"],
   [QUOTE, "const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;", "const exits = evmSellExits(chain, t, bought) ? bought : undefined;", R, "PC "],
@@ -568,7 +567,7 @@ export const MUTANTS = [
   [QUOTE, "if (!buy.logs.includes(`${v.pool}:${TOPIC_WITHDRAWN}`) || buy.logs", "if (buy.logs", R, "HB6 "],
   [QUOTE, " || buy.logs.includes(`${v.pool}:${TOPIC_BOUGHT}`)) return [];", ") return [];", R, "HB6 "],
   [QUOTE, "    if (withdrawn < 0n || fee < 0n || withdrawn - fee !== quote.amountIn) return [];\n", "", R, "HB6 "],
-  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "HB1 "],
+  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => boughtOf(r) === true, (r) => !r.ok);", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],
   [QUOTE, " || bMinOut !== quote.minOut) return [];", ") return [];", R, "HB6 "],
