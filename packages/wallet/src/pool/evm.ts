@@ -883,25 +883,14 @@ export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to:
 export type EvmLogRules = { max: bigint; ceilingPages: number; slowHalves: boolean };
 /** One provider's page: its size now and the widest it answered in full (null: none yet). */
 export type EvmLogPage = { size: bigint; answered: bigint | null };
-/** Where each read finds its page: by the RPC and its index, at each page (a seat's provider may change mid-read). The
- *  same provider's page is the same object at every call: readLogs grows a page only when the page that answered is the
- *  one it asked with. */
+/** Where each read finds its page: by the RPC and its index, at each page (a seat's provider may change mid-read). */
 export type EvmLogPager = { rules: EvmLogRules; of(rpc: EvmRpc, k: number): EvmLogPage };
 
-/** A W's Transfer read's pager: one size per RPC index in `page`, kept across Ws (the restore's), one page object per
- *  index (a fresh one at each call never grew again after a refusal, merge of main 63c90229: B1 paged at 9 blocks). It
- *  keeps no `answered`. */
-const transferPager = (page: bigint[], ceilingPages = Infinity): EvmLogPager => {
-  const pages = new Map<number, EvmLogPage>();
-  return {
-    rules: { max: EVM_LOG_PAGE_BLOCKS, ceilingPages, slowHalves: true },
-    of: (_rpc, k) => {
-      let p = pages.get(k);
-      if (p === undefined) pages.set(k, (p = { get size() { return page[k]!; }, set size(v: bigint) { page[k] = v; }, get answered() { return null; }, set answered(_v: bigint | null) {} }));
-      return p;
-    },
-  };
-};
+/** A W's Transfer read's pager: one size per RPC index in `page`, kept across Ws (the restore's). */
+const transferPager = (page: bigint[], ceilingPages = Infinity): EvmLogPager => ({
+  rules: { max: EVM_LOG_PAGE_BLOCKS, ceilingPages, slowHalves: true },
+  of: (_rpc, k) => ({ get size() { return page[k]!; }, set size(v: bigint) { page[k] = v; }, answered: null }),
+});
 
 /**
  * The pool sync's pager (card evm-pool-sync-wide-pages): one page for each provider, by its URL (a seat's provider now,
@@ -962,6 +951,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
     const p = pager.of(rpc, k);
+    // the provider asked: a seat's provider now (evmPair), compared by its URL, since a pager may hand out a fresh page
+    // object at each call (a W's Transfer pager does)
+    const via = (rpc as { url?: unknown }).url;
     const size = p.size;
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
@@ -1015,12 +1007,13 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const q = pager.of(rpc, k);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     const full = end - at + 1n === size;
-    if (full && (q.answered === null || size > q.answered)) q.answered = size;
+    // the provider that answered is the one asked: a page asked at another provider's size is neither its widest nor
+    // grown (a move back mid-call: review of e30c5c46, P6; review of a81876ab, P7)
+    const same = (rpc as { url?: unknown }).url === via;
+    if (full && same && (q.answered === null || size > q.answered)) q.answered = size;
     if (full && (widest === null || size > widest)) widest = size;
     if (full && refused !== null && ++held >= hold) refused = null;
-    // grown only when the provider that answered is the one whose page was asked: a seat moved back from a narrow
-    // provider to a wide one keeps the wide one's own page, never the narrow page doubled (review of e30c5c46)
-    if (full && q === p && size * 2n <= max && (refused === null || size * 2n < refused)) q.size = size * 2n;
+    if (full && same && size * 2n <= max && (refused === null || size * 2n < refused)) q.size = size * 2n;
     at = end + 1n;
   }
   for (let i = 1; i < out.length; i++) {
