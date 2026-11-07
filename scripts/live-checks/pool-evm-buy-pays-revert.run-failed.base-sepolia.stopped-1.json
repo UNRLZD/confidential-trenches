@@ -1,0 +1,54 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-07T05:00:27.555Z",
+  "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+  "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+  "venues": [],
+  "asked": [
+    "v3"
+  ],
+  "relayer": "0xfa44eb03766f2f5b7d64c5b8df8d20318377141e",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2065890000016032",
+  "restore": null,
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0x94a15c7428f5a68fe2e9383770e492bc8673ce02bd82f08b15c3e369199d9b95",
+      "from": "0xfa44eb03766f2f5b7d64c5b8df8d20318377141e",
+      "kind": "deposit",
+      "block": "55528141",
+      "gasUsed": "316513",
+      "commitment": "16189814928262869688966461977237540161914375173161576295972210904296942292704",
+      "label": "8823720177693533664852954812012767849448032919757799526336187163500891665816",
+      "value": "2000000000000000",
+      "precommitment": "12063793003838749173583620262660182833384345996529504422636865189398259572990"
+    },
+    {
+      "step": "buy through v3, its swap failing",
+      "hash": "0xfe280baf57484370d56020ace571210616427f0a7aa1b1a26e575f2b47e8155c",
+      "from": "0xfa44eb03766f2f5b7d64c5b8df8d20318377141e",
+      "kind": "buy-failed",
+      "venue": "v3",
+      "w": "0x116ece9713a80fd9a96e9f87c3b12e8d36902902",
+      "nullifier": "785219355310564951859448802933313680701226990972944002139446413677765981652",
+      "minOut": "4433626",
+      "quoted": "2216813",
+      "quoteBlock": "55528297",
+      "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "block": "55528324",
+      "gasUsed": "636046"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x6c04d65a5827fe46ae1285752052e3a50076ecf6979817029a660ee217e40e0f",
+      "from": "0xfa44eb03766f2f5b7d64c5b8df8d20318377141e",
+      "kind": "sweep",
+      "block": "55528783",
+      "gasUsed": "21000"
+    }
+  ]
+}
