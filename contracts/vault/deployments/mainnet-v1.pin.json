@@ -31,6 +31,6 @@
   },
   "wasm_witnesses": [
     "GitHub Actions ubuntu-24.04, .github/workflows/vault-build.yml run 42355216946 at e0623bf3, 2026-11-07 08:22-08:25Z: builds a and b both a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc, 230130 B",
-    "the team's Mac (darwin arm64, Docker), deploy.mjs --build-only --flavor mainnet in a clean checkout of e0623bf3 through heavy.sh, 2026-11-07 ~12:10Z: builds a and b both a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc, 230130 B, byte for byte the run's artifact (cmp)"
+    "the team's Mac (darwin arm64, Docker), deploy.mjs --build-only --flavor mainnet in a clean checkout of e0623bf3, 2026-11-07 ~12:10Z: builds a and b both a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc, 230130 B, byte for byte the run's artifact (cmp)"
   ]
 }
