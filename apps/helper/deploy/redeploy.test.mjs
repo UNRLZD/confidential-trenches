@@ -585,7 +585,7 @@ test("a Caddy that refuses the reload (a bad Caddyfile, its socket there): exit 
 });
 
 // The first redeploy after the socket landed meets a Caddy started with `admin off`: it is refused before the checkout,
-// so the result is never a new helper behind the old Caddy (the CO's split of 7 Nov 22:05Z).
+// so the result is never a new helper behind the old Caddy.
 const PROBE = "compose exec -T caddy sh -c test -S /config/caddy-admin.sock";
 
 test("a running Caddy with no admin socket, or a helper with no Caddy: refused before the checkout, naming the one fix; nothing changes, the helper included", () => {
