@@ -94,6 +94,10 @@ import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rul
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
+/** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
+ *  (RegExp.prototype.compile), so the page never tests against the shared one (card kit-oneclick-pins-frozen review). */
+const ROUTE_OUT = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags);
+
 /** What a buy run needs from the page. */
 export type PoolBuyHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
@@ -639,7 +643,7 @@ export async function sendAndSettle(
       const [a, b] = outs;
       const out = a && b && a.raw === b.raw && a.decimals === b.decimals && a.raw >= fill.minOut ? unitsOf(a.raw, a.decimals) : null;
       // never an amount past the kit's bound (SIGNPAGE_ROUTE_OUT: 78 digits each side), which a client refuses
-      if (out !== null && SIGNPAGE_ROUTE_OUT.test(out)) fill.tell({ out });
+      if (out !== null && ROUTE_OUT.test(out)) fill.tell({ out });
     }
   }
   if (!landed) return unlanded(ours ? txs : [], signature);

@@ -5,9 +5,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DepositRecord } from "@blindfill/wallet/store";
-import { APP_ORIGIN, startApi, signedOutState, type IncomingMessage } from "../src/api.ts";
-import { depositQuoteHost, type DepositPublic, type DepositWireDeps } from "../src/deposit-wire.ts";
+import type { IncomingMessage } from "../src/api.ts";
+import type { DepositPublic, DepositWireDeps } from "../src/deposit-wire.ts";
 import { ADDRESS, H72, h1c, NOW, SOL_USDC, U, type Mock } from "./oneclick-mock.ts";
+// after the mock, so the check loads the mock's keys (a static import would load the kit's first)
+const { APP_ORIGIN, startApi, signedOutState } = await import("../src/api.ts");
+const { depositQuoteHost } = await import("../src/deposit-wire.ts");
 
 const SCOPE = 7n;
 const RECORD: DepositRecord = { v: 1, scope: "7", index: 3, id: U };

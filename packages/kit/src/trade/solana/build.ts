@@ -48,6 +48,7 @@ import {
   type SolanaTeardownSimulation,
 } from "../../checks/solana/checks.ts";
 import type { SolanaFetch, SolanaRpc } from "./send.ts";
+import { deepFreeze } from "../../freeze.ts";
 
 /** The vendor path on the helper's proxy (apps/helper/src/proxy/vendors.ts, jupiter "/swap/v2/build": GET). */
 export const SOLANA_JUPITER_BUILD_PROXY_PATH = `${HELPER_V1_PREFIX}/proxy/jupiter/swap/v2/build`;
@@ -75,6 +76,7 @@ export const SOLANA_JUPITER_MAX_ACCOUNTS = 40;
  * is a cap the search asks only after no route at 40, and then steps down from.
  */
 export const SOLANA_JUPITER_CAP_UP: Readonly<Record<number, number>> = { 40: 48, 48: 60 };
+deepFreeze(SOLANA_JUPITER_CAP_UP);
 /** The cap after 40 when 40's route is over 1,232 bytes; any other cap steps down by SOLANA_JUPITER_CAP_DOWN. */
 export const SOLANA_JUPITER_CAP_BELOW_FIRST = 32;
 export const SOLANA_JUPITER_CAP_DOWN = 4;

@@ -347,7 +347,9 @@ test("cargo: main's workflows before this card, each cargo step without its fetc
   const before = ci.split("\n").filter((l) => !/retry\.sh cargo \+\S+ fetch /.test(l)).join("\n");
   const r = cargoWhat(before);
   assert.equal(r.filter((x) => x.includes("a cargo test of contracts/vault/Cargo.toml")).length, 2, r.join("\n")); // test-vault and the sandbox build's --no-run
-  assert.equal(r.filter((x) => x.includes("harness/run.sh")).length, 2, r.join("\n"));
+  // the shards' run.sh; the sandbox build's runs through retry.sh itself since card vault-sandbox-shipped-bytes (its
+  // vault is built in cargo-near's container), which the rule takes as its own retry
+  assert.equal(r.filter((x) => x.includes("harness/run.sh")).length, 1, r.join("\n"));
   assert.equal(r.filter((x) => x.includes("a cargo-build-sbf of")).length, 2, r.join("\n"));
   assert.equal(r.filter((x) => x.includes("a cargo test of contracts/pool-solana")).length, 2, r.join("\n"));
   assert.equal(r.filter((x) => x.includes("dry-run.sh")).length, 1, r.join("\n"));

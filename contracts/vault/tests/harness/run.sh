@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
-# The vault's near-sandbox suite (vault.md 5, V3.1): builds the vault (the mainnet build, as it ships, and VT-S17's
+# The vault's near-sandbox suite (vault.md 5, V3.1): builds the vault (the mainnet build, and VT-S17's
 # out-of-gas test build of it, VAULT_OOG_WASM), the mock token
 # and the harness's probe contract with cargo-near, fetches the pinned real USDC and intents.near wasm
 # (fetch-wasm.mjs), then runs every `required-features = ["sandbox"]` test against them in near-sandbox 2.13.4.
@@ -11,16 +11,36 @@
 # With no args it runs every test target with the sandbox feature on. Output: the wasm sizes and sha256, then the
 # tests with --nocapture (the harness prints each wasm's size and sha256 as it loads it; each test its gas table).
 # A NEAR_SANDBOX_BIN_PATH is refused by the harness unless HARNESS_SANDBOX_BIN names the same path.
+# Which vault (card vault-sandbox-shipped-bytes), said on its own line before any test:
+#   run.sh --reproducible [...]   the vault the mainnet deploy ships: contracts/vault/scripts/deploy.mjs --build-only
+#                                 --flavor mainnet (two clean `cargo near build reproducible-wasm` builds in the Docker
+#                                 image Cargo.toml pins by digest, from the committed HEAD, compared, every deploy
+#                                 refusal), then checked by contracts/vault/scripts/shipped.mjs; needs Docker and a
+#                                 tree with no change to commit, since cargo-near builds HEAD
+#   run.sh [...]                  a host build (cargo near build non-reproducible-wasm), quicker for work in progress:
+#                                 its bytes are not the shipped ones (other panic paths and metadata), and it says so
+# The other three are test builds and stay host builds, never deployed: VT-S17's out-of-gas vault (the same source
+# with feature test-on-payout-out-of-gas, whose on_payout runs out of gas), the mock token and the probe.
 # CI builds the four once for all its shards (.github/workflows/ci.yml, job vault-sandbox-build):
-#   contracts/vault/tests/harness/run.sh --build-only <dir>   builds them and copies each to <dir>/<name>.wasm, fetches
-#                                                             the two pinned ones into <dir>, and runs no test
-#   VAULT_WASM_DIR=<dir> contracts/vault/tests/harness/run.sh [args]   builds nothing: loads the four from <dir> (each
-#                                                             must be there) and runs the tests, cargo-near not needed
+#   contracts/vault/tests/harness/run.sh --reproducible --build-only <dir>   builds them and copies each to
+#                                                             <dir>/<name>.wasm, fetches the two pinned ones into <dir>,
+#                                                             and runs no test
+#   VAULT_WASM_DIR=<dir> VAULT_WASM_SHA256=<sha256> contracts/vault/tests/harness/run.sh [args]   builds nothing: loads
+#                                                             the four from <dir> (each must be there), refuses a vault
+#                                                             wasm that is not the shipped build of HEAD with that
+#                                                             sha256 (the build job's), and runs the tests, cargo-near
+#                                                             not needed
 set -euo pipefail
 V=$(cd "$(dirname "$0")/../.." && pwd)
 export PATH="$HOME/.cargo/bin:$PATH"
 TC=+1.96.0
 OUT=
+REPRO=
+if [ "${1:-}" = --reproducible ]; then
+  [ -z "${VAULT_WASM_DIR:-}" ] || { echo "run.sh: --reproducible builds, and VAULT_WASM_DIR says not to" >&2; exit 2; }
+  REPRO=1
+  shift
+fi
 if [ "${1:-}" = --build-only ]; then
   [ "$#" -eq 2 ] || { echo "usage: run.sh --build-only <dir>" >&2; exit 2; }
   [ -z "${VAULT_WASM_DIR:-}" ] || { echo "run.sh: --build-only builds, and VAULT_WASM_DIR says not to" >&2; exit 2; }
@@ -51,8 +71,8 @@ build() { # <crate dir> <wasm name> [more cargo-near args]
   echo "$w"
 }
 echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-unset} NEAR_SANDBOX_BIN_PATH=${NEAR_SANDBOX_BIN_PATH:-unset} HARNESS_SANDBOX_BIN=${HARNESS_SANDBOX_BIN:-unset}"
-# VT-S17's test build first (tests/s17.rs; its on_payout runs out of gas), copied aside, so the release build below is
-# the last one at blindfill_vault.wasm and VAULT_WASM names it
+# VT-S17's test build (tests/s17.rs; its on_payout runs out of gas) is copied aside, so a host release build after it
+# is the last one at blindfill_vault.wasm and VAULT_WASM names it
 # a wasm built by --build-only, by its name in VAULT_WASM_DIR
 prebuilt() {
   local w="$VAULT_WASM_DIR/$1.wasm"
@@ -60,18 +80,41 @@ prebuilt() {
   echo "$w $(wc -c <"$w" | tr -d ' ') B sha256 $(shasum -a 256 "$w" | cut -d' ' -f1)" >&2
   echo "$w"
 }
+# the vault the mainnet deploy ships, built by deploy.mjs itself into a new dir under the target dir; the exit code of
+# deploy.mjs is run.sh's (3 when the two builds differ, which scripts/ci/retry.sh never tries again)
+shipped_build() {
+  local d; d="$(target_dir "$V")/shipped"
+  rm -rf "$d"
+  node "$V/scripts/deploy.mjs" --build-only --flavor mainnet --build-dir "$d" >&2 || exit $?
+  echo "$d/blindfill_vault.wasm"
+}
+# the one line that says which vault the run loads; refuses (exit 1) a wasm that is not the shipped build of HEAD
+shipped_check() { # <wasm> [<sha256>]
+  echo -n "vault build: " >&2
+  node "$V/scripts/shipped.mjs" "$@" >&2
+}
 if [ -n "${VAULT_WASM_DIR:-}" ]; then
+  [ -n "${VAULT_WASM_SHA256:-}" ] || { echo "run.sh: VAULT_WASM_DIR needs VAULT_WASM_SHA256, the sha256 of the vault the build job built" >&2; exit 2; }
   VAULT_WASM_DIR=$(cd "$VAULT_WASM_DIR" && pwd)
   export BLINDFILL_WASM_CACHE="${BLINDFILL_WASM_CACHE:-$VAULT_WASM_DIR}" # the pinned two, as --build-only fetched them
   VAULT_OOG_WASM=$(prebuilt blindfill_vault_out_of_gas)
   VAULT_WASM=$(prebuilt blindfill_vault)
+  shipped_check "$VAULT_WASM" "$VAULT_WASM_SHA256"
   MOCK_TOKEN_WASM=$(prebuilt blindfill_mock_token)
   PROBE_WASM=$(prebuilt blindfill_harness_probe)
 else
+  if [ -n "$REPRO" ]; then
+    # first, while the tree is as committed (cargo-near builds HEAD)
+    VAULT_WASM=$(shipped_build)
+    shipped_check "$VAULT_WASM"
+  fi
   OOG_BUILT=$(build "$V" blindfill_vault --features test-on-payout-out-of-gas)
   VAULT_OOG_WASM="$(dirname "$OOG_BUILT")/blindfill_vault_out_of_gas.wasm"
   cp "$OOG_BUILT" "$VAULT_OOG_WASM"
-  VAULT_WASM=$(build "$V" blindfill_vault)
+  if [ -z "$REPRO" ]; then
+    VAULT_WASM=$(build "$V" blindfill_vault)
+    echo "vault build: host (cargo near build non-reproducible-wasm on $(uname -srm)): $VAULT_WASM, not the bytes the mainnet deploy ships (run.sh --reproducible builds those)" >&2
+  fi
   MOCK_TOKEN_WASM=$(build "$V/tests/mock-token" blindfill_mock_token)
   PROBE_WASM=$(build "$V/tests/harness/probe" blindfill_harness_probe)
 fi

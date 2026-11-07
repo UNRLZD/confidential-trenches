@@ -160,11 +160,11 @@ test("planted: a test target in no shard, in two, or gone fails", () => {
   assert.deepEqual(shardProblems(SHARDS, all.filter((t) => t !== "smoke")), ["smoke is in a shard but is no test target"]);
 });
 
-// What is wrong with ci.yml's sandbox build and caches: the shards must run on the wasm vault-sandbox-build built, the
-// wasm cache must be keyed on every file under contracts/vault/ and the cargo-near that builds it (else a shard tests
-// stale wasm), no cache key may name the commit (a key per commit fills the repo's 10 GB and evicts every cache), the
-// shards must read the build's rust-cache entry (same env and inputs, else they always build cold), and the matrix
-// must run every shard SHARDS lists.
+// What is wrong with ci.yml's sandbox build and caches: the shards must run on the wasm vault-sandbox-build built, its
+// vault the shipped one (run.sh --reproducible, every run, unconditional and never cached: its bytes name the commit,
+// so a cached one is another commit's), whose sha256 the build hands each shard to check; no cache key may name the
+// commit (a key per commit fills the repo's 10 GB and evicts every cache), the shards must read the build's rust-cache
+// entry (same env and inputs, else they always build cold), and the matrix must run every shard SHARDS lists.
 const jobText = (ci, name) => ci.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z-]+:\n/)[0];
 const block = (text, head) => {
   const at = text.indexOf(head);
@@ -187,11 +187,18 @@ function cacheProblems(ci, shards = SHARDS) {
   const build = jobText(ci, "vault-sandbox-build");
   const shard = jobText(ci, "vault-sandbox-shard");
   if (!build || !shard) return [...p, "ci.yml has no vault-sandbox-build or vault-sandbox-shard job"];
-  const key = build.match(/key: (vault-wasm-.*)/)?.[1] ?? "";
-  if (!key.includes("hashFiles('contracts/vault/**')")) p.push("the wasm cache key does not hash every file under contracts/vault/");
-  const near = build.match(/cargo-near-v([0-9.]+)\//)?.[1];
-  if (!near || !key.includes(`cargo-near-${near}-`)) p.push(`the wasm cache key does not name the cargo-near the build installs (${near})`);
-  if (!build.includes('run.sh --build-only "$RUNNER_TEMP/vault-wasm"')) p.push("vault-sandbox-build does not build the wasm with run.sh --build-only");
+  // a cache step (actions/cache, or its restore) whose path holds the built wasm
+  const cached = [...build.matchAll(/- (?:id: \S+\n\s+)?uses: actions\/cache(?:\/restore)?@[\s\S]*?\n\s+path: ([^\n]*)/g)].some((m) => m[1].includes("vault-wasm"));
+  if (cached) p.push("the vault wasm is cached, and its bytes name the commit it was built at: a cached one is another commit's");
+  const step = build.match(/- name: the four wasm[^\n]*\n((?: {8,}[^\n]*\n)*)/)?.[1] ?? "";
+  if (!/run: RETRY_FINAL=3 bash scripts\/ci\/retry\.sh bash scripts\/ci\/fresh-dir\.sh "\$RUNNER_TEMP\/vault-wasm" contracts\/vault\/tests\/harness\/run\.sh --reproducible --build-only "\$RUNNER_TEMP\/vault-wasm"\n/.test(step)) {
+    p.push("vault-sandbox-build does not build the shipped vault (run.sh --reproducible --build-only, retried into an emptied dir with RETRY_FINAL=3)");
+  }
+  if (/^\s+if:/m.test(step)) p.push("vault-sandbox-build's wasm build runs only on a condition, so a run can ship the shards no wasm of its commit");
+  if (!/\n    outputs:\n      vault_sha256: \$\{\{ steps\.shipped\.outputs\.sha256 \}\}\n/.test(build) || !/- name: [^\n]*\n\s+id: shipped\n\s+run: \|\n\s+node contracts\/vault\/scripts\/shipped\.mjs "\$RUNNER_TEMP\/vault-wasm\/blindfill_vault\.wasm"\n\s+echo "sha256=\$\(sha256sum "\$RUNNER_TEMP\/vault-wasm\/blindfill_vault\.wasm" \| cut -d' ' -f1\)" \| tee -a "\$GITHUB_OUTPUT"\n/.test(build)) {
+    p.push("vault-sandbox-build does not check the shipped vault and hand its sha256 to the shards");
+  }
+  if (!shard.includes("VAULT_WASM_SHA256: ${{ needs.vault-sandbox-build.outputs.vault_sha256 }}")) p.push("a shard does not check its vault wasm against the build job's sha256");
   if (!shard.includes('VAULT_WASM_DIR="$RUNNER_TEMP/vault-wasm" contracts/vault/tests/harness/run.sh')) p.push("a shard does not run on the built wasm");
   if (/--build-only/.test(shard)) p.push("a shard builds wasm");
   // a target that starts deploy.mjs gets its cargo-near builds: the shards install the build job's sha256-checked one
@@ -217,12 +224,12 @@ function cacheProblems(ci, shards = SHARDS) {
   return p;
 }
 
-test("the shards run on the wasm built once, from caches keyed on their inputs", () => {
+test("the shards run on the shipped vault built once, and on caches keyed on their inputs", () => {
   const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
   assert.deepEqual(cacheProblems(ci), []);
 });
 
-test("planted: a commit in a key, a stale wasm key, a shard that builds or misses the cache, a dropped shard fail", () => {
+test("planted: a commit in a key, a cached or host-built vault, a shard that builds, skips the sha256 or misses the cache, a dropped shard fail", () => {
   const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
   const at = (job) => ci.indexOf(`\n  ${job}:\n`);
   const plant = (job, a, b) => {
@@ -232,11 +239,24 @@ test("planted: a commit in a key, a stale wasm key, a shard that builds or misse
   };
   assert.deepEqual(cacheProblems(plant("pool-solana", "svm-tests/Cargo.lock') }}\n", "svm-tests/Cargo.lock') }}-${{ github.sha }}\n")),
     ["a cache key names the commit: key: pool-solana-rustc-1.96.0-1.97.1-agave-4.4.0-${{ hashFiles('contracts/pool-solana/Cargo.lock', 'contracts/pool-solana/svm-tests/Cargo.lock') }}-${{ github.sha }}"]);
-  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "hashFiles('contracts/vault/**')", "hashFiles('contracts/vault/Cargo.lock')")),
-    ["the wasm cache key does not hash every file under contracts/vault/"]);
+  // the wasm cache this card removed, put back as it was
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "      - uses: actions/setup-node", "      - id: wasm\n        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n        with:\n          path: ${{ runner.temp }}/vault-wasm\n          key: vault-wasm-rustc-1.96.0-cargo-near-0.22.0-${{ hashFiles('contracts/vault/**') }}\n      - uses: actions/setup-node")),
+    ["the vault wasm is cached, and its bytes name the commit it was built at: a cached one is another commit's"]);
+  // the host build of the vault, as before this card
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "run.sh --reproducible --build-only", "run.sh --build-only")),
+    ["vault-sandbox-build does not build the shipped vault (run.sh --reproducible --build-only, retried into an emptied dir with RETRY_FINAL=3)"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "run: RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh", "run: bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh")),
+    ["vault-sandbox-build does not build the shipped vault (run.sh --reproducible --build-only, retried into an emptied dir with RETRY_FINAL=3)"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "      - name: the four wasm, built once for every shard, and the pinned two\n", "      - name: the four wasm, built once for every shard, and the pinned two\n        if: steps.wasm.outputs.cache-hit != 'true'\n")),
+    ["vault-sandbox-build's wasm build runs only on a condition, so a run can ship the shards no wasm of its commit"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "      vault_sha256: ${{ steps.shipped.outputs.sha256 }}\n", "")),
+    ["vault-sandbox-build does not check the shipped vault and hand its sha256 to the shards"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-build", 'node contracts/vault/scripts/shipped.mjs "$RUNNER_TEMP/vault-wasm/blindfill_vault.wasm"\n', "true\n")),
+    ["vault-sandbox-build does not check the shipped vault and hand its sha256 to the shards"]);
+  assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "          VAULT_WASM_SHA256: ${{ needs.vault-sandbox-build.outputs.vault_sha256 }}\n", "")),
+    ["a shard does not check its vault wasm against the build job's sha256"]);
   assert.deepEqual(cacheProblems(plant("vault-sandbox-build", "cargo-near-v0.22.0/", "cargo-near-v0.23.0/")),
-    ["the wasm cache key does not name the cargo-near the build installs (0.23.0)",
-      "s17, s20 start contracts/vault/scripts/deploy.mjs, which builds with cargo-near, and the shards do not install it"]);
+    ["s17, s20 start contracts/vault/scripts/deploy.mjs, which builds with cargo-near, and the shards do not install it"]);
   assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", 'VAULT_WASM_DIR="$RUNNER_TEMP/vault-wasm" contracts', "contracts")),
     ["a shard does not run on the built wasm"]);
   assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "      - uses: actions/download-artifact", "      - run: contracts/vault/tests/harness/run.sh --build-only x\n      - uses: actions/download-artifact")),
@@ -254,4 +274,35 @@ test("planted: a commit in a key, a stale wasm key, a shard that builds or misse
   assert.deepEqual(cacheProblems(plant("vault-sandbox-shard", "shard: [1, 2, 3, 4]", "shard: [1, 2, 3]")),
     ["the matrix runs shards [1, 2, 3], and SHARDS has [1, 2, 3, 4]"]);
   assert.deepEqual(cacheProblems(ci, [...SHARDS, ["s99"]]), ["the matrix runs shards [1, 2, 3, 4], and SHARDS has [1, 2, 3, 4, 5]"]);
+});
+
+// What is wrong with run.sh's vault: on the shards' prebuilt path it must need the build job's sha256 and check the
+// vault wasm before any test, and --reproducible must build it as the mainnet deploy does.
+function runShProblems(sh) {
+  const p = [];
+  if (!sh.includes('[ -n "${VAULT_WASM_SHA256:-}" ] || {')) p.push("run.sh loads a prebuilt vault without the build job's sha256");
+  if (!/\n  VAULT_WASM=\$\(prebuilt blindfill_vault\)\n  shipped_check "\$VAULT_WASM" "\$VAULT_WASM_SHA256"\n/.test(sh)) p.push("run.sh does not check the prebuilt vault wasm against the shipped build and the sha256");
+  if (!/\n  node "\$V\/scripts\/deploy\.mjs" --build-only --flavor mainnet --build-dir "\$d" >&2 \|\| exit \$\?\n/.test(sh)) p.push("run.sh --reproducible does not build the vault as the mainnet deploy does (deploy.mjs --build-only --flavor mainnet)");
+  if (!/\n    VAULT_WASM=\$\(shipped_build\)\n    shipped_check "\$VAULT_WASM"\n/.test(sh)) p.push("run.sh --reproducible does not check the vault it built");
+  if (!/\n  node "\$V\/scripts\/shipped\.mjs" "\$@" >&2\n/.test(sh)) p.push("run.sh's check is not contracts/vault/scripts/shipped.mjs");
+  if (sh.indexOf("shipped_check \"$VAULT_WASM\" \"$VAULT_WASM_SHA256\"") > sh.indexOf("cargo $TC test")) p.push("run.sh checks the vault after the tests");
+  return p;
+}
+
+test("run.sh checks the vault wasm a shard loads, and --reproducible builds the shipped one", () => {
+  assert.deepEqual(runShProblems(readFileSync(path.join(ROOT, "contracts/vault/tests/harness/run.sh"), "utf8")), []);
+});
+
+test("planted: a run.sh that loads any vault, or builds it otherwise, fails", () => {
+  const sh = readFileSync(path.join(ROOT, "contracts/vault/tests/harness/run.sh"), "utf8");
+  const plant = (a, b) => {
+    const out = sh.replace(a, b);
+    assert.notEqual(out, sh, `the plant ${a} changed nothing`);
+    return runShProblems(out);
+  };
+  assert.deepEqual(plant('  shipped_check "$VAULT_WASM" "$VAULT_WASM_SHA256"\n', ""), ["run.sh does not check the prebuilt vault wasm against the shipped build and the sha256"]);
+  assert.deepEqual(plant('[ -n "${VAULT_WASM_SHA256:-}" ] || {', "true || {"), ["run.sh loads a prebuilt vault without the build job's sha256"]);
+  assert.deepEqual(plant("--build-only --flavor mainnet --build-dir", "--build-only --flavor testnet --build-dir"), ["run.sh --reproducible does not build the vault as the mainnet deploy does (deploy.mjs --build-only --flavor mainnet)"]);
+  assert.deepEqual(plant('    VAULT_WASM=$(shipped_build)\n    shipped_check "$VAULT_WASM"\n', '    VAULT_WASM=$(shipped_build)\n'), ["run.sh --reproducible does not check the vault it built"]);
+  assert.deepEqual(plant('node "$V/scripts/shipped.mjs" "$@"', 'node "$V/scripts/shipped.mjs" "$1"'), ["run.sh's check is not contracts/vault/scripts/shipped.mjs"]);
 });
