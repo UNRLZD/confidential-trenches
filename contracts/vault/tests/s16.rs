@@ -20,16 +20,23 @@
 //!   While blocked, u's own deposit call on a prepaid P fails whole at the token: u keeps its USDC, no receipt reaches
 //!   the vault, P stays unused. Off: `unblocklist`; then the same deposit lands on the same P.
 //! - (d) `vt_s16_d_token_code_changed`: the token account's key holder deploys other code over USDC (the harness's
-//!   mock token wasm, a token whose `ft_transfer` refuses the vault: it holds none of USDC's state), and the token's
-//!   code hash reads as the mock's, not the pin (what the relayer's code-hash watch reads, 7.3). Each payout fails at
-//!   the new code. Off: the key holder deploys the pinned USDC again, its state untouched; the same refund note
-//!   withdraws. A token that never comes back strands the notes in the vault, the residual M9 names; nothing on the
-//!   vault's side is lost or changed meanwhile.
+//!   mock token wasm, which cannot read USDC's state), and the token's code hash reads as the mock's, not the pin.
+//!   Each payout receipt fails at its first action that reads state (`storage_deposit` for fee_bounces, `ft_transfer`
+//!   for the others) with the new code's "Cannot deserialize the contract state.", pinned here. Off: the key holder
+//!   deploys the pinned USDC again, its state untouched; the same refund note withdraws. A token that never comes back
+//!   strands the notes in the vault, the residual M9 names; nothing on the vault's side is lost or changed meanwhile.
+//!   VT-S16 (d)'s named result, the relayer's code-hash watch holding every call once the hash is not the pin (7.3), is
+//!   the helper's: apps/helper/src/token-status/status.test.ts l.91-104 (a changed hash is shown as read and held),
+//!   apps/helper/src/bind/send.test.ts l.483-488 (a deposit call held as `token_halted` on a code hash not the pin,
+//!   nothing sent) and apps/helper/src/withdraw/send.test.ts l.673 (check 10: a withdrawal held while the watch reads
+//!   the token halted). This test shows the on-chain hash those watches read moving off the pin.
 //! - (b) `vt_s16_b_halt_between_move_and_resolve`: a halting account acting inside the receipt chain. USDC's second
 //!   pauser holds USDC and sends one transaction to the token holding [ft_transfer_call(vault), execute_multisig_request
 //!   (Pause)], so the halt lands after the move and before the token's resolve. First on a deposit the vault accepts:
-//!   the note lands and nothing is lost. Then on a deposit the vault refuses (no prepay, as a relayer broken into can
-//!   force): `ft_on_transfer` refuses with `NoPrepay`, the resolve fails on "FiatToken: paused", and the amount stays
+//!   the note lands, the resolve fails on "FiatToken: paused" with nothing to give back, and nothing is lost. Then a
+//!   stranger sends the vault 1 N (as every prepaid deposit leaves NEAR with the vault, deposit.rs row 6, so a vault
+//!   that skipped row 6 could pay for the record and land the deposit), and on a deposit the vault refuses (no prepay,
+//!   as a relayer broken into can force): `ft_on_transfer` refuses with `NoPrepay`, the resolve fails on "FiatToken: paused", and the amount stays
 //!   in the vault with no note: the loss the M1 row names, read exactly (the vault's USDC is the sum of its totals
 //!   plus that amount; no record, no totals moved, the supply unchanged). Then the same P, prepaid, lands after the
 //!   unhalt: P stayed unused and every later note is right.
@@ -64,6 +71,8 @@ const REGISTER: u128 = 1_250_000_000_000_000_000_000;
 const SETTLE_ATTACH: u128 = 10_000_000_000_000_000_000_000;
 /// USDC's message for a blocklisted account ("FiatToken: <account> is blocklisted").
 const BLOCKED: &str = "is blocklisted";
+/// near-sdk's panic when code reads a state it cannot decode: the mock token's on USDC's state, in (d).
+const NEW_CODE: &str = "Cannot deserialize the contract state.";
 /// The whole six deposits.
 const TOTAL: u128 = 31_000_000;
 /// One deposit in (b) and (c).
@@ -168,12 +177,12 @@ enum Switch {
 }
 
 impl Switch {
-    /// The text a payout part fails with; `None` for new code, whose failure is whatever that code says.
-    fn refusal(self) -> Option<&'static str> {
+    /// The text a payout part fails with.
+    fn refusal(self) -> &'static str {
         match self {
-            Switch::Halt => Some(USDC_HALTED),
-            Switch::BlockVault => Some(BLOCKED),
-            Switch::NewCode => None,
+            Switch::Halt => USDC_HALTED,
+            Switch::BlockVault => BLOCKED,
+            Switch::NewCode => NEW_CODE,
         }
     }
 }
@@ -263,9 +272,8 @@ fn bounced(h: &Harness, o: &Outcome, s: Switch, method: &str, name: &str, whole:
     assert!(w.ok(), "{name}: {}", w.line());
     let p = part(h, o)?;
     let f = p.failure().ok_or_else(|| format!("{name}: the payout part ran with the switch on: {}", p.line()))?;
-    if let Some(want) = s.refusal() {
-        assert!(f.contains(want), "{name}: the payout part failed with {f}, want {want:?}");
-    }
+    let want = s.refusal();
+    assert!(f.contains(want), "{name}: the payout part failed with {f}, want {want:?}");
     let cb = o.calls_exactly(&h.vault, "on_payout", 1)?[0];
     assert!(cb.ok(), "{name}: {}", cb.line());
     let d = data(&cb.logs[0]);
@@ -531,7 +539,9 @@ async fn vt_s16_b_halt_between_move_and_resolve() -> R<()> {
     let on = one(&rs, h.vault.as_str(), "ft_on_transfer")?;
     assert!(on.failure().is_none(), "the vault refused the prepaid deposit: {}", on.line());
     let resolve = one(&rs, h.token.as_str(), "ft_resolve_transfer")?;
-    println!("1. accepted, then halted: the resolve reads {}", resolve.line());
+    let f = resolve.failure().ok_or_else(|| format!("the halted token's resolve ran: {}", resolve.line()))?;
+    assert!(f.contains(USDC_HALTED), "want {USDC_HALTED:?}, got {f}");
+    println!("1. accepted, then halted: the resolve fails with nothing to give back: {}", resolve.line());
     let _ = h.usdc_halt(false).await?;
     let d = deposits(&h).await?;
     assert_eq!((d.len(), d[0]["precommitment"].as_str(), d[0]["value"].as_str(), d[0]["depositor"].as_str()), (1, Some(p1), Some("2000000"), Some(pauser.id().as_str())), "{d:?}");
@@ -541,6 +551,12 @@ async fn vt_s16_b_halt_between_move_and_resolve() -> R<()> {
 
     // 2. a deposit the vault refuses (no prepay): the resolve's refund stops on the halt, the amount stays with no note
     let p2 = "2222222222";
+    // NEAR on the vault, as prepaid deposits leave it: a vault that skipped row 6 could then pay for the record
+    let stranger = h.account("stranger", 10).await?;
+    let sent = stranger.transfer_near(&h.vault, NearToken::from_near(1)).await?;
+    if !sent.is_success() {
+        return Err(format!("the stranger's 1 N to the vault: {sent:?}").into());
+    }
     let (state0, usage0) = (vault_state(&h).await?, h.account_view(&h.vault, "final").await?["storage_usage"].clone());
     let rs = halt_inside_deposit(&h, p2).await?;
     let on = one(&rs, h.vault.as_str(), "ft_on_transfer")?;
