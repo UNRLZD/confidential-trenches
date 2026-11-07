@@ -895,6 +895,69 @@ test("params changed by the caller after request() are never posted: the client 
   assert.throws(() => C.signpageBuildRequest("orders.cancel", { order_ids: [() => "o1"] }, "id"), TypeError);
 });
 
+// card oneclick-fee-path-own-key (delta review L1): a listener's throw, a write into its frozen snapshot among them, never
+// stops the client's own steps (the handshake's state ask, a settle, the down state's retry, destroy) or another
+// listener; it is reported after, on its own microtask. Red at c88a3eeb: the write threw inside set(), so the ready never
+// asked state and the client never reached READY.
+test("a listener that throws, writing into its frozen snapshot, stops none of the client's steps and no other listener", async (t) => {
+  const reported = [];
+  t.mock.method(globalThis, "queueMicrotask", (f) => { try { f(); } catch (e) { reported.push(e); } });
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  c.subscribe((s) => { s.seenAt = 1; }); // throws: the snapshot is frozen
+  const heard = [];
+  c.subscribe((s) => heard.push(s.status));
+  c.onProgress(() => { throw new Error("progress listener"); });
+  const seen = [];
+  c.onProgress((id, stage) => seen.push(stage));
+  await handshake(h);
+  assert.equal(c.snapshot().status, "ready", "the handshake reached READY");
+  assert.ok(heard.includes("ready"), "the second listener still hears");
+  // a state answer is still settled
+  const handle = c.request("state", {});
+  await flush();
+  h.post(answer(h.frame().contentWindow.sent.at(-1).msg.id, { ...STATE, vault_balance: "5" }));
+  assert.equal((await handle.outcome).ok, true);
+  assert.equal(c.snapshot().state.vault_balance, "5");
+  h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
+  assert.deepEqual(seen, ["filled"], "a progress listener after a throwing one still hears");
+  // down still schedules its retry
+  h.frame().fire("error");
+  assert.equal(c.snapshot().status, "down");
+  mock.timers.tick(1_000);
+  assert.equal(h.frames.length, 2, "the down state's retry mounted a fresh iframe");
+  // destroy is clean
+  c.destroy();
+  assert.equal(h.listening(), false);
+  assert.equal(h.frames.at(-1).removed, true);
+  assert.ok(reported.length >= 3 && reported.every((e) => e instanceof Error), "each throw is reported, none lost");
+  assert.ok(reported.some((e) => e instanceof TypeError), "the write into the frozen snapshot is among them");
+});
+
+// delta review L2: the schema checks the request's own copy, never the caller's params; mutant k8 (check `params`) lived
+// through every test at c88a3eeb. A getter that answers a bad list to the first read and a good one to the second is
+// refused: the clone reads it once, and that bad copy is what is checked.
+test("params are checked as the client's copy: a getter that answers bad then good is refused", () => {
+  let n = 0;
+  const params = { get order_ids() { return ++n === 1 ? ["o1", { forged: 1 }] : ["o1"]; } };
+  assert.throws(() => C.signpageBuildRequest("orders.cancel", params, "id"), TypeError);
+  assert.equal(n, 1, "the getter is read once, by the clone");
+});
+
+// delta review info: the client keeps no object from a message: its state is the frozen view's own
+test("the client keeps no object from the message it read: a write into the posted state's object changes nothing", async () => {
+  const { h, c } = await readyClient();
+  const posted = { ...STATE, vault_balance: "8", orders: [] };
+  h.post({ v: 1, type: "state", state: posted });
+  const before = c.snapshot();
+  posted.vault_balance = "999999";
+  h.frame().fire("error"); // down: a change that keeps the state, so the next view is cloned from what the client kept
+  assert.equal(c.snapshot().status, "down");
+  assert.notEqual(c.snapshot(), before);
+  assert.equal(c.snapshot().state.vault_balance, "8");
+  assert.equal(before.state.vault_balance, "8");
+});
+
 // Card signpage-buy-route-events: a running pool.buy's route (messages.ts BuyRoute) comes as progress events with no
 // stage, one fact each. A client reads them through onRoute; a client of an earlier kit (an older app) checks progress
 // with exact keys, so it drops them and still reads every stage.

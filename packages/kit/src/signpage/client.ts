@@ -116,14 +116,15 @@ deepFreeze(SIGNPAGE_CLIENT_CODES);
 export type SignpageClientStatus = "connecting" | "ready" | "down" | "update";
 export type SignpageDropReason = "origin" | "source" | "shape" | "id";
 
+/** Read-only, and frozen at run time: every caller shares one snapshot per change (card oneclick-fee-path-own-key). */
 export interface SignpageClientSnapshot {
-  status: SignpageClientStatus;
+  readonly status: SignpageClientStatus;
   /** The page's release tag from its handshake. */
-  release: string | null;
+  readonly release: string | null;
   /** The last state the page sent. */
-  state: SignpageState | null;
+  readonly state: SignpageState | null;
   /** True when `state` is not this frame's latest: a `state` request timed out, or the frame went down or was replaced. */
-  stale: boolean;
+  readonly stale: boolean;
 }
 
 export type SignpageOutcome<K extends SignpageKind = SignpageKind> =
@@ -262,15 +263,31 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
    *  changes, as useSyncExternalStore needs; a write throws; and none of it is `snap`, which the client reads to decide
    *  whether a request may go. */
   let view: SignpageClientSnapshot = deepFreeze(structuredClone(snap));
+  /** Calls every listener in `fns` with `args`, each on its own: a listener's throw (a write into its frozen snapshot
+   *  among them) stops no other listener and none of the client's own steps around the call, and is reported after, on
+   *  its own microtask, as a browser reports an event listener's error (card oneclick-fee-path-own-key, delta review). */
+  const tell = <A extends unknown[]>(fns: Iterable<(...a: A) => void>, ...args: A): void => {
+    for (const f of [...fns]) {
+      try {
+        f(...args);
+      } catch (e) {
+        queueMicrotask(() => {
+          throw e;
+        });
+      }
+    }
+  };
   const set = (patch: Partial<SignpageClientSnapshot>) => {
     snap = { ...snap, ...patch };
     view = deepFreeze(structuredClone(snap));
+    // the client keeps the view's frozen state, never an object from a message or a caller
+    snap = { ...snap, state: view.state };
     if (snap.status !== "connecting") {
       const w = waiters;
       waiters = [];
       for (const f of w) f();
     }
-    for (const f of listeners) f(view);
+    tell(listeners, view);
   };
 
   const clearTimer = (t: Timer | null) => {
@@ -477,12 +494,12 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       if (signpageStateEventSchema(ev)) return set({ state: ev.state as SignpageState, stale: false });
     }
     if (signpageProgressSchema(m)) {
-      for (const f of progressListeners) f(m.id as string, m.stage as Stage);
+      tell(progressListeners, m.id as string, m.stage as Stage);
       return;
     }
     if (signpageProgressRouteSchema(m)) {
       const { v: _v, type: _t, id, ...route } = m;
-      for (const f of routeListeners) f(id as string, route as BuyRoute);
+      tell(routeListeners, id as string, route as BuyRoute);
       return;
     }
     drops.shape++;

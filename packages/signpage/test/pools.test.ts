@@ -94,7 +94,7 @@ test("no ops to give and a held list that fills the cap to within 2 bytes: the s
   const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
   const cap = SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM;
   const entry = (i: number, n: number) => ({ id: `h${String(i).padStart(5, "0")}${"x".repeat(n)}`, asset: "usdc", amount: "1" });
-  const held: SignpageState["held"] = [];
+  const held: { id: string; asset: string; amount: string }[] = []; // SignpageState["held"] is read-only
   while (bytes({ ...SIGNED_IN, held }) < cap - 2 - 900) held.push(entry(held.length, 500));
   // two last entries take the rest (an id is at most 512 characters), so the state leaves exactly 2 bytes of the cap
   held.push(entry(held.length, 0), entry(held.length + 1, 0));
