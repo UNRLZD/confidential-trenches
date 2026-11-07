@@ -5,7 +5,7 @@
 // resolves the same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named
 // test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
 // once (the style of sell-mutants.mjs).
-//   node apps/helper/test/pool-evm/release-mutants.mjs   (a heavy job: run it through heavy.sh)
+//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 34 test runs, one per mutant)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check, as the pool's own
 // ecrecover makes it): the v test (a v but 27 or 28 gives a recovery id below 0 or above 1, which recovers no key or
