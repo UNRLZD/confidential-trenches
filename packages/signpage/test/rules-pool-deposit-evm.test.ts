@@ -151,6 +151,11 @@ test("EVM deposit: the headroom is G(depth)'s per-level gas for d + 1 levels of 
   // measured on the live Base Sepolia pool (state 7 deep at size 66, label 5 at 27): our deposit after 0 to 36 others in
   // its block used at most 64,543 gas over its estimate of 372,596 (eth_simulateV1, 2026-11-07); the headroom covers it
   assert.ok(evmDepositHeadroom(7n, 5n) >= 64_543n);
+  // card evm-buy-gas-depth, the tightest depth (forge on main's pool, 7 Nov, the least gas each lands with): a deposit
+  // read on two empty trees (252,998) that lands behind one other (both trees at size 1, 303,294) needs 50,296 more,
+  // over the old per-level 21,518's 43,036
+  assert.equal(EVM_POOL_GAS_PER_LEVEL, 25_624n, "the kit's per-level gas since card evm-buy-gas-depth");
+  assert.ok(evmDepositHeadroom(0n, 0n) >= 50_296n);
   assert.equal(CALL.data.slice(0, 10), "0x" + Buffer.from(keccak_256(new TextEncoder().encode("deposit(uint256,uint256)"))).toString("hex").slice(0, 8), "the wallet's call: the selector the rule holds it to");
 });
 
