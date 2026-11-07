@@ -33,7 +33,8 @@ import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { EvmPoolSend, NoteRecord, NoteState, NoteStore } from "../../wallet/src/notes/store.ts";
-import { evmAgreedBlock, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { evmAgreedBlock, EvmLagError, evmPoolScopeOf, evmRetryLag, EvmUnansweredError, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
@@ -92,6 +93,16 @@ function firstWord(x: unknown, what: string): bigint {
   if (typeof x !== "string" || !/^0x[0-9a-fA-F]{64,}$/.test(x)) throw new Error(`${what}: not a word`);
   return BigInt("0x" + x.slice(2, 66));
 }
+/** Two RPCs whose answers to one read differ: no read at all, and the run answers failed (as the Solana runner does). */
+export class EvmDepositDisagree extends Error {
+  constructor(m: string) {
+    super(m);
+    this.name = "EvmDepositDisagree";
+  }
+}
+const apart = (what: string): never => {
+  throw new EvmDepositDisagree(`the two RPCs read ${what} apart`);
+};
 const both = <T>(rpcs: readonly [EvmRpc, EvmRpc], f: (rpc: EvmRpc, k: number) => Promise<T>): Promise<[T, T]> => Promise.all([f(rpcs[0], 0), f(rpcs[1], 1)]);
 
 /** U's chain of notes: the first note (its deposit note) of a deposit or a U second arrival of `scope`; null otherwise. */
@@ -107,13 +118,19 @@ type Run = { h: PoolDepositEvmHost; store: NoteStore; seed: Uint8Array; scope: b
 
 /** U's reads at one block both RPCs hold: the block, U's nonce (agreed) and its balance (each RPC's). */
 async function accountReads(r: Run, u: string): Promise<{ tag: string; baseFee: bigint; nonce: bigint; balance: [bigint, bigint] }> {
-  const blk = await evmAgreedBlock(r.h.rpcs, "latest");
-  if (blk.baseFeePerGas === null) throw new Error("the block has no base fee: not an EIP-1559 chain");
+  const sleep = (ms: number) => (r.h.wait ?? ((x: number) => new Promise<void>((ok) => setTimeout(ok, x))))(ms);
+  // the newest block both hold (a lag read again), then its base fee as each RPC answers it: the two the same
+  const blk = await evmRetryLag(() => evmAgreedBlock(r.h.rpcs, "latest", undefined, sleep), sleep);
   const tag = qty(blk.number);
+  const fees = await both(r.h.rpcs, async (rpc, k) => {
+    const b = (await rpc("eth_getBlockByNumber", [tag, false])) as { baseFeePerGas?: unknown } | null;
+    return quantity(b?.baseFeePerGas, `rpc ${k} base fee`);
+  });
+  if (fees[0] !== fees[1] || blk.baseFeePerGas !== fees[0]) apart("the base fee");
   const nonce = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [u, tag]), `rpc ${k} nonce`));
-  if (nonce[0] !== nonce[1]) throw new Error("the two RPCs read U's nonce apart");
+  if (nonce[0] !== nonce[1]) apart("U's nonce");
   const balance = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getBalance", [u, tag]), `rpc ${k} balance`));
-  return { tag, baseFee: blk.baseFeePerGas, nonce: nonce[0], balance };
+  return { tag, baseFee: fees[0], nonce: nonce[0], balance };
 }
 
 /** The L1 fee bound for `gas` on the pin's network: the kit's chain fee reads on both RPCs (agreed), 0 on Nitro. */
@@ -124,7 +141,7 @@ async function l1FeeOf(r: Run, gas: bigint, tag: string): Promise<bigint> {
   const answers: bigint[] = [];
   for (const c of calls) {
     const [a, b] = await both(r.h.rpcs, async (rpc, k) => firstWord(await rpc("eth_call", [{ to: c.to, data: c.data }, tag]), `rpc ${k} chain fee`));
-    if (a !== b) throw new Error("the two RPCs read the chain fee apart");
+    if (a !== b) apart("the chain fee");
     answers.push(a);
   }
   return evmPoolChainFee(net, EVM_POOL_TX_BYTES, answers);
@@ -182,7 +199,7 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   const estimateOf = async (call: { to: string; value: bigint; data: string }) =>
     both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_estimateGas", [{ from: u, to: call.to, value: qty(call.value), data: call.data }, acct.tag]), `rpc ${k} estimate`));
   let estimate = await estimateOf(step.call);
-  if (estimate[0] !== estimate[1]) throw new Error("the two RPCs estimate the deposit apart");
+  if (estimate[0] !== estimate[1]) apart("the deposit's gas estimate");
   let l1 = await l1FeeOf(r, estimate[0], acct.tag);
   if (sentValue === undefined) {
     const better = priced(estimate[0] * maxFee + l1);
@@ -336,7 +353,11 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
     if (landedTxs.length > 0) return { stage: "part_filled", txs: landedTxs };
     // a take not final yet before the note to sign: "not now" (pool-kinds.ts answers it busy), nothing signed
     if (e instanceof EvmNotFinalError) throw e;
-    return { error: e instanceof PoolRuleRefused ? "not_allowed" : "down" };
+    if (e instanceof PoolRuleRefused) return { error: "not_allowed" };
+    // a provider read that still fails after the page's own retry (or a lag past its tries), before U signs: "not now"
+    // (card pool-read-down); any other fault before a send (two RPCs that read apart, an answer out of shape): failed
+    if (e instanceof SolanaRpcTransportError || e instanceof EvmUnansweredError || e instanceof EvmLagError) return { error: "down" };
+    return { error: "failed" };
   } finally {
     seed.fill(0);
     for (const k of keys) k.fill(0);

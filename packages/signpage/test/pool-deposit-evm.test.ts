@@ -18,6 +18,7 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 const ENTROPY = () => new Uint8Array(16);
@@ -79,6 +80,13 @@ function chain() {
     fin: 100n,
     sent: [] as string[],
     onSend: (_raw: string) => {},
+    // one RPC's word off the other's: added to RPC 1's answer
+    off: { nonce: 0n, estimate: 0n, l1: 0n, baseFee: 0n },
+    /** a method that fails on RPC 1 past the page's retry (the kit client's transport error) */
+    down: null as string | null,
+    /** tx hashes each RPC knows; U's pending nonce on each, when it is past "latest" */
+    known: [new Set<string>(), new Set<string>()],
+    pending: [null, null] as (bigint | null)[],
   };
   const deposit = (pre: bigint, value: bigint) => {
     const label = vaultLabelOf(keccak_256, SCOPE, BigInt(c.events.length + 1));
@@ -96,22 +104,26 @@ function chain() {
     (k: number) =>
     async (method: string, params: readonly unknown[]): Promise<unknown> => {
       const p = params as unknown[];
+      const off = (v: bigint, d: bigint) => (k === 1 ? v + d : v);
+      if (k === 1 && c.down === method) throw new SolanaRpcTransportError("http", "HTTP 503", 4, "rpc1.example");
       switch (method) {
         case "eth_getBlockByNumber":
-          return { number: q(c.block), hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(c.baseFee) };
+          return { number: q(c.block), hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(off(c.baseFee, c.off.baseFee)) };
         case "eth_getTransactionCount":
-          return q(p[1] === "finalized" ? c.finNonce[k]! : c.nonce);
+          return q(p[1] === "finalized" ? c.finNonce[k]! : p[1] === "pending" ? (c.pending[k] ?? c.nonce) : off(c.nonce, c.off.nonce));
+        case "eth_getTransactionByHash":
+          return c.known[k]!.has(p[0] as string) ? { hash: p[0] } : null;
         case "eth_getBalance":
           return q(c.balance[k]!);
         case "eth_estimateGas":
-          return q(250_000n);
+          return q(off(250_000n, c.off.estimate));
         case "eth_call": {
           const call = p[0] as { from?: string; data: string };
           if (call.from !== undefined) {
             if (c.simFail[k]) throw new Error("RPC error 3: execution reverted");
             return "0x";
           }
-          return "0x" + word(call.data.startsWith("0xf1c7a58b") ? 7_000n : 0n); // L1 fee bound, operator fee 0
+          return "0x" + word(call.data.startsWith("0xf1c7a58b") ? off(7_000n, c.off.l1) : 0n); // L1 fee bound, operator fee 0
         }
         case "eth_sendRawTransaction": {
           const raw = p[0] as string;
@@ -286,4 +298,20 @@ test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), what
   const fake = Object.assign(new Error("x"), { name: "PoolRuleRefused" });
   const b = await runPoolDepositEvm(hostOf(ch, ns, { round: async () => Promise.reject(fake) }), ASK);
   assert.notDeepEqual(b, { error: "not_allowed" });
+});
+
+test("before a send, two RPCs that read apart (U's nonce, the estimate, the chain fee, the base fee) answer failed; a provider down past the page's retry answers down", async () => {
+  for (const [k, d] of [["nonce", 1n], ["estimate", 1n], ["l1", 1n], ["baseFee", 1n]] as const) {
+    const { ch, ns, planned } = await funded(RUNG + FEE);
+    ch.c.off[k] = d;
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK), { error: "failed" }, k);
+    assert.equal(ch.c.sent.length, 0, k);
+    assert.equal((await ns.get(planned.id))!.state, "PLANNED", k);
+  }
+  for (const m of ["eth_getBalance", "eth_estimateGas", "eth_getTransactionCount"]) {
+    const { ch, ns } = await funded(RUNG + FEE);
+    ch.c.down = m;
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK), { error: "down" }, m);
+    assert.equal(ch.c.sent.length, 0, m);
+  }
 });
