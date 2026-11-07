@@ -12,6 +12,7 @@ import type { IncomingMessage } from "node:http";
 import { isIPv6 } from "node:net";
 import { WINDOW_MS } from "../data/gecko.ts";
 import { resetMs } from "../proxy/proxy.ts";
+import type { DayPeers } from "./day-spend.ts";
 
 /** The window every limit counts in [design: 10 s, the pool routes' window since M356 (3)]. */
 export const LIMIT_WINDOW_MS = 10_000;
@@ -138,14 +139,21 @@ export type ProviderHolds = {
   heldMs(url: string): number;
   hold(url: string, seconds: number): void;
   take(url: string, calls: number, background: boolean, sender?: boolean): number;
+  /** True when `url`'s daily budget (Pace day) cannot fit `calls` more today: out for the rest of the UTC day, which is
+   *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429). */
+  dayOut(url: string, calls: number): boolean;
   reserve(url: string): void;
   room(url: string): number;
   paceOf(url: string): Pace | undefined;
 };
 
 /** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
- *  not) or a call (each request in a batch); `inflight`, the posts it takes at once. */
-export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number };
+ *  not) or a call (each request in a batch); `inflight`, the posts it takes at once; `group`, the one bucket every URL of
+ *  that company draws from, where its limit is the account's across chains (card rpc-keyed-lists: one key per company,
+ *  so its Base, Robinhood and Solana endpoints share it); `batch`, the most requests one post may carry; `day`, the
+ *  units the group (else the URL) may spend in one UTC day, and `cost`, the units one call spends (1 when unset): its
+ *  plan's month, credit- or compute-metered, as a daily budget (KEYED_DAY). */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number; day?: number; cost?: number };
 /**
  * Each paced provider, set under the point where it refuses (reads cited):
  *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
@@ -195,6 +203,62 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   // second, 20 at once. It refuses every eth_getLogs (LOGS_REFUSED).
   "https://mainnet.base.org": { perS: 10, burst: 20, unit: "call" },
 };
+/**
+ * The keyed providers' paces (card rpc-keyed-lists), one account each (rpc.ts keyedAccountOf sets `group`: each QuickNode
+ * endpoint and each dRPC key its own account, the owner 7 Nov 09:16Z and 09:27Z): each limit is the account's. Set from each company's first-party page at its smallest plan. A
+ * larger plan leaves rate room unused; its month is still capped by KEYED_DAY, since a paid plan bills use past its
+ * quota as overage (quicknode.com/pricing: "additional usage is billed at the overage rate"), never refuses it:
+ *   - QuickNode: "Free trial 15" requests per second, Build 50, Accelerate 125 (quicknode.com/pricing, read 2026-11-07
+ *     07:27Z). Paced at 7 calls a second, 7 at once: at most 14 in any second.
+ *   - dRPC: a keyed free account "120,000 CUs per minute per IP ... approximately 100 eth_call requests per second", at
+ *     least "50,400 CUs per minute, which is equivalent to 40 eth_call requests", "Batch requests are limited to 3
+ *     items", and Pay as You Go "100 RPS" (drpc.org/docs/howitworks/ratelimiting and /docs/pricing/requests, read
+ *     2026-11-07 07:29Z). The limit is per IP, and the owner's three keys (three accounts, rpc.ts keyedAccountOf) all
+ *     send from the helper's one, as does its keyless robinhood.drpc.org (PROVIDER_PACE, 15 a second, 15 at once),
+ *     which dRPC may count with them (review L2 of 424dce1e; no page says either way): each key paced at 8 calls a
+ *     second, 8 at once, 3 a post. The worst minute, every bucket full at its start, is 3 x (8 x 60 + 8) + (15 x 60 +
+ *     15) = 2,379 calls, 47,580 CU at 20 a call (KEYED_COST), under the free floor's 50,400 (a test holds the sum).
+ *   - FastNear: the paid plans name requests a month only, "Dev Plan $69 /month 10M RPC requests/month", Pro 36M,
+ *     Business 100M, and no rate (fastnear.com, read 2026-11-07 07:29Z; docs.fastnear.com/auth names none). Paced at
+ *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s). That pace all month long
+ *     would be 13M requests, over Dev's 10M: the month is bounded by KEYED_DAY, not by the pace.
+ */
+export const KEYED_PACE = {
+  quicknode: { perS: 7, burst: 7, unit: "call", group: "quicknode" },
+  drpc: { perS: 8, burst: 8, unit: "call", group: "drpc", batch: 3 },
+  fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
+} as const satisfies Readonly<Record<string, Pace>>;
+export type KeyedProvider = keyof typeof KEYED_PACE;
+/**
+ * Each keyed account's daily budget (card rpc-keyed-lists, review M2), in its company's unit, from its plan's month
+ * over 31 days (dRPC's 30-day period over 30) so no month passes the plan: past it that company is sent nothing more that UTC day (limits.ts take) and
+ * reads go to the spares, never to overage. RPC_DAY_<COMPANY> (keyedDayEnv) names another plan's, in the same unit.
+ *   - QuickNode, credits: the free trial "10M API credits", "1 month free" (quicknode.com/pricing, read 2026-11-07
+ *     09:15Z): 10,000,000 / 31 = 322,580 a day per endpoint, each its own account (the owner, 09:27Z).
+ *   - dRPC, compute units: the free plan "210 million Compute Units (CU) per 30-day period"
+ *     (drpc.org/docs/howitworks/ratelimiting, read 09:15Z): 210,000,000 / 30 = 7,000,000 a day per key, each key its own
+ *     account (rpc.ts keyedAccountOf), every chain's URL of that key drawing on it.
+ *   - FastNear, requests: the smallest paid plan, Dev's "10M RPC requests/month" (fastnear.com, read 07:29Z):
+ *     10,000,000 / 31 = 322,580 a day.
+ */
+export const KEYED_DAY: Readonly<Record<KeyedProvider, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580 };
+/** The units one call spends at each company, by chain family: QuickNode's "All methods" 20 credits on Base (and every
+ *  EVM chain listed) and 30 on Solana (quicknode.com/api-credits, read 2026-11-07 09:15Z); dRPC's 20 CU for every
+ *  method it lists but eth_chainId (0), eth_call, eth_getLogs, getSignaturesForAddress and getTransaction included, none
+ *  above 20 (drpc.org/docs/pricing/compute-units, read 09:16Z); FastNear's one request a call. */
+export const KEYED_COST: Readonly<Record<KeyedProvider, Readonly<Record<"evm" | "solana" | "near", number>>>> = {
+  quicknode: { evm: 20, solana: 30, near: 20 },
+  drpc: { evm: 20, solana: 20, near: 20 },
+  fastnear: { evm: 1, solana: 1, near: 1 },
+};
+/** The environment name of a company's daily budget (KEYED_DAY), a non-secret whole number of its units. */
+export const keyedDayEnv = (p: KeyedProvider): string => `RPC_DAY_${p.toUpperCase()}`;
+/** A UTC day, the daily budget's window. */
+const DAY_MS = 86_400_000;
+/** How often a helper re-reads the other helpers' day files, and at most how often it writes its own (day-spend.ts):
+ *  the two helpers of a handover count each other's spend within about this. [design: a second: a company's pace sends
+ *  at most 14 calls in it (QuickNode's 7 a second and 7 at once), 420 credits on Solana, 0.13% of its day.] */
+export const DAY_SYNC_MS = 1_000;
 /** Providers that refuse every `eth_getLogs` and answer the other reads: no path sends them one (rpc.ts callEvm, the
  *  swap reads), so a log read never holds the provider for the reads it does answer. mainnet.base.org answered every
  *  eth_getLogs, of 1 to 1,000 blocks, from the helper box and from the Mac, -32011 "request limit reached" (HTTP 429;
@@ -219,7 +283,10 @@ export const SENDER_ROOM = 0.125;
 
 // the holds' and paces' clock: monotonic, in epoch ms, as rpc.ts's (card helper-crowd-429: the box's wall clock stepped
 // back inside a test, which would hold a provider for the step's length)
-export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE): ProviderHolds {
+// `peers`: the day files (limits/day-spend.ts dayFiles) where each account's daily spend is kept and the other helpers'
+// is read (review H1 of 424dce1e: a restart resumes the day's spend, a handover's two helpers share one budget); none:
+// memory only
+export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE, peers?: DayPeers): ProviderHolds {
   const until = new Map<string, number>();
   const buckets = new Map<string, { tokens: number; at: number }>();
   /** Per provider: until when a caller's read that found no room waits for it (card helper-deploy-reads-fast). Background
@@ -230,12 +297,64 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
   const callerWaits = new Map<string, number>();
   /** The providers a pool sender reads, whose SENDER_ROOM callers leave (fold A). */
   const reserved = new Set<string>();
+  /** Per group (else URL) with a daily budget: the UTC day and the units spent in it (Pace day, cost). */
+  const spent = new Map<string, { day: number; units: number }>();
+  /** The other helpers' spend (peers): of day `day`, read at `at`. */
+  const others = { day: -1, at: -Infinity, units: new Map<string, number>() };
+  const othersOf = (k: string, day: number, t: number): number => {
+    if (peers === undefined) return 0;
+    if (others.day !== day || t - others.at >= DAY_SYNC_MS) {
+      try {
+        others.units = peers.read(day);
+      } catch {
+        // the store unreadable a moment: the last read stands until the next
+      }
+      others.day = day;
+      others.at = t;
+    }
+    return others.units.get(k) ?? 0;
+  };
+  const usedToday = (k: string, t: number): number => {
+    const s = spent.get(k);
+    const day = Math.floor(t / DAY_MS);
+    return (s !== undefined && s.day === day ? s.units : 0) + othersOf(k, day, t);
+  };
+  // this helper's spend to its day file: at once when the last write is DAY_SYNC_MS old, else at the end of that wait
+  // (so the last spend before a stop is kept too)
+  let wroteAt = -Infinity;
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const save = (day: number) => {
+    if (peers === undefined) return;
+    const units = new Map([...spent].filter(([, s]) => s.day === day).map(([k, s]) => [k, s.units]));
+    try {
+      peers.write(day, units);
+    } catch {
+      // the store unwritable a moment: the next spend writes again
+    }
+  };
+  const saveSoon = (day: number, t: number) => {
+    if (peers === undefined) return;
+    if (t - wroteAt >= DAY_SYNC_MS) {
+      wroteAt = t;
+      save(day);
+    } else if (pending === undefined) {
+      pending = setTimeout(() => {
+        pending = undefined;
+        wroteAt = now();
+        save(day);
+      }, DAY_SYNC_MS);
+      pending.unref?.();
+    }
+  };
+  const dayOut = (k: string, p: Pace, calls: number, t: number): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > p.day;
+  // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
   const fill = (url: string, p: Pace) => {
     const t = now();
-    const b = buckets.get(url) ?? { tokens: p.burst, at: t };
+    const k = p.group ?? url;
+    const b = buckets.get(k) ?? { tokens: p.burst, at: t };
     b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * p.perS) / 1000);
     b.at = t;
-    buckets.set(url, b);
+    buckets.set(k, b);
     return b;
   };
   return {
@@ -244,15 +363,28 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       if (p === undefined) return 0;
       const b = fill(url, p);
       const t = now();
-      const waiting = (callerWaits.get(url) ?? 0) - t;
+      const k = p.group ?? url;
+      // the day's budget (review M2): a draw it cannot fit waits for the next UTC day, so every path asks another
+      // provider; a pool sender's few reads are never refused by it (pool/evm.ts pacedEvmRpc waits out what take names)
+      const need = Math.max(calls, 1) * (p.cost ?? 1);
+      if (!sender && dayOut(k, p, calls, t)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
+      const spend = () => {
+        if (p.day === undefined) return;
+        const day = Math.floor(t / DAY_MS);
+        const s = spent.get(k);
+        spent.set(k, { day, units: (s !== undefined && s.day === day ? s.units : 0) + need });
+        saveSoon(day, t);
+      };
+      const waiting = (callerWaits.get(k) ?? 0) - t;
       if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
       const floor = background ? p.burst * CALLER_ROOM : sender || !reserved.has(url) ? 0 : p.burst * SENDER_ROOM;
       // a post larger than the bucket waits for a full one
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
       // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
-      const keep = (ms: number) => callerWaits.set(url, Math.max(callerWaits.get(url) ?? 0, t + ms));
+      const keep = (ms: number) => callerWaits.set(k, Math.max(callerWaits.get(k) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
         b.tokens -= units;
+        spend();
         if (!background) keep(CALLER_HOLD_MS);
         return 0;
       }
@@ -260,12 +392,19 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       if (!background) keep(Math.max(w, CALLER_HOLD_MS));
       return w;
     },
+    dayOut(url, calls) {
+      const p = pace[url];
+      return p !== undefined && dayOut(p.group ?? url, p, calls, now());
+    },
     reserve(url) {
       reserved.add(url);
     },
     room(url) {
       const p = pace[url];
-      return p === undefined ? 1 : fill(url, p).tokens / p.burst;
+      if (p === undefined) return 1;
+      // a day's budget with no call's room left: none (the swap reads rank it last)
+      if (p.day !== undefined && p.day - usedToday(p.group ?? url, now()) < (p.cost ?? 1)) return 0;
+      return fill(url, p).tokens / p.burst;
     },
     paceOf(url) {
       return pace[url];

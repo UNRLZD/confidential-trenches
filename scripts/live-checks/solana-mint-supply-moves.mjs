@@ -41,7 +41,7 @@ import {
   solanaDecodeLookupTable,
   solanaJsonRpc,
 } from "../../packages/kit/src/index.ts";
-import { BASE, BUY_LAMPORTS, RPCS, SLIPPAGE_BPS, base58, mintLine } from "./solana-jupiter-build.mjs";
+import { BASE, BUY_LAMPORTS, RPCS, SLIPPAGE_BPS, base58, mintLine, noneWritten } from "./solana-jupiter-build.mjs";
 
 const KEY = "solana-mint-supply-moves";
 export const ROUNDS = 20;
@@ -93,6 +93,7 @@ function mintChecks(build, req, ma, mb) {
     mint: [accRead(ma), accRead(mb)],
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
     simulations: [null, null],
+    writable: noneWritten(b64(build.wire), pairs),
     reference: null,
   });
   return v.results.filter((y) => (y.id === "S6" || y.id === "S10") && !y.ok).map((y) => `${y.id} ${y.detail}`);

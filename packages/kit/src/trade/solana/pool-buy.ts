@@ -55,8 +55,10 @@ import {
   SOLANA_SOL_MINT,
   SOLANA_SYSTEM_PROGRAM,
   SOLANA_TOKEN_2022_PROGRAM,
+  SOLANA_TOKEN_ACCOUNT_MAX_SIZE,
   SOLANA_TOKEN_PROGRAM,
   solanaEventAuthority,
+  solanaTokenAccountSize,
   solanaVolumeAccumulator,
 } from "../../checks/solana/checks.ts";
 import { solanaCompileV0, type SolanaApiAccount, type SolanaApiInstruction } from "./build.ts";
@@ -793,52 +795,11 @@ const READ_TIMEOUT_MS = 5_000;
 export const SOLANA_PUMP_GLOBAL_SIZE = 1_088;
 export const SOLANA_PUMP_AMM_CONFIG_SIZE = 949;
 
-/** Token-2022 mint extensions (spl-token-2022 ExtensionType) that add nothing to a new token account. */
-const T22_MINT_ONLY = new Set([3, 4, 6, 10, 12, 16, 18, 19, 20, 21, 22, 23, 24, 25]);
-/** Mint extensions that a new token account carries one of (get_required_init_account_extensions): TransferFeeConfig
- * -> TransferFeeAmount (8 bytes), NonTransferable -> NonTransferableAccount (0), TransferHook -> TransferHookAccount
- * (1), Pausable -> PausableAccount (0). */
-const T22_ACCOUNT_EXT = new Map([[1, 8], [9, 0], [14, 1], [26, 0]]);
-
-/** The largest new token account W can get for a mint the venue reader admits (solanaTokenAccountSize): a Token-2022
- * account with its type byte, ImmutableOwner, and each of the four extensions a mint can ask of it once (Token-2022
- * holds one extension of each type): 195 bytes. */
-export const SOLANA_TOKEN_ACCOUNT_MAX_SIZE = TOKEN_ACCOUNT_SIZE + 1 + 4 + [...T22_ACCOUNT_EXT.values()].reduce((s, x) => s + 4 + x, 0);
 /** The venue that costs W the most of its chunk (solanaPoolBuyFunds): pump's curve on a cashback coin with the largest
  * token account. A curve buy keeps the most for its sell (PumpSwap's need after graduation, with both cashback
  * accounts the sell makes: one volume account more than a PumpSwap buy, which keeps one cashback account and makes the
  * other). tap_max is priced on it, before the tap knows its venue, so the tap's real venue always funds that spend. */
 export const SOLANA_POOL_WORST_BUY_VENUE = Object.freeze({ kind: "pump-curve", tokenAccountSize: SOLANA_TOKEN_ACCOUNT_MAX_SIZE, cashback: true } as const);
-
-/** The size of W's new associated token account for `mint`: 165 for Token; for Token-2022 165, the account type byte
- * and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it) and the one each
- * mint extension asks. A mint extension this list does not know is refused. */
-export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }): number {
-  if (mint.owner === SOLANA_TOKEN_PROGRAM) {
-    if (mint.data.length !== 82) throw new Error("not a Token mint");
-    return TOKEN_ACCOUNT_SIZE;
-  }
-  if (mint.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`mint owned by ${mint.owner}`);
-  const d = mint.data;
-  let size = TOKEN_ACCOUNT_SIZE + 1 + 4; // account type, ImmutableOwner
-  if (d.length === 82) return size;
-  if (d.length < 166 || d[165] !== 1) throw new Error("not a Token-2022 mint");
-  const seen = new Set<number>(); // Token-2022 holds at most one extension of each type: a mint listing one twice is forged
-  for (let at = 166; at < d.length; ) {
-    if (at + 4 > d.length) throw new Error("a Token-2022 extension runs past the mint");
-    const type = d[at]! | (d[at + 1]! << 8);
-    const len = d[at + 2]! | (d[at + 3]! << 8);
-    if (type === 0) break; // Uninitialized: the rest is padding
-    if (seen.has(type)) throw new Error(`a Token-2022 mint lists extension ${type} twice`);
-    seen.add(type);
-    at += 4 + len;
-    if (at > d.length) throw new Error("a Token-2022 extension runs past the mint");
-    const extra = T22_ACCOUNT_EXT.get(type);
-    if (extra !== undefined) size += 4 + extra;
-    else if (!T22_MINT_ONLY.has(type)) throw new Error(`a Token-2022 mint extension ${type} not known here`);
-  }
-  return size;
-}
 
 /** The venue's buy accounts from one provider's read of [mint, curve, pump Global] or [mint, pool, GlobalConfig]; the
  * buyback recipient is the `pick`ed one of the venue's eight (the SDKs pick at random, which spreads the write locks). */
