@@ -57,7 +57,9 @@ export const MUTANTS = [
   // fold review 5: a give-up on a clock (the old hour) back in
   [SOL, [["    await pause(gap);\n    waited += gap;\n", "    if (waited + gap > 3_600_000) return null;\n    await pause(gap);\n    waited += gap;\n"]], "pool-deposit-sent-end review 1: a note the pass cannot"],
   // the sign out read before each note's read (delta review low 4: the loop's own check folded into it)
-  [SOL, [["      if (h.signal?.aborted) return null;\n      const e = await noteEnd(", "      const e = await noteEnd("]], "pool-deposit-sent-end review 4: the end's reads stop"],
+  [SOL, [["      if (h.signal?.aborted) return null;\n      // a send not read before", "      // a send not read before"]], "pool-deposit-sent-end review 4: the end's reads stop"],
+  // delta review 2 of release-86: the stop read before the wait for an RPC behind, not after it
+  [SOL, [["    await pause(ms);\n    stopped(h);\n", "    stopped(h);\n    await pause(ms);\n"]], "pool-deposit-sent-end review 2 M1"],
   // E1: the follower's round read before U's finalized nonce
   [EVM, [['  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n  stopped(h);\n  const round = await h.round();\n', '  const round = await h.round();\n  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n']], "review 8 E1:"],
   // E4: a take read from a Deposited not final yet; E5: a Deposited at another value read as landed
@@ -80,7 +82,7 @@ export const MUTANTS = [
   // fold review 4: X1, the EVM record restored at another value read as landed; X7, the EVM follower ignores the sign out;
   // X14, a failed read counted as a send that may land (no backoff)
   [EVM, [['return rec.state === "PLANNED" ? null : rec.leaf?.value === n.value ? "landed" : "dead";', 'return rec.state === "PLANNED" ? null : "landed";']], "pool-deposit-sent-end fold review 4 X1 (EVM)"],
-  [EVM, [["      if (h.signal?.aborted) return null;\n      const e = await noteEndEvm(", "      const e = await noteEndEvm("]], "pool-deposit-sent-end review 4 (EVM)"],
+  [EVM, [["      if (h.signal?.aborted) return null;\n      // a send not read before", "      // a send not read before"]], "pool-deposit-sent-end review 4 (EVM)"],
   [SOL, [['      const e = await noteEnd(h, sync, scope, n, wait, seen).catch(() => "fault" as const);', "      const e = await noteEnd(h, sync, scope, n, wait, seen).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14:"],
   [EVM, [['      const e = await noteEndEvm(h, n, seen).catch(() => "fault" as const);', "      const e = await noteEndEvm(h, n, seen).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14 (EVM)"],
   // fold review 5 (EVM): the give-up back in

@@ -2302,19 +2302,22 @@ test("pool-deposit-sent-end review 2 M1 (REV2 M1): a sign out while an RPC is be
     const ns = await notes();
     const stop = new AbortController();
     let after = 0;
+    let armed = false;
+    // the sign out lands inside the wait for the RPC behind (the host's wait, or 100 ms into the follower's own), so the
+    // order "the wait, then the stop" is what keeps the next mark read from going out
     const behind = (rpc: SolanaRpc): SolanaRpc => async (m, p) => {
       const pinned = m === "getAccountInfo" && (p[1] as { minContextSlot?: number } | undefined)?.minContextSlot !== undefined;
       if (stop.signal.aborted) after++;
       if (pinned) {
-        stop.abort();
+        if (!own && !armed) (armed = true), setTimeout(() => stop.abort(), 100);
         throw new Error("RPC error -32016 Minimum context slot has not been reached");
       }
       return rpc(m, p);
     };
     const { wait: _no, ...bare } = host(c, ns);
-    const got = await followPoolDeposit({ ...bare, ...(own ? { wait: async () => {} } : {}), rpcs: [behind(c.rpc()), behind(c.rpc())] as const, signal: stop.signal }, openLeft(1));
+    const got = await followPoolDeposit({ ...bare, ...(own ? { wait: async () => void stop.abort() } : {}), rpcs: [behind(c.rpc()), behind(c.rpc())] as const, signal: stop.signal }, openLeft(1));
     assert.equal(got, null);
-    assert.equal(after, 1, `only the read already in flight on the other RPC (${own ? "the host's wait" : "the follower's"})`);
+    assert.equal(after, 0, `no read after a sign out inside the wait (${own ? "the host's wait" : "the follower's"})`);
   }
 });
 
