@@ -56,6 +56,11 @@ const OWED_KEY = /^owed\/[^/]{1,200}$/;
  *  writes are no seed move (walletSeedMoved), and the frame's reader neither reads nor lists it. */
 export const WALLET_SYNC_PREFIX = "sync/";
 const SYNC_KEY = /^sync\/[^/]{1,200}$/;
+/** The EVM sale pools this device banned for a token, one record per (chain, token) (../pool/evm-sell-bans.ts, card
+ *  evm-sell-hook-converge): meta evm-bans/<chain>/<token>. Like a vault cursor it moves no seed, and the frame's
+ *  reader neither reads nor lists it (it names tokens the user sold). */
+export const WALLET_BAN_PREFIX = "evm-bans/";
+const BAN_KEY = /^evm-bans\/[^/]{1,40}\/[^/]{1,200}$/;
 // "closed": this store's own connection was closed by another tab's delete or upgrade (versionchange); open it again
 // "changed" names the key a caller's put, update or delete wrote (`key`; none for the store's own seed and counter
 // writes), so a listener can tell an owed send's write (meta owed/<op id>) from a seed change
@@ -66,7 +71,7 @@ export type WalletEvent = { kind: "changed"; stores: WalletStoreName[]; key?: st
  *  read as no seed). An event with no key (an older release's) counts. */
 export const walletSeedMoved = (e: WalletEvent | undefined): boolean =>
   e?.kind === "signout" ||
-  (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta") && !(e.stores.length === 1 && typeof e.key === "string" && (e.key.startsWith(WALLET_OWED_PREFIX) || e.key.startsWith(WALLET_SYNC_PREFIX))));
+  (e?.kind === "changed" && Array.isArray(e.stores) && e.stores.includes("meta") && !(e.stores.length === 1 && typeof e.key === "string" && (e.key.startsWith(WALLET_OWED_PREFIX) || e.key.startsWith(WALLET_SYNC_PREFIX) || e.key.startsWith(WALLET_BAN_PREFIX))));
 
 export interface WalletStoreOptions {
   name?: string; // tests only: the database name
@@ -204,7 +209,7 @@ function checkKey(store: WalletStoreName, key: string): void {
 function checkCallerKey(store: WalletStoreName, key: string): void {
   checkKey(store, key);
   if (store === "counters") throw new Error("counters only grow, through reserveDepositIndex");
-  if (store === "meta" && key !== "seed" && key !== "settings" && !OWED_KEY.test(key) && !SYNC_KEY.test(key)) throw new Error(`meta key ${key} is the store's own`);
+  if (store === "meta" && key !== "seed" && key !== "settings" && !OWED_KEY.test(key) && !SYNC_KEY.test(key) && !BAN_KEY.test(key)) throw new Error(`meta key ${key} is the store's own`);
   // the seed record holds the only copy of a no-PRF account's 12 words: it is written by insertSeed only, changed by
   // setCodeSaved only, and goes only with signOut
   if (store === "meta" && key === "seed") throw new Error("the seed record is written by insertSeed and setCodeSaved only");
@@ -635,7 +640,7 @@ export async function openWalletStoreReader(
     async keys(store) {
       checkKey(store, "x");
       const all = await req(live().transaction(store, "readonly").objectStore(store).getAllKeys());
-      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE || x.startsWith(WALLET_OWED_PREFIX) || x.startsWith(WALLET_SYNC_PREFIX))));
+      return all.map(String).filter((x) => !(store === "meta" && (x === K_WRAP || x === LANE || x.startsWith(WALLET_OWED_PREFIX) || x.startsWith(WALLET_SYNC_PREFIX) || x.startsWith(WALLET_BAN_PREFIX))));
     },
     close: shut,
   };

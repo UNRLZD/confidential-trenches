@@ -1667,10 +1667,11 @@ const bestOf = (xs: readonly Filled[]) => {
 };
 
 /** True when W can sell `token` back through the pools `route` buys through: the same pools backwards, as the sell
- *  builder takes them (trade/evm/sell-unpinned.ts evmSellRouteCheck). */
-function evmSellExits(chain: EvmPoolChain, token: string, route: EvmRoute): boolean {
+ *  builder takes them (trade/evm/sell-unpinned.ts evmSellRouteCheck; `anyHook`: a v4 hop's hook any, as the builder
+ *  takes it on a route the device's sell quote picked, card evm-sell-hook-converge). */
+function evmSellExits(chain: EvmPoolChain, token: string, route: EvmRoute, anyHook = false): boolean {
   try {
-    evmSellRouteCheck(chain, token, evmSellRouteOf(route));
+    evmSellRouteCheck(chain, token, evmSellRouteOf(route), anyHook);
     return true;
   } catch {
     return false;
@@ -2388,7 +2389,10 @@ export const evmIsDeviceQuote = (q: unknown): q is EvmPoolBuyQuote => typeof q =
 // that fill, by the buy's own rule (the output grows with the input; a v3 route whose twice reverts does not fill), and
 // that the sell builder takes; none is no_quote. It is held to a reference, the best of every route that fills, the
 // sell builder's or not: a pick more than the slippage below it is refused (below_reference), so a seeded pool is
-// never picked over the token's real market (review of evm-sell-device-quote, H1). Then, at the same block on both
+// never picked over the token's real market (review of evm-sell-device-quote, H1), except where the reference is a route
+// through a hook the venue does not list: that route is then the pick (card evm-sell-hook-converge), the quote names
+// its pools (`hooked`) for the caller to ban if the real sale reverts, and a banned pool (`banned`) is no route at
+// all. Then, at the same block on both
 // providers, the fee-on-transfer probe: W's code is replaced
 // (eth_call's state override) by EVM_SELL_PROBE_CODE, which transfers the amount from W to the pool's own address (the
 // PoolManager for v4, the v3 pool from the quoter's factory().getPool for v3) and returns what that address received,
@@ -2418,6 +2422,10 @@ export type EvmPoolSellQuoteRequest = {
   /** W's signature of a sim sell at the agreed block's timestamp (the kit's evmPoolSignSimSell with W's key), needed
    *  only where a route through a hook the venue does not list would set the reference (card evm-quote-exec-sim). */
   signSim?: (sim: EvmSellSim, blockTimestamp: bigint) => Uint8Array;
+  /** (optional) The v4 pools this device banned for this token on this chain (card evm-sell-hook-converge): each a
+   *  PoolId, 0x and 64 hex digits, from a quote's `hooked` whose real sale reverted (the wallet's store keeps them,
+   *  wallet pool/evm-sell-bans.ts). A route through any of them is neither picked nor a reference. */
+  banned?: readonly string[];
 };
 
 export type EvmPoolSellQuote = {
@@ -2438,6 +2446,12 @@ export type EvmPoolSellQuote = {
    *  evmPoolSellFeeMax) at the agreed block's base fee and chain fee, read on both providers; the kit's sell builder
    *  takes no fee cap above it, and minOut less it is at least the pool's MIN_DEPOSIT. */
   readonly feeMax: bigint;
+  /** The PoolId (0x and 64 hex digits) of each pool of the route behind a hook the venue does not list, in hop order;
+   *  empty for a route with none. Such a route is picked only where it sets the reference and no route through listed
+   *  pools is within the slippage of it (card evm-sell-hook-converge): a hook may honour a quote and a sim and revert the
+   *  real sale (one that honours only some blocks, or flips on per-block state), so where the real sale reverts the
+   *  caller bans these pools (`banned` on the next quote) and the sale goes on through the rest. */
+  readonly hooked: readonly string[];
 };
 
 /** The fee-on-transfer probe, run as W's code (calldata token ‖ to ‖ amount, 32 bytes each): token.balanceOf(to) and
@@ -2457,6 +2471,22 @@ export const EVM_SELL_PROBE_CODE =
   "0x6370a0823160e01b60005260203560045260206080602460006000355afa15610109573d602011610109576370a0823160e01b60005230600452602060c0602460006000355afa15610109573d6020116101095763a9059cbb60e01b60005260203560045260403560245260206101006044600060006000355af115610109573d15610097573d602011610109576101005115610109575b6370a0823160e01b600052602035600452602060a0602460006000355afa15610109573d602011610109576370a0823160e01b60005230600452602060e0602460006000355afa15610109573d6020116101095760805160a051038060e05160c0510314156101095760005260206000f35b600080fd";
 const SEL_FACTORY = "c45a0155"; // QuoterV2.factory()
 const SEL_GET_POOL = "1698ee82"; // UniswapV3Factory.getPool(address,address,uint24)
+
+/** The most PoolIds a sell quote's `banned` takes: far past any token's pools a device could try and ban. */
+export const EVM_SELL_BANNED_MAX = 4096;
+/** A request's `banned` (card evm-sell-hook-converge) as a set of PoolIds, 0x and 64 lower-case hex digits; none is
+ *  an empty set. Read once, into a copy; anything but a list of at most EVM_SELL_BANNED_MAX such strings is refused
+ *  (bad_request). */
+function bannedOf(b: unknown): ReadonlySet<string> {
+  if (b === undefined) return new Set();
+  if (!Array.isArray(b) || b.length > EVM_SELL_BANNED_MAX) return refuse("bad_request", `banned is a list of at most ${EVM_SELL_BANNED_MAX} pool ids`);
+  const out = new Set<string>();
+  for (const x of [...b]) {
+    if (typeof x !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(x)) return refuse("bad_request", "a banned pool id is 0x and 64 hex digits");
+    out.add(x.toLowerCase());
+  }
+  return out;
+}
 
 /** The device's sell quote on the chain's two pinned providers (see above); throws EvmQuoteError. Like
  *  evmPoolBuyQuote, it takes no provider from its caller; tests run evmPoolSellQuoteWith. */
@@ -2496,25 +2526,39 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   if (lower(evmPoolRouteDataQuoted(chain, bought).token) !== lower(token)) return refuse("token_mismatch", "the bought route buys another token");
   const boughtBlock = req.boughtBlock;
   if (typeof boughtBlock !== "bigint" || boughtBlock < 1n) return refuse("bad_request", "a sell quote takes `boughtBlock`, the block of the buy that paid W the token");
+  // the pools this device banned for the token (card evm-sell-hook-converge), read once into a set of PoolIds
+  const banned = bannedOf(req.banned);
   const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2);
   const t = lower(token);
 
   const reads: Read[] = [];
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought) ? bought : undefined;
-  const { block, out, filled } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
+  const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
+  // a route through a pool this device banned is neither simmed, picked nor a reference
+  const filled = found.filter((r) => !(r.route.venue === "uniswap-v4" && hopKeys(r.route).some((k) => banned.has("0x" + poolId(k)))));
   // a route through a hook the venue does not list, priced above the best route the sell builder takes, counts only
   // where W's own sell through it executes at that price (card evm-quote-exec-sim; review of edb4dbb, F4)
   const takes = best(filled.filter((r) => evmSellExits(chain, t, r.route)));
   const routes = await simmedSells(chain, v, rpcs, block, lower(w), t, amountIn, filled, takes?.amountOut ?? 0n, req.signSim);
-  // The pick: the best route the sell builder takes. The reference: the best of every route, the sell builder's or
-  // not (a pool of a hook not listed, priced at the lower of its quote with the hook replaced and as it is). A pick
-  // more than the slippage below the reference is refused, so a seeded pool is never picked over the token's real
-  // market (review of evm-sell-device-quote, H1)
-  const pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));
+  // The pick: the best route the sell builder takes through listed pools. The reference: the best of every route,
+  // the sell builder's or not (a pool of a hook not listed, priced at the lower of its quote with the hook replaced and
+  // as it is, or held by W's sim). A pick more than the slippage below the reference is refused, so a seeded pool is
+  // never picked over the token's real market (review of evm-sell-device-quote, H1), unless the reference's own route
+  // can be the pick (below)
   const reference = bestOf(routes);
+  const under = (p: Filled | null) => p === null || (reference !== null && p.amountOut * 10000n < reference.amountOut * BigInt(10000 - slippageBps));
+  let pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));
+  // A route through a hook the venue does not list that sets the reference, with no route through listed pools within
+  // the slippage of it, is the pick itself, at the reference's minOut (card evm-sell-hook-converge): its price held on
+  // both providers (and, where the chain pins a sell delegate and sender, in W's own sim), yet a hook can still honour
+  // only some blocks or flip on per-block state, which no read before the sale can see. Refusing would let such a pool
+  // freeze the token's sales; taking it costs at most one reverted sale, after which the caller bans its pools
+  // (`hooked`, then `banned`) and the next quote leaves through the rest. A builder is still never paid less than a
+  // route the sale can take: minOut is the reference's
+  if (under(pick) && reference !== null && evmSellExits(chain, t, reference.route, true)) pick = { route: reference.route, amountOut: reference.amountOut };
   if (pick === null) return refuse("no_quote", "no pool the sell can leave through fills it", reference);
-  if (reference !== null && pick.amountOut * 10000n < reference.amountOut * BigInt(10000 - slippageBps)) {
+  if (reference !== null && under(pick)) {
     return refuse("below_reference", `the best pool the sell can leave through quotes ${pick.amountOut}, more than the slippage below ${reference.amountOut}`, reference);
   }
   const route = evmSellRouteOf(pick.route);
@@ -2555,7 +2599,9 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   // the sale's proceeds less the sender's most go back into the pool as a deposit, which the pool refuses under its
   // MIN_DEPOSIT: a sale that could land only as a revert is never quoted (review fold 1, L5)
   if (minOut - feeMax < EVM_POOL_MIN_DEPOSIT) return refuse("below_minimum", `the sale's ${minOut} at least, less the fee's ${feeMax} at most, is under the pool's least deposit of ${EVM_POOL_MIN_DEPOSIT}`);
-  const quote: EvmPoolSellQuote = Object.freeze({ chain, token: t, w: lower(w), amountIn, route, target, block: Object.freeze(block), amountOut: pick.amountOut, minOut, feeMax });
+  // the pools of the pick behind a hook the venue does not list: the caller bans these where the real sale reverts
+  const hooked = Object.freeze(pick.route.venue === "uniswap-v4" ? hopKeys(pick.route).filter((k) => k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing)).map((k) => "0x" + poolId(k)) : []);
+  const quote: EvmPoolSellQuote = Object.freeze({ chain, token: t, w: lower(w), amountIn, route, target, block: Object.freeze(block), amountOut: pick.amountOut, minOut, feeMax, hooked });
   QUOTED_SELLS.add(quote);
   return quote;
 }
