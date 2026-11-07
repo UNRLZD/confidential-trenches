@@ -1,11 +1,11 @@
 {
- "_note": "good: the branch helper at 38249ca run on the Mac (port 8797), its Robinhood lists warmed, read by helper-robinhood-capacity.mjs --base http://127.0.0.1:8797 --record at 2026-11-05 07:35Z: 12 of 12 tapes 200 at once, p50 7020 ms, max 12199 ms. bad_pre_card: the deployed helper at 6832227, read at 2026-11-04 19:07Z: 6 x 503 after 52-57 s, 3 timeouts at 60 s, 3 late 200s. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
+ "_note": "good: the branch helper at 61f16646 (card robinhood-listed-tape-opens) run on the Mac (port 8797), its Robinhood lists warmed, read by helper-robinhood-capacity.mjs --base http://127.0.0.1:8797 --record at 2026-11-07 06:58Z: 12 of 12 tapes 200 at once, p50 2955 ms, max 5525 ms. bad_listed_dropped: the deployed helper at 358d8f4f in helper live run 42345906841 (2026-11-07 06:12Z), transcribed from the run's printed lines (its lists' time is not printed: null): 3 of 12 listed tokens answered 404 not_found in 796-852 ms, gone from the lists' next answer. bad_pre_card: the deployed helper at 6832227, read at 2026-11-04 19:07Z: 6 x 503 after 52-57 s, 3 timeouts at 60 s, 3 late 200s. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
  "good": {
   "base": "http://127.0.0.1:8797",
-  "at": "2026-11-05T07:35:31.962Z",
+  "at": "2026-11-07T06:58:43.765Z",
   "lists": {
    "status": 200,
-   "ms": 25,
+   "ms": 58,
    "tokens": 12
   },
   "answers": [
@@ -13,84 +13,182 @@
     "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
     "status": 200,
     "retryAfter": null,
-    "ms": 4928,
-    "shape": "tape"
-   },
-   {
-    "address": "0xfad17d7cc41d9c9ca4a459da798a4446dd217974",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 4946,
-    "shape": "tape"
-   },
-   {
-    "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 10659,
-    "shape": "tape"
-   },
-   {
-    "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 12199,
-    "shape": "tape"
-   },
-   {
-    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 7020,
-    "shape": "tape"
-   },
-   {
-    "address": "0x6b1d42927b1a84ec28fa88d4fc6fa7af404966be",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 10994,
-    "shape": "tape"
-   },
-   {
-    "address": "0x94641b97010608c3827fb058074889f19868ff33",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 7080,
-    "shape": "tape"
-   },
-   {
-    "address": "0x6adb9cd443f4653572101e2f91b35ea1ed5f6b69",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 5755,
-    "shape": "tape"
-   },
-   {
-    "address": "0xedbf91223639800bcd5756815caf908df3b890be",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 6465,
-    "shape": "tape"
-   },
-   {
-    "address": "0x7141c8559b2ded1f096012657ed6695662eaeba3",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 6635,
-    "shape": "tape"
-   },
-   {
-    "address": "0x818431feb34ef28a6487b1d2eb6be761f4f08888",
-    "status": 200,
-    "retryAfter": null,
-    "ms": 6749,
+    "ms": 2955,
     "shape": "tape"
    },
    {
     "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
     "status": 200,
     "retryAfter": null,
-    "ms": 7658,
+    "ms": 2957,
+    "shape": "tape"
+   },
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 1425,
+    "shape": "tape"
+   },
+   {
+    "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2955,
+    "shape": "tape"
+   },
+   {
+    "address": "0x255979302fd6a5e2ff6dce0d8b018f51e06e243a",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2955,
+    "shape": "tape"
+   },
+   {
+    "address": "0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2955,
+    "shape": "tape"
+   },
+   {
+    "address": "0x6511c233790ec10f7d673c64dc82c3f941d57828",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 5525,
+    "shape": "tape"
+   },
+   {
+    "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 8,
+    "shape": "tape"
+   },
+   {
+    "address": "0xb8fa8010833463aac5595b55b9045479239eff79",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 2955,
+    "shape": "tape"
+   },
+   {
+    "address": "0x7a75bae321a76acf5570a10ded9d590c082488b4",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 3030,
+    "shape": "tape"
+   },
+   {
+    "address": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 3962,
+    "shape": "tape"
+   },
+   {
+    "address": "0xb0007d59fe4050a1636c2fa19038973d16481337",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 5524,
+    "shape": "tape"
+   }
+  ]
+ },
+ "bad_listed_dropped": {
+  "base": "https://api.confidential.unrealized.trade",
+  "at": "2026-11-07T06:12:24.581Z",
+  "lists": {
+   "status": 200,
+   "ms": null,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 355,
+    "shape": "tape"
+   },
+   {
+    "address": "0xc60ba256b44334a0cd2c7242e98b88f031abb006",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 470,
+    "shape": "tape"
+   },
+   {
+    "address": "0xaa5751ff3fb61e613993b2eb4eab1fce017081fc",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 706,
+    "shape": "tape"
+   },
+   {
+    "address": "0x0339f5459fc690ac85f1782e15782a151b4a9e1b",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 788,
+    "shape": "tape"
+   },
+   {
+    "address": "0x451b42a15100c340ca12f7c66de06fac5ea2d751",
+    "status": 404,
+    "retryAfter": null,
+    "ms": 796,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "address": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 938,
+    "shape": "tape"
+   },
+   {
+    "address": "0xf44702b17d9abd53815f703e772f35e9c71a53af",
+    "status": 404,
+    "retryAfter": null,
+    "ms": 837,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "address": "0xdcd7face6a1d0bdd0665ea1b0842fc9ce797862b",
+    "status": 404,
+    "retryAfter": null,
+    "ms": 852,
+    "shape": null,
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "address": "0xf2ed00e0558a0de8b7336c9fac001a0127422377",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 1552,
+    "shape": "tape"
+   },
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 1149,
+    "shape": "tape"
+   },
+   {
+    "address": "0xb8fa8010833463aac5595b55b9045479239eff79",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 865,
+    "shape": "tape"
+   },
+   {
+    "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+    "status": 200,
+    "retryAfter": null,
+    "ms": 1229,
     "shape": "tape"
    }
   ]

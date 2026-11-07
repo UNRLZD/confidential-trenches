@@ -14,7 +14,7 @@ import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../termina
 import { onCurve } from "../../../../terminal/src/screens/market/curve.ts";
 import {
   address, b58decode, b58encode, createSolanaLists, dec, FRESH_MS, LIST_MAX, LIST_STEP_MS, pumpCurveAddress, pumpCurveBps, PUMP_PROGRAM,
-  READS, ROW_FIELDS, snapshot, STALE_MS, text, toRow, toRows, type Row,
+  READS, ROW_FIELDS, SERVED_MS, snapshot, STALE_MS, text, toRow, toRows, type Row,
 } from "./lists.ts";
 import { createOrigins, rpcAccounts } from "./origin.ts";
 import { createProxy } from "../../proxy/proxy.ts";
@@ -428,4 +428,38 @@ test("the lists' launchpad tags are the chain's: Jupiter's untagged pump.fun tok
   assert.ok(OX.tokens.some((t) => t.jupiter.launchpad === undefined && t.origin !== null), "a token Jupiter leaves untagged is tagged");
   assert.ok(OX.tokens.some((t) => t.jupiter.launchpad === "metadao" && t.origin === null), "a tag no launch backs is dropped");
   assert.ok((s.lists.graduating as Row[]).some((r) => r.launchpad === "raydium-launchlab"), "a LaunchLab token on its curve is graduating");
+});
+
+test("card robinhood-listed-tape-opens: a mint the last answer held and the next one dropped stays listed (its trades open) for SERVED_MS after the last answer that held it; one no answer held is not; unknown while no answer was built", async () => {
+  let t = AS_OF;
+  const trending = new Set([...RAW.trending_5m, ...RAW.trending_1h].map((x: { id: string }) => x.id));
+  const mint = (RAW.new as { id: string }[]).map((x) => x.id).find((m) => !trending.has(m))!;
+  assert.ok(mint, "the recorded New list holds a mint the trending lists do not");
+  let drop = false;
+  let down = true;
+  const proxy = {
+    handle: async (_v: string, path: string): Promise<{ status: number; headers: Record<string, string>; body: string }> => {
+      if (down) return { status: 503, headers: {}, body: '{"error":{"code":"upstream"}}' };
+      const k = path === READS.new ? "new" : path === READS.trending_5m ? "trending_5m" : "trending_1h";
+      const rows = k === "new" && drop ? (RAW.new as { id: string }[]).filter((x) => x.id !== mint) : RAW[k];
+      return { status: 200, headers: { "X-Fetched-At": new Date(t).toISOString() }, body: JSON.stringify(rows) };
+    },
+  };
+  const lists = createSolanaLists(proxy, recordedRpc, { now: () => t });
+  assert.equal(await lists.listed(mint), null, "no answer yet: unknown, never not listed");
+  down = false;
+  assert.equal(await lists.listed(mint), true);
+  drop = true;
+  t += LIST_STEP_MS; // New, read longest ago with the others, is read again
+  await lists.get();
+  for (let i = 0; i < 100 && JSON.parse((await lists.get()).body).as_of_ms === AS_OF; i++) await new Promise((ok) => setImmediate(ok));
+  const s = JSON.parse((await lists.get()).body) as { lists: Record<string, { token: string }[]> };
+  assert.ok(!Object.values(s.lists).some((rows) => rows.some((r) => r.token === mint)), "the next answer leaves the mint out");
+  assert.equal(await lists.listed(mint), true, "dropped from the newest answer, still listed");
+  assert.equal(await lists.listed("So11111111111111111111111111111111111111112"), false, "a mint no answer held");
+  const heldAt = AS_OF;
+  t = heldAt + SERVED_MS;
+  assert.equal(await lists.listed(mint), true, "at SERVED_MS after the last answer that held it");
+  t = heldAt + SERVED_MS + 1;
+  assert.equal(await lists.listed(mint), false, "past it: off the lists");
 });
