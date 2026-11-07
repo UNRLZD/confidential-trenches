@@ -41,18 +41,23 @@
 // 2026-10-31T09:08Z (FastNEAR's archive) on, so every id below it is over five days old (the newest stored, 189, was
 // made 2024-11-05, rpc.intea.rs view_state); testnet: N is 4 and its one stored id, 3, is a role request, not a Pause
 // (view_state on both testnet providers). An id at or above the pin that is stored is a request whose kind these reads
-// cannot tell, so the watch is not caught up and the relayers hold, until either both providers read it as no request
+// cannot tell, so the deposit's hold ("higher", the ids' deposit calls: a deposit the vault refuses is lost if a Pause
+// lands before its resolve) reads not caught up, until either both providers read it as no request
 // at H (executed or removed: an executed Pause is the halt itself, read by ft_balance_of) or MULTISIG_VALIDITY_NS has
 // passed since its first sight: the earliest H at which this watch read it stored on both, timed by H's block timestamp
 // as both providers give it (one hash, one timestamp), never the server's clock. First sight is no earlier than the
 // request's creation, and NEAR's block timestamps only rise, so any block after first sight + the validity runs the
 // request as expired: it can never execute. The validity is the token's ~am\x01 config, 02 00008bd6e6880100: threshold 2,
 // 432000000000000 ns (432000 s), the same bytes on mainnet (rpc.intea.rs view_state) and on both testnet providers.
-// Done ids (no request, or expired) at the bottom move the watch's own floor up from the pin, never below it. The floor
-// and each first sight are kept in this process and in the helper's store (HELPER_STORE_DIR/token-watch, store/durable.ts,
-// beside the relayers' folders), opened when a stored new id is first seen, once per process; a store another process
-// holds (a swap's handover) or no store at all keeps them in memory only. A restart with no record holds again from its
-// new first sight: the safe direction, it can only hold longer. More than NEW_REQUESTS_MAX new ids are not read: held.
+// Done ids (no request, or expired) at the bottom move the watch's own floor up from the pin, never below it. The ids
+// read at H are the window from the floor, at most NEW_REQUESTS_MAX: more new ids than that hold the deposit while the
+// floor still climbs the done ones. A withdrawal ("lower") and the display are never held by a pending request (an
+// executed Pause is the halt, which holds them); the base status and the request answer are kept by block apart. The
+// floor and each first sight are kept in this process and in the helper's store (HELPER_STORE_DIR/token-watch,
+// requests-<token>.json, store/durable.ts, beside the relayers' folders), the folder opened once per process; a store
+// another process holds (a swap's handover) or no store at all keeps them in memory, joined with the store's record at
+// its first successful open (the higher floor, each id's earlier first sight). A restart with no record holds again
+// from its new first sight: the safe direction, it can only hold longer.
 // The relayers' answer stays token_halted on the wire: the kit's refusal is exactly { error: { code } } and its codes
 // are frozen (packages/kit/src/helper/v1.ts:73, :91), and the device retries token_halted (wallet deposit/bind.ts RETRY,
 // withdraw/relay.ts AGAIN); the reason, the request ids and when each frees, goes to the helper's log.
@@ -115,7 +120,7 @@ const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 /** The kit's HelperTokenStatusAnswer (packages/kit/src/helper/v1.ts). */
 export type TokenStatus = HelperTokenStatusAnswer;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-/** Where a watch keeps its Requests record: the text it saved last, or null; a save that throws keeps memory only. */
+/** Where a watch keeps its Requests record: the text it saved last, or null; a load or save that throws keeps memory only. */
 export type RequestStore = { load(): string | null; save(text: string): void };
 /**
  * now: the wall clock, for H's age only; clock: a monotonic clock in ms; sleep: a wait (tests pass their own); store:
@@ -126,11 +131,12 @@ type Deps = { fetch?: Fetch; now?: () => number; clock?: () => number; sleep?: (
 /** The helper store's folder for the watches (store/durable.ts), opened once per process: a second open would drop the lock. */
 const STORE_DIRS = new Map<string, DurableDir | null>();
 /**
- * The Requests record in HELPER_STORE_DIR/token-watch, one file per network, the folder opened at the first load or
- * save without waiting for its lock: held elsewhere (a handover's other process) or failing, it is retried at the next
- * call and the record stays in memory meanwhile. No HELPER_STORE_DIR: null.
+ * The Requests record in HELPER_STORE_DIR/token-watch, one file per token (its account id in the name), the folder
+ * opened at the first load or save without waiting for its lock: held elsewhere (a handover's other process) or
+ * failing, load and save throw, are retried at the next call, and the record stays in memory meanwhile. No
+ * HELPER_STORE_DIR: null.
  */
-export function storeOf(env: Record<string, string | undefined>, network: TokenNetwork): RequestStore | null {
+export function storeOf(env: Record<string, string | undefined>, token: string): RequestStore | null {
   const root = env.HELPER_STORE_DIR ?? "";
   if (root === "") return null;
   const dir = join(root, "token-watch");
@@ -144,14 +150,16 @@ export function storeOf(env: Record<string, string | undefined>, network: TokenN
     }
     return STORE_DIRS.get(dir) ?? null;
   };
-  const name = `requests-${network}.json`;
+  if (!/^[a-z\d]([a-z\d_-]*[a-z\d])?(\.[a-z\d]([a-z\d_-]*[a-z\d])?)*$/.test(token) || token.length > 64) throw new Error(`no record name for token ${token}`);
+  const name = `requests-${token}.json`;
+  const opened = (): DurableDir => {
+    const d = open();
+    if (d === null) throw new Error("the token-watch store is held by another process");
+    return d;
+  };
   return {
-    load: () => open()?.text(name) ?? null,
-    save: (text) => {
-      const d = open();
-      if (d === null) throw new Error("the token-watch store is held by another process");
-      d.replace(name, text);
-    },
+    load: () => opened().text(name),
+    save: (text) => opened().replace(name, text),
   };
 }
 /**
@@ -195,11 +203,10 @@ export const VAULT_ENV = {
 export type ViewOutcome = { at: number; answer: string } | { at: number; panic: string } | { at?: undefined; other: true };
 /** One approve_multisig_request view's outcome: a stored request, no request, or neither (any other answer). */
 export type StoredOutcome = { at: number; stored: boolean } | { at?: undefined; other: true };
-/**
- * What one provider read at one block: the halt from ft_balance_of, the block from is_blocklisted, the code hash, the
- * next multisig request id, and for each id from the pin up to it whether a request is stored.
- */
-export type Read = { block_height: number; block_hash?: string; halt: ViewOutcome; blocked?: ViewOutcome; code_hash?: string; next?: ViewOutcome; stored?: readonly StoredOutcome[] };
+/** What one provider read at one block: the halt from ft_balance_of, the block from is_blocklisted, the code hash. */
+export type Read = { block_height: number; block_hash?: string; halt: ViewOutcome; blocked?: ViewOutcome; code_hash?: string };
+/** What one provider read of USDC's requests at one block: the next request id, and from the floor up whether each id is stored. */
+export type RequestRead = { block_height: number; next?: ViewOutcome; stored?: readonly StoredOutcome[] };
 
 /** The halt as one ft_balance_of outcome says it: false for a balance, true for exactly the paused panic, else null. */
 export function haltOf(o: ViewOutcome | undefined): boolean | null {
@@ -237,20 +244,23 @@ export type RequestsRead = { free: boolean; rec: Requests; held: { id: number; f
 
 /**
  * USDC's new requests at H from both providers' reads of that block (`a.stored[i]`, `b.stored[i]`: id `from` + i) and
- * H's timestamp in ns as both providers give it (null: not read, or the two differ). Free only when both read one N at
- * H, N is at least the floor and at most NEW_REQUESTS_MAX above it, and every id from the floor up to N is done on both:
- * no request, or stored and MULTISIG_VALIDITY_NS past its first sight. A stored id gets its first sight at the earliest
- * H read; the floor moves up over the done ids at its bottom. Anything unread or disagreeing is not free.
+ * H's timestamp in ns as both providers give it (null: not read, or the two differ). The ids read are the window from
+ * the floor, at most NEW_REQUESTS_MAX of them. Free only when both read one N at H, N is at least the floor and at most
+ * NEW_REQUESTS_MAX above it, and every id from the floor up to N is done on both: no request, or stored and
+ * MULTISIG_VALIDITY_NS past its first sight. A stored id gets its first sight at the earliest H read; the floor moves up
+ * over the done ids at the window's bottom, so more than NEW_REQUESTS_MAX new ids hold while the floor still climbs
+ * them. Anything unread or disagreeing is not free.
  */
-export function requestsAt(a: Read, b: Read, from: number, rec: Requests, hNs: bigint | null): RequestsRead {
+export function requestsAt(a: RequestRead, b: RequestRead, from: number, rec: Requests, hNs: bigint | null): RequestsRead {
   const na = a.next?.at === a.block_height ? nextIdOf(a.next) : null;
   const nb = b.next?.at === b.block_height ? nextIdOf(b.next) : null;
-  if (na === null || na !== nb || na < rec.floor || na - rec.floor > NEW_REQUESTS_MAX) return { free: false, rec, held: [] };
+  if (na === null || na !== nb || na < rec.floor) return { free: false, rec, held: [] };
+  const top = Math.min(na, rec.floor + NEW_REQUESTS_MAX);
   const seen: Record<string, string> = { ...rec.seen };
   const done = new Set<number>();
   const held: { id: number; frees: bigint }[] = [];
   let known = true;
-  for (let id = rec.floor; id < na; id++) {
+  for (let id = rec.floor; id < top; id++) {
     const [x, y] = id < from ? [undefined, undefined] : [a.stored?.[id - from], b.stored?.[id - from]];
     if (x === undefined || y === undefined || !("stored" in x) || !("stored" in y) || x.at !== a.block_height || y.at !== b.block_height || x.stored !== y.stored) {
       known = false;
@@ -274,7 +284,24 @@ export function requestsAt(a: Read, b: Read, from: number, rec: Requests, hNs: b
   let floor = rec.floor;
   while (done.has(floor)) floor++;
   for (const k of Object.keys(seen)) if (Number(k) < floor) delete seen[k];
-  return { free: known && held.length === 0, rec: { floor, seen }, held };
+  return { free: known && held.length === 0 && na - rec.floor <= NEW_REQUESTS_MAX, rec: { floor, seen }, held };
+}
+
+/**
+ * Two records of one token joined (the memory's and the store's at its first successful open): the higher floor (ids
+ * below a floor are done for good) and each id's earlier first sight (any first sight is no earlier than its creation).
+ */
+export function mergeRequests(a: Requests | undefined, b: Requests | null): Requests | undefined {
+  if (a === undefined || b === null) return a ?? b ?? undefined;
+  const floor = Math.max(a.floor, b.floor);
+  const seen: Record<string, string> = {};
+  for (const r of [a, b])
+    for (const [k, v] of Object.entries(r.seen)) {
+      if (Number(k) < floor) continue;
+      const was = seen[k];
+      seen[k] = was === undefined || BigInt(v) < BigInt(was) ? v : was;
+    }
+  return { floor, seen };
 }
 
 /** A record read back from the store: a floor at or above the pin and first sights in ns, else null (start from the pin). */
@@ -301,14 +328,14 @@ export function requestsOf(text: string | null, pin: number): Requests | null {
  * vault_blocked are either provider's. The code hash is shown whenever both read it at that block and agree; never more
  * than was read.
  */
-export function statusFrom(a: Read | undefined, b: Read | undefined, token: string, free?: boolean): TokenStatus {
+export function statusFrom(a: Read | undefined, b: Read | undefined, token: string): TokenStatus {
   const one = a !== undefined && b !== undefined && a.block_height === b.block_height && a.block_hash !== undefined && a.block_hash === b.block_hash;
   const agreed = one && a.code_hash !== undefined && a.code_hash === b.code_hash;
   // each view's own block is H: an answer of another block says nothing of H
   const atH = (r: Read) => r.halt.at === r.block_height && r.blocked?.at === r.block_height;
   const halts = [haltOf(a?.halt), haltOf(b?.halt)];
   const blocks = [blockedOf(a?.blocked), blockedOf(b?.blocked)];
-  const known = agreed && atH(a) && atH(b) && a.code_hash === USDC_CODE_HASH && !halts.includes(null) && !blocks.includes(null) && (free ?? (MULTISIG_PIN[token] !== undefined && requestsAt(a, b, MULTISIG_PIN[token], { floor: MULTISIG_PIN[token], seen: {} }, null).free));
+  const known = agreed && atH(a) && atH(b) && a.code_hash === USDC_CODE_HASH && !halts.includes(null) && !blocks.includes(null);
   return {
     token,
     caught_up: known,
@@ -407,12 +434,15 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
   const token = WATCHED[network].token;
   const vault = vaultOf(env, network);
   const pin = MULTISIG_PIN[token];
-  const store = deps.store === undefined ? storeOf(env, network) : deps.store;
-  let requests: Requests | undefined; // the record, loaded at its first use: the store's, else the pin's
+  const store = deps.store === undefined ? storeOf(env, token) : deps.store;
+  let requests: Requests | undefined; // the record: the memory's, joined with the store's at its first successful open
+  let synced = store === null; // the store's record joined in (or no store)
   const notCaughtUp = statusFrom(undefined, undefined, token);
   const byBlock = new Map<string, TokenStatus>(); // a final block's status never changes: kept by its height and hash
   const pausedCache = new Map<bigint, boolean>(); // a known answer for a past height never changes
   const inflight = new Map<string, Promise<TokenStatus>>(); // one read of a block's views at a time, by its height and hash
+  const freeBlocks = new Set<string>(); // blocks whose request read was free: that answer never changes
+  const freeing = new Map<string, Promise<boolean>>(); // one request read of a block at a time
   const moved = new Map<string, { height: number; since: number }>(); // each provider's final and when it last moved (monotonic)
   let shown: { at: number; status: TokenStatus } | undefined;
   let showing: Promise<TokenStatus> | undefined;
@@ -474,45 +504,59 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
       // no vault carried on this network: the code hash only, never caught up (nothing to carry, nothing to free)
       return { block_height: h.height, block_hash: h.hash, halt: { other: true }, code_hash: await codeHash(url, h.height, h.hash, h.height) };
     }
-    const [halt, blocked, code_hash, next] = await Promise.all([
-      view(url, "ft_balance_of", vault, h.height, h.hash, h.height),
-      view(url, "is_blocklisted", vault, h.height, h.hash, h.height),
-      codeHash(url, h.height, h.hash, h.height),
-      call(url, "get_next_multisig_request_id", {}, h.height, h.hash, h.height).then(viewOutcome),
-    ]);
-    return { block_height: h.height, block_hash: h.hash, halt, blocked, code_hash, next };
+    const [halt, blocked, code_hash] = await Promise.all([view(url, "ft_balance_of", vault, h.height, h.hash, h.height), view(url, "is_blocklisted", vault, h.height, h.hash, h.height), codeHash(url, h.height, h.hash, h.height)]);
+    return { block_height: h.height, block_hash: h.hash, halt, blocked, code_hash };
   }
 
-  /** Whether each id from the pin up to `n` holds a stored request at block H on `url` (one view each, all at once). */
+  /** Whether each id from `pin` up to `n` holds a stored request at block H on `url` (one view each, all at once). */
   const storedAt = (url: string, h: Head, pin: number, n: number): Promise<StoredOutcome[]> =>
     Promise.all(Array.from({ length: n - pin }, (_, i) => call(url, "approve_multisig_request", { request_id: pin + i }, h.height, h.hash, h.height).then(storedOutcome)));
 
-  /** The record: in memory, else the store's (a floor below the pin or a bad file starts from the pin), else the pin's. */
-  function record(): Requests {
-    if (requests === undefined) {
-      let text: string | null = null;
-      try {
-        text = store?.load() ?? null;
-      } catch {
-        text = null;
-      }
-      requests = requestsOf(text, pin!) ?? { floor: pin!, seen: {} };
+  /** Keeps `r` as the record and saves it; a save that fails keeps it in memory (a restart then holds longer, never less). */
+  function keep(r: Requests): void {
+    requests = r;
+    try {
+      store?.save(JSON.stringify(r));
+    } catch {
+      // kept in memory: a restart without it holds again from its new first sight
     }
-    return requests;
   }
 
   /**
-   * Whether no USDC request may be pending at H (requestsAt): the ids from the floor up to N at H on both providers,
-   * read only when both name one N above the floor and within NEW_REQUESTS_MAX of it; H's timestamp read on both (one
-   * hash, one timestamp) only when an id is stored. The record after it is kept, and saved when it changed.
+   * The record: the memory's, joined at the store's first successful open with the store's (mergeRequests; a floor below
+   * the pin or a bad file counts as none) and saved back when the memory added to it; else the pin's.
    */
-  async function requestsFree(h: Head, a: Read, b: Read): Promise<boolean> {
+  function record(): Requests {
+    if (!synced) {
+      try {
+        const disk = requestsOf(store!.load(), pin!);
+        synced = true;
+        const joined = mergeRequests(requests, disk);
+        if (joined !== undefined && JSON.stringify(joined) !== JSON.stringify(disk)) keep(joined);
+        else requests = joined;
+      } catch {
+        // the store not open (held elsewhere, or failing): memory only until a later call opens it
+      }
+    }
+    return (requests ??= { floor: pin!, seen: {} });
+  }
+
+  /**
+   * Whether no USDC request may be pending at H (requestsAt): N at H on both providers, then the window of ids from the
+   * floor (at most NEW_REQUESTS_MAX) when both name one N above the floor; H's timestamp read on both (one hash, one
+   * timestamp) only when an id is stored. The record after it is kept, and saved when it changed.
+   */
+  async function requestsFree(h: Head): Promise<boolean> {
     if (pin === undefined || vault === undefined) return false;
     const from = record().floor;
+    const [a, b]: [RequestRead, RequestRead] = await Promise.all(
+      [urls[0], urls[1]].map(async (u) => ({ block_height: h.height, next: viewOutcome(await call(u, "get_next_multisig_request_id", {}, h.height, h.hash, h.height)) })) as [Promise<RequestRead>, Promise<RequestRead>],
+    );
     const n = nextIdOf(a.next);
     let hNs: bigint | null = null;
-    if (n !== null && n === nextIdOf(b.next) && n > from && n - from <= NEW_REQUESTS_MAX) {
-      const [sa, sb] = await Promise.all([storedAt(urls[0], h, from, n), storedAt(urls[1], h, from, n)]);
+    if (n !== null && n === nextIdOf(b.next) && n > from) {
+      const top = Math.min(n, from + NEW_REQUESTS_MAX);
+      const [sa, sb] = await Promise.all([storedAt(urls[0], h, from, top), storedAt(urls[1], h, from, top)]);
       a.stored = sa;
       b.stored = sb;
       if ([...sa, ...sb].some((x) => "stored" in x && x.stored)) {
@@ -523,14 +567,7 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
     // the record as it stands now (another block's read may have moved it while this one waited), never an older one
     const before = record();
     const r = requestsAt(a, b, from, before, hNs);
-    if (JSON.stringify(r.rec) !== JSON.stringify(before)) {
-      requests = r.rec;
-      try {
-        store?.save(JSON.stringify(r.rec));
-      } catch {
-        // kept in memory: a restart without it holds again from its new first sight
-      }
-    }
+    if (JSON.stringify(r.rec) !== JSON.stringify(before)) keep(r.rec);
     if (r.held.length > 0) console.error(`token-watch ${network}: held: multisig request ${r.held.map((x) => `${x.id} stored, frees at ${new Date(Number(x.frees / 1_000_000n)).toISOString()}`).join("; ")} (block ${h.height})`);
     return r.free;
   }
@@ -562,26 +599,43 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
     return t - was.since > FINAL_AGE_MAX_MS;
   }
 
-  async function readAt(at: HoldAt): Promise<TokenStatus> {
+  async function readAt(at: HoldAt): Promise<[TokenStatus, Head?]> {
     // each caller reads its own finals, so its H is the move's own
     const [fa, fb] = await Promise.all(urls.map((u) => head(u, { finality: "final" })));
-    if (fa === undefined || fb === undefined) return notCaughtUp;
-    if (Math.abs(fa.height - fb.height) > HEIGHT_SPREAD_MAX) return notCaughtUp;
+    if (fa === undefined || fb === undefined) return [notCaughtUp];
+    if (Math.abs(fa.height - fb.height) > HEIGHT_SPREAD_MAX) return [notCaughtUp];
     const h = (at === "lower") === fa.height <= fb.height ? fa : fb;
     // two frozen providers never answer for now: H's block time on the wall clock, and each final's last move on the
     // monotonic clock (a wall clock stepped back hides a stale block time); both before any kept answer
     const still = [frozen(urls[0], fa), frozen(urls[1], fb)];
-    if (now() - h.ms > FINAL_AGE_MAX_MS || still.includes(true)) return notCaughtUp;
+    if (now() - h.ms > FINAL_AGE_MAX_MS || still.includes(true)) return [notCaughtUp];
     const key = `${h.height} ${h.hash}`;
     const kept = byBlock.get(key);
-    if (kept !== undefined) return kept;
+    if (kept !== undefined) return [kept, h];
     // one read of H's block at a time, whichever rule named it
     let p = inflight.get(key);
     if (p === undefined) {
       p = readBlock(h, [fa, fb]).finally(() => inflight.delete(key));
       inflight.set(key, p);
     }
-    return p;
+    return [await p, h];
+  }
+
+  /** Whether no request may be pending at block `h` (requestsFree), one read of a block at a time; a free answer kept. */
+  async function freeAt(h: Head): Promise<boolean> {
+    const key = `${h.height} ${h.hash}`;
+    if (freeBlocks.has(key)) return true;
+    let p = freeing.get(key);
+    if (p === undefined) {
+      p = requestsFree(h).finally(() => freeing.delete(key));
+      freeing.set(key, p);
+    }
+    const free = await p;
+    if (free) {
+      freeBlocks.add(key);
+      if (freeBlocks.size > BLOCKS_KEPT) freeBlocks.delete(freeBlocks.values().next().value!);
+    }
+    return free;
   }
 
   /** Both providers' views at block `h`, a provider whose final is below it given H_WAIT_MS to reach it; kept when caught up. */
@@ -589,7 +643,7 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
     const behind = finals.findIndex((f) => f.height < h.height);
     if (behind !== -1 && !(await reaches(urls[behind]!, h.height))) return notCaughtUp;
     const [a, b] = await Promise.all([read(urls[0], h), read(urls[1], h)]);
-    const s = statusFrom(a, b, token, await requestsFree(h, a, b));
+    const s = statusFrom(a, b, token);
     if (s.caught_up) {
       byBlock.set(`${h.height} ${h.hash}`, s);
       if (byBlock.size > BLOCKS_KEPT) byBlock.delete(byBlock.keys().next().value!);
@@ -597,8 +651,18 @@ export function createTokenWatch(network: TokenNetwork, env: Record<string, stri
     return s;
   }
 
-  /** The hold's read (H3.4 check 10, H4.3 step 9) at the move's own H: its own finals, a read of H's block shared. */
-  const statusAt = (at: HoldAt): Promise<TokenStatus> => readAt(at);
+  /**
+   * The hold's read (H3.4 check 10, H4.3 step 9) at the move's own H: its own finals, a read of H's block shared. The
+   * request hold gates only "higher", the ids' deposit calls (V:303, M1): a deposit the vault refuses is lost if a Pause
+   * lands before its resolve. A withdrawal ("lower") and the display are never held by a pending request: an executed
+   * Pause is the halt itself, which holds them as before. A deposit with a request that may be pending reads as not
+   * caught up (the kit's rule: halted, vault_blocked and code_hash_ok null).
+   */
+  async function statusAt(at: HoldAt): Promise<TokenStatus> {
+    const [s, h] = await readAt(at);
+    if (at === "lower" || !s.caught_up || h === undefined) return s;
+    return (await freeAt(h)) ? s : { ...notCaughtUp, code_hash: s.code_hash, block_height: s.block_height };
+  }
 
   /** /v1/token-status (display only): the status at the lower final, read at most once per CACHE_MS of the monotonic clock. */
   function status(): Promise<TokenStatus> {
