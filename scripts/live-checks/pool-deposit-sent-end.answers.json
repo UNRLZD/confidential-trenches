@@ -5,11 +5,12 @@
     "bad5a9": "main 5a9e5d8c's build (release-83's tree, with pool-deposits): no reads after a run, so a sent deposit leaves the app at sent: FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-07T09:28Z, before this card's deploy: FAIL",
     "bad37a": "the card's build at 37abecea, before the delta review fold: each landed rung posted as filled (an end), the reads open the note store and give up after an hour: FAIL",
-    "bad095": "the card's build at 09542dc6, before the delta review fold of its five Lows: a may-land read never backs off, the sign out read once per pass with a wait it does not end, a failed EVM hand-off read hands no note: FAIL"
+    "bad095": "the card's build at 09542dc6, before the delta review fold of its five Lows: a may-land read never backs off, the sign out read once per pass with a wait it does not end, a failed EVM hand-off read hands no note: FAIL",
+    "badc3c": "the card's build at c3cb08c8, before the fold of the delta review of bce5cde5: a wait inside a note's reads not ended in the stop, and a send another pass sends anew starts no new window"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-FIKmUcuOaaEEyl2BIfn5HyEK3yzluxIf4+aFt1BnfDYwiYPBzF9wTRaUjikGxLPw\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-FIKmUcuOaaEEyl2BIfn5HyEK3yzluxIf4+aFt1BnfDYwiYPBzF9wTRaUjikGxLPw",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-dqxnJaCww3IAPxOVs8KWOm7IB1e3rbKor5NX115yvJDNPi8zE8w6nc2RLvREHtL0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-dqxnJaCww3IAPxOVs8KWOm7IB1e3rbKor5NX115yvJDNPi8zE8w6nc2RLvREHtL0",
     "solFinals": true,
     "solMark": true,
     "solEnd": true,
@@ -22,7 +23,26 @@
     "evmRung": true,
     "loops": 2,
     "windows": true,
-    "waits": true
+    "waits": true,
+    "stopWait": true
+  },
+  "badc3c": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-FIKmUcuOaaEEyl2BIfn5HyEK3yzluxIf4+aFt1BnfDYwiYPBzF9wTRaUjikGxLPw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-FIKmUcuOaaEEyl2BIfn5HyEK3yzluxIf4+aFt1BnfDYwiYPBzF9wTRaUjikGxLPw",
+    "solFinals": true,
+    "solMark": true,
+    "solEnd": false,
+    "solLeft": true,
+    "solKind": true,
+    "evmEnd": false,
+    "evmLeft": true,
+    "evmKind": true,
+    "solRung": true,
+    "evmRung": true,
+    "loops": 0,
+    "windows": false,
+    "waits": true,
+    "stopWait": false
   },
   "bad095": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Kly9LZKVTiV/q3VES+69+5Ztkll3NxHMZGOOE/95FqbkXNhYq+Kcbka3QgcTNo8Y\"></script>\n  </head>\n  <body></body>\n</html>\n",
