@@ -1,0 +1,60 @@
+{
+  "_note": "good: the SIGN_HOST build of cards solana-legs-checked and solana-written-accounts-whole (packages/signpage/index.html and public/app.js as committed with release-84 on card/solana-legs-checked), 7 Nov: S6's walk over every route account with both its refusals live, and S11's two: PASS. bad: SIGN_HOST read 2026-11-07T07:26:49Z (main deployed, before card solana-legs-checked): none: FAIL. planted: the good bundle with one change each, its pin rewritten to match (the review's probes A, B, C of 7 Nov 06:35Z on this bundle): each FAIL.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MG6ZkQQAOJiRmH+IRpbTCGilW2x76tVK+vSe7g5UDPgurWozYO/U8bs4rp/mDP7m\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-MG6ZkQQAOJiRmH+IRpbTCGilW2x76tVK+vSe7g5UDPgurWozYO/U8bs4rp/mDP7m",
+    "carries": {
+      "S6 the walk over every account the route names": true,
+      "S6 a leg that is the wallet's token account": true,
+      "S6 a leg the device has not read": true,
+      "S11 the wallet's account moved": true,
+      "S11 the wallet's account not read back": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-vLQWvDv0hvHjAFWFBmYIujd62UHOmY1H032VYNpmFKPTtPzwHPsykCexZeLBFR14\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-vLQWvDv0hvHjAFWFBmYIujd62UHOmY1H032VYNpmFKPTtPzwHPsykCexZeLBFR14",
+    "carries": {
+      "S6 the walk over every account the route names": false,
+      "S6 a leg that is the wallet's token account": false,
+      "S6 a leg the device has not read": false,
+      "S11 the wallet's account moved": false,
+      "S11 the wallet's account not read back": false
+    }
+  },
+  "planted": {
+    "A the walk starts past every account": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lIZJFdsxUB49ZPFGKSJ1RWIk6+UJsZVr6m5Jybk0xeYn2LP51+O0SzkAXlId9fAJ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-lIZJFdsxUB49ZPFGKSJ1RWIk6+UJsZVr6m5Jybk0xeYn2LP51+O0SzkAXlId9fAJ",
+      "carries": {
+        "S6 the walk over every account the route names": false,
+        "S6 a leg that is the wallet's token account": true,
+        "S6 a leg the device has not read": true,
+        "S11 the wallet's account moved": true,
+        "S11 the wallet's account not read back": true
+      }
+    },
+    "B the wallet-account refusal dead": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QWlQnXZt37rUF6y7lcO4nX0dYrGHeZqpILaQaSGB2WYAFf+QVpIJISz38zMw3fvY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-QWlQnXZt37rUF6y7lcO4nX0dYrGHeZqpILaQaSGB2WYAFf+QVpIJISz38zMw3fvY",
+      "carries": {
+        "S6 the walk over every account the route names": true,
+        "S6 a leg that is the wallet's token account": false,
+        "S6 a leg the device has not read": true,
+        "S11 the wallet's account moved": true,
+        "S11 the wallet's account not read back": true
+      }
+    },
+    "C the walk removed": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-mw/Pvjc+KjD1qcS/o2dIWOaCtXrCsCxaKctw8UPbRSgY5WIENJzGIvcZq8olClA3\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-mw/Pvjc+KjD1qcS/o2dIWOaCtXrCsCxaKctw8UPbRSgY5WIENJzGIvcZq8olClA3",
+      "carries": {
+        "S6 the walk over every account the route names": false,
+        "S6 a leg that is the wallet's token account": false,
+        "S6 a leg the device has not read": false,
+        "S11 the wallet's account moved": true,
+        "S11 the wallet's account not read back": true
+      }
+    }
+  }
+}

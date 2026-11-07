@@ -1,0 +1,96 @@
+{
+  "_note": "good: card solana-written-accounts-whole's SIGN_HOST build (packages/signpage/index.html and public/app.js as committed with release-84 on card/solana-legs-checked), 7 Nov: every S11 line it marks: PASS. bad: SIGN_HOST read 2026-11-07T09:19Z (main deployed, before this card): none: FAIL. planted: the good bundle with one change each, its pin rewritten to match: each FAIL.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MG6ZkQQAOJiRmH+IRpbTCGilW2x76tVK+vSe7g5UDPgurWozYO/U8bs4rp/mDP7m\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-MG6ZkQQAOJiRmH+IRpbTCGilW2x76tVK+vSe7g5UDPgurWozYO/U8bs4rp/mDP7m",
+    "carries": {
+      "S11 the base read by field, to its last byte (165)": true,
+      "S11 a written account keeps its size": true,
+      "S11 the providers agree on every byte, the lamports and the program": true,
+      "S11 a wSOL account left with any field but its amount changed is refused": true,
+      "S11 the account of the token left with any field but its amount changed is refused": true,
+      "S11 any other account of the wallet's held to its lamports too": true,
+      "S11 a close of the account of the token the providers disagreed on is refused": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-LjK333AzbofVoSv0Xqfxdx4vp0+DsT5Z9DjwTlueoga3I9HzUh9WbwwqX293rYIQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-LjK333AzbofVoSv0Xqfxdx4vp0+DsT5Z9DjwTlueoga3I9HzUh9WbwwqX293rYIQ",
+    "carries": {
+      "S11 the base read by field, to its last byte (165)": false,
+      "S11 a written account keeps its size": false,
+      "S11 the providers agree on every byte, the lamports and the program": false,
+      "S11 a wSOL account left with any field but its amount changed is refused": false,
+      "S11 the account of the token left with any field but its amount changed is refused": false,
+      "S11 any other account of the wallet's held to its lamports too": false,
+      "S11 a close of the account of the token the providers disagreed on is refused": false
+    }
+  },
+  "planted": {
+    "P1 the field list cut to owner and amount": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ypt6GzVWWFJcgPTJN1CBG/QKRyaFy8vY1+D6ZVD4as1tDYly7GDO6LUPuZ8TsKP1\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-ypt6GzVWWFJcgPTJN1CBG/QKRyaFy8vY1+D6ZVD4as1tDYly7GDO6LUPuZ8TsKP1",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": false,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true
+      }
+    },
+    "P2 the providers agree on amount alone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-WSmFkFLHF2nM5c1M94UHprap/JAA3r5U2KwmF5UrV15oLgFLsDa/UcLgpxcU1kNM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-WSmFkFLHF2nM5c1M94UHprap/JAA3r5U2KwmF5UrV15oLgFLsDa/UcLgpxcU1kNM",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": false,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true
+      }
+    },
+    "P3 the wSOL refusal behind 0&&": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-/krLXt5qXu5jcz9Bhrs6f+eQJ95lfgDZNy8ZGYKOH+wM2xc+MA7ZbjI9dMQDOu5i\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-/krLXt5qXu5jcz9Bhrs6f+eQJ95lfgDZNy8ZGYKOH+wM2xc+MA7ZbjI9dMQDOu5i",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": false,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true
+      }
+    },
+    "P4 the size compare gone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EU/I3sf95WZc1jaw0q+NjNHW1sZYXXY7MDKwfiek1wICMaJOjP18Qb1fFi5iHTwO\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-EU/I3sf95WZc1jaw0q+NjNHW1sZYXXY7MDKwfiek1wICMaJOjP18Qb1fFi5iHTwO",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": false,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true
+      }
+    },
+    "P5 the disputed close's refusal gone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-70QyqnFfi/TyXrFe+Umq2f66KkX8hmuu3rr2aWm2eh7vlW7pvHR2SCu4K1goIfbw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-70QyqnFfi/TyXrFe+Umq2f66KkX8hmuu3rr2aWm2eh7vlW7pvHR2SCu4K1goIfbw",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": false
+      }
+    }
+  }
+}

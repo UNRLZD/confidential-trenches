@@ -15,11 +15,13 @@ import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import { assembleSolanaSwap, parseSolanaJupiterBuild, type SolanaBuildRequest } from "../src/trade/solana/build.ts";
 import { solanaAta, solanaDecodeLookupTable, solanaProgramAddress, type SolanaLookupTable } from "../src/checks/solana/message.ts";
+import { noneWritten } from "./solana-writes.ts";
 import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
   checkSolanaQuote,
   type SolanaAccountRead,
+  type SolanaHeldRead,
   type SolanaQuoteCheckId,
   type SolanaQuoteVerdict,
 } from "../src/checks/solana/checks.ts";
@@ -56,8 +58,11 @@ const floorOf = (j: Record<string, unknown>): bigint => (BigInt(j.outAmount as s
 type Swap = { accounts: { pubkey: string; isSigner: boolean; isWritable: boolean }[]; data: string };
 // Assemble the (possibly changed) build on the device's recorded blockhash and tables, then run every check.
 type MintPair = [SolanaAccountRead | null, SolanaAccountRead | null];
+type Held = Record<string, [SolanaHeldRead | null, SolanaHeldRead | null]>;
 // `mint`: the device's two reads of the token's mint, the recorded ones unless a case puts others in their place.
-function check(c: Case, change: (swap: Swap, data: Buffer) => Buffer | void = () => {}, minOut = floorOf(c.json), mint: MintPair = pair(c.run, c.run.mint)): SolanaQuoteVerdict {
+// `held`: the device's reads of accounts the tx writes. Every other account it writes reads as no account: the recorded
+// wallets are random addresses made per run, so none of them owns any account.
+function check(c: Case, change: (swap: Swap, data: Buffer) => Buffer | void = () => {}, minOut = floorOf(c.json), mint: MintPair = pair(c.run, c.run.mint), held: Held = {}): SolanaQuoteVerdict {
   const j = structuredClone(c.json);
   const swap = j.swapInstruction as Swap;
   const data = Buffer.from(swap.data, "base64");
@@ -75,6 +80,7 @@ function check(c: Case, change: (swap: Swap, data: Buffer) => Buffer | void = ()
     mint,
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
     simulations: [null, null],
+    writable: { ...noneWritten(tx.wire, tables), ...held },
     reference: null,
   });
 }
@@ -299,3 +305,65 @@ for (const r of MINT_REFUSALS) {
     }
   });
 }
+
+// The legs (card solana-legs-checked): every account shared_accounts_route_v2 names past its 12 goes into Jupiter's closed
+// program with the wallet's signature. Found by the solana-checks-shared-route review (2 Nov 06:50Z): S6 read none of
+// them, so a build could name another token account of the wallet's as a leg and Jupiter could move it. Each case below
+// rewrites one writable leg of a recorded build to a token account of the wallet's, read so by the device, and is refused.
+// A token account of `owner`'s as a provider answers it: the 165-byte base (mint, owner, amount, state initialized).
+const tokenAccount = (owner: string, mint: string, program: string, amount = 5_000_000n): SolanaHeldRead => {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(mint), 0);
+  d.set(base58.decode(owner), 32);
+  new DataView(d.buffer).setBigUint64(64, amount, true);
+  d[108] = 1;
+  return { owner: program, lamports: 2_039_280n, data: d };
+};
+const OTHER_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+// The first writable leg of the recorded build that is neither the wallet's source nor its destination.
+const legAt = (c: Case): number => {
+  const a = (c.json.swapInstruction as Swap).accounts;
+  const i = a.findIndex((x, k) => k >= 12 && x.isWritable && x.pubkey !== a[2]!.pubkey && x.pubkey !== a[5]!.pubkey);
+  assert.ok(i >= 12, `${c.name}: a writable leg`);
+  return i;
+};
+const LEGS: { what: string; key: (c: Case) => string; held: (c: Case, key: string) => [SolanaHeldRead | null, SolanaHeldRead | null] }[] = [
+  { what: "the wallet's associated account of another mint, read so on both providers", key: (c) => solanaAta(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM), held: (c) => [tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM), tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM)] },
+  { what: "a Token-2022 account of the wallet's at no associated address, read so on provider B alone", key: () => randomKey(), held: (c) => [null, tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_2022_PROGRAM)] },
+  { what: "the wallet's own account of the token under the other token program", key: (c) => solanaAta(c.run.wallet, c.run.mint, c.tp === SOLANA_TOKEN_PROGRAM ? SOLANA_TOKEN_2022_PROGRAM : SOLANA_TOKEN_PROGRAM), held: (c) => [tokenAccount(c.run.wallet, c.run.mint, c.tp === SOLANA_TOKEN_PROGRAM ? SOLANA_TOKEN_2022_PROGRAM : SOLANA_TOKEN_PROGRAM), null] },
+];
+for (const c of PICK) {
+  for (const l of LEGS) {
+    test(`S6 legs, ${c.tp === SOLANA_TOKEN_PROGRAM ? "SPL Token" : "Token-2022"} ${c.side} (${c.name}): a leg rewritten to ${l.what} is refused`, () => {
+      const at = legAt(c);
+      const key = l.key(c);
+      assert.equal(result(check(c), "S6").ok, true, "the unchanged build passes S6");
+      const v = check(c, (s) => { s.accounts[at]!.pubkey = key; }, undefined, undefined, { [key]: l.held(c, key) });
+      const got = result(v, "S6");
+      assert.equal(got.ok, false, `S6 passed: ${got.detail}`);
+      assert.ok(got.detail.includes(`leg account ${key} is a token account of the wallet's`), got.detail);
+    });
+  }
+}
+test("S6 legs: a writable leg the device has not read is refused; the same leg read as another owner's token account passes", () => {
+  for (const c of PICK) {
+    const key = (c.json.swapInstruction as Swap).accounts[legAt(c)]!.pubkey;
+    const unread = result(check(c, () => {}, undefined, undefined, { [key]: undefined as unknown as [null, null] }), "S6");
+    assert.equal(unread.ok, false, c.name);
+    assert.ok(unread.detail.includes(`leg account ${key} is not read`), unread.detail);
+    const pool = tokenAccount(randomKey(), OTHER_MINT, SOLANA_TOKEN_PROGRAM);
+    assert.equal(result(check(c, () => {}, undefined, undefined, { [key]: [pool, pool] }), "S6").ok, true, c.name);
+  }
+});
+
+// Card solana-written-accounts-whole: S6 scans every account the shared route names, with no offset by the IDL's count,
+// so a token account of the wallet's at the first leg (index 12) is refused like any other.
+test("S6 legs: the wallet's account at the shared route's first leg (index 12) is refused", () => {
+  for (const c of PICK) {
+    const key = solanaAta(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM);
+    const v = check(c, (s) => { s.accounts[12] = { pubkey: key, isSigner: false, isWritable: true }; }, undefined, undefined, { [key]: [tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM), tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM)] });
+    const got = result(v, "S6");
+    assert.equal(got.ok, false, `${c.name}: ${got.detail}`);
+    assert.ok(got.detail.includes(`leg account ${key} is a token account of the wallet's`), got.detail);
+  }
+});
