@@ -4,8 +4,8 @@
     "bad": "main 5a9e5d8c's build (mainnet, release-83): the release's reference reads on its own unpaced pair, the page's pair unpaced, the kit's reads outside the queue with their timeout over any wait"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-GtnGI7OcUJWdNbzVJEjX9ziMXCMXHqXQ9EZi8bq5bBhUoCfyYoiaGlxLBonB6sFc\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-GtnGI7OcUJWdNbzVJEjX9ziMXCMXHqXQ9EZi8bq5bBhUoCfyYoiaGlxLBonB6sFc",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-eS7YWsCsBVGgpCZc3JPM4rnQEPzM5IMktgtSOl+/H12MgJk+7L++YlIO4CPbsBma\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-eS7YWsCsBVGgpCZc3JPM4rnQEPzM5IMktgtSOl+/H12MgJk+7L++YlIO4CPbsBma",
     "release": true,
     "pair": true,
     "timed": true,

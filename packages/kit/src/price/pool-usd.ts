@@ -168,11 +168,10 @@ const nowAt = (nowS: number, bound: Bound): number => nowS + (Date.now() - bound
  *  the read's bound ends or the read is stopped. Any other answer, an error included, ends it at once. */
 async function call(rpc: SolanaRpc, method: string, params: readonly unknown[], what: string, bound: Bound): Promise<unknown> {
   for (let tries = 1; ; tries++) {
-    if (bound.stopped) return fail(`${what}: not asked again, the read has ended`);
     // a try's bound counts from when the call goes out in its provider's queue (a paced provider: the signing page's pair),
     // never from its wait for a turn, and is taken then, within the read's bound (card solana-release-reads-paced)
     const timed = solanaTimedRpc(rpc, () => {
-      // a read that ended while this try waited for its turn sends nothing
+      // a read that has ended asks no provider again, a try that waited for its turn while it ended included
       if (bound.stopped) throw new Error(`${what}: not asked again, the read ended before its turn`);
       const left = bound.end - Date.now();
       // a turn that comes once the read's bound has ended sends nothing: no try begins past it

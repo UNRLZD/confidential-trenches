@@ -671,7 +671,8 @@ test("retry: a try waiting for its turn sends nothing once the read has ended", 
   assert.deepEqual(a.sent, [], "a: its turn came after the read ended, and nothing was sent");
 });
 test("retry: a try whose turn comes past the read's bound sends nothing and fails the read as no answer", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  enableTimers(t.mock.timers, { apis: ["Date"], now: Date.now() });
+  t.after(() => resetTimers(t.mock.timers));
   const a = waiting("https://pace-usd-late-a.example/");
   await a.fill();
   const b = Object.assign(async () => GOOD(), { url: "https://pace-usd-late-b.example/" });
