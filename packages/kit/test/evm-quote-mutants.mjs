@@ -88,8 +88,8 @@ export const MUTANTS = [
   [QUOTE, 'fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route', "fills(c) ? [{ route: c.route", Q, "Q3 "],
   // the device's own reference: every standard route through every listed middle on both venues, and the pinned
   // launchpad pools
-  [QUOTE, "  if (q < reference.amountOut) {", "  if (false) {", Q, "Q5 "],
-  [QUOTE, "  if (q < reference.amountOut) {", "  if (q <= reference.amountOut) {", Q, "Q1 "],
+  [QUOTE, "  if (value < reference.amountOut && !underHooked) {", "  if (false) {", Q, "Q5 "],
+  [QUOTE, "  if (value < reference.amountOut && !underHooked) {", "  if (value <= reference.amountOut && !underHooked) {", Q, "Q1 "],
   [QUOTE, "(m === null || c.amountOut > m.amountOut ? c : m)", "(m === null || c.amountOut < m.amountOut ? c : m)", Q, "Q5 "],
   [QUOTE, "if (v3) for (const fee of V3_FEES) candidate(v3Direct(v.weth, token, fee));", "", Q, "Q5 "],
   [QUOTE, "if (v4) for (const key of V4_KEYS) candidate(v4Direct(NATIVE, token, key));", "", Q, "Q5 "],
@@ -353,7 +353,7 @@ export const MUTANTS = [
   [QUOTE, "  return Number.isFinite(at) && /[a-z]/i.test(t) ? Math.max(0, at - now) : null;", "  return null;", R, "TH12 "],
   [QUOTE, "export const EVM_QUOTE_MAX_KEYS = 65_536;", "export const EVM_QUOTE_MAX_KEYS = 16_384;", R, "X3 "],
   [QUOTE, "    if (hooks.some(replaced)) c.real =", "    if (false) c.real =", R, "H2 "],
-  [QUOTE, "    return x < y ? x : y;", "    return x;", R, "H2 "],
+  [QUOTE, "    let m = out(c.at)! < out(c.real.at)! ? out(c.at)! : out(c.real.at)!;", "    let m = out(c.at)!;", R, "H2 "],
   [QUOTE, "      const span = part.length === 1 ? on.span : or;", "      const span = on.span;", R, "B1 "],
   [QUOTE, "    const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));", "    const t = w(part[0]!.c);", R, "X4 "],
   [QUOTE, "[[e0, null, w(NATIVE), t], [e0, null, w(weth), t], [e0, null, t, w(weth)]]", "[[e0, null, w(weth), t], [e0, null, t, w(weth)]]", R, "S3 "],
@@ -374,18 +374,18 @@ export const MUTANTS = [
   // the hook's take, and minOut from the route the hook runs in
   [QUOTE, "const take = h === null ? null : h > q ? h - q : 0n;", "const take = h === null ? null : h - q;", Q, "Q4 "],
   [QUOTE, "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / h)", "takeBps: h === null || take === null || h === 0n ? null : Number((take * 10000n) / q)", Q, "Q4 "],
-  [QUOTE, "const minOut = (q * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = ((hook?.hookless ?? q) * BigInt(10000 - slippageBps)) / 10000n;", Q, "Q4 "],
+  [QUOTE, "const minOut = ((underHooked ? reference.amountOut : value) * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = ((hook?.hookless ?? q) * BigInt(10000 - slippageBps)) / 10000n;", Q, "Q4 "],
   [QUOTE, "(r.override === undefined && r.state !== true ? [i] : [])", "(r.state !== true ? [i] : [])", Q, "Q4 "],
-  [QUOTE, "const minOut = (q * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = q;", Q, "Q1 "],
+  [QUOTE, "const minOut = ((underHooked ? reference.amountOut : value) * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = q;", Q, "Q1 "],
   [QUOTE, 'if (minOut === 0n) return refuse("no_quote", "the route quotes too little to set a minimum above 0");', "", Q, "Q10 "],
   // native first
-  [QUOTE, "  if (nativeExists && wethStart && (nativeBest === null || q <= nativeBest.amountOut)) {", "  if (false) {", Q, "Q6 "],
+  [QUOTE, "  if (nativeExists && wethStart && (nativeBest === null || value <= nativeBest.amountOut)) {", "  if (false) {", Q, "Q6 "],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", Q, "Q6 "],
   [QUOTE, "const nativeBest = bestOf(filled.filter((c) => startsNative(c.route)));", "const nativeBest = bestOf(filled);", R, "N3a "],
   // native when at least as good: a WETH route equal to the best native route still refuses
-  [QUOTE, "q <= nativeBest.amountOut", "q < nativeBest.amountOut", R, "N3b "],
-  [QUOTE, "q <= nativeBest.amountOut", "q <= nativeBest.amountOut && false", R, "N3b "],
-  [QUOTE, "(nativeBest === null || q <= nativeBest.amountOut)", "(nativeBest !== null && q <= nativeBest.amountOut)", R, "R7 "],
+  [QUOTE, "value <= nativeBest.amountOut", "value < nativeBest.amountOut", R, "N3b "],
+  [QUOTE, "value <= nativeBest.amountOut", "value <= nativeBest.amountOut && false", R, "N3b "],
+  [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest !== null && value <= nativeBest.amountOut)", R, "R7 "],
   [QUOTE, "  const reference = bestOf(filled);", "  const reference = bestOf(filled.filter((c) => !nativeExists || startsNative(c.route)));", R, "N1f "],
   [QUOTE, "|| firstHop.some((c) => fills(c)))", ")", R, "R7 "],
   // only a device quote builds, within 30 s, and W signs only that build
@@ -505,9 +505,10 @@ export const MUTANTS = [
   [QUOTE, "  if ((await replay({})).ok) return [];\n", "", R, "HC2 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
-  [QUOTE, "    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "", R, "RV8 "],
+  [QUOTE, "sellRead(v, token, bought, quote.amountIn));\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "sellRead(v, token, bought, quote.amountIn));\n  } catch (e) {\n", R, "RV8 "],
+  [QUOTE, "quoteCall(chain, v, route, quote.amountIn));\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "quoteCall(chain, v, route, quote.amountIn));\n  } catch (e) {\n", R, "HB6 "],
   [QUOTE, "(x, y) => x.ok === y.ok && (x.ok || x.data === (y as { data: string }).data),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
-  [QUOTE, "for (const k of keys) if (k.hooks === hk && !out.includes(", "for (const k of keys.filter((x) => x.hooks === hk).slice(0, 1)) if (k.hooks === hk && !out.includes(", R, "RV10 "],
+  [QUOTE, "{ code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys) if (k.hooks === hk && !out.includes(", "{ code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys.filter((x) => x.hooks === hk).slice(0, 1)) if (k.hooks === hk && !out.includes(", R, "RV10 "],
   // every hook together (review of c1f486ae, M1): where no one hook's no-op rescues the sale, the replay with every hook
   // a no-op at once, on providers that agree, bans every pool of the route behind any of them; never in place of a
   // one-hook verdict, never without that replay's success, never on one provider's word, never fewer than all of them
@@ -540,7 +541,8 @@ export const MUTANTS = [
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],
   [QUOTE, " || bMinOut !== quote.minOut) return [];", ") return [];", R, "HB6 "],
   [QUOTE, "    if (data !== \"0x\" + hex(evmPoolRouteDataQuoted(chain, route).data)) return [];\n", "", R, "HB6 "],
-  [QUOTE, "  if (out.length === 0 && hooks.length > 1) {", "  if (hooks.length > 1) {", R, "RV4 "],
+  // (card evm-buy-hook-converge: running step 5 where step 4 already blamed a hook is no longer a mutant: leaving each
+  // hook in alone bans only a hook whose own revert stands, so it adds no ban step 4 did not)
   // the sale is the quote's own: each field of the Sell and its route bound (a sale with one off is never evidence)
   [QUOTE, "if (sToken !== BigInt(token) || sAmount", "if (sAmount", R, "RV11 "],
   [QUOTE, " || sAmount !== quote.amountIn || sTarget", " || sTarget", R, "RV11 "],
