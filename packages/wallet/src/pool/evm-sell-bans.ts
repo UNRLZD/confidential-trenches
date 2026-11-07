@@ -6,6 +6,10 @@
 // sale's replay reverts, the quoter still prices the route at minOut, and the replay with that pool's hook alone made a
 // no-op succeeds, on both providers), bans those here, and passes evmSellBanned's list as the next quote's `banned`.
 // A revert with no such evidence (a price that moved, providers that disagree) bans nothing.
+// The buy shares these bans (card evm-buy-hook-converge): its quote (evmPoolBuyQuote) takes a route through such a hook
+// on the same terms and names its pools in `hooked`; where the real buy reverts, the caller asks evmBuyRevertedPools(quote,
+// txHash) the same question of the buy, bans its answer here under the same (chain, token), and passes evmSellBanned's
+// list as the next buy quote's `banned` too: a pool is banned for the token whichever trade proved it at fault.
 //
 // A ban expires (review of 919742f5, F2: a permanent ban let one bad read cost a token its honest market on this device
 // for good): the first lasts EVM_SELL_BAN_FIRST_MS, each repeat after it expired lasts twice the one before, at most
