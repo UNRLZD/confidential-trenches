@@ -97,8 +97,11 @@ test("worker-src and default-src are exactly 'none'", () => {
   refused(checkCsp(csp("trusted-types 'none';", "trusted-types default;")), /trusted-types must be exactly 'none'/);
 });
 
-test("connect-src takes only the helper, SIGN_HOST and the three RPCs; a directive outside the policy is refused", () => {
+test("connect-src takes only the helper, SIGN_HOST, the kit's EVM providers and the three RPCs; a directive outside the policy is refused", () => {
   refused(checkCsp(csp("connect-src 'self'", "connect-src 'self' https://evil.ct.test")), /connect-src: https:\/\/evil\.ct\.test is not allowed/);
+  // a kit EVM provider's origin is allowed (card page-evm-rpc-csp), its URL with a path is not (a path may carry a key)
+  assert.deepEqual(checkCsp(csp("connect-src 'self'", "connect-src 'self' https://rpc.sentio.xyz")), []);
+  refused(checkCsp(csp("connect-src 'self'", "connect-src 'self' https://rpc.sentio.xyz/base")), /connect-src: https:\/\/rpc\.sentio\.xyz\/base is not allowed/);
   refused(checkCsp(`${CSP}; report-uri https://evil.ct.test`), /directive report-uri is not in the policy/);
   refused(checkCsp(`${CSP}; script-src 'self' 'unsafe-eval'`), /script-src given twice/);
   refused(checkCsp(`${CSP}, script-src *`), /more than one policy/);

@@ -80,6 +80,7 @@ export const CHANGED = [
   "scripts/live-checks/kit-deposit-calls.mjs",
   "scripts/live-checks/kit-frame-version.mjs",
   "scripts/live-checks/kit-oneclick-pins-frozen.mjs",
+  "scripts/live-checks/page-evm-rpc-csp.mjs",
   "scripts/live-checks/wallet-deposit-follow.mjs",
   "scripts/live-checks/kit-renewal-read-bounded.mjs",
   "scripts/live-checks/market-data-evm.mjs",
