@@ -18,9 +18,11 @@
 //!   proofs) of the same six notes, deposit 6 named to q.test.near as that file names it: note 3 by u and note 6 by q
 //!   land once their deposits are in the tree under their own labels; note 2's (withdrawn) shares a nullifier with
 //!   same_nullifier_a and _b, note 3's with one_block_a and _b, note 6's with short_registration, so a nullifier is
-//!   spent by either exit and the other is refused, in both orders; change and unlanded prove notes that are never
-//!   leaves here, zero a 0 note, and refund_note a label no deposit has. A ragequit has no root check (2.5.3); its
-//!   payout and settle are a withdrawal's, to and from the depositor.
+//!   spent by either exit and the other is refused, in both orders; one_block_a_change proves one_block_a's change note
+//!   (6,000,000 on note 3's label), which lands by u once that withdrawal's change leaf is in the tree (row 4 takes any
+//!   leaf of the label, not only its deposit's); change and unlanded prove notes that are never leaves here, zero a 0
+//!   note, and refund_note a label no deposit has. A ragequit has no root check (2.5.3); its payout and settle are a
+//!   withdrawal's, to and from the depositor; some land with exactly their gas bound attached.
 //! - The mock token (`Token`) keeps every account's balance. `ft_transfer_call` moves the amount into the vault before
 //!   `ft_on_transfer` and gives it back when the call refuses. A payout receipt runs its parts in order
 //!   (`storage_deposit`, then `ft_transfer` to the recipient, then to the fee recipient); at random the token fails one
@@ -32,15 +34,20 @@
 //! - Hostile steps: withdrawals against an unknown root, against the same notes' roots on another vault (another
 //!   scope), to another recipient than the proof's, of another amount, of more than the notes hold, with too little gas
 //!   or too little NEAR, and the same nullifier again; ragequits by a stranger or the other depositor, of a refund note,
-//!   on changed signals, of a note not in the tree, of a 0 note, with a 0 refund precommitment, too little gas or too
-//!   little NEAR, and the same nullifier again (after a ragequit or a withdrawal); deposits from a
+//!   on a settled spend's refund label put in the label signal, on changed signals, of a note not in the tree, of a 0
+//!   note, with a 0 refund precommitment, too little gas or too little NEAR, and the same nullifier again (after a
+//!   ragequit or a withdrawal); deposits from a
 //!   caller that is not the token, under MIN_DEPOSIT, on a used precommitment, without a prepay, or on a 756 B prepay
 //!   while a tree grows a level; prepays on 0, on p, on a used precommitment, or short; settles of an unknown, in-flight
 //!   or settled spend; a second callback, a callback with two results, a callback on no spend; plain transfers of the
 //!   token into the vault (M8's stray money).
 //! - The model predicts every call's outcome (the exact refusal, in the vault's order of checks) and keeps each spend's
 //!   status, the totals, and every leaf and label in order; after every step the invariants run on the vault's own views
-//!   and the token's balances, then the model's leaves, labels, totals and counts are compared exactly.
+//!   and the token's balances, then the model's leaves, labels, totals, counts and each spend record's payer,
+//!   recipient, fee, context and change leaf index are compared exactly. The harness counts the bytes each landed call
+//!   writes from its records (`usage_delta`, never the vault's own `env::storage_usage()`): an exit's reserve is exactly
+//!   the attachment less those bytes, its registration and its yocto, and settle pays the payer exactly the reserve
+//!   less the bytes it wrote. Each exit's callback must depend on its payout receipt.
 //!
 //! Each named branch is counted (`Branch`); the long run fails when any of `BRANCHES` counts 0, so a run that never
 //! drew a failing part of a payout cannot pass for a refund test. The long run (24 cases) is `#[ignore]`d, as
@@ -315,10 +322,22 @@ enum Branch {
     /// a withdrawal on a nullifier a ragequit spent
     WithdrawAfterRagequit,
     RagequitLanded,
-    /// a ragequit signed by a stranger or by the other depositor
-    RagequitWrongCaller,
-    /// a ragequit on a label no deposit has: a refund note's, or one whose deposit has not landed
-    RagequitNoDeposit,
+    /// a ragequit signed by an account no deposit names (row 2)
+    RagequitStranger,
+    /// a ragequit signed by a depositor, not the one its label's deposit names (row 2)
+    RagequitOtherDepositor,
+    /// a ragequit on a refund note's label, which no deposit has (row 2): the fixture's refund_note when nonce 7 is a
+    /// refund note, or the settled-refund-label draw
+    RagequitRefundNoteLabel,
+    /// a ragequit on a label no deposit or refund note has yet (row 2)
+    RagequitNotLanded,
+    /// the hostile draw that puts a settled spend's refund label in a ragequit's label signal: row 2 refuses it before
+    /// the proof is checked (a refund note has no depositor, src/settle.rs writes no `label_index` row)
+    RagequitSettledRefundLabel,
+    /// a ragequit of a change note (one_block_a's) landed: row 4 takes any leaf of the label, not only its deposit's
+    RagequitChangeNote,
+    /// a ragequit landed with exactly its gas bound attached (145 Tgas, 155 with a registration)
+    RagequitAtGasBound,
     /// the same nullifier again after a ragequit
     RagequitReplayed,
     /// a ragequit on a nullifier a withdrawal spent
@@ -336,7 +355,7 @@ enum Branch {
 }
 
 /// The branches every run must hit at least once.
-const BRANCHES: [Branch; 41] = [
+const BRANCHES: [Branch; 46] = [
     Branch::PayoutDelivered,
     Branch::PayoutStorageDepositFailed,
     Branch::PayoutRecipientFailed,
@@ -366,8 +385,13 @@ const BRANCHES: [Branch; 41] = [
     Branch::WithdrawWrongScope,
     Branch::WithdrawAfterRagequit,
     Branch::RagequitLanded,
-    Branch::RagequitWrongCaller,
-    Branch::RagequitNoDeposit,
+    Branch::RagequitStranger,
+    Branch::RagequitOtherDepositor,
+    Branch::RagequitRefundNoteLabel,
+    Branch::RagequitNotLanded,
+    Branch::RagequitSettledRefundLabel,
+    Branch::RagequitChangeNote,
+    Branch::RagequitAtGasBound,
     Branch::RagequitReplayed,
     Branch::RagequitAfterWithdraw,
     Branch::RagequitInvalidProof,
@@ -418,6 +442,10 @@ struct Exit {
     fee_recipient: String,
     refund_precommitment: String,
     payer: String,
+    /// a withdrawal's context (its proof's signal 7), a ragequit's "0"
+    context: String,
+    /// a withdrawal's change leaf's index in the state tree, a ragequit's 0 (it inserts none)
+    new_leaf_index: u64,
 }
 
 #[derive(Default)]
@@ -457,6 +485,8 @@ struct Outcome<R> {
     receipts: Vec<Receipt>,
     /// a refused call changed the struct or a record before it refused (then rolled back)
     wrote: bool,
+    /// the bytes a landed call added, counted from its records (`usage_delta`); 0 for a refusal
+    usage: i128,
 }
 
 struct Harness {
@@ -500,6 +530,8 @@ struct Harness {
     exp_leaves: Vec<String>,
     /// nullifier hashes whose `spent` record the drop-spent mutant deleted
     forgotten: HashSet<String>,
+    /// the labels of the refund notes settle wrote, in order (label_of(scope, the nonce it took))
+    refund_labels: Vec<String>,
 }
 
 fn id(s: &str) -> AccountId {
@@ -536,6 +568,22 @@ fn panic_text(e: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// The bytes the records `after` hold over `before`, as NEAR counts an account's storage (near-parameters'
+/// `num_extra_bytes_record`, 40): a new record is its key, its value and 40 B, a rewritten one the change in its value's
+/// length, a removed one all of it less. The harness's own count, never the vault's `env::storage_usage()`.
+fn usage_delta(before: &HashMap<Vec<u8>, Vec<u8>>, after: &HashMap<Vec<u8>, Vec<u8>>) -> i128 {
+    let size = |k: &[u8], v: &[u8]| (k.len() + v.len() + 40) as i128;
+    let added: i128 = after
+        .iter()
+        .map(|(k, v)| match before.get(k) {
+            Some(old) => v.len() as i128 - old.len() as i128,
+            None => size(k, v),
+        })
+        .sum();
+    let removed: i128 = before.iter().filter(|(k, _)| !after.contains_key(*k)).map(|(k, v)| size(k, v)).sum();
+    added - removed
+}
+
 impl Harness {
     fn new(seed: u64, mutant: Mutant) -> Self {
         Harness {
@@ -567,6 +615,7 @@ impl Harness {
             status: Vec::new(),
             exp_leaves: Vec::new(),
             forgotten: HashSet::new(),
+            refund_labels: Vec::new(),
         }
     }
 
@@ -601,8 +650,10 @@ impl Harness {
         let receipts = get_created_receipts();
         let after = near_sdk::mock::with_mocked_blockchain(|b| b.take_storage());
         let mut wrote = false;
+        let mut usage = 0;
         match result {
             Ok(_) => {
+                usage = usage_delta(&self.storage, &after);
                 self.storage = after;
                 // the chain writes the contract's state record after the call and reads it back on the next one
                 self.vault = near_sdk::borsh::from_slice(&near_sdk::borsh::to_vec(&self.vault).unwrap()).unwrap();
@@ -612,7 +663,21 @@ impl Harness {
                 self.vault = near_sdk::borsh::from_slice(&before).unwrap();
             }
         }
-        Outcome { result, logs, receipts, wrote }
+        Outcome { result, logs, receipts, wrote, usage }
+    }
+
+    /// L3 (src/payout.rs row 14): a landed exit's reserve is exactly the attachment less the bytes it wrote (counted
+    /// from its records, never from the vault's own `env::storage_usage()`), its registration and 1 yocto per
+    /// `ft_transfer`.
+    fn check_reserve(&self, index: u64, attached: u128, usage: i128, register: u128, fee: u128) {
+        let bytes = u128::try_from(usage).expect("an exit only adds records");
+        let yocto = if fee > 0 { 2 } else { 1 };
+        let want = attached - bytes * BYTE - register - yocto;
+        let got = self.view(|v| v.spends(index, 1))[0].reserve.0;
+        assert!(
+            got == want,
+            "storage (row 14): spend {index}'s reserve is {got}, want {want}: {attached} attached less {bytes} B written, {register} registration and {yocto} yocto"
+        );
     }
 
     /// A read of the vault's views on the current records.
@@ -948,11 +1013,15 @@ impl Harness {
             fee_recipient: s.withdrawal.fee_recipient.to_string(),
             refund_precommitment: s.withdrawal.refund_precommitment.clone(),
             payer: PAYER.into(),
+            context: s.signals[7].clone(),
+            new_leaf_index: self.leaves.len() as u64,
         };
+        let (register, fee) = (s.register, s.fee);
         let change = s.signals[0].clone();
         self.change_leaves.insert(change.clone());
         self.insert_leaf(Leaf::Other, change);
         let index = self.land(exit, &o.receipts);
+        self.check_reserve(index, attached, o.usage, register, fee);
         self.hit(Branch::WithdrawLanded);
         format!("withdraw {name} {what}: landed as spend {index}")
     }
@@ -988,13 +1057,34 @@ impl Harness {
     /// (the refund precommitment, then the value), the gas pre-check, row 2 (the label's deposit names the caller), the
     /// proof, row 4 (the commitment a leaf), row 5 (the nullifier unspent), row 6 (storage, the last refusal).
     fn ragequit_step(&mut self) -> String {
-        let r = &self.fx.ragequits[self.rng.below(self.fx.ragequits.len() as u64) as usize];
+        self.ragequit(None)
+    }
+
+    /// `ragequit_step`, or, with `on_label`, the hostile draw on that refund note's label (settle_step makes one after
+    /// each refund note it writes: a draw of 1 in 14 among the few ragequits that came after a refund note never drew
+    /// it on the fixed seed).
+    fn ragequit(&mut self, on_label: Option<String>) -> String {
+        // while one_block_a's change note is a leaf and its nullifier unspent, half the ragequits take its ragequit as
+        // signed, so a run lands a change note's ragequit (an even draw of 1 in 8 after that withdrawal rarely did)
+        let change = self.fx.ragequits.iter().position(|r| r.name == "one_block_a_change").expect("ragequit-spends.json's one_block_a_change");
+        let ready = {
+            let s = &self.fx.ragequits[change].signals;
+            self.exp_leaves.contains(&s[SIGNAL_COMMITMENT]) && !self.landed.contains_key(&s[SIGNAL_NULLIFIER_HASH])
+        };
+        let targeted = on_label.is_none() && ready && self.rng.pct(50);
+        let r = &self.fx.ragequits[if targeted { change } else { self.rng.below(self.fx.ragequits.len() as u64) as usize }];
         let (name, proof, mut signals, mut refund_pc) = (r.name.clone(), r.proof.clone(), r.signals.clone(), r.refund_precommitment.clone());
         let mut register: u128 = r.register.parse().unwrap();
         let mut by = r.depositor.clone();
         let (mut gas, mut attached) = (Gas::from_tgas(300), ONE_NEAR);
         let mut changed = false;
-        let what = match self.rng.below(12) {
+        let mut refund_label = false;
+        let draw = match (&on_label, targeted) {
+            (Some(_), _) => 8,
+            (None, true) => 13,
+            (None, false) => self.rng.below(14),
+        };
+        let what = match draw {
             0 => {
                 by = MALLORY.into();
                 "by a stranger"
@@ -1031,6 +1121,21 @@ impl Harness {
                 register = if self.rng.pct(50) { REGISTER_MIN } else { REGISTER_MIN - 1 };
                 "with a registration"
             }
+            8 if on_label.is_some() || !self.refund_labels.is_empty() => {
+                // a settled spend's refund label in the label signal: a refund note has no depositor, so row 2 refuses
+                // it before the proof is checked
+                signals[SIGNAL_LABEL] = match &on_label {
+                    Some(l) => l.clone(),
+                    None => self.refund_labels[self.rng.below(self.refund_labels.len() as u64) as usize].clone(),
+                };
+                changed = true;
+                refund_label = true;
+                "on a settled refund note's label"
+            }
+            9 | 10 => {
+                gas = Gas::from_tgas(ragequit_bound(register));
+                "at its gas bound"
+            }
             _ => "as signed",
         };
         let value: u128 = signals[SIGNAL_VALUE].parse().unwrap();
@@ -1046,7 +1151,12 @@ impl Harness {
         } else if gas < Gas::from_tgas(ragequit_bound(register)) {
             (Err("InsufficientGas"), Branch::RagequitShortGas)
         } else if named != Some(&by) {
-            let b = if named.is_none() { Branch::RagequitNoDeposit } else { Branch::RagequitWrongCaller };
+            let b = match (nonce, named) {
+                (None, _) => Branch::RagequitNotLanded,
+                (Some(_), None) => Branch::RagequitRefundNoteLabel,
+                _ if by == MALLORY => Branch::RagequitStranger,
+                _ => Branch::RagequitOtherDepositor,
+            };
             (Err("OnlyOriginalDepositor"), b)
         } else if changed {
             (Err("InvalidProof"), Branch::RagequitInvalidProof)
@@ -1066,6 +1176,9 @@ impl Harness {
             (Ok(()), Ok(())) => {}
             (Err(e), Err(w)) if e.contains(w) => {
                 self.hit(branch);
+                if refund_label && branch == Branch::RagequitRefundNoteLabel {
+                    self.hit(Branch::RagequitSettledRefundLabel);
+                }
                 return format!("ragequit {name} {what} by {by}: refused ({w})");
             }
             (got, want) => panic!("ragequit {name} {what} by {by}: got {got:?}, want {want:?}"),
@@ -1081,9 +1194,19 @@ impl Harness {
             fee_recipient: by.clone(),
             refund_precommitment: refund_pc,
             payer: by.clone(),
+            context: "0".into(),
+            new_leaf_index: 0,
         };
         let index = self.land(exit, &o.receipts);
+        self.check_reserve(index, attached, o.usage, register, 0);
         self.hit(Branch::RagequitLanded);
+        if gas == Gas::from_tgas(ragequit_bound(register)) {
+            self.hit(Branch::RagequitAtGasBound);
+        }
+        // a leaf of the label that is not its deposit's: a change note
+        if !self.fx.leaves.contains(&commitment) {
+            self.hit(Branch::RagequitChangeNote);
+        }
         format!("ragequit {name} {what} by {by}: landed as spend {index}")
     }
 
@@ -1171,9 +1294,9 @@ impl Harness {
         match (&o.result, want) {
             (Ok(()), Ok(refund)) => {
                 let i = pick.unwrap();
-                // settle sends NEAR only, never the token (I3); the reserve's rest goes to the spend's payer (a
-                // ragequit's depositor) and the caller attached nothing; it never sends more than the reserve held,
-                // which it leaves at 0 (M7)
+                // settle sends NEAR only, never the token (I3); the caller attached nothing, so the payer (a ragequit's
+                // depositor) gets exactly the reserve's rest, the reserve less the bytes settle wrote (counted from its
+                // records), and the reserve is left at 0 (M7)
                 let payer = self.exits[i].payer.clone();
                 let mut sent = 0u128;
                 for r in &o.receipts {
@@ -1186,7 +1309,12 @@ impl Harness {
                     }
                 }
                 let reserve_before = reserve_before.unwrap();
-                assert!(sent <= reserve_before, "settle (M7): sent {sent} yocto from a reserve of {reserve_before}");
+                let bytes = u128::try_from(o.usage).expect("settle only adds records");
+                let rest = reserve_before.checked_sub(bytes * BYTE).expect("the reserve covers settle's bytes");
+                assert!(
+                    sent == rest,
+                    "settle (M7): sent {sent} yocto to the payer {payer}, want the reserve's rest {rest} ({reserve_before} less {bytes} B written)"
+                );
                 let after = self.view(|v| v.spends(i as u64, 1))[0].reserve.0;
                 assert!(after == 0, "settle (M7): the spend's reserve is {after} after its settle, want 0");
                 self.status[i] = Status::Settled;
@@ -1196,11 +1324,15 @@ impl Harness {
                     self.nonce += 1;
                     let leaf = Self::commitment(value, &self.label(self.nonce), &refund_pc);
                     self.insert_leaf(Leaf::Other, leaf);
+                    let refund_label = dec(&self.label(self.nonce));
+                    self.refund_labels.push(refund_label.clone());
                     self.hit(Branch::SettleRefundNote);
                     if ragequit {
                         self.hit(Branch::SettleRagequitRefund);
                     }
-                    format!("settle of spend {i}'s refund of {value}: a refund note")
+                    // then a hostile ragequit on the new note's label (its own call, checked as any other)
+                    let then = self.ragequit(Some(refund_label));
+                    format!("settle of spend {i}'s refund of {value}: a refund note; then {then}")
                 } else {
                     self.hit(Branch::SettlePaid);
                     format!("settle of the paid spend {i}")
@@ -1413,10 +1545,11 @@ impl Harness {
         if spends.len() as u64 != self.spend_count {
             return Err(format!("model: {} spends, want {}", spends.len(), self.spend_count));
         }
-        // each record is its exit's: who paid, who is paid, the fee, and a ragequit's context 0 (restore reads it so)
+        // each record is its exit's: who paid, who is paid, the fee, the context (a withdrawal's proof's, a ragequit's
+        // 0, which restore reads as a ragequit) and the change leaf's index (a ragequit's 0: it inserts none)
         for (row, e) in spends.iter().zip(&self.exits) {
-            let got = (row.payer.as_str(), row.recipient.as_str(), row.fee.0, row.context == "0");
-            if got != (e.payer.as_str(), e.recipient.as_str(), e.fee, e.ragequit) {
+            let got = (row.payer.as_str(), row.recipient.as_str(), row.fee.0, row.context.as_str(), row.new_leaf_index);
+            if got != (e.payer.as_str(), e.recipient.as_str(), e.fee, e.context.as_str(), e.new_leaf_index) {
                 return Err(format!("model: spend {} is {got:?}, want {}'s", row.index, e.name));
             }
         }
@@ -1462,6 +1595,10 @@ fn payout_of(receipts: &[Receipt], vault: &str, index: u64, s: &Exit) -> Pending
     assert_eq!(receipts.len(), 2, "I3: an exit makes the payout receipt and its callback");
     assert_eq!(receipts[0].receiver_id.as_str(), TOKEN, "I3: the payout goes to the token");
     assert_eq!(receipts[1].receiver_id.as_str(), vault, "the callback goes to the vault");
+    // the callback depends on the payout receipt (promise_batch_then), so it runs after it and reads its result; a
+    // callback made apart from it would run with no result to read
+    assert!(receipts[0].receipt_indices.is_empty(), "the payout receipt waits on nothing: {:?}", receipts[0].receipt_indices);
+    assert_eq!(receipts[1].receipt_indices, vec![0], "the callback of {} depends on the payout receipt", s.name);
     let mut want: Vec<(String, String, u128)> = Vec::new();
     if s.register > 0 {
         want.push(("storage_deposit".into(), format!(r#"{{"account_id":"{}","registration_only":true}}"#, s.recipient), s.register));
