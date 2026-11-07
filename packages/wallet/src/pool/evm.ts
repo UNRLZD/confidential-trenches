@@ -883,14 +883,25 @@ export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to:
 export type EvmLogRules = { max: bigint; ceilingPages: number; slowHalves: boolean };
 /** One provider's page: its size now and the widest it answered in full (null: none yet). */
 export type EvmLogPage = { size: bigint; answered: bigint | null };
-/** Where each read finds its page: by the RPC and its index, at each page (a seat's provider may change mid-read). */
+/** Where each read finds its page: by the RPC and its index, at each page (a seat's provider may change mid-read). The
+ *  same provider's page is the same object at every call: readLogs grows a page only when the page that answered is the
+ *  one it asked with. */
 export type EvmLogPager = { rules: EvmLogRules; of(rpc: EvmRpc, k: number): EvmLogPage };
 
-/** A W's Transfer read's pager: one size per RPC index in `page`, kept across Ws (the restore's). */
-const transferPager = (page: bigint[], ceilingPages = Infinity): EvmLogPager => ({
-  rules: { max: EVM_LOG_PAGE_BLOCKS, ceilingPages, slowHalves: true },
-  of: (_rpc, k) => ({ get size() { return page[k]!; }, set size(v: bigint) { page[k] = v; }, answered: null }),
-});
+/** A W's Transfer read's pager: one size per RPC index in `page`, kept across Ws (the restore's), one page object per
+ *  index (a fresh one at each call never grew again after a refusal, merge of main 63c90229: B1 paged at 9 blocks). It
+ *  keeps no `answered`. */
+const transferPager = (page: bigint[], ceilingPages = Infinity): EvmLogPager => {
+  const pages = new Map<number, EvmLogPage>();
+  return {
+    rules: { max: EVM_LOG_PAGE_BLOCKS, ceilingPages, slowHalves: true },
+    of: (_rpc, k) => {
+      let p = pages.get(k);
+      if (p === undefined) pages.set(k, (p = { get size() { return page[k]!; }, set size(v: bigint) { page[k] = v; }, get answered() { return null; }, set answered(_v: bigint | null) {} }));
+      return p;
+    },
+  };
+};
 
 /**
  * The pool sync's pager (card evm-pool-sync-wide-pages): one page for each provider, by its URL (a seat's provider now,
