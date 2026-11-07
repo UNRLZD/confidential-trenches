@@ -16,6 +16,7 @@ export const LIVE_CHECKS = [
   "helper-usdc-event-watch",
   "helper-pool-senders",
   "helper-evm-sender",
+  "helper-evm-sender-2",
   "helper-sell-fee-recipient",
   "helper-sender-fee-proof",
   "helper-abuse-limits",
@@ -84,7 +85,40 @@ export function solanaPools(root = ROOT) {
   );
 }
 
-/** helper-pool-senders' runs, one per cluster with a record, and why the clusters with none are not applicable (or null). */
+// helper-evm-sender-2.mjs runs helper-pool-senders' EVM branch once for each EVM network a pool may be deployed on
+// (card helper-evm-sender-2; the testnets and mainnets of scripts/live-checks/pool-evm-deploy.mjs, CHAINS and MAINNETS,
+// a test holds them), with the PrivacyPoolSimple its deploy record names: a testnet's record is
+// scripts/live-checks/pool-evm-deploy.<network>.json, a mainnet's contracts/pool-evm/deployments/<network>.json
+// (pool-evm-deploy.mjs deploymentFile, where contracts/pool-evm/script/deploy.mjs writes it). A network with no record
+// has no run.
+export const POOL_EVM_NETWORKS = ["base", "robinhood", "base-sepolia", "robinhood-testnet"];
+const EVM_MAINNETS = new Set(["base", "robinhood"]);
+export const evmPoolRecord = (network) => (EVM_MAINNETS.has(network) ? `contracts/pool-evm/deployments/${network}.json` : `scripts/live-checks/pool-evm-deploy.${network}.json`);
+const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
+
+/** The PrivacyPoolSimple each EVM network's deploy record names under `root`, lower case, or null where there is no
+ *  record. Throws on a bad record. */
+export function evmPools(root = ROOT) {
+  return Object.fromEntries(
+    POOL_EVM_NETWORKS.map((network) => {
+      const file = path.join(root, evmPoolRecord(network));
+      if (!existsSync(file)) return [network, null];
+      let rec;
+      try {
+        rec = JSON.parse(readFileSync(file, "utf8"));
+      } catch {
+        throw new Error(`${evmPoolRecord(network)} is not JSON`);
+      }
+      if (rec?.chain !== network) throw new Error(`${evmPoolRecord(network)} names chain ${rec?.chain}, not ${network}`);
+      const pool = rec.contracts?.PrivacyPoolSimple?.address;
+      if (typeof pool !== "string" || !EVM_ADDRESS.test(pool.toLowerCase())) throw new Error(`${evmPoolRecord(network)} names no PrivacyPoolSimple address`);
+      return [network, pool.toLowerCase()];
+    }),
+  );
+}
+
+/** helper-pool-senders' runs, one per cluster with a record, and why the clusters with none are not applicable (or null).
+ *  The EVM pools run through helper-evm-sender-2.mjs (evmPools), their one owner. */
 export function poolSenderPlan(root = ROOT) {
   const pools = solanaPools(root);
   const none = POOL_SOLANA_CLUSTERS.filter((c) => !pools[c]);

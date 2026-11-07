@@ -10,11 +10,12 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { evmPoolFee, evmPoolGas } from "@blindfill/kit";
 import { EVM_FEE_STEP, evmPoolSender, POOL_LIFE_MAX_MS, WITHDRAW_SELECTOR, type EvmRpc } from "./evm.ts";
 import { oncePerNullifier } from "./once.ts";
+import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
-const RECIPIENT = "0x0000000000000000000000000000000000000a11";
+const RECIPIENT = W; // the test W key, which signs each release
 const DEADLINE = 2_000_000_000_000;
 const NOW = DEADLINE - 100_000;
 const EPOCH = 1_999_999_860_000;
@@ -37,7 +38,9 @@ const SIG = `${w32(65n)}${"ab".repeat(65).padEnd(192, "0")}`;
 function calldata(o: { nullifier?: bigint; deadlineMs?: bigint; relayLen?: bigint; feeToWord?: string } = {}): string {
   const relay = [a32(RECIPIENT), o.feeToWord ?? a32(FEE_TO), w32(10n ** 16n), w32(o.deadlineMs ?? BigInt(DEADLINE)), w32(5n), "c9ebb52422ed595de60e051c69edee1a".padEnd(64, "0")];
   const proof = PROOF.map((v, i) => (i === 9 && o.nullifier !== undefined ? o.nullifier : v));
-  return `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(FEE)}${w32(28n * 32n)}${a32(POOL)}${w32(64n)}${w32(o.relayLen ?? 192n)}${relay.join("")}${SIG}`;
+  const raw = `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(FEE)}${w32(28n * 32n)}${a32(POOL)}${w32(64n)}${w32(o.relayLen ?? 192n)}${relay.join("")}${SIG}`;
+  // a malformed one does not read as a release: it goes as built, refused bad_shape before W's signature is read
+  return o.relayLen !== undefined || o.feeToWord !== undefined ? raw : signRelease(raw, POOL);
 }
 
 type Calls = { method: string; params: readonly unknown[] }[];
@@ -62,7 +65,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
     const key = feeRead_ ? "fee read" : method;
     if (o.fail?.[key]) throw new Error(o.fail[key]);
     switch (method) {
-      case "eth_chainId": return "0x7a69";
+      case "eth_chainId": return "0x14a34"; // Base Sepolia, the kit's pin for the network
       case "eth_getCode": return o.code ? o.code(params[1] as string) : "0x";
       case "eth_call": {
         const [{ to, data }, at] = params as [{ to: string; data: string }, unknown];
