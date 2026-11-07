@@ -72,8 +72,8 @@ const RETURN_NATIVE_TOKENS: ReadonlySet<string> = new Set(Object.values(RETURN_N
  * The tokens an id can hold inside intents.near and take out by ft_withdraw (W:930: "token = the asset it holds
  * there"): every USDC the deposit path takes (rules/deposit-dry.ts DEPOSIT_ASSET_CHAINS, the kit's ONECLICK_USDC_ASSETS),
  * a refund under U landing in the asset the deposit came in. Each maps to its code hash: NEAR USDC's is the vault's pin;
- * the two omft tokens' were read 2026-11-07T08:00Z by view_account at final on rpc.mainnet.near.org and
- * free.rpc.fastnear.com (blocks 223438260-223438273), the two equal. A token upgraded since reads another hash, and
+ * the two omft tokens' were read 2026-11-07T12:24Z by view_account at final on free.rpc.fastnear.com (FastNear) and
+ * near.drpc.org (dRPC), two operators (blocks 223465873-223465875), the two equal. A token upgraded since reads another hash, and
  * nothing is signed until the release pins it.
  */
 export const FT_WITHDRAW_TOKENS: Readonly<Record<string, string>> = Object.freeze({

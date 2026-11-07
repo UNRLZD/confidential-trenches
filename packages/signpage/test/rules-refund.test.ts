@@ -578,7 +578,7 @@ test("ft_withdraw out of intents.near: every USDC the deposit path takes, each t
   // the list is the deposit path's, in its order: a new deposit asset fails here until its code hash is pinned
   assert.deepEqual(Object.keys(R.FT_WITHDRAW_TOKENS).map((t) => `nep141:${t}`), DEPOSIT_ASSET_CHAINS.map((a) => a.id));
   assert.ok(Object.isFrozen(R.FT_WITHDRAW_TOKENS));
-  // the pins as read (view_account at final, rpc.mainnet.near.org and free.rpc.fastnear.com, 2026-11-07T08:00Z, equal)
+  // the pins as read (view_account at final, free.rpc.fastnear.com and near.drpc.org, two operators, 2026-11-07T12:24Z, equal)
   assert.deepEqual({ ...R.FT_WITHDRAW_TOKENS }, {
     [USDC]: "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q", // gitleaks:allow (a public code hash)
     [SOL_TOKEN]: "Ba6uZKxsuRPW5X7XVQrSnYEYScEjFLJLMqMWvZ1aS3tC", // gitleaks:allow (a public code hash)
