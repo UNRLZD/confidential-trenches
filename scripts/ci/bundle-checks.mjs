@@ -43,6 +43,7 @@ export const IN_PROCESS = [
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
   viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
   viaRead("oneclick-fee-path-own-key", () => import("../live-checks/oneclick-fee-path-own-key.mjs")),
+  viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
   { key: "app-harness-signin-e2e", host: "sign", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["sign"], f)) },
