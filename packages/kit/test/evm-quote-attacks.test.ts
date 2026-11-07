@@ -6650,3 +6650,25 @@ test("review of 1ee73a00, 3 (buy, Robinhood, pinned trace pair) an honest-size c
 test("review of 1ee73a00, info EVM_TRACE_UNANSWERED's text names no replay outcome: it is thrown where the replay passed and where it failed", () => {
   assert.equal(quoteMod.EVM_TRACE_UNANSWERED, "the trade's trace was not answered and could still change the answer");
 });
+
+// ------------------------------------------------------------------------------------- review of d6d055bf
+// 1: step 4 asks every set's no-op at the pool's stored fee first, and the fee-0 no-op only where none of those
+// rescues: an honest hook h1 whose 5% fee is its dynamic pool's stored LP fee (the quoter and the trade pay it alike),
+// beside a hostile h2 that shows the quoter 2% more and skims 3% from the real buy alone (the shortfall, 1.843 against
+// minOut 1.881, is less than h1's fee). With fee 0 asked first, h1's no-op rescues too and both pools are banned; the
+// stored-fee pass bans h2 alone. (Case 7f8, h1's fee one every no-op removes, stays open: its own card.)
+const r5Skim = (a: bigint, ctx: SimCtx) => (later(ctx) ? (a * 97n) / 100n : (a * 102n) / 100n);
+test("review of d6d055bf, 1 (buy, Base) an honest dynamic pool's stored fee beside a hostile skimmer: the stored-fee no-op pass bans the skimmer's pool alone (case 7f9)", async () => {
+  const n = 0x7f9;
+  const [token, x] = ["0x" + (0xc1f00 + n).toString(16).padStart(40, "0"), xAt(n)];
+  const pools: ModelPool[] = [
+    seeded(token),
+    // h1's stored fee goes only where the no-op it is given carries the override flag (feeOverridden)
+    { key: keyOf(x, NATIVE, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedAt(2n), neutral: (a, ctx) => (feeOverridden(ctx, N1_H1) ? 2n * a : (2n * a * 95n) / 100n) },
+    { key: keyOf(token, x, 3000, 60, N1_H2), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: r5Skim },
+  ];
+  const logs = [{ key: pools[2]!.key, at: 4_500_000 }, { key: pools[1]!.key, at: 4_100_001 }];
+  const q = await hbQuote(pools, token, logs, n1BuyRoute(token, x));
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q)), [hcPid(pools[2]!.key)], "the hostile pool alone");
+});

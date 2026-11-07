@@ -501,8 +501,8 @@ export const MUTANTS = [
   // reverted, went to W and the replay reverts too; providers that disagree ban nothing; a hook behind two pools of the
   // route explains neither
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
-  [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV4 "],
-  [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
+  [QUOTE, "        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) rescued.push(set);", "        rescued.push(set);", R, "RV4 "],
+  [QUOTE, "        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) rescued.push(set);", "        rescued.push(set);", R, "RV7 "],
   [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];\n", "", R, "RV9 "],
   // (card evm-sell-hook-intrablock: the as-is check is `asIs`; the line that returns where it passes and the trace names
@@ -692,8 +692,12 @@ export const MUTANTS = [
   [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && unread ? again() : out;", R, "review of 1ee73a00, 1b"],
   [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && unread ? again() : out;", R, "review of 1ee73a00, 1c"],
   [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && (unread || none) ? again() : out;", R, "review of fb923143, 2 step 4"],
-  [QUOTE, "[hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "[hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", R, "review of 1ee73a00, 1d"],
-  [QUOTE, "[hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "[hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", R, "review of 1ee73a00, 1e"],
+  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_NOOP_HOOK_CODE]) {", R, "review of 1ee73a00, 1d"],
+  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_NOOP_HOOK_CODE]) {", R, "review of 1ee73a00, 1e"],
+  // review of d6d055bf, 1: the stored-fee pass first, the fee-0 pass only where it rescued nothing
+  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_EVIDENCE_NOOP_HOOK_CODE]) {", R, "review of d6d055bf, 1 "],
+  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_EVIDENCE_NOOP_HOOK_CODE, EVM_NOOP_HOOK_CODE]) {", R, "review of d6d055bf, 1 "],
+  [QUOTE, "      if (rescued.length > 0) break;\n", "", R, "review of d6d055bf, 1 "],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1d"],
   [QUOTE, "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b60606000f3\";", "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b6240000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
