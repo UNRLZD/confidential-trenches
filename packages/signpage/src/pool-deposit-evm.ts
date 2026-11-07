@@ -327,6 +327,8 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
       h.short?.(t.u, t.short);
       return { error: "not_funded" };
     }
+    // the run's step cap (a front-runner taking note after note) with the ask not all in: what landed, never filled
+    if (ask !== null && left >= EVM_POOL_MIN_DEPOSIT) return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: sentTxs };
     return { stage: "filled", txs: landedTxs };
   } catch (e) {
     // a send may have left: never failed while it may land
