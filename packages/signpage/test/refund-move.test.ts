@@ -301,7 +301,10 @@ async function relayLoop(intentsAnswer: () => Response, simMinutes: number) {
     now: () => NOW + simMs,
   });
   await f.settle();
-  for (let k = 0; k < 2_000_000 && !stopped; k++) await new Promise<void>((ok) => setImmediate(ok));
+  // until the simulated minutes pass, or the follow ends by itself (a held op: nothing more to wait for)
+  let ended = false;
+  void f.idle().then(() => (ended = true));
+  for (let k = 0; k < 2_000_000 && !stopped && !ended; k++) await new Promise<void>((ok) => setImmediate(ok));
   await f.idle();
   const op = (await w.get("ops", "dq-r")) as { stage: string; follow: { why?: string } };
   return { c, perMin: (n: number) => n / (simMs / 60_000), op };

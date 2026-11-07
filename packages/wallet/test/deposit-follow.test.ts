@@ -22,6 +22,7 @@ import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src
 import { RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
 import { DEPOSIT_STATUS_URL, type DepositOp, followEnded, readMoveAt, type FollowArgs, type FollowDeps, type FollowMoveAsk, followDeposit, type FollowRpc, MOVE_RETRY_MIN_MS, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, SLOW_MS, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
+import { depositId } from "../src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -1621,9 +1622,10 @@ test("M2: a move the relayer does not carry (404, no route): the next one no soo
   let clock = NOW;
   const at: number[] = [];
   const refundMove = answered(log, 404, null);
-  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  // the chain's time follows the follow's clock: the refused move stays out for its whole 120 s window
   const sleep = async (ms: number) => {
     clock += ms;
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + ms;
     await t.deps.sleep!(ms);
   };
   await followDeposit(t.args, { ...t.deps, now: () => clock, sleep, refundMove: async (a) => (at.push(clock - NOW), refundMove(a)), untilFinal: true, signal: stop(t, 120) }).catch(() => {});
@@ -1632,7 +1634,78 @@ test("M2: a move the relayer does not carry (404, no route): the next one no soo
   const gaps = at.slice(1).map((x, k) => x - at[k]!);
   assert.ok(gaps.every((g) => g >= MOVE_RETRY_MIN_MS), `no move sooner than ${MOVE_RETRY_MIN_MS} ms: ${gaps}`);
   assert.ok(gaps.at(-1)! > gaps[0]!, `the wait grows: ${gaps}`);
-  assert.ok(t.sleeps.slice(5).every((ms) => ms >= SLOW_MS), "the rounds at the slow pace once the relayer refused");
+  assert.ok(t.sleeps.every((ms) => ms >= SLOW_MS), `every round at the slow pace once the relayer refused, the move out included: ${t.sleeps.filter((ms) => ms < SLOW_MS).length} faster`);
+});
+
+test("M2: REFUNDED is read again once a minute at most, while the rounds run at 1 s (a carried move out that never lands)", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let clock = NOW;
+  const sleep = async (ms: number) => {
+    clock += ms;
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + ms;
+    await t.deps.sleep!(ms);
+  };
+  // the relayer carries each move (200), none lands: each one out for its window at 1 s, then a new one
+  await followDeposit(t.args, { ...t.deps, now: () => clock, sleep, refundMove: mover(() => {}), signal: stop(t, 300) }).catch(() => {});
+  const reads = t.oc.urls.filter((u) => u.startsWith(DEPOSIT_STATUS_URL)).length;
+  const minutes = (clock - NOW) / 60_000;
+  assert.ok(t.sleeps.filter((ms) => ms < SLOW_MS).length > 200, "the rounds ran at 1 s");
+  assert.ok(reads <= Math.ceil(minutes) + 1, `${reads} status reads in ${minutes.toFixed(1)} min`);
+});
+
+test("a move past its window with its nonce unused and U's balance still the move's amount (no debit at all): over unlanded, never through", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const asks: (number | null)[] = [];
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => (asks.push(ask.priorMs), mover(() => {})(ask));
+  // each round past the move's window at once: no read inside it
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 200_000);
+  await followDeposit(t.args, { ...t.deps, refundMove, signal: stop(t, 6) }).catch(() => {});
+  const op = await opOf(t.w);
+  assert.notEqual(op.follow.moved, true, "not through: U still holds all of it");
+  assert.ok(asks.length >= 2 && asks[0] === null && asks[1] !== null, `a new move, the old deadline handed on: ${asks}`);
+});
+
+test("readMoveAt: is_nonce_used read apart, a block or a view answered at another height than asked: no read", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const n1 = versionedNonce("252812b3", NOW);
+  const [a, b] = t.chain.rpcs();
+  assert.notEqual(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, b]), null, "the two RPCs as they answer");
+  const value = (j: any): unknown => JSON.parse(Buffer.from(j.result.result).toString());
+  const usedApart: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.method_name === "is_nonce_used") j.result.result = [...Buffer.from(JSON.stringify(!value(j)))]; return j; } };
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, usedApart]), null, "is_nonce_used apart");
+  const blockOff: FollowRpc = { ...b, block: async (p: any) => { const j: any = await b.block(p); if ("block_id" in p && j.result) j.result.header.height += 1; return j; } };
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, blockOff]), null, "a block at another height");
+  const viewOff: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.block_id !== undefined && j.result) j.result.block_height += 1; return j; } };
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, viewOff]), null, "a view at another block");
+});
+
+test("the refund move's key: U's own key from the seed, open for the signature only, key and seed zeroed after; a seed whose U is not the op's signs nothing", async () => {
+  for (const wrong of [false, true]) {
+    const t = await setup(["REFUNDED"]);
+    t.chain.a.held = t.chain.b.held = CREDIT;
+    const OTHER = d.wordsToSeed64(d.entropyToWords(Uint8Array.from({ length: 16 }, (_, k) => k + 1)));
+    let held: Uint8Array | null = null;
+    let copy: Uint8Array | null = null;
+    let refused: unknown = undefined;
+    const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+      if (refused === undefined) refused = await ask.openKey((sk) => ((held = sk), (copy = Uint8Array.from(sk)))).then(() => null, (e: unknown) => e);
+      return { kind: "refused", why: "the test signs nothing" };
+    };
+    const seed64 = async () => (t.seeds.push(Uint8Array.from(wrong ? OTHER : SEED)), t.seeds.at(-1)!);
+    await followDeposit(t.args, { ...t.deps, seed64, refundMove, signal: stop(t, 3) }).catch(() => {});
+    assert.ok(t.seeds.length >= 1 && t.seeds.every((x) => x.every((v) => v === 0)), `${wrong}: every seed copy zeroed`);
+    if (wrong) {
+      assert.ok(refused instanceof Error && /not the op's U/.test(refused.message), `a seed whose U is not the op's: ${refused}`);
+      assert.equal(copy, null, "no key handed to the signer");
+    } else {
+      assert.equal(refused, null);
+      assert.deepEqual(copy, depositId(SEED, 1n, t.i).secretKey, "U's own key");
+      assert.ok(held !== null && (held as Uint8Array).every((v) => v === 0), "the key zeroed after the signature");
+    }
+  }
 });
 
 test("M1: the same two refunded ops after a reload (both read REFUNDED already): B's 2 USDC is moved, only A held", async () => {

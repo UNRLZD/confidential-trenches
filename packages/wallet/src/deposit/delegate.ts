@@ -30,6 +30,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
 import { type DepositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc, readDepositAccount } from "./account.ts";
+import { readCapped } from "./capped.ts";
 
 /** W: the delegate's window in blocks over the lower of the two RPC heights (V:670-672). */
 export const DEPOSIT_WINDOW = 120;
@@ -257,31 +258,4 @@ export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "s
     if (res.status === status) return { ok: false, code: code as HelperBindCode };
   }
   throw new Error(`relayer: HTTP ${res.status}, not a bind answer`);
-}
-
-/** The body's bytes, refused once they pass `max` (a declared or a streamed length), without reading the rest. */
-export async function readCapped(res: Response, max: number): Promise<Uint8Array> {
-  const declared = Number(res.headers.get("content-length") ?? "0");
-  if (declared > max) throw new Error(`relayer: an answer over ${max} B`);
-  if (res.body === null) return new Uint8Array(0);
-  const reader = res.body.getReader();
-  const parts: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > max) {
-      await reader.cancel();
-      throw new Error(`relayer: an answer over ${max} B`);
-    }
-    parts.push(value);
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
 }

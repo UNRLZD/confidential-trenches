@@ -21,7 +21,7 @@
 // Nothing here logs. The request names U, the asset and the amount; the intent is U's own.
 import { HELPER_FETCH_INIT, HELPER_INTENTS_CODES, type HelperIntentsCode, type HelperSignedIntent, type OneClickRequest } from "@blindfill/kit";
 import { base64 } from "@scure/base";
-import { readCapped } from "./delegate.ts";
+import { readCapped } from "./capped.ts";
 import { askDepositQuote, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, type DepositQuoteReply } from "./quote.ts";
 
 /** The release's relayer for an id's intents: POST /v1/intents on HELPER_HOST (kit helper/v1.ts HelperIntentsRequest). */

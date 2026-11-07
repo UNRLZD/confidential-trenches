@@ -87,7 +87,7 @@ test("a quote off the request, an intent the rule refuses, or reads that disagre
 });
 
 /** A run whose relayer answers `answer` to the move and `probe` to an empty body; the URLs asked logged in order. */
-function relayRun(answer: () => Response, o: { probe?: boolean; probeAnswer?: () => Response } = {}) {
+function relayRun(answer: () => Response, o: { probe?: boolean; probeAnswer?: () => Response; record?: () => Promise<void> } = {}) {
   const log: string[] = [];
   const check: RefundMoveCheck<{ q: true }, { i: true }> = {
     quote: () => ({ q: true }),
@@ -102,10 +102,16 @@ function relayRun(answer: () => Response, o: { probe?: boolean; probeAnswer?: ()
   }) as typeof fetch;
   const p = runRefundMove(
     { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n }, { blockTimeNs: T, held: 25_000_000n }], salt: "252812b3", priorMs: null, probe: o.probe },
-    { check, fetchFn, now: () => NOW, openKey: async (fn) => fn(new Uint8Array(32)), record: async () => void log.push("record") },
+    { check, fetchFn, now: () => NOW, openKey: async (fn) => fn(new Uint8Array(32)), record: o.record ?? (async () => void log.push("record")) },
   );
   return { p, log };
 }
+
+test("a record that fails sends nothing: no move is ever out unrecorded", async () => {
+  const r = relayRun(() => Response.json({ tx_hash: "1".repeat(44) }), { record: async () => { throw new Error("the store refused"); } });
+  await assert.rejects(r.p, /the store refused/);
+  assert.deepEqual(r.log, ["quote", "sign"]);
+});
 
 test("the relayer's answer: its listed code with a 4xx status is read (sender_struck), anything else is no code", async () => {
   for (const [what, answer, status, code] of [

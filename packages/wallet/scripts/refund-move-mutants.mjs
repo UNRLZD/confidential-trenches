@@ -2,7 +2,7 @@
 // refund move at a time (the wallet's follow.ts and refund.ts, SIGN_HOST's deposit-follow.ts), runs the test that holds
 // that rule, expects it to fail, and puts the source back. Each rule is wallet.md §2.4 point 8 and the §2.8 refund move
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
-// The last 11 are review wrm-58c238ab's M1, M2, L1 and L2 as folded.
+// Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -59,7 +59,7 @@ const M = [
   ["M2: a new quote and signature with no probe of the route", FOLLOW,
     [["probe: relayDown,", "probe: false,"]], WT, "M2: a move the relayer"],
   ["M2: a REFUNDED status read every round", FOLLOW,
-    [["if (op.follow.status === \"REFUNDED\") statusAt.set(id, now() + SLOW_MAX_MS);", ""]], ST, "M2: no route"],
+    [["if (op.follow.status === \"REFUNDED\") statusAt.set(id, now() + SLOW_MAX_MS);", ""]], WT, "M2: REFUNDED is read again"],
   ["M2: a listed code read on any status", REFUND,
     [[" && res.status >= 400 && res.status < 500) code", ") code"]], WR, "the relayer's answer"],
   ["M2: a route with no answer of its own still quoted and signed", REFUND,
@@ -70,6 +70,23 @@ const M = [
     [["if (move.foreign !== true) await mark(null, { move: { ...move, foreign: true } });", ""]], WT, "L2: a withdraw.open from U while"],
   ["L2: an op whose money left U by another intent never ends", FOLLOW,
     [["await write(id, \"held\", legFacts(op, \"held\"), { why: \"moved_out\" });", "void [id, op];"]], WT, "takes it all"],
+  // review wrm-58c238ab's own money-rule plants that no named test held (its sweep over whole files, 8 survivors)
+  ["through when U's balance equals the move (debit not seen)", FOLLOW,
+    [["at.held < BigInt(move.amount)", "at.held <= BigInt(move.amount)"]], WT, "a move past its window with its nonce unused"],
+  ["the two RPCs' is_nonce_used not compared", FOLLOW,
+    [["a.salt !== b.salt || a.used !== b.used)", "a.salt !== b.salt)"]], WT, "readMoveAt: is_nonce_used read apart"],
+  ["a block answer at another height accepted", FOLLOW,
+    [["if (\"block_id\" in params && height !== params.block_id) return null;", ""]], WT, "readMoveAt: is_nonce_used read apart"],
+  ["a view answer at another block accepted", FOLLOW,
+    [["JSON.stringify(args))), block_id: at }), at);", "JSON.stringify(args))), block_id: at }));"]], WT, "readMoveAt: is_nonce_used read apart"],
+  ["openKey signs without checking the seed's U", FOLLOW,
+    [["if (k.id !== U) throw new DepositFollowRefused(\"the seed's U_{s,i} is not the op's U\");\n          return fn(k.secretKey);", "return fn(k.secretKey);"]], WT, "the refund move's key"],
+  ["U's key not zeroed after the signature", FOLLOW,
+    [["          k.secretKey.fill(0);\n        }\n      } finally {\n        seed.fill(0);", "          void 0;\n        }\n      } finally {\n        seed.fill(0);"]], WT, "the refund move's key"],
+  ["the seed not zeroed after the signature", FOLLOW,
+    [["          k.secretKey.fill(0);\n        }\n      } finally {\n        seed.fill(0);", "          k.secretKey.fill(0);\n        }\n      } finally {\n        void 0;"]], WT, "the refund move's key"],
+  ["a record failure swallowed: the move sent unrecorded", REFUND,
+    [["await deps.record(move);", "await deps.record(move).catch(() => {});"]], WR, "a record that fails"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {
