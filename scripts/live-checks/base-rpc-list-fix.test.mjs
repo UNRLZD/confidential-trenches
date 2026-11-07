@@ -1,6 +1,6 @@
 // Replays card base-rpc-list-fix's live check: each of its three checks on its own recorded answers (base-rpc-list-fix.mjs
-// runs them in turn). Good: evm-quote-warm-round's run (fc7f1b1, its preflights read with bloXroute's Base POST answering
-// no allow-origin, run 42114981904), evm-rpc-spare-list's (this card's kit, this Mac, 2026-11-06 01:06Z: Base's four scan
+// runs them in turn). Good: evm-quote-warm-round's good run (re-recorded on card evm-spare-list-green's list, with bloXroute's Base POST
+// answering no allow-origin added as run 42114981904 read it), evm-rpc-spare-list's (this card's kit, this Mac, 2026-11-06 01:06Z: Base's four scan
 // providers) and evm-quote-lag-held's (each case in a process of its own, 00:57Z) pass on the kit's list. Bad: the
 // spare-list run at 66d7b60 (each scan list stops at two) and lag-held at main 2e7ec335, every case in one process
 // (base-blastapi-50's lagger asked 0 times), fail; so does warm-round's good run on main's list, which held bloXroute.

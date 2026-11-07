@@ -404,7 +404,7 @@ const mainnet = (on = {}) => {
 const room = (t) => {
   const dir = mkdtempSync(path.join(TMP, "m-"));
   const out = path.join(dir, "base.json");
-  return { dir, keys: path.join(dir, "keys"), out, journal: path.join(dir, "base.journal.json"), io: { keysBase: path.join(dir, "keys"), recordOf: () => out, deployedElsewhere: async () => null, sinkOf: async () => PIN } };
+  return { dir, keys: path.join(dir, "keys"), out, journal: path.join(dir, "base.journal.json"), io: { keysBase: path.join(dir, "keys"), recordOf: () => out, deployedElsewhere: async () => null, sinkOf: async () => PIN, mainCheckout: () => {} } };
 };
 const folders = (keys) => (existsSync(keys) ? readdirSync(keys) : []);
 
@@ -1036,6 +1036,23 @@ test("mainnet review 2: a failed git fetch is refused as itself, never as a pool
   await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "rev-parse" ? no : ok) }), (e) => /^origin\/main is not in this checkout, so main's record could not be read: nothing was sent/.test(e.message));
   assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok) }), null);
   assert.equal(await deployedElsewhere("base", { git: () => ok }), "origin/main holds contracts/pool-evm/deployments/base.json");
+});
+
+test("card evm-paste-fold: a mainnet paste in a checkout that is not main's code is refused before any read, key or funding line; a loopback rehearsal is not held to it", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  let asked = 0;
+  const r = await run(t, c, { head: MAIN, io: { ...m.io, mainCheckout: () => { asked++; throw new Error("this folder has changes main lacks (x): the paste runs main's code only: nothing was sent"); } }, outArg: false, out: m.out });
+  assert.equal(asked, 1);
+  assert.match(String(r.error?.message), /^this folder has changes main lacks/, why(c));
+  assert.equal(c.calls.length, 0, "no RPC read");
+  assert.deepEqual(folders(m.keys), [], "no key made");
+  assert.equal(c.seen.size, 0, "nothing sent");
+  // the rehearsal's loopback fork runs a card's branch: the check is not asked
+  const m2 = room(t);
+  const c2 = mainnet();
+  await run(t, c2, { head: ["--chain", "base", "--mainnet", "--rpc", "http://127.0.0.1:8545"], io: { ...m2.io, mainCheckout: () => { asked++; } }, out: m2.out });
+  assert.equal(asked, 1, "not asked on a loopback fork");
 });
 
 // ---- the mainnet paste's review (round 3) ----
