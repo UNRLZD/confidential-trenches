@@ -85,6 +85,8 @@ export const EXEMPT: Readonly<Record<string, Exempt>> = {
   "packages/kit/src/trade/evm/quoted.ts": { define: true },
   "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend", "signEvmDeposit"] }, // rules/pool.ts:853, 1020; signEvmDeposit (card pool-deposits)
   "packages/kit/src/trade/evm/buy-unpinned.ts": { curve: ["evmPoolSignBuyUnpinned"] }, // a buy's signature, buy-unpinned.ts:612
+  // W's EVM return send to a 1Click deposit address (card signpage-refund-kinds), signed only as checkReturnEvm read it
+  "packages/signpage/src/rules/refund.ts": { curve: ["signReturnEvm"] }, // rules/refund.ts:620
   // a quote's simulation: a sim sell built and its call data encoded, signed by its caller on the note the caller names
   "packages/kit/src/checks/evm/quote.ts": { calls: ["evmPoolBuildSimSellUnpinned", "evmSellCallData"] },
   // the helper (a server file, never on the page): its sender key signs its own relay sends (signEvmTx, signEvmTx4),
