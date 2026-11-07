@@ -501,8 +501,8 @@ export const MUTANTS = [
   // reverted, went to W and the replay reverts too; providers that disagree ban nothing; a hook behind two pools of the
   // route explains neither
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
-  [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV4 "],
-  [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
+  [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV4 "],
+  [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
   [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];\n", "", R, "RV9 "],
   // (card evm-sell-hook-intrablock: the as-is check is `asIs`; the line that returns where it passes and the trace names
@@ -532,7 +532,7 @@ export const MUTANTS = [
   // smaller one that rescued it (an honest hook beside them is never banned)
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1)) {", R, "RVX "],
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "N1D "],
-  [QUOTE, "  const fault = new Set(asIs ? rescued.flat() : errored);", "  const fault = new Set(asIs ? rescued.slice(0, 1).flat() : errored);", R, "review of 72e28658, H3 (buy)"],
+  [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? (none ? named : rescued.slice(0, 1).flat()) : errored);", R, "review of 72e28658, H3 (buy)"],
   [QUOTE, "    if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "N1D "],
   // review of 72e28658, L2: the RV4 mutant ("step 5 always") is not equivalent: a set holding the one hook that rescued
   // the trade, asked anyway, bans an honest capped hook beside it
@@ -640,7 +640,7 @@ export const MUTANTS = [
   // review of 29498693: a trace that adds nothing leaves the parent replay's evidence (HIGH); the as-is leg on the trace
   // bans the hooks it names errored alone, each a frame the PoolManager called (MEDIUM)
   [QUOTE, "  try {\n    p = pre === undefined ? undefined : ((await pre(sale, hooks)) ?? undefined);\n  } catch (e) {\n", "  {\n    p = pre === undefined ? undefined : ((await pre(sale, hooks)) ?? undefined);\n  }\n  if (false as boolean) {\n    const e: unknown = null;\n", R, "review of 29498693, HIGH"],
-  [QUOTE, "new Set(asIs ? rescued.flat() : errored)", "new Set(asIs ? rescued.flat() : hooks)", R, "review of 29498693, MEDIUM"],
+  [QUOTE, "new Set(asIs ? (none ? named : rescued.flat()) : errored)", "new Set(asIs ? (none ? named : rescued.flat()) : hooks)", R, "review of 29498693, MEDIUM"],
   [QUOTE, " && isAddress(f.from) && lower(f.from) === pm", "", R, "review of 29498693, MEDIUM"],
   // review of f0f983d2: a caught frame never counts, the outermost route hook alone (item 2); the bounds from the
   // trade's gas, the prestate with no code (item 3); a trace not answered where nothing else bans is asked again (item
@@ -672,15 +672,36 @@ export const MUTANTS = [
   // both did, and only the as-is leg is unread (1); a callTracer answered apart or not the trade's own call still drops
   // the prestate with it (1d); with the prestate unread, step 3's and step 4's [] are asked again (2); a numeric field
   // that is not a number refuses (question 5)
-  [QUOTE, '    if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };\n', "", R, "review of fb923143, 1a"],
-  [QUOTE, '    if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };\n', "", R, "review of fb923143, 1b"],
-  [QUOTE, 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', 'if (e instanceof EvmQuoteError) return { over, errored: undefined };', R, "review of fb923143, 1d"],
+  [QUOTE, '    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };\n', "", R, "review of fb923143, 1a"],
+  [QUOTE, '    if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };\n', "", R, "review of fb923143, 1b"],
+  // (the 1d mutant that kept the prestate on any EvmQuoteError is gone: since review of 1ee73a00, 2 the catch keeps it
+  // on rpc_disagree too, and the agreed read of a callTracer throws no other code, so it is equivalent)
   [QUOTE, "  return errored === null ? null : { over, errored };", "  return { over, errored: errored ?? undefined };", R, "review of fb923143, 1d"],
   [QUOTE, "  if (over === null) return null;\n", "", R, "review of fb923143, 1e"],
   [QUOTE, "  const legUnread = unread || (p !== undefined && p.errored === undefined);", "  const legUnread = unread;", R, "review of fb923143, 1c"],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];", "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];", R, "review of fb923143, 2 (buy"],
-  [QUOTE, "  return out.length === 0 && unread ? again() : out;", "  return out;", R, "review of fb923143, 2 step 4"],
+  [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out;", R, "review of fb923143, 2 step 4"],
   [QUOTE, '!/^0x[0-9a-fA-F]{1,64}$/.test(v)) return refuse("rpc_error", `${who}\'s ${k} is not a number`);', '!/^0x[0-9a-fA-F]{0,64}$/.test(v)) return refuse("rpc_error", `${who}\'s ${k} is not a number`);', R, "review of fb923143, question 5"],
+  // review of 1ee73a00: where the replay failed and no set's no-op rescued it, the hooks the callTracer names errored are
+  // at fault, asked again while it is unread (1); the evidence's no-op takes LP fee 0, apart from the quote's (1); a
+  // callTracer one provider answers apart keeps the prestate (2); each tracer read on its own byte cap (3)
+  [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? rescued.flat() : errored);", R, "review of 1ee73a00, 1b"],
+  [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? rescued.flat() : errored);", R, "review of 1ee73a00, 1c"],
+  [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? (none ? [] : rescued.flat()) : errored);", R, "review of 1ee73a00, 1a"],
+  [QUOTE, "  const named = seen === undefined ? [] : hooks.filter((hk) => seen.includes(lower(hk)));", "  const named = seen === undefined ? [] : hooks;", R, "review of fb923143, 2 step 4"],
+  [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && unread ? again() : out;", R, "review of 1ee73a00, 1b"],
+  [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && unread ? again() : out;", R, "review of 1ee73a00, 1c"],
+  [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && (unread || none) ? again() : out;", R, "review of fb923143, 2 step 4"],
+  [QUOTE, "[hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "[hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", R, "review of 1ee73a00, 1d"],
+  [QUOTE, "[hk, { code: EVM_EVIDENCE_NOOP_HOOK_CODE }]))))) rescued.push(set);", "[hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", R, "review of 1ee73a00, 1e"],
+  [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
+  [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1d"],
+  [QUOTE, "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b60606000f3\";", "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b6240000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
+  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of 1ee73a00, 2c"],
+  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of 1ee73a00, 2d"],
+  [QUOTE, 'if (e instanceof EvmQuoteError && (e.code === "rpc_error" || e.code === "rpc_disagree")) return { over, errored: undefined };', 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', R, "review of fb923143, 1d"],
+  [QUOTE, "      trace.map((t) => t[at]),", "      trace.map((t) => t[0]),", R, "review of 1ee73a00, 3 "],
+  [QUOTE, "[evmJsonRpc(u, fetch, b.preBytes), evmJsonRpc(u, fetch, b.callBytes)]", "[evmJsonRpc(u, fetch, b.preBytes), evmJsonRpc(u, fetch, b.preBytes)]", R, "review of 1ee73a00, 3 "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => r.ok, (r) => boughtOf(r) === false, preStateOf(v, trace));", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === true, (r) => !r.ok, preStateOf(v, trace));", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],

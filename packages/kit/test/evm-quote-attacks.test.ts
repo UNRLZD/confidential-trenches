@@ -289,7 +289,8 @@ const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toStrin
 // `neutral`: what the pool pays W's own sell with its hook replaced by the no-op hook (by default `give`)
 // `lieAt`: what the quoter reads with its hook as it is where the read carries a block override (`lie` otherwise)
 // `over`: the hooks the call replaces with the no-op hook; `dir`: whether the pool is swapped in a buy or a sale
-type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint; block?: number; sale?: true; over?: Set<string>; dir?: "buy" | "sell"; sees?: Sees };
+// `codes`: the code the call's state override gives each address it replaces (lowercased), which a `neutral` may run
+type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint; block?: number; sale?: true; over?: Set<string>; dir?: "buy" | "sell"; sees?: Sees; codes?: Record<string, string> };
 // What a call at a block after the quote's sees of its block, each true where it is the trade's block's own (review of
 // da11bbb6, H1): L1Block's sequenceNumber, EIP-2935's hash of the block before, EIP-4788's root at the block's time,
 // BASEFEE and PREVRANDAO. The real trade sees all; a replay sees each only where its overrides set it (sysSees below).
@@ -451,7 +452,8 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       if (typeof base === "string") return { jsonrpc: "2.0", id, error: { code: -32000, message: base } };
       // a block override (a replay of a sale) runs the call at that block; the model's own marker runs the real sale
       const env = c.params[3] as { number?: string; baseFeePerGas?: string; prevRandao?: string } | undefined;
-      const ctx = base === null ? null : { ...base, ...(env?.number !== undefined ? { block: Number(BigInt(env.number)), sees: c.params[4] === SALE_RUN ? SEES_ALL : sysSees(Number(BigInt(env.number)), (c.params[2] ?? {}) as Record<string, { stateDiff?: Record<string, string> }>, env, nitro) } : {}), ...(c.params[4] === SALE_RUN ? { sale: true as const } : {}) };
+      const codes = Object.fromEntries(Object.entries((c.params[2] ?? {}) as Record<string, { code?: string }>).flatMap(([a, o]) => (o.code !== undefined ? [[a.toLowerCase(), o.code]] : [])));
+      const ctx = base === null ? null : { ...base, codes, ...(env?.number !== undefined ? { block: Number(BigInt(env.number)), sees: c.params[4] === SALE_RUN ? SEES_ALL : sysSees(Number(BigInt(env.number)), (c.params[2] ?? {}) as Record<string, { stateDiff?: Record<string, string> }>, env, nitro) } : {}), ...(c.params[4] === SALE_RUN ? { sale: true as const } : {}) };
       // a quoter read with a block override (step 3 on the replay's own basis) runs at that block with what it overrides
       const at = base === null && env?.number !== undefined ? { origin: SENDER, sender: SENDER, gas: 0n, gasPrice: 0n, block: Number(BigInt(env.number)), sees: sysSees(Number(BigInt(env.number)), (c.params[2] ?? {}) as Record<string, { stateDiff?: Record<string, string> }>, env, nitro) } : undefined;
       const o = isSim ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>, ctx!, overridden) : isBuy ? buyRun(data.slice(2), ctx!, overridden) : one(to, data.slice(2), overridden, at);
@@ -6340,8 +6342,8 @@ test("review of fb923143, 1c (buy, Robinhood) a callTracer flooded where only it
   await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools).map(callFlooded)), r3Unanswered);
 });
 
-test("review of fb923143, 1d (buy, Robinhood) the callTracer kept to its bounds and its root: a callTracer the two answer apart, or one not the trade's own call, still drops the prestate with it, so the flipped hook is not banned on it", async () => {
-  const { pools, q } = await ihBuy(earlierHook, 33, EARLY);
+test("review of fb923143, 1d (buy, Robinhood) the callTracer kept to its bounds and its root: one both answer not as the trade's own call drops the prestate with it, so the flipped hook is not banned on it; one the two answer apart keeps the prestate (review of 1ee73a00, 2)", async () => {
+  const { pools, q, hostile } = await ihBuy(earlierHook, 33, EARLY);
   const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
   const callEdit = (f: (r: Record<string, unknown>) => Record<string, unknown>) => (rpc: EvmRpc): EvmRpc => async (calls) => {
     const out = (await rpc(calls)) as { result?: Record<string, unknown> }[];
@@ -6349,7 +6351,9 @@ test("review of fb923143, 1d (buy, Robinhood) the callTracer kept to its bounds 
   };
   const t = rhTrace(pools);
   const notOwn = callEdit((r) => ({ ...r, input: "0x00" }));
-  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [t[0]!, notOwn(t[1]!)]), [], "the callTracer answered apart (one the trade's call, one not)");
+  // review of 1ee73a00, 2: one provider alone can answer its callTracer apart, so that keeps the prestate both agree on
+  // (this asserted [] before)
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [t[0]!, notOwn(t[1]!)]), [hcPid(hostile.key)], "the callTracer answered apart (one the trade's call, one not): the prestate kept");
   assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools).map(notOwn)), [], "a root frame that is not the trade's own call");
 });
 
@@ -6377,9 +6381,11 @@ test("review of fb923143, 2 (buy, Robinhood) a reverting hook keyed on ArbOS's b
   await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [rhTrace(pools)[0]!, down]), r3Unanswered);
 });
 
-test("review of fb923143, 2 step 4 (buy, Robinhood) a buy that failed where no set of its hooks' no-op rescues it: final [] with the trace read; with one trace provider down, read on the parent basis, asked again", async () => {
+test("review of fb923143, 2 step 4 (buy, Robinhood) a buy that failed where no set of its hooks' no-op rescues it and no hook's own frame errored: final [] with the trace read; with one trace provider down, read on the parent basis, asked again", async () => {
   const dry = (a: bigint, ctx: SimCtx) => (later(ctx) ? null : 2n * a);
-  const { pools, q } = await ihBuy(dry, 35, { neutral: dry });
+  // deltaFee: the trade fails with no errored hook frame (review of 1ee73a00, 1: where the hook's own frame errored,
+  // the callTracer bans it, review of 1ee73a00, 1a)
+  const { pools, q } = await ihBuy(dry, 35, { neutral: dry, deltaFee: true });
   const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
   assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools)), [], "the trace read: no set rescues it, final");
   const down: EvmRpc = async () => {
@@ -6425,4 +6431,222 @@ test("review of fb923143, question 5 (sell, Robinhood) a sale's receipt status \
   const hash = await land(pools, q, HEAD_NO + 1, {}, (x) => x, RH_SALE);
   const on = (who: 0 | 1) => chain(pools, who, undefined, undefined, undefined, true);
   await assert.rejects(evmSellRevertedPoolsWith(q as unknown as EvmPoolSellQuote, hash, [on(0), on(1)].map(r3Field("eth_getTransactionReceipt", "status", "0x")), RH_SALE.venues, [on(0), on(1)]), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error" && e.message.includes("status is not a number"));
+});
+
+// ------------------------------------------------------------------------------------- review of 1ee73a00
+// 1: where the replay failed and no set's no-op rescues it, the hooks the agreed callTracer names errored are at fault
+// (a hook an earlier transaction armed can fail its own no-op pool too), asked again while that callTracer is unread;
+// and the evidence's no-op takes LP fee 0 (EVM_EVIDENCE_NOOP_HOOK_CODE), so a stored dynamic fee the hook raised cannot
+// fail it even under a flood; 2: a callTracer one provider answers apart keeps the agreed prestate; 3: the callTracer is
+// read on its own byte cap through the pinned pair; info: EVM_TRACE_UNANSWERED's text is true where it is thrown.
+// Repros Q2a to Q4 are review 4's (the ehi4 block), Q2c flipped to the fix.
+/** The few opcodes a no-op hook runs (PUSH1-PUSH32, CALLDATACOPY, CALLDATALOAD, SHR, EQ, JUMPI to a JUMPDEST, MSTORE,
+ *  RETURN), run as the EVM does on `data`: the bytes it returns, or null on any other opcode or a jump to no JUMPDEST. */
+function hookReturn(code: string, data: string): string | null {
+  const c = Buffer.from(code.slice(2), "hex");
+  const cd = Buffer.from(data.slice(2), "hex");
+  const mem = Buffer.alloc(4096);
+  const st: bigint[] = [];
+  const pop = () => {
+    const v = st.pop();
+    if (v === undefined) throw new Error("stack underflow");
+    return v;
+  };
+  for (let pc = 0, n = 0; n < 1000; n++) {
+    if (pc >= c.length) return "0x";
+    const op = c[pc]!;
+    if (op >= 0x60 && op <= 0x7f) {
+      const k = op - 0x5f;
+      st.push(BigInt("0x" + c.subarray(pc + 1, pc + 1 + k).toString("hex").padEnd(2 * k, "0")));
+      pc += 1 + k;
+      continue;
+    }
+    if (op === 0x37) {
+      const [m, o, l] = [pop(), pop(), pop()];
+      for (let i = 0n; i < l; i++) mem[Number(m + i)] = cd[Number(o + i)] ?? 0;
+    } else if (op === 0x35) {
+      const o = Number(pop());
+      st.push(BigInt("0x" + Buffer.from(Array.from({ length: 32 }, (_, i) => cd[o + i] ?? 0)).toString("hex")));
+    } else if (op === 0x1c) {
+      const [sh, v] = [pop(), pop()];
+      st.push(sh >= 256n ? 0n : v >> sh);
+    } else if (op === 0x14) st.push(pop() === pop() ? 1n : 0n);
+    else if (op === 0x57) {
+      const [d, cond] = [pop(), pop()];
+      if (cond !== 0n) {
+        if (c[Number(d)] !== 0x5b) return null;
+        pc = Number(d);
+        continue;
+      }
+    } else if (op === 0x52) {
+      const [m, v] = [pop(), pop()];
+      mem.write(v.toString(16).padStart(64, "0"), Number(m), "hex");
+    } else if (op === 0xf3) {
+      const [m, l] = [pop(), pop()];
+      return "0x" + mem.subarray(Number(m), Number(m + l)).toString("hex");
+    } else if (op !== 0x5b) return null;
+    pc++;
+  }
+  return null;
+}
+const SEL_BEFORE_SWAP = "575e24b4";
+const SEL_AFTER_SWAP = "b47b2fb1";
+/** Whether the code the call gives `hook` answers beforeSwap with v4-core's OVERRIDE_FEE_FLAG (0x400000) set in its fee
+ *  word (Pool.swap then takes the fee it carries, not the pool's stored LP fee). */
+const feeOverridden = (ctx: SimCtx, hook: string) => {
+  const code = ctx.codes?.[hook.toLowerCase()];
+  const r = code === undefined ? null : hookReturn(code, "0x" + SEL_BEFORE_SWAP + "00".repeat(32 * 12));
+  return r !== null && r.length === 2 + 192 && (BigInt("0x" + r.slice(130, 194)) & 0x400000n) !== 0n;
+};
+test("review of 1ee73a00, 1 (no-op code) the evidence's no-op answers beforeSwap with fee 0 and the override flag, the quote's with fee 0 and no flag; both echo the selector, delta 0, and answer afterSwap in 64 bytes", () => {
+  const sel = (s: string) => s.padEnd(64, "0");
+  const before = "0x" + SEL_BEFORE_SWAP + "11".repeat(32 * 12);
+  const after = "0x" + SEL_AFTER_SWAP + "22".repeat(32 * 14);
+  assert.equal(hookReturn(quoteMod.EVM_EVIDENCE_NOOP_HOOK_CODE, before), "0x" + sel(SEL_BEFORE_SWAP) + W(0n) + W(0x400000n));
+  assert.equal(hookReturn(quoteMod.EVM_EVIDENCE_NOOP_HOOK_CODE, after), "0x" + sel(SEL_AFTER_SWAP) + W(0n));
+  assert.equal(hookReturn(quoteMod.EVM_NOOP_HOOK_CODE, before), "0x" + sel(SEL_BEFORE_SWAP) + W(0n) + W(0n), "the quote path's no-op reads the stored fee");
+  assert.equal(hookReturn(quoteMod.EVM_NOOP_HOOK_CODE, after), "0x" + sel(SEL_AFTER_SWAP) + W(0n));
+});
+
+// 2: one trace provider's callTracer refused or answered apart, the other's a value: the prestate is kept, only the
+// as-is leg unread
+test("review of 1ee73a00, 2a (sell, Robinhood) callTracer refused on one trace provider, answered on the other: the flipped hook is banned (ehi4 Q2a)", async () => {
+  const token = "0x" + (0x1ae4b01).toString(16).padStart(40, "0");
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xf1)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: earlierHook, ...EARLY };
+  const pools = [seeded(token), hostile];
+  const q = await hcQuote(pools, token, [{ key: hostile.key, at: 4_500_001 }], undefined, RH_SALE);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const hash = await land(pools, q, HEAD_NO + 1, {}, (x) => x, RH_SALE);
+  const on = (who: 0 | 1) => chain(pools, who, undefined, undefined, undefined, true);
+  const sq = q as unknown as EvmPoolSellQuote;
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [on(0), callFlooded(on(1))]), [hcPid(hostile.key)]);
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [callFlooded(on(0)), on(1)]), [hcPid(hostile.key)]);
+});
+test("review of 1ee73a00, 2b (buy, Robinhood) callTracer refused on one, answered on the other, where only it could tell (backlog hook): asked again, never a final [] (ehi4 Q2b)", async () => {
+  const { pools, q } = await ihBuy(backlogHook, 41);
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  const t = rhTrace(pools);
+  await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [t[0]!, callFlooded(t[1]!)]), r3Unanswered);
+  await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [callFlooded(t[0]!), t[1]!]), r3Unanswered);
+});
+/** A trace provider whose callTracer's root input is not the trade's (erroredOf null), the rest answered true. */
+const r4NotOwn = (rpc: EvmRpc): EvmRpc => async (calls) => {
+  const out = (await rpc(calls)) as { result?: Record<string, unknown> }[];
+  return out.map((a, i) => (calls[i]!.method === "debug_traceTransaction" && (calls[i]!.params[1] as { tracer: string }).tracer === "callTracer" && a?.result ? { ...a, result: { ...a.result, input: "0x00" } } : a));
+};
+test("review of 1ee73a00, 2c (buy, Robinhood) one trace provider answering its callTracer apart (not failing it) keeps the agreed prestate: the flipped hook is banned, either order (ehi4 Q2c, flipped)", async () => {
+  const { pools, q, hostile } = await ihBuy(earlierHook, 42, EARLY);
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  const t = rhTrace(pools);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [t[0]!, callFlooded(t[1]!)]), [hcPid(hostile.key)], "one fails its callTracer: banned");
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [t[0]!, r4NotOwn(t[1]!)]), [hcPid(hostile.key)], "one answers apart: the prestate kept, banned");
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [r4NotOwn(t[0]!), t[1]!]), [hcPid(hostile.key)], "the other way round");
+});
+test("review of 1ee73a00, 2d (sell, Robinhood) one trace provider answering a sale's callTracer apart keeps the agreed prestate: the flipped hook is banned, either order", async () => {
+  const token = "0x" + (0x1ae4b05).toString(16).padStart(40, "0");
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xf5)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: earlierHook, ...EARLY };
+  const pools = [seeded(token), hostile];
+  const q = await hcQuote(pools, token, [{ key: hostile.key, at: 4_500_001 }], undefined, RH_SALE);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const hash = await land(pools, q, HEAD_NO + 1, {}, (x) => x, RH_SALE);
+  const on = (who: 0 | 1) => chain(pools, who, undefined, undefined, undefined, true);
+  const sq = q as unknown as EvmPoolSellQuote;
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [on(0), r4NotOwn(on(1))]), [hcPid(hostile.key)]);
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [r4NotOwn(on(0)), on(1)]), [hcPid(hostile.key)]);
+});
+
+// 1: the replay failed, the prestate read, the market held and no no-op rescues: the callTracer's errored frame
+test("review of 1ee73a00, 1a (buy, Robinhood) with the replay failed, a flooded callTracer gives the same ban as a whole one where a no-op rescues (earlierHook); where none rescues, the whole one bans the dry hook's own errored frame and the flooded one is asked again (ehi4 Q3a, re-pointed)", async () => {
+  const a = await ihBuy(earlierHook, 43, EARLY);
+  const ha = await landBuy(a.pools, a.q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(a.q, ha, rhTrace(a.pools), RH_NET.venues, rhTrace(a.pools).map(callFlooded)), [hcPid(a.hostile.key)]);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(a.q, ha, rhTrace(a.pools), RH_NET.venues, rhTrace(a.pools)), [hcPid(a.hostile.key)]);
+  // re-pointed: ehi4 asserted [] for both; this hook's own frame errored in the buy and its no-op pool fails too, so
+  // the callTracer is its only witness: read, a ban; flooded, asked again
+  const dry = (x: bigint, ctx: SimCtx) => (later(ctx) ? null : 2n * x);
+  const b = await ihBuy(dry, 44, { neutral: dry });
+  const hb = await landBuy(b.pools, b.q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(SALES.get(hb)!.errored, [b.hostile.key.hooks], "the dry hook's own frame errored in the buy");
+  await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(b.q, hb, rhTrace(b.pools), RH_NET.venues, rhTrace(b.pools).map(callFlooded)), r3Unanswered);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(b.q, hb, rhTrace(b.pools), RH_NET.venues, rhTrace(b.pools)), [hcPid(b.hostile.key)]);
+});
+// A hook an earlier transaction of the block armed, that reverts the real trade in its own frame, leaves the quoter its
+// normal price (its beforeSwap sees the quoter as sender), and whose pool pays nothing with its code a no-op (the arming
+// transaction moved its pool's price or liquidity)
+const bait = (a: bigint, ctx: SimCtx) => (later(ctx) && ctx.sees?.earlier === true ? null : 2n * a);
+test("review of 1ee73a00, 1b (buy, Robinhood) the bait: the replay fails, the prestate read, the market held, no no-op rescues: the hook the callTracer names errored is banned (ehi4 Q3b)", async () => {
+  const c = await ihBuy(bait, 45);
+  const hc = await landBuy(c.pools, c.q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(c.q, hc, rhTrace(c.pools), RH_NET.venues, rhTrace(c.pools)), [hcPid(c.hostile.key)], "control: the no-op pool pays, step 4 bans it");
+  const { pools, q, hostile } = await ihBuy(bait, 46, { neutral: bait });
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(SALES.get(h)!.errored, [hostile.key.hooks], "the hook's own frame errored in the buy");
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools)), [hcPid(hostile.key)], "the bait hook banned");
+  await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools).map(callFlooded)), r3Unanswered, "its callTracer flooded: asked again, never a final []");
+});
+test("review of 1ee73a00, 1c (sell, Robinhood) the bait on a sale: the hook the callTracer names errored is banned; its callTracer flooded, asked again (ehi4 Q3c)", async () => {
+  const token = "0x" + (0x1ae4b03).toString(16).padStart(40, "0");
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xf3)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: bait, neutral: bait };
+  const pools = [seeded(token), hostile];
+  const q = await hcQuote(pools, token, [{ key: hostile.key, at: 4_500_001 }], undefined, RH_SALE);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const hash = await land(pools, q, HEAD_NO + 1, {}, (x) => x, RH_SALE);
+  assert.equal(SALES.get(hash)!.status, "0x0");
+  assert.deepEqual(SALES.get(hash)!.errored, [hostile.key.hooks], "the hook's own frame errored in the sale");
+  const on = (who: 0 | 1) => chain(pools, who, undefined, undefined, undefined, true);
+  const sq = q as unknown as EvmPoolSellQuote;
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [on(0), on(1)]), [hcPid(hostile.key)], "the bait hook banned");
+  await assert.rejects(evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [on(0), on(1)].map(callFlooded)), r3Unanswered, "its callTracer flooded: asked again");
+});
+// The bait on a dynamic-fee pool (fee 0x800000): the arming transaction raised its stored LP fee (updateDynamicLPFee),
+// which the hook's own beforeSwap override hides from the quoter and from the trade; with its code a no-op, the pool
+// pays nothing where it sees that write unless the no-op's fee word carries the override flag (feeOverridden runs the
+// code the replay gives the hook)
+const storedFee = (hook: string) => (a: bigint, ctx: SimCtx) => (later(ctx) && ctx.sees?.earlier === true && !feeOverridden(ctx, hook) ? null : 2n * a);
+const DYN = 0x800000;
+test("review of 1ee73a00, 1d (buy, Robinhood) the stored-fee bait on a dynamic-fee pool, its callTracer flooded: the evidence's no-op takes fee 0, so it rescues the replay and the pool is banned", async () => {
+  const n = 48;
+  const token = "0x" + (0x1ae0000 + n).toString(16).padStart(40, "0");
+  const hook = PH(0xc0 + n);
+  const { pools, q, hostile } = await ihBuy(bait, n, { key: keyOf(token, NATIVE, DYN, 60, hook), neutral: storedFee(hook) });
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(SALES.get(h)!.errored, [hostile.key.hooks], "the hook's own frame errored in the buy");
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools).map(callFlooded)), [hcPid(hostile.key)], "flooded: the no-op rescues");
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, rhTrace(pools)), [hcPid(hostile.key)], "whole");
+});
+test("review of 1ee73a00, 1e (sell, Robinhood) the stored-fee bait on a sale's dynamic-fee pool, its callTracer flooded: the evidence's no-op takes fee 0, so the pool is banned", async () => {
+  const token = "0x" + (0x1ae4b06).toString(16).padStart(40, "0");
+  const hook = PH(0xf6);
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, DYN, 60, hook), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: bait, neutral: storedFee(hook) };
+  const pools = [seeded(token), hostile];
+  const q = await hcQuote(pools, token, [{ key: hostile.key, at: 4_500_001 }], undefined, RH_SALE);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const hash = await land(pools, q, HEAD_NO + 1, {}, (x) => x, RH_SALE);
+  assert.deepEqual(SALES.get(hash)!.errored, [hostile.key.hooks], "the hook's own frame errored in the sale");
+  const on = (who: 0 | 1) => chain(pools, who, undefined, undefined, undefined, true);
+  const sq = q as unknown as EvmPoolSellQuote;
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [on(0), on(1)].map(callFlooded)), [hcPid(hostile.key)], "flooded: the no-op rescues");
+  assert.deepEqual(await evmSellRevertedPoolsWith(sq, hash, [on(0), on(1)], RH_SALE.venues, [on(0), on(1)]), [hcPid(hostile.key)], "whole");
+});
+
+// 3: the callTracer read through the pinned pair with each tracer's own cap (t[at]), not the prestate's (t[0])
+test("review of 1ee73a00, 3 (buy, Robinhood, pinned trace pair) an honest-size callTracer between preBytes and callBytes is read on the callTracer's own cap: the backlog hook is banned (ehi4 Q4)", async () => {
+  const { pools, q, hostile } = await ihBuy(backlogHook, 47);
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  const by = [chain(pools, 0, undefined, undefined, undefined, true), chain(pools, 1, undefined, undefined, undefined, true)];
+  const urls = RH_NET.venues!.robinhood!.traceProviders as readonly string[];
+  assert.equal(urls.length, 2);
+  const real = globalThis.fetch;
+  // 8 frames of 128 KiB: about 2.1 MB, past preBytes (~0.88 MB at the model buy's gas) and within callBytes (~7.2 MB)
+  globalThis.fetch = (async (url: unknown, init?: { body?: unknown }) => r3Fetch(by[String(url).startsWith(urls[0]!) ? 0 : 1]!, 8)(url as string, init as RequestInit)) as typeof fetch;
+  try {
+    assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues), [hcPid(hostile.key)]);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+// info: every EVM_TRACE_UNANSWERED is thrown where the trace could still change the answer, the replay passed or not
+test("review of 1ee73a00, info EVM_TRACE_UNANSWERED's text names no replay outcome: it is thrown where the replay passed and where it failed", () => {
+  assert.equal(quoteMod.EVM_TRACE_UNANSWERED, "the trade's trace was not answered and could still change the answer");
 });
