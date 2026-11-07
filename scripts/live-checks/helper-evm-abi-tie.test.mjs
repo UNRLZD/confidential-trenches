@@ -7,9 +7,21 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { bodiesOf, judge } from "./helper-evm-abi-tie.mjs";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolRecords, FIRST_SET } from "./helper-evm-sender.mjs";
+import { bodiesOf, judge as judgeLive } from "./helper-evm-abi-tie.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./helper-evm-abi-tie.answers.json", import.meta.url), "utf8"));
+// The recordings were made on the testnets' first pool set (FIRST_SET), before card pool-evm-buy-pays-revert's pools: a
+// replay judges each on the pins it was recorded on; the live check reads the kit's pins (evmPoolVenues()).
+const FIRST = evmPoolRecords(undefined, FIRST_SET);
+const THEN = Object.fromEntries(Object.entries(evmPoolVenues()).map(([n, v]) => [n, Object.hasOwn(FIRST, n) ? { ...v, pool: FIRST[n] } : v]));
+const judge = (run, o = {}) => judgeLive(run, { venues: THEN, ...o });
+test("the recordings name the first set's pools; the kit pins each testnet's newest pool, which the live check reads", () => {
+  assert.deepEqual(Object.fromEntries(A.good.pools.map((p) => [p.network, p.pool])), FIRST);
+  for (const n of Object.keys(FIRST)) assert.notEqual(evmPoolVenues()[n].pool, FIRST[n], n);
+  assert.match(judgeLive(A.good).lines.find((l) => l.includes("pools read")), /^BAD pools read/);
+});
 const copy = () => structuredClone(A.good);
 const bad = (run) => judge(run).lines.filter((l) => l.startsWith("BAD"));
 
