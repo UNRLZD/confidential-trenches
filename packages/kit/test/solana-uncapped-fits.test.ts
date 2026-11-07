@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { noneWritten } from "./solana-writes.ts";
 import { SolanaBuildError, assembleSolanaSwap, fetchSolanaJupiterBuild, type SolanaBuildRequest, type SolanaJupiterBuild } from "../src/trade/solana/build.ts";
 import { SOLANA_MAX_TX_BYTES, solanaDecodeLookupTable, type SolanaLookupTable } from "../src/checks/solana/message.ts";
 import { checkSolanaQuote } from "../src/checks/solana/checks.ts";
@@ -78,6 +79,7 @@ test("no route at 40: the retry's build fits the device's transaction and passes
     mint: [read(a.accounts[F.mint]![0]), read(a.accounts[F.mint]![1])],
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
     simulations: [null, null],
+    writable: noneWritten(tx.wire, Object.fromEntries(got.build.tables.flatMap((t) => (a.accounts[t]?.[0] ? [[t, solanaDecodeLookupTable(bytesOf(a.accounts[t][0])!)]] : [])))),
     reference: null,
   });
   const frame = ["S1", "S2", "S3", "S4", "S5", "S6", "S8", "S9", "S10", "S13"];
