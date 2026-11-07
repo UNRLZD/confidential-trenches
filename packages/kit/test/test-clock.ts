@@ -12,7 +12,8 @@
 // never ends) fails the test, naming where each was set. A run whose clock passes RUNAWAY_MS fails, as it would at its
 // test's timeout in real time. A clear of a timer set outside the clock goes to the real clearTimeout.
 // Date.now skips with it: the head watch keeps a head fresh until a Date.now time, and stops there as it does in real
-// time. The clock never runs back: once a run has skipped idle time, performance.now and Date.now stay that far ahead
+// time. Date.now is the whole milliseconds of the same clock, so it is always an integer, never runs back, and shows a
+// skipped wait at least as long as it was set (skipped time is whole milliseconds, a timer fires at or after its time). The clock never runs back: once a run has skipped idle time, performance.now and Date.now stay that far ahead
 // for the rest of the process (a quote's state keeps times it read, such as a provider held until a time), as after a
 // real wait. The
 // wallet's test/pool-evm-restore.test.ts runs its helper route's pace on the same kind of clock.
@@ -21,12 +22,17 @@
 export const RUNAWAY_MS = 600_000;
 
 const READ = performance.now.bind(performance);
-// the idle time every run so far has skipped: performance.now reads the real clock plus it, from the first run on
+// the idle time every run so far has skipped, whole milliseconds: performance.now reads the real clock plus it, from the
+// first run on
 let skipped = 0;
 // timer ids are the process's, never reused: a late clear of an earlier run's timer never takes out a later one's
 let id = 0;
 const now = () => READ() + skipped;
 const DATE = Date.now.bind(Date);
+// Date.now on the clock: the wall time at the first run, rounded up so it never reads below the real one then, moved on by
+// the clock; set once, so it never runs back across runs
+let dateAt: number | undefined;
+const dateNow = () => Math.floor(dateAt! + now());
 
 /** A timer of the clock: the handle setTimeout returns, as Node's (a quote unrefs some of its timers). */
 class Timer {
@@ -60,12 +66,13 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
       return void ((driving = false), (ranAway = true), runaway(new Error(`the test clock ran away: past ${RUNAWAY_MS} ms`)));
     }
     live.delete(next.id);
-    skipped += Math.max(0, next.due - now());
+    skipped += Math.max(0, Math.ceil(next.due - now()));
     setImmediate(drive);
     next.fire();
   };
   g.setTimeout = (f: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
-    const t = { due: now() + Math.max(0, Number(ms) || 0), id: ++id, fire: () => f(...a), at: new Error("set here") };
+    // a delay in whole milliseconds, a fraction rounded up: the wait it shows on Date.now is never shorter than it was set
+    const t = { due: now() + Math.ceil(Math.max(0, Number(ms) || 0)), id: ++id, fire: () => f(...a), at: new Error("set here") };
     let lo = 0, hi = queue.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
@@ -84,7 +91,10 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
     return c.signal;
   };
   Object.defineProperty(performance, "now", { value: now, configurable: true, writable: true });
-  Date.now = () => DATE() + skipped;
+  if (dateAt === undefined) {
+    dateAt = DATE() + 1 - now();
+    Date.now = dateNow;
+  }
   let out: { ok: true; v: T } | { ok: false; e: unknown };
   try {
     out = { ok: true, v: await Promise.race([run(), stopped]) };
