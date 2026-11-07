@@ -2,9 +2,11 @@
 // (solana-quote-under-1s.answers.json), each a real run of the check on HELPER_HOST and PublicNode (card
 // solana-quote-under-1s), named in the answers file with where and on which kit each was recorded.
 // - bad (the kit before the card): the build waits for the reference, the second simulation for the first: FAIL.
-// - head (the card's kit, from a Mac about 200 ms from the helper): every structural line holds and only the time bound
-//   fails. No passing run is recorded yet; one from a host near the helper, or after the helper's provider B stops
-//   pacing a quote's burst, is the good answer this file still needs.
+// - main (the kit at a1bcd0cc, the card's first part merged): provider B's simulation waits for B's table read: FAIL.
+// - head: the card's kit at 5d2385d1 (the read again beside the simulations), recorded the same way.
+// - head (the card's kit, from a Mac about 180 ms from the helper): every structural line holds and only the time bound
+//   fails. No passing run is recorded yet; one from a host near the helper, or after the helper's answers are
+//   compressed (a cold page's first round trip carries about 37 KB uncompressed), is the good answer this file still needs.
 // Made from head, each one thing changed: a refused leg, a check that did not run or failed, provider B with no
 // blockhash, the build asked after the reference answered, the second simulation asked after the first answered or not
 // at all, a run dropped: each FAIL with its own line.
@@ -13,7 +15,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, RUNS, WALLET, WSOL } from "./solana-quote-under-1s.mjs";
+import { judge, RUNS, stages, WALLET, WSOL } from "./solana-quote-under-1s.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "solana-quote-under-1s.answers.json"), "utf8"));
@@ -28,7 +30,22 @@ test(`recorded head run: ${RUNS} quotes, every check run and passed on both prov
   assert.equal(r.ok, false);
   const b = bad(r);
   assert.equal(b.length, 1, r.lines.join("\n"));
-  assert.match(b[0], /^BAD the quote complete: p50 \d+ ms, p95 \d+ ms over 5 \(bound p50 < 1000, p95 < 1300\)$/);
+  assert.match(b[0], new RegExp(`^BAD the quote complete: p50 \\d+ ms, p95 \\d+ ms over ${RUNS} \\(bound p50 < 1000, p95 < 1300\\)$`));
+});
+
+test("recorded main run (a1bcd0cc): provider B's simulation waits for B's read of the build's tables: FAIL on that line", () => {
+  const r = judge(A.main);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => /provider B's simulation went out at \d+ ms, after its table read answered at \d+ ms/.test(l)), bad(r).join("\n"));
+});
+
+test("stages: every stage of a recorded head run is a time inside its quote", () => {
+  for (const run of A.head.runs) {
+    const s = stages(run);
+    for (const k of ["reference", "build", "tablesA", "tablesB", "simulationA", "simulationB", "rereadA", "rereadB"]) assert.ok(Number.isFinite(s[k]) && s[k] > 0 && s[k] <= run.quote, `${k} ${s[k]}`);
+    assert.ok(s.checks >= 0 && s.quote === run.quote);
+    assert.ok(s.simulationB > s.tablesA, "B's simulation answered after A's tables");
+  }
 });
 
 /** A run's whole timeline scaled so its quote completes at `ms`: every call keeps its order and its place before it. */
@@ -80,6 +97,16 @@ test("planted: the build asked after the reference answered: FAIL", () => {
 test("planted: provider A's second simulation asked after its first answered: FAIL", () => {
   const r = planted((run) => { const first = run.calls.find((c) => isFirst(c, "A")); run.calls.find((c) => isSecond(c, "A")).start = first.end + 1; });
   assert.ok(bad(r).some((l) => /run 0: provider A's second simulation went out at \d+ ms, after the first answered/.test(l)));
+});
+
+test("planted: provider B's simulation asked after its table read answered and 31 ms after what it waits for: FAIL", () => {
+  const r = planted((run) => { const b = run.calls.find((c) => c.method === "build"); const t = run.calls.find((c) => c.at === "B" && c.method === "getMultipleAccounts" && c.start >= b.end && c.keys?.length === b.tables.length && c.keys.every((k, i) => k === b.tables[i])); const a = run.calls.find((c) => c.at === "A" && c.method === "getMultipleAccounts" && c.start >= b.end && c.keys?.length === b.tables.length && c.keys.every((k, i) => k === b.tables[i])); const side = run.calls.filter((c) => c.start < b.end && (c.method === "getMinimumBalanceForRentExemption" || (c.method === "getMultipleAccounts" && c.keys?.[0] === WALLET && c.keys.length <= 5))); const ref = run.calls.find((c) => c.method === "reference"); run.calls.find((c) => isFirst(c, "B")).start = Math.max(t.end, a.end, ref.end, ...side.map((c) => c.end)) + 31; });
+  assert.ok(bad(r).some((l) => /run 0: provider B's simulation went out at \d+ ms, after its table read answered/.test(l)));
+});
+
+test("planted: the build's tables not recorded: FAIL", () => {
+  const r = planted((run) => { delete run.calls.find((c) => c.method === "build").tables; });
+  assert.ok(bad(r).some((l) => /run 0: the build's lookup tables were not recorded/.test(l)));
 });
 
 test("planted: no second simulation on provider B: FAIL", () => {
