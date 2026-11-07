@@ -1,0 +1,36 @@
+{
+  "source_commit": "e0623bf3244dee5115a8b18cbdb54ca355fd3c25",
+  "network": "mainnet",
+  "account_id": "vault.confidential.unrlzd.near",
+  "parent": "confidential.unrlzd.near",
+  "asset": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "scope": "2696045386038969515385069783440640732471742599039067451316404212202914210601",
+  "wasm_sha256": "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc",
+  "wasm_builds_sha256": [
+    "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc",
+    "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc"
+  ],
+  "code_hash": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u",
+  "wasm_bytes": 230130,
+  "largest_function_body": 14026,
+  "version": "blindfill-vault 0.1.0 mainnet",
+  "build": "cargo +1.96.0 near build reproducible-wasm --out-dir <out-dir> (cargo-near-near 0.22.0, image sourcescan/cargo-near:0.21.1-rust-1.96.0@sha256:ccb22bb4e677ed022d8b9d1aa1b32f0af52dd0471ef1c32e48dedbf68ee6ee17, on linux x64), at e0623bf3244dee5115a8b18cbdb54ca355fd3c25",
+  "artifact": {
+    "run": 42355216946,
+    "name": "vault-mainnet-wasm",
+    "workflow": ".github/workflows/vault-build.yml",
+    "event": "workflow_dispatch"
+  },
+  "sources": {
+    "pre_deploy": "the record the owner's deploy paste (contracts/vault/scripts/mainnet-v1/2-deploy.sh) passes to deploy.mjs as --deployment; deploy.mjs writes contracts/vault/deployments/mainnet-v1.json (--out) from this record and the landed transactions, so the kit and the helper see mainnet-v1.json only once the vault exists",
+    "account_id": "merge notes M304 D-13: the vaults sit under confidential.unrlzd.near, vault-test for Nov 4 and vault for Nov 7; deploy.mjs vaultIdProblems: a direct sub-account of the parent",
+    "parent": "owner-decisions vaultname: confidential.unrlzd.near; M200: its one full-access key, KR10",
+    "asset": "contracts/vault/src/constants.rs TOKEN (not feature testnet); vault-testnet-t01.mjs MAINNET_USDC",
+    "scope": "contracts/vault/src/tests.rs KIT_SCOPE_VECTORS (vault.confidential.unrlzd.near with mainnet USDC), made by the kit's own TypeScript and checked against context.rs scope_for by scope_matches_every_kit_vector",
+    "wasm_sha256": "vault-build run 42355216946 (workflow_dispatch at e0623bf3 on card/vault-final-sha, ubuntu-24.04, 7 Nov 08:22-08:25Z): builds a and b both a4a2af69...87fc, 230130 B; its artifact vault-mainnet-wasm hashed again on the Mac 7 Nov 10:00Z to the same sha256, its NEP-330 metadata naming e0623bf3, the pinned image and the mainnet command (deploy.mjs metadataProblems [], deployProblems mainnet [])"
+  },
+  "wasm_witnesses": [
+    "GitHub Actions ubuntu-24.04, .github/workflows/vault-build.yml run 42355216946 at e0623bf3, 2026-11-07 08:22-08:25Z: builds a and b both a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc, 230130 B",
+    "the team's Mac (darwin arm64, Docker), deploy.mjs --build-only --flavor mainnet in a clean checkout of e0623bf3, 2026-11-07 ~12:10Z: builds a and b both a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc, 230130 B, byte for byte the run's artifact (cmp)"
+  ]
+}

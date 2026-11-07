@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { noneWritten } from "./solana-writes.ts";
 import { base58 } from "@scure/base";
 import {
   assembleSolanaSwap,
@@ -111,6 +112,7 @@ test("recorded two-table builds: a fresh blockhash changes only its own 32 bytes
       mint: [accOf(c.accounts[c.mint]![0]), accOf(c.accounts[c.mint]![1])] as const,
       rent: { tokenAccount: [0n, 0n] as const, pumpVolumeAccumulator: [0n, 0n] as const },
       simulations: [null, null] as const,
+      writable: noneWritten(a.wire, tables),
       reference: null,
     };
     const q = { ...req, spendable: req.amount, minOut: 1n, otherWallets: [] };

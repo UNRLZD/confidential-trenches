@@ -1,0 +1,140 @@
+{
+  "_note": "good: card solana-written-accounts-whole's SIGN_HOST build (packages/signpage/index.html and public/app.js as committed with release-84 on card/solana-legs-checked), 7 Nov: every S11 line it marks: PASS. bad: SIGN_HOST read 2026-11-07T13:02:08Z (main deployed, before this card): none: FAIL. planted: the good bundle with one change each, its pin rewritten to match: each FAIL.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rQ462T8+w9Mpyx1LS3GYEnpnjlBY/pMZeUfKPrTVPwVI1WD2MyCjnZ1Mo0p8TTmF\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-rQ462T8+w9Mpyx1LS3GYEnpnjlBY/pMZeUfKPrTVPwVI1WD2MyCjnZ1Mo0p8TTmF",
+    "carries": {
+      "S11 the base read by field, to its last byte (165)": true,
+      "S11 a written account keeps its size": true,
+      "S11 the providers agree on every byte, the lamports and the program": true,
+      "S11 a wSOL account left with any field but its amount changed is refused": true,
+      "S11 the account of the token left with any field but its amount changed is refused": true,
+      "S11 any other account of the wallet's held to its lamports too": true,
+      "S11 a close of the account of the token the providers disagreed on is refused": true,
+      "S11 a closed account of the token's rent counted as the wallet's": true,
+      "S11 the account of the token a buy creates held to its size": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p",
+    "carries": {
+      "S11 the base read by field, to its last byte (165)": false,
+      "S11 a written account keeps its size": false,
+      "S11 the providers agree on every byte, the lamports and the program": false,
+      "S11 a wSOL account left with any field but its amount changed is refused": false,
+      "S11 the account of the token left with any field but its amount changed is refused": false,
+      "S11 any other account of the wallet's held to its lamports too": false,
+      "S11 a close of the account of the token the providers disagreed on is refused": false,
+      "S11 a closed account of the token's rent counted as the wallet's": false,
+      "S11 the account of the token a buy creates held to its size": false
+    }
+  },
+  "planted": {
+    "P1 the field list cut to owner and amount": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ChGc2qqTPTcvHaEXyzO3mJyUNwgOv/WP7tE7G1WsqmtNnUWeE6VPHMR5AzTwUdVd\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-ChGc2qqTPTcvHaEXyzO3mJyUNwgOv/WP7tE7G1WsqmtNnUWeE6VPHMR5AzTwUdVd",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": false,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true,
+        "S11 a closed account of the token's rent counted as the wallet's": true,
+        "S11 the account of the token a buy creates held to its size": true
+      }
+    },
+    "P2 the providers agree on amount alone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-JydLCbQ2VuYiK2bZaJ9hNGdn8GCoSrSH4wsfs2FOewvE4txEwbB47qPjVYQXohBz\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-JydLCbQ2VuYiK2bZaJ9hNGdn8GCoSrSH4wsfs2FOewvE4txEwbB47qPjVYQXohBz",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": false,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true,
+        "S11 a closed account of the token's rent counted as the wallet's": true,
+        "S11 the account of the token a buy creates held to its size": true
+      }
+    },
+    "P3 the wSOL refusal behind 0&&": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-S2s08Xwbh2AWQCfqzkEE5Iit8pg13G+dA6batgD7Cn5xwHLLrZZPOzy1KZ1oV2lQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-S2s08Xwbh2AWQCfqzkEE5Iit8pg13G+dA6batgD7Cn5xwHLLrZZPOzy1KZ1oV2lQ",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": false,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true,
+        "S11 a closed account of the token's rent counted as the wallet's": true,
+        "S11 the account of the token a buy creates held to its size": true
+      }
+    },
+    "P4 the size compare gone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-iN6KjmLxFUhkZedVMAVYnoUXJc2ZUVHXMgItGO/zmftecbIyt9nhwrFzgUpZ1AKe\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-iN6KjmLxFUhkZedVMAVYnoUXJc2ZUVHXMgItGO/zmftecbIyt9nhwrFzgUpZ1AKe",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": false,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true,
+        "S11 a closed account of the token's rent counted as the wallet's": true,
+        "S11 the account of the token a buy creates held to its size": true
+      }
+    },
+    "P5 the disputed close's refusal gone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-TikU1OpUXL9rIoDLGLZtwY7dgllZZRxUdTi+u55WxiZoPcGg+nvjJZYHNm6GV4ny\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-TikU1OpUXL9rIoDLGLZtwY7dgllZZRxUdTi+u55WxiZoPcGg+nvjJZYHNm6GV4ny",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": false,
+        "S11 a closed account of the token's rent counted as the wallet's": true,
+        "S11 the account of the token a buy creates held to its size": true
+      }
+    },
+    "P6 the closed account of the token's rent not counted": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-wJ+VVd8O9LiG5aVoUnEL9UAwFKk5qsJt+1omrp02j09tHQ0Z36zG6WIYr/eyflL2\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-wJ+VVd8O9LiG5aVoUnEL9UAwFKk5qsJt+1omrp02j09tHQ0Z36zG6WIYr/eyflL2",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true,
+        "S11 a closed account of the token's rent counted as the wallet's": false,
+        "S11 the account of the token a buy creates held to its size": true
+      }
+    },
+    "P7 the created account's size compare gone": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-FxdVF0u/QZ64gh6TGpfC6Ffgltchz731F2vbD25MlaBathhnUvUkxJnf/Kp1Dklf\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-FxdVF0u/QZ64gh6TGpfC6Ffgltchz731F2vbD25MlaBathhnUvUkxJnf/Kp1Dklf",
+      "carries": {
+        "S11 the base read by field, to its last byte (165)": true,
+        "S11 a written account keeps its size": true,
+        "S11 the providers agree on every byte, the lamports and the program": true,
+        "S11 a wSOL account left with any field but its amount changed is refused": true,
+        "S11 the account of the token left with any field but its amount changed is refused": true,
+        "S11 any other account of the wallet's held to its lamports too": true,
+        "S11 a close of the account of the token the providers disagreed on is refused": true,
+        "S11 a closed account of the token's rent counted as the wallet's": true,
+        "S11 the account of the token a buy creates held to its size": false
+      }
+    }
+  }
+}

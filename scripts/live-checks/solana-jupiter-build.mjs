@@ -61,6 +61,7 @@ import {
   solanaDecodeTransaction,
   solanaJsonRpc,
   solanaMintDisagreement,
+  solanaResolveKeys,
 } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-jupiter-build";
@@ -107,6 +108,10 @@ export const SHAPES = [
   { name: "S-2 sell, a token with no route at 40", side: "sell", token: "noRoute" },
 ];
 // The checks a build is judged by here; S11 and S12 need the buy flow's simulation and reference pool.
+/** S6's and S11's reads of every account the tx writes (card solana-legs-checked), each as no account: the check's
+ * wallet is a random address made per run, which owns none. `pairs` holds each table's two reads. */
+export const noneWritten = (wire, pairs) =>
+  Object.fromEntries(solanaResolveKeys(solanaDecodeTransaction(wire).message, Object.fromEntries(Object.entries(pairs).flatMap(([k, [a]]) => (a ? [[k, solanaDecodeLookupTable(a.data)]] : [])))).filter((k) => k.writable).map((k) => [k.key, [null, null]]));
 export const JUDGED = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S13"];
 // The route instruction by its Anchor discriminator, for the line only (the checks decode the bytes themselves).
 const ROUTES = { bb64facc31c4af14: "route_v2", d19853937cfed8e9: "shared_accounts_route_v2" };
@@ -286,6 +291,7 @@ export async function judge(r) {
       mint: [accRead(ma), accRead(mb)],
       rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
       simulations: [null, null],
+      writable: noneWritten(tx.wire, pairs),
       reference: null,
     });
     const off = v.results.filter((x) => JUDGED.includes(x.id) && !x.ok).map((x) => `${x.id} ${x.detail}`);
