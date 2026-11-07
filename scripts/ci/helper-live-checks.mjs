@@ -51,6 +51,7 @@ export const LIVE_CHECKS = [
   "oneclick-partner-fee-live",
   "evm-testnet-delegate-review3",
   "robinhood-mainnet-rpcs",
+  "helper-usdc-pending-pause",
 ];
 
 // `{commit}` is the deployed commit

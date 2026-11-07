@@ -1,9 +1,13 @@
 // The H-1c-shaped 1Click mock of test/rules-deposit-quote.test.ts, shared with test/deposit-wire.test.ts: a fetch standing
 // in for the helper's 1Click proxy that answers in 1Click's own shape and signs each answer with a throwaway ed25519
-// key, which the importing test process alone adds to the kit's pinned set, as the harness's test build does.
+// key, which the importing test process alone trusts. The kit's pins are frozen (card kit-oneclick-pins-frozen), so the
+// key is never pushed into them: a load hook gives this process its own oneclick-keys.ts, the pinned keys and this one,
+// frozen. The hook acts only on modules loaded after it, so a test imports this file before anything that loads the
+// kit's 1Click check, and imports that with await import(); this file throws when the check's keys were loaded first.
 /// <reference types="node" />
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { ONECLICK_SIGNING_KEYS, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
+import { registerHooks } from "node:module";
+import type { OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 
 export const U = "5d".repeat(32); // a test U: any 64-hex id; no key of it is used here
 export const ATTACKER = "e1".repeat(32);
@@ -29,7 +33,20 @@ export const base58 = {
 export const mockKey = generateKeyPairSync("ed25519");
 export const otherKey = generateKeyPairSync("ed25519");
 export const rawPublic = (k: KeyObject): string => `ed25519:${base58.encode(Buffer.from(k.export({ format: "jwk" }).x as string, "base64url"))}`;
-(ONECLICK_SIGNING_KEYS as string[]).push(rawPublic(mockKey.publicKey));
+const KEYS = new URL("../../kit/src/checks/oneclick-keys.ts", import.meta.url).href;
+registerHooks({
+  load(url, context, next) {
+    if (url !== KEYS) return next(url, context);
+    // the real module under another address (the hook passes it through), its keys and the mock's, frozen
+    const source = `import { ONECLICK_SIGNING_KEYS as PINNED } from ${JSON.stringify(`${KEYS}?pinned`)};
+export const ONECLICK_SIGNING_KEYS = Object.freeze([...PINNED, ${JSON.stringify(rawPublic(mockKey.publicKey))}]);
+`;
+    return { format: "module", source, shortCircuit: true };
+  },
+});
+const trusted = ((await import("../../kit/src/checks/oneclick-keys.ts")) as { ONECLICK_SIGNING_KEYS: readonly string[] }).ONECLICK_SIGNING_KEYS;
+if (!trusted.includes(rawPublic(mockKey.publicKey)))
+  throw new Error("oneclick-mock.ts: the kit's 1Click keys were loaded before the mock's hook; import what loads the check with await import() after this file");
 
 export type Answer = { quote: Record<string, unknown>; quoteRequest: Record<string, unknown>; signature: string; timestamp: string } & Record<string, unknown>;
 
