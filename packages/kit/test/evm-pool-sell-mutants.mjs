@@ -132,7 +132,7 @@ export const MUTANTS = [
   [SELL, "for (let i = 1; i < path.length; i++)", "for (let i = 2; i < path.length; i++)", REVIEW],
   // the pins (M370): the chain's pool for a sell, its sell delegate for W's authorization
   [SELL, 'if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);', "", PINPOOL],
-  [SELL, "= evmPoolBuildSellUnpinned(chain, { ...req, pool });", "= evmPoolBuildSellUnpinned(chain, { pool, ...req });", PINPOOL],
+  [SELL, "= evmPoolBuildSellUnpinned(chain, { ...req, pool }, anyHook);", "= evmPoolBuildSellUnpinned(chain, { pool, ...req }, anyHook);", PINPOOL],
   [SELL, 'if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool to sign a sell into yet`);', "", PINPOOL],
   [SELL, 'if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell\'s pool is not ${chain}\'s pinned pool`);', "", PINPOOL],
   [SELL, 'if (delegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);', "", PINAUTH],

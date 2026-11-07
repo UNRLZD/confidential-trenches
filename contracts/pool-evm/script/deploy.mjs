@@ -31,7 +31,8 @@
 //     differs from a testnet run in these, each refused before a key is made: the RPC is the chain's first in
 //     pool-evm-deploy.mjs MAINNETS (or a loopback fork of it with --out, the rehearsal); the record goes to
 //     contracts/pool-evm/deployments/<chain>.json, and once it exists the run is refused, naming the live check, as it
-//     is when origin/main holds that record or the kit pins a pool for the chain (deployedElsewhere); --return must
+//     is when origin/main holds that record or the kit pins a pool for the chain (deployedElsewhere); a checkout that is
+//     not main's code is refused (mainCheckout; not on a loopback fork, which runs a card's branch); --return must
 //     also hold ETH on both RPCs (the wallet the owner funds from); each contract's init code must be MAINNET_INIT's,
 //     and those checked bytes are the ones sent; the max fee (the lower of both RPCs') must be at most MAX_FEE_CAP.
 //     Then: the run key, made in memory, is kept in a 0700 folder (keysBase(), file 0600), written with the journal just
@@ -65,7 +66,8 @@
 //     run, which needs --out so it never writes the real record). A mainnet id is refused: that deploy is the owner's.
 //     --return must not be the zero address, must pass its EIP-55 checksum when mixed case, and must have no code on
 //     the chain's two RPCs (the fork's one URL on a dry run).
-//  2. The build: forge build --root contracts/pool-evm (CI's command), and each contract's runtime checked against
+//  2. The build: forge-std set up at its pinned commit (forgeStdReady), forge build --root contracts/pool-evm (CI's
+//     command), and each contract's runtime checked against
 //     pool-evm-deploy.build.json (length, keccak256 with the immutables zeroed), so the code sent is the code pinned.
 //  3. The run key, made in memory by @noble/curves; its address is printed, the key never is. Its nonce must be 0, so
 //     every contract's address is known before the first transaction: CREATE from the key at nonces 0, 1, ...
@@ -148,6 +150,56 @@ export async function sinkOf(chainName, { git = repoGit } = {}) {
   if (!/^0x[0-9a-f]{40}$/.test(s) || /^0x0{40}$/.test(s)) throw new Error(`the kit pins no sell sender on ${chainName}, the FeeCollector's sink: nothing was sent`);
   return s;
 }
+// The folder a mainnet run writes its record, journal and lock to: the one part of the checkout mainCheckout lets
+// differ from main (a completed run's record is committed in this folder right after, as the paste says)
+export const RUN_OUTPUT = "contracts/pool-evm/deployments";
+// Where a file git does not track could be run or read by a mainnet run
+const RUN_PATHS = ["contracts/pool-evm", "packages/kit/src", "scripts/live-checks/pool-evm-deploy*"];
+const list = (s) => String(s ?? "").split("\n").filter(Boolean);
+const some = (files) => `${files.slice(0, 3).join(", ")}${files.length > 3 ? ` and ${files.length - 3} more` : ""}`;
+/**
+ * A mainnet paste runs main's code (card evm-paste-fold; the review of main 63c90229 found only KIT_PIN_FILE compared):
+ * origin/main is fetched, then the run is refused, with nothing sent, while this checkout has a change main lacks (a
+ * tracked file edited, staged or not, or a file git does not track under RUN_PATHS) or its commit's files differ from
+ * main's. RUN_OUTPUT is left out of both, so a record committed here and not yet on main passes. `git` is for tests.
+ */
+export function mainCheckout({ git = repoGit } = {}) {
+  fetchMain(git, "main's code");
+  const not = `:(exclude)${RUN_OUTPUT}`;
+  const edited = git("diff", "--name-only", "HEAD", "--", ".", not);
+  const untracked = git("ls-files", "--others", "--exclude-standard", "--", ...RUN_PATHS, not);
+  const behind = git("diff", "--name-only", "HEAD", "origin/main", "--", ".", not);
+  if ([edited, untracked, behind].some((r) => r.status !== 0)) throw new Error("this folder could not be compared with origin/main: nothing was sent");
+  const local = [...list(edited.stdout), ...list(untracked.stdout)];
+  if (local.length) throw new Error(`this folder has changes main lacks (${some(local)}): the paste runs main's code only: nothing was sent; put those files back as main has them (git status lists them), then run the paste again`);
+  const off = list(behind.stdout);
+  if (off.length) throw new Error(`this folder is not at origin/main (files that differ: ${some(off)}): the paste runs main's code only: nothing was sent; run git pull --ff-only origin main here, then run the paste again`);
+}
+// forge-std, which forge build compiles for test/ (no contract in src/ imports it): a submodule pinned by commit in this
+// repository's tree. A clone made without --recurse-submodules has it empty, and forge build then fails on
+// lib/forge-std/src/console.sol before anything is sent (the review of main 63c90229, in the owner's folder).
+export const FORGE_STD = "contracts/pool-evm/lib/forge-std";
+export const FORGE_STD_FIX = `git submodule update --init ${FORGE_STD}`;
+/**
+ * forge-std set up at its pinned commit before forge build, or a throw (nothing is sent). When it is not set up this
+ * runs FORGE_STD_FIX itself: the commit is the tree's pin, and what a run deploys is pinned apart from it
+ * (pool-evm-deploy.build.json, MAINNET_INIT). At another commit, or conflicted, it is refused naming FORGE_STD_FIX, so
+ * a checkout someone moved is never moved here. `git` is for tests.
+ */
+export function forgeStdReady({ git = repoGit, log = (l) => console.log(l) } = {}) {
+  const state = () => {
+    const s = git("submodule", "status", "--", FORGE_STD);
+    return s.status === 0 && s.stdout ? s.stdout[0] : null;
+  };
+  let st = state();
+  if (st === "-") {
+    log(`deploy: ${FORGE_STD} is not set up: ${FORGE_STD_FIX} (its pinned commit)`);
+    const u = git("submodule", "update", "--init", "--", FORGE_STD);
+    if (u.status !== 0) throw new Error(`${FORGE_STD_FIX} failed (${list(u.stderr).pop() ?? `exit ${u.status}`}), and forge cannot build without it: nothing was sent; run it here once it works, then run the deploy again`);
+    st = state();
+  }
+  if (st !== " ") throw new Error(`${FORGE_STD} is not set up at its pinned commit, so forge cannot build: nothing was sent; run ${FORGE_STD_FIX} here, then run the deploy again`);
+}
 export const onlyFile = (name, chain) => path.join(REPO, "scripts/live-checks", `${ALONE[name].key}.${chain}.json`);
 const GAS_MARGIN = (g) => (g * 12n) / 10n;
 const OP_ORACLE = "0x420000000000000000000000000000000000000f"; // the OP Stack GasPriceOracle predeploy
@@ -180,7 +232,9 @@ export function writeAtomic(file, text) {
 // (CI builds with forge 1.7.1).
 export const MAINNET_INIT = Object.freeze({
   WithdrawalVerifier: { length: 1975, keccak: "0x381df6043b0354b2ff24f5620391b26cb95612f896a258266f3bf798de21910f" },
-  PrivacyPoolSimple: { length: 10142, keccak: "0x50a3d2fa107766537bc20545d46f052b8a355d0986a1e6a11eb55bfff0c733fb" },
+  // card pool-evm-buy-pays-revert (a buy whose swap fails pays out): read from forge build --root contracts/pool-evm
+  // (forge 1.7.1 on the Mac, 2026-11-07), where the other five read as above
+  PrivacyPoolSimple: { length: 10956, keccak: "0x7e8d15c9f42c8866cf0080e49757f0a13139e85ffdffdf638b7a445d5b787e6f" },
   UniswapV4Adapter: { length: 4578, keccak: "0xedc0d3a854fc280089da75b2ed4baf8e3495fdb80eed6632ddfe5421ac96b6ef" },
   UniswapV3Adapter: { length: 2269, keccak: "0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05" },
   SellDelegate: { length: 9479, keccak: "0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132" },
@@ -472,6 +526,8 @@ async function run(args, io = {}) {
     // money gate read (an --only run's is its card's, ALONE), and a rerun would overwrite it with another address
     if (existsSync(out)) throw new Error(`${rel(out)} exists: ${only ?? "the pool"} is deployed on ${chainName} by that record: run its live check alone: ${liveCheck}; a new deployment is a new card's record (ALONE, or --out <a new file>): nothing was read or sent`);
   } else if (mainnet) {
+    // the owner's paste runs main's code; a rehearsal on a loopback fork runs a card's branch
+    if (!dryRun) (io.mainCheckout ?? mainCheckout)();
     if (existsSync(out)) {
       const j = existsSync(journalFile) ? JSON.parse(readFileSync(journalFile, "utf8")) : null;
       const left = j?.keys?.state && j.keys.state !== "removed" ? `; its run key is still ${j.keys.state}: send its rest back: ${sweepCommand(chainName)}` : "";
@@ -550,6 +606,7 @@ async function run(args, io = {}) {
   } else {
     // 2. the build
     if (!args.includes("--no-build")) {
+      (io.forgeStdReady ?? forgeStdReady)();
       const b = spawnSync("forge", ["build", "--root", POOL_DIR], { stdio: "inherit" });
       if (b.status !== 0) throw new Error("forge build failed");
     }
@@ -1102,6 +1159,11 @@ async function run(args, io = {}) {
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  // a closed terminal must never end the run before its sweep (the review of main 63c90229; test/paste-fold.test.mjs):
+  // both streams are opened here, while the terminal is there (node opens one on its first write, and opening a gone
+  // terminal hung the stop's first line on macOS), and a write that fails later (EIO on a gone tty, EPIPE on a gone
+  // pipe) is dropped, never an uncaught error; the journal and the record still hold every transaction
+  for (const s of [process.stdout, process.stderr]) s.on("error", () => {});
   try {
     if (args.includes("--write-build")) {
       const file = {

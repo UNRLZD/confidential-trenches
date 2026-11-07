@@ -11,7 +11,9 @@
 //     held the same ways and two more: "limit" (-32011 "request limit reached", mainnet.base.org's answer to every
 //     eth_getLogs on 5 Nov) and "history" (-32002 "keyless requests are served for the most recent 5000 blocks only",
 //     rpc-robinhood.blockmachine.io's answer on which a restore's Robinhood read stopped in live run 42206377652,
-//     6 Nov 10:56Z);
+//     6 Nov 10:56Z) and "cap" (-32001 "Block range too large: maximum allowed is 50 blocks on your current plan",
+//     base-pokt.nodies.app's answer that reached a caller in live run 42241935061, 6 Nov 15:19Z, card
+//     helper-evm-range-cap-walk);
 //   - the deployed helper's caller read of the chain's PoolManager logs over 100 blocks HISTORY_BACK blocks back
 //     (HELPER_HOST's POST /v1/rpc/<chain> with the app's Origin): past every keyless provider's history cap;
 //   - the helper's maker read list (apps/helper/src/data/evm/lists.ts MAKER_RPCS): MIN_MAKERS at least, on hosts of
@@ -45,7 +47,7 @@ const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 const W_TOPIC = "0x" + "0".repeat(24) + "809286a10000000000000000000000000000078e";
 export const BOUND_MS = 60_000;
 export const MODES = ["refused", "503"];
-export const HELPER_MODES = ["refused", "503", "limit", "history"];
+export const HELPER_MODES = ["refused", "503", "limit", "history", "cap"];
 /** Blocks back the history reads go: past blockmachine's 5,000 and blockvectra's about 850 (read 2026-11-06 12:38Z). */
 export const HISTORY_BACK = 50_000n;
 /** The least maker providers a chain lists (card evm-rpc-spare-list: Base seven, Robinhood five). */
@@ -245,7 +247,9 @@ const holding = (real, held, mode, n) => async (u, init) => {
   if (mode === "refused") throw new TypeError("Failed to fetch");
   if (mode === "503") return new Response("No server is available to handle this request", { status: 503 });
   const body = bodyOf(init);
-  const error = mode === "history" ? { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only; block 107541799 is older than that; use an API key for older blocks" } : { code: -32011, message: "request limit reached" };
+  const error = mode === "history" ? { code: -32002, message: "keyless requests are served for the most recent 5000 blocks only; block 107541799 is older than that; use an API key for older blocks" }
+    : mode === "cap" ? { code: -32001, message: "Block range too large: maximum allowed is 50 blocks on your current plan. Upgrade your subscription at https://nodies.app" }
+    : { code: -32011, message: "request limit reached" };
   const answers = body.map((c) => ({ jsonrpc: "2.0", id: c?.id ?? null, error }));
   return new Response(JSON.stringify(Array.isArray(JSON.parse(String(init.body))) ? answers : answers[0]), { status: 200, headers: { "content-type": "application/json" } });
 };

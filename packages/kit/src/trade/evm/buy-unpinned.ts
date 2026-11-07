@@ -67,6 +67,12 @@ export type EvmPoolVenue = {
    *  which live check evm-buy-hookdata-fee reads after every deploy; `providers` need not (a quote reads the latest
    *  block). */
   readonly feeProviders?: readonly [string, string];
+  /** The pool's own list, where `providers` cannot page the pool's logs (card robinhood-mainnet-rpcs): the wallet's pool
+   *  sync and pool reads take it as a pair with spares (the wallet's evmPair: the first two the seats, the rest spares),
+   *  each of another operator, each seat paging the pool's eth_getLogs over the sync's page (packages/wallet/src/pool/
+   *  evm.ts EVM_LOG_PAGE_BLOCKS) from the deploy block to the head. A quote ranks `providers` by eth_call speed, which no
+   *  log read measures. Absent: `providers` is the pool's list too. */
+  readonly poolProviders?: readonly string[];
   readonly maxLag?: number;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
@@ -92,6 +98,13 @@ export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "w
 const bare = <T extends object>(o: T): Readonly<T> => Object.freeze(Object.assign(Object.create(null) as T, o));
 /** A venue list the pinned functions read (evmPoolVenues(), or a test's): a chain it does not have is refused. */
 export type EvmPoolVenueList = Readonly<Partial<Record<EvmPoolChain, EvmPoolVenue>>>;
+/** The list a venue's pool is synced and read on (card robinhood-mainnet-rpcs, review M-2): its `poolProviders`, or its
+ *  `providers` when it has none. Every reader of a pool list takes it from here (the wallet's pool reads check, the
+ *  card's live check), so none reads the quote list where the pool has its own. Own fields only: a list on the
+ *  prototype is not the venue's. */
+export function evmPoolProvidersOf(venue: EvmPoolVenue): readonly string[] | undefined {
+  return Object.hasOwn(venue, "poolProviders") ? venue.poolProviders : Object.hasOwn(venue, "providers") ? venue.providers : undefined;
+}
 let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
 export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
   (venues ??= bare({
@@ -122,15 +135,27 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // (its preflight names no allow-origin; review of bc189de, L-5); the live check evm-quote-warm-round preflights and
       // POSTs every listed provider. Passed over:
       // base.drpc.org and Tenderly's gateway (429 on 6 batches at once, again 18:56Z), meowrpc, zan, onfinality, 1rpc,
-      // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), base.api.pocket.network (10 of 60
-      // answers differed), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
+      // thirdweb, blockmachine (429 or a usage limit), tatum (eth_call paid only), blockvectra (outside its history window), llamarpc, omniatech, lava, nodeflare, ankr (no head);
       // third-party proxies of unknown operators are not listed.
       // What the list holds against a lie: a quote decides on two that agree, and a value any provider asked contradicts
       // is used only where more than half of these four gave it (review of bc189de, M-1). Left, as the device has always
       // had it on two providers: two that collude and agree, each answering more than the hedge (EVM_HEDGE_MS, 400 ms)
       // sooner than the honest provider they are asked beside, decide before its answer lands (re-review of fd9dd16,
       // Q10).
-      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.public.blockpi.network/v1/rpc/public"]),
+      // BlockPI left the list (card evm-spare-list-green): base.public.blockpi.network answered Cloudflare's 521 (its
+      // origin down) to every read in the helper live runs from 17:36Z to 22:14Z on 6 Nov and to three eth_chainId at
+      // 22:42Z, and a held Base quote ended rpc_error on it (live run 42263101671, 17:36Z). This list is also the wallet's
+      // Base pool-sync list (packages/wallet/src/pool/evm.ts), so its place takes a provider that answers eth_call,
+      // pages eth_getLogs over 5,000 blocks and more, and allows the app's origin: Pocket's base.api.pocket.network,
+      // read 2026-11-06 23:30-23:32Z from this Mac: preflight 204 and POST with allow-origin the app's origin,
+      // content-type allowed; a batch of 3 eth_call answered; the PoolManager's Initialize logs over 5,000, 10,000 and
+      // 50,000 blocks at the head and 5,000 blocks 1M back answered (389 ms to 3.4 s); asked first beside publicnode,
+      // 12 of 12 base-hook quotes ended ok, every read the two agreeing, its posts p50/p95 226/1,118 ms of 95 (its
+      // answers differed on 10 of 60 on 4 Nov; none of 95 here). Every other keyless Base endpoint read then failed one
+      // of the three: Sentio and thirdweb cap eth_getLogs at 1,000 blocks (Sentio as HTTP 429, a throttle to the pager),
+      // Tenderly at 1,000, base.drpc.org refuses any range (code 35), nodies at 50, meowrpc 429s and has no eth_getLogs,
+      // llamarpc 525, omniatech 521, lava 410, therpc 403.
+      providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.api.pocket.network"]),
       // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
@@ -235,8 +260,33 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // only these two of the five keep state 600 s back: Robinhood's own answers 630 s and refuses 660 s, dRPC 600 s
       // (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s, 2026-11-04 20:12Z); publicnode, bloXroute and
       // Globalstake refused a state read at the block 600 s back, "historical state ... is not available" (card
-      // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac)
-      feeProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
+      // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac). dRPC first (card robinhood-mainnet-rpcs, review
+      // M-3): a read one provider answers goes to the first, and the helper's pool sender reads and sends on the first of
+      // POOL_EVM_RPCS_ROBINHOOD (the same order, apps/helper/deploy/compose.yaml), so they draw on dRPC's pace (15 a
+      // second) and leave Robinhood's own (1 a second) to the pool sync, whose seat it is
+      feeProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"] as const),
+      // The pool's list (card robinhood-mainnet-rpcs): the quote list's first two cannot page the pool's logs.
+      // Every keyless Robinhood mainnet RPC the chain's docs (docs.robinhood.com/chain/connecting: its own RPC; GlobalStake
+      // and dRPC named) and the chainid.network and DefiLlama chainlist entries for 4663 name, read 2026-11-07
+      // 01:42-01:50Z from this Mac on the pool's filter (an address, its three topics in one position) over 100, 1,000,
+      // 10,000 and 100,000 blocks to the head and 10,000 and 100,000 blocks from 13M back:
+      // - rpc.mainnet.chain.robinhood.com (Robinhood; nitro v3.12.3-rc.4, logs' blockTimestamp 0x0): all six, 270 ms;
+      //   30 of 30 pages of 100,000 walking back 3M blocks, p50/p95 270/356 ms.
+      // - robinhood.api.pocket.network (Pocket, on its own pocket.network; nitro v3.11.2, logs' blockTimestamp set, so
+      //   not Robinhood's node): all four at the head, 13M back 10,000 and "-32602: eth_getLogs block range too large
+      //   (max 10001 blocks)" at 100,000; its backends differ: 23 of 30 pages of 100,000 back 3M blocks (6 "max 10001", 1
+      //   "exceeds maximum 50000", which the pager asks again, then halves), 20 of 20 of 10,000, p50 208-220 ms. The
+      //   PoolManager's Swap logs over 100 blocks the same as Robinhood's own, digest for digest; CORS from the signing
+      //   page's origin 204 and 200, allow-origin that origin; x-ratelimit-limit 1200 a minute.
+      // Not taken: rpc-robinhood.globalstake.io (GlobalStake; nitro v3.12.1, blockTimestamp set: all four at the head
+      // and 10,000 13M back, but 0.5-6.6 s and no answer in 15 s at 100,000 13M back and past the head, past the
+      // device's 3.5 s client even as a spare), robinhood-rpc.publicnode.com (HTTP 403 "Archive requests require a personal token" from 1,000 blocks),
+      // robinhood.drpc.org (code 35 at 1,000), robinhood.daybreak-rpc.network (2,000), rpc-robinhood.blockmachine.io
+      // and robinhood-mainnet-rpc.blockreq.com (the newest 5,000 and 1,024 blocks keyless), api.blockvectra.com (100
+      // blocks, its history window), the Tatum gateway (100, then 429), 4663.rpc.thirdweb.com (1,000, then 429),
+      // rpc.degenprotocol.io (Pocket's very words "max 10001 blocks", and a finalized block above its head),
+      // robinhood.rpc.blxrbdn.com and rpc.nodeflare.app (403), lb.routeme.sh (429), rpc.ordofi.network (no answer).
+      poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,
@@ -298,7 +348,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02, the v3 adapter's router (scripts/live-checks/pool-evm-deploy.mjs CHAINS: its code hash
       // read on sepolia.base.org and base-sepolia-rpc.publicnode.com)
       routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),
-      pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+      // the pool whose buy pays a failed swap's chunk to W instead of reverting (card pool-evm-buy-pays-revert:
+      // scripts/live-checks/pool-evm-buy-pays-revert.base-sepolia.json, deploy tx
+      // 0x47fa9d64f391118425e42cec266d7bee4d8c0117dda24e5e33219b0cc366424d, its verifier 0xa46aee47…0be3; its code the
+      // build's on sepolia.base.org and base-sepolia-rpc.publicnode.com, 7 Nov 04:5xZ). The 3 Nov pool
+      // 0xb239a38af69b68e6c5c305df64985f283b5d5fe5 keeps the build before it (pool-evm-deploy.build.json frozen). That
+      // run's adapters and delegate are the same builds as the pins below, which stay
+      pool: "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
       adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1" }),
       // the delegate at the pool-review-3 build: the 11-field Sell (0x0c2cb9ca) this kit signs, its fee paid to the
       // signed feeRecipient (card evm-testnet-delegate-review3: scripts/live-checks/evm-testnet-delegate-review3.
@@ -344,7 +400,12 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       middles: Object.freeze([]),
       // no Uniswap v3 on Robinhood testnet (M365): no v3 adapter and no router; a sell goes through the PoolManager
       routers: Object.freeze([]),
-      pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+      // the pool whose buy pays a failed swap's chunk to W (card pool-evm-buy-pays-revert: scripts/live-checks/
+      // pool-evm-buy-pays-revert.robinhood-testnet.json, deploy tx
+      // 0x83ab94117dc9659a95f08966be9f49e02dc313afb54e8fccf1fbd25fca82567b, its verifier 0xe9a698c1…d27b; its code the
+      // build's on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 7 Nov 04:5xZ); the 3 Nov
+      // pool 0xe5e948414a89c23e73d76cd740dacdd9364c25d5 keeps the build before it
+      pool: "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
       adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" }),
       // the delegate at the pool-review-3 build, selling through the v4 PoolManager alone here (card
       // evm-testnet-delegate-review3: scripts/live-checks/evm-testnet-delegate-review3.robinhood-testnet.json, deploy tx
@@ -686,4 +747,67 @@ export function pinnedSignBuy(venues: EvmPoolVenueList, secretKey: Uint8Array, c
     return refuse("not_pinned", `the buy's adapter is not one of ${chain}'s pinned adapters`);
   }
   return evmPoolSignBuyUnpinned(secretKey, chain, pool, built, proof);
+}
+
+/** A signed Buy as a sender reads it back from PrivacyPoolSimple.buy's calldata: the adapter, its data, minOut, token. */
+export type EvmSignedBuy = { adapter: string; data: string; minOut: bigint; token: string };
+
+/** The route a signed Buy's (adapter, data) encodes, when it is one the device's builder makes for that Buy; refused
+ *  (throws EvmPoolBuyError) otherwise. The adapter must be the chain's pinned v3 or v4 adapter (not_pinned; a chain with
+ *  neither, not_deployed), its data is decoded loosely into a route (v3: the packed path; v4: abi.encode(address
+ *  currencyIn, PathKey[])), encoded again with the builder's own encoder as the device builds every buy (routeData,
+ *  quoted: evmPoolBuildQuoted, the index's only builder) and held byte-equal to the data signed, and the token it buys
+ *  must be the Buy's token (token_mismatch). So a sender carries a buy only through a pinned adapter, along a route the
+ *  device's builder takes (card helper-evm-sender-2: the helper's sender pays the gas of every buy W signs; the adapter
+ *  runs it, and a foreign adapter could run anything). */
+export function evmBuyRouteOf(chain: EvmPoolChain, buy: EvmSignedBuy): EvmRoute {
+  if (typeof buy !== "object" || buy === null) return refuse("bad_route", "a signed buy is an object");
+  const { adapter, data, minOut, token } = buy;
+  if (!isAddress(adapter) || !isAddress(token) || lower(token) === NATIVE) return refuse("bad_route", "the adapter or the token is not an address");
+  if (typeof minOut !== "bigint" || minOut <= 0n || minOut >= 1n << 256n) return refuse("bad_amount", "minOut is a uint256 above 0");
+  if (typeof data !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(data) || data.length > 2 + 2 * 4096) return refuse("bad_route", "the data is not 0x hex, or too long");
+  const pins = venuePins(evmPoolVenues(), chain);
+  if (pins.v3 === undefined && pins.v4 === undefined) return refuse("not_deployed", `${chain} has no pinned adapter yet`);
+  const d = hexBytes(data.toLowerCase());
+  const at = (i: number): bigint => {
+    if (i < 0 || i + 32 > d.length) return refuse("bad_route", "the data is too short");
+    let v = 0n;
+    for (let k = i; k < i + 32; k++) v = (v << 8n) | BigInt(d[k]!);
+    return v;
+  };
+  const small = (v: bigint, below: number, what: string): number => (v < BigInt(below) ? Number(v) : refuse("bad_route", `${what} is out of range`));
+  const asAddress = (v: bigint): string => (v >> 160n === 0n ? `0x${v.toString(16).padStart(40, "0")}` : refuse("bad_route", "an address word's high bytes"));
+  let route: EvmRoute;
+  if (pins.v3 !== undefined && samePin(adapter, pins.v3)) {
+    // the packed path: token (20), then fee (3) and token (20) per hop
+    if (d.length < 43 || (d.length - 20) % 23 !== 0) return refuse("bad_route", "a v3 path is a token, then a fee and a token per hop");
+    const tokens = [toHex(d.slice(0, 20))];
+    const fees: number[] = [];
+    for (let o = 20; o < d.length; o += 23) {
+      fees.push((d[o]! << 16) | (d[o + 1]! << 8) | d[o + 2]!);
+      tokens.push(toHex(d.slice(o + 3, o + 23)));
+    }
+    route = { venue: "uniswap-v3", tokens, fees };
+  } else if (pins.v4 !== undefined && samePin(adapter, pins.v4)) {
+    // abi.encode(address currencyIn, PathKey[]): currencyIn, the array's offset, then its length, one offset per
+    // element (from the first offset's word), and each element
+    const currencyIn = asAddress(at(0));
+    const base = 32 + small(at(32), 0x10000, "the path's offset");
+    const n = small(at(base - 32), EVM_POOL_MAX_HOPS + 1, "the path's length");
+    const hops: EvmV4Hop[] = [];
+    for (let i = 0; i < n; i++) {
+      const e = base + small(at(base + 32 * i), 0x10000, "a hop's offset");
+      const hd = e + small(at(e + 128), 0x10000, "a hop's hook data offset");
+      const len = small(at(hd), EVM_POOL_MAX_HOOK_DATA + 1, "a hop's hook data length");
+      if (hd + 32 + len > d.length) return refuse("bad_route", "a hop's hook data runs past the data");
+      hops.push({ currency: asAddress(at(e)), fee: small(at(e + 32), U24 + 1, "a fee"), tickSpacing: small(at(e + 64), MAX_TICK_SPACING + 1, "a tick spacing"), hooks: asAddress(at(e + 96)), hookData: toHex(d.slice(hd + 32, hd + 32 + len)) });
+    }
+    route = { venue: "uniswap-v4", currencyIn, hops };
+  } else return refuse("not_pinned", `the adapter is not one of ${chain}'s pinned adapters`);
+  // the builder's own encoding of that route, as the device builds it: any other byte (an offset, a padding, a trailing
+  // byte, hook data) is refused here
+  const again = routeData(chain, route, true);
+  if (toHex(again.data) !== lower(data)) return refuse("bad_route", "the data is not the builder's encoding of its route");
+  if (lower(again.token) !== lower(token)) return refuse("token_mismatch", `the route buys ${again.token}, not ${token}`);
+  return route;
 }

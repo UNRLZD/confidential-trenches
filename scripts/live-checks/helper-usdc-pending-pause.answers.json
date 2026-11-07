@@ -1,0 +1,461 @@
+{
+ "_about": "good: a real run recorded by the check's read(): mainnet N 218 and ids 202-217 no request on FastNEAR and dRPC, the carry token_not_accepted; testnet N 4, request 3 stored on both, kind tag 3 (ConfigureMultisigRole, created 2026-11-02T16:45:20Z) from view_state on both, the carry bad_signature: PASS. bad_pending: read() over the same real providers and helper with one answer changed, each request's view_state bytes given tag 6 (Pause): testnet request 3 reads as a Pause on both while the carry runs its checks (bad_signature): FAIL. Block answers are trimmed by the recorder to height, hash and timestamp_nanosec.",
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-07T01:42:03.677Z",
+  "nets": [
+   {
+    "network": "mainnet",
+    "h": 223398500,
+    "chain": [
+     {
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "next": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"logs\":[],\"result\":[50,49,56]},\"id\":1}",
+      "stored": [
+       {
+        "id": 202,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 203,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 204,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 205,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 206,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 207,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 208,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 209,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 210,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 211,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 212,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 213,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 214,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 215,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 216,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 217,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       }
+      ],
+      "state": []
+     },
+     {
+      "rpc": "https://near.drpc.org",
+      "next": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"logs\":[],\"result\":[50,49,56]}}",
+      "stored": [
+       {
+        "id": 202,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 203,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 204,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 205,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 206,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 207,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 208,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 209,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 210,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 211,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 212,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 213,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 214,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 215,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 216,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 217,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"Euqbrqu2A3UwyUBbRmGeXPoX5ubGnGTTRvemrxVtiRJv\",\"block_height\":223398500,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       }
+      ],
+      "state": []
+     }
+    ],
+    "carry": {
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"token_not_accepted\"}}"
+    }
+   },
+   {
+    "network": "testnet",
+    "h": 276566192,
+    "chain": [
+     {
+      "rpc": "https://test.rpc.fastnear.com",
+      "next": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"logs\":[],\"result\":[52]},\"id\":1}",
+      "stored": [
+       {
+        "id": 0,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 1,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 2,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 3,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(ProhibitedInView { method_name: \\\"predecessor_account_id\\\" })\",\"logs\":[]},\"id\":1}"
+       }
+      ],
+      "state": [
+       {
+        "id": 3,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"values\":[{\"key\":\"fmFtAgMAAAA=\",\"value\":\"AwclAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldAEAAAAlAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldPPpN2gvSOQY\"}]},\"id\":1}"
+       }
+      ]
+     },
+     {
+      "rpc": "https://near-testnet.drpc.org",
+      "next": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"logs\":[],\"result\":[52]}}",
+      "stored": [
+       {
+        "id": 0,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 1,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 2,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 3,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"error\":\"wasm execution failed with error: HostError(ProhibitedInView { method_name: \\\"predecessor_account_id\\\" })\",\"logs\":[]}}"
+       }
+      ],
+      "state": [
+       {
+        "id": 3,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"block_height\":276566192,\"values\":[{\"key\":\"fmFtAgMAAAA=\",\"value\":\"AwclAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldAEAAAAlAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldPPpN2gvSOQY\"}]}}"
+       }
+      ]
+     }
+    ],
+    "archive": {
+     "h": "{\"result\":{\"header\":{\"height\":276566192,\"hash\":\"4wWbUUueUUaLknEmjQn3zL4iwFiBWDaRxDiLwSQktNw6\",\"timestamp_nanosec\":\"1794015716295312142\"}}}",
+     "old": "{\"result\":{\"header\":{\"height\":275831120,\"hash\":\"81S6AvJRAxXC6C3bAV7f79ngYJMMxHUeEZV4McKWyUgB\",\"timestamp_nanosec\":\"1793583463981905990\"}}}",
+     "oldNext": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"81S6AvJRAxXC6C3bAV7f79ngYJMMxHUeEZV4McKWyUgB\",\"block_height\":275831120,\"logs\":[],\"result\":[51]},\"id\":1}"
+    },
+    "carry": {
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_signature\"}}"
+    }
+   }
+  ]
+ },
+ "bad_pending": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-07T01:42:08.172Z",
+  "nets": [
+   {
+    "network": "mainnet",
+    "h": 223398512,
+    "chain": [
+     {
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "next": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"logs\":[],\"result\":[50,49,56]},\"id\":1}",
+      "stored": [
+       {
+        "id": 202,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 203,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 204,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 205,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 206,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 207,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 208,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 209,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 210,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 211,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 212,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 213,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 214,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 215,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 216,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 217,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       }
+      ],
+      "state": []
+     },
+     {
+      "rpc": "https://near.drpc.org",
+      "next": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"logs\":[],\"result\":[50,49,56]}}",
+      "stored": [
+       {
+        "id": 202,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 203,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 204,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 205,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 206,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 207,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 208,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 209,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 210,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 211,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 212,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 213,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 214,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 215,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 216,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 217,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"2EKZ5e6h314kQkiPaUZaGULZPaUDqzJEjNkY9TF4w7W9\",\"block_height\":223398512,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       }
+      ],
+      "state": []
+     }
+    ],
+    "carry": {
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"token_not_accepted\"}}"
+    }
+   },
+   {
+    "network": "testnet",
+    "h": 276566200,
+    "chain": [
+     {
+      "rpc": "https://test.rpc.fastnear.com",
+      "next": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"logs\":[],\"result\":[52]},\"id\":1}",
+      "stored": [
+       {
+        "id": 0,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 1,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 2,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]},\"id\":1}"
+       },
+       {
+        "id": 3,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(ProhibitedInView { method_name: \\\"predecessor_account_id\\\" })\",\"logs\":[]},\"id\":1}"
+       }
+      ],
+      "state": [
+       {
+        "id": 3,
+        "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"values\":[{\"key\":\"fmFtAgMAAAA=\",\"value\":\"BgclAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldAEAAAAlAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldPPpN2gvSOQY\"}]},\"id\":1}"
+       }
+      ]
+     },
+     {
+      "rpc": "https://near-testnet.drpc.org",
+      "next": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"logs\":[],\"result\":[52]}}",
+      "stored": [
+       {
+        "id": 0,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 1,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 2,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(GuestPanic { panic_msg: \\\"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\\\" })\",\"logs\":[]}}"
+       },
+       {
+        "id": 3,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"error\":\"wasm execution failed with error: HostError(ProhibitedInView { method_name: \\\"predecessor_account_id\\\" })\",\"logs\":[]}}"
+       }
+      ],
+      "state": [
+       {
+        "id": 3,
+        "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"block_height\":276566200,\"values\":[{\"key\":\"fmFtAgMAAAA=\",\"value\":\"BgclAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldAEAAAAlAAAAb3duZXIuYmYtdXNkYy0yMDI2MTEwMXQwMjIyNDgudGVzdG5ldPPpN2gvSOQY\"}]}}"
+       }
+      ]
+     }
+    ],
+    "archive": {
+     "h": "{\"result\":{\"header\":{\"height\":276566200,\"hash\":\"6bDnXheqgUXGM6LTMz73fuKt5a51eQ7QoFvUhEvpFkdz\",\"timestamp_nanosec\":\"1794015721980735518\"}}}",
+     "old": "{\"result\":{\"header\":{\"height\":275831130,\"hash\":\"CeLAXtAgbWMoCfQvPjPUc8mg4BUdBjQhEZcNEvqdKxkh\",\"timestamp_nanosec\":\"1793583470112719116\"}}}",
+     "oldNext": "{\"jsonrpc\":\"2.0\",\"result\":{\"block_hash\":\"CeLAXtAgbWMoCfQvPjPUc8mg4BUdBjQhEZcNEvqdKxkh\",\"block_height\":275831130,\"logs\":[],\"result\":[51]},\"id\":1}"
+    },
+    "carry": {
+     "status": 400,
+     "body": "{\"error\":{\"code\":\"bad_signature\"}}"
+    }
+   }
+  ]
+ }
+}

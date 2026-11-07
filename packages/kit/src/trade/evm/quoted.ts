@@ -50,11 +50,12 @@ export function evmQuotedSell(venues: EvmPoolVenueList, quote: EvmPoolSellQuote,
   fresh(quote.block.timestamp, nowMs);
   if (typeof fields !== "object" || fields === null) throw new EvmPoolSellError("bad_amount", "the sell's fields are an object");
   const { precommitment, feeCap: asked, feeRecipient, deadline, nonce } = fields;
-  const { chain, w, token, amountIn: amount, target, route, minOut, feeMax } = quote;
+  const { chain, w, token, amountIn: amount, target, route, minOut, feeMax, hooked } = quote;
   // the sender takes no more than the device's own fee rule allows, never a figure a caller or a server names
   const feeCap = asked === undefined ? feeMax : asked;
   if (feeCap > feeMax) throw new EvmPoolSellError("bad_fee", `the fee cap is above the device's fee rule's ${feeMax}`);
-  const built = pinnedBuildSell(venues, chain, { w, token, amount, target, route, minOut, precommitment, feeCap, feeRecipient, deadline, nonce });
+  // a route through a hook the venue does not list only where the device's quote picked it (card evm-sell-hook-converge)
+  const built = pinnedBuildSell(venues, chain, { w, token, amount, target, route, minOut, precommitment, feeCap, feeRecipient, deadline, nonce }, hooked.length > 0);
   QUOTED_SELLS.add(built);
   return built;
 }

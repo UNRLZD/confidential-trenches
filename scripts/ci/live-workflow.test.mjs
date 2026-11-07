@@ -5,8 +5,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { SUMMARY_LINES, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
-import { HOSTS, ROOT, commitProblem, enginesFor, listOf, missingFor, planFor, reachesLauncher, usagesOf } from "./live-plan.mjs";
+import { BUDGET_READS, SUMMARY_LINES, budgetProblems, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
+import { HOSTS, ROOT, commitProblem, enginesFor, keysOf, listOf, missingFor, planFor, reachesLauncher, usagesOf } from "./live-plan.mjs";
 
 const LIVE = readFileSync(path.join(ROOT, ".github/workflows/live.yml"), "utf8");
 const CHROME = readFileSync(path.join(ROOT, ".github/actions/chrome/action.yml"), "utf8");
@@ -111,20 +111,23 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
     const plan = await planFor(host, { commit: COMMIT });
     const skipped = Object.keys(list.skipped);
     const ran = list.checks.filter((k) => !skipped.includes(k) && list.runs[k].length);
-    assert.deepEqual([...new Set(plan.include.map((e) => e.key))].sort(), ran.sort(), host);
+    assert.deepEqual([...new Set(plan.include.flatMap(keysOf))].sort(), ran.sort(), host);
     assert.deepEqual(list.checks.filter((k) => !ran.includes(k) && !skipped.includes(k)).filter((k) => !list.notApplicable[k]), [], `${host}: a check with no run says why`);
     assert.deepEqual(plan.skipped.map((s) => s.key).sort(), [...skipped, ...Object.keys(list.notApplicable)].sort(), host);
-    assert.deepEqual(plan.include.map((e) => `scripts/live-checks/${e.key}.mjs${e.args ? ` ${e.args}` : ""}`).sort(), list.checks.filter((k) => !skipped.includes(k)).flatMap((k) => list.runs[k]).sort(), host);
+    assert.deepEqual(plan.include.flatMap((e) => keysOf(e).map((k) => `scripts/live-checks/${k}.mjs${e.args ? ` ${e.args}` : ""}`)).sort(), list.checks.filter((k) => !skipped.includes(k)).flatMap((k) => list.runs[k]).sort(), host);
     assert.equal(new Set(plan.include.map((e) => e.id)).size, plan.include.length, `${host}: ids are unique`);
   }
 });
 
-test("the signing page's thirty-five checks (signpage-shell runs four ways, wallet-deposit-follow and hosts-main-on-top the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's thirty-eight checks (signpage-shell runs four ways, pool-deposits, pool-answer-unknown and hosts-main-on-top the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 35);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 38);
   assert.ok(sign.include.some((e) => e.key === "hosts-main-on-top" && !e.chrome && e.args === ""), "hosts-main-on-top (SIGN_HOST's DNS: no child, no wildcard) runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-deposits" && !e.chrome && e.args === ""), "pool-deposits runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-answer-unknown" && !e.chrome && e.args === ""), "pool-answer-unknown runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-frame-version" && !e.chrome && e.args === ""), "kit-frame-version runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-assets-dry" && e.chrome && e.args === ""), "kit-deposit-assets-dry runs after every sign deploy, in Chrome");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-calls" && !e.chrome && e.args === ""), "kit-deposit-calls runs after every sign deploy");
@@ -139,7 +142,8 @@ test("the signing page's thirty-five checks (signpage-shell runs four ways, wall
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 31, "the app's thirty-one checks, rh-cold-quote and token-page-fills-after the newest");
+  assert.equal(app.include.length, 32, "the app's thirty-two checks, token-page-fills-after and app-deposit-mount the newest");
+  assert.ok(app.include.some((e) => e.key === "app-deposit-mount" && e.chrome && e.args === ""), "app-deposit-mount runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "rh-cold-quote" && e.args === ""), "rh-cold-quote runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "token-page-fills-after" && e.chrome && e.args === ""), "token-page-fills-after runs after every app deploy, in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-chart-live"), "app-chart-live runs after every app deploy");
@@ -162,8 +166,8 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   const plan = await planFor("helper", { commit: COMMIT });
   const na = existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"];
   assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
-  assert.ok(!plan.include.some((e) => SKIPPED[e.key]), "a skipped check is never in the matrix");
-  for (const key of ["solana-jupiter-build", "wallet-per-buy"]) assert.ok(plan.include.some((e) => e.key === key && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
+  assert.ok(!plan.include.some((e) => keysOf(e).some((k) => SKIPPED[k])), "a skipped check is never in the matrix");
+  for (const key of ["solana-jupiter-build", "wallet-per-buy", "helper-usdc-pending-pause"]) assert.ok(plan.include.some((e) => keysOf(e).includes(key) && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
 });
 
 test("a job gets Chrome when its check reaches the launcher, and Firefox or WebKit only where its arguments name them", async () => {
@@ -221,9 +225,11 @@ test("the real lists pass: every run of every check, on both networks, gives wha
   for (const host of Object.keys(HOSTS)) for (const network of ["mainnet", "testnet"]) {
     const plan = await planFor(host, { commit: COMMIT, network });
     for (const e of plan.include) {
-      const forms = usagesOf(readFileSync(path.join(ROOT, "scripts/live-checks", `${e.key}.mjs`), "utf8"), e.key);
-      assert.ok(forms.length, `${e.key} has a usage line`);
-      assert.deepEqual(missingFor(forms, e.args), [], `${host} ${network} ${e.id}`);
+      for (const k of keysOf(e)) {
+        const forms = usagesOf(readFileSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), "utf8"), k);
+        assert.ok(forms.length, `${k} has a usage line`);
+        assert.deepEqual(missingFor(forms, e.args), [], `${host} ${network} ${e.id}`);
+      }
     }
   }
 });
@@ -298,6 +304,7 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
   const real = (edit) =>
     fixture((r) => {
       cpSync(path.join(ROOT, "scripts/ci/helper-live-checks.mjs"), path.join(r, "scripts/ci/helper-live-checks.mjs"));
+      cpSync(path.join(ROOT, "scripts/live-checks/pool-redeploys.mjs"), path.join(r, "scripts/live-checks/pool-redeploys.mjs"));
       for (const k of LIVE_CHECKS) cpSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), path.join(r, "scripts/live-checks", `${k}.mjs`));
       edit(r);
     });
@@ -319,4 +326,171 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
 test("planted: a plan job that also runs on a pull request is refused", () => {
   assert.deepEqual(liveProblems(LIVE).filter((l) => /plan job runs/.test(l)), []);
   assert.ok(has(liveProblems(LIVE.replace("    if: github.event_name == 'workflow_dispatch'\n", "    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'card/x'\n")), /plan job runs on something other than a dispatch/));
+});
+
+test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deploy record names, read from where the deploy writes it; helper-pool-senders' own list stays Solana's", async () => {
+  const { POOL_EVM_NETWORKS, evmPoolRecord, evmPools, poolSenderPlan } = await import("./helper-live-checks.mjs");
+  // card helper-evm-sender-2: one run for each EVM network a pool deploys to, its record where the deploy writes it
+  const deploy = await import("../live-checks/pool-evm-deploy.mjs");
+  assert.deepEqual([...POOL_EVM_NETWORKS].sort(), [...Object.keys(deploy.CHAINS), ...Object.keys(deploy.MAINNETS)].sort(), "each network pool-evm-deploy.mjs deploys a pool to");
+  // a testnet's newest pool set (card pool-evm-buy-pays-revert's), a mainnet's deploy record: pool-evm-deploy.mjs poolFile
+  for (const n of POOL_EVM_NETWORKS) assert.equal(evmPoolRecord(n), path.relative(ROOT, deploy.poolFile(n)), n);
+  for (const n of POOL_EVM_NETWORKS) {
+    const f = path.join(ROOT, evmPoolRecord(n));
+    assert.equal(evmPools()[n], existsSync(f) ? JSON.parse(readFileSync(f, "utf8")).contracts.PrivacyPoolSimple.address.toLowerCase() : null, n);
+  }
+  // one owner: helper-pool-senders' plan names no EVM pool (the duplicate runs this card first added)
+  assert.ok(!poolSenderPlan().runs.some((r) => /--pool 0x/.test(r)), "no EVM pool in helper-pool-senders' plan");
+  const root = mkdtempSync(path.join(tmpdir(), "evm-pool-records-"));
+  const evm = (n, body) => {
+    mkdirSync(path.dirname(path.join(root, evmPoolRecord(n, root))), { recursive: true });
+    writeFileSync(path.join(root, evmPoolRecord(n, root)), typeof body === "string" ? body : JSON.stringify(body));
+  };
+  try {
+    assert.deepEqual(evmPools(root), Object.fromEntries(POOL_EVM_NETWORKS.map((n) => [n, null])));
+    const B = "0xB239A38AF69B68E6C5C305DF64985F283B5D5FE5";
+    for (const n of POOL_EVM_NETWORKS) evm(n, { chain: n, contracts: { PrivacyPoolSimple: { address: B } } });
+    assert.deepEqual(evmPools(root), Object.fromEntries(POOL_EVM_NETWORKS.map((n) => [n, B.toLowerCase()])));
+    evm("base", { chain: "base-sepolia", contracts: { PrivacyPoolSimple: { address: B } } });
+    assert.throws(() => evmPools(root), /contracts\/pool-evm\/deployments\/base\.json names chain base-sepolia, not base/);
+    evm("base", { chain: "base", contracts: { PrivacyPool: { address: B } } });
+    assert.throws(() => evmPools(root), /deployments\/base\.json names no PrivacyPoolSimple address/);
+    evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: "0x1234" } } });
+    assert.throws(() => evmPools(root), /names no PrivacyPoolSimple address/);
+    evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: B } } });
+    evm("robinhood-testnet", "{");
+    assert.throws(() => evmPools(root), /pool-evm-deploy\.robinhood-testnet\.json is not JSON/);
+    // a pool set redeployed by a later card (pool-redeploys.mjs POOL_REDEPLOYS) is the testnet's pool, over the first set's
+    evm("robinhood-testnet", { chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: B } } });
+    const R = "0x00000000000000000000000000000000000000aa";
+    writeFileSync(path.join(root, "scripts/live-checks/pool-evm-buy-pays-revert.robinhood-testnet.json"), JSON.stringify({ chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: R } } }));
+    assert.equal(evmPoolRecord("robinhood-testnet", root), "scripts/live-checks/pool-evm-buy-pays-revert.robinhood-testnet.json");
+    assert.equal(evmPools(root)["robinhood-testnet"], R);
+    assert.equal(evmPools(root)["base-sepolia"], B.toLowerCase());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---- card helper-live-jup-serial: the checks that spend the helper's Jupiter budget run one after another in one job ----
+
+const BUDGET_KEYS = ["helper-token-page-cold", "market-data-solana-token", "helper-page-jup-429", "solana-legs-share-wait", "solana-mint-supply-moves", "solana-jupiter-build"];
+
+test("the helper's plan runs the six checks that spend the Jupiter budget as ONE matrix entry, in order, and every other check as its own", async () => {
+  const plan = await planFor("helper", { commit: COMMIT });
+  const groups = plan.include.filter((e) => e.group !== "");
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].id, "jupiter-budget");
+  assert.equal(groups[0].key, "");
+  assert.equal(groups[0].args, "");
+  assert.deepEqual(keysOf(groups[0]), BUDGET_KEYS);
+  assert.equal(groups[0].chrome, false);
+  assert.match(groups[0].name, /^jupiter-budget \(6 checks, one after another\)$/);
+  for (const k of BUDGET_KEYS) assert.ok(!plan.include.some((e) => e.group === "" && e.key === k), `${k} has no job of its own`);
+  assert.ok(plan.include.every((e) => typeof e.group === "string"), "every entry says its group, '' for none, so the workflow's if reads one value");
+  assert.ok(plan.include.some((e) => e.key === "app-console-429" && e.group === ""), "app-console-429 reads a listed token's page, no Jupiter call: its own job");
+  // the other hosts have no group
+  for (const host of ["app", "sign"]) assert.ok((await planFor(host, { commit: COMMIT })).include.every((e) => e.group === ""), host);
+});
+
+test("the real helper plan has no budget check outside the group, and every check that reads a Jupiter route is found by BUDGET_READS", async () => {
+  const plan = await planFor("helper", { commit: COMMIT });
+  assert.deepEqual(budgetProblems("helper", plan), []);
+  const list = listOf("helper", ROOT, { commit: COMMIT, network: "mainnet" });
+  const found = list.checks.filter((k) => !list.skipped[k] && BUDGET_READS.test(readFileSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), "utf8"))).sort();
+  assert.deepEqual(found, [...BUDGET_KEYS, ...Object.keys(list.budgetExempt)].sort(), "the group and the exempt are exactly the checks that name a Jupiter route");
+  assert.deepEqual(Object.keys(list.budgetExempt), ["app-console-429"]);
+});
+
+// a list with a serial group and an exempt list, for the fixtures below
+const budgetList = (checks, { serial = {}, budgetExempt = {} } = {}) =>
+  `console.log(JSON.stringify({ checks: ${JSON.stringify(checks)}, serial: ${JSON.stringify(serial)}, budgetExempt: ${JSON.stringify(budgetExempt)}, runs: Object.fromEntries(${JSON.stringify(checks)}.map((k) => [k, ["scripts/live-checks/" + k + ".mjs"]])) }));\n`;
+
+// a root whose helper list is `list`, with two checks that name the helper's Jupiter proxy and one that does not
+function budgetFixture(list) {
+  return fixture((r) => {
+    for (const k of ["jup-a", "jup-b", "calm"]) {
+      const text = k === "calm" ? "" : `const r = await fetch("/v1/proxy/jupiter/swap/v2/build");\n`;
+      writeFileSync(path.join(r, `scripts/live-checks/${k}.mjs`), `//   node scripts/live-checks/${k}.mjs [--base <url>]\n${text}`);
+      writeFileSync(path.join(r, `scripts/live-checks/${k}.test.mjs`), "");
+      writeFileSync(path.join(r, `scripts/live-checks/${k}.answers.json`), "{}");
+    }
+    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), list);
+  });
+}
+
+test("planted: two checks that spend the Jupiter budget in separate jobs are refused; in one serial group they pass", async () => {
+  const apart = budgetFixture(budgetList(["jup-a", "jup-b", "calm"]));
+  const together = budgetFixture(budgetList(["jup-a", "jup-b", "calm"], { serial: { "jupiter-budget": ["jup-a", "jup-b"] } }));
+  try {
+    const bad = await planProblems("helper", apart);
+    assert.ok(has(bad, /jup-a reads the helper's Jupiter budget .* in a job of its own/), bad.join("\n"));
+    assert.ok(has(bad, /jup-b reads the helper's Jupiter budget .* in a job of its own/), bad.join("\n"));
+    assert.ok(!has(bad, /calm reads/), "a check that names no Jupiter route is no budget check");
+    assert.equal((await planFor("helper", { commit: COMMIT, root: apart })).include.length, 3, "apart, three jobs: the plan itself would run them in parallel");
+    assert.deepEqual(await planProblems("helper", together), []);
+    const one = await planFor("helper", { commit: COMMIT, root: together });
+    assert.deepEqual(one.include.map((e) => [e.id, e.group]), [["jupiter-budget", "jup-a jup-b"], ["calm", ""]], "the two are ONE entry");
+  } finally {
+    for (const r of [apart, together]) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+test("planted: one budget check left out of the group is refused by name, and the exempt list is no way round it", async () => {
+  const roots = [];
+  const root = (opts) => {
+    const r = budgetFixture(budgetList(["jup-a", "jup-b", "calm"], opts));
+    roots.push(r);
+    return r;
+  };
+  try {
+    const left = await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "calm"] } }));
+    assert.ok(has(left, /jup-b reads the helper's Jupiter budget/) && !has(left, /jup-a reads/), left.join("\n"));
+    const reason = "it opens a listed token's page, which makes no Jupiter call";
+    assert.deepEqual(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "calm"] }, budgetExempt: { "jup-b": reason } })), [], "an exempt check with its reason");
+    assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "calm"] }, budgetExempt: { "jup-b": "short" } })), /jup-b is exempt from the Jupiter budget group with no reason/));
+    assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { "jup-b": reason } })), /jup-b is both in a serial group and exempt from it/));
+    assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { "no-such": reason } })), /no-such is exempt from the Jupiter budget group but is no listed check/));
+  } finally {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+test("planted: a serial group the job cannot run fails the plan: one member, an unlisted or skipped one, a repeat, two groups, a name that is a check, arguments", async () => {
+  const roots = [];
+  const plan = async (opts, list = ["jup-a", "jup-b", "calm"]) => {
+    const r = budgetFixture(budgetList(list, opts));
+    roots.push(r);
+    return planFor("helper", { commit: COMMIT, root: r });
+  };
+  try {
+    await assert.rejects(plan({ serial: { g: ["jup-a"] } }), /serial group g: needs two or more different checks/);
+    await assert.rejects(plan({ serial: { g: ["jup-a", "jup-a"] } }), /needs two or more different checks/);
+    await assert.rejects(plan({ serial: { g: ["jup-a", "no-such"] } }), /no-such is not a listed check/);
+    await assert.rejects(plan({ serial: { g: ["jup-a", "jup-b"], h: ["jup-b", "calm"] } }), /jup-b is in two serial groups, g and h/);
+    await assert.rejects(plan({ serial: { calm: ["jup-a", "jup-b"] } }), /the id is no name a job can take, or is a check's key/);
+    await assert.rejects(plan({ serial: { "Bad Name": ["jup-a", "jup-b"] } }), /the id is no name a job can take/);
+    // a member runs once and with no arguments: the entry carries keys alone
+    const runsOf = (a, b) => `console.log(JSON.stringify({ checks: ["jup-a", "jup-b"], serial: { g: ["jup-a", "jup-b"] }, runs: { "jup-a": ${JSON.stringify(a)}, "jup-b": ${JSON.stringify(b)} } }));\n`;
+    const bare = (k) => `scripts/live-checks/${k}.mjs`;
+    for (const [list, want] of [
+      [runsOf([`${bare("jup-a")} --base https://x.example`], [bare("jup-b")]), /jup-a runs with arguments/],
+      [runsOf([bare("jup-a"), `${bare("jup-a")} --base https://x.example`], [bare("jup-b")]), /jup-a has 2 runs/],
+    ]) {
+      const r = budgetFixture(list);
+      roots.push(r);
+      await assert.rejects(planFor("helper", { commit: COMMIT, root: r }), want);
+    }
+  } finally {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+test("planted: live.yml that runs a serial group's checks as one single check, drops the group step, or lets both steps run, is refused", () => {
+  assert.deepEqual(liveProblems(LIVE), []);
+  assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group != ''\n", "")), /does not run a serial group's checks with scripts\/ci\/live-serial\.mjs/), "no `if` on the group step: every job would run it");
+  assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group == ''\n", "")), /single-check step does not run `if: matrix\.group == ''`/), "no `if` on the single step: a group job would run no-key twice");
+  assert.ok(has(liveProblems(LIVE.replace("node scripts/ci/live-serial.mjs $GROUP", "node scripts/live-checks/$GROUP.mjs")), /does not run a serial group's checks/), "a group run as one check");
+  assert.ok(has(liveProblems(LIVE.replace("GROUP: ${{ matrix.group }}", "GROUP: ${{ matrix.key }}")), /does not run a serial group's checks/), "the group is not the matrix's");
+  assert.ok(has(liveProblems(LIVE.replace("timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}", "timeout-minutes: 20")), /a serial group's job has no longer limit/), "a group of about 11 minutes of checks cannot be held to 20");
 });

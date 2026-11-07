@@ -26,11 +26,12 @@ import { HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.m
 import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
 import { WORKER_CSP, WORKER_PATH, ZK_CACHE } from "../../../scripts/live-checks/signpage-prover-host.mjs";
 import { THREAD_CSP, THREAD_PATH } from "../../../scripts/live-checks/signpage-prover-threads.mjs";
+import { facts as pinFacts, judge as judgePins } from "../../../scripts/live-checks/kit-oneclick-pins-frozen.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
 
 /** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["hosts-main-on-top", "signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "signpage-solana-trade", "signpage-pool-kinds", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form", "app-harness-signin-e2e", "signpage-pool-price", "signpage-pool-pins", "signpage-pool-mainnet", "pool-ready-no-flicker", "signpage-buy-route-events", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "kit-renewal-read-bounded", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "pool-restore-wired", "evm-pool-sync-wide-pages", "kit-deposit-calls", "kit-frame-version", "kit-deposit-assets-dry", "signpage-withdraw-handoff", "wallet-deposit-follow"];
+export const LIVE_CHECKS = ["hosts-main-on-top", "signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "signpage-solana-trade", "signpage-pool-kinds", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form", "app-harness-signin-e2e", "signpage-pool-price", "signpage-pool-pins", "signpage-pool-mainnet", "pool-ready-no-flicker", "signpage-buy-route-events", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "kit-renewal-read-bounded", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "pool-restore-wired", "evm-pool-sync-wide-pages", "kit-deposit-calls", "kit-frame-version", "kit-deposit-assets-dry", "signpage-withdraw-handoff", "wallet-deposit-follow", "kit-oneclick-pins-frozen", "pool-deposits", "pool-answer-unknown"];
 // the arguments a check is run with after this deploy (a list: one run for each, each its own job in live.yml):
 // signpage-release reads SIGN_HOST alone against this commit's own build, and app-harness-signin-e2e SIGN_HOST's
 // backdrop alone, so an APP_HOST that lags does not fail this deploy; signpage-shell takes an engine and runs live on
@@ -133,8 +134,17 @@ export function checkDir(dir) {
   if (existsSync(join(dir, "_worker.js"))) p.push(`${dir} carries _worker.js: Pages applies no _headers rule to a Function's response`);
   if (existsSync(join(dir, ".well-known", "webauthn"))) p.push(`${dir} carries .well-known/webauthn: no other origin may use SIGN_HOST's passkeys`);
   p.push(...checkProver(dir));
+  p.push(...checkPins(dir));
   if (!existsSync(join(dir, "_headers"))) return [...p, `${dir} has no _headers file`];
   return [...p, ...checkHeadersFile(readFileSync(join(dir, "_headers"), "utf8"))];
+}
+
+/** Problems with a build folder's 1Click pins (card kit-oneclick-pins-frozen; empty = fine): its app.js names no 1Click
+ *  signing key but the pinned bytes (PINNED_KEYS, named by the live check itself), so a build that ships a test
+ *  harness's key is never uploaded or listed, and every pin of the device's 1Click check in it is frozen. */
+export function checkPins(dir) {
+  if (!existsSync(join(dir, "index.html")) || !existsSync(join(dir, "app.js"))) return [`${dir} has no app.js for the 1Click pin check`];
+  return judgePins(pinFacts(readFileSync(join(dir, "index.html"), "utf8"), readFileSync(join(dir, "app.js"), "utf8"))).lines.map((l) => `app.js: ${l.slice(4)}`);
 }
 
 /** Problems with a build folder's prover files (empty = fine): the worker and the thread file are the kit's build, the setup files are exactly the pinned six. */

@@ -60,6 +60,9 @@ const ENOUGH = 1_000_000_000; // W's lamports: a reserve of 0
 const enc = new TextEncoder();
 const be32 = (x: bigint): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => Number((x >> BigInt(8 * (31 - i))) & 255n));
 const beInt = (b: Uint8Array): bigint => b.reduce((a, x) => (a << 8n) | BigInt(x), 0n);
+/** A front-runner's deposit on the return note's precommitment: the pool's least deposit (contracts/pool-solana/src/lib.rs:78),
+ *  the least the program writes a mark for. */
+const FRONT_RUN = 1_000_000n;
 const markOf = (pre: bigint, program = PROGRAM): string => solanaProgramAddress([enc.encode("pre"), be32(pre)], program);
 const RETURN: NoteRef = { kind: "return", c: "sol", l: L, j: J };
 const SECOND = (n: number): NoteRef => ({ kind: "second", id: { id: "R", c: "sol", l: L, j: J }, n });
@@ -117,6 +120,8 @@ type Plant = {
   frontRun?: boolean;
   /** RPC 1 never shows this account */
   hideOn1?: string;
+  /** RPC p's answer for an account, changed (the chain itself keeps it as it is) */
+  mapOn?: (p: 0 | 1, address: string, a: Acc) => Acc;
   /** RPC 1's simulation of the sell fails */
   simFailOn1?: boolean;
   /** the PumpSwap pool says a cashback coin (its is_cashback_coin byte, 244, set in the recorded reads) */
@@ -351,8 +356,9 @@ function chain(plant: Plant = {}) {
     const answer = (address: string): unknown => {
       if (p === 1 && plant.hideOn1 === address) return null;
       if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
-      const a = accounts.get(address);
-      if (!a) return null;
+      const held = accounts.get(address);
+      if (!held) return null;
+      const a = plant.mapOn ? plant.mapOn(p, address, held) : held;
       const data = p === 1 && address === ata && plant.heldOn1 !== undefined ? tokenAccount(plant.heldOn1, 1, mint) : a.data;
       return { owner: a.owner, lamports: a.lamports, data: [base64.encode(data), "base64"], executable: false, rentEpoch: 0, space: data.length };
     };
@@ -437,7 +443,7 @@ function chain(plant: Plant = {}) {
           const tx = base64.decode(params[0] as string);
           const sig = base58.encode(tx.subarray(1, 65));
           sentTx.set(sig, tx);
-          if (plant.frontRun && !accounts.has(markOf(preOf(RETURN)))) deposit(preOf(RETURN), 1n);
+          if (plant.frontRun && !accounts.has(markOf(preOf(RETURN)))) deposit(preOf(RETURN), FRONT_RUN); // the least the program takes
           if (plant.frontRunSame && !accounts.has(markOf(preOf(RETURN)))) {
             const m = solanaDecodeMessage(tx.subarray(65));
             const dep = m.instructions.at(-1)!;
@@ -664,17 +670,33 @@ test("past the blockhash's last height on both RPCs with no mark: not_landed, th
   assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
 });
 
+test("card pool-deposits I-3, every path: a stranger's system account at the return note's mark is no mark: the sell is planned and sent, its drop read as dropped (never pending for ever), and the next sell takes the account over and fills", async () => {
+  const plant: Plant = { lands: false };
+  const w = await world(plant);
+  const at = markOf(preOf(RETURN));
+  w.c.accounts.set(at, { owner: "11111111111111111111111111111111", lamports: 1_000_000, data: new Uint8Array(0) });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+  const [n] = (await w.ns.list()).filter((x) => x.scope === SCOPE);
+  assert.deepEqual({ ref: n!.ref, state: n!.state }, { ref: RETURN, state: "PLANNED" });
+  plant.lands = true;
+  const b = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.equal(w.c.accounts.get(at)!.owner, PROGRAM);
+});
+
 test("another deposit takes the return note's precommitment first: the sell fails on chain as a whole, refused, and that deposit is stored as the user's own note (only the seed names it)", async () => {
   const w = await world({ frontRun: true });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "refused");
-  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: 1n, leafIndex: BigInt(N) }]);
+  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: FRONT_RUN, leafIndex: BigInt(N) }]);
   // the sell dropped, its precommitment taken by another deposit of another value: not the sale's deposit (not
   // filled), and it can never land (its deposit would be refused): not_landed, the note stored with the mark's value
   const x = await world({ frontRun: true, lands: false });
   const b = await runPoolSell(x.host, ASK);
   assert.equal("stage" in b && b.stage, "not_landed");
-  assert.deepEqual(await ours(x.ns), [{ ref: RETURN, state: "UNSPENT", value: 1n, leafIndex: BigInt(N) }]);
+  assert.deepEqual(await ours(x.ns), [{ ref: RETURN, state: "UNSPENT", value: FRONT_RUN, leafIndex: BigInt(N) }]);
   // the next sell of that W takes R 0
   const c = await runPoolSell(w.host, ASK);
   assert.equal("stage" in c && c.stage, "filled");
@@ -708,6 +730,21 @@ test("a mark for the return note on one RPC only is that RPC's word against the 
   assert.deepEqual(await runPoolSell(w.host, ASK), { error: "failed" });
   assert.ok(!w.c.log.some((x) => /getLatestBlockhash|simulateTransaction|sendTransaction/.test(x)), "refused at the walk, before the quote");
   assert.deepEqual(await ours(w.ns), []);
+});
+
+test("card pool-answer-unknown (review S2): a mark for the return note the two RPCs give at two values is neither's word: failed, nothing sent or stored", async () => {
+  const pre = markOf(preOf(RETURN));
+  const w = await world({ mapOn: (p, address, a) => (p === 1 && address === pre ? { ...a, data: (() => { const d = a.data.slice(); new DataView(d.buffer).setBigUint64(0, 12_345_679n, true); return d; })() } : a) });
+  w.c.deposit(preOf(RETURN), 12_345_678n);
+  assert.deepEqual(await runPoolSell(w.host, ASK), { error: "failed" });
+  assert.ok(!w.c.log.some((x) => /sendTransaction/.test(x)), "nothing sent");
+  assert.deepEqual(await ours(w.ns), []);
+});
+
+test("card pool-answer-unknown (review F5): the pool's, the mint's and the Rent sysvar's balances past 2^53 lamports are never parsed (none is priced): the sell fills", async () => {
+  const w = await world({ mapOn: (_, address, a) => (address === POOL || address === MINT || address === fx.rent.account ? { ...a, lamports: 2 ** 60 } : a) });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
 });
 
 test("a simulation that fails on either RPC is failed: W never derived, nothing sent or stored", async () => {

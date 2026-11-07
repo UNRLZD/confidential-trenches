@@ -127,14 +127,18 @@ export function evmThrottleS(error: unknown): number {
  * from before it sends: take(url, calls, background) takes the post's units (1, or its calls for a provider that counts
  * calls) and answers 0, or the ms until they fit and takes nothing. Background reads (the swap and maker reads) draw
  * only down to the CALLER_ROOM a provider keeps for callers' reads (/v1/rpc), so our own load never spends the room a
- * user's call needs. room(url) is the bucket's free share, 0 to 1 (1 for a provider with no pace), by which the swap
- * reads pick the providers they ask; paceOf(url) the pace they were made with.
+ * user's call needs. On a provider a pool sender reads (reserve(url), pool/evm.ts pacedEvmRpc), callers' reads in turn
+ * draw only down to the SENDER_ROOM kept for the senders' reads (take(url, calls, false, true)), which only they draw.
+ * room(url) is the bucket's free share, 0
+ * to 1 (1 for a provider with no pace), by which the swap reads pick the providers they ask; paceOf(url) the pace they
+ * were made with.
  */
 export type ProviderHolds = {
   heldFor(url: string): number;
   heldMs(url: string): number;
   hold(url: string, seconds: number): void;
-  take(url: string, calls: number, background: boolean): number;
+  take(url: string, calls: number, background: boolean, sender?: boolean): number;
+  reserve(url: string): void;
   room(url: string): number;
   paceOf(url: string): Pace | undefined;
 };
@@ -173,8 +177,9 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *     Paced at 3 calls a second, 6 at once.
  *   - base.gateway.tenderly.co: 2 a second none refused, 4 a second refused 2 of 24 at once; batches of 3 a second refused
  *     1 of 18. Paced at 2 calls a second, 3 at once.
- *   - base.public.blockpi.network's public endpoint: 4 a second none refused; batches of 5 a second refused 7 of 30
- *     (-32000 "Max messages exceeded (Limit: 5)"). Paced at 3 calls a second, 4 at once.
+ *   - rpc.sentio.xyz/base (BlockPI's public endpoint's place, card evm-spare-list-green: BlockPI answered Cloudflare's
+ *     521, its origin down, 17:36-22:42Z on 6 Nov): 2, 4 and 6 a second for 6 s none refused; batches of 5 answered, of 10
+ *     refused (code 8, "maximum of 5 requests"), 22:45Z. Paced at 4 calls a second, 5 at once.
  */
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
@@ -184,7 +189,7 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
   "https://base-rpc.publicnode.com": { perS: 3, burst: 6, unit: "call" },
   "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },
-  "https://base.public.blockpi.network/v1/rpc/public": { perS: 3, burst: 4, unit: "call" },
+  "https://rpc.sentio.xyz/base": { perS: 4, burst: 5, unit: "call" },
   // mainnet.base.org, Base's own and /v1/rpc/base's first: 5 eth_getTransactionByHash posts a second for 5 s and
   // batches of 10 at 2 a second (20 calls a second) none refused (2026-11-05 19:3xZ, from the Mac). Paced at 10 calls a
   // second, 20 at once. It refuses every eth_getLogs (LOGS_REFUSED).
@@ -205,6 +210,12 @@ export const CALLER_HOLD_MS = 1_000;
 /** The share of a paced provider's burst background reads leave for callers' reads. [design: a quarter, so a caller's
  *  read finds room at once on the provider it asks first while the walks run at three quarters of its pace.] */
 export const CALLER_ROOM = 0.25;
+/** The share of a paced provider's burst callers' reads (/v1/rpc, the swap reads a caller asked for) leave for the pool
+ *  senders' reads, on the providers they read (reserve) (card robinhood-mainnet-rpcs fold A): as plain callers the senders shared CALLER_ROOM with every
+ *  /v1/rpc client, and enough clients took each refill first, so a withdraw waited past its deadline. Under
+ *  CALLER_ROOM, so background, which stops at CALLER_ROOM, never reaches it either. [design: an eighth: a sender's post
+ *  waits at most one post's refill, 1/perS, behind any crowd, and callers keep seven eighths of the bucket.] */
+export const SENDER_ROOM = 0.125;
 
 // the holds' and paces' clock: monotonic, in epoch ms, as rpc.ts's (card helper-crowd-429: the box's wall clock stepped
 // back inside a test, which would hold a provider for the step's length)
@@ -217,6 +228,8 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
    *  6.4 s on the paces alone). Cleared by the caller's draw; a caller that asks another provider instead leaves it to
    *  end on its own, at most the wait it was named. */
   const callerWaits = new Map<string, number>();
+  /** The providers a pool sender reads, whose SENDER_ROOM callers leave (fold A). */
+  const reserved = new Set<string>();
   const fill = (url: string, p: Pace) => {
     const t = now();
     const b = buckets.get(url) ?? { tokens: p.burst, at: t };
@@ -226,14 +239,14 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     return b;
   };
   return {
-    take(url, calls, background) {
+    take(url, calls, background, sender = false) {
       const p = pace[url];
       if (p === undefined) return 0;
       const b = fill(url, p);
       const t = now();
       const waiting = (callerWaits.get(url) ?? 0) - t;
       if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
-      const floor = background ? p.burst * CALLER_ROOM : 0;
+      const floor = background ? p.burst * CALLER_ROOM : sender || !reserved.has(url) ? 0 : p.burst * SENDER_ROOM;
       // a post larger than the bucket waits for a full one
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
       // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
@@ -246,6 +259,9 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
       if (!background) keep(Math.max(w, CALLER_HOLD_MS));
       return w;
+    },
+    reserve(url) {
+      reserved.add(url);
     },
     room(url) {
       const p = pace[url];

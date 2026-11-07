@@ -1,7 +1,9 @@
 // node --test scripts/live-checks/helper-robinhood-capacity.test.mjs: the live check's verdict replays recorded runs
 // (helper-robinhood-capacity.answers.json):
-//   good:         the branch helper at 38249ca on the Mac, read by helper-robinhood-capacity.mjs --base <local> --record:
-//                 12 of 12 tapes 200: PASS;
+//   good:         the branch helper at 61f16646 (card robinhood-listed-tape-opens) on the Mac, read by
+//                 helper-robinhood-capacity.mjs --base <local> --record: 12 of 12 tapes 200: PASS;
+//   bad_listed_dropped: the deployed helper at 358d8f4f (live run 42345906841, 06:12Z): 3 of 12 listed tokens' tapes
+//                 404 not_found in ~800 ms, gone from the lists' next answer: FAIL;
 //   bad_pre_card: the deployed helper at 6832227 (19:07Z): 6 of 12 503 after 52-57 s and 3 timeouts at 60 s: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -34,6 +36,16 @@ test("the recorded bad answer (the deployed helper before this card) fails, each
   assert.equal(bad(r).filter((l) => / 503 .* in \d+ ms$/.test(l)).length, 6, bad(r).join("\n"));
   assert.equal(bad(r).filter((l) => / 0 .*aborted due to timeout/.test(l)).length, 3, bad(r).join("\n"));
   assert.match(r.lines.at(-1), /3 of 12 tapes 200 at once/);
+});
+
+test("the recorded bad answer of card robinhood-listed-tape-opens (a listed token's tape refused once a refresh dropped it) fails, each 404 named", () => {
+  const r = judge(A.bad_listed_dropped);
+  assert.equal(r.ok, false);
+  assert.deepEqual(
+    bad(r).map((l) => l.replace(/ in \d+ ms$/, "")),
+    ["0x451b42a15100c340ca12f7c66de06fac5ea2d751", "0xf44702b17d9abd53815f703e772f35e9c71a53af", "0xdcd7face6a1d0bdd0665ea1b0842fc9ce797862b"].map((t) => `BAD trades ${t}: 404 {"error":{"code":"not_found"}}`),
+  );
+  assert.match(r.lines.at(-1), /9 of 12 tapes 200 at once/);
 });
 
 test("planted on the good answer: one 429, one 503, a tape not from the chain, too few tokens and failed lists each fail; a slow 200 tape passes with its time printed", () => {

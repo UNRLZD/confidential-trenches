@@ -13,6 +13,11 @@
 // spare past the second answering its chain id and that read; it passes. `badHistory` is a real run at 0d130f2f (main
 // before this half) against the deployed helper: the -32002 held on the first two is the caller's answer on both chains
 // and each maker list is three; it fails on each.
+// Card helper-evm-range-cap-walk: `good` is re-recorded on that card's branch at c0cc4d2b (a keyless helper started from it on
+// this Mac as --base, 2026-11-06 17:00Z), with its "cap" mode (the first two answering base-pokt.nodies.app's 50-block cap)
+// answered past them on each chain and Base's maker list of six (BlockPI dropped); it passes. On merging main 63c90229 it
+// is re-recorded on the merged tree (988aa0e7, the same way, 2026-11-07 00:48-00:50Z), Sentio in that maker list. Its bad answers are
+// replayed by helper-evm-range-cap-walk.test.mjs.
 //   node --test scripts/live-checks/evm-rpc-spare-list.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -83,4 +88,28 @@ test("card base-rpc-list-fix: Base's list of three, or a fourth whose POST names
   const blind = structuredClone(A.good);
   blind.preflight[blind.scans.base[3]] = { ...blind.preflight[blind.scans.base[3]], post: null };
   assert.equal(check(blind).ok, false);
+});
+
+// Card evm-spare-list-green: `badSpare` is a real run at 6adacd73 (main, this Mac, 2026-11-06 22:5xZ, against the deployed
+// helper at 6adacd73), the same FAIL lines as host=helper live run 42302023037: each held Robinhood quote ends rpc_error
+// (the warm quote kept USDG, which the warm-up's prune dropped, and scanned all its pools over the whole depth: about
+// 5,000 requests of 2,000 blocks on Pocket, which answers about 400 and then 429 with Retry-After 59), and BlockPI's
+// Base maker spare answers Cloudflare's 521 page. `goodSpare` is a real run on this card's branch (aa8728ba, this Mac, 23:05-23:07Z,
+// against the same deployed helper; nothing it reads needs the branch's helper deployed): every held Robinhood quote ends ok with
+// Pocket asked for logs, and the Base maker list of six answers on every spare. Card helper-evm-range-cap-walk, on merging
+// main 63c90229: `goodSpare` is re-recorded on that card's merged tree (988aa0e7, a keyless helper started from it on this
+// Mac as --base, 2026-11-07 00:50-00:52Z), since the check's "cap" mode needs the branch's helper; the lines above hold.
+test("card evm-spare-list-green: the bad answer at 6adacd73 fails: each held Robinhood quote ends rpc_error, and BlockPI's maker spare answers a Cloudflare page", () => {
+  const r = check(A.badSpare);
+  assert.equal(r.ok, false);
+  for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^FAIL robinhood-torch, first two ${m}: ends rpc_error: rpc_error: the scan provider (limited its rate past|did not answer within) the quote's bound of 60000 ms`));
+  has(r.lines, /^FAIL helper base maker spare base\.public\.blockpi\.network: chain id <!DOCTYPE html>/);
+});
+
+test("card evm-spare-list-green: the good answer on this card's branch passes: every held Robinhood quote ok on Pocket, and no Base maker spare down", () => {
+  const r = check(A.goodSpare);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS robinhood-torch, first two ${m}: ends ok in \\d+ ms`));
+  has(r.lines, /^PASS helper base maker list of 6, each on its own host: .*rpc\.sentio\.xyz \(5 at least\)$/);
+  assert.ok(!r.lines.some((l) => /blockpi/.test(l)), "no line names BlockPI");
 });

@@ -26,7 +26,7 @@
 // text is cut and stripped, a list holds at most LIST_MAX rows, and an RPC log is used only when its emitter, topic0
 // and token word match the table exactly.
 import { gzipSync } from "node:zlib";
-import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
+import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 
@@ -85,16 +85,21 @@ const LOGS_MAX = 2_000;
 // tokens still without two answers, padsAt and recordsAt; a code read goes down the list past a provider that does not
 // answer it, codeBlock and hadCode). The spares, read 2026-11-06 12:38Z from this Mac (an address filter's eth_getLogs of
 // 100 blocks 5,000, 50,000 and 500,000 blocks back, a state read 600 s back, eth_chainId 8453 and 4663 on each):
-// Base: base.gateway.tenderly.co (Tenderly), base.api.pocket.network (Pocket), rpc.sentio.xyz (Sentio) and
-// base.public.blockpi.network (BlockPI) answered all three, 353-2,022 ms (blastapi now refuses a getLogs over 10
-// blocks, -32600, and stays first for its old state); Robinhood: robinhood.api.pocket.network (Pocket) and
+// Base: base.gateway.tenderly.co (Tenderly), base.api.pocket.network (Pocket) and rpc.sentio.xyz (Sentio) answered all
+// three, 353-2,022 ms (blastapi now refuses a getLogs over 10 blocks, -32600, and stays first for its old state);
+// base.public.blockpi.network (BlockPI) answered them too, and was dropped (card helper-evm-range-cap-walk) for a
+// Cloudflare 521 outage on every chain of its public endpoint from about 16:00Z on 6 Nov (521 on base and ethereum,
+// read 16:05-16:56Z), which failed evm-rpc-spare-list after every helper deploy; Robinhood: robinhood.api.pocket.network (Pocket) and
 // 4663.rpc.thirdweb.com (thirdweb) answered all three, 412-841 ms. Left out: mainnet.base.org (-32011 on every
 // getLogs), base-pokt.nodies.app and 1rpc.io (50 blocks), base.meowrpc.com (no eth_getLogs), base.llamarpc.com (525),
 // rpc-robinhood.blockmachine.io (-32002 past its newest 5,000 blocks; "missing trie node" 600 s back),
 // api.blockvectra.com (-32011 outside its history window), robinhood.rpc.blxrbdn.com (-32601 eth_getLogs), daybreak and
-// globalstake (5 s and more, a timeout at 500,000 back; no state 600 s back).
+// globalstake (5 s and more, a timeout at 500,000 back; no state 600 s back). BlockPI left the Base list (card
+// evm-spare-list-green): Cloudflare's 521, its origin down, to every read from 17:36Z to 22:42Z on 6 Nov (live check
+// evm-rpc-spare-list "chain id <!DOCTYPE html>", runs 42263101671, 42268627326 and 42302023037; three eth_chainId from
+// this Mac at 22:42Z); six stay, the floor five.
 export const MAKER_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
-  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base", "https://base.public.blockpi.network/v1/rpc/public"],
+  base: ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://base.gateway.tenderly.co", "https://base.api.pocket.network", "https://rpc.sentio.xyz/base"],
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://4663.rpc.thirdweb.com"],
 };
 
@@ -123,7 +128,9 @@ async function agreedOnList<T>(urls: readonly string[], n: number, ask: (url: st
 /** daybreak counts each call of a batch as one of the about 4 concurrent requests it takes (a batch of 5 at 4 posts a
  *  second refused at its 4th post with -32005 "too many concurrent requests", 2026-11-04 20:51Z, from the Mac): one call a
  *  post, three posts out at once (limits.ts PROVIDER_PACE). */
-export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1 };
+/** rpc.sentio.xyz/base takes 5 (card evm-spare-list-green: a batch of 10 answered HTTP 429 code 8 "JSON-RPC batch exceeds
+ *  the maximum of 5 requests", batches of 5 answered, 2026-11-06 22:45Z from the Mac). */
+export const BATCH_MAX: Readonly<Record<string, number>> = { "https://base.drpc.org": 3, "https://robinhood.drpc.org": 3, "https://robinhood.daybreak-rpc.network": 1, "https://rpc.sentio.xyz/base": 5 };
 
 /** One stretch of a chain's fixed block clock: from block `fromBlock`, made at `atMs`, a block every `blockMs`. */
 export type ClockEra = { fromBlock: number; atMs: number; blockMs: number };
@@ -733,8 +740,9 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
 type Read = { rows: Row[]; created: Map<string, number>; pools: Map<string, string>; at: number; raw: string };
 /** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
- *  read and its read time, and the makers read. The answers are parsed again by toRows, as from GeckoTerminal. */
-export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][]; clock?: string };
+ *  read and its read time, the makers read, and the tokens served with when (listed, card robinhood-listed-tape-opens).
+ *  The answers are parsed again by toRows, as from GeckoTerminal. */
+export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][]; clock?: string; served?: [string, number][] };
 /** The block clock a chain's makers were settled on (BLOCK_CLOCK), as the warm file carries it: a none settled on
  *  another clock may come from a wrong block range, so restore reads it again (card helper-ready-page-warm). */
 export const clockOf = (chain: EvmChain): string => JSON.stringify(BLOCK_CLOCK[chain]);
@@ -750,6 +758,8 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   const reads: Partial<Record<ListKey, Read>> = {};
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
   let running: Promise<void> | null = null;
+  // every token an answer held, and when (listed)
+  const served = servedTokens(now);
 
   async function gt(path: string, urgent: boolean, first: boolean): Promise<Read | null> {
     if (!gecko.take("lists", urgent, first)) return null;
@@ -787,6 +797,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const pools: Record<string, string> = {};
     for (const r of [read.trending_1h, read.trending_5m, read.new]) for (const [t, p] of r.pools) if (!Object.hasOwn(pools, t)) pools[t] = p;
     const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled, pools } satisfies EvmSnapshot);
+    served.add(Object.values(lists).flatMap((rows) => rows.map((r) => r.token as string)));
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
     for (const fn of listeners) fn();
   }
@@ -845,6 +856,14 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return last;
   }
 
+  /** Whether an answer of the last SERVED_MS held the token (../solana/lists.ts servedTokens): the swap reads' gate
+   *  (swaps.ts mainPool), so a token a user saw opens its chart and tape after a refresh drops it. False while no
+   *  answer was built. */
+  async function listed(token: string): Promise<boolean> {
+    await get();
+    return served.has(token);
+  }
+
   /** One tick now and one every TICK_MS; the timer never holds the process open. Returns the stop. */
   function warm(): () => void {
     void start();
@@ -855,7 +874,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
 
   /** This chain's lists as a next process takes them over. */
   function state(): EvmListsState {
-    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain) };
+    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain), served: served.state() };
     for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at };
     return out;
   }
@@ -866,11 +885,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
    *  it may have been settled on a wrong block range (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old
    *  2 s clock put every new token's pool hours before its code, and each was settled as none and carried over in the
    *  warm file). Dropping every none instead left a swap's Base lists 35 of 44 unsettled (live run 42104885123 attempt
-   *  1, 20:36Z), read again at MAKER_PER_TICK a tick. Reads held already are kept.
+   *  1, 20:36Z), read again at MAKER_PER_TICK a tick. Reads held already are kept. The tokens served are taken over
+   *  as addresses with a time no later than now (listed).
    *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
   function restore(st: unknown): boolean {
     const t = now();
-    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown };
+    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown; served?: unknown };
     const sameClock = o.clock === clockOf(chain);
     const rs = (o.reads ?? {}) as Record<string, unknown>;
     for (const k of LIST_KEYS) {
@@ -890,9 +910,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
         if (!(m[1] === null ? sameClock : typeof m[1] === "string" && pads.has(m[1]))) continue;
         if (!makers.has(m[0])) makers.set(m[0], m[1]);
       }
+    // the tokens served: an address as the lists write it (lowercase) and a time a read could have been at
+    if (Array.isArray(o.served))
+      served.restore(o.served.slice(0, SERVED_MAX).filter((x): x is [string, number] => Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && /^0x[0-9a-f]{40}$/.test(x[0]) && typeof x[1] === "number" && Number.isFinite(x[1])));
     build();
     return all() !== null;
   }
 
-  return { get, warm, tick, state, restore, onAnswer };
+  return { get, warm, tick, state, restore, onAnswer, listed };
 }

@@ -58,6 +58,7 @@ import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_SELL_FEE, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
@@ -138,8 +139,6 @@ const POOL_LEN = 2179;
 const POOL_DISC = /* @__PURE__ */ new TextEncoder().encode("bfpool01");
 const TREE_LEN = 8 + 1 + 33 * 32;
 const OFF_TREES = 49;
-const PRE_MARK_LEN = 17;
-const MARK_TAG = 1;
 const U32 = 0xffff_ffff;
 const enc = /* @__PURE__ */ new TextEncoder();
 
@@ -172,14 +171,16 @@ const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.leng
 const both = <T>(rpcs: readonly [SolanaRpc, SolanaRpc], f: (rpc: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(rpcs[0]), f(rpcs[1])]);
 type Rpcs = readonly [SolanaRpc, SolanaRpc];
 
-/** One account as an RPC gives it (base64), with the slot it answered at; none when there is no account. */
-async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" | "finalized", minContextSlot?: number): Promise<{ slot: number; owner: string; data: Uint8Array; lamports: bigint } | { slot: number; none: true }> {
+/** One account as an RPC gives it (base64), with the slot it answered at; none when there is no account. `lamports` as
+ *  the RPC wrote it, read only where it is priced (W's balance): the pool's, a mint's or a mark's balance is never a
+ *  number a sell needs, so no size of it ever refuses one. */
+async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" | "finalized", minContextSlot?: number): Promise<{ slot: number; owner: string; data: Uint8Array; lamports: unknown } | { slot: number; none: true }> {
   const r = (await rpc("getAccountInfo", [address, { encoding: "base64", commitment, ...(minContextSlot === undefined ? {} : { minContextSlot }) }])) as { context?: { slot?: unknown }; value?: unknown };
   const slot = int(r?.context?.slot);
   const v = r?.value as { owner?: unknown; data?: unknown; lamports?: unknown } | null | undefined;
   if (v === null) return { slot, none: true };
   if (typeof v?.owner !== "string" || !Array.isArray(v.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string") return no();
-  return { slot, owner: v.owner, data: base64.decode(v.data[0]), lamports: BigInt(int(v.lamports)) };
+  return { slot, owner: v.owner, data: base64.decode(v.data[0]), lamports: v.lamports };
 }
 
 /** Up to 10 accounts in one getMultipleAccounts call (one provider's cap), all at one slot; null: no account. */
@@ -246,13 +247,21 @@ type Mark = { value: bigint; nonce: bigint; slot: number };
 async function markOf(rpcs: Rpcs, program: string, precommitment: bigint, at?: readonly [number, number]): Promise<Mark | "one" | null> {
   const address = solanaProgramAddress([enc.encode("pre"), be32(precommitment)], program);
   const [a, b] = await Promise.all([account(rpcs[0], address, "finalized", at?.[0]), account(rpcs[1], address, "finalized", at?.[1])]);
-  if ("none" in a && "none" in b) return null;
-  if ("none" in a || "none" in b) return "one";
-  if (a.owner !== program || b.owner !== program || !sameBytes(a.data, b.data)) return no();
-  const d = a.data;
-  if (d.length !== PRE_MARK_LEN || d[16] !== MARK_TAG) return no();
-  const v = new DataView(d.buffer, d.byteOffset, 16);
-  return { value: v.getBigUint64(0, true), nonce: v.getBigUint64(8, true), slot: Math.max(a.slot, b.slot) };
+  // the kit's parse: a stranger's system account at the address is no mark (the deposit takes it over; card
+  // pool-deposits I-3), anything but the program's 17-byte mark refused
+  const mark = (x: typeof a): SolanaPoolPreMark | null => {
+    if ("none" in x) return null;
+    try {
+      return solanaPoolPreMarkOf(x, program);
+    } catch {
+      return no();
+    }
+  };
+  const [ma, mb] = [mark(a), mark(b)];
+  if (ma === null && mb === null) return null;
+  if (ma === null || mb === null) return "one";
+  if (ma.value !== mb.value || ma.nonce !== mb.nonce) return no();
+  return { value: ma.value, nonce: ma.nonce, slot: Math.max(a.slot, b.slot) };
 }
 
 /** A mark's leaf, as pool-deposit.ts's verdict reads it: its label the label tree's leaf nonce - 1, and the commitment
@@ -452,7 +461,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     if (tokens.amount < amount) return no("not_funded");
     const lamports = lower(...(await both(rpcs, async (r) => {
       const a = await account(r, w.address, "confirmed");
-      return "none" in a ? 0n : a.lamports;
+      return "none" in a ? 0n : BigInt(int(a.lamports));
     })));
     // W pays the sell's fee before anything runs, and must hold what the sell makes before any proceeds arrive (the
     // kit's solanaPoolSellNeed): short of the cheaper venue's need, no venue can take it, refused before any other read

@@ -557,26 +557,29 @@ test("candles: the server's one GeckoTerminal budget: the page takes what the li
 });
 test("card helper-crowd-429: a cold chart read with GeckoTerminal's minute spent waits for the next free call within GT_PAGE_WAIT_MS and answers 200, not 429 (market-data-solana-token, live run 41923006818 at 22:12Z)", async () => {
   const g = fakeGecko();
-  let skew = 0;
-  const now = () => performance.timeOrigin + performance.now() + skew;
+  // on this test's clock (card helper-pace-test-clock): the budget's minute and the wait for its next call, never wall
+  // time, where a busy runner's stall between the minute's move and the stopwatch's start read the wait short
+  let clock = 1_800_000_000_000;
+  const now = () => clock;
+  const sleep = async (ms: number) => void (clock += ms);
   const shared = geckoBudget(now);
   for (let i = 0; i < GT_PER_MIN; i++) assert.equal(shared.take("pages"), true);
-  skew = WINDOW_MS - 1_200; // the minute's calls leave the window in 1.2 s
-  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now, fetch: g.fetch, gecko: shared });
-  const t0 = performance.now();
+  clock += WINDOW_MS - 1_200; // the minute's calls leave the window in 1.2 s
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now, sleep, fetch: g.fetch, gecko: shared });
+  const t0 = clock;
   const a = await t.candles(PUMP, "1h", null, 24);
-  const waited = performance.now() - t0;
+  const waited = clock - t0;
   assert.equal(a.status, 200, `${a.status} ${a.body}`);
-  assert.ok(waited >= 1_000 && waited < GT_PAGE_WAIT_MS * 2, `waited ${Math.round(waited)} ms`);
+  assert.ok(waited >= 1_200 && waited < GT_PAGE_WAIT_MS * 2, `waited ${Math.round(waited)} ms`);
   assert.equal(g.urls.length, 2, "its pool, then its bars");
   // a minute that frees past the bound still answers 429 at once with the wait named
   const full = geckoBudget(now);
   for (let i = 0; i < GT_PER_MIN; i++) full.take("pages");
-  const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now, fetch: g.fetch, gecko: full });
-  const t1 = performance.now();
+  const t2 = createSolanaToken(fakeProxy(), fakeRpc(), { now, sleep, fetch: g.fetch, gecko: full });
+  const t1 = clock;
   const over = await t2.candles(CURVE, "1h", null, 24);
   assert.deepEqual([over.status, over.retryAfterS], [429, WINDOW_MS / 1000]);
-  assert.ok(performance.now() - t1 < 500, "no wait past the bound");
+  assert.equal(clock - t1, 0, "no wait past the bound");
 });
 
 test("review F-E: a GeckoTerminal 429 (and the paused queue after it) answers 429 with a wait, not 503", async () => {

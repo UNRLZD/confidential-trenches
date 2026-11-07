@@ -42,6 +42,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolSignSellAuthorization, evmPoolVenues, evmSellRouteOf } from "../../packages/kit/src/index.ts";
 import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
+import { poolRecordName } from "./pool-evm-deploy.mjs";
 import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, its signatures and the digests
@@ -53,7 +54,10 @@ export const BASE = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The EVM testnets a pool is deployed on, each with its deploy record. */
 export const NETWORKS = ["base-sepolia", "robinhood-testnet"];
-export const poolRecord = (network) => `pool-evm-deploy.${network}.json`;
+/** The record naming a network's current pool in `dir`: its newest pool set's (pool-evm-deploy.mjs poolRecordName). */
+export const poolRecord = (network, dir = HERE) => poolRecordName(network, dir);
+/** The first set's record of a network (card pool-evm-deploy's), before any pool redeploy. */
+export const FIRST_SET = (network) => `pool-evm-deploy.${network}.json`;
 /** The fee answer's field naming the helper's sell sender: an address, or null where no sell key is set */
 export const SENDER_FIELD = "sell_sender";
 /** EvmFeeAnswer's fields (apps/helper/src/pool/evm.ts). */
@@ -83,16 +87,18 @@ const json = (t) => {
   }
 };
 
-/** The pool each network's deploy record names, for the networks with a record. Throws on a bad record. */
-export function evmPoolRecords(dir = HERE) {
+/** The pool each network's deploy record names, for the networks with a record (`nameOf`: its current pool set's,
+ * poolRecord; FIRST_SET: the first set's, which the helper checks' recordings of 6 Nov were made on). Throws on a bad
+ * record. */
+export function evmPoolRecords(dir = HERE, nameOf = poolRecord) {
   const out = {};
   for (const network of NETWORKS) {
-    const file = path.join(dir, poolRecord(network));
+    const file = path.join(dir, nameOf(network, dir));
     if (!existsSync(file)) continue;
     const rec = json(readFileSync(file, "utf8"));
-    if (rec?.chain !== network) throw new Error(`${poolRecord(network)} names chain ${rec?.chain}, not ${network}`);
+    if (rec?.chain !== network) throw new Error(`${nameOf(network, dir)} names chain ${rec?.chain}, not ${network}`);
     const pool = rec.contracts?.PrivacyPoolSimple?.address;
-    if (typeof pool !== "string" || !ADDRESS.test(pool)) throw new Error(`${poolRecord(network)} names no PrivacyPoolSimple address`);
+    if (typeof pool !== "string" || !ADDRESS.test(pool)) throw new Error(`${nameOf(network, dir)} names no PrivacyPoolSimple address`);
     out[network] = pool;
   }
   return out;
@@ -211,14 +217,16 @@ const OTHER_ADDRESS = "0x000000000000000000000000000000000000dead";
 /** One v4 hop to the native coin, fee 3000, tick spacing 60, no hook, as abi.encode(PathKey[]) writes it: the swap data
  *  the kit's sell builder makes for that route through the PoolManager. */
 const ZERO = "0x0000000000000000000000000000000000000000";
-const V4_NATIVE_PATH = `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(ZERO)}${w32(3000n)}${w32(60n)}${a32(ZERO)}${w32(0xa0n)}${w32(0n)}`;
+/** The same hop through the pool behind `hooks` (card evm-sell-hook-converge: a hook no venue lists). */
+export const v4PathThrough = (hooks) => `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(ZERO)}${w32(3000n)}${w32(60n)}${a32(hooks)}${w32(0xa0n)}${w32(0n)}`;
+const V4_NATIVE_PATH = v4PathThrough(ZERO);
 
 /**
  * The base sell for `pool` on `network` at `nowMs`, paying its fee to `feeRecipient` (the fee answer's fee_recipient),
  * and each plant made from it, as POST /v1/pool/evm/sell bodies. W and the other signer are throwaway keys made here
- * unless given; `wKey` is returned for the test only.
+ * unless given; `wKey` is returned for the test only. `data`: the swap's data (the hookless hop by default).
  */
-export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey() }) {
+export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey(), data = V4_NATIVE_PATH }) {
   const v = evmPoolVenues()[network];
   if (!v?.sellDelegate || !v.poolManager) throw new Error(`the kit pins no sell delegate or PoolManager for ${network}`);
   if (typeof feeRecipient !== "string" || !ADDRESS.test(feeRecipient)) throw new Error(`the fee recipient ${show(feeRecipient)} is no address`);
@@ -230,7 +238,7 @@ export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey
     token: "0x0000000000000000000000000000000000007070", // no static check reads it, and W holds none of it
     amount: 10n ** 18n,
     target: v.poolManager.toLowerCase(),
-    data: V4_NATIVE_PATH,
+    data,
     minOut: 10n ** 15n,
     pool,
     precommitment: 12_345n,
@@ -355,9 +363,9 @@ export function sendersOf(run) {
   return out;
 }
 
-export async function read(base, fetchFn = fetch) {
+export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
   const pools = [];
-  for (const [network, pool] of Object.entries(evmPoolRecords())) {
+  for (const [network, pool] of Object.entries(records)) {
     const reads = [];
     const get = async (asked, url, init = {}) => {
       const r = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15_000) });

@@ -1,0 +1,146 @@
+{
+ "good": {
+  "base": "in process at bafd7ebf3468d05b0c6d9fb18545f193f14bb44e",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-07T03:49:55.413Z",
+      "status": 200,
+      "headers": {
+       "x-helper-commit": "bafd7ebf3468d05b0c6d9fb18545f193f14bb44e"
+      },
+      "body": "{\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\"}"
+     },
+     {
+      "asked": "listed_deadline_near",
+      "readAt": "2026-11-07T03:49:55.433Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "bafd7ebf3468d05b0c6d9fb18545f193f14bb44e"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794023454 s, now 1794023395433 ms\"}}"
+     },
+     {
+      "asked": "hooked_deadline_near",
+      "readAt": "2026-11-07T03:49:55.436Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "bafd7ebf3468d05b0c6d9fb18545f193f14bb44e"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794023454 s, now 1794023395436 ms\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-07T03:49:55.436Z",
+      "status": 200,
+      "headers": {
+       "x-helper-commit": "bafd7ebf3468d05b0c6d9fb18545f193f14bb44e"
+      },
+      "body": "{\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\"}"
+     },
+     {
+      "asked": "listed_deadline_near",
+      "readAt": "2026-11-07T03:49:55.450Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "bafd7ebf3468d05b0c6d9fb18545f193f14bb44e"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794023454 s, now 1794023395450 ms\"}}"
+     },
+     {
+      "asked": "hooked_deadline_near",
+      "readAt": "2026-11-07T03:49:55.453Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "bafd7ebf3468d05b0c6d9fb18545f193f14bb44e"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794023454 s, now 1794023395453 ms\"}}"
+     }
+    ]
+   }
+  ],
+  "where": "this Mac, 2026-11-07 03:5xZ: the live check --local, the plants through card evm-sell-hook-converge's helper sender in process at bafd7ebf (what a deploy of the card answers; HELPER_HOST still runs the build before it)"
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "pools": [
+   {
+    "network": "base-sepolia",
+    "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-07T03:50:04.436Z",
+      "status": 200,
+      "headers": {
+       "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794023400000,\"block\":\"0x34efac8\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "listed_deadline_near",
+      "readAt": "2026-11-07T03:50:05.007Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794023463 s, now 1794023404919 ms\"}}"
+     },
+     {
+      "asked": "hooked_deadline_near",
+      "readAt": "2026-11-07T03:50:05.202Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0"
+      },
+      "body": "{\"error\":{\"code\":\"bad_route\",\"detail\":\"bad_route: the hook 0x00000000000000000000000000000000000020cc with fee 3000 and tick spacing 60 is not a launchpad pool the venue lists\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-07T03:50:07.776Z",
+      "status": 200,
+      "headers": {
+       "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1794023400000,\"block\":\"0x8ee1c17\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "listed_deadline_near",
+      "readAt": "2026-11-07T03:50:07.996Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794023466 s, now 1794023407901 ms\"}}"
+     },
+     {
+      "asked": "hooked_deadline_near",
+      "readAt": "2026-11-07T03:50:08.187Z",
+      "status": 422,
+      "headers": {
+       "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0"
+      },
+      "body": "{\"error\":{\"code\":\"bad_route\",\"detail\":\"bad_route: the hook 0x00000000000000000000000000000000000020cc with fee 3000 and tick spacing 60 is not a launchpad pool the venue lists\"}}"
+     }
+    ]
+   }
+  ],
+  "where": "HELPER_HOST, 2026-11-07 03:5xZ, its build ea97ceff before the card: the live check's own --record; the hooked plant refused bad_route"
+ }
+}

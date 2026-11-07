@@ -7,7 +7,7 @@
 // near-api-js 7.3.1's borsh of the helper's fixture equals ours; and the signature verifies under node:crypto.
 import assert from "node:assert/strict";
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
@@ -126,14 +126,26 @@ test("the vector: the device's bytes equal the shared vector, and the helper's d
   for (const p of sent as Record<string, unknown>[]) assert.ok(p.account_id === U || p.account_id === NET.usdc, JSON.stringify(p));
 });
 
-test("the vault is the release's: testnet's from its deployment file, none on mainnet, and no argument names one", async () => {
-  const dep = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-v1.json", import.meta.url), "utf8"));
+test("the vault is the release's: each network's from its deployment file, none on mainnet until it has one, and no argument names one", async () => {
+  const deployment = (name: string) => new URL(`../../../contracts/vault/deployments/${name}.json`, import.meta.url);
+  const dep = JSON.parse(readFileSync(deployment("testnet-v1"), "utf8"));
   assert.equal(dep.network, "testnet");
   assert.equal(NET.vault, dep.account_id);
   assert.equal(V.expect.vault, dep.account_id);
-  assert.equal(NEAR_NETWORKS.mainnet.vault, null);
-  // Mainnet: U's reads pass, then nothing is signed until the release writes a vault.
-  await refused(sign({ network: "mainnet" }), "no_vault", /mainnet/);
+  // Mainnet: the vault is mainnet-v1.json's (the record the mainnet deploy writes), and null exactly while that file is
+  // absent. mainnet-test.json is the test vault on mainnet, never the release's.
+  const testVault = JSON.parse(readFileSync(deployment("mainnet-test"), "utf8")).account_id;
+  assert.notEqual(NEAR_NETWORKS.mainnet.vault, testVault);
+  if (existsSync(deployment("mainnet-v1"))) {
+    const main = JSON.parse(readFileSync(deployment("mainnet-v1"), "utf8"));
+    assert.equal(main.network, "mainnet");
+    assert.equal(typeof main.account_id, "string");
+    assert.equal(NEAR_NETWORKS.mainnet.vault, main.account_id);
+  } else {
+    assert.equal(NEAR_NETWORKS.mainnet.vault, null);
+    // U's reads pass, then nothing is signed until the release writes a vault.
+    await refused(sign({ network: "mainnet" }), "no_vault", /mainnet/);
+  }
   // A vault slipped into the arguments is not read: the call still names the release's vault, byte for byte.
   const out = await sign({ vault: "attacker.near" } as Partial<DepositDelegateArgs>);
   assert.equal(out.signed_delegate, V.signed_delegate);

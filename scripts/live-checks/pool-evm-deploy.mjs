@@ -33,6 +33,7 @@ import { existsSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { poolRecordName as recordNameIn } from "./pool-redeploys.mjs";
 
 const KEY = "pool-evm-deploy";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,6 +43,11 @@ export const BUILD = JSON.parse(readFileSync(BUILD_FILE, "utf8"));
 // a testnet's record sits here; a mainnet's in contracts/pool-evm/deployments/ (card pool-evm-deploy-mainnet)
 export const deploymentFile = (chain) =>
   Object.hasOwn(MAINNETS, chain) ? path.join(HERE, "../../contracts/pool-evm/deployments", `${chain}.json`) : path.join(HERE, `pool-evm-deploy.${chain}.json`);
+/** The name of the record that holds `chain`'s current testnet pool in `dir` (here by default): the newest redeploy of
+ * pool-redeploys.mjs POOL_REDEPLOYS, the one list, else pool-evm-deploy's. */
+export const poolRecordName = (chain, dir = HERE) => recordNameIn(chain, dir);
+/** The record of `chain`'s current pool: a mainnet's deploy record, a testnet's newest pool set (poolRecordName). */
+export const poolFile = (chain) => (Object.hasOwn(MAINNETS, chain) ? deploymentFile(chain) : path.join(HERE, poolRecordName(chain)));
 /** The one build the code of `name` at `address` on `chain` must be: the frozen older build when the build file pins
  * that exact address to it (a contract deployed before the build moved on, e.g. the v1 SellDelegate), else the current
  * build. Never either one: each address has exactly one build. */
@@ -385,7 +391,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const opt = (n, dflt) => (args.includes(n) ? args[args.indexOf(n) + 1] : dflt);
   try {
-    const files = opt("--deployment") ? opt("--deployment").split(",") : [...Object.keys(CHAINS), ...Object.keys(MAINNETS)].map(deploymentFile).filter(existsSync);
+    // every set still on chain: each testnet's first set and its newest pool set (poolFile), and each mainnet's
+    const files = opt("--deployment") ? opt("--deployment").split(",") : [...new Set([...Object.keys(CHAINS).flatMap((c) => [deploymentFile(c), poolFile(c)]), ...Object.keys(MAINNETS).map(deploymentFile)])].filter(existsSync);
     if (files.length === 0) throw new Error("no deployment record (pool-evm-deploy.<chain>.json) to check");
     const ds = files.map((f) => JSON.parse(readFileSync(f, "utf8")));
     // the testnets' run record only: a mainnet record's is pool-evm-deploy-mainnet.mjs --write-record's, refused here

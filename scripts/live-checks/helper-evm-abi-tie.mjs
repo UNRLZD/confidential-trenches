@@ -6,8 +6,9 @@
 //     three-argument selector, which no pool runs. The pinned sell delegates are not read here: on 6 Nov 14:45Z both
 //     dispatched the ten-field sell (0xbea5695c) of the build before pool-review-3, not the source's eleven-field one
 //     (0x0c2cb9ca), a redeploy this card does not make;
-//   - a real withdraw that landed on that pool (the first withdraw of pool-evm-testnet-run.<network>.json), its input
-//     read on both RPCs, the same on both;
+//   - a real withdraw that landed on that pool (landedOf: the first withdraw of the run record paired with the pool's
+//     current record, pool-evm-deploy.mjs poolRecordName, which must name that pool), its input read on both RPCs, the
+//     same on both;
 //   - GET /v1/pool/fee?pool=<pool> (its fee_recipient), then three POST /v1/pool/evm/send, none of which can send: the
 //     landed withdraw's calldata with its fee recipient word made the fee answer's, at the epoch now: its deadline is
 //     past, so a helper that reads the pool's withdraw answers 422 epoch_off before any RPC call (and its nullifier is
@@ -24,11 +25,12 @@
 // fix is deployed, `node scripts/live-checks/helper-evm-abi-tie.mjs --record <file>` records the host's real run.
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { poolRecordName } from "./pool-evm-deploy.mjs";
 import { RPCS } from "./pool-evm-testnet-run.mjs";
 
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -123,7 +125,26 @@ async function rpc(url, method, params) {
   }
 }
 
-const landedOf = (network) => JSON.parse(readFileSync(path.join(HERE, `pool-evm-testnet-run.${network}.json`), "utf8")).txs.find((t) => t.kind === "withdraw").hash;
+/** The run record of the pool `network`'s current record names (pool-evm-deploy.mjs poolRecordName): a redeploy's
+ * record <card>.<network>.json is paired with that card's run, <card>.run.<network>.json; the first set's
+ * (pool-evm-deploy.<network>.json) with pool-evm-testnet-run.<network>.json. */
+export const runRecordName = (network, dir = HERE) => {
+  const rec = poolRecordName(network, dir);
+  return rec === `pool-evm-deploy.${network}.json` ? `pool-evm-testnet-run.${network}.json` : rec.replace(new RegExp(`\\.${network}\\.json$`), `.run.${network}.json`);
+};
+/** The first withdraw that landed on the pool `network`'s current record names: from its paired run record, which must
+ * name that pool. Never an older pool's: a run on another pool, or none, throws. */
+export function landedOf(network, dir = HERE) {
+  const recName = poolRecordName(network, dir);
+  const pool = lower(JSON.parse(readFileSync(path.join(dir, recName), "utf8")).contracts?.PrivacyPoolSimple?.address ?? "");
+  const runName = runRecordName(network, dir);
+  if (!existsSync(path.join(dir, runName))) throw new Error(`${network}: no run record ${runName} for the pool ${recName} names (${pool})`);
+  const run = JSON.parse(readFileSync(path.join(dir, runName), "utf8"));
+  if (!ADDRESS.test(pool) || lower(run.pool) !== pool) throw new Error(`${network}: ${runName} ran on ${run.pool}, not the pool ${recName} names (${pool})`);
+  const w = run.txs?.find((t) => t.kind === "withdraw");
+  if (!w) throw new Error(`${network}: ${runName} has no withdraw`);
+  return w.hash;
+}
 
 async function collect(base, inProcess) {
   const venues = evmPoolVenues();

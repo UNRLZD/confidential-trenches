@@ -292,7 +292,8 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
-  assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env\);/);
+  // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider
+  assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env, undefined, holds\);/);
   assert.match(main, /const release = releaseOf\(process\.env\);/);
   // card helper-ready-gate: the fee quoter is the senders' (their store handed over), and a replacing helper listens only once ready
   assert.match(main, /const senders = sendersFromEnv\(process\.env\);/);

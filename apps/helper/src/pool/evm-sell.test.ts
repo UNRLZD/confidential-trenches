@@ -10,6 +10,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
+import { signRelease, W as W_SIGNER } from "../../test/pool-evm/release-sign.ts";
 import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_LANE_SENT_WINDOW_MS, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
 import * as evmModule from "./evm.ts";
 
@@ -812,7 +813,6 @@ test("bad_route: a sale to any target but the PoolManager or a listed router, or
   const cases: [string, Partial<Sell>][] = [
     ["any target, any token (0x…dead, 0x…deadbeef)", { target: "0x000000000000000000000000000000000000dead", token: "0x00000000000000000000000000000000deadbeef", data: `0x${"ff".repeat(32)}` }],
     ["the PoolManager with data that is no path", { data: `0x${"ff".repeat(32)}` }],
-    ["an unlisted hook", { data: v4Path(NATIVE, "0x00000000000000000000000000000000000000cc") }],
     ["a path that ends at another token", { data: v4Path("0x0000000000000000000000000000000000007071") }],
     ["a listed router with v4 data", { target: V.routers[0]!.toLowerCase() }],
   ];
@@ -822,6 +822,14 @@ test("bad_route: a sale to any target but the PoolManager or a listed router, or
     assert.deepEqual([a.status, code(a)], [422, "bad_route"], `${name}: ${JSON.stringify(a.body)}`);
     assert.equal(calls.length, 0, `${name}: nothing read`);
   }
+  // a hook no venue lists passes the route check (card evm-sell-hook-converge: the device's quote routes a sale through
+  // such a pool where it sets the reference, which no sender can tell from the Sell): the same sale 59 s from its
+  // deadline stops at the deadline check, nothing read
+  const calls: Calls = [];
+  const near = NOW_S + 59n;
+  const a = await senderOf(calls, {}, calls).sell(body({ sell: { data: v4Path(NATIVE, "0x00000000000000000000000000000000000000cc"), deadline: near } }));
+  assert.deepEqual([a.status, code(a)], [422, "deadline_near"], JSON.stringify(a.body));
+  assert.equal(calls.length, 0, "nothing read");
 });
 
 test("unpaid sell gas: reverting sales are held against the client, the token, W and the sender's budget; past a cap 429 rate_limited with the wait", async () => {
@@ -887,10 +895,10 @@ test("a proven sale one provider reads at effectiveGasPrice 10^30 stays paid: it
 
 /** withdraw's calldata as solc's abi.encode writes it, for this test's pool and fee recipient (the proof's words are
  *  not read by the helper; the pool checks them, and the fake providers' simulation passes). */
-function withdrawData(fee: bigint, nullifier: bigint, deadlineMs = NOW + 300_000): string {
-  const relay = [a32("0x0000000000000000000000000000000000000a11"), a32(FEE_TO), w32(10n ** 16n), w32(BigInt(deadlineMs)), w32(1n), "c9".padEnd(64, "0")];
+function withdrawData(fee: bigint, nullifier: bigint, deadlineMs = NOW + 300_000, chainId = CHAIN_ID): string {
+  const relay = [a32(W_SIGNER), a32(FEE_TO), w32(10n ** 16n), w32(BigInt(deadlineMs)), w32(1n), "c9".padEnd(64, "0")];
   const proof = Array.from({ length: 16 }, (_, i) => (i === 9 ? nullifier : BigInt(i + 1)));
-  return `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(fee)}${w32(28n * 32n)}${a32(POOL)}${w32(64n)}${w32(192n)}${relay.join("")}${SIG}`;
+  return signRelease(`0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(fee)}${w32(28n * 32n)}${a32(POOL)}${w32(64n)}${w32(192n)}${relay.join("")}${SIG}`, POOL, chainId);
 }
 
 test("withdraws still go while sales answer 429: the sell sender's whole budget spent refuses every sale, a client's included, and that client's withdraw is still sent from the withdraw sender", async () => {
@@ -1075,7 +1083,8 @@ const stuck = async (send: (s: ReturnType<typeof evmPoolSender>) => Promise<{ st
   const count = (t: string, who: string) => (!lanes.has(who) ? 7n : t === "pending" ? pending : mined);
   const countB = (t: string, who: string) => (!lanes.has(who) ? 7n : t === "pending" ? pending : (minedB ?? mined));
   const x: Calls = [];
-  const o: Opts = { receipt: () => null, tx: () => ({}), count, ...(o2.arbL1 === undefined ? {} : { arbL1: o2.arbL1 }) };
+  // the providers name the network's pinned chain id (Robinhood testnet's 46630 there), as the withdraw route requires
+  const o: Opts = { receipt: () => null, tx: () => ({}), count, ...(o2.arbL1 === undefined ? {} : { arbL1: o2.arbL1 }), ...(o2.network === "robinhood-testnet" ? { chain: "0xb626" } : {}) };
   // provider b: o's answers as they change, but its own latest count once set, and its ArbGasInfo estimate when given
   const ob: Opts = Object.create(o, { count: { value: countB }, ...(o2.arbL1B === undefined ? {} : { arbL1: { value: o2.arbL1B } }) }) as Opts;
   const lines: string[] = [];
@@ -1255,10 +1264,11 @@ test("the replacement's gas on Robinhood: 21,000 + the L1 poster's gas (the kit'
   const fee = withdrawFee(BASE, "robinhood-testnet");
   const E = 2_000_000n; // ArbGasInfo's L1 base fee estimate on provider a; b answers twice it, the higher
   // the base fee 2 x BASE on a and 3 x BASE on b: the price on the higher, the poster's gas on the lower
-  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x84n), epoch: NOW }), NOW + 300_000, { network: "robinhood-testnet", arbL1: E, arbL1B: 2n * E, base: 2n * BASE, baseB: 3n * BASE });
+  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x84n, NOW + 300_000, 46_630n), epoch: NOW }), NOW + 300_000, { network: "robinhood-testnet", arbL1: E, arbL1B: 2n * E, base: 2n * BASE, baseB: 3n * BASE });
   const repl = r.raws[1]!;
   assert.ok(repl.maxFee >= 2n * (3n * BASE) + repl.tip, "priced on the higher base fee");
-  const txBytes = BigInt(evmTx4MaxLength({ chainId: CHAIN_ID, nonce: 7n, maxPriorityFeePerGas: repl.tip, maxFeePerGas: repl.maxFee, gas: 1n << 32n, to: evmAddressOf(KEY), data: new Uint8Array(), authorizations: [] }));
+  // signed for Robinhood testnet's pinned chain id, 46630 (card helper-evm-sender-2: the providers must name it)
+  const txBytes = BigInt(evmTx4MaxLength({ chainId: 46_630n, nonce: 7n, maxPriorityFeePerGas: repl.tip, maxFeePerGas: repl.maxFee, gas: 1n << 32n, to: evmAddressOf(KEY), data: new Uint8Array(), authorizations: [] }));
   const l1 = evmPoolChainFee("robinhood-testnet", txBytes, [2n * E]);
   assert.ok(l1 > evmPoolChainFee("robinhood-testnet", txBytes, [E]), "the two estimates price apart");
   const poster = (l1 + 2n * BASE - 1n) / (2n * BASE);

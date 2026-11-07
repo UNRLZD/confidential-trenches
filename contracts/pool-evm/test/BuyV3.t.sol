@@ -161,28 +161,23 @@ contract BuyV3Test is BuyBase {
   }
 
   /// The pool fills only part of the chunk (it stops at its price limit): the router would keep the rest as ETH, for
-  /// anyone's refundETH. The buy reverts whole and the note stays unspent.
+  /// anyone's refundETH. The swap reverts whole, and the buy pays out as a withdraw (card pool-evm-buy-pays-revert).
   function test_aPartialFillRevertsTheBuy() public {
     lp.mint(V3POOL, -1000, -500, 1e9); // token1 only, below the price: about 2.4e7 units for about 2.6e7 wei
     (IPrivacyPoolSimple.Buy memory _b, bytes memory _sig) = _signedBuy(abi.encodePacked(WETH, uint24(500), USDC), USDC, 2e7);
-    uint256 _poolBefore = POOL.balance;
-    vm.expectRevert(PARTIAL_FILL);
-    _buy('local.buy', 0.01 ether, _b, _sig);
-    assertFalse(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'the note is not spent');
-    assertEq(POOL.balance, _poolBefore, 'the chunk stays in the pool');
+    _paysOut('local.buy', 0.01 ether, _b, _sig, PARTIAL_FILL);
     assertEq(ROUTER.balance, 0, 'nothing in the router');
+    assertEq(IERC20Balance(USDC).balanceOf(W), 0, 'W holds no USDC');
   }
 
   /// The second hop is thin: the router would keep the first hop's USDC, for anyone's sweepToken (a check on the
-  /// router's ETH alone would not see it). The buy reverts whole.
+  /// router's ETH alone would not see it). The swap reverts whole, and the buy pays out as a withdraw.
   function test_aPartialSecondHopRevertsTheBuy() public {
     lp.mint(V3POOL, -1000, -500, 1e22); // a deep first hop
     lp.mint(_secondPool(), 500, 1000, 1e9); // a thin second hop: token0 (X) only, above the price
     (IPrivacyPoolSimple.Buy memory _b, bytes memory _sig) =
       _signedBuy(abi.encodePacked(WETH, uint24(500), USDC, uint24(500), X), X, 2e7);
-    vm.expectRevert(PARTIAL_FILL);
-    _buy('local.buy', 0.01 ether, _b, _sig);
-    assertFalse(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'the note is not spent');
+    _paysOut('local.buy', 0.01 ether, _b, _sig, PARTIAL_FILL);
     assertEq(IERC20Balance(USDC).balanceOf(ROUTER), 0, 'no USDC in the router');
   }
 
