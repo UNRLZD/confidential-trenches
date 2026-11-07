@@ -37,7 +37,7 @@ const NOW = 2_000_000_000_000 - 100_000;
 const EPOCH = 1_999_999_860_000;
 const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("currentTreeDepth()"))).subarray(0, 4).toString("hex")}`;
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance = 10n ** 20n): EvmRpc {
+function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance: bigint | (() => bigint) = 10n ** 20n): EvmRpc {
   const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
   return async (method, params) => {
     calls.push({ method, params });
@@ -55,13 +55,13 @@ function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1"
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
       case "eth_getTransactionReceipt": return receipt;
-      case "eth_getBalance": return `0x${balance.toString(16)}`;
+      case "eth_getBalance": return `0x${(typeof balance === "function" ? balance() : balance).toString(16)}`;
       default: throw new Error(`unexpected ${method}`);
     }
   };
 }
-const senderOf = (calls: Calls, network = "base-sepolia", chain = "0x14a34", venues?: Parameters<typeof evmPoolSender>[0]["venues"], receipts?: [unknown, unknown], balances?: [bigint, bigint]) =>
-  evmPoolSender({ network, pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, ...(venues ? { venues } : {}) }, [rpc(calls, chain, receipts?.[0], balances?.[0]), rpc([], chain, receipts?.[1], balances?.[1])], () => NOW);
+const senderOf = (calls: Calls, network = "base-sepolia", chain = "0x14a34", venues?: Parameters<typeof evmPoolSender>[0]["venues"], receipts?: [unknown, unknown], balances?: [bigint | (() => bigint), bigint | (() => bigint)], log?: (line: string) => void) =>
+  evmPoolSender({ network, pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, log: log ?? (() => {}), ...(venues ? { venues } : {}) }, [rpc(calls, chain, receipts?.[0], balances?.[0]), rpc([], chain, receipts?.[1], balances?.[1])], () => NOW);
 const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
 const sends = (calls: Calls) => calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
 
@@ -358,6 +358,34 @@ test("a buy is refused (429) when the sender's lower pending balance, less the b
   assert.equal(code(await enough.carry({ pool: POOL, data, epoch: EPOCH })), "ok");
   const second = await enough.carry({ pool: POOL, data: buyAs({ n: 1n, key: new Uint8Array(createHash("sha256").update("helper-evm-sender-2/test-key/W3").digest()), coin: "0x0000000000000000000000000000000000007070" }), epoch: EPOCH }, "198.51.100.77");
   assert.match(JSON.stringify(second.body), new RegExp(`buys in flight ${worst}, this buy`), "the first buy's worst counts as spent while it flies");
+  // review of 7d210cb5 r3 Low B: a buy whose two receipts are read leaves the in-flight set, its cost already out of the
+  // balance: after a buy that reverted (its whole cost charged to its W, client and token), another W's buy of another
+  // coin from another client at the reserve plus its own worst goes
+  const landed = senderOf([], "base-sepolia", "0x14a34", undefined, [receiptOf(data, "0x0", false), receiptOf(data, "0x0", false)], [reserve + worst, reserve + worst]);
+  assert.equal(code(await landed.carry({ pool: POOL, data, epoch: EPOCH }, "203.0.113.50")), "ok");
+  await settle();
+  const after = await landed.carry({ pool: POOL, data: buyAs({ n: 1n, key: new Uint8Array(createHash("sha256").update("helper-evm-sender-2/test-key/W5").digest()), coin: "0x0000000000000000000000000000000000007070" }), epoch: EPOCH }, "198.51.100.51");
+  assert.equal(code(after), "ok", `the read buy no longer counts as in flight: ${JSON.stringify(after.body)}`);
+});
+
+test("one log line when buys first stop at the withdraws' reserve and one when they go again, naming the sender, its lower balance, the reserve and the buys in flight", async () => {
+  const reserve = BigInt(EVM_WITHDRAW_RESERVE_SENDS) * EVM_GAS_MAX * 2_100_000_000n;
+  const gas = (0x95433n * 12n) / 10n;
+  const fee = evmReadRelease(bytes(buyAs())).fee;
+  const worst = gas * (fee / gas < 2_100_000_000n ? fee / gas : 2_100_000_000n);
+  const lines: string[] = [];
+  let balance = reserve; // under the reserve plus one buy's worst
+  const s = senderOf([], "base-sepolia", "0x14a34", undefined, [null, null], [() => balance + 5n, () => balance], (l) => lines.push(l));
+  for (const n of [0n, 1n, 2n]) assert.equal(code(await s.carry({ pool: POOL, data: buyAs({ n }), epoch: EPOCH })), "rate_limited");
+  const sender = evmAddressOf(KEY);
+  assert.deepEqual(lines, [`evm base-sepolia: buys stop at the withdraws' reserve: ${sender}'s lower pending balance ${reserve} wei, reserve ${reserve} wei, buys in flight 0 wei; refill the sender`], "one line for the whole stop");
+  balance = reserve + worst; // refilled
+  assert.equal(code(await s.carry({ pool: POOL, data: buyAs({ n: 3n }), epoch: EPOCH })), "ok");
+  assert.equal(code(await s.carry({ pool: POOL, data: buyAs({ n: 4n, key: new Uint8Array(createHash("sha256").update("helper-evm-sender-2/test-key/W4").digest()), coin: "0x0000000000000000000000000000000000007070" }), epoch: EPOCH }, "198.51.100.88")), "rate_limited", "the first buy now flies: the next stops again");
+  assert.deepEqual(lines.slice(1), [
+    `evm base-sepolia: buys go again over the withdraws' reserve: ${sender}'s lower pending balance ${reserve + worst} wei, reserve ${reserve} wei, buys in flight 0 wei`,
+    `evm base-sepolia: buys stop at the withdraws' reserve: ${sender}'s lower pending balance ${reserve + worst} wei, reserve ${reserve} wei, buys in flight ${worst} wei; refill the sender`,
+  ]);
 });
 
 // ---- review of 7d210cb5 L1: a retry of a buy already sent gets its first hash, even when its own worst fills a cap ----

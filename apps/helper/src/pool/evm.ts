@@ -128,9 +128,10 @@
 //   rate_limited (429) the sell lane's queue is full; or the unpaid gas held against W, the client, the token (each
 //                    EVM_SELL_UNPAID_CAP_WEI) or the sender's whole sell budget (EVM_SELL_UNPAID_BUDGET_WEI) in the
 //                    window would pass its cap with this sale's worst cost, each with Retry-After until the oldest
-//                    leaves it (a cap holding nothing takes one sale: its worst is at most the cap); a caller (W or
-//                    client) whose own sale landed and paid in the window is held by its own W and client caps and the
-//                    budget, never by the token's, so unpaid gas never passes the budget by more than one sale.
+//                    leaves it (a cap holding nothing takes one sale whatever its worst, which a gas spike can lift past
+//                    the cap: one such sale per empty key); a caller (W or client) whose own sale landed and paid in the
+//                    window is held by its own W and client caps and the budget, never by the token's, so unpaid gas
+//                    never passes the budget by more than one sale.
 //                    Withdraws are never held by these; buys are, by the same W, client and token caps and their own
 //                    budget (above);
 //   in_flight (429)  as the withdraw: one held limit per client across both routes.
@@ -813,6 +814,8 @@ export function evmPoolSender(
   const unpaid = new Map<string, Charge[]>();
   /** Each buy sent whose two receipts are not yet read, its worst held: the withdraws' reserve counts them as spent. */
   const buysInFlight = new Set<Charge>();
+  /** Whether the last buy that read the reserve stopped at it: one log line per stop and per start again. */
+  let reserveHeld = false;
   const live = (k: string, t: number): Charge[] => {
     const l = (unpaid.get(k) ?? []).filter((c) => c.at > t - EVM_SELL_UNPAID_WINDOW_MS);
     if (l.length === 0) unpaid.delete(k);
@@ -834,7 +837,9 @@ export function evmPoolSender(
       // a key with nothing held takes one send whatever its worst (a buy's worst is at most its fee, which a gas spike
       // can lift past a cap: one buy is never refused for its own size). So a key holds at most its cap plus the one
       // send that found it empty: a W, client or token key, which buys and sales share, its cap plus one buy and one
-      // sale (each may find it empty at once); a sale's worst is at most the cap (EVM_SELL_MAX_FEE_PER_GAS)
+      // sale (each may find it empty at once). A sale's worst, gas x min(2 x base + tip, (fee - the chain fee) / gas), has
+      // no ceiling of its own (EVM_SELL_MAX_FEE_PER_GAS caps only the lane's replacements), so in a gas spike it too can
+      // pass the cap: one such sale per empty key
       if (sum > 0n && sum + extra > cap) {
         const oldest = l.length > 0 ? l[0]!.at : t;
         return { ...no(429, "rate_limited", `unpaid ${keys[0] === "buys" ? "buy" : "sell"} gas ${sum} wei for ${budget ? "this sender" : k.slice(0, 1) === "w" ? "W" : k.slice(0, 1) === "c" ? "this client" : "this token"}, cap ${cap}`), retryAfterS: Math.max(1, Math.ceil((oldest + EVM_SELL_UNPAID_WINDOW_MS - t) / 1000)) };
@@ -1065,7 +1070,16 @@ export function evmPoolSender(
       const flying = [...buysInFlight].reduce((x, c) => x + c.wei, 0n);
       const reserve = BigInt(EVM_WITHDRAW_RESERVE_SENDS) * EVM_GAS_MAX * (2n * base + tip);
       const low = balA < balB ? balA : balB;
-      if (low < reserve + flying + worst) return { ...no(429, "rate_limited", `the sender keeps ${reserve} wei for withdraws: balance ${low}, buys in flight ${flying}, this buy ${worst}`), retryAfterS: EVM_LANE_RETRY_S };
+      // one log line when buys first stop at the reserve and one when they go again, so the operator learns of a refill
+      // need from the log, not from users
+      const said = `${sender}'s lower pending balance ${low} wei, reserve ${reserve} wei, buys in flight ${flying} wei`;
+      if (low < reserve + flying + worst) {
+        if (!reserveHeld) log(`evm ${cfg.network}: buys stop at the withdraws' reserve: ${said}; refill the sender`);
+        reserveHeld = true;
+        return { ...no(429, "rate_limited", `the sender keeps ${reserve} wei for withdraws: balance ${low}, buys in flight ${flying}, this buy ${worst}`), retryAfterS: EVM_LANE_RETRY_S };
+      }
+      if (reserveHeld) log(`evm ${cfg.network}: buys go again over the withdraws' reserve: ${said}`);
+      reserveHeld = false;
     }
     // the simulation is the transaction as it will be signed: at pending, from the sender, with its gas and fee fields
     // (a call that reverts only at a real gas price is caught here, not paid for on chain)

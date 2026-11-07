@@ -5,7 +5,7 @@
 // resolves the same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named
 // test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
 // once (the style of sell-mutants.mjs).
-//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 68 test runs, one per mutant)
+//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 69 test runs, one per mutant)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check, as the pool's own
 // ecrecover makes it): the v test (a v but 27 or 28 gives a recovery id below 0 or above 1, which recovers no key or
@@ -116,6 +116,7 @@ export const MUTANTS = [
   [EVM, "      if (low < reserve + flying + worst) return", "      if (low < reserve + worst) return", T, RESERVE],
   [EVM, "      const low = balA < balB ? balA : balB;", "      const low = balA;", T, RESERVE],
   [EVM, "      buysInFlight.add(held);\n", "", T, RESERVE],
+  [EVM, "    buysInFlight.delete(held);\n", "", T, RESERVE],
   // review of 7d210cb5 L1: a repeat of a sent buy gets its hash; a repeat after it ended is held before its new send
   [EVM, "    if (keys !== undefined && once.get(w.nullifier) === undefined) {", "    if (keys !== undefined) {", T, RETRY],
   [EVM, "      if (keys !== undefined) {\n        const capped = overCap(keys, 1n);", "      if (false) {\n        const capped = overCap(keys, 1n);", T, HOLD],
