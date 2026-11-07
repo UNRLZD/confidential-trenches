@@ -3,7 +3,8 @@
 // deposit's status. Every state comes from an answer or an event (a quote answered, the deposit seen, the arrival, the
 // signed deadline reached); no timer ever produces a failure. APP_HOST never makes an address: the only address the
 // sheet draws is the one inside the quote SIGN_HOST checked (W:667, CH-028, CH-033).
-import type { Chain, DepositAsset, DepositFacts, DepositStage, Operation, SignpageResults } from "@blindfill/kit";
+import { POOL_CHAINS } from "@blindfill/kit";
+import type { Chain, DepositAsset, DepositFacts, DepositStage, Operation, PoolChain, SignpageResults } from "@blindfill/kit";
 
 /**
  * Every state the sheet draws. S4.x ids are BRF's (09-design-brief S4) and R5's; the rest are app.md's NEW frames, named
@@ -31,7 +32,26 @@ export type SheetState =
   | "held-vault-blocked" // CH-119: the vault's account blocked on USDC
   | "S4.18" // short deposit (1Click INCOMPLETE_DEPOSIT)
   | "S4.19" // backup first: the 12 words are the only copy and not saved
-  | "S4.20"; // address expired before anything arrived
+  | "S4.20" // address expired before anything arrived
+  | "pool-off"; // card deposit-to-pool: a pool picked, which the sheet cannot fund yet (no quote, no address)
+
+/**
+ * Where the money goes (card deposit-to-pool, v2 A3): the NEAR vault, the cash home, then each chain's pool in the kit's
+ * own order (POOL_CHAINS: NEAR's money is the vault's, never a pool's).
+ */
+export type Dest = "near" | PoolChain;
+export const DESTS: readonly Dest[] = Object.freeze(["near", ...POOL_CHAINS]);
+
+/**
+ * Whether the sheet can put money into a destination today. The kit's deposit.quote and deposit.dry quote a deposit that
+ * lands only in the NEAR vault (messages.ts deposit.quote, deposit.dry), and the kit has no kind that answers a pool's
+ * deposit address: pool.deposit moves only money the device already holds at its one-time wallet on that chain. A pool
+ * turns fundable here when the kit answers its address (card pool-deposit-address); until then a pool picked asks
+ * nothing and shows no address, so no money is ever sent where it cannot land.
+ */
+export function destFundable(d: Dest): boolean {
+  return d === "near";
+}
 
 /** A dry quote: the quote lines of S4.3, no address (the kit's deposit.dry answer, DepositDry). */
 export interface DryQuote {
@@ -89,6 +109,8 @@ export interface Asset {
 }
 
 export interface SheetInput {
+  /** Where the money goes (the To row). */
+  dest: Dest;
   signedIn: boolean;
   /** The signing page is READY with its state known. */
   moneyOn: boolean;
@@ -156,6 +178,7 @@ export function statusState(s: DepositStatus | null, deadline: string, now: numb
 /** The sheet's state. */
 export function sheetState(i: SheetInput): SheetState {
   if (i.checked.kind === "ok") return statusState(i.status, i.checked.value.deadline, i.now);
+  if (!destFundable(i.dest)) return "pool-off";
   if (!i.asset) return i.dry.kind === "refused" ? REFUSAL[i.dry.code] : "S4.1";
   if (i.checked.kind === "refused") return REFUSAL[i.checked.code];
   const amt = parseAmount(i.amount);

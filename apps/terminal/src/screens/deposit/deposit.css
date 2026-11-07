@@ -21,6 +21,17 @@
 .dseg { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; border: 1px solid var(--border-panel); flex: none; }
 .dseg button { height: 38px; border-radius: 9px; font: 500 15px var(--font-ui); color: var(--text-2); }
 .dseg button.on { background: var(--border-strong); color: var(--text-1); }
+/* the To row (card deposit-to-pool): R5's dpick label over four tiles in R5's drow box and dseg's on colours, each tile
+   its chain's round mark (market/avatar.css .tok-cb) over its name; a tile the sheet cannot fund yet is quieter */
+.ddest .lb { font: 500 13px var(--font-ui); color: var(--text-2); height: 18px; display: flex; align-items: center; margin-bottom: 8px; }
+.dtiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.dtiles button { height: 52px; border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-width: 0; color: var(--text-2); }
+.dtiles button.on { background: var(--border-strong); border-color: var(--border-strong); color: var(--text-1); }
+.dtiles .mk { width: 20px; height: 20px; border-radius: 50%; overflow: hidden; background: var(--bg-page); box-sizing: border-box; display: block; flex: none; }
+.dtiles .mk img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.dtiles .nm { font: 500 12px var(--font-ui); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+.dtiles button[data-fundable="no"]:not(.on) { color: var(--text-3); }
+.dtiles button[data-fundable="no"]:not(.on) .mk { opacity: .6; }
 .dpicks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dpick .lb, .damt .lb, .dget .lb { font: 500 13px var(--font-ui); color: var(--text-3); height: 18px; display: flex; align-items: center; }
 .dpick .lb { margin-bottom: 8px; color: var(--text-2); }
@@ -94,6 +105,7 @@
   .dep-x { width: 44px; height: 44px; border-radius: 14px; background: #181818; }
   .dbody { padding: 4px 16px 16px; }
   .dseg button { height: 44px; }
+  .dtiles button { height: 56px; }
   .damt .v { font-size: 44px; letter-spacing: -0.02em; }
   .dstat .retry { height: 44px; border-radius: 14px; }
   .dstat.row { padding-right: 0; border: 0; }
