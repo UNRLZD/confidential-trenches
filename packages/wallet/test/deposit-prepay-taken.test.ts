@@ -171,6 +171,18 @@ test("L1: U's key reads failing on one RPC after done: nothing final, and the ro
   assert.ok(later.filter((ms) => ms > 0).some((ms) => ms > POLL_MS), `the rounds back off on a failed read: ${later.filter((ms) => ms > 0).join()}`);
 });
 
+// With the release relayer not named (mainnet today) no tx read can show the ran call FINAL, so U's nonce past it ends
+// `out` a height before the token debits U: the pace until U's refund is bound (`due`) and final's REFUND_FINAL_BLOCKS
+// window (`late`) are what hold a slow refund. (With the relayer named, the FINAL gate holds both until the refund.)
+test("V-01 with the refund slow (10 blocks after the call), the release relayer not named: no wait past the poll until U's refund is bound, final only after it", async () => {
+  const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => ((world.refundBlocks = 10n), { relayerAccount: null }));
+  await recovered(t, ONE_USDC);
+  const f = await run((u) => ({ depositor: u, value: CREDIT }), (world) => ((world.refundBlocks = 10n), { relayerAccount: null, untilFinal: true, sleep: async () => (world.tick(), (world.timeMs += 600_000), await turn()) }));
+  assert.equal(f.op.follow.final, true);
+  assert.equal(f.world.balance, 0n, "final only once U's refund was bound");
+  assert.deepEqual(f.world.carried.map((c) => c.fate), ["refunded", "landed"]);
+});
+
 test("V-01 while the two RPCs disagree on the pages (one lacks the stranger's row): the device waits, never binds", async () => {
   let during = -1;
   const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => {
