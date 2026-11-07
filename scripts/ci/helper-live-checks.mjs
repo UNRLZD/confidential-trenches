@@ -142,10 +142,11 @@ export function poolSenderPlan(root = ROOT) {
 // is no carry to read: the check is listed not-applicable with that reason and runs on no deploy, so no helper deploy
 // fails for a vault not yet deployed. The commit that adds the record turns it on with nothing typed here.
 export const BIND_MAINNET_RECORD = "contracts/vault/deployments/mainnet-v1.json";
-/** helper-bind-relayer-mainnet's runs under `root`: one once the mainnet record exists, else none and why. */
-export const bindMainnetPlan = (root = ROOT) =>
+/** helper-bind-relayer-mainnet's runs under `root`: one once the mainnet record exists, pinned to the deployed commit
+ *  (the check holds X-Helper-Commit to it, then that commit's MAINNET_VAULT to the record), else none and why. */
+export const bindMainnetPlan = (root = ROOT, commit = "{commit}") =>
   existsSync(path.join(root, BIND_MAINNET_RECORD))
-    ? { runs: ["scripts/live-checks/helper-bind-relayer-mainnet.mjs"], notApplicable: null }
+    ? { runs: [`scripts/live-checks/helper-bind-relayer-mainnet.mjs --commit ${commit}`], notApplicable: null }
     : { runs: [], notApplicable: `the mainnet vault is not deployed: ${BIND_MAINNET_RECORD} does not exist` };
 
 // A check the runner cannot run, with why. live.yml lists each one in the run's summary as skipped-<reason> and runs
@@ -188,7 +189,7 @@ export const BUDGET_EXEMPT = {
 };
 
 export const liveRuns = (k, { commit = "{commit}", root = ROOT } = {}) =>
-  k === "helper-pool-senders" ? poolSenderPlan(root).runs : k === "helper-bind-relayer-mainnet" ? bindMainnetPlan(root).runs : [`scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k].replaceAll("{commit}", commit)}` : ""}`];
+  k === "helper-pool-senders" ? poolSenderPlan(root).runs : k === "helper-bind-relayer-mainnet" ? bindMainnetPlan(root, commit).runs : [`scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k].replaceAll("{commit}", commit)}` : ""}`];
 
 /** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs --commit <sha>`). */
 export const liveList = (opts = {}) => {

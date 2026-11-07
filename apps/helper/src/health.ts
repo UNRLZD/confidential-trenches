@@ -10,7 +10,6 @@
 import { HELPER_PARTS, type HelperPart, type HelperPartState } from "@blindfill/kit";
 import { RELEASE_ENV } from "./withdraw/send.ts";
 import type { SlotName, SlotState } from "./rpc/slot.ts";
-import type { BindCarry } from "./bind/env.ts";
 import type { KeyedChain } from "./rpc/rpc.ts";
 import type { TokenNetwork } from "./token-status/status.ts";
 
@@ -24,9 +23,11 @@ export type PartState = HelperPartState;
 // `rpc` (card rpc-keyed-lists): each mainnet chain's keyed URLs in the order its reads ask them (rpc/rpc.ts
 // RPC_UPSTREAMS keyed), each "<company's domain> <state>" (rpc.ts companyOf) with its last identity read (rpc.ts
 // probe): "answers" its chain, "wrong chain", "held", "down" or "unread"; never a path, a query or a key.
-// `bind` (card helper-bind-relayer-mainnet): each network POST /v1/bind carries, with its gas account and vault (both
-// public, on chain with every deposit), so the operator's live check reads which account to fund; {} when none.
-export type Health = { ok: true; commit: string; release: number | null; ready: boolean; parts: Record<Part, PartState>; solana: Partial<Record<SlotName, SlotState>>; rpc: Partial<Record<KeyedChain, string[]>>; bind: Partial<Record<TokenNetwork, BindCarry>> };
+// `bind` (card helper-bind-relayer-mainnet): each network POST /v1/bind carries, with its gas account (public, on chain
+// with every deposit), so the operator's live check reads which account to fund; {} when none. No vault: mainnet's is
+// the release's pin (withdraw/send.ts MAINNET_VAULT, bind/env.ts refuses any other at start), and the body stays within
+// the kit's 1 KB at the longest full config (server.test.ts holds it).
+export type Health = { ok: true; commit: string; release: number | null; ready: boolean; parts: Record<Part, PartState>; solana: Partial<Record<SlotName, SlotState>>; rpc: Partial<Record<KeyedChain, string[]>>; bind: Partial<Record<TokenNetwork, string>> };
 
 /** HELPER_RELEASE as the relayers read it (send.ts, bind/env.ts: 1 to 9 digits, no leading zero), else null. */
 export function releaseOf(env: Record<string, string | undefined>): number | null {

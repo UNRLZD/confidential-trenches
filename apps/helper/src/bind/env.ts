@@ -41,13 +41,13 @@ export type BindSender = {
    */
   delivered?(body: string): void;
   /**
-   * Each carried network's gas account and vault, public both, for /v1/health (card helper-bind-relayer-mainnet): set
-   * at start from the host's lines, whether or not the account exists or is funded yet.
+   * Each carried network's gas account (public, on chain with every deposit it signs), for /v1/health (card
+   * helper-bind-relayer-mainnet): set at start from the host's lines, whether or not the account exists or is funded
+   * yet. The vault is not listed: mainnet's is the release's pin (MAINNET_VAULT, checked at start above), and the
+   * health body must stay within the kit's 1 KB (review FIX 1).
    */
-  carried?(): Partial<Record<TokenNetwork, BindCarry>>;
+  carried?(): Partial<Record<TokenNetwork, string>>;
 };
-/** A carried network as /v1/health lists it. */
-export type BindCarry = { account: string; vault: string };
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
 /** A device polls its status: the answers that change nothing are not logged. */
@@ -202,7 +202,7 @@ export function bindSenderFromEnv(
       return carryDeposit(body, deps);
     },
     warm: () => carried.forEach((net) => void warmNet(net)),
-    carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, { account: net.account, vault: net.vault }])),
+    carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, net.account])),
     delivered(body) {
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
       void onStatusAnswer(body, nets).then(

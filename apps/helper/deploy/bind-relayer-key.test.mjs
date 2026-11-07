@@ -98,7 +98,7 @@ test("writes the three mainnet names once: the vault mainnet-v1.json's, the key 
   // the helper's own start takes the three lines (bind/env.ts: the pin, the key's form, the margin and store set)
   const helperEnv = Object.fromEntries(after.split("\n").filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
   const sender = bindSenderFromEnv({ ...helperEnv, HELPER_STORE_DIR: mkdtempSync(path.join(tmpdir(), "bind-key-store-")) }, {}, async () => { throw new Error("no network in this test"); });
-  assert.deepEqual(sender.carried?.(), { mainnet: { account, vault: MAINNET_VAULT } });
+  assert.deepEqual(sender.carried?.(), { mainnet: account });
   sender.stop();
   // the output: the public key and the accounts, never the secret or any part of its seed
   const out = r.stdout + r.stderr;

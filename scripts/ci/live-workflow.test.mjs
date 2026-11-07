@@ -352,9 +352,10 @@ test("the plan runs helper-bind-relayer-mainnet once contracts/vault/deployments
     const a = await planFor("helper", { commit: COMMIT, root: before });
     assert.ok(!a.include.some((e) => keysOf(e).includes("helper-bind-relayer-mainnet")), "no mainnet vault: no run, so no deploy fails on it");
     assert.deepEqual(a.skipped.filter((s) => s.key === "helper-bind-relayer-mainnet"), [{ key: "helper-bind-relayer-mainnet", reason: "not-applicable", detail: reason }]);
-    assert.deepEqual(bindMainnetPlan(after), { runs: ["scripts/live-checks/helper-bind-relayer-mainnet.mjs"], notApplicable: null });
+    assert.deepEqual(bindMainnetPlan(after), { runs: ["scripts/live-checks/helper-bind-relayer-mainnet.mjs --commit {commit}"], notApplicable: null });
     const b = await planFor("helper", { commit: COMMIT, root: after });
-    assert.deepEqual(b.include.filter((e) => e.key === "helper-bind-relayer-mainnet").map((e) => e.args), [""], "one run, after every helper deploy");
+    // review FIX 1: the health answer names no vault, so the check pins the deployed commit and reads that commit's pin
+    assert.deepEqual(b.include.filter((e) => e.key === "helper-bind-relayer-mainnet").map((e) => e.args), [`--commit ${COMMIT}`], "one run, after every helper deploy, pinned to the deployed commit");
     assert.ok(!b.skipped.some((s) => s.key === "helper-bind-relayer-mainnet"));
   } finally {
     for (const r of [before, after]) rmSync(r, { recursive: true, force: true });
