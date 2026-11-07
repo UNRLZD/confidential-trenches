@@ -55,8 +55,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addressOf, returnAddress, signTx } from "./deploy.mjs";
-import { MAINNET_IDS, deploymentFile, hex, keccak, rpc, selector, word } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { authJson, balanceOfData, buyData, depositData, proofArg, revertName, sellData, sign65, signTx7702, stopper, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
+import { MAINNET_IDS, hex, keccak, poolFile, rpc, selector, word } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
+import { authJson, balanceOfData, buyData, buyDigest, depositData, proofArg, revertName, sellData, sign65, signTx7702, stopper, withdrawData, withdrawDigest, withdrawLeft } from "./testnet-run-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "../../..");
@@ -222,6 +222,9 @@ export function wiringOf(args, io = {}) {
   const sellHelper = opt("--sell-helper");
   if (args.includes("--sell-helper") && !/^https?:\/\/[^/\s]+$/.test(sellHelper ?? "")) throw new Error("--sell-helper: a helper's base URL, no path");
   if (!out) throw new Error("a dry run (loopback RPCs) needs --out, so it never writes the real record");
+  // --fail-buy (card pool-evm-buy-pays-revert): each buy asks a minOut twice the device's quote, which no swap meets, so
+  // the pool pays W the chunk less the fee in ETH and emits Withdrawn, the buy landing with status 1; nothing is sold
+  const failBuy = args.includes("--fail-buy");
   const evmRpc = (u) => Object.assign((method, params) => rpc(fetchFn, u, method, params, sleep), { url: u });
   const rpcs = [evmRpc(urls[0]), evmRpc(urls[1])];
   // the fee's state reads at the epoch's first block (the device's bind and the relayer's answer): the kit pin's two
@@ -229,7 +232,7 @@ export function wiringOf(args, io = {}) {
   const feeUrls = feeProviders(chain, opt("--rpc"));
   const feeRpcs = [evmRpc(feeUrls[0]), evmRpc(feeUrls[1])];
   return {
-    fetchFn, sleep, chain, net, ret, venues, urls, dryRun, bindFromS, out, sellHelper, evmRpc, rpcs, feeUrls, feeRpcs,
+    fetchFn, sleep, chain, net, ret, venues, urls, dryRun, bindFromS, out, sellHelper, evmRpc, rpcs, feeUrls, feeRpcs, failBuy,
     /** The device's pool's arguments (deviceOf): the sync on the run's pair, the fee's state reads on the fee's. */
     deviceArgs: (pin, relayFee) => ({ pin, rpcs, feeRpcs, relayFee }),
     /** A bind's epoch: once the pool's time (`nowOf`) is at least --bind-from-s into it (bindEpoch). */
@@ -239,7 +242,7 @@ export function wiringOf(args, io = {}) {
 
 export async function main(args, io = {}) {
   const w = wiringOf(args, io);
-  const { fetchFn, sleep, chain, net, ret, venues, urls, dryRun, out, sellHelper, evmRpc, rpcs, feeRpcs } = w;
+  const { fetchFn, sleep, chain, net, ret, venues, urls, dryRun, out, sellHelper, evmRpc, rpcs, feeRpcs, failBuy } = w;
   const call = (method, params, u = urls[0]) => rpc(fetchFn, u, method, params, sleep);
   // the device's quotes: a real run's on the chain's pinned providers (the kit's index); the dry run's on the fork
   const batchRpc = (u) => async (calls) => {
@@ -278,7 +281,9 @@ export async function main(args, io = {}) {
   const adapters = { v4: lower(venue.adapters.v4), v3: lower(venue.adapters.v3 ?? ZERO) };
   for (const v of venues) if (adapters[v] === ZERO) throw new Error(`${chain} has no pinned ${v} adapter`);
   for (const v of venues) if (!net[v]) throw new Error(`${chain} has no ${v} pool or quoter in NETS`);
-  const deployRec = JSON.parse(readFileSync(deploymentFile(chain), "utf8"));
+  // the pinned pool's own deploy (its newest pool set's record): its block is the sync's start
+  const deployRec = JSON.parse(readFileSync(poolFile(chain), "utf8"));
+  if (lower(deployRec.contracts.PrivacyPoolSimple.address) !== pool) throw new Error(`${chain}'s pool record names ${deployRec.contracts.PrivacyPoolSimple.address}, not the kit's pinned pool ${pool}`);
   const deployTx = deployRec.txs.find((t) => t.step === "deploy PrivacyPoolSimple").hash;
   const fromBlock = BigInt((await call("eth_getTransactionReceipt", [deployTx])).blockNumber);
   const scope = evmPoolScopeOf(pool, chainId);
@@ -435,8 +440,36 @@ export async function main(args, io = {}) {
           (q) => kit.evmPoolBuildQuoted(adapters[q.route.venue === "uniswap-v4" ? "v4" : "v3"], q),
         );
         const got = q.route.venue === "uniswap-v4" ? "v4" : "v3";
-        const sig = kit.evmPoolSignBuy(W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
         v = got;
+        if (failBuy) {
+          // the device's built buy with a minOut no swap meets, signed as the pool's Buy (buyDigest); the pool takes the
+          // fee, pays W the rest in ETH and emits Withdrawn, never Bought, and the buy lands
+          const asked = { ...built, minOut: 2n * q.amountOut };
+          const sig = sign65(buyDigest(chainId, pool, asked, nullifier, b.context, withdrawn), W.secretKey);
+          const before = await Promise.all(urls.map((u) => call("eth_getBalance", [W.address, "latest"], u)));
+          step = `buy through ${v}, its swap failing`;
+          r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, asked, sig) }, { kind: "buy-failed", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(asked.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), coin: token });
+          if (poolLog(r, T.Bought)) throw new Error(`${step}: a Bought event`);
+          const ev = poolLog(r, T.Withdrawn);
+          if (!ev) throw new Error(`${step}: no Withdrawn event`);
+          // Withdrawn(recipient indexed; feeRecipient, value, fee, spentNullifier, newCommitment): the data's words
+          const d = words(ev.data);
+          if (lower(`0x${ev.topics[1].slice(26)}`) !== lower(W.address) || d[0] !== BigInt(relayer) || d[1] !== withdrawn || d[2] !== fee || d[3] !== nullifier) throw new Error(`${step}: Withdrawn(${ev.topics[1]}; ${d.slice(0, 4).join(", ")}), not (W ${W.address}; fee recipient ${relayer}, value ${withdrawn}, fee ${fee}, nullifier ${nullifier})`);
+          // W holds the chunk less the fee in ETH and no token, on both RPCs at the buy's block
+          const at = `0x${BigInt(r.blockNumber).toString(16)}`;
+          for (const [i, u] of urls.entries()) {
+            const eth = BigInt(await call("eth_getBalance", [W.address, at], u)) - BigInt(before[i]);
+            const tok = BigInt(await call("eth_call", [{ to: token, data: balanceOfData(W.address) }, at], u));
+            if (eth !== withdrawn - fee || tok !== 0n) throw new Error(`${step}: W gained ${eth} wei and holds ${tok} of the token on ${u}, not ${withdrawn - fee} and 0`);
+          }
+          console.log(`run: ${step}: Withdrawn(value ${withdrawn}, fee ${fee}); W ${lower(W.address)} gained ${withdrawn - fee} wei and holds no token on both RPCs; the fee went to the fee recipient ${relayer}`);
+          Object.assign(steps.at(-1), { newCommitment: String(d[4]), value: String(withdrawn), fee: String(fee), wGained: String(withdrawn - fee) });
+          wallets.add(cref.l.toString() + ":" + j);
+          note.spent = true;
+          notes.push({ ref: cref, value: note.value - withdrawn, label: l, commitment: BigInt(steps.at(-1).newCommitment), block: BigInt(r.blockNumber), spent: false });
+          return;
+        }
+        const sig = kit.evmPoolSignBuy(W.secretKey, chain, pool, built, { nullifier, context: b.context, value: withdrawn });
         step = `buy through ${v}`;
         r = await send(step, { to: pool, data: buyData(pool, relay, proof, fee, built, sig) }, { kind: "buy", venue: v, w: lower(W.address), nullifier: String(nullifier), minOut: String(built.minOut), quoted: String(q.amountOut), quoteBlock: String(q.block.number), coin: token });
         const ev = poolLog(r, T.Bought);

@@ -13,11 +13,15 @@ import { judge } from "./helper-pool-senders.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./helper-evm-sender-2.answers.json", import.meta.url), "utf8"));
 const P = JSON.parse(readFileSync(new URL("./helper-pool-senders.answers.json", import.meta.url), "utf8"));
+// the recordings' pools: the testnets' first set (6 Nov); the entry runs on each testnet's newest pool set, card
+// pool-evm-buy-pays-revert's (7 Nov), and the first set's pools no longer
 const TESTNET_POOLS = ["0xb239a38af69b68e6c5c305df64985f283b5d5fe5", "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"];
+const CURRENT_POOLS = ["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"];
 
 test("the entry runs helper-pool-senders on each EVM pool a deploy record names, or the one asked", () => {
   assert.deepEqual(CHECKS, ["helper-pool-senders"]);
-  for (const p of TESTNET_POOLS) assert.ok(poolsOf(undefined).includes(p), `${p} from its deploy record`);
+  for (const p of CURRENT_POOLS) assert.ok(poolsOf(undefined).includes(p), `${p} from its deploy record`);
+  for (const p of TESTNET_POOLS) assert.ok(!poolsOf(undefined).includes(p), `${p}: the first set's pool, redeployed`);
   assert.deepEqual(poolsOf(TESTNET_POOLS[0]), [TESTNET_POOLS[0]]);
   assert.deepEqual(poolsOf("0xB239A38AF69B68E6C5C305DF64985F283B5D5FE5"), [], "a pool not as the route takes it");
 });

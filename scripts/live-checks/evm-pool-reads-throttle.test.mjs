@@ -16,7 +16,7 @@ const A = JSON.parse(readFileSync(new URL("./evm-pool-reads-throttle.answers.jso
 test("the recorded good run passes: the binding is made with every kind of read throttled once on both providers", async () => {
   const r = await check(replayer(A.good), { wait: false });
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.match(r.lines[0], /^base-sepolia: pool 0xb239a38af69b68e6c5c305df64985f283b5d5fe5 from block \d+: now \d+, the trees at epoch \d+ \(\d+ leaves\), bound for W 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf at fee \d+ wei, deadline \d+, with \d+ reads throttled once on base-sepolia-rpc\.publicnode\.com, base-testnet\.api\.pocket\.network, sepolia\.base\.org \(eth_chainId, block finalized, block latest, block number, block hash, view, eth_getLogs; views of \d+ kinds\)$/);
+  assert.match(r.lines[0], /^base-sepolia: pool 0xeb967dfc1b4ffb22942f833c76866ea85fc42266 from block \d+: now \d+, the trees at epoch \d+ \(\d+ leaves\), bound for W 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf at fee \d+ wei, deadline \d+, with \d+ reads throttled once on base-sepolia-rpc\.publicnode\.com, base-testnet\.api\.pocket\.network, sepolia\.base\.org \(eth_chainId, block finalized, block latest, block number, block hash, view, eth_getLogs; views of \d+ kinds\)$/);
   for (const k of KINDS) assert.ok(r.lines[0].includes(k), k);
 });
 
