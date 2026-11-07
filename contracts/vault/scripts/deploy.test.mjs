@@ -484,12 +484,14 @@ test("a deploy record names exactly one source: source_commit or non_reproducibl
   assert.match(recordSourceProblems({ ...rec, source_commit: "main" }).join(";"), /source_commit "main" is not a 40-hex commit/);
   assert.match(recordSourceProblems({ ...rec, code_hash: "x" }).join(";"), /code_hash x is not the base58/);
   const records = vaultRecords();
-  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", "testnet-skeleton.json", "testnet-v1.json", "testnet-v3.json", "testnet-v4.json"]);
+  // mainnet-v1.json is the record the mainnet deploy writes (card vault-mainnet-deploy), there once the vault exists
+  const v1 = existsSync(path.join(HERE, "..", "deployments", "mainnet-v1.json")) ? ["mainnet-v1.json"] : [];
+  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", ...v1, "mainnet-v1.pin.json", "testnet-skeleton.json", "testnet-v1.json", "testnet-v3.json", "testnet-v4.json"]);
   for (const { name, record } of records) {
     assert.deepEqual(recordSourceProblems(record), [], name);
-    // testnet-v3 (card vault-review-fixes-3) is the first reproducible deploy and testnet-v4 (card vault-final-sha) the
-    // vault's final commit: each names its commit; the earlier are marked
-    if (name === "testnet-v3.json" || name === "testnet-v4.json") assert.match(record.source_commit, /^[0-9a-f]{40}$/, name);
+    // testnet-v3 (card vault-review-fixes-3) is the first reproducible deploy, testnet-v4 (card vault-final-sha) the
+    // vault's final commit and mainnet-v1 its mainnet build of that commit: each names its commit; the earlier are marked
+    if (["testnet-v3.json", "testnet-v4.json", "mainnet-v1.pin.json", "mainnet-v1.json"].includes(name)) assert.match(record.source_commit, /^[0-9a-f]{40}$/, name);
     else assert.ok(Object.hasOwn(record, "non_reproducible"), `${name} is not marked`);
   }
 });
@@ -949,13 +951,36 @@ test("mainnet MED-1: a record pinning a changed wasm for the real vault is refus
   neverSent(r);
 });
 
-test("mainnet MED-1: MAINNET_PINS names the test vault's pin, the one mainnet-test.json holds", async () => {
+test("mainnet MED-1: MAINNET_PINS names each mainnet vault's pin, the one its pre-deploy record holds", async () => {
   const { MAINNET_PINS, pinProblems } = await import(SCRIPT);
   const rec = JSON.parse(readFileSync(path.join(HERE, "..", "deployments", "mainnet-test.json"), "utf8"));
-  assert.deepEqual(MAINNET_PINS, { [rec.account_id]: rec.wasm_sha256 });
+  const v1 = JSON.parse(readFileSync(path.join(HERE, "..", "deployments", "mainnet-v1.pin.json"), "utf8"));
+  assert.deepEqual(MAINNET_PINS, { [rec.account_id]: rec.wasm_sha256, [v1.account_id]: v1.wasm_sha256 });
   // another vault has no pin at all
   const w = mainnetWasm();
-  assert.match(pinProblems(w, { ...rec, account_id: "vault.confidential.unrlzd.near" }, "vault.confidential.unrlzd.near").join(";"), /MAINNET_PINS holds no pin for vault\.confidential\.unrlzd\.near/);
+  assert.match(pinProblems(w, { ...rec, account_id: "vault-2.confidential.unrlzd.near" }, "vault-2.confidential.unrlzd.near").join(";"), /MAINNET_PINS holds no pin for vault-2\.confidential\.unrlzd\.near/);
+});
+
+// card vault-mainnet-deploy: the release vault's pre-deploy record pins the mainnet build of the vault's final source
+// commit (testnet-v4.json's source_commit), for vault.confidential.unrlzd.near (M304 D-13), and every check the deploy
+// runs on the record alone passes; the wasm itself is checked by the owner's paste (2-deploy.sh) and deploy.mjs
+test("mainnet-v1.pin.json: the mainnet vault's pre-deploy record pins the mainnet build of the final commit, and MAINNET_PINS holds the same pin", async () => {
+  const { MAINNET_PINS, recordSourceProblems } = await import(SCRIPT);
+  const dir = path.join(HERE, "..", "deployments");
+  const v1 = JSON.parse(readFileSync(path.join(dir, "mainnet-v1.pin.json"), "utf8"));
+  const v4 = JSON.parse(readFileSync(path.join(dir, "testnet-v4.json"), "utf8"));
+  assert.equal(v1.account_id, "vault.confidential.unrlzd.near");
+  assert.equal(v1.parent, "confidential.unrlzd.near");
+  assert.equal(v1.network, "mainnet");
+  assert.equal(v1.source_commit, v4.source_commit);
+  assert.equal(v1.wasm_sha256, "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc");
+  assert.equal(MAINNET_PINS[v1.account_id], v1.wasm_sha256);
+  assert.ok(v1.wasm_builds_sha256.length >= 2 && v1.wasm_builds_sha256.every((b) => b === v1.wasm_sha256));
+  assert.deepEqual(recordSourceProblems(v1), []);
+  assert.equal(v1.asset, "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1");
+  assert.match(v1.version, /^blindfill-vault \S+ mainnet$/);
+  assert.deepEqual(v1.artifact, { run: 42355216946, name: "vault-mainnet-wasm", workflow: ".github/workflows/vault-build.yml", event: "workflow_dispatch" });
+  assert.equal(Object.hasOwn(v1, "tx_hash"), false, "the pre-deploy record names no deploy");
 });
 
 test("mainnet (d): a batch that would leave a key on the vault (an AddKey, or any action past the four) is refused", async () => {

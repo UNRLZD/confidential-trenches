@@ -113,7 +113,9 @@ export const MAINNET_LIVE_CHECK = "scripts/live-checks/vault-mainnet.mjs";
 // here, not imported: that module's imports reach scripts/ci (money-gate.mjs), which the sandbox suite does not read.
 export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 // The one wasm each mainnet vault may be deployed with (review MED-1): the pin of its pre-deploy record, held here too.
-export const MAINNET_PINS = { "vault-test.confidential.unrlzd.near": "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a" };
+// vault-test: mainnet-test.json (card vault-mainnet-test). vault: mainnet-v1.pin.json, the mainnet build of e0623bf3
+// (card vault-mainnet-deploy), which deploy.mjs turns into mainnet-v1.json once the vault exists.
+export const MAINNET_PINS = { "vault-test.confidential.unrlzd.near": "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a", "vault.confidential.unrlzd.near": "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc" };
 // config().version of a mainnet build (contracts/vault/src/constants.rs NETWORK)
 export const MAINNET_VERSION = /^blindfill-vault \S+ mainnet$/;
 // What the parent must hold on mainnet beyond the code storage and the registration: the recipe's 100 Tgas config call
