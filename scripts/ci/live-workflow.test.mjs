@@ -320,3 +320,39 @@ test("planted: a plan job that also runs on a pull request is refused", () => {
   assert.deepEqual(liveProblems(LIVE).filter((l) => /plan job runs/.test(l)), []);
   assert.ok(has(liveProblems(LIVE.replace("    if: github.event_name == 'workflow_dispatch'\n", "    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'card/x'\n")), /plan job runs on something other than a dispatch/));
 });
+
+test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deploy record names, read from where the deploy writes it; helper-pool-senders' own list stays Solana's", async () => {
+  const { POOL_EVM_NETWORKS, evmPoolRecord, evmPools, poolSenderPlan } = await import("./helper-live-checks.mjs");
+  // card helper-evm-sender-2: one run for each EVM network a pool deploys to, its record where the deploy writes it
+  const deploy = await import("../live-checks/pool-evm-deploy.mjs");
+  assert.deepEqual([...POOL_EVM_NETWORKS].sort(), [...Object.keys(deploy.CHAINS), ...Object.keys(deploy.MAINNETS)].sort(), "each network pool-evm-deploy.mjs deploys a pool to");
+  for (const n of POOL_EVM_NETWORKS) assert.equal(evmPoolRecord(n), path.relative(ROOT, deploy.deploymentFile(n)), n);
+  for (const n of POOL_EVM_NETWORKS) {
+    const f = path.join(ROOT, evmPoolRecord(n));
+    assert.equal(evmPools()[n], existsSync(f) ? JSON.parse(readFileSync(f, "utf8")).contracts.PrivacyPoolSimple.address.toLowerCase() : null, n);
+  }
+  // one owner: helper-pool-senders' plan names no EVM pool (the duplicate runs this card first added)
+  assert.ok(!poolSenderPlan().runs.some((r) => /--pool 0x/.test(r)), "no EVM pool in helper-pool-senders' plan");
+  const root = mkdtempSync(path.join(tmpdir(), "evm-pool-records-"));
+  const evm = (n, body) => {
+    mkdirSync(path.dirname(path.join(root, evmPoolRecord(n))), { recursive: true });
+    writeFileSync(path.join(root, evmPoolRecord(n)), typeof body === "string" ? body : JSON.stringify(body));
+  };
+  try {
+    assert.deepEqual(evmPools(root), Object.fromEntries(POOL_EVM_NETWORKS.map((n) => [n, null])));
+    const B = "0xB239A38AF69B68E6C5C305DF64985F283B5D5FE5";
+    for (const n of POOL_EVM_NETWORKS) evm(n, { chain: n, contracts: { PrivacyPoolSimple: { address: B } } });
+    assert.deepEqual(evmPools(root), Object.fromEntries(POOL_EVM_NETWORKS.map((n) => [n, B.toLowerCase()])));
+    evm("base", { chain: "base-sepolia", contracts: { PrivacyPoolSimple: { address: B } } });
+    assert.throws(() => evmPools(root), /contracts\/pool-evm\/deployments\/base\.json names chain base-sepolia, not base/);
+    evm("base", { chain: "base", contracts: { PrivacyPool: { address: B } } });
+    assert.throws(() => evmPools(root), /deployments\/base\.json names no PrivacyPoolSimple address/);
+    evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: "0x1234" } } });
+    assert.throws(() => evmPools(root), /names no PrivacyPoolSimple address/);
+    evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: B } } });
+    evm("robinhood-testnet", "{");
+    assert.throws(() => evmPools(root), /pool-evm-deploy\.robinhood-testnet\.json is not JSON/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

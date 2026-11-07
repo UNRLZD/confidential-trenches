@@ -801,11 +801,10 @@ test("card evm-rpc-spare-list: when every provider answers -32701 the caller get
   assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test", "https://p3.test"]);
 });
 
-test("card evm-rpc-spare-list: a range cap and a revert are the device's to read: answered as they are, the next provider not asked", async () => {
+test("card evm-rpc-spare-list: a revert is the device's to read: answered as it is, the next provider not asked (a range cap walks on: card helper-evm-range-cap-walk)", async () => {
   for (const error of [
-    { code: -32602, message: "block range limit exceeded" },
-    { code: -32000, message: "query exceeds max block range 2000" },
     { code: 3, message: "execution reverted", data: "0x" },
+    { code: -32000, message: "execution reverted: block range" },
   ]) {
     const { r, asked } = shapeRig({
       "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error }),
@@ -872,4 +871,176 @@ test("card evm-rpc-spare-list: when every provider refuses the read's blocks the
   assert.equal(a.status, 200, a.body);
   assert.equal(JSON.parse(a.body).error.code, -32002);
   assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test", "https://p3.test"]);
+});
+
+// -- card helper-evm-range-cap-walk: a provider's range cap walks on; only when every provider caps is the cap answered --
+// Live run 42241935061 (6 Nov 15:19Z), check evm-rpc-spare-list: the deployed helper answered a restore's address-less
+// Transfer read of 1,000 blocks with base-pokt.nodies.app's -32001 "Block range too large: maximum allowed is 50 blocks on
+// your current plan" (its words, read again from the Mac 6 Nov 15:58Z, where base.gateway.tenderly.co and
+// base.public.blockpi.network, the list's next, answered the same read with a list), so the device paged at 50 blocks.
+
+/** Range caps read live, each with the span it names (the wallet's pool reader keeps the reads: packages/wallet/src/pool/evm.ts). */
+const CAP_ERRS: [{ code: number; message: string; data?: unknown }, bigint][] = [
+  [{ code: -32001, message: "Block range too large: maximum allowed is 50 blocks on your current plan. Upgrade your subscription at https://nodies.app" }, 50n],
+  [{ code: -32602, message: "eth_getLogs is limited to 0 - 50 blocks range" }, 50n],
+  [{ code: 35, message: "ranges over 10000 blocks are not supported on free plan" }, 10_000n],
+  [{ code: -32602, message: "invalid params", data: "Block range too large: maximum 1000 blocks without an access key. Try [0x33104e2, 0x33108ca], or use an access key for larger ranges." }, 1_000n],
+  [{ code: -32000, message: "query exceeds max block range 2000" }, 2_000n],
+  [{ code: -32701, message: "exceed maximum block range: 50000" }, 50_000n],
+  [{ code: -32602, message: "invalid argument 0: block range exceeds maximum 500" }, 500n],
+  [{ code: -32602, message: "block range exceeds maximum allowed (max=10000, requested=99993)" }, 10_000n],
+  [{ code: -32602, message: "query spans 99993 blocks (from 0x1 to 0x1869a), but only 30000 are allowed" }, 30_000n],
+  [{ code: -32614, message: "eth_getLogs is limited to a 200 range" }, 200n],
+  [{ code: -32602, message: "eth_getLogs requests are allowed up to a 10 block range" }, 10n],
+  [{ code: -32005, message: "Log response size exceeded. Maximum allowed number of requested blocks is 1000" }, 1_000n],
+  [{ code: -32602, message: "block range limit exceeded" }, 0n],
+  [{ code: -32005, message: "query returned more than 10000 results" }, 0n],
+];
+
+test("card helper-evm-range-cap-walk: each range cap read live is a cap, with the span it names (0: none named); a revert, a throttle or a shape refusal is none", () => {
+  const capOf = (rpcModule as { evmRangeCap?: (error: unknown) => bigint | null }).evmRangeCap;
+  assert.equal(typeof capOf, "function", "rpc.ts exports evmRangeCap");
+  for (const [error, span] of CAP_ERRS) assert.equal(capOf!(error), span, JSON.stringify(error));
+  for (const error of [{ code: 3, message: "execution reverted" }, { code: -32005, message: "rate limit exceeded" }, SHAPE_ERR.error, { code: -32000, message: "missing trie node" }, null, "x", { code: -32001 }]) assert.equal(capOf!(error), null, JSON.stringify(error));
+});
+
+for (const chain of ["base", "robinhood"] as const) {
+  for (const [error] of CAP_ERRS) {
+    test(`card helper-evm-range-cap-walk: ${chain}, the configured provider capping (${error.code} ${error.message.slice(0, 36)}), the next provider's list reaches the caller, and it is not held`, async () => {
+      const logs = [{ address: "0x" + "ab".repeat(20), topics: [], data: "0x", blockNumber: "0x200", logIndex: "0x0", transactionHash: "0x" + "cd".repeat(32), removed: false }];
+      const asked: string[] = [];
+      const answers: Record<string, (b: { id: unknown }) => Response> = {
+        "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error }),
+        "https://p1.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: logs }),
+        "https://p2.test": () => jsonOk({}),
+      };
+      const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answers[url]!(JSON.parse(String(init.body))));
+      const t = { v: performance.timeOrigin + performance.now() };
+      const holds = providerHolds(() => t.v);
+      const r = createRpc({ [chain === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: "https://cfg.test/" }, { fetch: fetch as never, holds, pinned: { [chain]: ["https://p1.test", "https://p2.test"] }, now: () => t.v });
+      const a = await call(r, chain, TRANSFERS(), JSON_T);
+      assert.equal(a.status, 200, a.body);
+      assert.deepEqual(JSON.parse(a.body).result, logs, a.body);
+      assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test"]);
+      assert.equal(holds.heldMs("https://cfg.test/"), 0, "no hold: it still serves smaller spans and every other read");
+    });
+  }
+}
+
+test("card helper-evm-range-cap-walk: when every provider caps, the caller gets the cap naming the largest span (a batch's too), so the device pages at the biggest any provider serves", async () => {
+  const cap = (e: { code: number; message: string; data?: unknown }) => (b: { id: unknown }) => jsonOk(Array.isArray(b) ? b.map((x: { id: unknown }) => ({ jsonrpc: "2.0", id: x.id, error: e })) : { jsonrpc: "2.0", id: b.id, error: e });
+  const { r, asked, holds } = shapeRig({
+    "https://cfg.test/": cap(CAP_ERRS[0]![0]),
+    "https://p1.test": cap(CAP_ERRS[3]![0]),
+    "https://p2.test": cap(CAP_ERRS[2]![0]),
+    "https://p3.test": cap(CAP_ERRS[4]![0]),
+  });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[2]![0], "base.drpc.org's 10,000, the largest of 50, 1,000, 10,000 and 2,000");
+  assert.deepEqual(asked, ["https://cfg.test/", "https://p1.test", "https://p2.test", "https://p3.test"]);
+  for (const u of ["https://cfg.test/", "https://p1.test", "https://p2.test", "https://p3.test"]) assert.equal(holds.heldMs(u), 0);
+  const b = await call(r, "base", [TRANSFERS(1), TRANSFERS(2)], JSON_T);
+  assert.equal(b.status, 200, b.body);
+  assert.deepEqual(JSON.parse(b.body).map((x: { error: unknown }) => x.error), [CAP_ERRS[2]![0], CAP_ERRS[2]![0]]);
+});
+
+test("card helper-evm-range-cap-walk: a cap that names its span beats one that names none, and a cap beats a shape refusal or a provider down", async () => {
+  const { r } = shapeRig({
+    "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: -32602, message: "block range limit exceeded" } }),
+    "https://p1.test": () => jsonOk(SHAPE_ERR),
+    "https://p2.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: CAP_ERRS[0]![0] }),
+    "https://p3.test": () => new Response("down", { status: 503 }),
+  });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[0]![0]);
+});
+
+test("card helper-evm-range-cap-walk (review fold 4): with the rest held for longer than the wait, the cap is the caller's answer, safe to page on (a shape refusal stays a 429)", async () => {
+  const { r, asked, holds } = shapeRig({
+    "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: CAP_ERRS[0]![0] }),
+    "https://p1.test": () => jsonOk({}),
+    "https://p2.test": () => jsonOk({}),
+    "https://p3.test": () => jsonOk({}),
+  });
+  for (const u of ["https://p1.test", "https://p2.test", "https://p3.test"]) holds.hold(u, 30);
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[0]![0]);
+  assert.deepEqual(asked, ["https://cfg.test/"]);
+});
+
+test("card helper-evm-range-cap-walk: with the next provider out of its pace for a moment, the read waits for it rather than answering the cap (live run 42241935061's shape)", async () => {
+  const logs: unknown[] = [];
+  const asked: string[] = [];
+  const answers: Record<string, (b: { id: unknown }) => Response> = {
+    "https://cfg.test/": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: CAP_ERRS[0]![0] }),
+    "https://p1.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, result: logs }),
+    "https://p2.test": () => jsonOk({}),
+  };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answers[url]!(JSON.parse(String(init.body))));
+  // the test's clock: a wait moves it on by the wait's length
+  const t = { v: performance.timeOrigin + performance.now() };
+  const holds = providerHolds(() => t.v);
+  const r = createRpc({ BASE_RPC_URL: "https://cfg.test/" }, { fetch: fetch as never, holds, pinned: { base: ["https://p1.test", "https://p2.test"] }, now: () => t.v, sleep: async (ms) => void (t.v += ms) });
+  holds.hold("https://p2.test", 30);
+  holds.hold("https://p1.test", 1);
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).result, logs);
+  assert.deepEqual(asked, ["https://cfg.test/", "https://cfg.test/", "https://p1.test"]);
+});
+
+// -- review fold 1: a cap or shape answer that holds the configured URL's key never reaches the caller, and never hides a
+// clean cap --------------------------------------------------------------------------------------------------------------
+
+// the configured URL with a path segment of 16 characters or more, a secret part by readUpstreams
+const SEGMENT = "projectsegment0123456789";
+const KEYED = `https://cfg.test/v2/${SEGMENT}`;
+function keyedRig(answers: Record<string, (b: { id: unknown }) => Response>) {
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answers[url]!(JSON.parse(String(init.body))));
+  const t = { v: performance.timeOrigin + performance.now() };
+  const r = createRpc({ BASE_RPC_URL: KEYED }, { fetch: fetch as never, holds: providerHolds(() => t.v), pinned: { base: ["https://p1.test"] }, now: () => t.v });
+  return { r, asked };
+}
+const leakCap = (b: { id: unknown }) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: 35, message: `ranges over 10000 blocks are not supported on free plan for ${KEYED}` } });
+
+test("card helper-evm-range-cap-walk (review fold 1): a cap echoing the configured URL's key never reaches the caller: 503 when it is the only answer", async () => {
+  const { r } = keyedRig({ [KEYED]: leakCap, "https://p1.test": () => new Response("down", { status: 503 }) });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.ok(!a.body.includes(SEGMENT), a.body);
+  assert.equal(a.status, 503, a.body);
+});
+
+test("card helper-evm-range-cap-walk (review fold 1): a leaking cap naming the largest span never hides a clean one: the clean cap answers", async () => {
+  const { r } = keyedRig({ [KEYED]: leakCap, "https://p1.test": (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: CAP_ERRS[0]![0] }) });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.ok(!a.body.includes(SEGMENT), a.body);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).error, CAP_ERRS[0]![0]);
+});
+
+test("card helper-evm-range-cap-walk (review fold 1): a shape refusal echoing the key never reaches the caller", async () => {
+  const { r } = keyedRig({ [KEYED]: (b) => jsonOk({ jsonrpc: "2.0", id: b.id, error: { code: -32701, message: `Please specify an address (${KEYED})` } }), "https://p1.test": () => new Response("down", { status: 503 }) });
+  const a = await call(r, "base", TRANSFERS(), JSON_T);
+  assert.ok(!a.body.includes(SEGMENT), a.body);
+  assert.equal(a.status, 503, a.body);
+});
+
+// -- review fold 5 (H5): a batch's span is the largest any of its errors names, never its first -------------------------
+test("card helper-evm-range-cap-walk (review fold 5): of two batches every provider caps, the one whose errors name the larger span answers, read across each batch", async () => {
+  const batchOf = (spans: { code: number; message: string }[]) => (b: unknown) => jsonOk((b as { id: unknown }[]).map((x, i) => ({ jsonrpc: "2.0", id: x.id, error: spans[i] })));
+  const { r } = shapeRig({
+    // its first error names 50, its second 10,000: the larger, 10,000, is its span
+    "https://cfg.test/": batchOf([CAP_ERRS[0]![0], CAP_ERRS[2]![0]]),
+    // 1,000 and 1,000
+    "https://p1.test": batchOf([CAP_ERRS[11]![0], CAP_ERRS[11]![0]]),
+    "https://p2.test": () => new Response("down", { status: 503 }),
+    "https://p3.test": () => new Response("down", { status: 503 }),
+  });
+  const a = await call(r, "base", [TRANSFERS(1), TRANSFERS(2)], JSON_T);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(JSON.parse(a.body).map((x: { error: unknown }) => x.error), [CAP_ERRS[0]![0], CAP_ERRS[2]![0]]);
 });

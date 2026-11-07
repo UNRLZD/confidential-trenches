@@ -1,0 +1,23 @@
+{
+ "note": "card pool-deposits: a deposit the pool-evm-testnet-run landed on the pinned base-sepolia pool (scripts/live-checks/pool-evm-testnet-run.md:3), eth_getTransactionByHash and eth_getTransactionReceipt on both RPCs",
+ "tx": "0x3e12217aad7c077bae57972f13f002a57c34a0eb46e6ec51bc52cf917bd7bb60",
+ "read": "2026-11-07T01:44Z",
+ "answers": [
+  {
+   "rpc": "https://sepolia.base.org",
+   "to": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+   "value": "0xaa87bee538000",
+   "input": "0xe2bbb158000000000000000000000000000000000000000000000000000aa87bee5380002d40a5c85025873f6fa7095229efa06a1c62648b9d08243023de18424621cad9",
+   "blockNumber": "0x33d0901",
+   "status": "0x1"
+  },
+  {
+   "rpc": "https://base-sepolia-rpc.publicnode.com",
+   "to": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+   "value": "0xaa87bee538000",
+   "input": "0xe2bbb158000000000000000000000000000000000000000000000000000aa87bee5380002d40a5c85025873f6fa7095229efa06a1c62648b9d08243023de18424621cad9",
+   "blockNumber": "0x33d0901",
+   "status": "0x1"
+  }
+ ]
+}

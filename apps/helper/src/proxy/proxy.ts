@@ -144,7 +144,11 @@ type Read = { status: number; body: string; fetchedAt: string; timing?: string[]
 /** `peers` (card helper-deploy-reads-fast): the other helpers on the same keys (shared-calls.ts callsFiles), whose calls
  *  every draw that may reach a vendor counts first, and to which each such draw is told at once. */
 export type Peers = { read(): unknown; write(calls: Record<string, number[]>): void };
-type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers; log?: (line: string) => void; burstMs?: number };
+/** `now` is the wall clock in ms (dates and the vendors' resets); `mono` is the monotonic clock in ms the elapsed times read
+ *  (a turn's wait, a send's duration: the turn log line and Server-Timing), performance.now by default. A test injects both
+ *  so an elapsed time is a value it sets, never the machine's speed (card helper-jup-log-clock: "answered 200 in 1 ms" on a
+ *  busy CI runner where 0 was expected). */
+type Deps = { fetch?: Fetch; now?: () => number; mono?: () => number; sleep?: (ms: number) => Promise<void>; peers?: Peers; log?: (line: string) => void; burstMs?: number };
 
 const error = (status: number, code: string): ProxyAnswer => ({ status, headers: {}, body: JSON.stringify({ error: { code } }) });
 /**
@@ -220,6 +224,7 @@ export function resetMs(h: Headers, now: number): number {
 export function createProxy(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
+  const mono = deps.mono ?? (() => performance.now());
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   /** The short window PACED vendors count (BURST_MS); 0 counts the minute alone, as a vendor that publishes no second. */
@@ -516,14 +521,14 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     const again = (): boolean => up.method === "GET" && failures === 0 && now() + RETRY_FAILED_MS <= by && (failures++, true);
     for (let attempt = 0; ; attempt++) {
       // the vendor's reset holds every call to it: waited out when it ends by `by`, else not ready (never our 429)
-      const t0 = performance.now();
+      const t0 = mono();
       const late = PACED.has(name) ? await paced(name, by, caller, reserved, client) : (await turn(name, by)) ? 0 : heldS();
       // card helper-rpc-wait-timing: a turn given at the hold's end (pump's wake) can find the clock a few ms inside it,
       // as Node dates a timer from the event loop's clock read when its turn began (lib/internal/timers.js getLibuvNow);
       // the rest is waited out while it ends by `by`, a few rounds at most so a clock that does not move still ends it,
       // and the send is drawn after it (PR #342 test-packages job 127786967728: the retry's draw refused as held, a 503)
       for (let round = 0; late === 0 && round < 3 && budget.heldUntil(name) > now() && budget.heldUntil(name) <= by; round++) await sleep(budget.heldUntil(name) - now() + HOLD_MARGIN_MS);
-      const thisTurnMs = performance.now() - t0;
+      const thisTurnMs = mono() - t0;
       turnMs += thisTurnMs;
       // past the wait: Jupiter's hold (a 429's reset) when it is held, else the turns ahead (our pace of its plan)
       if (late > 0) return budget.heldUntil(name) > now() || !PACED.has(name) ? notReady(refusals > 0 ? "429" : "held", `${name} held`, Math.max(late, heldS()), waits()) : notReady("budget", `${name} turn`, late, waits());
@@ -541,7 +546,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       let r: Response;
       let text: string | undefined;
       let logged = false;
-      const sentAt = performance.now();
+      const sentAt = mono();
       try {
         r = await doFetch(`${v.base}${path}${query}`, {
           method: up.method,
@@ -550,7 +555,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
           redirect: "error",
           signal: AbortSignal.timeout(TIMEOUT_MS),
         });
-        if (PACED.has(name)) logTurn(name, caller, thisTurnMs, String(r.status), performance.now() - sentAt, r.headers), (logged = true);
+        if (PACED.has(name)) logTurn(name, caller, thisTurnMs, String(r.status), mono() - sentAt, r.headers), (logged = true);
         if (r.status === 429) {
           await r.body?.cancel();
           refusals++;
@@ -575,7 +580,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         text = await readBody(r);
       } catch (e) {
         const timeout = (e as Error | null)?.name === "TimeoutError";
-        if (PACED.has(name) && !logged) logTurn(name, caller, thisTurnMs, timeout ? "timeout" : "send", performance.now() - sentAt);
+        if (PACED.has(name) && !logged) logTurn(name, caller, thisTurnMs, timeout ? "timeout" : "send", mono() - sentAt);
         if (!timeout && again()) {
           await sleep(RETRY_FAILED_MS);
           continue;
@@ -593,7 +598,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         return UPSTREAM("answer", `${name} answer`, waits());
       }
       if (holdsKey(text)) return UPSTREAM("answer", `${name} answer`, waits());
-      const timing = [...waits(), `send;dur=${Math.round(performance.now() - sentAt)}`];
+      const timing = [...waits(), `send;dur=${Math.round(mono() - sentAt)}`];
       return { status: r.status, body: text, fetchedAt, timing };
     }
   }
@@ -646,10 +651,10 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     // both with the seconds until the draw would go (Retry-After)
     const refused = (wait: number): ProxyAnswer => {
       const why = budget.refusedBy();
-      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why.endsWith(" held") ? "held" : "budget", why, wait, [`budget;dur=${Math.round(performance.now() - b0)}`]);
+      return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why.endsWith(" held") ? "held" : "budget", why, wait, [`budget;dur=${Math.round(mono() - b0)}`]);
     };
     // when the draw began, for the budget's wait in Server-Timing
-    const b0 = performance.now();
+    const b0 = mono();
     // card helper-page-jup-429: a PACED vendor's turn that would come past the wait is refused before any draw
     const lateTurn = (): ProxyAnswer | null => {
       if (!PACED.has(name)) return null;
@@ -681,7 +686,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         if (late !== null) return source(late);
         const first = draw(p !== undefined);
         const wait = typeof first === "number" ? first : await first;
-        budgetMs = performance.now() - b0;
+        budgetMs = mono() - b0;
         if (wait > 0) return source(refused(wait));
         // a read another call began while this one waited is joined, not sent twice
         p ??= inflight.get(id);
