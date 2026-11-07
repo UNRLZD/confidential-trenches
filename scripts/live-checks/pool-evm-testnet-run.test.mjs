@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { replayer } from "./notes-per-pool-evm.mjs";
-import { CHAINS, SELL_SELECTOR, SELL_SELECTOR_10, TOPICS, VIEWS, check, recordFileOf, recordFiles, runRecord, sellSelectorOf, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
+import { CHAINS, SELL_SELECTOR, SELL_SELECTOR_10, TOPICS, VIEWS, check, poolRecordAt, recordFileOf, recordFiles, runRecord, sellSelectorOf, sellTarget, spoil } from "./pool-evm-testnet-run.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-evm-testnet-run.answers.json", import.meta.url), "utf8"));
 const RECS = recordFiles().map((f) => JSON.parse(readFileSync(f, "utf8")));
@@ -184,3 +184,16 @@ test("a frozen 11-field SellDelegate build keeps its own sell selector; a build 
   }
 });
 
+test("each run is read against the pool set of its time: the first set's runs its pool, card pool-evm-buy-pays-revert's runs its redeployed pool", () => {
+  const rec = (f) => JSON.parse(readFileSync(new URL(`./${f}`, import.meta.url), "utf8"));
+  for (const c of CHAINS) {
+    const first = rec(`pool-evm-deploy.${c}.json`).contracts.PrivacyPoolSimple.address;
+    const redeploy = rec(`pool-evm-buy-pays-revert.${c}.json`);
+    assert.equal(poolRecordAt(c, rec(`pool-evm-testnet-run.${c}.json`).at).contracts.PrivacyPoolSimple.address, first, `${c}: the first set's run`);
+    const run = rec(`pool-evm-buy-pays-revert.run.${c}.json`);
+    assert.equal(run.pool.toLowerCase(), redeploy.contracts.PrivacyPoolSimple.address.toLowerCase(), c);
+    assert.equal(poolRecordAt(c, run.at).contracts.PrivacyPoolSimple.address, redeploy.contracts.PrivacyPoolSimple.address, `${c}: the redeployed set's run`);
+    assert.equal(poolRecordAt(c, new Date(Date.parse(redeploy.at) - 1).toISOString()).contracts.PrivacyPoolSimple.address, first, `${c}: a run just before the redeploy`);
+    assert.throws(() => poolRecordAt(c, "2026-11-01T00:00:00.000Z"), /no pool deployed on/);
+  }
+});

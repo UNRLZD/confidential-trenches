@@ -12,14 +12,17 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, evmPoolRouteData, evmPoolVenues } from "@blindfill/kit";
 import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
-import { BOUGHT_TOPIC, BUY_SELECTOR, BUY_SIGNATURE, EVM_BODY_DATA_MAX, EVM_GAS_MAX, EVM_WITHDRAW_RESERVE_SENDS, evmAddressOf, evmBuyLanded, evmBuyUnpaid, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
+import { BOUGHT_TOPIC, BUY_SELECTOR, WITHDRAWN_TOPIC, BUY_SIGNATURE, EVM_BODY_DATA_MAX, EVM_GAS_MAX, EVM_WITHDRAW_RESERVE_SENDS, evmAddressOf, evmBuyLanded, evmBuyUnpaid, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const CAST = JSON.parse(readFileSync(new URL("./fixtures/release-cast.json", import.meta.url), "utf8")) as {
   w: string; withdrawType: string; buyType: string;
   cases: Record<string, { method: string; chainId: number; pool: string; nullifier: string; context: string; value: string; adapter?: string; data?: string; minOut?: string; coin?: string; digest: string; signature: string; callData: string; other: Record<string, string> }>;
 };
-const LANDED = JSON.parse(readFileSync(new URL("./fixtures/release-landed.json", import.meta.url), "utf8")) as { txs: { network: string; kind: string; hash: string; pool: string; w: string; input: string }[] };
+const LANDED = JSON.parse(readFileSync(new URL("./fixtures/release-landed.json", import.meta.url), "utf8")) as { txs: { network: string; kind: string; swapFailed?: boolean; hash: string; pool: string; w: string; input: string }[] };
+/** Each testnet's first pool set (card pool-evm-deploy's record), where the first testnet runs landed before card
+ *  pool-evm-buy-pays-revert's pools; the kit pins the newest. */
+const FIRST_POOL = Object.fromEntries(["base-sepolia", "robinhood-testnet"].map((n) => [n, (JSON.parse(readFileSync(new URL(`../../../../scripts/live-checks/pool-evm-deploy.${n}.json`, import.meta.url), "utf8")) as { contracts: { PrivacyPoolSimple: { address: string } } }).contracts.PrivacyPoolSimple.address]));
 const POOL = "0x00000000000000000000000000000000b1f1f001";
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
 const N = secp256k1.Point.CURVE().n;
@@ -37,7 +40,10 @@ const NOW = 2_000_000_000_000 - 100_000;
 const EPOCH = 1_999_999_860_000;
 const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("currentTreeDepth()"))).subarray(0, 4).toString("hex")}`;
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance: bigint | (() => bigint) = 10n ** 20n): EvmRpc {
+// a buy's eth_call at pending answers buy's bool (card pool-evm-buy-pays-revert: true, the swap landed; false, it failed
+// and W is paid ETH); a withdraw's answers nothing
+const BOUGHT_TRUE = `0x${"0".repeat(63)}1`;
+function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance: bigint | (() => bigint) = 10n ** 20n, buySim = BOUGHT_TRUE): EvmRpc {
   const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
   return async (method, params) => {
     calls.push({ method, params });
@@ -47,7 +53,7 @@ function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1"
       case "eth_call": {
         const [{ to, data }, at] = params as [{ to: string; data: string }, unknown];
         if (typeof at === "object" && at !== null && "blockHash" in at) return `0x${(to === "0x420000000000000000000000000000000000000f" ? (data.startsWith("0xf1c7a58b") ? 7_917n : 0n) : data === DEPTH_DATA ? 2n : 0n).toString(16).padStart(64, "0")}`;
-        return "0x";
+        return data.startsWith(`0x${BUY_SELECTOR}`) ? buySim : "0x";
       }
       case "eth_estimateGas": return "0x95433"; // 611,391
       case "eth_getBlockByNumber": return params[0] === "latest" ? block(600n) : BigInt(params[0] as string) <= 600n ? block(BigInt(params[0] as string)) : null;
@@ -82,11 +88,16 @@ test("the helper's release digest is the pool's: cast's EIP-712 of the pool's Wi
   }
 });
 
-test("every withdraw and buy that landed on Base Sepolia and Robinhood testnet recovers to the W its run named, under the kit's pinned chain id and pool", () => {
-  assert.deepEqual(LANDED.txs.map((t) => t.kind).sort(), ["buy", "buy", "buy", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw"]);
+test("every withdraw and buy that landed on Base Sepolia and Robinhood testnet recovers to the W its run named, under the kit's pinned chain id and the pool it ran on", () => {
+  assert.deepEqual(LANDED.txs.map((t) => t.kind).sort(), ["buy", "buy", "buy", "buy", "buy", "buy", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw"]);
+  // each kit-pinned pool has its own landings: on Base Sepolia a buy that swapped, one whose swap failed, and withdraws;
+  // on Robinhood testnet a buy and two withdraws
+  const pinned = (n: "base-sepolia" | "robinhood-testnet") => LANDED.txs.filter((t) => t.network === n && t.pool === evmPoolVenues()[n].pool).map((t) => `${t.kind}${t.swapFailed ? " (swap failed)" : ""}`).sort();
+  assert.deepEqual(pinned("base-sepolia"), ["buy", "buy (swap failed)", "withdraw", "withdraw", "withdraw"]);
+  assert.deepEqual(pinned("robinhood-testnet"), ["buy", "withdraw", "withdraw"]);
   for (const t of LANDED.txs) {
     const v = evmPoolVenues()[t.network as "base-sepolia"];
-    assert.equal(t.pool, v.pool, `${t.hash}: the kit's pinned pool`);
+    assert.ok(t.pool === v.pool || t.pool === FIRST_POOL[t.network], `${t.hash}: the kit's pinned pool or the first set's`);
     const r = evmReadRelease(bytes(t.input));
     assert.equal(r.method, t.kind, t.hash);
     assert.equal(r.processooor, t.pool, t.hash);
@@ -429,5 +440,51 @@ test("evmBuyUnpaid: a proven buy whose receipt cost passes its fee (an l1Fee) ho
   for (const [what, l] of rows) {
     assert.equal(evmBuyLanded(one(l), buy), false, what);
     assert.deepEqual(evmBuyUnpaid(one(l), ok, buy, 10n ** 18n).proven, false, `${what}: unproven, its whole cost held`);
+  }
+});
+
+// ---- card pool-evm-buy-pays-revert: a buy whose swap fails lands with the pool's Withdrawn, its fee paid ----
+test("evmBuyLanded: a buy whose swap failed lands on the pool's Withdrawn of this buy (W, fee recipient, fee, nullifier), each field read", () => {
+  const data = buyAs();
+  const r = evmReadRelease(bytes(data));
+  const buy = { pool: POOL, w: r.recipient, feeRecipient: r.feeRecipient, fee: r.fee, nullifier: r.nullifier, token: r.buy!.token, gas: 733_669n, maxFeePerGas: 1_880_000_000n };
+  const pad = (a: string) => a.slice(2).padStart(64, "0");
+  const log = { address: POOL, topics: [WITHDRAWN_TOPIC, `0x${pad(r.recipient)}`], data: `0x${pad(r.feeRecipient)}${w32(r.value)}${w32(r.fee)}${r.nullifier}${w32(7n)}` };
+  const ok = { status: "0x1", gasUsed: "0x95433", effectiveGasPrice: "0x7d2b7500", logs: [log] };
+  assert.equal(evmBuyLanded(ok, buy), true);
+  const cost = 0x95433n * buy.maxFeePerGas;
+  assert.deepEqual(evmBuyUnpaid(ok, ok, buy, 10n ** 18n), { proven: true, unpaid: cost > r.fee ? cost - r.fee : 0n }, "proven: only the cost past the fee is held");
+  const word = (i: number) => log.data.slice(2 + 64 * i, 2 + 64 * (i + 1));
+  const withWord = (i: number, w: string) => `0x${[0, 1, 2, 3, 4].map((k) => (k === i ? w : word(k))).join("")}`;
+  const one = (l: object) => ({ ...ok, logs: [l] });
+  const rows: [string, object | null][] = [
+    ["from another address", { ...log, address: "0x000000000000000000000000000000000000dead" }],
+    ["another W topic", { ...log, topics: [WITHDRAWN_TOPIC, `0x${"0".repeat(24)}${"1".repeat(40)}`] }],
+    ["another event", { ...log, topics: [`0x${"ab".repeat(32)}`, log.topics[1]] }],
+    ["another fee recipient", { ...log, data: withWord(0, w32(0xdeadn)) }],
+    ["another fee", { ...log, data: withWord(2, w32(r.fee + 1n)) }],
+    ["another nullifier", { ...log, data: withWord(3, w32(BigInt(`0x${r.nullifier}`) + 1n)) }],
+    ["removed", { ...log, removed: true }],
+    ["a word short", { ...log, data: log.data.slice(0, -64) }],
+    ["a word long (Bought's length under Withdrawn's topic)", { ...log, data: `${log.data}${w32(0x7070n)}${w32(1n)}` }],
+    ["status 0", null],
+  ];
+  for (const [what, l] of rows) {
+    if (l === null) {
+      assert.deepEqual(evmBuyUnpaid({ ...ok, status: "0x0" }, ok, buy, 10n ** 18n).proven, false, what);
+      continue;
+    }
+    assert.equal(evmBuyLanded(one(l), buy), false, what);
+    assert.deepEqual(evmBuyUnpaid(one(l), ok, buy, 10n ** 18n).proven, false, `${what}: unproven, its whole cost held`);
+  }
+});
+
+test("a buy whose own simulation answers false (its swap fails now: the pool would take the fee and pay W ETH) is refused simulation_failed and never sent; an answer that is not exactly true is refused too (review of 68b0930a, M1)", async () => {
+  const data = CAST.cases.buyBaseSepolia!.callData;
+  for (const [answer, sent] of [[BOUGHT_TRUE, 1], [`0x${"0".repeat(64)}`, 0], ["0x", 0], [`0x${"0".repeat(62)}02`, 0], [`${BOUGHT_TRUE}${"0".repeat(64)}`, 0]] as const) {
+    const calls: Calls = [];
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, log: () => {} }, [rpc(calls, "0x14a34", undefined, undefined, answer), rpc([], "0x14a34", undefined, undefined, answer)], () => NOW);
+    const a = await s.carry({ pool: POOL, data, epoch: EPOCH });
+    assert.deepEqual([a.status, code(a), sends(calls).length], sent === 1 ? [200, "ok", 1] : [422, "simulation_failed", 0], `${answer}: ${JSON.stringify(a.body)}`);
   }
 });

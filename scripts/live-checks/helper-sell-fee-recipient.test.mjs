@@ -13,11 +13,16 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
-import { evmPoolRecords, feeCollectors, randomKey } from "./helper-evm-sender.mjs";
-import { judge, OTHER, read, SELLS, sellsOf } from "./helper-sell-fee-recipient.mjs";
+import { evmPoolRecords as currentRecords, feeCollectors, FIRST_SET, randomKey } from "./helper-evm-sender.mjs";
+import { judge as judgeLive, OTHER, read as readLive, SELLS, sellsOf } from "./helper-sell-fee-recipient.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-sell-fee-recipient.answers.json"), "utf8"));
+// The recordings were made 6 Nov on the testnets' first pool set (FIRST_SET), before card pool-evm-buy-pays-revert's
+// pools: a replay judges each on the pools it was recorded on; the live check reads the current set (evmPoolRecords()).
+const evmPoolRecords = () => currentRecords(undefined, FIRST_SET);
+const judge = (run, records = evmPoolRecords(), collectors) => judgeLive(run, records, collectors);
+const read = (base, fetchFn, records = evmPoolRecords()) => readLive(base, fetchFn, records);
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => (network && p.network !== network ? p : { ...p, reads: p.reads.map((x) => (x.asked === asked ? f(x) : x)) })) });
 const body = (x, f) => ({ ...x, body: JSON.stringify(f(JSON.parse(x.body))) });

@@ -1,25 +1,31 @@
 import type { SignpageClientSnapshot, SignpageResults } from "@blindfill/kit";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import type { ReturnHopView } from "../../shell/ReturnHop.tsx";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
+import { assetOf, statusOf } from "./model.ts";
 import type { Asset, DepositStatus, DryQuote, QuoteRefusal } from "./model.ts";
 
-// What the deposit sheet reads and does. Where the kit has the call, the live source makes it: `deposit.quote` (the
-// quote SIGN_HOST fetches and checks before any address exists, W:667), the deposit's stage from `state.ops` by that
-// request's id, and the hops (withdraw.open with the held id, backup.open). Where the kit has none yet, the live source
-// answers "not available", so the sheet shows S4.6 and never a made-up quote: the asset list, the dry quote with its
-// limits, and the stages the kit's DepositStage lacks (model.ts DepositStatus). The screen tests pass fixtures through
-// DepositSourceProvider, so the same sheet draws every state with no signing page.
+// What the deposit sheet reads and does, all through the kit's deposit calls (kit-deposit-assets-dry, kit-deposit-calls):
+// `deposit.assets` (the assets 1Click takes, each with its minimum and the beta cap) when the sheet opens, `deposit.dry`
+// (the quote lines for an amount, no address) as the amount is typed, `deposit.quote` (the quote SIGN_HOST fetches and
+// checks before any address exists, W:667), and the deposit's stage and facts from `state.ops` under that request's id;
+// the hops (withdraw.open with the held id, backup.open) go through the shell's return hop. The screen tests pass
+// fixtures through DepositSourceProvider, so the same sheet draws every state with no signing page.
 
 export type Reply<T> = { ok: true; value: T } | { ok: false; code: QuoteRefusal };
 
 export interface DepositSource {
   snapshot: SignpageClientSnapshot;
   moneyOn: boolean;
-  /** The assets 1Click takes, with their limits; null while loading. Not in the kit yet. */
+  /** The assets 1Click takes, with their limits (kit deposit.assets); null while loading or refused. */
   assets: Asset[] | null;
-  /** The quote lines for an amount, no address. Not in the kit yet. */
+  /** Why deposit.assets was refused; null while it loads or once it answered. */
+  assetsRefused: QuoteRefusal | null;
+  /** Asks deposit.assets again (Retry after busy). */
+  retryAssets(): void;
+  /** The quote lines for an amount, no address (kit deposit.dry). */
   dryQuote(asset: Asset, amount: string): Promise<Reply<DryQuote>>;
   /** The checked quote: kit `deposit.quote`. Returns the request id with the answer, to follow its stage. */
   quote(asset: Asset, amount: string): Promise<{ id: string | null; reply: Reply<SignpageResults["deposit.quote"]> }>;
@@ -44,12 +50,39 @@ export const DepositSourceProvider = Fixture.Provider;
 const KNOWN: ReadonlySet<string> = new Set(["below_min", "above_max", "not_available", "busy", "down", "quote_check_failed"]);
 const refusal = (code: string): QuoteRefusal => (KNOWN.has(code) ? (code as QuoteRefusal) : "not_available");
 
-const noDryQuote: DepositSource["dryQuote"] = async () => ({ ok: false, code: "not_available" });
+/** The dry quote waits for the typing to pause this long, so one amount typed is one request, not one per key. */
+export const DRY_PAUSE_MS = 300;
 
 export function useDepositSource(): DepositSource {
   const fixture = useContext(Fixture);
   const { client, snapshot, moneyOn } = useSignpage();
   const { hop, locked } = useReturnHop();
+  const [assets, setAssets] = useState<{ list: Asset[] | null; refused: QuoteRefusal | null }>({ list: null, refused: null });
+  const [asks, setAsks] = useState(0);
+  // the asset list, asked once the signing page is READY and kept while the sheet is open (a READY again does not draw the
+  // skeleton over a list it has); asked again on Retry. The fixture brings its own. An older ask's answer never lands.
+  const loaded = assets.list !== null;
+  useEffect(() => {
+    if (fixture || !client || !moneyOn || loaded) return;
+    let live = true;
+    void client.request("deposit.assets", {}).outcome.then((o) => {
+      if (live) setAssets(o.ok ? { list: o.result.assets.map(assetOf), refused: null } : { list: null, refused: refusal(o.error.code) });
+    });
+    return () => void (live = false);
+  }, [fixture, client, moneyOn, loaded, asks]);
+  const typed = useRef(0);
+  const dryQuote = useCallback<DepositSource["dryQuote"]>(
+    async (asset, amount) => {
+      const n = ++typed.current;
+      await new Promise((r) => setTimeout(r, DRY_PAUSE_MS));
+      // a newer amount came while this one waited: the sheet drops this answer (its own order check), so ask nothing
+      if (n !== typed.current) return { ok: false, code: "not_available" };
+      if (!client) return { ok: false, code: "down" };
+      const o = await client.request("deposit.dry", { origin_asset: asset.id, amount }).outcome;
+      return o.ok ? { ok: true, value: o.result } : { ok: false, code: refusal(o.error.code) };
+    },
+    [client],
+  );
   const quote = useCallback<DepositSource["quote"]>(
     async (asset, amount) => {
       if (!client) return { id: null, reply: { ok: false, code: "down" } };
@@ -61,16 +94,21 @@ export function useDepositSource(): DepositSource {
   );
   const status = useCallback<DepositSource["status"]>(
     (id) => {
-      const op = snapshot.state?.ops.find((o) => o.id === id && o.kind === "deposit");
-      return op && op.kind === "deposit" ? { stage: op.stage } : null;
+      const op = snapshot.state?.ops.find((o) => o.id === id);
+      return op && op.kind === "deposit" ? statusOf(op) : null;
     },
     [snapshot],
   );
   const live: DepositSource = {
     snapshot,
     moneyOn,
-    assets: [],
-    dryQuote: noDryQuote,
+    assets: assets.list,
+    assetsRefused: assets.refused,
+    retryAssets: () => {
+      setAssets({ list: null, refused: null });
+      setAsks((n) => n + 1);
+    },
+    dryQuote,
     quote,
     status,
     hop,
@@ -80,6 +118,24 @@ export function useDepositSource(): DepositSource {
     copy: (t) => void navigator.clipboard?.writeText(t).catch(() => {}),
   };
   return fixture ?? live;
+}
+
+/**
+ * Whether the one deposit sheet is open. The shell mounts the sheet once (shell/DepositMount.tsx); the header's Deposit,
+ * the phone's +, Portfolio's Deposit and the withdraw progress's Deposit open it. Outside the shell nothing opens.
+ */
+interface SheetView {
+  open: boolean;
+  setOpen(open: boolean): void;
+}
+
+const Sheet = createContext<SheetView>({ open: false, setOpen: () => {} });
+
+export const useDepositSheet = () => useContext(Sheet);
+
+export function DepositSheetProvider({ children, initial = false }: { children: ReactNode; initial?: boolean }) {
+  const [open, setOpen] = useState(initial);
+  return <Sheet.Provider value={{ open, setOpen }}>{children}</Sheet.Provider>;
 }
 
 /** The clock for the counter and the countdown: one tick a second while a state draws a time, none otherwise. */

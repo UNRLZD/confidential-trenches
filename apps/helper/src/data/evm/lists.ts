@@ -26,7 +26,7 @@
 // text is cut and stripped, a list holds at most LIST_MAX rows, and an RPC log is used only when its emitter, topic0
 // and token word match the table exactly.
 import { gzipSync } from "node:zlib";
-import { dec, LIST_MAX, ROW_FIELDS, text, type ListsAnswer, type Row } from "../solana/lists.ts";
+import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 
@@ -740,8 +740,9 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
 type Read = { rows: Row[]; created: Map<string, number>; pools: Map<string, string>; at: number; raw: string };
 /** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
- *  read and its read time, and the makers read. The answers are parsed again by toRows, as from GeckoTerminal. */
-export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][]; clock?: string };
+ *  read and its read time, the makers read, and the tokens served with when (listed, card robinhood-listed-tape-opens).
+ *  The answers are parsed again by toRows, as from GeckoTerminal. */
+export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][]; clock?: string; served?: [string, number][] };
 /** The block clock a chain's makers were settled on (BLOCK_CLOCK), as the warm file carries it: a none settled on
  *  another clock may come from a wrong block range, so restore reads it again (card helper-ready-page-warm). */
 export const clockOf = (chain: EvmChain): string => JSON.stringify(BLOCK_CLOCK[chain]);
@@ -757,6 +758,8 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   const reads: Partial<Record<ListKey, Read>> = {};
   let last: (ListsAnswer & { asOfMs: number }) | null = null;
   let running: Promise<void> | null = null;
+  // every token an answer held, and when (listed)
+  const served = servedTokens(now);
 
   async function gt(path: string, urgent: boolean, first: boolean): Promise<Read | null> {
     if (!gecko.take("lists", urgent, first)) return null;
@@ -794,6 +797,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     const pools: Record<string, string> = {};
     for (const r of [read.trending_1h, read.trending_5m, read.new]) for (const [t, p] of r.pools) if (!Object.hasOwn(pools, t)) pools[t] = p;
     const body = JSON.stringify({ chain, lists, as_of_ms: asOf, unsettled, pools } satisfies EvmSnapshot);
+    served.add(Object.values(lists).flatMap((rows) => rows.map((r) => r.token as string)));
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
     for (const fn of listeners) fn();
   }
@@ -852,6 +856,14 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return last;
   }
 
+  /** Whether an answer of the last SERVED_MS held the token (../solana/lists.ts servedTokens): the swap reads' gate
+   *  (swaps.ts mainPool), so a token a user saw opens its chart and tape after a refresh drops it. False while no
+   *  answer was built. */
+  async function listed(token: string): Promise<boolean> {
+    await get();
+    return served.has(token);
+  }
+
   /** One tick now and one every TICK_MS; the timer never holds the process open. Returns the stop. */
   function warm(): () => void {
     void start();
@@ -862,7 +874,7 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
 
   /** This chain's lists as a next process takes them over. */
   function state(): EvmListsState {
-    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain) };
+    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain), served: served.state() };
     for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at };
     return out;
   }
@@ -873,11 +885,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
    *  it may have been settled on a wrong block range (card helper-ready-page-warm: from 18:00Z on 2026-11-05 Base's old
    *  2 s clock put every new token's pool hours before its code, and each was settled as none and carried over in the
    *  warm file). Dropping every none instead left a swap's Base lists 35 of 44 unsettled (live run 42104885123 attempt
-   *  1, 20:36Z), read again at MAKER_PER_TICK a tick. Reads held already are kept.
+   *  1, 20:36Z), read again at MAKER_PER_TICK a tick. Reads held already are kept. The tokens served are taken over
+   *  as addresses with a time no later than now (listed).
    *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
   function restore(st: unknown): boolean {
     const t = now();
-    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown };
+    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown; served?: unknown };
     const sameClock = o.clock === clockOf(chain);
     const rs = (o.reads ?? {}) as Record<string, unknown>;
     for (const k of LIST_KEYS) {
@@ -897,9 +910,12 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
         if (!(m[1] === null ? sameClock : typeof m[1] === "string" && pads.has(m[1]))) continue;
         if (!makers.has(m[0])) makers.set(m[0], m[1]);
       }
+    // the tokens served: an address as the lists write it (lowercase) and a time a read could have been at
+    if (Array.isArray(o.served))
+      served.restore(o.served.slice(0, SERVED_MAX).filter((x): x is [string, number] => Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && /^0x[0-9a-f]{40}$/.test(x[0]) && typeof x[1] === "number" && Number.isFinite(x[1])));
     build();
     return all() !== null;
   }
 
-  return { get, warm, tick, state, restore, onAnswer };
+  return { get, warm, tick, state, restore, onAnswer, listed };
 }

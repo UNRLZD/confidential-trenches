@@ -3,7 +3,7 @@
 // deposit's status. Every state comes from an answer or an event (a quote answered, the deposit seen, the arrival, the
 // signed deadline reached); no timer ever produces a failure. APP_HOST never makes an address: the only address the
 // sheet draws is the one inside the quote SIGN_HOST checked (W:667, CH-028, CH-033).
-import type { DepositStage, SignpageResults } from "@blindfill/kit";
+import type { Chain, DepositAsset, DepositFacts, DepositStage, Operation, SignpageResults } from "@blindfill/kit";
 
 /**
  * Every state the sheet draws. S4.x ids are BRF's (09-design-brief S4) and R5's; the rest are app.md's NEW frames, named
@@ -33,7 +33,7 @@ export type SheetState =
   | "S4.19" // backup first: the 12 words are the only copy and not saved
   | "S4.20"; // address expired before anything arrived
 
-/** A dry quote: the quote lines of S4.3, no address. Not in the kit yet (named in the card's report). */
+/** A dry quote: the quote lines of S4.3, no address (the kit's deposit.dry answer, DepositDry). */
 export interface DryQuote {
   /** USD, decimal strings. */
   amount_out_usd: string;
@@ -48,21 +48,32 @@ export type QuoteRefusal = "below_min" | "above_max" | "not_available" | "busy" 
 export type Answer<T> = { kind: "idle" } | { kind: "pending" } | { kind: "ok"; value: T } | { kind: "refused"; code: QuoteRefusal };
 
 /**
- * The deposit's status as the kit reports it. The kit's DepositStage plus four the kit does not have yet (named in the
- * card's report): `failed` (1Click FAILED, still processing, J2.F12), `short` (INCOMPLETE_DEPOSIT), `expired` (the
- * signed deadline passed with nothing sent) and `refund_move` (FR-D2). `refunded` marks a deposit 1Click refunded to U,
- * so the legs after it are the refund move's. `hold` says why a `halted` deposit waits (CH-119).
+ * The deposit's status as the kit reports it on the deposit's op in state.ops (kit-deposit-calls): its stage and the
+ * facts beside it (DepositFacts). `refunded` marks a deposit 1Click refunded to U, so the legs after it are the refund
+ * move's; `hold` says why a `halted` deposit waits (CH-119); `held_id` is the id the money waits under, for
+ * withdraw.open's `from_id`; `since_ms` is the counter's zero; `amount_usd` the USDC credited, once done.
  */
-export interface DepositStatus {
-  stage: DepositStage | "failed" | "short" | "expired" | "refund_move";
-  refunded?: boolean;
-  hold?: "halted" | "not_caught_up" | "vault_blocked";
-  /** The id the money waits under (U, or the refund id V), for withdraw.open's `from_id`. */
-  held_id?: string;
-  /** Unix ms when the kit first saw the send: the counter's zero. */
-  since_ms?: number;
-  /** USDC credited, decimal string, once done. */
-  amount_usd?: string;
+export interface DepositStatus extends DepositFacts {
+  stage: DepositStage;
+}
+
+/** A deposit op's status: its stage and the facts the kit sent with it, nothing else. */
+export function statusOf(op: Extract<Operation, { kind: "deposit" }>): DepositStatus {
+  const { id: _id, kind: _kind, txs: _txs, ...status } = op;
+  return status;
+}
+
+/** The chain names the sheet draws for the kit's chain ids (data, as Portfolio draws them). */
+const CHAIN_NAME: Record<Chain, string> = { solana: "Solana", base: "Base", robinhood: "Robinhood", near: "NEAR" };
+
+/** One row of the kit's deposit.assets as the sheet's asset. */
+export function assetOf(a: DepositAsset): Asset {
+  return { id: a.origin_asset, chain: CHAIN_NAME[a.chain] ?? a.chain, symbol: a.symbol, min: a.min, max_usd: a.max_usd };
+}
+
+/** The address box's heading: the asset, then its chain when the chain's name is not the asset's (never "NEAR NEAR"). */
+export function addressHeading(a: Pick<Asset, "symbol" | "chain">): string[] {
+  return a.symbol.toLowerCase() === a.chain.toLowerCase() ? [a.symbol] : [a.symbol, a.chain];
 }
 
 export interface Asset {
@@ -182,4 +193,55 @@ export function countdown(deadline: string, now: number): string {
 export function usd(s: string): string {
   const [i = "0", f = ""] = s.split(".");
   return `$${i.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${(f + "00").slice(0, 2)}`;
+}
+
+/** The asset picker's rows: each symbol once, in the list's order. */
+export function symbolsOf(assets: readonly Asset[]): string[] {
+  return [...new Set(assets.map((a) => a.symbol))];
+}
+
+/** The chain picker's rows: the chains the asset is on, in the list's order. */
+export function chainsOf(assets: readonly Asset[], symbol: string): string[] {
+  return assets.filter((a) => a.symbol === symbol).map((a) => a.chain);
+}
+
+/** The asset picked: the symbol on its chain, else the symbol on its first chain, else the list's first; null with none. */
+export function pickAsset(assets: readonly Asset[] | null, picked: { symbol: string; chain: string } | null): Asset | null {
+  if (!assets?.length) return null;
+  if (!picked) return assets[0]!;
+  return assets.find((a) => a.symbol === picked.symbol && a.chain === picked.chain) ?? assets.find((a) => a.symbol === picked.symbol) ?? assets[0]!;
+}
+
+/** A row of the sheet's Recent block: a deposit of this account, its stage's word, and what it credited once done. */
+export interface RecentRow {
+  id: string;
+  word: "deposited" | "waiting" | "processing" | "short" | "refunded" | "held" | "expired";
+  amount_usd?: string;
+}
+
+const RECENT_WORD: Record<DepositStage, RecentRow["word"]> = {
+  quote_checked: "waiting",
+  waiting: "waiting",
+  in_transit: "processing",
+  into_vault: "processing",
+  failed: "processing",
+  done: "deposited",
+  short: "short",
+  refunded: "refunded",
+  refund_move: "refunded",
+  held: "held",
+  halted: "held",
+  expired: "expired",
+};
+
+/** The Recent rows: the deposits in state.ops (oldest first there), newest first, three at most; a refund's later legs read Refunded until done. */
+export function recentRows(ops: readonly Operation[] | undefined): RecentRow[] {
+  const rows: RecentRow[] = [];
+  for (const op of [...(ops ?? [])].reverse()) {
+    if (op.kind !== "deposit") continue;
+    const word = op.refunded && op.stage !== "done" && RECENT_WORD[op.stage] === "processing" ? "refunded" : RECENT_WORD[op.stage];
+    rows.push(op.stage === "done" && op.amount_usd !== undefined ? { id: op.id, word, amount_usd: op.amount_usd } : { id: op.id, word });
+    if (rows.length === 3) break;
+  }
+  return rows;
 }
