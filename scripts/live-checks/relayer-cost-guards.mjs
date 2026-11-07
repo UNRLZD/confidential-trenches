@@ -3,26 +3,32 @@
 // transaction that earns no fee. It moves no money: it reads, and posts two Solana releases the helper refuses.
 //   NEAR, for mainnet USDC and the testnet token: the token's storage_balance_bounds().min on two RPCs of two operators
 //   (relayer-withdraw-fee's PAIRS) at one final block, the same bytes on both, and GET /v1/withdraw/fee for the token
-//   with Origin APP_HOST. A network the helper quotes (200) passes only while that minimum is at or under the pinned
-//   REGISTER_DEPOSIT_MAX of this checkout (apps/helper/src/withdraw/fee.ts; live.yml checks out the deployed commit):
-//   above it the helper must not quote (503), since a bounced payout leaves its register_deposit in the vault for good.
-//   A network the helper does not carry answers 404 not_found.
+//   with Origin APP_HOST. It passes only while that minimum equals the pinned REGISTER_DEPOSIT_MAX of this checkout
+//   (apps/helper/src/withdraw/fee.ts; live.yml checks out the deployed commit), the one register_deposit the relayer
+//   carries: any other minimum FAILs, so a change to USDC's bounds raises an alarm instead of a quiet 503 (above the pin
+//   the helper holds every withdrawal; below it the device's own read no longer matches the pin). The quote answers 200,
+//   or 404 not_found for a network the helper does not carry.
 //   Solana, for each pool a deploy record names (helper-live-checks.mjs solanaPools): GET /v1/pool/fee, then POST
 //   /v1/pool/solana/send two releases built as helper-pool-senders builds them (a throwaway W, W-signed, slot 0 empty):
-//     "zero_fee": a release whose relay_fee is 0 (I-6: the program holds no fee floor) -> 422 fee_off;
-//     "sim_fail": a release at the published fee that passes every check on the bytes but cannot run (a junk proof on
-//                 a blockhash no cluster has) -> 422 simulation_failed: the helper simulates before it signs.
+//     "zero_fee": a release whose relay_fee is 0 (I-6: the program holds no fee floor) -> 422 fee_off, refused on the
+//                 bytes (pool/solana.ts:269), before any read;
+//     "program_fails": a release at the published fee on a recent blockhash of the cluster (read here on RENT_RPCS),
+//                 passing every check on the bytes, whose pool instruction fails when simulated (its proof is junk) ->
+//                 422 simulation_failed with an InstructionError detail: the simulation ran the program, and the helper
+//                 refused before it signed (pool/solana.ts:559-570). A failing venue inside a tag 3 is the same
+//                 InstructionError branch; it cannot be reached live without a valid proof, so the unit tests hold it
+//                 (apps/helper/src/pool/solana.test.ts, I-6).
 //   Neither answer may carry a signature (the fee payer's signature is only given for a release it carried).
 //   Every answer carries a full-sha X-Helper-Commit, equal to --commit when given.
-// Not readable live: the bounce strike (the send store's count; apps/helper/src/withdraw/send.test.ts holds it) and the
-// queue's re-read of the recipient's registration (only a valid proof reaches check 7).
+// Not readable live: check 7's refusal of a register_deposit other than the minimum (only a valid proof reaches check 7;
+// apps/helper/src/withdraw/send.test.ts holds it).
 //   node scripts/live-checks/relayer-cost-guards.mjs [--commit <sha>] [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { REGISTER_DEPOSIT_MAX } from "../../apps/helper/src/withdraw/fee.ts";
 import { solanaPools } from "../ci/helper-live-checks.mjs";
-import { plant } from "./helper-pool-senders.mjs";
+import { b58decode, plant, RENT_RPCS } from "./helper-pool-senders.mjs";
 import { PAIRS, TOKENS } from "./relayer-withdraw-fee.mjs";
 
 const KEY = "relayer-cost-guards";
@@ -35,7 +41,7 @@ const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 /** Each planted release and the refusal it must get. */
 export const SOLANA_PLANTS = [
   ["zero_fee", "fee_off"],
-  ["sim_fail", "simulation_failed"],
+  ["program_fails", "simulation_failed"],
 ];
 
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
@@ -73,10 +79,9 @@ export function judge(run, pin = PIN) {
       min = same && typeof m === "string" && DEC.test(m) ? BigInt(m) : null;
       say(min !== null, `${tag} storage_balance_bounds().min ${show(m)} on ${b[0].rpc} and ${b[1].rpc} at block ${b[0].block_height}: ${same ? "the same bytes" : "the RPCs disagree"}`);
     }
+    say(min !== null && min === pin, `${tag} the token's minimum ${min ?? "unread"} equals the pinned REGISTER_DEPOSIT_MAX ${pin}, the one register_deposit carried`);
     const code = json(q.body)?.error?.code;
-    if (q.status === 404) say(code === "not_found", `${tag} not carried: 404 ${show(code)}`);
-    else if (min !== null && min > pin) say(q.status === 503, `${tag} the token's minimum ${min} is above the pinned ${pin}: the quote must hold (503), answered ${q.status}`);
-    else say(q.status === 200 && min !== null, `${tag} quoted (${q.status}) at a minimum ${min} at or under the pinned REGISTER_DEPOSIT_MAX ${pin}`);
+    say(q.status === 200 || (q.status === 404 && code === "not_found"), `${tag} GET /v1/withdraw/fee: ${q.status === 404 ? "not carried, " : ""}${q.status} ${q.status === 200 ? "quoted" : show(code)}`);
   }
   const pools = run.solana ?? [];
   say(pools.length > 0, `Solana pools read: ${pools.map((p) => p.pool).join(", ") || "none"}`);
@@ -94,6 +99,7 @@ export function judge(run, pin = PIN) {
       answers.push([`${tag} ${asked}`, r]);
       const body = json(r.body);
       say(r.status === 422 && body?.error?.code === want, `${tag} ${asked}: ${r.status} ${show(body?.error?.code)}, want 422 ${want}`);
+      if (asked === "program_fails") say(/^\{"InstructionError":/.test(body?.error?.detail ?? ""), `${tag} ${asked}: the simulation ran the program (${show(body?.error?.detail)})`);
       say(!/"signature"/.test(r.body ?? ""), `${tag} ${asked}: no signature in the answer`);
     }
   }
@@ -143,10 +149,13 @@ export async function read(base = BASE, { fetchFn = fetch, pools = solanaPools()
     const fee = await get(`${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
     const f = json(fee.body);
     const posts = [];
-    if (fee.status === 200 && DEC.test(f?.fee ?? "") && B58.test(f?.program ?? "") && B58.test(f?.fee_payer ?? "")) {
+    if (fee.status === 200 && DEC.test(f?.fee ?? "") && B58.test(f?.program ?? "") && B58.test(f?.fee_payer ?? "") && RENT_RPCS[f?.cluster]) {
       const cfg = { program: f.program, pool, feePayer: f.fee_payer };
+      // a recent blockhash of the cluster, so the simulation runs the program instead of stopping at the blockhash
+      const bh = (await rpc(RENT_RPCS[f.cluster][0], "getLatestBlockhash", [{ commitment: "finalized" }], fetchFn))?.value?.blockhash;
+      if (typeof bh !== "string" || !B58.test(bh)) throw new Error(`getLatestBlockhash on ${RENT_RPCS[f.cluster][0]}: no blockhash`);
       for (const [asked] of SOLANA_PLANTS) {
-        const wire = plant({ ...cfg, relayFee: asked === "zero_fee" ? 0n : BigInt(f.fee) });
+        const wire = plant({ ...cfg, relayFee: asked === "zero_fee" ? 0n : BigInt(f.fee), blockhash: b58decode(bh) });
         posts.push({ asked, ...(await get(`${base}/v1/pool/solana/send`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool, tx: wire.toString("base64") }) })) });
       }
     }

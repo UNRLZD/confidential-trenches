@@ -8,8 +8,9 @@
 //   frozen path (../derive armAccount), and the account is the NEAR-implicit id of that key: the lowercase hex of its
 //   public key (W:88). It is never a named account (W:65). Only the public side leaves this file: the secret key is
 //   zeroed at once, and whoever signs from A later derives its own copy.
-// - register_deposit (W:649; V 2.5.2, V:372-376; markets H3.4 check 7): 0 when storage_balance_of(A) on the vault's
-//   asset is set, the token's storage_balance_bounds().min when it is null. Both views are read on two RPCs of two
+// - register_deposit (W:649; V 2.5.2, V:372-376; markets H3.4 check 7): the token's storage_balance_bounds().min,
+//   whether storage_balance_of(A) on the vault's asset is set or null (card relayer-cost-guards, audit V-03: a 0 for a
+//   registered A let A unregister before the payout and bounce it at the relayer's cost). Both views are read on two RPCs of two
 //   operators: exactly one FastNEAR URL and the dRPC URL of the network, as deposit/account.ts pairs them (the operator
 //   map is scripts/ci/near-rpc-operators.mjs). The device decides only when both RPCs answer every read and agree on
 //   whether A is registered and on the minimum; one RPC down, an error answer, a malformed answer or a disagreement
@@ -126,7 +127,10 @@ export async function readArmingRegistration(
   if (!heights.every((h) => typeof h === "number" && Number.isSafeInteger(h) && h > 0)) throw new ArmingRegistrationRefused("rpc", "a read has no block height");
   const spread = heightSpreadOver(heights as number[]);
   if (spread !== null) throw new ArmingRegistrationRefused("disagree", spread);
-  return { account, registered: ra, min: ma, registerDeposit: ra ? 0n : ma };
+  // the minimum whether A is registered or not (card relayer-cost-guards, audit V-03): the vault's payout receipt runs
+  // storage_deposit before ft_transfer, so an A that unregisters after this read is registered again and cannot bounce
+  // it; the relayer carries no other value
+  return { account, registered: ra, min: ma, registerDeposit: ma };
 }
 
 /**

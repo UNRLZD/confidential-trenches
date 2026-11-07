@@ -9,16 +9,13 @@
 //        spent + returned from totals(), else bad_proof (row 9); and newCommitmentHash is not a leaf in the leaves index
 //        (caught up at the spends index's final height H, as it is), which holds fewer than 2^32 leaves, else bad_proof
 //        (row 12) (M:1129-1135). A proof over a tree the vault never had is refused here with nothing signed.
-//   7.   register_deposit is 0 when storage_balance_of(recipient) is set, and the token's storage_balance_bounds().min
-//        when it is null, both read at one agreed final block on two NEAR RPCs (fee.ts agreedBlock and viewAt); else
-//        register_deposit_wrong. A send of a stored withdrawal (H3.7's send after done, a carry of the stored request,
-//        the restart's send) also takes the minimum for a recipient registered after the request was taken. The minimum
-//        is held at or below fee.ts REGISTER_DEPOSIT_MAX (USDC's as read on two RPCs), else 503 upstream. In the queue,
-//        right before signing, storage_balance_of(recipient) is read again with check 7b's reads: a register_deposit of
-//        0 whose recipient no longer reads registered is register_deposit_wrong, nothing sent (audit V-03).
-//   7c.  the bounce strike (audit V-03): a recipient that WITHDRAW_BOUNCES_MAX of our sends' payouts bounced to (the
-//        vault's spends row refund_pending, or settled with refund_value above 0, read by the settle rounds) is
-//        recipient_refused, before any read and again in the queue.
+//   7.   register_deposit is exactly the token's storage_balance_bounds().min, read at one agreed final block on two NEAR
+//        RPCs (fee.ts agreedBlock and readRegisterMin), registered recipient or not; else register_deposit_wrong (card
+//        relayer-cost-guards, audit V-03). The vault's one payout receipt then runs storage_deposit(recipient,
+//        registration_only) before ft_transfer (vault promise.rs:85-91), so a recipient that unregisters after any read
+//        is registered again inside that receipt and cannot bounce it, the fee with it; for one still registered the
+//        token returns the minimum to the vault, which the quote prices (fee.ts S_w). The minimum is held at or below
+//        fee.ts REGISTER_DEPOSIT_MAX (USDC's as read on two RPCs), else 503 upstream: no quote and no send.
 //   7b.  the fee account (fee_recipient, check 3's own): storage_balance_of(fee_recipient) a NEP-145 balance (not null)
 //        and is_blocklisted(fee_recipient) exactly false at check 7's block on both RPCs (fee.ts readFeeAccount), else
 //        503 relayer_low with the log line "withdraw 503 relayer_low: relayer fee account not ready (<fee> on <token>:
@@ -69,7 +66,7 @@ import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRe
 import { readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
 import { agreedBlock, FEE_ACCOUNT_NOT_READY, feeAccountReady, FeeReadRefused, HEIGHT_SPREAD_MAX, readFeeAccount, readRegisterMin, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeAccount, type FeeNetwork, type FeeQuoter } from "./fee.ts";
-import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, WITHDRAW_BOUNCES_MAX, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
+import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
 import { pagesAt } from "../near/pages.ts";
 
 // ---- Values ----
@@ -161,7 +158,6 @@ export async function newestFinalMs(rpcs: readonly [Rpc, Rpc]): Promise<bigint> 
 export type AccountRead = { kind: "absent" } | { kind: "account"; amount: bigint; keys: { public_key: string; permission: unknown }[] };
 
 export type ChainReads = {
-  registered: boolean;
   registerMin: bigint;
   finalMs: bigint;
   /** Check 5's views (rows 5, 6 and 9). */
@@ -176,8 +172,9 @@ export type ChainReads = {
   recipientListed: boolean;
 };
 
-/** Check 7b as read: the fee account's two views, or why they could not be read (a failed read holds). */
-export type FeeRead = FeeAccount | { unread: string };
+/** Check 7b as read: the fee account's two views, or why they could not be read (a failed read holds; `recipient`
+ * when the read that failed was the queue's is_blocklisted(recipient)). */
+export type FeeRead = FeeAccount | { unread: string; recipient?: true };
 export { FEE_ACCOUNT_NOT_READY, feeAccountReady, readFeeAccount, type FeeAccount };
 
 const why = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
@@ -190,24 +187,29 @@ export async function readRecipientListed(rpcs: readonly [Rpc, Rpc], b: Block, t
 }
 
 /**
- * Checks 7, 7b and 8 again in the queue, at one fresh agreed block: null when the fee account reads ready, the
- * recipient is not blocklisted and, for a register_deposit of 0, still registered on the token; "bad_recipient" for a
- * blocklisted recipient; "register_deposit_wrong" for a recipient that unregistered since check 7 (card
- * relayer-cost-guards, audit V-03: its payout would bounce whole, the fee with it); else check 7b's hold (its reads, or
- * why they could not be read: a failed read holds).
+ * Checks 7b and 8 again in the queue, at one fresh agreed block: null when the fee account reads ready and the
+ * recipient is not blocklisted; "bad_recipient" for a blocklisted recipient; else check 7b's hold (its reads, or why
+ * they could not be read: a failed read holds). A failed read names its account (`recipient` set when it was the
+ * recipient's blocklist read), so the hold's log line says which read failed.
  */
-export async function queueHold(rpcs: readonly [Rpc, Rpc], token: string, fee: string, recipient: string, now: () => number = Date.now, registerDeposit: bigint): Promise<FeeRead | "bad_recipient" | "register_deposit_wrong" | null> {
+export async function queueHold(rpcs: readonly [Rpc, Rpc], token: string, fee: string, recipient: string, now: () => number = Date.now): Promise<FeeRead | "bad_recipient" | null> {
   try {
     const b = await agreedBlock(rpcs, now);
-    const [f, listed, bal] = await Promise.all([readFeeAccount(rpcs, b, token, fee), readRecipientListed(rpcs, b, token, recipient), viewAt(rpcs, b, token, "storage_balance_of", { account_id: recipient })]);
-    if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of(recipient): neither null nor a balance");
+    const [f, listed] = await Promise.all([
+      readFeeAccount(rpcs, b, token, fee),
+      readRecipientListed(rpcs, b, token, recipient).catch((e): never => {
+        throw new RecipientUnread(why(e));
+      }),
+    ]);
     if (listed) return "bad_recipient";
-    if (registerDeposit === 0n && bal === null) return "register_deposit_wrong";
     return feeAccountReady(f) ? null : f;
   } catch (e) {
-    return { unread: why(e) };
+    return e instanceof RecipientUnread ? { unread: e.message, recipient: true } : { unread: why(e) };
   }
 }
+
+/** The queue's recipient read failed (not the fee account's): its log line names the recipient. */
+class RecipientUnread extends Error {}
 
 /**
  * One provider's view of `id` at block `b`: view_account and view_access_key_list, both answered at `b`. An absent
@@ -251,8 +253,7 @@ export async function accountAt(rpcs: readonly [Rpc, Rpc], b: Block, id: string)
  */
 export async function readChecks(rpcs: readonly [Rpc, Rpc], vault: string, token: string, w: CheckedWithdraw, now: () => number = Date.now): Promise<ChainReads> {
   const [block, finalMs] = await Promise.all([agreedBlock(rpcs, now), newestFinalMs(rpcs)]);
-  const [bal, registerMin, stateKnown, labelKnown, totals, recipient, feeAccount, recipientListed] = await Promise.all([
-    viewAt(rpcs, block, token, "storage_balance_of", { account_id: w.recipient }),
+  const [registerMin, stateKnown, labelKnown, totals, recipient, feeAccount, recipientListed] = await Promise.all([
     readRegisterMin(rpcs, block, token), // above REGISTER_DEPOSIT_MAX it throws: nothing is carried
     viewAt(rpcs, block, vault, "is_known_state_root", { root: w.stateRoot.toString() }),
     viewAt(rpcs, block, vault, "is_known_label_root", { root: w.ASPRoot.toString() }),
@@ -262,11 +263,10 @@ export async function readChecks(rpcs: readonly [Rpc, Rpc], vault: string, token
     readFeeAccount(rpcs, block, token, w.fee_recipient).catch((e): FeeRead => ({ unread: why(e) })),
     readRecipientListed(rpcs, block, token, w.recipient),
   ]);
-  if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of: neither null nor a balance");
   if (typeof stateKnown !== "boolean" || typeof labelKnown !== "boolean") throw new FeeReadRefused("is_known_*_root: not a boolean");
   const t = isObj(totals) ? { deposited: decimal(totals.deposited, U128), spent: decimal(totals.spent, U128), returned: decimal(totals.returned, U128) } : null;
   if (t === null || t.deposited === null || t.spent === null || t.returned === null) throw new FeeReadRefused("totals: not three u128");
-  return { registered: bal !== null, registerMin, finalMs, stateKnown, labelKnown, totals: t as ChainReads["totals"], feeAccount, recipientListed, ...(recipient !== undefined && { recipient }) };
+  return { registerMin, finalMs, stateKnown, labelKnown, totals: t as ChainReads["totals"], feeAccount, recipientListed, ...(recipient !== undefined && { recipient }) };
 }
 
 /** Check 5's rows 5, 6 and 9 on what was read; null when they pass. */
@@ -293,13 +293,11 @@ export function checkFunded(w: CheckedWithdraw, r: ChainReads): HelperWithdrawCo
 }
 
 /**
- * Checks 7, 8 and 9 on what was read, in that order; null when all pass. `stored`: a send of a stored withdrawal,
- * which also takes the minimum for a recipient registered since. `funds`: this request funds A first (120 s margin).
+ * Checks 7, 8 and 9 on what was read, in that order; null when all pass. `funds`: this request funds A first (120 s
+ * margin).
  */
-export function checks7to9(w: CheckedWithdraw, vault: string, r: ChainReads, opts: { stored?: boolean; funds?: boolean } = {}): HelperWithdrawCode | null {
-  const rd = w.register_deposit;
-  const ok7 = r.registered ? rd === 0n || (opts.stored === true && rd === r.registerMin) : rd === r.registerMin;
-  if (!ok7) return "register_deposit_wrong";
+export function checks7to9(w: CheckedWithdraw, vault: string, r: ChainReads, opts: { funds?: boolean } = {}): HelperWithdrawCode | null {
+  if (w.register_deposit !== r.registerMin) return "register_deposit_wrong"; // the minimum, registered or not (V-03)
   for (const a of [w.recipient, w.fee_recipient]) if (a === vault || a === INTENTS) return "bad_recipient";
   if (r.recipientListed) return "bad_recipient";
   const margin = opts.funds === true ? FUND_MARGIN_MS : SEND_MARGIN_MS;
@@ -337,8 +335,6 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
     if (e instanceof FeeReadRefused) return no("upstream", 503);
     throw e;
   }
-  // the bounce strike (card relayer-cost-guards, audit V-03), before any read or spend
-  if (deps.store.bounces(w.recipient) >= WITHDRAW_BOUNCES_MAX) return no("recipient_refused");
   const nf = w.existingNullifierHash;
   const n = await checkNullifier(nf, { index: deps.index, store: deps.store });
   if (!n.ok) return no(n.code, n.code === "index_behind" ? 503 : 400);
@@ -361,7 +357,8 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
   if (c !== null) return no(c);
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const feeHold = (f: FeeRead) => {
-    log(`withdraw 503 relayer_low: ${FEE_ACCOUNT_NOT_READY} (${w.fee_recipient} on ${deps.cfg.token}: ${"unread" in f ? `not read (${f.unread})` : `registered ${f.registered}, blocklisted ${f.blocklisted}`})`);
+    if ("unread" in f && f.recipient === true) log(`withdraw 503 relayer_low: recipient not read (${w.recipient} on ${deps.cfg.token}: ${f.unread})`);
+    else log(`withdraw 503 relayer_low: ${FEE_ACCOUNT_NOT_READY} (${w.fee_recipient} on ${deps.cfg.token}: ${"unread" in f ? `not read (${f.unread})` : `registered ${f.registered}, blocklisted ${f.blocklisted}`})`);
     return no("relayer_low", 503);
   };
   if (await held(deps)) return no("token_halted", 503); // check 10 first: a halted token holds whatever 7b reads
@@ -378,9 +375,8 @@ export async function carryWithdraw(request: unknown, deps: WithdrawSendDeps): P
       // the margin it was checked against at the reads above
       async () => {
         if (await held(deps)) return "token_halted";
-        if (deps.store.bounces(w.recipient) >= WITHDRAW_BOUNCES_MAX) return "recipient_refused"; // a bounce read meanwhile
-        const q = await queueHold(deps.rpcs, deps.cfg.token, w.fee_recipient, w.recipient, deps.now, w.register_deposit); // checks 7, 7b and 8 again
-        if (q === "bad_recipient" || q === "register_deposit_wrong") return q;
+        const q = await queueHold(deps.rpcs, deps.cfg.token, w.fee_recipient, w.recipient, deps.now); // checks 7b and 8 again
+        if (q === "bad_recipient") return "bad_recipient";
         feeHeld = q;
         if (feeHeld !== null) return "relayer_low";
         if ((await relayer.balance()) < withdrawFloor(deposit)) return "relayer_low";
@@ -423,13 +419,6 @@ async function spendStatus(deps: WithdrawSendDeps, nf: bigint): Promise<string |
   const block = await agreedBlock(deps.rpcs, deps.now ?? Date.now);
   const [row] = await pagesAt(deps.rpcs, deps.cfg.vault, "spends", block.height, i, 1);
   if (row === undefined || decimal(row.nullifier_hash, 1n << 256n) !== nf) throw new Error("spends: the row is not this nullifier's");
-  // a payout that bounced (refund_value above 0: refund_pending, or settled into a refund note) counts toward its
-  // recipient's strike, read before any settle is signed (card relayer-cost-guards, audit V-03)
-  const refund = decimal(row.refund_value, U128);
-  if (row.status === "refund_pending" || (row.status === "settled" && refund !== null && refund > 0n)) {
-    if (!isAccountId(row.recipient)) throw new Error("spends: a bounced row names no recipient");
-    deps.store.bounce(nf, row.recipient);
-  }
   return typeof row.status === "string" ? row.status : null;
 }
 

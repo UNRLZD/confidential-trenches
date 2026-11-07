@@ -166,9 +166,11 @@ test("the recording: GOOD is registered, TEST_A is A_{l,0} of the A.8 seed, and 
   }
 });
 
-test("registered on both: register_deposit 0", async () => {
+test("registered on both: register_deposit is still the minimum (card relayer-cost-guards, audit V-03: the relayer carries only the minimum, so A cannot bounce its payout by unregistering)", async () => {
   const r = await readArmingRegistration(rec.good, "mainnet", pair("mainnet", { reg: "reg_set" }));
-  assert.deepEqual(r, { account: rec.good, registered: true, min: MIN, registerDeposit: 0n });
+  assert.deepEqual(r, { account: rec.good, registered: true, min: MIN, registerDeposit: MIN });
+  // withdrawRequest's registerDepositOf gives the same for a registered A
+  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good, NEAR_NETWORKS.mainnet.usdc), MIN);
 });
 
 test("not registered on both: register_deposit = storage_balance_bounds().min, mainnet and testnet", async () => {
@@ -271,7 +273,7 @@ test("each request names only A or the token, at final", async () => {
 test("armingRegisterDepositOf is withdrawRequest's registerDepositOf", async () => {
   const f: WithdrawRequestArgs["registerDepositOf"] = armingRegisterDepositOf("mainnet", pair("mainnet"));
   assert.equal(await f(rec.test_a, VAULT_CONSTANTS.TOKEN), MIN);
-  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good, VAULT_CONSTANTS.TOKEN), 0n);
+  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good, VAULT_CONSTANTS.TOKEN), MIN); // registered: still the minimum (V-03)
   await refused(armingRegisterDepositOf("mainnet", pair("mainnet", {}, { down: true }))(rec.test_a, VAULT_CONSTANTS.TOKEN), "rpc");
   // the withdrawal's token must be the token the read is made on, and nothing is read otherwise
   const seen: unknown[] = [];
