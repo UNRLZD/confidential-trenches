@@ -29,9 +29,9 @@ export const RECORD = path.join(HERE, "../../contracts/vault/deployments/mainnet
 export const PIN_RECORD = path.join(HERE, "../../contracts/vault/deployments/mainnet-v1.pin.json");
 export const deployment = () => (existsSync(RECORD) ? RECORD : PIN_RECORD);
 export const args = () => ["--network", "mainnet", "--account", ACCOUNT, "--signer", SIGNER, "--deployment", deployment(), "--registered"];
-// the landed write, set by the record commit after 3-readback-write.sh; null until then
-export const PREPAY_TX = null;
-export const PREPAY_P = null;
+// the landed write, set by the record commit from vault-mainnet-deploy.answers.json (3-readback-write.sh, 7 Nov); the test holds both to it
+export const PREPAY_TX = "4rYpSgDpG163YCCxAFdb7NazwNxNrACmFH5ezDAVuW2u";
+export const PREPAY_P = "343956469738139399150638971303622014548357682639799632250445894797972969203";
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const given = process.argv.slice(2);
