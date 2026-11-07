@@ -1,6 +1,6 @@
 {
   "_note": {
-    "good": "this card third fold's SIGN_HOST build: packages/signpage/index.html and public/app.js as built at card/pool-deposit-sent-end, merged with origin/main 685a5606 (release-85 and later), with the delta review of 09542dc6 folded: a send that may land read at the base wait only inside its landing window, the sign out read before each read and ending the wait, an EVM hand-off whose store read fails handing every note over as open",
+    "good": "this card third fold's SIGN_HOST build: packages/signpage/index.html and public/app.js as built at card/pool-deposit-sent-end, merged with origin/main 685a5606 (release-85 and later) and card/solana-quote-under-1s faec3084 (release-86), with the delta review of 09542dc6 folded: a send that may land read at the base wait only inside its landing window, the sign out read before each read and ending the wait, an EVM hand-off whose store read fails handing every note over as open",
     "bad": "the card's build before the review fold (6f20021b): the reads follow captured sends, tell not_landed on an expiry the pass builds again, read the Solana mark with no slot pin, and never stop or back off: FAIL",
     "bad5a9": "main 5a9e5d8c's build (release-83's tree, with pool-deposits): no reads after a run, so a sent deposit leaves the app at sent: FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-07T09:28Z, before this card's deploy: FAIL",
@@ -8,8 +8,8 @@
     "bad095": "the card's build at 09542dc6, before the delta review fold of its five Lows: a may-land read never backs off, the sign out read once per pass with a wait it does not end, a failed EVM hand-off read hands no note: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-HWtQG60W7tvXJwSzYxeOKv5p8u3SJK+rVcEuyQpRxxkuUTv3F4zNXQegqAX1HaPz\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-HWtQG60W7tvXJwSzYxeOKv5p8u3SJK+rVcEuyQpRxxkuUTv3F4zNXQegqAX1HaPz",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-FIKmUcuOaaEEyl2BIfn5HyEK3yzluxIf4+aFt1BnfDYwiYPBzF9wTRaUjikGxLPw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-FIKmUcuOaaEEyl2BIfn5HyEK3yzluxIf4+aFt1BnfDYwiYPBzF9wTRaUjikGxLPw",
     "solFinals": true,
     "solMark": true,
     "solEnd": true,

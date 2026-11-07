@@ -140,6 +140,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-small-note-buys.mjs",
   "scripts/live-checks/solana-jupiter-build.mjs",
   "scripts/live-checks/solana-legs-share-wait.mjs",
+  "scripts/live-checks/solana-quote-under-1s.mjs",
   "scripts/live-checks/solana-legs-checked.mjs",
   "scripts/live-checks/solana-written-accounts-whole.mjs",
   "scripts/live-checks/solana-mint-supply-moves.mjs",
