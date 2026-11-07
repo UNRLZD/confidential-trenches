@@ -10,13 +10,14 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createServer } from "node:http";
 import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
+import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
 import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
 const REQ = {
-  recipient: "0x0000000000000000000000000000000000000a11",
+  recipient: W, // W signs every release it is paid by (M354): the test W key's address
   feeRecipient: FEE_TO,
   feeCap: 10_000_000_000_000_000n,
   deadlineMs: 2_000_000_000_000n,
@@ -55,14 +56,14 @@ const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("current
 
 const w32 = (n: bigint) => n.toString(16).padStart(64, "0");
 const a32 = (a: string) => a.slice(2).padStart(64, "0");
-/** W's signature as the calldata carries it: its length, 65, then r, s, v padded to three words (the helper reads only
- *  its shape; the pool and the simulation check the signer). */
+/** W's signature as the calldata carries it: its length, 65, then r, s, v padded to three words; signRelease puts W's
+ *  real signature of the release in its place. */
 const SIG = `${w32(65n)}${"ab".repeat(65).padEnd(192, "0")}`;
-/** withdraw's calldata as solc's abi.encode writes it. */
+/** withdraw's calldata as solc's abi.encode writes it, signed by W for this pool on Base Sepolia's chain id. */
 function calldata(o: { fee?: bigint; processooor?: string; feeRecipient?: string; feeCap?: bigint; nullifier?: bigint; refund?: bigint } = {}): string {
   const relay = [a32(REQ.recipient), a32(o.feeRecipient ?? REQ.feeRecipient), w32(o.feeCap ?? REQ.feeCap), w32(REQ.deadlineMs), w32(o.refund ?? REQ.refundPrecommitment), REQ.salt.padEnd(64, "0")];
   const proof = PROOF.map((v, i) => (i === 9 && o.nullifier !== undefined ? o.nullifier : v));
-  return `0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(o.fee ?? FEE)}${w32(28n * 32n)}${a32(o.processooor ?? POOL)}${w32(64n)}${w32(192n)}${relay.join("")}${SIG}`;
+  return signRelease(`0x${WITHDRAW_SELECTOR}${w32(19n * 32n)}${proof.map(w32).join("")}${w32(o.fee ?? FEE)}${w32(28n * 32n)}${a32(o.processooor ?? POOL)}${w32(64n)}${w32(192n)}${relay.join("")}${SIG}`, POOL);
 }
 
 type Calls = { method: string; params: readonly unknown[] }[];
@@ -71,7 +72,7 @@ function rpc(calls: Calls, opts: { revert?: boolean; gas?: bigint; chain?: strin
   return async (method, params) => {
     calls.push({ method, params });
     switch (method) {
-      case "eth_chainId": return opts.chain ?? "0x7a69";
+      case "eth_chainId": return opts.chain ?? "0x14a34"; // Base Sepolia, the kit's pin for the network
       case "eth_getCode": return "0x";
       case "eth_call": {
         const [{ to, data }, at] = params as [{ to: string; data: string }, unknown];
@@ -131,7 +132,9 @@ test("the selector is withdraw's, and the calldata reads back the request and it
   // the signature is the pool's as it compiles: contracts/pool-evm/test/abi-tie.test.mjs ties it to abi.json
   assert.equal(WITHDRAW_SELECTOR, Buffer.from(keccak_256(new TextEncoder().encode(WITHDRAW_SIGNATURE))).subarray(0, 4).toString("hex"));
   const w = evmReadWithdraw(new Uint8Array(Buffer.from(calldata().slice(2), "hex")));
-  assert.deepEqual(w, { processooor: POOL, recipient: REQ.recipient, feeRecipient: FEE_TO, feeCap: REQ.feeCap, deadlineMs: REQ.deadlineMs, fee: FEE, nullifier: PROOF[9]!.toString(16).padStart(64, "0") });
+  const { signature, ...read } = w;
+  assert.deepEqual(read, { method: "withdraw", processooor: POOL, recipient: REQ.recipient, feeRecipient: FEE_TO, feeCap: REQ.feeCap, deadlineMs: REQ.deadlineMs, fee: FEE, nullifier: PROOF[9]!.toString(16).padStart(64, "0"), value: PROOF[10], context: PROOF[15] });
+  assert.equal(Buffer.from(signature).toString("hex"), calldata().slice(-192, -62), "W's 65 signature bytes, the calldata's last three words but v's pad");
 });
 
 // card helper-evm-abi-tie: the withdraws that landed on both testnet pools (fixtures/withdraw-landed.json, each read on
@@ -340,27 +343,29 @@ const LETTERS = chainOf({ hash: (n) => `0x${"ab".repeat(30)}${n.toString(16).pad
 test("a provider that writes hex in upper case: drpc's 0xB626 reads as 46630, and its fee and send are the lower-case provider's", async () => {
   const pair = (calls: Calls, b: Calls, chainA: string, chainB: string, c = LETTERS) =>
     evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [upper(rpc(calls, { chain: chainA }, c)), rpc(b, { chain: chainB }, c)], () => NOW);
+  // a Robinhood testnet release: W signs it for the network's pinned chain id, 46630
+  const rreq = () => req(signRelease(calldata(), POOL, 46_630n));
   const calls: Calls = [];
   const s = pair(calls, [], "0xb626", "0xb626");
   const fee = await s.fee(EPOCH);
   assert.deepEqual(fee, await pair([], [], "0xb626", "0xb626", LETTERS).fee(EPOCH).then((f) => f), "read twice alike");
   assert.equal(fee?.block, "0x1ae");
   assert.equal(fee?.fee, FEE.toString());
-  const a = await s.carry(req());
+  const a = await s.carry(rreq());
   assert.equal(a.status, 200, JSON.stringify(a.body));
   assert.equal(num(decodeTx(sends(calls)[0]!)[0]!), 46_630n, "signed for chain 0xB626 = 46630");
   // a case-only difference never fails agreement; any other difference still does
-  assert.equal(code(await pair([], [], "0xB626", "0xb626").carry(req())), "ok");
+  assert.equal(code(await pair([], [], "0xB626", "0xb626").carry(rreq())), "ok");
   const b: Calls = [];
-  assert.equal(code(await pair([], b, "0xB626", "0x2105").carry(req())), "upstream", "another chain");
+  assert.equal(code(await pair([], b, "0xB626", "0x2105").carry(rreq())), "upstream", "another chain");
   const moved = chainOf({ hash: (n) => `0x${"ab".repeat(30)}${(n + 1n).toString(16).padStart(4, "0")}` });
   const t = evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [upper(rpc([], {}, LETTERS)), rpc(b, {}, moved)], () => NOW);
-  assert.equal(code(await t.carry(req())), "upstream", "another block");
+  assert.equal(code(await t.carry(rreq())), "upstream", "another block");
   assert.equal(sends(b).length, 0);
   // not hex at all is still no quantity
   const junk: EvmRpc = async (m, p) => (m === "eth_chainId" ? "0xG626" : rpc([])(m, p));
   const j = evmPoolSender({ network: "robinhood-testnet", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [junk, rpc([])], () => NOW);
-  assert.equal(code(await j.carry(req())), "upstream");
+  assert.equal(code(await j.carry(rreq())), "upstream");
 });
 
 // card evm-quote-exec-sim (review of the exec sim, HIGH 1): the device sims each sale as sent from the kit's pinned sell

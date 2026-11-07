@@ -1,17 +1,27 @@
-// POST /v1/pool/evm/send (card helper-pool-senders; v2 M3): the helper's EVM sender carries a pool withdraw the device
-// built, byte for byte as its calldata, or refuses it. The sender is an operating key holding only gas, read from the
+// POST /v1/pool/evm/send (card helper-pool-senders; v2 M3; card helper-evm-sender-2): the helper's EVM sender carries a
+// pool withdraw or buy the device built and W signed, byte for byte as its calldata, or refuses it. The sender is an operating key holding only gas, read from the
 // host's environment; it signs one EIP-1559 transaction to the pool with value 0 and exactly the calldata received, and
 // takes only the fee the proof's context caps, paid to the release's fee recipient.
 //
 // The body: { "pool": "0x<the pool>", "data": "0x<calldata>", "epoch": <the start, ms, of the epoch whose fee the
 // proof binds> }. Checks, each a refusal before any send (422 unless named):
 //   bad_shape        not withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes),
-//                    PrivacyPool.withdraw(Withdrawal, WithdrawProof, fee, W's signature) as the pool compiles it
-//                    (contracts/pool-evm/abi.json, card helper-evm-abi-tie), in its one canonical ABI encoding (every
-//                    offset, length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
-//                    EVM_BODY_DATA_MAX (400);
+//                    PrivacyPool.withdraw(Withdrawal, WithdrawProof, fee, W's signature), nor buy((address,bytes),
+//                    (uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes),
+//                    PrivacyPoolSimple.buy(Withdrawal, WithdrawProof, fee, Buy, W's signature), as the pool compiles
+//                    them (contracts/pool-evm/abi.json, card helper-evm-abi-tie), in its one canonical ABI encoding
+//                    (every offset, length and padding as the encoder writes them, a 65-byte signature, nothing after),
+//                    or over EVM_BODY_DATA_MAX (400);
 //   not_pool         the withdrawal's processooor is not the pool the body names, which this helper carries;
 //   fee_recipient    the request pays the fee to anyone but this release's fee recipient;
+//   not_configured (503) the kit pins no chain id for the network (evmPoolVenues): every release, nothing read;
+//   bad_signature    W's signature does not recover to the request's recipient over the pool's own EIP-712 digest of
+//                    exactly this release (evmReleaseDigest: domain Blindfill, 1, the network's pinned chain id, the
+//                    pool; Withdraw(uint256 nullifier,uint256 context,uint256 value), or Buy(address adapter,bytes data,
+//                    uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value) with the proof's
+//                    pubSignals 1, 7 and 2; M354, M357), or its v is not 27 or 28, r or s is 0 or not under n, or s is
+//                    over n / 2 (the pool's HALF_N); checked before any RPC call, so a forged or replayed release, or
+//                    one W signed for another value, nullifier, context, chain, pool or method, costs no read;
 //   epoch_off        the epoch is not inside the proof's life (deadlineMs - POOL_LIFE_MAX_MS up to the deadline), is
 //                    outside [now - POOL_LIFE_MAX_MS, now], or the chain has no block in it yet;
 //   deadline_near    the deadline is under now + EVM_POOL_SEND_MARGIN_MS (these first checks make no RPC call);
@@ -34,12 +44,13 @@
 //   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
 //                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
 //   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error),
-//                    or the two providers name different chains.
+//                    or the two providers name different chains, or a chain other than the network's pinned one
+//                    (M356 (6)): the send is signed only for the chain W signed for.
 // A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
 // reverted is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the sender never pays more
 // gas than the fee, and a send the helper accepts either lands and spends or fails in the simulation.
-// Answer: 200 { hash }. pool-evm-buy adds buy() with W's EIP-712 signature: its selector goes in SELECTORS with its own
-// decoder, and the same fee, recipient, simulation and send rules apply.
+// Answer: 200 { hash }. A buy runs every rule a withdraw does, on the same lane and once key (one proof serves either
+// method, and W's signature picks which).
 //
 // POST /v1/pool/evm/sell (card helper-evm-sender): W's sell of its token back into the pool. W holds no ETH and sends
 // nothing: the device sends W's EIP-712 Sell inside SellDelegate.sell's calldata and W's EIP-7702 authorization of the
@@ -159,9 +170,13 @@ import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
 
-/** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 32 = 1,028 bytes, WITHDRAW_LEN). */
-export const POOL_EVM_BODY_MAX = 4_096;
-export const EVM_BODY_DATA_MAX = 2_048;
+/** POST /v1/pool/evm/send's body limit, and the calldata's: a withdraw is 4 + 32 x 32 = 1,028 bytes (WITHDRAW_LEN), a buy
+ *  1,220 bytes plus its swap data padded; the most a release's calldata can be is the most whose signed transaction, at
+ *  every field's longest, fits the kit's EVM_POOL_TX_BYTES (2,600), the bytes the epoch fee pays the chain fee for (a
+ *  larger one would be sent at the sender's cost): 2,404 bytes (evm.test.ts holds it), which takes the kit's longest
+ *  route with no hook data, 4 v4 hops, at 2,212. */
+export const POOL_EVM_BODY_MAX = 8_192;
+export const EVM_BODY_DATA_MAX = 2_404;
 /** The most gas the helper pays for one withdraw: the measured Privacy Pools withdrawal is 611,391 (M349), so 2.5x [design]. */
 export const EVM_GAS_MAX = 1_500_000n;
 
@@ -171,35 +186,79 @@ const selectorOf = (sig: string): string => hex(keccak_256(new TextEncoder().enc
 /** The pool's withdraw as it compiles (contracts/pool-evm/abi.json; contracts/pool-evm/test/abi-tie.test.mjs ties it). */
 export const WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)";
 export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);
+/** The pool's buy as it compiles (PrivacyPoolSimple.buy: Withdrawal, WithdrawProof, fee, Buy, W's signature). */
+export const BUY_SIGNATURE = "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)";
+export const BUY_SELECTOR = selectorOf(BUY_SIGNATURE);
 
 const word = (d: Uint8Array, i: number): bigint => BigInt(`0x${hex(d.subarray(4 + 32 * i, 4 + 32 * (i + 1))) || "0"}`);
 const HEAD_WORDS = 19; // the Withdrawal's offset, the proof's 16 words, the fee, the signature's offset
-const W_OFFSET = BigInt(32 * HEAD_WORDS); // the Withdrawal tuple's tail starts after the head
+const BUY_HEAD_WORDS = 20; // the Withdrawal's offset, the proof's 16 words, the fee, the Buy's offset, the signature's offset
 const RELAY_WORDS = 6; // recipient, feeRecipient, feeCap, deadlineMs, refundPrecommitment, salt
 const W_WORDS = 3 + RELAY_WORDS; // processooor, the data's offset (64), its length (192), the data
-const SIG_OFFSET = BigInt(32 * (HEAD_WORDS + W_WORDS)); // W's signature's tail, after the Withdrawal's
 const SIG_WORDS = 4; // its length (65), r, s, v and 31 zero bytes
+const BUY_WORDS = 5; // adapter, the data's offset (128), minOut, token, the data's length; then the data, padded
 const WITHDRAW_LEN = 4 + 32 * (HEAD_WORDS + W_WORDS + SIG_WORDS);
+const BUY_LEN_MIN = 4 + 32 * (BUY_HEAD_WORDS + W_WORDS + BUY_WORDS + SIG_WORDS);
 const isAddressWord = (w: bigint) => w >> 160n === 0n;
 const addr = (w: bigint) => `0x${w.toString(16).padStart(40, "0")}`;
 
-export type EvmWithdraw = { processooor: string; recipient: string; feeRecipient: string; feeCap: bigint; deadlineMs: bigint; fee: bigint; nullifier: string };
+/** A release's calldata read back: the request, the fee, the proof's nullifier (hex, the send's once key), value and
+ *  context (pubSignals 1, 2 and 7: ProofLib.sol), W's 65 signature bytes, and for a buy its Buy. */
+export type EvmRelease = {
+  method: "withdraw" | "buy";
+  processooor: string; recipient: string; feeRecipient: string; feeCap: bigint; deadlineMs: bigint; fee: bigint;
+  nullifier: string; value: bigint; context: bigint; signature: Uint8Array;
+  buy?: { adapter: string; data: Uint8Array; minOut: bigint; token: string };
+};
+export type EvmWithdraw = EvmRelease;
+
+/** The words a withdraw and a buy share, read from a head of `head` words: the Withdrawal's offset and its tail (exactly
+ *  abi.encode(RelayData), as the pool's _relayData takes only 192 bytes), the fee, the proof's public values. */
+function readRelease(d: Uint8Array, head: number, method: EvmRelease["method"], sigAt: number): EvmRelease {
+  if (word(d, 0) !== BigInt(32 * head)) throw new Error("the withdrawal's offset");
+  const processooor = word(d, head);
+  if (!isAddressWord(processooor) || word(d, head + 1) !== 64n || word(d, head + 2) !== BigInt(32 * RELAY_WORDS)) throw new Error("the withdrawal's layout");
+  const r = (i: number) => word(d, head + 3 + i);
+  if (!isAddressWord(r(0)) || !isAddressWord(r(1)) || r(3) >> 64n !== 0n || (r(5) & ((1n << 128n) - 1n)) !== 0n) throw new Error("the relay data's padding");
+  // the signature: 65 bytes, as the pool's _signer takes only 65; the rest of its last word zero
+  if (word(d, sigAt) !== 65n || (word(d, sigAt + 3) & ((1n << 248n) - 1n)) !== 0n) throw new Error("the signature's layout");
+  const at = 4 + 32 * (sigAt + 1);
+  // the proof's pubSignals start at head word 9 (after pA 2, pB 4, pC 2): [1] the nullifier, [2] the value, [7] the context
+  return {
+    method, processooor: addr(processooor), recipient: addr(r(0)), feeRecipient: addr(r(1)), feeCap: r(2), deadlineMs: r(3), fee: word(d, 17),
+    nullifier: word(d, 10).toString(16).padStart(64, "0"), value: word(d, 11), context: word(d, 16), signature: d.slice(at, at + 65),
+  };
+}
 
 /** A withdraw's calldata read back; throws unless it is exactly the one canonical encoding. */
-export function evmReadWithdraw(d: Uint8Array): EvmWithdraw {
+export function evmReadWithdraw(d: Uint8Array): EvmRelease {
   if (d.length !== WITHDRAW_LEN || hex(d.subarray(0, 4)) !== WITHDRAW_SELECTOR) throw new Error("not withdraw's calldata");
-  if (word(d, 0) !== W_OFFSET) throw new Error("the withdrawal's offset");
-  const fee = word(d, 17);
-  if (word(d, 18) !== SIG_OFFSET) throw new Error("the signature's offset");
-  const processooor = word(d, HEAD_WORDS);
-  if (!isAddressWord(processooor) || word(d, HEAD_WORDS + 1) !== 64n || word(d, HEAD_WORDS + 2) !== BigInt(32 * RELAY_WORDS)) throw new Error("the withdrawal's layout");
-  const at = HEAD_WORDS + W_WORDS; // the signature: 65 bytes, as the pool's _signer takes only 65; the rest of its word zero
-  if (word(d, at) !== 65n || (word(d, at + 3) & ((1n << 248n) - 1n)) !== 0n) throw new Error("the signature's layout");
-  const r = (i: number) => word(d, HEAD_WORDS + 3 + i);
-  if (!isAddressWord(r(0)) || !isAddressWord(r(1)) || r(3) >> 64n !== 0n || (r(5) & ((1n << 128n) - 1n)) !== 0n) throw new Error("the relay data's padding");
-  // pubSignals[1], existingNullifierHash: head word 1 + 2 (pA) + 4 (pB) + 2 (pC) + 1
-  const nullifier = word(d, 10).toString(16).padStart(64, "0");
-  return { processooor: addr(processooor), recipient: addr(r(0)), feeRecipient: addr(r(1)), feeCap: r(2), deadlineMs: r(3), fee, nullifier };
+  if (word(d, 18) !== BigInt(32 * (HEAD_WORDS + W_WORDS))) throw new Error("the signature's offset");
+  return readRelease(d, HEAD_WORDS, "withdraw", HEAD_WORDS + W_WORDS);
+}
+
+/** A buy's calldata read back; throws unless it is exactly the one canonical encoding, nothing after the signature. */
+export function evmReadBuy(d: Uint8Array): EvmRelease {
+  if (d.length < BUY_LEN_MIN || d.length > EVM_BODY_DATA_MAX || (d.length - 4) % 32 !== 0 || hex(d.subarray(0, 4)) !== BUY_SELECTOR) throw new Error("not buy's calldata");
+  const at = BUY_HEAD_WORDS + W_WORDS; // the Buy's tail, after the Withdrawal's
+  if (word(d, 18) !== BigInt(32 * at)) throw new Error("the buy's offset");
+  const b = (i: number) => word(d, at + i);
+  if (!isAddressWord(b(0)) || !isAddressWord(b(3))) throw new Error("an address's padding");
+  if (b(1) !== BigInt(32 * 4)) throw new Error("the buy data's offset");
+  const len = b(4);
+  if (len > BigInt(d.length)) throw new Error("the buy data's length");
+  const padded = Math.ceil(Number(len) / 32);
+  const sigAt = at + BUY_WORDS + padded;
+  if ((d.length - 4) / 32 !== sigAt + SIG_WORDS) throw new Error("the buy's length");
+  if (word(d, 19) !== BigInt(32 * sigAt)) throw new Error("the signature's offset");
+  const dataAt = 4 + 32 * (at + BUY_WORDS);
+  if (d.subarray(dataAt + Number(len), dataAt + 32 * padded).some((x) => x !== 0)) throw new Error("the buy data's padding");
+  return { ...readRelease(d, BUY_HEAD_WORDS, "buy", sigAt), buy: { adapter: addr(b(0)), data: d.slice(dataAt, dataAt + Number(len)), minOut: b(2), token: addr(b(3)) } };
+}
+
+/** A withdraw's or a buy's calldata, by its selector; throws on any other. */
+export function evmReadRelease(d: Uint8Array): EvmRelease {
+  return hex(d.subarray(0, 4)) === BUY_SELECTOR ? evmReadBuy(d) : evmReadWithdraw(d);
 }
 
 // ---- RLP and the EIP-1559 transaction ----
@@ -316,6 +375,23 @@ export function evmSellDigest(chainId: bigint, w: string, s: EvmSell): Uint8Arra
   return keccak_256(Uint8Array.from([0x19, 0x01, ...domain, ...struct]));
 }
 
+/** The pool's release types (PrivacyPool.sol WITHDRAW_TYPEHASH, PrivacyPoolSimple.sol BUY_TYPEHASH; M354, M357 (2)). */
+const WITHDRAW_TYPE = keccak_256(utf8("Withdraw(uint256 nullifier,uint256 context,uint256 value)"));
+const BUY_TYPE = keccak_256(utf8("Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)"));
+/** The EIP-712 digest W signs to take a proof as `r`'s method, as the pool's _typedDigest makes it: domain Blindfill,
+ *  1, `chainId`, verifyingContract the pool; the struct the method's type with the Buy's fields (a buy) and the proof's
+ *  nullifier, context and value. */
+export function evmReleaseDigest(chainId: bigint, pool: string, r: EvmRelease): Uint8Array {
+  const domain = keccak_256(Uint8Array.from([...DOMAIN_TYPE, ...keccak_256(utf8("Blindfill")), ...keccak_256(utf8("1")), ...w32(chainId), ...w32(BigInt(pool))]));
+  const proof = [BigInt(`0x${r.nullifier}`), r.context, r.value].map(w32).flatMap((x) => [...x]);
+  const b = r.buy;
+  if ((r.method === "buy") !== (b !== undefined)) throw new Error("a buy is exactly a release with its Buy");
+  const struct = b !== undefined
+    ? keccak_256(Uint8Array.from([...BUY_TYPE, ...w32(BigInt(b.adapter)), ...keccak_256(b.data), ...w32(b.minOut), ...w32(BigInt(b.token)), ...proof]))
+    : keccak_256(Uint8Array.from([...WITHDRAW_TYPE, ...proof]));
+  return keccak_256(Uint8Array.from([0x19, 0x01, ...domain, ...struct]));
+}
+
 const N = secp256k1.Point.CURVE().n;
 /** The address that signed `digest` with (recovery, r, s), or null where none does. */
 function recoverAddress(digest: Uint8Array, recovery: number, r: bigint, s: bigint): string | null {
@@ -326,6 +402,17 @@ function recoverAddress(digest: Uint8Array, recovery: number, r: bigint, s: bigi
   } catch {
     return null;
   }
+}
+
+/** The address whose signature `r` carries over its digest on `pool` and chain `chainId`, as the pool's _signer reads
+ *  it (r ‖ s ‖ v), or null unless it is in its one form: v 27 or 28, r and s in 1..n-1, s at most n / 2 (EIP-2), as the
+ *  pool's HALF_N; a signature with s high is refused even where its low twin is W's (the pool reverts it). */
+export function evmReleaseSigner(chainId: bigint, pool: string, r: EvmRelease): string | null {
+  const sig = r.signature;
+  if (sig.length !== 65) return null;
+  const [sr, ss, sv] = [BigInt(`0x${hex(sig.subarray(0, 32))}`), BigInt(`0x${hex(sig.subarray(32, 64))}`), sig[64]!];
+  if ((sv !== 27 && sv !== 28) || sr === 0n || sr >= N || ss === 0n || ss > N / 2n) return null;
+  return recoverAddress(evmReleaseDigest(chainId, pool, r), sv - 27, sr, ss);
 }
 
 // ---- The epoch fee (M352 (2)) ----
@@ -632,6 +719,9 @@ export function evmPoolSender(
   const sellChain = sellVenue === undefined ? undefined : (cfg.network as EvmPoolChain);
   const pinned = sellVenue !== undefined && Object.hasOwn(sellVenue, "sellDelegate") && typeof sellVenue.sellDelegate === "string" ? sellVenue.sellDelegate.toLowerCase() : undefined;
   const sellDelegate = pinned !== undefined && ADDRESS.test(pinned) ? pinned : undefined;
+  // the chain id a withdraw's or a buy's W signature is checked under and its send signed for: the kit's pin for the
+  // network (M356 (6)); a network the kit does not list refuses every release
+  const releaseChainId = sellVenue === undefined ? undefined : BigInt(sellVenue.chainId);
   const sells = oncePerNullifier<PoolEvmAnswer>(cfg.memory);
   /** Each remembered sale's Sell deadline (unix seconds), so a repeat can tell a dropped sale from a waiting one. */
   const sellDeadline = new WeakMap<Promise<PoolEvmAnswer>, bigint>();
@@ -753,14 +843,20 @@ export function evmPoolSender(
     if (p !== pool || typeof data !== "string" || data.length > 2 + 2 * EVM_BODY_DATA_MAX || !HEX.test(data)) return no(400, "bad_shape");
     if (typeof epoch !== "number" || !Number.isSafeInteger(epoch) || epoch <= 0 || epoch % POOL_EPOCH_MS !== 0) return no(400, "bad_shape");
     const bytes = unhex(data.slice(2));
-    let w: EvmWithdraw;
+    let w: EvmRelease;
     try {
-      w = evmReadWithdraw(bytes);
+      w = evmReadRelease(bytes);
     } catch (e) {
       return no(400, "bad_shape", (e as Error).message);
     }
     if (w.processooor !== pool) return no(422, "not_pool");
     if (w.feeRecipient !== feeRecipient) return no(422, "fee_recipient");
+    // W picked this release (M354, M357): its signature of exactly this method, Buy, nullifier, context and value, on
+    // this pool and the network's pinned chain id, in its one form (65 bytes, v 27 or 28, s low), by the recipient, as
+    // the pool's _release checks it; no RPC call before it, so a forged or replayed release costs no read
+    if (releaseChainId === undefined) return no(503, "not_configured", `the kit pins no chain id for ${cfg.network}`);
+    const signer = evmReleaseSigner(releaseChainId, pool, w);
+    if (signer !== w.recipient) return no(422, "bad_signature", signer === null ? "not one signature: v not 27 or 28, r or s out of range, s high, or no key" : `signed by ${signer}, not the recipient W`);
     // the proof's epoch: inside its life (at most POOL_LIFE_MAX_MS before its deadline, before the deadline), never
     // later than the epoch now nor older than a proof's life; then a deadline at least the send margin away. No RPC
     // call before these, so an old or expired request costs no read (M356 (3)).
@@ -803,7 +899,7 @@ export function evmPoolSender(
     if (!sentDeadline.has(entry)) sentDeadline.set(entry, Number(w.deadlineMs));
     return entry;
   };
-  async function simulateSignSend(data: string, bytes: Uint8Array, w: EvmWithdraw): Promise<PoolEvmAnswer> {
+  async function simulateSignSend(data: string, bytes: Uint8Array, w: EvmRelease): Promise<PoolEvmAnswer> {
     // the deadline again after the queue's wait: a send that waited past the margin would pay for the pool's revert
     if (Number(w.deadlineMs) < now() + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${w.deadlineMs}, now ${now()} after the queue`);
     const call = { from: sender, to: pool, data, value: "0x0" };
@@ -812,6 +908,8 @@ export function evmPoolSender(
       const stuck = await laneHeld(withdrawLane);
       if (stuck !== null) return stuck;
       id = await chain();
+      // the chain W signed for (M356 (6)): the providers must name the network's pinned chain id, never another
+      if (id !== releaseChainId) return no(503, "upstream", `the providers name chain ${id}, not ${releaseChainId}`);
       // a recipient with code could revert the pool's push after the simulation: refused on either provider, at
       // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
       const codes = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map((at) => r("eth_getCode", [w.recipient, at]))));
