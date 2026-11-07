@@ -247,6 +247,22 @@ export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KE
   bareOf.set(out, bare);
   return out;
 }
+/** The provider with each call timed out `ms` after it goes out, never counting its wait for a turn (card
+ *  solana-release-reads-paced): when a caller holds the provider under a limit (a paced wrapper made, a set or trade
+ *  started), every call takes its turn in the provider's shared queue under the limits named there, naming none of its
+ *  own; a provider no caller paces is called as given. The provider is called synchronously inside its turn, so a paced
+ *  wrapper given here is that turn's own call, never queued twice. */
+export function solanaTimedRpc(rpc: SolanaRpc, ms: number): SolanaRpc {
+  const timed = solanaWrappedRpc(rpc, (method, params) => {
+    let p: Promise<unknown>;
+    try { p = Promise.resolve(rpc(method, params)); } catch (e) { p = Promise.reject(e); }
+    return withTimeout(p, ms);
+  });
+  const bare = bareOf.get(rpc) ?? rpc;
+  const queue = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
+  const named = queue?.limits.values().next().value;
+  return named ? solanaPacedRpc(timed, named) : timed;
+}
 
 export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
 /** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. `url`, when
@@ -743,7 +759,9 @@ export async function readSolanaTxEnd(
 ): Promise<"filled" | "failed" | "expired" | "unknown"> {
   const one = async (rpc: SolanaRpc): Promise<{ read: StatusRead | null; dead: boolean }> => {
     try {
-      const call = (method: string, params: readonly unknown[]) => withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs);
+      // each call timed from when it goes out, in the provider's queue when a caller paces it (solanaTimedRpc)
+      const timed = solanaTimedRpc(rpc, callTimeoutMs);
+      const call = (method: string, params: readonly unknown[]) => Promise.resolve().then(() => timed(method, params));
       const anchor = readAnchor(await call("getLatestBlockhash", [{ commitment: "finalized" }]));
       const v = readValid(await call("isBlockhashValid", [tx.blockhash, { commitment: "processed" }]));
       const st = readStatuses(await call("getSignatureStatuses", [[tx.signature], { searchTransactionHistory: true }]), 1);

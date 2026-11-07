@@ -559,3 +559,27 @@ test("PumpSwap sell: the pool must hold the quote out of its real reserve; a dis
   assert.deepEqual(solanaPumpSwapOut("sell", 10_000n, swapPool, { ...swapCfg, disableFlags: 16 }, swapFees, BILLION, M, M), { out: 0n, spotOut: null });
   assert.equal(solanaPumpSwapOut("buy", 10_000n, swapPool, { ...swapCfg, disableFlags: 16 }, swapFees, BILLION, M, M).out, 9_870n);
 });
+
+// Card solana-release-reads-paced: a provider a caller holds under a limit (the trade's pacedDeps, the signing page's
+// pair) has one queue, and the reference's reads join it: with the pace full, no read goes out past it, and each read's
+// READ_TIMEOUT_MS (5 s) counts from when it goes out, never from its wait, so a wait past 5 s is still the reference,
+// never a read refused as down. Own URLs, so the limit named here binds no other test's provider.
+test("card solana-release-reads-paced: with a provider's pace full the reference sends no read past it, and a wait past 5 s is still its reference", async () => {
+  const s = scenario(curveToken, "buy");
+  const unpaced = await readSolanaReference(pair(s), req(curveToken, s, true));
+  assert.ok(unpaced, "the recorded reads give a reference");
+  const recorded = pair(s);
+  const a = Object.assign(async (m: string, p: readonly unknown[]) => recorded[0](m, p), { url: "https://pace-a.example/" });
+  const b = Object.assign(async (m: string, p: readonly unknown[]) => recorded[1](m, p), { url: "https://pace-b.example/" });
+  const sentA: number[] = [];
+  const watchedA = Object.assign(async (m: string, p: readonly unknown[]) => { sentA.push(performance.now()); return a(m, p); }, { url: a.url });
+  // the pace full: a caller holding provider A under 2 calls in any 5.6 s has made its 2
+  const filler = solanaPacedRpc(Object.assign(async () => null, { url: a.url }), { windowMs: 5_600, total: 2, perMethod: 2 });
+  await Promise.all([filler("getSlot", []), filler("getSlot", [])]);
+  const full = performance.now();
+  const ref = readSolanaReference([watchedA, b], req(curveToken, s, true));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(sentA.length, 0, "no read went to provider A past its full pace");
+  assert.equal(show(await ref), show(unpaced), "the reference, read after its wait");
+  assert.ok(sentA.length >= 2 && sentA.every((t) => t - full >= 5_500), `each read on A went out once the pace let it: ${sentA.map((t) => Math.round(t - full)).join(", ")} ms`);
+});
