@@ -1056,7 +1056,8 @@ async function onPaceClock<T>(run: () => Promise<T>): Promise<T> {
     g.clearTimeout = real.clearTimeout;
     if (real.now === undefined) delete (performance as { now?: unknown }).now;
     else Object.defineProperty(performance, "now", real.now);
-    for (const t of timers.values()) real.setTimeout(t.fire, Math.max(0, t.due - at));    timers.clear();
+    for (const t of timers.values()) real.setTimeout(t.fire, Math.max(0, t.due - at));
+    timers.clear();
   }
 }
 const namedBy = (seen: Body[]) => seen.filter((b) => isXfer(b)).map((b) => (b.params[0] as { topics: string[] }).topics[2]!);
