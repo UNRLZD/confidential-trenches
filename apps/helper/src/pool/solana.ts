@@ -11,7 +11,10 @@
 //                       writable), slot 0 not zero, or over SOLANA_MAX_TX_BYTES (400);
 //   bad_signature       W's signature does not verify over the message bytes: any byte changed after W signed;
 //   not_pool            the instruction after the compute budget is not the configured pool program's tag 2 or tag 3,
-//                       or its first account is not the pool;
+//                       or its first account is not the pool; a tag 2 of other than 8 or 9 accounts (the ninth the
+//                       next state page, release.rs:155); a tag 3 with flag bit 1 and no account after the tip account
+//                       (or at 8, no tip) for the next state page, or an inner instruction naming that page (buy.rs:155-159;
+//                       the program refuses it by key, InnerNamesPoolAccount);
 //   extra_instruction   any instruction other than at most one compute unit limit and one compute unit price, before
 //                       exactly one pool instruction;
 //   fee_payer_named     the fee payer named anywhere but the payer (key 0) and the pool instruction's account 2: as a
@@ -140,17 +143,17 @@ export type PoolSendCode =
 export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } }; retryAfterS?: number };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
-export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[] };
+export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[]; nextPage: boolean };
 
 /** Tag 2's or tag 3's data, read; throws on any layout TAG3.md and release.rs do not allow. */
 export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   if (d[0] === SOLANA_POOL_TAG_RELEASE) {
     const r = solanaDecodePoolRelease(d); // exactly 387 bytes
-    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), tip: 0n, innerAccounts: [], innerPrograms: [] };
+    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), tip: 0n, innerAccounts: [], innerPrograms: [], nextPage: false };
   }
   if (d[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || d.length < 2) throw new Error("not tag 2 or tag 3");
   const flags = d[1]!;
-  if ((flags & ~1) !== 0) throw new Error("tag 3 flags other than bit 0");
+  if ((flags & ~3) !== 0) throw new Error("tag 3 flags other than bits 0 and 1");
   const proof = flags & 1 ? PROOF_COMPRESSED : PROOF_RAW;
   const fieldsAt = 2 + proof;
   const tipAt = fieldsAt + FIELDS;
@@ -175,7 +178,7 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
     if (at > d.length) throw new Error("tag 3 inner data truncated");
   }
   if (at !== d.length) throw new Error("tag 3 bytes after the last inner instruction");
-  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms };
+  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms, nextPage: (flags & 2) !== 0 };
 }
 
 /** The relay fee a pool instruction carries, or null when the bytes are not one (checkSolanaPoolTx then names why). */
@@ -256,7 +259,11 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   } catch (e) {
     return no("not_pool", (e as Error).message);
   }
-  if (pix.accounts.length < 8 || (p.tag === 2 && pix.accounts.length !== 8)) return no("not_pool", "not the release's accounts");
+  if (pix.accounts.length < 8 || (p.tag === 2 && pix.accounts.length !== 8 && pix.accounts.length !== 9)) return no("not_pool", "not the release's accounts");
+  // tag 3's next state page (flag bit 1): after the tip account, or at 8 with no tip; no inner instruction may name it
+  const nextAt = p.nextPage ? 8 + (p.tip > 0n ? 1 : 0) : -1;
+  if (p.nextPage && nextAt >= pix.accounts.length) return no("not_pool", "flag bit 1 with no next state page");
+  if (p.nextPage && [...p.innerAccounts, ...p.innerPrograms].includes(nextAt)) return no("not_pool", "an inner instruction names the next state page");
   // the pool at account 0: a static key here, a loaded one once its table is read (checkSolanaPoolKeys)
   if (pix.accounts[0]! < m.staticKeys.length && keyOf(pix.accounts[0]!) !== cfg.pool) return no("not_pool", "another pool");
   if (pix.accounts[1] !== 1) return no("bad_shape", "account 1 is not W", 400);

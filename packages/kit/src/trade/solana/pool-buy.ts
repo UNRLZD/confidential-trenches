@@ -19,6 +19,10 @@
 // - accounts: pool (w); W (w, signer); fee payer (w, signer); spent mark ["spent", nullifier] (w); state root page;
 //   label root page; the current state page (w), where the change note goes; system program.
 // - page PDA ["page", tree u8 (0 state, 1 label), page_no u32 LE], 1,024 entries a page (src/state.rs).
+// - the next state page (w) after those eight in tag 2, and after the tip account in tag 3 with flag bit 1: the change
+//   note's entry goes there when inserts that landed after the device read the size carried its index onto that page
+//   (src/state.rs page_for, since d3edab1). Tag 2 always names it; tag 3 names it when the transaction still fits 1,232
+//   bytes (it loads from our table, 2 bytes, while the table holds it; else a static key, 33).
 //
 // The venues, from pump-fun/pump-public-docs idl/pump.json and idl/pump_amm.json at 639b87fb (read 2026-11-02 18:37Z,
 // docs/research/arch-v2/solana-pool.md A3): pump `buy_exact_sol_in` (16 accounts; args spendable_sol_in u64,
@@ -91,6 +95,8 @@ export const SOLANA_POOL_BUY_CU = { "pump-curve": 300_000, pumpswap: 400_000 } a
 deepFreeze(SOLANA_POOL_BUY_CU);
 /** Tag 3's inner instructions: at most this many (TAG3.md). */
 export const SOLANA_POOL_TAG3_MAX_INNER = 8;
+/** Tag 3's flag bit 1 (src/buy.rs FLAG_NEXT_PAGE): the next state page follows the tip account (or sits at 8, no tip). */
+export const SOLANA_POOL_TAG3_NEXT_PAGE = 2;
 
 const FIELD_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const U64_MAX = (1n << 64n) - 1n;
@@ -201,6 +207,11 @@ export const solanaPoolSpentMark = (program: string, nullifierHash: Uint8Array):
 /** The pool account of a program. */
 export const solanaPoolAccount = (program: string): string => solanaProgramAddress([enc("pool")], program);
 
+/** The page after the one holding entry `size` of `tree`: where that entry goes when inserts that land first carry it
+ *  past its page's end (src/state.rs page_for). */
+export const solanaPoolNextPage = (program: string, tree: 0 | 1, size: number): string =>
+  solanaPoolPage(program, tree, (Math.floor(size / SOLANA_POOL_PAGE_ENTRIES) + 1) * SOLANA_POOL_PAGE_ENTRIES);
+
 /** The release's 8 accounts in order; `stateSize` is the pool's state tree size now (its change note goes at that index). */
 export function solanaPoolReleaseAccounts(cfg: SolanaPoolConfig, wallet: string, feePayer: string, r: SolanaPoolRelease, stateSize: number): SolanaApiAccount[] {
   if (!Number.isSafeInteger(stateSize) || stateSize < 0 || stateSize > 0xffff_ffff) throw new Error("the state size must be a u32");
@@ -214,6 +225,12 @@ export function solanaPoolReleaseAccounts(cfg: SolanaPoolConfig, wallet: string,
     acc(solanaPoolPage(cfg.program, 0, stateSize), false, true),
     acc(SOLANA_SYSTEM_PROGRAM, false, false),
   ];
+}
+
+/** Tag 2's 9 accounts: the release's eight, then the next state page (w), so a change note an insert carried past its
+ *  page's end still lands (src/release.rs:155, state.rs page_for). */
+export function solanaPoolTag2Accounts(cfg: SolanaPoolConfig, wallet: string, feePayer: string, r: SolanaPoolRelease, stateSize: number): SolanaApiAccount[] {
+  return [...solanaPoolReleaseAccounts(cfg, wallet, feePayer, r, stateSize), acc(solanaPoolNextPage(cfg.program, 0, stateSize), false, true)];
 }
 
 // ------------------------------------------------------------------------------------------------- the venue
@@ -722,15 +739,16 @@ function checkRequest(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: 
 }
 
 /**
- * Tag 3's data (contracts/pool-solana/TAG3.md, src/buy.rs): tag 3 ‖ flags u8 (bit 0: compressed proof) ‖ proof (256 or
+ * Tag 3's data (contracts/pool-solana/TAG3.md, src/buy.rs): tag 3 ‖ flags u8 (bit 0: compressed proof; bit 1: the
+ * next state page follows the tip account, `nextPage`) ‖ proof (256 or
  * 128) ‖ the release's 130 field bytes as tag 2 ‖ tip u64 ‖ inner count u8 ‖ per inner instruction: program u8 (index
  * into this instruction's accounts) ‖ n u8 ‖ n account indexes u8 ‖ data length u16 LE ‖ data.
  */
-export function solanaEncodePoolTag3(release: SolanaPoolRelease, compressed: boolean, tip: bigint, inner: readonly { program: number; accounts: readonly number[]; data: Uint8Array }[]): Uint8Array {
+export function solanaEncodePoolTag3(release: SolanaPoolRelease, compressed: boolean, tip: bigint, inner: readonly { program: number; accounts: readonly number[]; data: Uint8Array }[], nextPage = false): Uint8Array {
   checkRelease(release, compressed ? SOLANA_POOL_PROOF_COMPRESSED_BYTES : SOLANA_POOL_PROOF_BYTES);
   if (!isU64(tip) || tip > release.tipCap) throw new Error("the tip is over the proof's tip cap");
   if (inner.length === 0 || inner.length > SOLANA_POOL_TAG3_MAX_INNER) throw new Error(`1 to ${SOLANA_POOL_TAG3_MAX_INNER} inner instructions`);
-  const out: number[] = [SOLANA_POOL_TAG_RELEASE_AND_BUY, compressed ? 1 : 0, ...release.proof, ...releaseFields(release), ...u64le(tip), inner.length];
+  const out: number[] = [SOLANA_POOL_TAG_RELEASE_AND_BUY, (compressed ? 1 : 0) | (nextPage ? SOLANA_POOL_TAG3_NEXT_PAGE : 0), ...release.proof, ...releaseFields(release), ...u64le(tip), inner.length];
   for (const x of inner) {
     if (x.accounts.length > 255 || x.data.length > 0xffff) throw new Error("an inner instruction is too large");
     out.push(x.program, x.accounts.length, ...x.accounts, x.data.length & 0xff, x.data.length >> 8, ...x.data);
@@ -743,15 +761,20 @@ const TAG3_HEAD = 2 + SOLANA_POOL_PROOF_COMPRESSED_BYTES + 130 + 8;
 
 /**
  * The transaction's three instructions: CU limit, CU price, and tag 3 into the pool with the compressed proof. Tag 3's
- * accounts are the release's eight, the tip account when the tip is above 0, then every account the steps name, each
- * once with its flags merged; the steps (solanaPoolBuySteps) are its inner instructions.
+ * accounts are the release's eight, the tip account when the tip is above 0, the next state page when `nextPage` (flag
+ * bit 1), then every account the steps name, each once with its flags merged; the steps (solanaPoolBuySteps) are its
+ * inner instructions.
  */
-export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, stateSize: number, rent: SolanaRent, tipAccount: string | null): SolanaApiInstruction[] {
+export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, stateSize: number, rent: SolanaRent, tipAccount: string | null, nextPage = false): SolanaApiInstruction[] {
   checkRequest(cfg, release, venue, req, rent);
   if ((req.tip > 0n) !== (tipAccount !== null)) throw new Error("a tip account goes with a tip above 0, and only then");
   if (tipAccount !== null && !SOLANA_JITO_TIP_ACCOUNTS.includes(tipAccount)) throw new Error("the tip account is not a Jito tip account");
   const steps = solanaPoolBuySteps(venue, req.wallet, req.spend, req.minOut);
-  const outer: SolanaApiAccount[] = [...solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, stateSize), ...(tipAccount ? [acc(tipAccount, false, true)] : [])];
+  const outer: SolanaApiAccount[] = [
+    ...solanaPoolReleaseAccounts(cfg, req.wallet, req.feePayer, release, stateSize),
+    ...(tipAccount ? [acc(tipAccount, false, true)] : []),
+    ...(nextPage ? [acc(solanaPoolNextPage(cfg.program, 0, stateSize), false, true)] : []),
+  ];
   const indexOf = (a: SolanaApiAccount): number => {
     let i = outer.findIndex((o) => o.key === a.key);
     if (i < 0) i = outer.push({ ...a }) - 1;
@@ -762,9 +785,9 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   // the pool refuses an inner account that is one of its own (the pool, its spent mark, the pages; by key or owner) or
   // a signer other than W, and the fee payer's signature must never reach a venue: never build one. Checked on every
   // account each step names, so one that lands in tag 3's head (the pool at 0, the fee payer at 2) is caught too.
-  const barred = new Set([cfg.pool, cfg.program, req.feePayer, ...[3, 4, 5, 6].map((i) => outer[i]!.key)]);
+  const barred = new Set([cfg.pool, cfg.program, req.feePayer, ...[3, 4, 5, 6].map((i) => outer[i]!.key), solanaPoolNextPage(cfg.program, 0, stateSize)]);
   if (steps.some((x) => barred.has(x.program) || x.accounts.some((a) => barred.has(a.key)))) throw new Error("a step names the pool, its accounts or the fee payer");
-  const data = solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, req.tip, inner);
+  const data = solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, req.tip, inner, nextPage);
   return [
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32le(perVenue(SOLANA_POOL_BUY_CU, venue.kind))]),
     ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [3, ...u64le(req.cuPrice)]),
@@ -772,13 +795,20 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   ];
 }
 
-/** The unsigned v0 transaction the fee payer and W sign: one tag 3 release-and-buy. Refuses over 1,232 bytes. */
+/** The unsigned v0 transaction the fee payer and W sign: one tag 3 release-and-buy, naming the next state page (flag
+ *  bit 1) whenever the transaction still fits 1,232 bytes with it. Refuses over 1,232 bytes. */
 export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: SolanaPoolBuyChain, opts: SolanaPoolBuyOptions = {}): SolanaPoolBuyBuilt {
   if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
   if (!solanaTableIsActive(chain.table.table)) throw new Error("our lookup table is deactivated");
   const tipAccount = req.tip > 0n ? (SOLANA_JITO_TIP_ACCOUNTS[(opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length)] as string) : null;
-  const instructions = solanaPoolBuyInstructions(cfg, release, venue, req, chain.stateSize, chain.rent, tipAccount);
-  const { message } = solanaCompileV0(req.feePayer, instructions, chain.blockhash, [chain.table], [req.feePayer, req.wallet]);
+  const compile = (nextPage: boolean) => {
+    const instructions = solanaPoolBuyInstructions(cfg, release, venue, req, chain.stateSize, chain.rent, tipAccount, nextPage);
+    const { message } = solanaCompileV0(req.feePayer, instructions, chain.blockhash, [chain.table], [req.feePayer, req.wallet]);
+    return { instructions, message, size: 1 + 128 + message.length };
+  };
+  let built = compile(true);
+  if (built.size > SOLANA_MAX_TX_BYTES) built = compile(false);
+  const { instructions, message } = built;
   const wire = new Uint8Array(1 + 128 + message.length);
   wire[0] = 2;
   wire.set(message, 129);
@@ -938,6 +968,9 @@ function privileges(ixs: readonly SolanaApiInstruction[]): Map<string, { signer:
   return m;
 }
 
+/** Whether tag 3's data sets flag bit 1 (the next state page). */
+const g3NextPage = (d: Uint8Array | undefined): boolean => d !== undefined && d.length > 1 && (d[1]! & SOLANA_POOL_TAG3_NEXT_PAGE) !== 0;
+
 type InnerRun = { program: string; accounts: { key: string; signer: boolean; writable: boolean }[]; data: Uint8Array };
 /**
  * Tag 3's inner instructions as the pool runs them (src/buy.rs): each index resolved to the tag 3 instruction's
@@ -945,7 +978,7 @@ type InnerRun = { program: string; accounts: { key: string; signer: boolean; wri
  * parse as the pool parses it (count 1 to 8, every index in range, ending exactly).
  */
 function innerRuns(data: Uint8Array, outer: readonly { key: string; signer: boolean; writable: boolean }[], wallet: string): InnerRun[] | null {
-  if (data.length < TAG3_HEAD + 1 || data[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || data[1] !== 1) return null;
+  if (data.length < TAG3_HEAD + 1 || data[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || (data[1] !== 1 && data[1] !== 1 + SOLANA_POOL_TAG3_NEXT_PAGE)) return null;
   const count = data[TAG3_HEAD]!;
   if (count === 0 || count > SOLANA_POOL_TAG3_MAX_INNER) return null;
   const out: InnerRun[] = [];
@@ -1027,9 +1060,12 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   const got = m.instructions.map((x) => ({ program: keys[x.programIndex]?.key ?? "?", accounts: x.accounts.map((i) => keys[i] ?? { key: "?", signer: false, writable: false }), data: x.data }));
   // the tip account the message names (tag 3's ninth account); the rebuild holds it to the baked Jito accounts
   const tipTo = req.tip > 0n ? got[2]?.accounts[8]?.key ?? null : null;
+  // the next state page (flag bit 1): either form is the device's, the build picks it by size; the rebuild takes the
+  // form the message carries, so the page it names is held to the state tree's next page key for key (RELEASE)
+  const nextPage = g3NextPage(got[2]?.data);
   let want: SolanaApiInstruction[];
   try {
-    want = solanaPoolBuyInstructions(cfg, release, venue, req, reads.stateSize, reads.rent, tipTo);
+    want = solanaPoolBuyInstructions(cfg, release, venue, req, reads.stateSize, reads.rent, tipTo, nextPage);
   } catch (e) {
     fail("RELEASE", `the request itself is refused: ${(e as Error).message}`);
     return done();
@@ -1039,9 +1075,9 @@ export function checkSolanaPoolBuy(wire: Uint8Array, cfg: SolanaPoolConfig, rele
   else pass("FRAME", "CU limit, CU price, tag 3");
   const g = got[2];
   const w = want[2]!;
-  const head = 8 + (req.tip > 0n ? 1 : 0);
+  const head = 8 + (req.tip > 0n ? 1 : 0) + (nextPage ? 1 : 0);
   // RELEASE: the head of tag 3 (tag, flags, this proof compressed, the release's fields, the tip) and its first
-  // accounts (the release's eight, then the tip account)
+  // accounts (the release's eight, then the tip account, then the next state page)
   if (!g || g.program !== cfg.program || g.data.length < TAG3_HEAD || !eqBytes(g.data.subarray(0, TAG3_HEAD), w.data.subarray(0, TAG3_HEAD)) ||
     g.accounts.length < head || w.accounts.slice(0, head).some((a, i) => a.key !== g.accounts[i]!.key)) {
     fail("RELEASE", "the release is not this proof's, to W, paid by the fee payer, into the pool's pages, with this tip");

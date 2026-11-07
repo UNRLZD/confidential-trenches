@@ -43,7 +43,7 @@ import { poolProveWithdraw, type VaultProver } from "../../kit/src/prover/prove.
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import {
-  readSolanaRent, solanaEncodePoolRelease, solanaPoolAccount, solanaPoolFee, solanaPoolReleaseAccounts, solanaRentMin, type SolanaRent,
+  readSolanaRent, solanaEncodePoolRelease, solanaPoolAccount, solanaPoolFee, solanaPoolTag2Accounts, solanaRentMin, type SolanaRent,
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
@@ -589,7 +589,7 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     const rent = await readSolanaRent(h.rpcs);
     const bh = await blockhashOf(h.rpcs);
     const cfg = { program: h.pin.program, pool };
-    const accounts = solanaPoolReleaseAccounts(cfg, w.address, h.pin.feePayer, release, sizes.stateSize);
+    const accounts = solanaPoolTag2Accounts(cfg, w.address, h.pin.feePayer, release, sizes.stateSize);
     const ixs = [
       { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, ...u32le(POOL_WITHDRAW_CU)) },
       { program: h.pin.program, accounts, data: solanaEncodePoolRelease(release) },

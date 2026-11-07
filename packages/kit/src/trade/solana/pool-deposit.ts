@@ -8,22 +8,24 @@
 // - data, 41 bytes: tag 1 ‖ value u64 LE ‖ precommitment (32, big-endian);
 // - accounts: pool (w), depositor (w, signer), state page (w), label page (w), precommitment mark ["pre",
 //   precommitment] (w), system program; each page the one holding entry `size` of its tree (state::page_for), so the
-//   sizes are the pool account's as read on two RPCs (solanaPoolTreeSizes).
+//   sizes are the pool account's as read on two RPCs (solanaPoolTreeSizes); then each tree's next page, state (w) and
+//   label (w), the program's optional pair since d3edab1 (deposit.rs:72-76).
 // - the program refuses a value below MIN_DEPOSIT (lib.rs:78), a precommitment at or above p or 0, and a precommitment
 //   whose mark exists; the builder refuses the first three itself, so it never hands out a message that cannot land.
-// - the builder passes the 6 accounts, never the optional next pages: a deposit planned at a page's last slot (size
-//   1023 mod 1024) that an insert overtakes fails on chain and loses only its fee, and the retry, planned from the
-//   sizes read again, lands (state::page_for takes the next page only when it is named).
+// - the builder passes all 8 accounts: a deposit planned at a page's last slot (size 1023 mod 1024) that an insert
+//   overtakes writes its entry on the next page and lands (state::page_for takes the next page only when the page the
+//   size named is not the entry's).
 // - the depositor pays every rent the deposit makes (M353 (1)), as the program charges it (src/state.rs create_pda and
 //   push_entry): the mark's rent-exempt minimum of 17 bytes less what the mark's address already holds, and each page's
 //   minimum at its new length (16 + 72 x (slot + 1)) less what the page holds, never below 0; plus the fee. Lamports a
 //   stranger sends to a page or a mark's address lower that cost, so it is priced from both accounts' balances, read on
-//   two RPCs (solanaPoolDepositCost), never from a page's expected size.
+//   two RPCs (solanaPoolDepositCost), never from a page's expected size. An entry the next page takes opens it (16 + 72
+//   bytes, 731,520 lamports more a tree at mainnet rent), which that price does not hold yet.
 import { solanaProgramAddress } from "../../checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 import { VAULT_FIELD_P } from "../../vault/shapes.ts";
 import { solanaCompileV0, type SolanaApiInstruction } from "./build.ts";
-import { solanaPoolAccount, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
+import { solanaPoolAccount, solanaPoolNextPage, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
 
 /** The deposit's tag and data length (contracts/pool-solana/src/lib.rs:84, deposit.rs:69). */
 export const SOLANA_POOL_TAG_DEPOSIT = 1;
@@ -110,7 +112,8 @@ function checkPrecommitment(p: unknown): bigint {
   return p;
 }
 
-/** The tag 1 instruction of one note by `depositor` into the pool of `program`, at the trees' sizes now. */
+/** The tag 1 instruction of one note by `depositor` into the pool of `program`, at the trees' sizes now, naming each
+ *  tree's next page. */
 export function solanaPoolDepositIx(program: string, depositor: string, note: SolanaPoolDepositNote, sizes: { stateSize: number; labelSize: number }): SolanaApiInstruction {
   const { value, precommitment } = note;
   if (typeof value !== "bigint" || value < SOLANA_POOL_MIN_DEPOSIT || value >= U64) refuse(`the value is not a u64 at or above ${SOLANA_POOL_MIN_DEPOSIT}`);
@@ -124,6 +127,8 @@ export function solanaPoolDepositIx(program: string, depositor: string, note: So
       { key: solanaPoolPage(program, 1, size(sizes.labelSize, "labelSize")), signer: false, writable: true },
       { key: solanaProgramAddress([enc.encode("pre"), pre], program), signer: false, writable: true },
       { key: SOLANA_SYSTEM_PROGRAM, signer: false, writable: false },
+      { key: solanaPoolNextPage(program, 0, sizes.stateSize), signer: false, writable: true },
+      { key: solanaPoolNextPage(program, 1, sizes.labelSize), signer: false, writable: true },
     ],
     data: Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT, ...u64le(value), ...pre),
   };
@@ -143,7 +148,9 @@ export function solanaPoolDepositTx(program: string, depositor: string, note: So
  * What one note's deposit costs its depositor beyond the value, as the program charges it (src/state.rs create_pda,
  * push_entry): the fee, max(0, rent(17) - the mark address's lamports), and for each tree max(0, rent(16 + 72 x (slot +
  * 1)) - its page's lamports), slot = size mod 1024 (a page not made yet holds what strangers sent it, often 0). `rent`
- * is the Rent sysvar read on two RPCs (readSolanaRent); the balances are the lower of two RPCs'.
+ * is the Rent sysvar read on two RPCs (readSolanaRent); the balances are the lower of two RPCs'. An entry the next page
+ * takes (inserts that landed first carried it there) opens that page instead, 731,520 lamports more a tree at mainnet
+ * rent; this price does not hold that (card pool-senders-next-page, open).
  */
 export function solanaPoolDepositCost(fee: bigint, rent: SolanaRent, sizes: { stateSize: number; labelSize: number }, have: { mark: bigint; statePage: bigint; labelPage: bigint }): bigint {
   for (const x of [fee, have.mark, have.statePage, have.labelPage]) if (typeof x !== "bigint" || x < 0n) refuse("the fee and the balances are bigints at or above 0");

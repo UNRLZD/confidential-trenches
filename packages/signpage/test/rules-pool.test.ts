@@ -169,7 +169,8 @@ const solCtx = (o: Partial<PoolContext> = {}): PoolContext & { precommitment: bi
 const acc = (k: string, signer: boolean, writable: boolean) => ({ key: k, signer, writable });
 const cuLimit = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, 0x40, 0x0d, 0x03, 0) };
 type Ixx = { program: string; accounts: { key: string; signer: boolean; writable: boolean }[]; data: Uint8Array };
-const depositIx = (o: { program?: string; pool?: string; from?: string; fromSigns?: boolean; value?: bigint; pre?: bigint; state?: number; label?: number; mark?: string; system?: string } = {}): Ixx => {
+// the kit's tag 1 since card pool-senders-next-page: the six, then each tree's next page (deposit.rs:72-76)
+const depositIx = (o: { program?: string; pool?: string; from?: string; fromSigns?: boolean; value?: bigint; pre?: bigint; state?: number; label?: number; mark?: string; system?: string; nextState?: string; nextLabel?: string; six?: boolean } = {}): Ixx => {
   const program = o.program ?? PROGRAM;
   const pre = preBytes(o.pre ?? PRE);
   return {
@@ -181,6 +182,7 @@ const depositIx = (o: { program?: string; pool?: string; from?: string; fromSign
       acc(solanaPoolPage(PROGRAM, 1, o.label ?? 4), false, true),
       acc(o.mark ?? solanaProgramAddress([enc("pre"), pre], PROGRAM), false, true),
       acc(o.system ?? SOLANA_SYSTEM_PROGRAM, false, false),
+      ...(o.six ? [] : [acc(o.nextState ?? solanaPoolPage(PROGRAM, 0, 1024), false, true), acc(o.nextLabel ?? solanaPoolPage(PROGRAM, 1, 1024), false, true)]),
     ],
     data: Uint8Array.from([1, ...u64(o.value ?? 2_000_000_000n), ...pre]),
   };
@@ -221,6 +223,11 @@ test("Solana deposit: another program, pool, depositor, amount, precommitment, p
     [ok([cuLimit, depositIx({ pre: PRE + 1n })]), "precommitment"],
     [ok([cuLimit, depositIx({ state: 2_000 })]), "state_page"],
     [ok([cuLimit, depositIx({ label: 1_100 })]), "label_page"],
+    // card pool-senders-next-page: the next pages are each tree's page after its size's, writable; the six alone are not the kit's
+    [ok([cuLimit, depositIx({ nextState: solanaPoolPage(PROGRAM, 0, 2048) })]), "state_page"],
+    [ok([cuLimit, depositIx({ nextState: solanaPoolPage(PROGRAM, 1, 1024) })]), "state_page"],
+    [ok([cuLimit, depositIx({ nextLabel: solanaPoolPage(PROGRAM, 1, 0) })]), "label_page"],
+    [ok([cuLimit, depositIx({ six: true })]), "deposit_accounts"],
     [ok([cuLimit, depositIx()], { bh: key(8) }), "blockhash"],
     [ok([cuLimit, depositIx(), { program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(SOL_W, true, true), acc(other, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(1n)) }]), "instructions"],
     [ok([depositIx(), cuLimit]), "compute_budget"],
@@ -239,7 +246,8 @@ const release: SolanaPoolRelease = { ...fxRelease, deadlineMs: NOW + 120_000n };
 const TO = key(77);
 const relIx = (r: SolanaPoolRelease = release, w = SOL_W, fp = SOL_FEE_PAYER, program = PROGRAM): Ixx => ({
   program,
-  accounts: solanaPoolReleaseAccounts({ program, pool: solanaProgramAddress([enc("pool")], program) }, w, fp, r, 6).map((a) => ({ ...a })),
+  // the kit's tag 2 since card pool-senders-next-page: the release's eight, then the next state page (release.rs:155)
+  accounts: [...solanaPoolReleaseAccounts({ program, pool: solanaProgramAddress([enc("pool")], program) }, w, fp, r, 6), acc(solanaPoolPage(program, 0, 1024), false, true)].map((a) => ({ ...a })),
   data: solanaEncodePoolRelease(r),
 });
 const send = (to = TO, v = release.withdrawnValue - release.relayFee, from = SOL_W): Ixx => ({
@@ -269,6 +277,10 @@ test("Solana withdraw: another pool program, release, recipient, fee payer, a fe
     [wdWire([relIx(), send(), send()]), solCtx(), "instructions"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 0 ? { ...x, key: key(48) } : x)) }]), solCtx(), "release_accounts"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 6 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_000) } : x)) }]), solCtx(), "release_accounts"],
+    // card pool-senders-next-page: the ninth is the state tree's next page, writable, and it is there
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 8 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_048) } : x)) }]), solCtx(), "release_accounts"],
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 8 ? { ...x, writable: false } : x)) }]), solCtx(), "release_accounts"],
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.slice(0, 8) }]), solCtx(), "release_accounts"],
   ] as const) {
     assert.throws(() => checkSolanaWithdraw(w, wdAsk, ctx, release, SOL_READS), refusedAs(rule), rule);
   }

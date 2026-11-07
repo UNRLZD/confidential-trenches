@@ -69,7 +69,8 @@ import {
   solanaEncodePoolRelease,
   solanaPoolFee,
   solanaPoolPage,
-  solanaPoolReleaseAccounts,
+  solanaPoolNextPage,
+  solanaPoolTag2Accounts,
   solanaPoolSellMinOut,
   solanaPoolSellSteps,
   solanaRentMin,
@@ -365,8 +366,9 @@ const sameList = (got: Ix["accounts"], want: readonly { key: string; signer: boo
 function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, precommitment: bigint, reads: SolanaPoolReads): bigint {
   if (x.program !== pin.program) return refuse("program");
   if (x.data.length !== SOLANA_POOL_DEPOSIT_LEN || x.data[0] !== SOLANA_POOL_TAG_DEPOSIT) return refuse("deposit_data");
-  if (x.accounts.length !== 6) return refuse("deposit_accounts");
-  const [pool, from, statePage, labelPage, mark, system] = x.accounts;
+  // the kit's tag 1: the six, then each tree's next page (deposit.rs:72-76 since d3edab1, state.rs page_for)
+  if (x.accounts.length !== 8) return refuse("deposit_accounts");
+  const [pool, from, statePage, labelPage, mark, system, nextState, nextLabel] = x.accounts;
   if (!same(pool, pin.pool, false, true)) return refuse("pool");
   if (!same(from, depositor, true, true)) return refuse("depositor");
   const pre = x.data.subarray(9, 41);
@@ -375,6 +377,8 @@ function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, 
   if (!same(labelPage, solanaPoolPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");
   if (!same(mark, solanaProgramAddress([new TextEncoder().encode("pre"), pre], pin.program), false, true)) return refuse("precommitment_mark");
   if (!same(system, SOLANA_SYSTEM_PROGRAM, false, false)) return refuse("system");
+  if (!same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");
+  if (!same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");
   const value = u64le(x.data, 1);
   if (value === 0n) return refuse("amount");
   return value;
@@ -416,7 +420,8 @@ export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolCon
   const want = solanaEncodePoolRelease(release);
   if (want.length !== rel.data.length || want.some((b, i) => b !== rel.data[i])) return refuse("release_not_devices");
   checkFeeAndDeadline(got.relayFee, got.relayFeeCap, got.deadlineMs, ctx);
-  const accounts = solanaPoolReleaseAccounts(pin, ctx.wallet, pin.feePayer, got, reads.stateSize);
+  // the kit's tag 2: the release's eight, then the next state page (release.rs:155 since d3edab1)
+  const accounts = solanaPoolTag2Accounts(pin, ctx.wallet, pin.feePayer, got, reads.stateSize);
   if (!sameList(rel.accounts, accounts)) return refuse("release_accounts");
   // the release alone: nothing after it
   if (d.ixs.length > n + 1) return refuse("instructions");
