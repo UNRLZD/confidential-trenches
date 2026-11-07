@@ -68,7 +68,15 @@
 //   node contracts/vault/scripts/deploy.mjs --network sandbox --rpc <url> --parent <id> --key-file <path>
 //     [--wasm <file> | --flavor mainnet|testnet] [--vault <id>] [--out <file>]
 //   node contracts/vault/scripts/deploy.mjs --network mainnet --parent <name>.near --vault <label>.<parent>
-//     --key-file <path> --wasm <file> --deployment <pre-deploy record> --out <file>
+//     --key-file <path> --wasm <file> --deployment <pre-deploy record> --out <file> [--resume-tx <batch hash>]
+//
+// Resume (mainnet, review M1 of card vault-mainnet-deploy): once the batch is sent, any failure prints the same command
+// with --resume-tx <its hash>. That run sends no batch: it reads the landed tx on both RPCs at final and refuses unless
+// it is exactly the reviewed batch (signer the parent, receiver the vault, exactly [CreateAccount, Transfer(the code
+// storage), DeployContract(the pinned code's sha256), FunctionCall(config, {}, 100 Tgas, 0)], succeeded), then runs the
+// read-back, the registration (none sent when storage_balance_of is non-null on every read) and writes --out. Until
+// then the only record is <out>.partial.json, so --out (mainnet-v1.json, which the kit and the helper read) names a
+// vault only once it is read back keyless and registered.
 import "../../../scripts/net-window.mjs";
 import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
@@ -113,7 +121,9 @@ export const MAINNET_LIVE_CHECK = "scripts/live-checks/vault-mainnet.mjs";
 // here, not imported: that module's imports reach scripts/ci (money-gate.mjs), which the sandbox suite does not read.
 export const MAINNET_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 // The one wasm each mainnet vault may be deployed with (review MED-1): the pin of its pre-deploy record, held here too.
-export const MAINNET_PINS = { "vault-test.confidential.unrlzd.near": "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a" };
+// vault-test: mainnet-test.json (card vault-mainnet-test). vault: mainnet-v1.pin.json, the mainnet build of e0623bf3
+// (card vault-mainnet-deploy), which deploy.mjs turns into mainnet-v1.json once the vault exists.
+export const MAINNET_PINS = { "vault-test.confidential.unrlzd.near": "57535ae7486f840d9c9d29934e265712c44ada1992abc14344e431c2f2caca6a", "vault.confidential.unrlzd.near": "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc" };
 // config().version of a mainnet build (contracts/vault/src/constants.rs NETWORK)
 export const MAINNET_VERSION = /^blindfill-vault \S+ mainnet$/;
 // What the parent must hold on mainnet beyond the code storage and the registration: the recipe's 100 Tgas config call
@@ -564,6 +574,40 @@ export function recipeProblems(tx) {
   return tags.join(",") === "0,3,1,2" ? [] : [`the batch's actions are [${tags.join(", ")}], want exactly [0, 3, 1, 2] (CreateAccount, Transfer, DeployContract, FunctionCall), no AddKey`];
 }
 
+// What keeps the tx answer `r` (nearcore's tx view, read at final) from being the reviewed recipe `hash` from `parent`
+// to `vault`: exactly CreateAccount, Transfer(transfer), DeployContract(the code whose sha256 is `sha`, shown as the
+// base64 of that hash), FunctionCall(config, {}, CONFIG_GAS, 0), final, and the tx and every receipt succeeded. [] when
+// it is.
+export function landedRecipeProblems(r, { hash, parent, vault, transfer, sha }) {
+  const p = [];
+  const t = r?.transaction ?? {};
+  if (r?.final_execution_status !== "FINAL") p.push(`the tx is ${r?.final_execution_status ?? "not"} final, want FINAL`);
+  if (t.hash !== hash) p.push(`the tx is ${t.hash}, not ${hash}`);
+  if (t.signer_id !== parent) p.push(`its signer is ${t.signer_id}, not ${parent}`);
+  if (t.receiver_id !== vault) p.push(`its receiver is ${t.receiver_id}, not ${vault}`);
+  const shown = (a) => {
+    if (a === "CreateAccount") return "CreateAccount";
+    if (a?.Transfer) return `Transfer(${a.Transfer.deposit})`;
+    if (a?.DeployContract) return `DeployContract(${a.DeployContract.code})`;
+    if (a?.FunctionCall) return `FunctionCall(${a.FunctionCall.method_name}, ${a.FunctionCall.args}, ${a.FunctionCall.gas}, ${a.FunctionCall.deposit})`;
+    return JSON.stringify(a).slice(0, 120);
+  };
+  const got = (Array.isArray(t.actions) ? t.actions : []).map(shown);
+  const want = ["CreateAccount", `Transfer(${transfer})`, `DeployContract(${Buffer.from(sha, "hex").toString("base64")})`, `FunctionCall(config, ${Buffer.from("{}").toString("base64")}, ${CONFIG_GAS}, 0)`];
+  if (JSON.stringify(got) !== JSON.stringify(want)) p.push(`its actions are [${got.join(", ")}], want exactly [${want.join(", ")}]`);
+  const outcomes = [r?.transaction_outcome, ...(r?.receipts_outcome ?? [])];
+  const okStatus = (st) => st && typeof st === "object" && ("SuccessValue" in st || "SuccessReceiptId" in st);
+  if (!(r?.status && "SuccessValue" in r.status) || !outcomes.every((o) => okStatus(o?.outcome?.status))) p.push(`the tx or a receipt did not succeed: ${JSON.stringify(r?.status ?? null).slice(0, 200)}`);
+  return p;
+}
+
+// one shell word, as sh reads it back (the printed resume line is pasted whole)
+const shq = (x) => (/^[\w@%+=:,./-]+$/.test(x) ? x : `'${x.replaceAll("'", "'\\''")}'`);
+// the command that finishes a mainnet deploy whose batch `hash` was sent: this run's own arguments and --resume-tx
+export const resumeLine = (argv, hash) => `node contracts/vault/scripts/deploy.mjs ${argv.map(shq).join(" ")} --resume-tx ${hash}`;
+// printed on any error once the batch is sent
+let resumeHint = null;
+
 // What keeps a mainnet parent holding `amount` yocto from paying the recipe's `transfer`, the registration and the gas.
 export function balanceProblems(amount, transfer) {
   const need = BigInt(transfer) + MAX_REGISTRATION + MAINNET_GAS_MARGIN;
@@ -703,7 +747,7 @@ async function send(url, tx, privateKey, what) {
 }
 
 function parseArgs(argv) {
-  const known = new Set(["--build-only", "--verify-records", "--flavor", "--build-dir", "--network", "--rpc", "--parent", "--key-file", "--vault", "--wasm", "--out", "--deployment"]);
+  const known = new Set(["--build-only", "--verify-records", "--flavor", "--build-dir", "--network", "--rpc", "--parent", "--key-file", "--vault", "--wasm", "--out", "--deployment", "--resume-tx"]);
   const flags = new Set(["--build-only", "--verify-records"]);
   const o = {};
   for (let i = 0; i < argv.length; i++) {
@@ -744,6 +788,9 @@ async function main() {
 
   const network = o.network;
   if (network !== "testnet" && network !== "sandbox" && network !== "mainnet") throw new Error("--network testnet|sandbox|mainnet");
+  const resume = o["resume-tx"];
+  if (resume !== undefined && network !== "mainnet") throw new Error("--resume-tx is for --network mainnet only");
+  if (resume !== undefined && !/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(resume)) throw new Error("--resume-tx: want a base58 tx hash");
   // mainnet deploys the pinned wasm only: never built on the owner's machine, never another vault by default
   let record = null;
   if (network === "mainnet") {
@@ -764,6 +811,9 @@ async function main() {
   if (idp.length) throw new Error(idp.join("; "));
   const out = o.out ?? (network === "testnet" ? path.join(CRATE, "deployments", "testnet-vault.json") : null);
   if (!out) throw new Error("--network sandbox needs --out <file>");
+  // the record written once the batch lands, before the read-back and the registration; --out only when both are done
+  const partialOut = `${out.replace(/\.json$/, "")}.partial.json`;
+  if (resume && existsSync(out)) throw new Error(`${out} already exists: nothing to resume`);
 
   // the parent's key, read and checked before the build so a wrong key costs no build
   const { pub, privateKey } = loadKey(o["key-file"], parent);
@@ -816,7 +866,7 @@ async function main() {
   }
   const ak = await rpc(url, "query", { request_type: "view_access_key", account_id: parent, public_key: pubText, finality: "optimistic" });
   if (ak.permission !== "FullAccess") throw new Error(`${parent}'s key ${pubText} is not a full-access key`);
-  try {
+  if (!resume) try {
     await rpc(url, "query", { request_type: "view_account", account_id: vault, finality: "optimistic" });
     throw new Error(`EXISTS`);
   } catch (e) {
@@ -824,22 +874,38 @@ async function main() {
     if (!/UNKNOWN_ACCOUNT|does not exist/.test(e.message)) throw e;
   }
   const transfer = BigInt(wasm.length + 100) * BYTE + NEAR / 100n;
+  let block, d;
+  if (resume) {
+    // the landed batch, read on every RPC at final: exactly the reviewed recipe, or nothing more is done
+    const answers = [];
+    for (const u of rpcs) {
+      const r = await rpc(u, "tx", { tx_hash: resume, sender_account_id: parent, wait_until: "FINAL" });
+      const lp = landedRecipeProblems(r, { hash: resume, parent, vault, transfer, sha });
+      if (lp.length) throw new Error(`--resume-tx ${resume} on ${u} is not the reviewed batch: nothing was sent: ${lp.join("; ")}`);
+      answers.push(r);
+    }
+    console.log(`resume: tx ${resume} is the reviewed batch on ${rpcs.join(" and ")}, final`);
+    d = { hash: resume, r: answers[0] };
+  } else {
   if (network === "mainnet") {
     const acct = await rpc(url, "query", { request_type: "view_account", account_id: parent, finality: "final" });
     const bp = balanceProblems(acct.amount, transfer);
     if (bp.length) throw new Error(`refused before any send: ${bp.join("; ")}`);
     console.log(`the parent holds ${acct.amount} yocto: it pays ${transfer} of code storage, the registration and the gas`);
   }
-  let block = await rpc(url, "block", { finality: "final" });
+  block = await rpc(url, "block", { finality: "final" });
   const tx = recipeTx({ signer: parent, publicKey: pub, nonce: BigInt(ak.nonce) + 1n, receiver: vault, blockHash: b58decode(block.header.hash), wasm, transfer, configGas: CONFIG_GAS });
   const rcp = recipeProblems(tx);
   if (rcp.length) throw new Error(`refused before any send: ${rcp.join("; ")}`);
-  console.log(`sending tx ${signTx(tx, privateKey).hash}: [CreateAccount, Transfer(${transfer}), DeployContract(${wasm.length} B), FunctionCall(config, ${CONFIG_GAS / TGAS} Tgas, 0)] from ${parent} to ${vault}, no AddKey`);
-  const d = await send(url, tx, privateKey, "the recipe");
-  // the deploy is on chain from here: its record is written before any read that could stop the run
-  mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
-  writeFileSync(out, JSON.stringify({ ...(network === "mainnet" ? record : {}), ...source, network, account_id: vault, parent, tx_hash: d.hash, stage: "deployed: the read-back and the registration are not recorded yet", wasm_sha256: sha, deployed_at: new Date().toISOString() }, null, 2) + "\n");
-  console.log(`deployed: tx ${d.hash}; partial record ${out}`);
+  const batchHash = signTx(tx, privateKey).hash;
+  console.log(`sending tx ${batchHash}: [CreateAccount, Transfer(${transfer}), DeployContract(${wasm.length} B), FunctionCall(config, ${CONFIG_GAS / TGAS} Tgas, 0)] from ${parent} to ${vault}, no AddKey`);
+  if (network === "mainnet") resumeHint = resumeLine(process.argv.slice(2), batchHash);
+  d = await send(url, tx, privateKey, "the recipe");
+  }
+  // the deploy is on chain from here: its partial record is written before any read that could stop the run
+  mkdirSync(path.dirname(path.resolve(partialOut)), { recursive: true });
+  writeFileSync(partialOut, JSON.stringify({ ...(network === "mainnet" ? record : {}), ...source, network, account_id: vault, parent, tx_hash: d.hash, stage: `deployed: not read back and not registered yet${network === "mainnet" ? `; finish with --resume-tx ${d.hash}` : ""}`, wasm_sha256: sha, deployed_at: new Date().toISOString() }, null, 2) + "\n");
+  console.log(`deployed: tx ${d.hash}; partial record ${partialOut}`);
   const config = JSON.parse(Buffer.from(d.r.status.SuccessValue, "base64").toString("utf8"));
   if (network === "testnet" && (config.asset !== TESTNET_TOKEN || !TESTNET_VERSION.test(config.version))) throw new Error(`deployed, but config() names asset ${config.asset}, version ${config.version}: not the testnet build`);
   if (network === "mainnet" && (config.asset !== MAINNET_USDC || !MAINNET_VERSION.test(config.version))) throw new Error(`deployed ${vault} (tx ${d.hash}), but config() names asset ${config.asset}, version ${config.version}: not the mainnet build`);
@@ -874,20 +940,29 @@ async function main() {
   const regp = registrationProblems(bounds);
   if (regp.length) throw new Error(`deployed ${vault} (tx ${d.hash}), registration refused before signing: ${token}: ${regp.join("; ")}`);
   const min = BigInt(bounds.min);
-  const ak2 = await rpc(url, "query", { request_type: "view_access_key", account_id: parent, public_key: pubText, finality: "optimistic" });
-  block = await rpc(url, "block", { finality: "final" });
-  const args = JSON.stringify({ account_id: vault, registration_only: true });
-  const reg = await send(url, functionCallTx({ signer: parent, publicKey: pub, nonce: BigInt(ak2.nonce) + 1n, receiver: token, blockHash: b58decode(block.header.hash), method: "storage_deposit", args, gas: REGISTER_GAS, deposit: min }), privateKey, "the registration");
+  // registered already (a resume after a registration that landed): nothing is sent
+  const before = [];
+  for (const [u, finality] of reads) before.push(await view(u, token, "storage_balance_of", { account_id: vault }, finality));
+  let reg = null;
+  if (before.every((b) => b !== null)) console.log(`${vault} is already registered on ${token} on every read: no registration sent`);
+  else {
+    const ak2 = await rpc(url, "query", { request_type: "view_access_key", account_id: parent, public_key: pubText, finality: "optimistic" });
+    block = await rpc(url, "block", { finality: "final" });
+    const args = JSON.stringify({ account_id: vault, registration_only: true });
+    reg = await send(url, functionCallTx({ signer: parent, publicKey: pub, nonce: BigInt(ak2.nonce) + 1n, receiver: token, blockHash: b58decode(block.header.hash), method: "storage_deposit", args, gas: REGISTER_GAS, deposit: min }), privateKey, "the registration");
+  }
   let balance = null;
   for (const [u, finality] of reads) {
     balance = await view(u, token, "storage_balance_of", { account_id: vault }, finality);
-    if (balance === null) throw new Error(`${token}.storage_balance_of(${vault}) is null on ${u} at ${finality} after ${reg.hash}`);
+    if (balance === null) throw new Error(`${token}.storage_balance_of(${vault}) is null on ${u} at ${finality} after ${reg?.hash ?? "no registration"}`);
   }
-  console.log(`registered: tx ${reg.hash}, ${token}.storage_deposit(${vault}) with ${min} yocto; storage_balance_of ${JSON.stringify(balance)}`);
+  console.log(`registered: ${reg ? `tx ${reg.hash}, ${token}.storage_deposit(${vault}) with ${min} yocto` : "before this run"}; storage_balance_of ${JSON.stringify(balance)}`);
 
   const doc = {
     ...(network === "mainnet" ? record : {}),
     ...source,
+    // the pre-deploy record's note on itself is not true of this record (review L6)
+    ...(network === "mainnet" && record.sources ? { sources: (({ pre_deploy, ...kept }) => kept)(record.sources) } : {}),
     network,
     account_id: vault,
     parent,
@@ -904,13 +979,16 @@ async function main() {
     asset: token,
     scope: config.scope,
     version: config.version,
-    registration_tx: reg.hash,
+    registration_tx: reg ? reg.hash : null,
+    ...(reg ? {} : { registration_note: `already registered on ${token} when this run read it (storage_balance_of non-null on every read): its storage_deposit was sent by an earlier run` }),
     registration_yocto: String(min),
     build,
     deployed_at: new Date().toISOString(),
   };
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
   writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
+  rmSync(partialOut, { force: true });
+  resumeHint = null;
   console.log(`wrote ${out}`);
   console.log(nextLine(network, path.relative(path.resolve(CRATE, "../.."), path.resolve(out)), { account: vault, signer: parent }));
 }
@@ -918,6 +996,7 @@ async function main() {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((e) => {
     console.error(`deploy: ERROR: ${String(e.message)}`);
+    if (resumeHint) console.error(`deploy: the batch was sent, so this deploy is not to be run again as it was. Once the batch is final, finish it with:\n${resumeHint}`);
     process.exit(e.signal ? 128 + os.constants.signals[e.signal] : (e.exitCode ?? 1));
   });
 }

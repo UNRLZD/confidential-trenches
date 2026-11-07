@@ -16,6 +16,7 @@ const SHARED = path.join(ROOT, "scripts/net-window.mjs");
 export const CHANGED = [
   "apps/helper/deploy/create-server.mjs",
   "contracts/vault/scripts/deploy.mjs",
+  "contracts/vault/scripts/mainnet-v1/reads.mjs",
   "contracts/vault/scripts/prepay.mjs",
   "contracts/vault/scripts/testnet-t04.mjs",
   "contracts/vault/scripts/testnet-usdc.mjs",
@@ -112,6 +113,7 @@ export const CHANGED = [
   "scripts/live-checks/rh-cold-quote.mjs",
   "scripts/live-checks/robinhood-listed-tape-opens.mjs",
   "scripts/live-checks/robinhood-mainnet-rpcs.mjs",
+  "scripts/live-checks/rpc-keyed-lists.mjs",
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
   "scripts/live-checks/evm-pool-sync-wide-pages.mjs",
