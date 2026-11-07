@@ -1493,7 +1493,7 @@ test("review G: a send built again on its blockhash's expiry never counts toward
   assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent.at(-1) }] });
 });
 
-test("review J (CO r2: down): a provider fault after the ask's only send was taken, with nothing of the ask landed and no send of it that may still land, answers down, so the user can ask again", async () => {
+test("review J (r2: down): a provider fault after the ask's only send was taken, with nothing of the ask landed and no send of it that may still land, answers down, so the user can ask again", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, 50_000_000);
