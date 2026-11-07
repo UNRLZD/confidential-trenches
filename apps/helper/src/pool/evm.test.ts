@@ -818,25 +818,56 @@ test("review M-3: the search finds the first block at or after any time on any c
   }
 });
 
-test("review M-3: on Robinhood mainnet an epoch's first fee and a withdraw in an epoch with no cached fee each wait under 3 s on the helper's pace, the search and the sender's reads on dRPC", async () => {
+// delta review L-2 (of 44b74adf): both providers' reads, in the order pool/evm.ts makes them, each through
+// pacedEvmRpc on the real PROVIDER_PACE, on a virtual clock with a timer queue (a sleeper's wait never adds to another's
+// that runs beside it). Provider b, Robinhood's own (1 post a second, burst 2), sets the time: the fee reads 3 on it and
+// a withdraw 5 more (6 on the sender's first send, its chain id), so 6 s of waits (7 s on the first send). A buy adds
+// one balance read on each.
+test("review M-3: on Robinhood mainnet an epoch's first fee waits under 3 s, and the fee and a withdraw at most 6 s (7 s on the sender's first send) on the helper's pace, both providers' reads in the code's order", async () => {
   const [a, b] = evmPoolVenues().robinhood.feeProviders ?? assert.fail("robinhood: no fee pair");
-  assert.equal(a, "https://robinhood.drpc.org", "the sender's single-provider reads and its sends go to dRPC");
-  for (const lateS of [5n, 30n, 55n]) {
+  assert.equal(a, "https://robinhood.drpc.org", "the sender's single-provider reads go to dRPC");
+  for (const [lateS, firstSend] of [[5n, true], [30n, false], [55n, false], [55n, true]] as const) {
     let t = 1_800_000_000_000;
+    const timers: { at: number; go: () => void }[] = [];
+    const sleep = (ms: number) => new Promise<void>((go) => void timers.push({ at: t + ms, go }));
     const holds = providerHolds(() => t);
-    const sleep = async (ms: number) => void (t += ms);
-    const ra = pacedEvmRpc(a, chainAt(robinhoodAt(lateS), HEAD), holds, sleep);
-    const rb = pacedEvmRpc(b, chainAt(robinhoodAt(lateS), HEAD), holds, sleep);
-    const t0 = t;
-    // the fee: the epoch's first block on a, then the depth, the L1 fee bound and the operator fee on both (the test
-    // above: 3 eth_call on each), both providers at once
-    await evmFirstBlockAtOrAfter(ra, S);
-    await Promise.all([ra, rb].map(async (r) => { for (let k = 0; k < 3; k++) await r("eth_getBlockByNumber", ["latest"]); }));
-    const fee = t - t0;
-    assert.ok(fee < 3_000, `${lateS} s in: the fee waited ${fee} ms`);
-    // a withdraw's reads and its send on a (2 getCode, 4 reads, estimateGas, eth_call, sendRaw)
-    for (let k = 0; k < 9; k++) await ra("eth_getBlockByNumber", ["latest"]);
-    assert.ok(t - t0 < 3_000, `${lateS} s in: the fee and the withdraw waited ${t - t0} ms`);
+    const posts: Map<string, number> = new Map([[a, 0], [b, 0]]);
+    const raw = (url: string): EvmRpc => { const r = chainAt(robinhoodAt(lateS), HEAD); return (m, p) => (posts.set(url, posts.get(url)! + 1), r(m, p)); };
+    const ra = pacedEvmRpc(a, raw(a), holds, sleep);
+    const rb = pacedEvmRpc(b, raw(b), holds, sleep);
+    const one = (r: EvmRpc) => r("eth_getBlockByNumber", ["latest", false]);
+    const marks: { fee?: number; all?: number } = {};
+    let done = false;
+    const run = (async () => {
+      const t0 = t;
+      // feeOf: the search on a, the block found on b, then viewAt (both at once) for the depth and ArbGasInfo's one read
+      await evmFirstBlockAtOrAfter(ra, S);
+      await one(rb);
+      for (let k = 0; k < 2; k++) await Promise.all([one(ra), one(rb)]);
+      marks.fee = t - t0;
+      // simulateSignSend: chain() on both (the first send only; later sends keep its answer), eth_getCode pending and latest on both, a's block, tip and
+      // two nonces beside b's two nonces, estimateGas and the eth_call on a, the send on both
+      if (firstSend) await Promise.all([one(ra), one(rb)]);
+      await Promise.all([ra, rb].flatMap((r) => [one(r), one(r)]));
+      await Promise.all([one(ra), one(ra), one(ra), one(rb), one(ra), one(rb)]);
+      await one(ra);
+      await one(ra);
+      await Promise.allSettled([one(ra), one(rb)]);
+      marks.all = t - t0;
+    })().finally(() => void (done = true));
+    while (!done) {
+      await new Promise((go) => setImmediate(go));
+      if (done) break;
+      timers.sort((x, y) => x.at - y.at);
+      const next = timers.shift();
+      if (next === undefined) break;
+      t = Math.max(t, next.at);
+      next.go();
+    }
+    await run;
+    assert.equal(posts.get(b), firstSend ? 9 : 8, "b: the fee's 3 reads and the withdraw's 5, 6 on the first send");
+    assert.ok(marks.fee! < 3_000, `${lateS} s in: the fee waited ${marks.fee} ms`);
+    assert.ok(marks.all! <= (firstSend ? 7_000 : 6_000), `${lateS} s in: the fee and the withdraw waited ${marks.all} ms (posts: a ${posts.get(a)}, b ${posts.get(b)})`);
   }
 });
 

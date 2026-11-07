@@ -110,6 +110,9 @@ test("L-2/L-3: POOL_EVM_RPCS_* of one operator however written, a CNAME of the o
     ["https://user:s3cr3t@a.robinhood.com/v2/KEY?k=1,https://b.robinhood.com", "robinhood.com"],
     ["https://rpc.mainnet.chain.robinhood.com,https://customer-origin.offchainlabs.com", "robinhood.com"],
     ["https://robinhood.api.pocket.network,https://rpc.degenprotocol.io", "pocket.network"],
+    // delta review L-2: by domain, never by host
+    ["https://customer-origin.offchainlabs.com,https://other-origin.offchainlabs.com", "robinhood.com"],
+    ["https://rpc.degenprotocol.io,https://rpc2.degenprotocol.io", "pocket.network"],
     ["https://rpc.foo.co.uk,https://rpc.bar.co.uk", "co.uk"],
     ["http://127.0.0.1:1,http://127.1:2", "127.0.0.1"],
     ["http://2130706433:1,http://127.0.0.1:2", "127.0.0.1"],

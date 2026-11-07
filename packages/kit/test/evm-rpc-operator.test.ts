@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { EVM_RPC_OPERATORS, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, type EvmPoolVenue } from "../src/index.ts";
+import { EVM_RPC_DOMAIN_ALIASES, EVM_RPC_OPERATORS, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, type EvmPoolVenue } from "../src/index.ts";
 // the money gate's curated map (a script, so read by its URL: the kit's types reach no script)
 const GATE = new URL("../../../scripts/ci/rpc-operators.mjs", import.meta.url).href;
 const { RPC_OPERATORS } = (await import(GATE)) as { RPC_OPERATORS: Readonly<Record<string, Readonly<Record<string, string>>>> };
@@ -56,9 +56,28 @@ test("the curated map names every EVM host of the money gate's map, as the money
       byGate.set(gateOp, mine);
     }
   }
-  // each name the map gives is the form a host it leaves out gets, so a mapped host and an unmapped one of one
-  // operator never read as two
-  for (const name of new Set(Object.values(EVM_RPC_OPERATORS))) assert.match(name, /^[a-z0-9-]+\.[a-z]+$/, name);
+});
+
+// delta review L-2: a host entry naming another domain's operator made a second host of that domain a second operator
+// (customer-origin.offchainlabs.com robinhood.com, other-origin.offchainlabs.com offchainlabs.com)
+test("each name the map gives a host is the name its domain gets anyway, its domain or that domain's alias, so a mapped host and an unmapped one of one domain never read as two", () => {
+  for (const [host, name] of Object.entries(EVM_RPC_OPERATORS)) {
+    const domain = host.split(".").slice(-2).join(".");
+    assert.equal(name, Object.hasOwn(EVM_RPC_DOMAIN_ALIASES, domain) ? EVM_RPC_DOMAIN_ALIASES[domain] : domain, host);
+  }
+  assert.ok(Object.isFrozen(EVM_RPC_DOMAIN_ALIASES));
+  for (const [domain, name] of Object.entries(EVM_RPC_DOMAIN_ALIASES)) assert.notEqual(name, domain, domain);
+});
+
+test("every host of an aliased domain is the alias's operator: two hosts of Offchain Labs are Robinhood's one, two of degenprotocol Pocket's one", () => {
+  for (const [x, y] of [
+    ["https://customer-origin.offchainlabs.com", "https://other-origin.offchainlabs.com"],
+    ["https://customer-origin.offchainlabs.com", "https://rpc.mainnet.chain.robinhood.com"],
+    ["https://rpc.degenprotocol.io", "https://rpc2.degenprotocol.io"],
+    ["https://rpc2.degenprotocol.io", "https://robinhood.api.pocket.network"],
+  ] as const) assert.equal(op(x), op(y), `${x} and ${y}`);
+  assert.equal(op("https://other-origin.offchainlabs.com"), "robinhood.com");
+  assert.equal(op("https://rpc2.degenprotocol.io"), "pocket.network");
 });
 
 test("every list the kit pins for an EVM venue, quote, fee and pool, is each entry another operator's", () => {
