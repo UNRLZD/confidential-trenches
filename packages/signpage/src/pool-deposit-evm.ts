@@ -10,7 +10,10 @@
 // - The price, from both RPCs at one block both hold (evmAgreedBlock "latest"): U's nonce and the base fee agree, U's
 //   balance is each RPC's own reading and the deposit must go on both; eth_estimateGas of the call from U agrees on both
 //   (capped, rules/pool.ts EVM_DEPOSIT_GAS_MAX); the L1 fee is the kit's chain fee read (evmPoolChainFeeReads) on Base,
-//   0 on Robinhood (Nitro's L1 cost is in its gas). Cost = gasLimit x maxFee + l1Fee, maxFee = 2 x baseFee + tip.
+//   0 on Robinhood (Nitro's L1 cost is in its gas). The gas limit is the estimate plus the tree's headroom
+//   (rules/pool.ts evmDepositHeadroom, from the pool's two tree depths both RPCs agree on): the deposit lands at any
+//   later index than the estimate's, and gas it does not use is never charged. Cost = gasLimit x maxFee + l1Fee,
+//   maxFee = 2 x baseFee + tip, checked against U's balance at that padded limit.
 // - Before anything is written: the tx is checked by the rule (rules/pool.ts checkEvmDeposit) and simulated on BOTH RPCs
 //   (eth_call from U with the value and data). A failure on either signs nothing. If a Deposited already names the
 //   precommitment, the note was taken: it is restored as the user's (evmClaimTaken, at the value that deposit carried)
@@ -21,10 +24,16 @@
 //   and evmNextNote) moves the note to UNSPENT with its leaf; one at another value is a take, the note restored at that
 //   value. A send is dead ONLY when U's finalized nonce has passed it on BOTH RPCs and no Deposited names the
 //   precommitment on either (final or not): then it is built again from fresh reads at the new nonce on the SAME note,
-//   never the old bytes, at most POOL_DEPOSIT_EVM_REBUILDS times a run. Anything else is pending: the note stays
-//   INCOMING and the answer is "sent" or "not_landed", never failed.
-// - An INCOMING note of the scope (a run a reload cut) is settled first, every run; while it is open no index is planned
-//   and nothing new is signed.
+//   never the old bytes, at most POOL_DEPOSIT_EVM_REBUILDS times a run. A send that reached neither RPC is built again
+//   at its own nonce once EVM_DEPOSIT_RESEND_MS has passed on the device's clock since it left (a send again restarts
+//   it). Anything else is pending: the note stays INCOMING and the answer is "sent" or "not_landed", never failed.
+// - The Solana runner's rule for open notes (src/pool-deposit.ts): each INCOMING note of the scope's U chains is read
+//   once at the start of every run, as its own move, never waited on: settled, taken, sent again, or left INCOMING with
+//   its U no source this run (a send again U cannot pay leaves it so, and `short` names the top-up). settle (no ask)
+//   does that pass on page load and on the page's state reads while such a note is open (src/pool-testnet.ts). An ask
+//   never takes an earlier note's landing or send as its own: it goes on the newest U with no open note, else the
+//   planned index; short there, it waits (not_landed) only when a U still landing a note holds the rung once that note
+//   lands, else not_funded with `short` naming the ask's own U. `sent` and `progress` are the ask's own sends only.
 // - Every read names a public account (the pool, U) and no request carries a key, the words or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -39,7 +48,7 @@ import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/p
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
+import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
 import { POOL_DEPOSIT_LOCK, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -64,6 +73,8 @@ export type PoolDepositEvmHost = {
   short?(address: string, wei: bigint): void;
   /** The device's cap on the priority fee, wei per gas (EVM_DEPOSIT_PRIORITY_CAP otherwise). */
   priorityCap?: bigint;
+  /** The device's clock, ms since the epoch (Date.now otherwise): when a send left, for EVM_DEPOSIT_RESEND_MS. */
+  now?(): number;
   reads?: number;
   wait?(ms: number): Promise<void>;
   end?(): void;
@@ -72,25 +83,26 @@ export type PoolDepositEvmHost = {
 /** The priority fee U offers, wei per gas: 0.01 gwei, above what Base's blocks include at (a tip that never lands
  *  holds U's nonce); Robinhood (Nitro) ignores it. */
 export const EVM_DEPOSIT_PRIORITY_CAP = 10_000_000n;
-/** Verdict reads a send gets in one run, POOL_DEPOSIT_EVM_WAIT_MS apart: past Base's finality (~15 min) is the next
- *  run's (a state read or the next ask settles the open note first). */
-export const POOL_DEPOSIT_EVM_READS = 120;
+/** Verdict reads the ask's own send gets in its run, POOL_DEPOSIT_EVM_WAIT_MS apart. One: a Deposited is final on
+ *  both RPCs only after Base 1,061 s, Base Sepolia 1,341 s, Robinhood 1,088 s, Robinhood testnet 1,439 s (measured on
+ *  two public RPCs per chain, 2026-11-07 06:12Z), so no wait inside a run sees it, and a run holding the deposit lock
+ *  that long would hold every other deposit. The note settles in the load and state-read pass (settle). */
+export const POOL_DEPOSIT_EVM_READS = 1;
 export const POOL_DEPOSIT_EVM_WAIT_MS = 2_000;
 /** A run builds one note's send again at most this many times (each only once the last is dead on both RPCs, or
  *  reached neither). */
 export const POOL_DEPOSIT_EVM_REBUILDS = 3;
-/** Each network's block interval, ms: Base and Base Sepolia (OP Stack) 2 s; Robinhood Chain and its testnet (Arbitrum
- *  Nitro) about 0.25 s. */
-const EVM_BLOCK_MS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 2_000n, "base-sepolia": 2_000n, robinhood: 250n, "robinhood-testnet": 250n });
+/** Each network's block interval, ms, the slower of two public RPCs' mean over 100 and 1,000 blocks (2026-11-07): Base
+ *  and Base Sepolia 200; Robinhood Chain 110; Robinhood testnet 180 to 204, so 204. */
+export const EVM_BLOCK_MS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 200n, "base-sepolia": 200n, robinhood: 110n, "robinhood-testnet": 204n });
 /**
- * How many blocks past a send's sentBlock BOTH RPCs' latest heads must be before a send that reached neither RPC is
- * built again at its nonce: one block interval plus the RPC propagation bound, the page client's deadline for one call
- * with its retry (EVM_READ_TRY_MS, 3.5 s), in the chain's own blocks, rounded up: Base (2 s blocks) ceil(5.5 s / 2 s) =
- * 3, Robinhood (0.25 s) ceil(3.75 s / 0.25 s) = 15. So a send still on its way is never taken for lost, and the bound is
- * read from the chain, never the device's clock (at the same nonce at most one of the sends can land in any case).
+ * How long after a send left the device (its sentMs, or the run's own send again of the same bytes, whichever is later)
+ * a send that reached neither RPC is built again at its nonce: the page client's deadline for one call with its retry
+ * (EVM_READ_TRY_MS, 3.5 s) plus one block interval. A send still on its way is never taken for lost; at the same nonce
+ * at most one of the sends can land in any case.
  */
-export const EVM_DEPOSIT_RESEND_BLOCKS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze(
-  Object.fromEntries(Object.entries(EVM_BLOCK_MS).map(([n, ms]) => [n, (ms + EVM_READ_TRY_MS + ms - 1n) / ms])) as Record<EvmNetwork, bigint>,
+export const EVM_DEPOSIT_RESEND_MS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze(
+  Object.fromEntries(Object.entries(EVM_BLOCK_MS).map(([n, ms]) => [n, EVM_READ_TRY_MS + ms])) as Record<EvmNetwork, bigint>,
 );
 /** Notes one run may settle or try (landed, taken, or deposited): a front-runner who takes every send ends the run. */
 const STEPS_MAX = 16;
@@ -128,11 +140,14 @@ function firstOf(ref: NoteRef, scope: bigint): Extract<NoteRef, { kind: "deposit
 }
 const sameRef = (a: NoteRef, b: NoteRef): boolean => JSON.stringify(a, (_, v) => (typeof v === "bigint" ? `${v}` : v)) === JSON.stringify(b, (_, v) => (typeof v === "bigint" ? `${v}` : v));
 
-/** A run's own: the host, the store, the seed, the pool's scope and the keys to zero. */
-type Run = { h: PoolDepositEvmHost; store: NoteStore; seed: Uint8Array; scope: bigint; chainId: bigint; keys: Uint8Array[]; ask: PoolAsk };
+/** A run's own: the host, the store, the seed, the pool's scope, the keys to zero, and when this run last sent each
+ *  hash (a send again of the very bytes restarts EVM_DEPOSIT_RESEND_MS). */
+type Run = { h: PoolDepositEvmHost; store: NoteStore; seed: Uint8Array; scope: bigint; chainId: bigint; keys: Uint8Array[]; ask: PoolAsk; sentAt: Map<string, bigint> };
+const nowOf = (r: Run): bigint => BigInt(Math.floor((r.h.now ?? Date.now)()));
 
-/** U's reads at one block both RPCs hold: the block, U's nonce (agreed) and its balance (each RPC's). */
-async function accountReads(r: Run, u: string): Promise<{ block: bigint; tag: string; baseFee: bigint; nonce: bigint; balance: [bigint, bigint] }> {
+/** U's reads at one block both RPCs hold: the block, U's nonce and the base fee (agreed; each RPC's reading kept for
+ *  the rule's own check) and its balance (each RPC's). */
+async function accountReads(r: Run, u: string): Promise<{ block: bigint; tag: string; baseFee: bigint; baseFees: [bigint, bigint]; nonce: bigint; nonces: [bigint, bigint]; balance: [bigint, bigint] }> {
   const sleep = (ms: number) => (r.h.wait ?? ((x: number) => new Promise<void>((ok) => setTimeout(ok, x))))(ms);
   // the newest block both hold (a lag read again), then its base fee as each RPC answers it: the two the same
   const blk = await evmRetryLag(() => evmAgreedBlock(r.h.rpcs, "latest", undefined, sleep), sleep);
@@ -145,21 +160,38 @@ async function accountReads(r: Run, u: string): Promise<{ block: bigint; tag: st
   const nonce = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [u, tag]), `rpc ${k} nonce`));
   if (nonce[0] !== nonce[1]) apart("U's nonce");
   const balance = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getBalance", [u, tag]), `rpc ${k} balance`));
-  return { block: blk.number, tag, baseFee: fees[0], nonce: nonce[0], balance };
+  return { block: blk.number, tag, baseFee: fees[0], baseFees: fees, nonce: nonce[0], nonces: nonce, balance };
 }
 
-/** The L1 fee bound for `gas` on the pin's network: the kit's chain fee reads on both RPCs (agreed), 0 on Nitro. */
-async function l1FeeOf(r: Run, gas: bigint, tag: string): Promise<bigint> {
+const DEPTH_CALLS = Object.freeze([selectorOf("currentTreeDepth()"), selectorOf("currentLabelTreeDepth()")]);
+function selectorOf(sig: string): string {
+  return hex(keccak_256(new TextEncoder().encode(sig)).slice(0, 4));
+}
+/** The pool's state and label tree depths at `tag`, each as both RPCs read it (they must agree). */
+async function depthsOf(r: Run, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
+  const out: [bigint, bigint][] = [];
+  for (const data of DEPTH_CALLS) {
+    const d = await both(r.h.rpcs, async (rpc, k) => firstWord(await rpc("eth_call", [{ to: r.h.pin.pool, data }, tag]), `rpc ${k} tree depth`));
+    if (d[0] !== d[1]) apart("the pool's tree depth");
+    out.push(d);
+  }
+  return { state: out[0]!, label: out[1]! };
+}
+
+/** The L1 fee bound for `gas` on the pin's network, as each RPC's chain fee reads give it (the kit's reads; they must
+ *  agree), 0 on Nitro. */
+async function l1FeesOf(r: Run, gas: bigint, tag: string): Promise<[bigint, bigint]> {
   const net = r.h.pin.network;
-  if (net === "robinhood" || net === "robinhood-testnet") return 0n;
+  if (net === "robinhood" || net === "robinhood-testnet") return [0n, 0n];
   const calls = evmPoolChainFeeReads(net, gas);
-  const answers: bigint[] = [];
+  const answers: [bigint[], bigint[]] = [[], []];
   for (const c of calls) {
     const [a, b] = await both(r.h.rpcs, async (rpc, k) => firstWord(await rpc("eth_call", [{ to: c.to, data: c.data }, tag]), `rpc ${k} chain fee`));
     if (a !== b) apart("the chain fee");
-    answers.push(a);
+    answers[0].push(a);
+    answers[1].push(b);
   }
-  return evmPoolChainFee(net, EVM_POOL_TX_BYTES, answers);
+  return [evmPoolChainFee(net, EVM_POOL_TX_BYTES, answers[0]), evmPoolChainFee(net, EVM_POOL_TX_BYTES, answers[1])];
 }
 
 /** What one try at a note came to. */
@@ -207,8 +239,12 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
     const cap = (sentValue ?? want) + cost;
     return evmSameChainDeposit({ pin: r.h.pin, seed64: r.seed, scope: r.scope, ladder: EVM_LADDER, first, held, events: round.events, finalBlock: round.finalBlock, balance: low < cap ? low : cap, cost });
   };
-  // first at the cap's gas, then at the estimate both RPCs agree on for the call that gives
-  const bound = EVM_DEPOSIT_GAS_MAX * maxFee + (await l1FeeOf(r, EVM_DEPOSIT_GAS_MAX, acct.tag));
+  // the tree's headroom over any estimate (the pool's two depths, both RPCs); first at the cap's gas with it, then at
+  // the estimate both RPCs agree on for the call that gives, with it
+  const depths = await depthsOf(r, acct.tag);
+  const room = evmDepositHeadroom(depths.state[0], depths.label[0]);
+  const capGas = EVM_DEPOSIT_GAS_MAX + room;
+  const bound = capGas * maxFee + (await l1FeesOf(r, capGas, acct.tag))[0];
   let step = priced(bound);
   if (step.kind === "wait") return { kind: "wait" };
   if (step.kind === "claim") return { kind: "claimed" };
@@ -221,25 +257,29 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
     both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_estimateGas", [{ from: u, to: call.to, value: qty(call.value), data: call.data }, acct.tag]), `rpc ${k} estimate`));
   let estimate = await estimateOf(step.call);
   if (estimate[0] !== estimate[1]) apart("the deposit's gas estimate");
-  let l1 = await l1FeeOf(r, estimate[0], acct.tag);
+  if (estimate[0] > EVM_DEPOSIT_GAS_MAX) throw new PoolRuleRefused("gas_over_cap");
+  let l1 = await l1FeesOf(r, estimate[0] + room, acct.tag);
   if (sentValue === undefined) {
-    const better = priced(estimate[0] * maxFee + l1);
+    const better = priced((estimate[0] + room) * maxFee + l1[0]);
     if (better.kind === "deposit" && better.call !== undefined && better.value > step.value && sameRef(better.ref, step.ref)) {
       const e2 = await estimateOf(better.call);
       if (e2[0] === e2[1] && e2[0] === estimate[0]) step = better;
-      else if (e2[0] === e2[1] && e2[0] <= EVM_DEPOSIT_GAS_MAX) ((estimate = e2), (step = better), (l1 = await l1FeeOf(r, e2[0], acct.tag)));
+      else if (e2[0] === e2[1] && e2[0] <= EVM_DEPOSIT_GAS_MAX) ((estimate = e2), (step = better), (l1 = await l1FeesOf(r, e2[0] + room, acct.tag)));
     }
   }
   const call = step.call!;
-  const tx: EvmOnwardSend = { type: 2, chainId: r.chainId, nonce: acct.nonce, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit: estimate[0], to: call.to, value: call.value, data: call.data, accessList: [] };
+  const gasLimit = estimate[0] + room;
+  const tx: EvmOnwardSend = { type: 2, chainId: r.chainId, nonce: acct.nonce, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit, to: call.to, value: call.value, data: call.data, accessList: [] };
   // a send again is of the value an earlier ask signed for: the check holds it to that
   const ask = sentValue !== undefined ? { ...r.ask, amount: sentValue } : { ...r.ask, amount: want };
-  checkEvmDeposit(tx, ask, { wallet: u, precommitment: step.precommitment, call, pin: r.h.pin }, { nonce: [acct.nonce, acct.nonce], balance: acct.balance, estimate, baseFee: [acct.baseFee, acct.baseFee], l1Fee: [l1, l1], priorityCap: tip }, r.h.pin.network === "base-sepolia" || r.h.pin.network === "robinhood-testnet");
+  // U's balance at the padded limit: a send again U can no longer pay is `keep`, its top-up named
+  if (call.value + gasLimit * maxFee + l1[0] > low) return { kind: "keep", short: call.value + gasLimit * maxFee + l1[0] - low, u };
+  checkEvmDeposit(tx, ask, { wallet: u, precommitment: step.precommitment, call, pin: r.h.pin }, { nonce: acct.nonces, balance: acct.balance, estimate, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip }, r.h.pin.network === "base-sepolia" || r.h.pin.network === "robinhood-testnet");
   // simulated on both before U signs: a failure on either signs nothing
-  const sim = await Promise.allSettled(r.h.rpcs.map((rpc) => rpc("eth_call", [{ from: u, to: call.to, value: qty(call.value), data: call.data, gas: qty(estimate[0]) }, acct.tag])));
+  const sim = await Promise.allSettled(r.h.rpcs.map((rpc) => rpc("eth_call", [{ from: u, to: call.to, value: qty(call.value), data: call.data, gas: qty(gasLimit) }, acct.tag])));
   if (sim.some((s) => s.status === "rejected")) return { kind: "sim_failed" };
   const raw = signEvmDeposit(id.secretKey, tx);
-  const send: EvmPoolSend = { hash: hex(keccak_256(raw)), nonce: acct.nonce, value: call.value, sentBlock: acct.block };
+  const send: EvmPoolSend = { hash: hex(keccak_256(raw)), nonce: acct.nonce, value: call.value, sentMs: nowOf(r) };
   // the state and its send, written before the signed tx leaves the device
   let note: NoteRecord;
   if (again !== null && (again.evmSends ?? []).some((x) => x.hash === send.hash)) {
@@ -255,6 +295,8 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
     if (planned.state !== "PLANNED" || planned.precommitment !== step.precommitment) throw new Error("the note to deposit is not PLANNED");
     note = await r.store.move(planned.id, "PLANNED", "INCOMING", { evmSend: send });
   }
+  // the send's clock starts as it leaves (a send again of the very bytes restarts it)
+  r.sentAt.set(send.hash, nowOf(r));
   await Promise.allSettled(r.h.rpcs.map((rpc) => rpc("eth_sendRawTransaction", [hex(raw)])));
   return { kind: "sent", note, hash: send.hash };
 }
@@ -287,11 +329,11 @@ async function verdictOf(r: Run, n: NoteRecord): Promise<Verdict> {
   if (fin[0] > last.nonce && fin[1] > last.nonce) return { kind: "dead" };
   // reached neither RPC: old enough, no RPC knows any of the note's hashes, and U's latest and pending nonces both still
   // the send's on both. Anything else is pending
-  // old enough: both RPCs' latest heads at least sentBlock + the network's EVM_DEPOSIT_RESEND_BLOCKS
-  if (last.sentBlock === undefined) return { kind: "pending" };
-  const heads = await both(r.h.rpcs, async (rpc, k) => quantity(((await rpc("eth_getBlockByNumber", ["latest", false])) as { number?: unknown } | null)?.number, `rpc ${k} head`));
-  const after = last.sentBlock + EVM_DEPOSIT_RESEND_BLOCKS[r.h.pin.network];
-  if (heads[0] < after || heads[1] < after) return { kind: "pending" };
+  // old enough: EVM_DEPOSIT_RESEND_MS since the last send left the device (its record, or this run's send again)
+  if (last.sentMs === undefined) return { kind: "pending" };
+  const ran = r.sentAt.get(last.hash);
+  const left = ran !== undefined && ran > last.sentMs ? ran : last.sentMs;
+  if (nowOf(r) < left + EVM_DEPOSIT_RESEND_MS[r.h.pin.network]) return { kind: "pending" };
   const hashes = n.evmSends!.map((x) => x.hash);
   const known = await both(r.h.rpcs, async (rpc) => (await Promise.all(hashes.map((x) => rpc("eth_getTransactionByHash", [x])))).some((t) => t !== null));
   if (known[0] || known[1]) return { kind: "pending" };
@@ -300,6 +342,38 @@ async function verdictOf(r: Run, n: NoteRecord): Promise<Verdict> {
     if (nonce[0] !== last.nonce || nonce[1] !== last.nonce) return { kind: "pending" };
   }
   return { kind: "unsent", nonce: last.nonce };
+}
+
+/** How an open note's reads in one run ended: landed (or taken: restored at the value its Deposited carried), still
+ *  pending (maybe sent again), or stuck (its send again U cannot pay: the top-up `short` names). */
+type End = { kind: "landed"; note: NoteRecord; filled: boolean; hash: string | undefined } | { kind: "pending" } | { kind: "stuck"; short: bigint; u: string };
+
+/** An INCOMING note read up to `reads` times, POOL_DEPOSIT_EVM_WAIT_MS apart; a dead send built again (a send that
+ *  reached neither RPC at its own nonce), at most POOL_DEPOSIT_EVM_REBUILDS times. `sent` hears each send again. */
+async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) => Promise<void>, sent: (hash: string) => void): Promise<End> {
+  let note = n;
+  let rebuilds = 0;
+  for (let k = 0; k < reads; k++) {
+    if (k > 0) await wait(POOL_DEPOSIT_EVM_WAIT_MS);
+    const v = await verdictOf(r, note);
+    if (v.kind === "landed") return { kind: "landed", note: v.note, filled: v.filled, hash: note.evmSends?.at(-1)?.hash };
+    if (v.kind === "pending") continue;
+    // dead on both RPCs: the same note again from fresh reads at U's new nonce; reached neither: at its own nonce
+    if (++rebuilds > POOL_DEPOSIT_EVM_REBUILDS) return { kind: "pending" };
+    const t = await tryNote(r, firstOf(note.ref, r.scope)!, note, 0n, v.kind === "unsent" ? v.nonce : undefined);
+    if (t.kind === "sent") {
+      note = t.note;
+      sent(t.hash);
+      continue;
+    }
+    if (t.kind === "taken") {
+      const now = (await r.store.get(note.id))!;
+      return { kind: "landed", note: now, filled: false, hash: undefined };
+    }
+    if (t.kind === "keep") return { kind: "stuck", short: t.short, u: t.u };
+    return { kind: "pending" };
+  }
+  return { kind: "pending" };
 }
 
 /** The run: an ask (pool.deposit on an EVM chain), or null to settle the scope's open notes only. */
@@ -311,45 +385,58 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
   const sentTxs: TxRef[] = [];
   const chain = ask?.chain ?? (h.pin.network === "robinhood" || h.pin.network === "robinhood-testnet" ? "robinhood" : "base");
   const wait = h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  // the ask's own notes that landed this run (each counted whether or not a tx is named for it)
+  let landed = 0;
+  // a send of the pass (an earlier note's, sent again) may land too: the run is never "failed" past it
+  let passSent = false;
   try {
     const store = await h.notes();
     const chainId = EVM_CHAIN_IDS[h.pin.network];
     const scope = evmPoolScopeOf(h.pin.pool, chainId);
-    const r: Run = { h, store, seed, scope, chainId, keys, ask: ask ?? { kind: "pool.deposit", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } };
-    let left = ask?.amount ?? 0n;
-    let rebuilds = 0;
+    const r: Run = { h, store, seed, scope, chainId, keys, ask: ask ?? { kind: "pool.deposit", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 }, sentAt: new Map() };
+    const mine = async () => (await store.list()).filter((n) => n.scope === scope && firstOf(n.ref, scope) !== null);
+
+    // the pass: each INCOMING note of the scope read once, as its own move, never waited on; its U no source this run
+    // while it stays open. Its landing and its sends are never the ask's.
+    const busy = new Set<number>();
+    const pending = new Set<number>(); // the U of a note still landing (not one stuck on its top-up)
+    let stuck = false;
+    for (const n of (await mine()).filter((x) => x.state === "INCOMING")) {
+      const i = firstOf(n.ref, scope)!.i;
+      const end = await follow(r, n, 1, wait, () => void (passSent = true));
+      if (end.kind === "landed") continue;
+      busy.add(i);
+      if (end.kind === "pending") pending.add(i);
+      else {
+        stuck = true;
+        h.short?.(end.u, end.short);
+      }
+    }
+    if (ask === null) return busy.size === 0 ? { stage: "filled", txs: [] } : stuck && !passSent ? { error: "not_funded" } : { stage: "not_landed", txs: [] };
+
+    // a U still landing a note holds `value` once that note lands. Per RPC: U's balance at the newest block both hold,
+    // less the note's value while U's nonce there has not passed its last send (a mined send is out of the balance
+    // already); the lower of the two RPCs' readings decides, so neither alone makes the ask wait
+    const coversOnceLanded = async (value: bigint): Promise<boolean> => {
+      const open = (await mine()).filter((n) => n.state === "INCOMING");
+      for (const i of pending) {
+        const id = depositIdEvm(seed, scope, i);
+        keys.push(id.secretKey);
+        const acct = await accountReads(r, id.address);
+        const out = open.filter((n) => firstOf(n.ref, scope)!.i === i && (n.evmSends?.at(-1)?.nonce ?? acct.nonce) >= acct.nonce).reduce((t, n) => t + (n.evmSends?.[0]?.value ?? 0n), 0n);
+        const low = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
+        if (low - out >= value) return true;
+      }
+      return false;
+    };
+
+    let left = ask.amount;
     let simAgain = false;
     for (let steps = 0; steps < STEPS_MAX; steps++) {
-      const all = (await store.list()).filter((n) => n.scope === scope && firstOf(n.ref, scope) !== null);
-      const open = all.find((n) => n.state === "INCOMING");
-      if (open !== undefined) {
-        // an open note is settled first: no new index, nothing new signed, while it may land
-        let v: Verdict = { kind: "pending" };
-        for (let k = 0; k < (h.reads ?? POOL_DEPOSIT_EVM_READS); k++) {
-          v = await verdictOf(r, open);
-          if (v.kind !== "pending") break;
-          await wait(POOL_DEPOSIT_EVM_WAIT_MS);
-        }
-        if (v.kind === "landed") {
-          const hash = open.evmSends?.at(-1)?.hash;
-          if (hash !== undefined) landedTxs.push({ chain, hash });
-          if (v.filled) left -= left < v.note.leaf!.value ? left : v.note.leaf!.value;
-          h.progress?.("filled");
-          continue;
-        }
-        if (v.kind === "pending") return sentTxs.length > 0 ? { stage: "sent", txs: sentTxs } : { stage: "not_landed", txs: [] };
-        // dead on both RPCs: the same note again from fresh reads at U's new nonce; reached neither: at its own nonce
-        if (++rebuilds > POOL_DEPOSIT_EVM_REBUILDS) return { stage: "not_landed", txs: sentTxs };
-        const t = await tryNote(r, firstOf(open.ref, scope)!, open, 0n, v.kind === "unsent" ? v.nonce : undefined);
-        if (t.kind === "sent") {
-          sentTxs.push({ chain, hash: t.hash });
-          h.sent?.(t.hash);
-        } else if (t.kind !== "taken") return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: sentTxs };
-        continue;
-      }
-      if (ask === null || left < EVM_POOL_MIN_DEPOSIT) break;
-      // the source: the newest U that landed a note while it covers a rung, else the planned index
-      const used = all.filter((n) => LANDED.includes(n.state)).map((n) => firstOf(n.ref, scope)!.i);
+      if (left < EVM_POOL_MIN_DEPOSIT) break;
+      // the source: the newest U with no open note that landed a note, while it covers a rung; else the planned index
+      const all = await mine();
+      const used = all.filter((n) => LANDED.includes(n.state)).map((n) => firstOf(n.ref, scope)!.i).filter((i) => !busy.has(i));
       let t: Try | null = null;
       if (used.length > 0) {
         t = await tryNote(r, { kind: "deposit", s: scope, i: Math.max(...used) }, null, left);
@@ -363,39 +450,59 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
         sentTxs.push({ chain, hash: t.hash });
         h.sent?.(t.hash);
         h.progress?.("sent");
-        continue;
+        const i = firstOf(t.note.ref, scope)!.i;
+        const end = await follow(r, t.note, h.reads ?? POOL_DEPOSIT_EVM_READS, wait, (hash) => {
+          sentTxs.push({ chain, hash });
+          h.sent?.(hash);
+        });
+        if (end.kind === "landed") {
+          landed++;
+          if (end.hash !== undefined) landedTxs.push({ chain, hash: end.hash });
+          if (end.filled) left -= left < end.note.leaf!.value ? left : end.note.leaf!.value;
+          h.progress?.("filled");
+          continue;
+        }
+        // still landing (the next load settles it), or its send again U cannot pay: the ask ends here with its sends
+        busy.add(i);
+        if (end.kind === "stuck") h.short?.(end.u, end.short);
+        return landed ? { stage: "part_filled", txs: landedTxs } : { stage: "sent", txs: sentTxs };
       }
       if (t.kind === "taken" || t.kind === "claimed") {
         simAgain = false; // a new note: its own simulation, and its own second try
         continue;
       }
-      if (t.kind === "wait" || t.kind === "moved") return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: [] };
+      if (t.kind === "wait" || t.kind === "moved") return landed ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: [] };
       if (t.kind === "sim_failed") {
         // the pool may have moved: read and simulate once more, then not_funded
         if (!simAgain) {
           simAgain = true;
           continue;
         }
-        return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { error: "not_funded" };
+        return landed ? { stage: "part_filled", txs: landedTxs } : { error: "not_funded" };
       }
       // keep: U cannot carry a rung and its fee
-      if (landedTxs.length) return { stage: ask.amount - left > 0n && left >= EVM_POOL_MIN_DEPOSIT ? "part_filled" : "filled", txs: landedTxs };
+      if (landed) return { stage: left >= EVM_POOL_MIN_DEPOSIT ? "part_filled" : "filled", txs: landedTxs };
+      // an earlier note still landing on a U that covers this rung once it lands: try again then; else the ask's own U
+      // is short, and the top-up names it
+      if (await coversOnceLanded(ladderSplit(EVM_LADDER, left).notes[0] ?? EVM_LADDER.one)) return { stage: "not_landed", txs: [] };
       h.short?.(t.u, t.short);
       return { error: "not_funded" };
     }
     // the run's step cap (a front-runner taking note after note) with the ask not all in: what landed, never filled
-    if (ask !== null && left >= EVM_POOL_MIN_DEPOSIT) return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: sentTxs };
+    if (left >= EVM_POOL_MIN_DEPOSIT) return landed ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: sentTxs };
     return { stage: "filled", txs: landedTxs };
   } catch (e) {
     // a send may have left: never failed while it may land
     if (sentTxs.length > 0) return { stage: "sent", txs: sentTxs };
-    if (landedTxs.length > 0) return { stage: "part_filled", txs: landedTxs };
+    if (landed > 0) return { stage: "part_filled", txs: landedTxs };
     // a take not final yet before the note to sign: "not now" (pool-kinds.ts answers it busy), nothing signed
     if (e instanceof EvmNotFinalError) throw e;
     if (e instanceof PoolRuleRefused) return { error: "not_allowed" };
     // a provider read that still fails after the page's own retry (or a lag past its tries), before U signs: "not now"
-    // (card pool-read-down); any other fault before a send (two RPCs that read apart, an answer out of shape): failed
+    // (card pool-read-down); any other fault before a send (two RPCs that read apart, an answer out of shape): failed,
+    // except past a send of the pass, which may land: not_landed
     if (e instanceof SolanaRpcTransportError || e instanceof EvmUnansweredError || e instanceof EvmLagError) return { error: "down" };
+    if (passSent) return { stage: "not_landed", txs: [] };
     return { error: "failed" };
   } finally {
     seed.fill(0);

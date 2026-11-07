@@ -1035,24 +1035,46 @@ const hex = (b: Uint8Array): string => "0x" + Array.from(b, (x) => x.toString(16
 // signer signs only the send this check passed, as it read it, with U's key alone.
 
 /** The device's reads for U's deposit, each as its two RPCs answered: U's nonce, base fee, eth_estimateGas of the call
- *  from U and the L1 fee bound (Base: the kit's evmPoolChainFeeReads; 0 on Robinhood, Nitro's L1 cost is in its gas)
- *  must agree; U's balance is each RPC's own reading, and the deposit must go on both; the device's priority-fee cap. */
+ *  from U, the L1 fee bound (Base: the kit's evmPoolChainFeeReads; 0 on Robinhood, Nitro's L1 cost is in its gas) and
+ *  the pool's two tree depths (State.sol currentTreeDepth, currentLabelTreeDepth) must agree; U's balance is each RPC's
+ *  own reading, and the deposit must go on both; the device's priority-fee cap. */
 export type EvmDepositReads = {
   readonly nonce: readonly [bigint, bigint];
   readonly balance: readonly [bigint, bigint];
   readonly estimate: readonly [bigint, bigint];
   readonly baseFee: readonly [bigint, bigint];
   readonly l1Fee: readonly [bigint, bigint];
+  readonly stateDepth: readonly [bigint, bigint];
+  readonly labelDepth: readonly [bigint, bigint];
   readonly priorityCap: bigint;
 };
 /** The device's side of U's deposit: U's address, the note's precommitment, the call the wallet's evmSameChainDeposit
  *  returned for it (frozen), and the device's pin of the pool (the wallet's EVM_POOLS entry of the page's network). */
 export type EvmDepositContext = { readonly wallet: string; readonly precommitment: bigint; readonly call: { readonly to: string; readonly value: bigint; readonly data: string }; readonly pin: EvmPoolPin };
-/** The most gas U's deposit may take: its two-RPC estimate, never past this. A pool deposit inserts one leaf (Poseidon
- *  per tree level, the tree at most 32 deep) and the funding tool bounds it at 300,000 (contracts/pool-evm/script/
- *  testnet-run.mjs GAS.deposit); Nitro adds its L1 cost as gas. The cap keeps two RPCs' estimate from spending U's
- *  money as gas. */
+/** The most gas the two RPCs' estimate of U's deposit may name: the cap keeps their word from spending U's money as gas
+ *  (Nitro adds its L1 cost as gas). */
 export const EVM_DEPOSIT_GAS_MAX = 1_000_000n;
+/** Gas one tree level may add to an insert: the kit's EVM_POOL_GAS_PER_LEVEL (G(depth)'s slope, 21,518, measured per
+ *  level of a release's insert; held equal by test/rules-pool-deposit-evm.test.ts). A level whose index bit is set
+ *  hashes (one PoseidonT3) where a clear bit only stores: on the Base Sepolia pool one such level measured 15,868 more
+ *  (eth_simulateV1, 2026-11-07, our deposit after 0 to 36 others in its block). */
+export const EVM_DEPOSIT_GAS_PER_LEVEL = 21_518n;
+/** The deepest tree the pool takes (State.sol MAX_TREE_DEPTH). */
+const EVM_DEPOSIT_MAX_DEPTH = 32n;
+/**
+ * The headroom over the estimate U's deposit is signed with: G(depth) in the deposit's terms. A deposit inserts one leaf
+ * in each of the pool's two trees (InternalLeanIMT._insert: one Poseidon per set bit of the next index, below the tree's
+ * depth), and the estimate is of the index at the block it was read; the deposit lands behind any others in its block,
+ * at any later index. The worst insert at a tree's depth d hashes at every level, and one deposit ahead can raise the
+ * depth by one, so each tree may take d + 1 levels more than the estimate's: (stateDepth + 1 + labelDepth + 1) x the
+ * per-level gas. Gas U does not use is never charged (EIP-1559 charges gasUsed), so only U's balance must cover it.
+ */
+export function evmDepositHeadroom(stateDepth: bigint, labelDepth: bigint): bigint {
+  for (const d of [stateDepth, labelDepth]) if (typeof d !== "bigint" || d < 0n || d > EVM_DEPOSIT_MAX_DEPTH) throw new PoolRuleRefused("depth");
+  return (stateDepth + 1n + labelDepth + 1n) * EVM_DEPOSIT_GAS_PER_LEVEL;
+}
+/** The pool's deposit(uint256,uint256) selector (PrivacyPool.sol:82). */
+export const EVM_DEPOSIT_SELECTOR = "0xe2bbb158";
 const DEPOSIT_CHECKED = new WeakMap<object, OnwardRead>();
 /** The pool's least deposit: its ladder's one, PrivacyPool.sol:53 MIN_DEPOSIT (the kit's EVM_POOL_MIN_DEPOSIT, held equal
  *  by test/rules-pool-deposit-evm.test.ts; this file imports no kit module beside its checks and builders). */
@@ -1079,6 +1101,8 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   const base = agreed(reads.baseFee, isUint);
   const estimate = agreed(reads.estimate, isUint);
   const l1 = agreed(reads.l1Fee, isUint);
+  const stateDepth = agreed(reads.stateDepth, isUint);
+  const labelDepth = agreed(reads.labelDepth, isUint);
   const tipCap = reads.priorityCap;
   if (!Array.isArray(reads.balance) || reads.balance.length !== 2 || !reads.balance.every(isUint) || !isUint(tipCap)) return refuse("reads");
   // Nitro charges its L1 data as gas, inside the estimate: no L1 fee beside it
@@ -1097,15 +1121,15 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   const pre = ctx.precommitment;
   if (typeof pre !== "bigint" || pre <= 0n || pre >= EVM_DEPOSIT_FIELD_P) return refuse("precommitment");
   const data = lower(call.data);
-  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");
+  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(0, 10) !== EVM_DEPOSIT_SELECTOR || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");
   if (lower(d.data) !== data) return refuse("data");
   // U's nonce on two RPCs: no replacing a send of U's, no queueing behind one
   if (d.nonce !== uNonce) return refuse("nonce");
   // no access list: nothing beside the call
   if (d.accessList.length > 0) return refuse("access_list");
-  // the two-RPC estimate, no padding past it, and never past the cap
-  if (d.gasLimit !== estimate || d.gasLimit === 0n) return refuse("gas_estimate");
-  if (d.gasLimit > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");
+  // the two-RPC estimate, never past the cap, and exactly the tree's headroom over it: no padding past that bound
+  if (estimate === 0n || estimate > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");
+  if (d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)) return refuse("gas_estimate");
   // no tip past the device's cap nor above the max fee; no max fee past two base fees and the tip, nor under the base fee
   if (d.maxPriorityFeePerGas > tipCap || d.maxPriorityFeePerGas > d.maxFeePerGas) return refuse("priority_fee");
   if (d.maxFeePerGas > 2n * base + tipCap || d.maxFeePerGas < base) return refuse("max_fee");

@@ -17,8 +17,9 @@ import { evmPoolScopeOf, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin } from "
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
-import { EVM_DEPOSIT_GAS_MAX } from "../src/rules/pool.ts";
-import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_BLOCKS } from "../src/pool-deposit-evm.ts";
+import { EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom } from "../src/rules/pool.ts";
+import { EVM_READ_TRY_MS } from "../../wallet/src/pool/evm.ts";
+import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
 import { mock } from "node:test";
 import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
@@ -34,6 +35,9 @@ const RUNG = EVM_LADDER.min; // 0.001 ETH
 const ASK: PoolAsk = { kind: "pool.deposit", chain: "base", token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
 const FEE = 1_000_000n * 3_000_000n + 10n ** 13n; // well above the cap's fee bound at the mocked base fee
 const q = (v: bigint) => "0x" + v.toString(16);
+const sel = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex").slice(0, 8);
+const SEL_STATE_DEPTH = sel("currentTreeDepth()");
+const SEL_LABEL_DEPTH = sel("currentLabelTreeDepth()");
 const word = (v: bigint) => v.toString(16).padStart(64, "0");
 
 const closers: (() => void)[] = [];
@@ -68,7 +72,7 @@ const big = (b: Uint8Array) => b.reduce((a, x) => (a << 8n) | BigInt(x), 0n);
 const sentOf = (raw: string) => {
   const f = fieldsOf(raw);
   const data = Buffer.from(f[7]!).toString("hex");
-  return { nonce: big(f[1]!), value: big(f[6]!), pre: BigInt("0x" + data.slice(72, 136)), hash: "0x" + Buffer.from(keccak_256(Buffer.from(raw.slice(2), "hex"))).toString("hex") };
+  return { nonce: big(f[1]!), gas: big(f[4]!), value: big(f[6]!), pre: BigInt("0x" + data.slice(72, 136)), hash: "0x" + Buffer.from(keccak_256(Buffer.from(raw.slice(2), "hex"))).toString("hex") };
 };
 
 /** Two RPCs over one chain: per-RPC balance, finalized nonce and simulation; the pool's events and its finalized block. */
@@ -93,6 +97,10 @@ function chain() {
     /** each RPC's latest head when it is past `block` (the agreed block is the lower of the two) */
     head: [null, null] as (bigint | null)[],
     pending: [null, null] as (bigint | null)[],
+    /** the pool's state and label tree depths (currentTreeDepth, currentLabelTreeDepth) */
+    depth: [0n, 0n] as bigint[],
+    /** a balance of one address's own, by lowercase address (else `balance`) */
+    at: new Map<string, bigint[]>(),
   };
   const deposit = (pre: bigint, value: bigint) => {
     const label = vaultLabelOf(keccak_256, SCOPE, BigInt(c.events.length + 1));
@@ -120,7 +128,7 @@ function chain() {
         case "eth_getTransactionByHash":
           return c.known[k]!.has(p[0] as string) ? { hash: p[0] } : null;
         case "eth_getBalance":
-          return q(c.balance[k]!);
+          return q((c.at.get(String(p[0]).toLowerCase()) ?? c.balance)[k]!);
         case "eth_estimateGas":
           return q(off(250_000n, c.off.estimate));
         case "eth_call": {
@@ -129,6 +137,8 @@ function chain() {
             if (c.simFail[k]) throw new Error("RPC error 3: execution reverted");
             return "0x";
           }
+          if (call.data === SEL_STATE_DEPTH) return "0x" + word(c.depth[0]!);
+          if (call.data === SEL_LABEL_DEPTH) return "0x" + word(c.depth[1]!);
           return "0x" + word(call.data.startsWith("0xf1c7a58b") ? off(7_000n, c.off.l1) : 0n); // L1 fee bound, operator fee 0
         }
         case "eth_sendRawTransaction": {
@@ -175,14 +185,14 @@ test("a funded U deposits its rung: INCOMING with { hash, nonce, value } before 
     void ns.get(planned.id).then((n) => atSend.push(n));
     ch.land(raw);
   };
-  const h = hostOf(ch, ns);
+  const h = hostOf(ch, ns, { now: () => 5_000 });
   const a = await runPoolDepositEvm(h, ASK);
   assert.equal(ch.c.sent.length, 1);
   const s = sentOf(ch.c.sent[0]!);
   assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: s.hash }] });
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(atSend[0]!.state, "INCOMING", "INCOMING before the tx left");
-  assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG, sentBlock: 100n }]);
+  assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG, sentMs: 5_000n }], "sentMs: the device's clock as it left");
   assert.equal(s.pre, planned.precommitment, "the planned note's precommitment");
   const n = await ns.get(planned.id);
   assert.equal(n!.state, "UNSPENT");
@@ -211,17 +221,20 @@ test("a precommitment a Deposited already names is restored as the user's note a
   assert.equal(sentOf(ch.c.sent[0]!).pre, noteSecrets(SEED, n0).precommitment, "the rung went on U's second arrival 0");
 });
 
-test("a reload mid-way: a run cut after the INCOMING write, then a fresh run, sends nothing new and plans no index i+1", async () => {
+test("a reload mid-way: a run cut after the INCOMING write, then a fresh ask: the open note read once, never waited on, its U no source; the ask waits (not_landed) since that U holds the rung once its note lands", async () => {
   const { ch, ns, planned } = await funded(RUNG + FEE);
   const a = await runPoolDepositEvm(hostOf(ch, ns), ASK); // never lands within its reads
   assert.equal("stage" in a && a.stage, "sent", "pending: sent, never failed");
   assert.equal((await ns.get(planned.id))!.state, "INCOMING");
-  ch.c.balance = [10n * RUNG, 10n * RUNG]; // more money: still no second deposit while the note is open
-  const b = await runPoolDepositEvm(hostOf(ch, ns), ASK);
-  assert.deepEqual(b, { stage: "not_landed", txs: [] });
+  // more money on U: still no second send from U while its note is open; any other U holds nothing
+  ch.c.at.set(uOf(planned).toLowerCase(), [10n * RUNG, 10n * RUNG]);
+  ch.c.balance = [0n, 0n];
+  let waits = 0;
+  const b = await runPoolDepositEvm(hostOf(ch, ns, { reads: 50, wait: async () => void waits++ }), ASK);
+  assert.deepEqual(b, { stage: "not_landed", txs: [] }, "never the old note's tx as the ask's");
+  assert.equal(waits, 0, "the old note is never waited on");
   assert.equal(ch.c.sent.length, 1, "no second send");
-  const deps = (await ours(ns)).filter((n) => n.ref.kind === "deposit");
-  assert.deepEqual(deps.map((n) => n.id), [planned.id], "no index i+1");
+  assert.equal((await ns.get(planned.id))!.state, "INCOMING");
 });
 
 test("a dead send (U's finalized nonce past it on BOTH RPCs, no Deposited) is rebuilt on the same note at the new nonce; on one RPC only it stays pending", async () => {
@@ -231,13 +244,14 @@ test("a dead send (U's finalized nonce past it on BOTH RPCs, no Deposited) is re
   // U's nonce 0 used by another tx (dropped deposit): finalized nonce 1 on one RPC only
   ch.c.nonce = 1n;
   ch.c.finNonce = [1n, 0n];
-  const p = await runPoolDepositEvm(hostOf(ch, ns), ASK);
+  const p = await runPoolDepositEvm(hostOf(ch, ns), null); // the load's pass
   assert.deepEqual(p, { stage: "not_landed", txs: [] });
   assert.equal(ch.c.sent.length, 1, "pending on one RPC's word: not rebuilt");
   // on both: rebuilt from fresh reads at nonce 1, same note and precommitment, new bytes
   ch.c.finNonce = [1n, 1n];
   ch.c.onSend = (raw) => ch.land(raw);
-  const r = await runPoolDepositEvm(hostOf(ch, ns), ASK);
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), null), { stage: "not_landed", txs: [] }, "sent again by the pass: read at the next one");
+  const r = await runPoolDepositEvm(hostOf(ch, ns), null);
   assert.equal(ch.c.sent.length, 2);
   const second = sentOf(ch.c.sent[1]!);
   assert.deepEqual([second.nonce, second.pre, second.value], [1n, first.pre, first.value]);
@@ -245,7 +259,7 @@ test("a dead send (U's finalized nonce past it on BOTH RPCs, no Deposited) is re
   const n = await ns.get(planned.id);
   assert.deepEqual(n!.evmSends!.map((x) => x.nonce), [0n, 1n]);
   assert.equal(n!.state, "UNSPENT");
-  assert.equal("stage" in r && r.stage, "filled");
+  assert.deepEqual(r, { stage: "filled", txs: [] }, "settled by the pass, no ask's tx");
 });
 
 test("a Deposited at another value in the verdict is a take: the note restored at that value, the rung sent again on the next note", async () => {
@@ -330,71 +344,164 @@ test("not_funded names the ask's first rung and the fee bound less U's lower bal
   const shorts: [string, bigint][] = [];
   const a = await runPoolDepositEvm(hostOf(ch, ns, { short: (x, w) => void shorts.push([x, w]) }), { ...ASK, amount: want });
   assert.deepEqual(a, { error: "not_funded" });
-  const bound = EVM_DEPOSIT_GAS_MAX * (2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n; // the cap's gas at the max fee, and the L1 fee bound
+  const bound = (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(0n, 0n)) * (2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n; // the cap's gas and the tree's headroom at the max fee, and the L1 fee bound
   assert.deepEqual(shorts, [[u, first + bound - 5n * 10n ** 14n]]);
   assert.ok(first > EVM_POOL_MIN_DEPOSIT, "the ask's rung, not the pool's least deposit");
 });
 
-/** A run whose send reached neither RPC (neither knows its hash, U's nonce not moved), sent at block 100. */
+/** A run whose send reached neither RPC (neither knows its hash, U's nonce not moved), sent at the device's 1,000 ms. */
+const T0 = 1_000;
 async function unsent() {
   const f = await funded(RUNG + FEE);
-  const a = await runPoolDepositEvm(hostOf(f.ch, f.ns), ASK);
+  const a = await runPoolDepositEvm(hostOf(f.ch, f.ns, { now: () => T0 }), ASK);
   assert.equal("stage" in a && a.stage, "sent");
-  assert.equal((await f.ns.get(f.planned.id))!.evmSends![0]!.sentBlock, 100n, "sentBlock: the head both RPCs agreed on");
-  return { ...f, N: EVM_DEPOSIT_RESEND_BLOCKS[PIN.network], first: sentOf(f.ch.c.sent[0]!) };
+  assert.equal((await f.ns.get(f.planned.id))!.evmSends![0]!.sentMs, BigInt(T0), "sentMs: the device's clock as it left");
+  return { ...f, N: Number(EVM_DEPOSIT_RESEND_MS[PIN.network]), first: sentOf(f.ch.c.sent[0]!) };
 }
-const HOURS = 5 * 3_600_000;
 
-test("the resend bound in blocks: Base 3 (2 s blocks), Robinhood 15 (0.25 s), one block interval and the client's 3.5 s deadline rounded up", () => {
-  assert.deepEqual({ ...EVM_DEPOSIT_RESEND_BLOCKS }, { base: 3n, "base-sepolia": 3n, robinhood: 15n, "robinhood-testnet": 15n });
+test("the resend wait in ms: the client's deadline for one call with its retry and one measured block interval", () => {
+  assert.equal(EVM_READ_TRY_MS, 3_500n);
+  assert.deepEqual({ ...EVM_DEPOSIT_RESEND_MS }, { base: 3_700n, "base-sepolia": 3_700n, robinhood: 3_610n, "robinhood-testnet": 3_704n });
 });
 
-test("a send that reached neither RPC is built again at the SAME nonce (same note, value, fresh fees) once both heads passed sentBlock + N; the two sends land as one deposit and one UNSPENT note", async () => {
+test("a send that reached neither RPC is built again at the SAME nonce (same note, value, fresh fees) once the wait has passed since it left; the two sends land as one deposit and one UNSPENT note", async () => {
   const { ch, ns, planned, N, first } = await unsent();
   ch.c.onSend = (raw) => ch.land(raw);
   ch.c.baseFee += 1n; // fresh fee reads: the base fee moved
-  ch.c.block = 100n + N;
-  const clock = mock.method(Date, "now", () => Date.prototype.valueOf.call(new Date(0)) - HOURS); // a device clock hours behind
-  try {
-    const r = await runPoolDepositEvm(hostOf(ch, ns), ASK);
-    assert.equal("stage" in r && r.stage, "filled");
-  } finally {
-    clock.mock.restore();
-  }
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + N }), null), { stage: "not_landed", txs: [] });
   assert.equal(ch.c.sent.length, 2, "built again");
   const second = sentOf(ch.c.sent[1]!);
   assert.deepEqual([second.nonce, second.pre, second.value], [first.nonce, first.pre, first.value], "the same nonce, note and value");
   assert.notEqual(second.hash, first.hash);
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + N }), null), { stage: "filled", txs: [] });
   const n = (await ns.get(planned.id))!;
-  assert.deepEqual(n.evmSends!.map((x) => [x.hash, x.nonce, x.sentBlock]), [[first.hash, 0n, 100n], [second.hash, 0n, 100n + N]], "every hash kept");
+  assert.deepEqual(n.evmSends!.map((x) => [x.hash, x.nonce, x.sentMs]), [[first.hash, 0n, BigInt(T0)], [second.hash, 0n, BigInt(T0 + N)]], "every hash kept");
   assert.equal(n.state, "UNSPENT");
   assert.equal(ch.c.events.filter((e) => e.precommitment === planned.precommitment).length, 1, "one deposit");
   assert.equal((await ours(ns)).filter((x) => x.state === "UNSPENT").length, 1, "one note");
 });
 
-test("the same-nonce rebuild is refused when either RPC knows a hash, when either RPC's pending nonce is past the send's, and while either head is short of sentBlock + N, whatever the device's clock says", async () => {
+test("the same-nonce rebuild is refused when either RPC knows a hash, when either RPC's pending nonce is past the send's, and until the wait has passed since the send left", async () => {
   type C = ReturnType<typeof chain>["c"];
-  const cases: [string, (c: C, h: string, N: bigint) => void][] = [
-    ["RPC 1 knows the hash", (c, h, N) => ((c.block = 100n + N), void c.known[1]!.add(h))],
-    ["RPC 0 knows the hash", (c, h, N) => ((c.block = 100n + N), void c.known[0]!.add(h))],
-    ["RPC 0's pending nonce past it", (c, _h, N) => ((c.block = 100n + N), void (c.pending[0] = 1n))],
-    ["RPC 1's pending nonce past it", (c, _h, N) => ((c.block = 100n + N), void (c.pending[1] = 1n))],
-    ["RPC 0's head short", (c, _h, N) => void (c.head = [100n + N - 1n, 100n + N + 50n])],
-    ["RPC 1's head short", (c, _h, N) => void (c.head = [100n + N + 50n, 100n + N - 1n])],
+  const cases: [string, (c: C, h: string) => void, number][] = [
+    ["RPC 1 knows the hash", (c, h) => void c.known[1]!.add(h), 0],
+    ["RPC 0 knows the hash", (c, h) => void c.known[0]!.add(h), 0],
+    ["RPC 0's pending nonce past it", (c) => void (c.pending[0] = 1n), 0],
+    ["RPC 1's pending nonce past it", (c) => void (c.pending[1] = 1n), 0],
+    ["1 ms short of the wait", () => {}, -1],
   ];
-  for (const [what, set] of cases) {
+  for (const [what, set, early] of cases) {
     const { ch, ns, planned, N, first } = await unsent();
-    set(ch.c, first.hash, N);
-    // a device clock hours ahead changes nothing
-    const clock = mock.method(Date, "now", () => Date.prototype.valueOf.call(new Date(0)) + HOURS * 1_000);
-    let r;
-    try {
-      r = await runPoolDepositEvm(hostOf(ch, ns), ASK);
-    } finally {
-      clock.mock.restore();
-    }
+    set(ch.c, first.hash);
+    const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + N + early }), null);
     assert.deepEqual(r, { stage: "not_landed", txs: [] }, what);
     assert.equal(ch.c.sent.length, 1, `${what}: not built again`);
     assert.equal((await ns.get(planned.id))!.state, "INCOMING", what);
   }
+});
+
+test("a send again of the very bytes restarts the wait: within one run it is not sent a third time before the wait passes again", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const N = Number(EVM_DEPOSIT_RESEND_MS[PIN.network]);
+  let clock = T0;
+  let jumped = false;
+  // the ask's own reads: the first at the send, then the wait passes once (the very bytes sent again: fees unchanged),
+  // then no more time passes
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { now: () => clock, reads: 4, wait: async () => void (jumped || ((clock += N), (jumped = true))) }), ASK);
+  assert.equal("stage" in a && a.stage, "sent");
+  assert.equal(ch.c.sent.length, 2, "sent again once, the same bytes");
+  assert.equal(ch.c.sent[0], ch.c.sent[1]);
+  assert.equal((await ns.get(planned.id))!.evmSends!.length, 1, "the very send: no second record");
+});
+
+// The slice 3 review's scenarios (R1, R2), on the mock above.
+const capBound = (c: { baseFee: bigint; depth: bigint[] }) => (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(c.depth[0]!, c.depth[1]!)) * (2n * c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n;
+
+test("R1: an earlier ask's note that lands later is settled by the next run, never credited to it: the later ask sends its own deposit and answers with its own tx", async () => {
+  const { ch, ns, planned } = await funded(0n);
+  ch.c.balance = [RUNG + capBound(ch.c), RUNG + capBound(ch.c)];
+  // ask X: sent, its Deposited in a block not final within the run (finality ~18 to 24 min on all four networks)
+  ch.c.onSend = (raw) => {
+    const s = sentOf(raw);
+    ch.deposit(s.pre, s.value);
+    ch.c.events.at(-1)!.block = ch.c.fin + 10n;
+    ch.c.nonce = s.nonce + 1n;
+    ch.c.balance = ch.c.balance.map((b) => b - s.value - 250_000n * (ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP));
+  };
+  const a = await runPoolDepositEvm(hostOf(ch, ns), ASK);
+  assert.equal("stage" in a && a.stage, "sent");
+  const x = sentOf(ch.c.sent[0]!).hash;
+  assert.equal((await ns.get(planned.id))!.state, "INCOMING");
+  // later: X's block is final; the user funds U for a second deposit Y of one rung and asks it
+  ch.c.fin += 20n;
+  ch.c.finNonce = [1n, 1n];
+  ch.c.balance = ch.c.balance.map((b) => b + RUNG + capBound(ch.c));
+  ch.c.onSend = (raw) => ch.land(raw);
+  const sent: string[] = [];
+  const b = await runPoolDepositEvm(hostOf(ch, ns, { sent: (h) => void sent.push(h) }), ASK);
+  assert.equal(ch.c.sent.length, 2, "Y sent its own deposit");
+  const y = sentOf(ch.c.sent[1]!).hash;
+  assert.notEqual(y, x);
+  assert.deepEqual(b, { stage: "filled", txs: [{ chain: "base", hash: y }] }, "Y answered with Y's tx, never X's");
+  assert.deepEqual(sent, [y], "the app hears only Y's send");
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT", "X settled as its own note");
+  assert.equal((await ours(ns)).filter((n) => n.state === "UNSPENT").length, 2, "two notes: X's and Y's");
+});
+
+test("R2: a deposit that reverts and cannot be paid again names its top-up (`short`, the amount) on every pass, and never blocks the pool: the next ask goes on a new index", async () => {
+  const ch = chain();
+  const { ns } = await notes();
+  const planned = await ns.planDeposit(SCOPE, (ref) => noteSecrets(SEED, ref).precommitment);
+  const u = uOf(planned);
+  const shorts: [string, bigint][] = [];
+  const h = (o: Partial<PoolDepositEvmHost> = {}) => hostOf(ch, ns, { short: (x, w) => void shorts.push([x, w]), ...o });
+  assert.deepEqual(await runPoolDepositEvm(h(), ASK), { error: "not_funded" });
+  const [named, top] = shorts[0]!;
+  assert.equal(named, u);
+  ch.c.at.set(u.toLowerCase(), [top, top]); // the user tops up exactly what was asked; any other U holds nothing
+  // the deposit is mined and reverts: U's nonce used, its gas burnt
+  ch.c.onSend = (raw) => {
+    const s = sentOf(raw);
+    ch.c.nonce = s.nonce + 1n;
+    ch.c.finNonce = [ch.c.nonce, ch.c.nonce];
+    const left = ch.c.at.get(u.toLowerCase())!.map((b) => b - s.gas * (ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP));
+    ch.c.at.set(u.toLowerCase(), left);
+  };
+  const a = await runPoolDepositEvm(h(), ASK);
+  assert.equal("stage" in a && a.stage, "sent", "the ask's send: sent, never failed");
+  assert.equal(ch.c.sent.length, 1, "the send again not signed: U cannot pay it");
+  assert.equal((await ns.get(planned.id))!.state, "INCOMING");
+  const low = ch.c.at.get(u.toLowerCase())![0]!;
+  const want: [string, bigint] = [u, RUNG + capBound(ch.c) - low];
+  assert.deepEqual(shorts.at(-1), want, "the top-up the send again needs, named");
+  // the load's pass: the same top-up named again, and the answer is not_funded
+  assert.deepEqual(await runPoolDepositEvm(h(), null), { error: "not_funded" });
+  assert.deepEqual(shorts.at(-1), want);
+  // the next ask: the stuck note's U is no source, the ask plans a new index and names that U's top-up
+  assert.deepEqual(await runPoolDepositEvm(h(), ASK), { error: "not_funded" });
+  const other = shorts.at(-1)!;
+  assert.notEqual(other[0], u, "a new index's U, never blocked behind the stuck note");
+  assert.equal(ch.c.sent.length, 1);
+});
+
+test("the gas limit is the two-RPC estimate plus the tree's headroom from the pool's two depths, and U's balance covers that padded limit", async () => {
+  const { ch, ns } = await funded(0n);
+  ch.c.depth = [7n, 5n];
+  const need = RUNG + capBound(ch.c);
+  ch.c.balance = [need - 1n, need - 1n];
+  const shorts: bigint[] = [];
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { short: (_u, w) => void shorts.push(w) }), ASK), { error: "not_funded" });
+  assert.deepEqual(shorts, [1n], "short by the padded limit's fee, to the wei");
+  ch.c.balance = [need, need];
+  ch.c.onSend = (raw) => ch.land(raw);
+  const a = await runPoolDepositEvm(hostOf(ch, ns), ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.equal(sentOf(ch.c.sent[0]!).gas, 250_000n + evmDepositHeadroom(7n, 5n), "estimate + (7 + 1 + 5 + 1) levels");
+  // two RPCs that read the depth apart: no read, nothing signed
+  const f = await funded(10n ** 18n);
+  f.ch.c.depth = [7n, 5n];
+  const orig = f.ch.rpcs[1];
+  const rpcs = [f.ch.rpcs[0], async (m: string, p: readonly unknown[]) => ((p[0] as { data?: string })?.data === SEL_STATE_DEPTH ? "0x" + word(8n) : orig(m, p))] as const;
+  assert.deepEqual(await runPoolDepositEvm(hostOf(f.ch, f.ns, { rpcs }), ASK), { error: "failed" });
+  assert.equal(f.ch.c.sent.length, 0);
 });

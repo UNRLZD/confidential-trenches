@@ -52,7 +52,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
-import { EVM_POOLS, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import type { PoolChain } from "./rules/pool.ts";
@@ -411,22 +411,65 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return { events: round.events, finalBlock: round.fin.number };
       };
     });
-  const evmDeposit = (chain: "base" | "robinhood") => {
-    const p = evmPin(chain);
-    const r = p === undefined ? null : evmRpcs(chain);
-    if (p === undefined || r === null) return null;
-    const round = evmRound(p, r);
+  // each EVM chain's pool on this page: its pin, its two RPCs and its round, made once
+  const evmPools = new Map<"base" | "robinhood", { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc]; round: () => Promise<EvmDepositRound>; scope: bigint } | null>();
+  const evmPool = (chain: "base" | "robinhood") => {
+    if (!evmPools.has(chain)) {
+      const p = evmPin(chain);
+      const r = p === undefined ? null : evmRpcs(chain);
+      evmPools.set(chain, p === undefined || r === null ? null : { pin: p, rpcs: r, round: evmRound(p, r), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
+    }
+    return evmPools.get(chain)!;
+  };
+  const evmKind = (chain: "base" | "robinhood", end?: () => void) => {
+    const e = evmPool(chain);
+    if (e === null) return null;
     return poolDepositEvmKind(() => {
       let notes: NoteStore | null = null;
       return {
-        pin: p,
-        rpcs: r,
-        round,
+        pin: e.pin,
+        rpcs: e.rpcs,
+        round: e.round,
         notes: async () => (notes = await openNoteStore(await page.store())),
         seed64: page.seed64,
-        end: () => notes?.close(),
+        end: () => {
+          notes?.close();
+          end?.();
+        },
       };
     });
+  };
+  const evmDeposit = (chain: "base" | "robinhood") => evmKind(chain);
+  // an EVM pool's INCOMING notes finished with no ask (src/pool-deposit-evm.ts, the Solana pass's rule), one pass per
+  // chain at a time: on a signed-in load and on each state read while such a note is open
+  const evmSettling = new Map<"base" | "robinhood", Promise<void>>();
+  const settleEvm = (chain: "base" | "robinhood"): Promise<void> => {
+    const now = evmSettling.get(chain);
+    if (now) return now;
+    let done!: () => void;
+    const p = new Promise<void>((r) => (done = r)).finally(() => {
+      if (evmSettling.get(chain) === p) evmSettling.delete(chain);
+    });
+    evmSettling.set(chain, p);
+    const kind = evmKind(chain, done);
+    const r = kind === null ? ({ error: "not_allowed" } as const) : kind(null, null);
+    if ("error" in r) done();
+    else
+      void r.after.then(() => {
+        const a = r.answer();
+        if (a === null || "error" in a) done();
+      });
+    return p;
+  };
+  /** The EVM chains whose pool has an INCOMING note of its own scope in the store. */
+  const evmOpen = async (): Promise<("base" | "robinhood")[]> => {
+    const pools = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
+    if (pools.length === 0) return [];
+    const all = await readNotes(await page.store());
+    return pools.filter((c) => all.some((n) => n.scope === evmPool(c)!.scope && n.state === "INCOMING"));
+  };
+  const settleEvmOpen = async (): Promise<void> => {
+    await Promise.all((await evmOpen()).map(settleEvm));
   };
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
   const table = over.table === undefined ? PAGE_TABLE : over.table;
@@ -472,7 +515,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   const buy = poolBuyKind(() => buyHost());
   let settling: Promise<void> | null = null;
-  const settle = (): Promise<void> => {
+  const settle = (): Promise<void> => Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {});
+  const settleSolana = (): Promise<void> => {
     if (pin === undefined) return Promise.resolve();
     if (settling) return settling;
     let done!: () => void;
@@ -662,13 +706,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const stateRead = (): Promise<void> => {
-    if (scope === null) return Promise.resolve();
+    // the EVM pools' open deposits settle on every state read, beside the Solana pool's (none pinned: only theirs)
+    if (scope === null) return settleEvmOpen().catch(() => {});
     if (reading) return reading;
     const p = (async () => {
       try {
+        await settleEvmOpen().catch(() => {});
         if (settling) return await settling;
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
-        if (mine.some((n) => n.state === "INCOMING")) await settle();
+        if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved().catch(() => {});
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();

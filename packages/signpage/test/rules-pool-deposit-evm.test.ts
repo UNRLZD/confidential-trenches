@@ -13,8 +13,8 @@ import { evmPoolScopeOf, EVM_LADDER, type EvmPoolPin } from "../../wallet/src/po
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import type { NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { VAULT_FIELD_P } from "../../kit/src/vault/shapes.ts";
-import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
-import { checkEvmDeposit, EVM_DEPOSIT_FIELD_P, EVM_DEPOSIT_GAS_MAX, evmOnwardSendDigest, PoolRuleRefused, signEvmDeposit, type EvmDepositContext, type EvmDepositReads, type EvmOnwardSend, type PoolAsk } from "../src/rules/pool.ts";
+import { EVM_POOL_GAS_PER_LEVEL, EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
+import { checkEvmDeposit, EVM_DEPOSIT_FIELD_P, EVM_DEPOSIT_GAS_MAX, EVM_DEPOSIT_GAS_PER_LEVEL, EVM_DEPOSIT_SELECTOR, evmDepositHeadroom, evmOnwardSendDigest, PoolRuleRefused, signEvmDeposit, type EvmDepositContext, type EvmDepositReads, type EvmOnwardSend, type PoolAsk } from "../src/rules/pool.ts";
 
 const refusedAs = (rule: string) => (e: unknown) => e instanceof PoolRuleRefused && e.code === "not_allowed" && e.rule === rule;
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -30,10 +30,13 @@ const CALL = step.call!;
 const PRE = (step as { precommitment: bigint }).precommitment;
 const ASK: PoolAsk = { kind: "pool.deposit", chain: "base", token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
 const BASE_FEE = 1_000_000n, TIP = 100_000n, GAS = 250_000n, L1 = 5_000_000n;
+// the live Base Sepolia pool's depths, 2026-11-07: state tree 7, label tree 5
+const DS = 7n, DL = 5n;
+const ROOM = evmDepositHeadroom(DS, DL);
 const ctxOf = (o: Partial<EvmDepositContext> = {}): EvmDepositContext => ({ wallet: U.address, precommitment: PRE, call: CALL, pin: PIN, ...o });
-const txOf = (o: Partial<EvmOnwardSend> = {}): EvmOnwardSend => ({ type: 2, chainId: 8453n, nonce: 7n, maxPriorityFeePerGas: TIP, maxFeePerGas: 2n * BASE_FEE + TIP, gasLimit: GAS, to: POOL, value: RUNG, data: CALL.data, accessList: [], ...o });
-const FEE = GAS * (2n * BASE_FEE + TIP) + L1;
-const readsOf = (o: Partial<EvmDepositReads> = {}): EvmDepositReads => ({ nonce: [7n, 7n], balance: [RUNG + FEE, RUNG + FEE + 5n], estimate: [GAS, GAS], baseFee: [BASE_FEE, BASE_FEE], l1Fee: [L1, L1], priorityCap: TIP, ...o });
+const txOf = (o: Partial<EvmOnwardSend> = {}): EvmOnwardSend => ({ type: 2, chainId: 8453n, nonce: 7n, maxPriorityFeePerGas: TIP, maxFeePerGas: 2n * BASE_FEE + TIP, gasLimit: GAS + ROOM, to: POOL, value: RUNG, data: CALL.data, accessList: [], ...o });
+const FEE = (GAS + ROOM) * (2n * BASE_FEE + TIP) + L1;
+const readsOf = (o: Partial<EvmDepositReads> = {}): EvmDepositReads => ({ nonce: [7n, 7n], balance: [RUNG + FEE, RUNG + FEE + 5n], estimate: [GAS, GAS], baseFee: [BASE_FEE, BASE_FEE], l1Fee: [L1, L1], stateDepth: [DS, DS], labelDepth: [DL, DL], priorityCap: TIP, ...o });
 
 test("EVM deposit: U's one rung into the pinned pool with its fee bound passes; the draw names the pool", () => {
   assert.deepEqual(checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf()), { chain: "base", op: "pool.deposit", token: null, amount: RUNG, feeCap: FEE, pool: POOL, to: POOL, decimals: 18, back: null });
@@ -68,14 +71,22 @@ test("EVM deposit: one refusal per field", () => {
     ["data", () => checkEvmDeposit(txOf(), ASK, ctxOf({ precommitment: PRE + 1n }), readsOf())], // another note's
     ["data", () => checkEvmDeposit(txOf({ data: CALL.data + "00" }), ASK, ctxOf(), readsOf())],
     ["data", () => checkEvmDeposit(txOf({ data: "0x12345678" + CALL.data.slice(10) }), ASK, ctxOf(), readsOf())], // another selector
+    // the call itself of another selector (the tx its bytes): the rule's own selector check, not only call = tx
+    ["data", () => checkEvmDeposit(txOf({ data: "0x12345678" + CALL.data.slice(10) }), ASK, ctxOf({ call: Object.freeze({ ...CALL, data: "0x12345678" + CALL.data.slice(10) }) }), readsOf())],
     ["nonce", () => checkEvmDeposit(txOf({ nonce: 6n }), ASK, ctxOf(), readsOf())],
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ nonce: [7n, 8n] }))], // the RPCs disagree
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ baseFee: [BASE_FEE, BASE_FEE + 1n] }))],
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ estimate: [GAS, GAS + 1n] }))],
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ l1Fee: [L1, L1 + 1n] }))],
+    ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ stateDepth: [DS, DS + 1n] }))],
+    ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ labelDepth: [DL + 1n, DL] }))],
+    ["depth", () => checkEvmDeposit(txOf({ gasLimit: GAS + evmDepositHeadroom(32n, DL) + 21_518n }), ASK, ctxOf(), readsOf({ stateDepth: [33n, 33n], balance: [10n ** 18n, 10n ** 18n] }))],
     ["access_list", () => checkEvmDeposit(txOf({ accessList: [[POOL, []]] }), ASK, ctxOf(), readsOf())],
-    ["gas_estimate", () => checkEvmDeposit(txOf({ gasLimit: GAS + 1n }), ASK, ctxOf(), readsOf())],
-    ["gas_over_cap", () => checkEvmDeposit(txOf({ gasLimit: EVM_DEPOSIT_GAS_MAX + 1n }), ASK, ctxOf(), readsOf({ estimate: [EVM_DEPOSIT_GAS_MAX + 1n, EVM_DEPOSIT_GAS_MAX + 1n], balance: [10n ** 18n, 10n ** 18n] }))],
+    ["gas_estimate", () => checkEvmDeposit(txOf({ gasLimit: GAS + ROOM + 1n }), ASK, ctxOf(), readsOf())], // past the headroom
+    ["gas_estimate", () => checkEvmDeposit(txOf({ gasLimit: GAS + ROOM - 1n }), ASK, ctxOf(), readsOf())],
+    ["gas_estimate", () => checkEvmDeposit(txOf({ gasLimit: GAS }), ASK, ctxOf(), readsOf())], // the bare estimate: a later index runs out of gas
+    ["gas_over_cap", () => checkEvmDeposit(txOf({ gasLimit: EVM_DEPOSIT_GAS_MAX + 1n + ROOM }), ASK, ctxOf(), readsOf({ estimate: [EVM_DEPOSIT_GAS_MAX + 1n, EVM_DEPOSIT_GAS_MAX + 1n], balance: [10n ** 18n, 10n ** 18n] }))],
+    ["gas_over_cap", () => checkEvmDeposit(txOf({ gasLimit: ROOM }), ASK, ctxOf(), readsOf({ estimate: [0n, 0n] }))],
     ["priority_fee", () => checkEvmDeposit(txOf({ maxPriorityFeePerGas: TIP + 1n }), ASK, ctxOf(), readsOf())],
     ["priority_fee", () => checkEvmDeposit(txOf({ maxPriorityFeePerGas: TIP, maxFeePerGas: TIP - 1n }), ASK, ctxOf(), readsOf({ baseFee: [0n, 0n] }))],
     ["max_fee", () => checkEvmDeposit(txOf({ maxFeePerGas: 2n * BASE_FEE + TIP + 1n }), ASK, ctxOf(), readsOf())],
@@ -130,6 +141,18 @@ test("EVM deposit: signs as U the send the check passed, and the raw tx recovers
   const t3 = txOf();
   checkEvmDeposit(t3, ASK, ctxOf(), readsOf());
   assert.throws(() => signEvmDeposit(depositIdEvm(SEED, SCOPE, 1).secretKey, t3), refusedAs("wallet"));
+});
+
+test("EVM deposit: the headroom is G(depth)'s per-level gas for d + 1 levels of each tree, the selector deposit(uint256,uint256)'s", () => {
+  assert.equal(EVM_DEPOSIT_GAS_PER_LEVEL, EVM_POOL_GAS_PER_LEVEL, "the kit's per-level gas");
+  assert.equal(evmDepositHeadroom(0n, 0n), 2n * EVM_POOL_GAS_PER_LEVEL);
+  assert.equal(evmDepositHeadroom(7n, 5n), 14n * EVM_POOL_GAS_PER_LEVEL);
+  assert.equal(evmDepositHeadroom(32n, 32n), 66n * EVM_POOL_GAS_PER_LEVEL);
+  // measured on the live Base Sepolia pool (state 7 deep at size 66, label 5 at 27): our deposit after 0 to 36 others in
+  // its block used at most 64,543 gas over its estimate of 372,596 (eth_simulateV1, 2026-11-07); the headroom covers it
+  assert.ok(evmDepositHeadroom(7n, 5n) >= 64_543n);
+  assert.equal(EVM_DEPOSIT_SELECTOR, "0x" + Buffer.from(keccak_256(new TextEncoder().encode("deposit(uint256,uint256)"))).toString("hex").slice(0, 8));
+  assert.equal(CALL.data.slice(0, 10), EVM_DEPOSIT_SELECTOR);
 });
 
 test("EVM deposit: the rule's own bounds are the kit's: the field's order and the pool's MIN_DEPOSIT (its ladder's one)", () => {
