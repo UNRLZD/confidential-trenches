@@ -39,6 +39,15 @@ services:
       NEAR_RPC_URL_B: ${NEAR_RPC_URL_B:-}
       NEAR_TESTNET_RPC_URL: ${NEAR_TESTNET_RPC_URL:-}
       NEAR_TESTNET_RPC_URL_B: ${NEAR_TESTNET_RPC_URL_B:-}
+      # each chain's keyed list after the names above (src/rpc/rpc.ts RPC_UPSTREAMS keyed; card rpc-keyed-lists), one
+      # company each, written by the research repo's scripts/deploy/set-rpc-keys.sh; empty: that slot is skipped
+      BASE_RPC_URL_QUICKNODE: ${BASE_RPC_URL_QUICKNODE:-}
+      BASE_RPC_URL_DRPC: ${BASE_RPC_URL_DRPC:-}
+      ROBINHOOD_RPC_URL_QUICKNODE: ${ROBINHOOD_RPC_URL_QUICKNODE:-}
+      ROBINHOOD_RPC_URL_DRPC: ${ROBINHOOD_RPC_URL_DRPC:-}
+      SOLANA_RPC_URL_QUICKNODE: ${SOLANA_RPC_URL_QUICKNODE:-}
+      SOLANA_RPC_URL_DRPC: ${SOLANA_RPC_URL_DRPC:-}
+      NEAR_RPC_URL_FASTNEAR: ${NEAR_RPC_URL_FASTNEAR:-}
       # each chain's RPC budget per 10 s, "<total>,<per client>" (src/rpc/rpc.ts; empty: the public provider's limit)
       RPC_BUDGET_SOLANA: ${RPC_BUDGET_SOLANA:-}
       RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}

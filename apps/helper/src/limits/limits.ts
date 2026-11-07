@@ -144,8 +144,10 @@ export type ProviderHolds = {
 };
 
 /** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
- *  not) or a call (each request in a batch); `inflight`, the posts it takes at once. */
-export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number };
+ *  not) or a call (each request in a batch); `inflight`, the posts it takes at once; `group`, the one bucket every URL of
+ *  that company draws from, where its limit is the account's across chains (card rpc-keyed-lists: one key per company,
+ *  so its Base, Robinhood and Solana endpoints share it); `batch`, the most requests one post may carry. */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number };
 /**
  * Each paced provider, set under the point where it refuses (reads cited):
  *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
@@ -195,6 +197,28 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   // second, 20 at once. It refuses every eth_getLogs (LOGS_REFUSED).
   "https://mainnet.base.org": { perS: 10, burst: 20, unit: "call" },
 };
+/**
+ * The keyed providers' paces (card rpc-keyed-lists), one company each, every URL of a company in its one bucket (`group`):
+ * each limit is the account's, across its chains. Set from each company's first-party page at its smallest plan, so a
+ * larger plan only leaves room unused, never makes the provider refuse us:
+ *   - QuickNode: "Free trial 15" requests per second, Build 50, Accelerate 125 (quicknode.com/pricing, read 2026-11-07
+ *     07:27Z). Paced at 7 calls a second, 7 at once: at most 14 in any second.
+ *   - dRPC: a keyed free account "120,000 CUs per minute per IP ... approximately 100 eth_call requests per second", at
+ *     least "50,400 CUs per minute, which is equivalent to 40 eth_call requests", "Batch requests are limited to 3
+ *     items", and Pay as You Go "100 RPS" (drpc.org/docs/howitworks/ratelimiting and /docs/pricing/requests, read
+ *     2026-11-07 07:29Z). Paced at 15 calls a second, 15 at once (at most 30 in any second, under the free floor's 40),
+ *     3 a post.
+ *   - FastNear: the paid plans name requests a month only, "Dev Plan $69 /month 10M RPC requests/month", Pro 36M,
+ *     Business 100M, and no rate (fastnear.com, read 2026-11-07 07:29Z; docs.fastnear.com/auth names none). Paced at
+ *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s): Dev's month at that pace
+ *     all month long would be 13M, so the pace, not the quota, is the bound at the helper's NEAR reads.
+ */
+export const KEYED_PACE = {
+  quicknode: { perS: 7, burst: 7, unit: "call", group: "quicknode" },
+  drpc: { perS: 15, burst: 15, unit: "call", group: "drpc", batch: 3 },
+  fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
+} as const satisfies Readonly<Record<string, Pace>>;
+export type KeyedProvider = keyof typeof KEYED_PACE;
 /** Providers that refuse every `eth_getLogs` and answer the other reads: no path sends them one (rpc.ts callEvm, the
  *  swap reads), so a log read never holds the provider for the reads it does answer. mainnet.base.org answered every
  *  eth_getLogs, of 1 to 1,000 blocks, from the helper box and from the Mac, -32011 "request limit reached" (HTTP 429;
@@ -230,12 +254,14 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
   const callerWaits = new Map<string, number>();
   /** The providers a pool sender reads, whose SENDER_ROOM callers leave (fold A). */
   const reserved = new Set<string>();
+  // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
   const fill = (url: string, p: Pace) => {
     const t = now();
-    const b = buckets.get(url) ?? { tokens: p.burst, at: t };
+    const k = p.group ?? url;
+    const b = buckets.get(k) ?? { tokens: p.burst, at: t };
     b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * p.perS) / 1000);
     b.at = t;
-    buckets.set(url, b);
+    buckets.set(k, b);
     return b;
   };
   return {
@@ -244,13 +270,14 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       if (p === undefined) return 0;
       const b = fill(url, p);
       const t = now();
-      const waiting = (callerWaits.get(url) ?? 0) - t;
+      const k = p.group ?? url;
+      const waiting = (callerWaits.get(k) ?? 0) - t;
       if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
       const floor = background ? p.burst * CALLER_ROOM : sender || !reserved.has(url) ? 0 : p.burst * SENDER_ROOM;
       // a post larger than the bucket waits for a full one
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
       // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
-      const keep = (ms: number) => callerWaits.set(url, Math.max(callerWaits.get(url) ?? 0, t + ms));
+      const keep = (ms: number) => callerWaits.set(k, Math.max(callerWaits.get(k) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
         b.tokens -= units;
         if (!background) keep(CALLER_HOLD_MS);

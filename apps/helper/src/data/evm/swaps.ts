@@ -789,6 +789,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   };
   // each provider's hold, shared with every other path of the helper that reads it (limits.ts providerHolds)
   const holds = deps.holds ?? providerHolds(now);
+  /** Requests one post to `u` carries: BATCH_SIZE's, at most its pace's batch and, where it counts calls, its burst (card
+   *  rpc-keyed-lists: a keyed URL is in no list here, its company's pace names it, limits.ts KEYED_PACE). */
+  const batchOf = (u: string): number => {
+    const p = holds.paceOf(u);
+    return Math.min(BATCH_SIZE[u] ?? 10, p?.batch ?? Infinity, p?.unit === "call" ? Math.max(1, Math.floor(p.burst)) : Infinity);
+  };
 
   // Two lanes on every provider's pace and in-flight queue (card helper-deploy-reads-fast): a read a caller waits on (a
   // candles or trades read's open: its pool, its first read, its traders) is foreground; the helper's own reads (the open
@@ -842,7 +848,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** One JSON-RPC batch to a provider: each call's reply, or the wait a refusal names; null when it failed. */
   async function batchTo(url: string, calls: Call[], patient = false): Promise<Reply[] | null> {
-    const max = BATCH_SIZE[url] ?? 10;
+    const max = batchOf(url);
     const parts: Call[][] = [];
     for (let i = 0; i < calls.length; i += max) parts.push(calls.slice(i, i + max));
     // a part waits for its units of the provider's pace inside its place in the in-flight queue; a background part waits
@@ -996,13 +1002,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `urls` less a provider that takes one request a post (BATCH_SIZE 1: daybreak, blockvectra) when `calls` would be
    *  more than one post to it: it takes single-post reads only (card helper-robinhood-capacity fold 5: at fa4b98d a
    *  cold dozen sent daybreak 94 eth_getLogs posts, each wide read 3 to 6 of them in its 3 slots). */
-  const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => (BATCH_SIZE[u] ?? 10) > 1 || calls <= 1);
+  const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => batchOf(u) > 1 || calls <= 1);
   /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
    *  units above CALLER_ROOM and a second's refill, times the calls a post carries where it counts posts), less the calls
    *  already out or queued to it (slot), so a dozen walks starting at once see each other's reads. A provider with no
    *  pace counts what INFLIGHT_MAX posts carry. */
   const free = (u: string): number => {
-    const batch = BATCH_SIZE[u] ?? 10;
+    const batch = batchOf(u);
     const p = holds.paceOf(u);
     const per = p === undefined || p.unit === "post" ? batch : 1;
     const room = p === undefined ? INFLIGHT_MAX : Math.max(0, holds.room(u) * p.burst - p.burst * CALLER_ROOM) + p.perS;
@@ -1016,7 +1022,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  ranked daybreak first while its queue was longest: at c780282 a cold dozen's reads waited 68.7 s in all in
    *  daybreak's queue against 12.1 s of its pace, and the slowest tape took 16.7 s. */
   const waitOf = (u: string, calls: number, headers: boolean): number => {
-    const batch = BATCH_SIZE[u] ?? 10;
+    const batch = batchOf(u);
     const posts = Math.ceil(Math.max(calls, 1) / batch) * (headers ? 2 : 1);
     const q = inflight.get(u);
     const p = holds.paceOf(u);
