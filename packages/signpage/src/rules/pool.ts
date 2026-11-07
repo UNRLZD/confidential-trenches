@@ -82,9 +82,7 @@ import {
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
-import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
-import { EVM_POOL_MIN_DEPOSIT } from "../../../kit/src/trade/evm/pool-fee.ts";
-import { VAULT_FIELD_P } from "../../../kit/src/vault/shapes.ts";
+import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
 export const POOL_KINDS = ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"] as const;
@@ -1056,6 +1054,11 @@ export type EvmDepositContext = { readonly wallet: string; readonly precommitmen
  *  money as gas. */
 export const EVM_DEPOSIT_GAS_MAX = 1_000_000n;
 const DEPOSIT_CHECKED = new WeakMap<object, OnwardRead>();
+/** The pool's least deposit: its ladder's one, PrivacyPool.sol:53 MIN_DEPOSIT (the kit's EVM_POOL_MIN_DEPOSIT, held equal
+ *  by test/rules-pool-deposit-evm.test.ts; this file imports no kit module beside its checks and builders). */
+const EVM_DEPOSIT_MIN = EVM_LADDER.one;
+/** The BN254 scalar field's order, below which a precommitment is (the kit's VAULT_FIELD_P, held equal by the test). */
+export const EVM_DEPOSIT_FIELD_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const evmWord = (v: bigint): string => v.toString(16).padStart(64, "0");
 const EVM_NETWORK_OF: Readonly<Record<"base" | "robinhood", readonly [string, string]>> = Object.freeze({ base: ["base", "base-sepolia"], robinhood: ["robinhood", "robinhood-testnet"] });
 
@@ -1088,11 +1091,11 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   if (lower(call.to) !== lower(pin.pool) || lower(d.to) !== lower(pin.pool)) return refuse("to");
   // the rung: the pool's own bounds (PrivacyPool.sol:86-90), never more than asked, msg.value the call's value
   const rung = call.value;
-  if (rung < EVM_POOL_MIN_DEPOSIT || rung >= (1n << 128n) - 1n || rung > ask.amount) return refuse("amount");
+  if (rung < EVM_DEPOSIT_MIN || rung >= (1n << 128n) - 1n || rung > ask.amount) return refuse("amount");
   if (d.value !== rung) return refuse("value");
   // the note's own precommitment, below p, and the call's bytes exactly: selector, value, precommitment, nothing else
   const pre = ctx.precommitment;
-  if (typeof pre !== "bigint" || pre <= 0n || pre >= VAULT_FIELD_P) return refuse("precommitment");
+  if (typeof pre !== "bigint" || pre <= 0n || pre >= EVM_DEPOSIT_FIELD_P) return refuse("precommitment");
   const data = lower(call.data);
   if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");
   if (lower(d.data) !== data) return refuse("data");

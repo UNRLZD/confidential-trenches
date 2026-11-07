@@ -12,7 +12,9 @@ import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { evmPoolScopeOf, EVM_LADDER, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import type { NoteRef } from "../../wallet/src/notes/secrets.ts";
-import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmOnwardSendDigest, PoolRuleRefused, signEvmDeposit, type EvmDepositContext, type EvmDepositReads, type EvmOnwardSend, type PoolAsk } from "../src/rules/pool.ts";
+import { VAULT_FIELD_P } from "../../kit/src/vault/shapes.ts";
+import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
+import { checkEvmDeposit, EVM_DEPOSIT_FIELD_P, EVM_DEPOSIT_GAS_MAX, evmOnwardSendDigest, PoolRuleRefused, signEvmDeposit, type EvmDepositContext, type EvmDepositReads, type EvmOnwardSend, type PoolAsk } from "../src/rules/pool.ts";
 
 const refusedAs = (rule: string) => (e: unknown) => e instanceof PoolRuleRefused && e.code === "not_allowed" && e.rule === rule;
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -128,4 +130,11 @@ test("EVM deposit: signs as U the send the check passed, and the raw tx recovers
   const t3 = txOf();
   checkEvmDeposit(t3, ASK, ctxOf(), readsOf());
   assert.throws(() => signEvmDeposit(depositIdEvm(SEED, SCOPE, 1).secretKey, t3), refusedAs("wallet"));
+});
+
+test("EVM deposit: the rule's own bounds are the kit's: the field's order and the pool's MIN_DEPOSIT (its ladder's one)", () => {
+  assert.equal(EVM_DEPOSIT_FIELD_P, VAULT_FIELD_P);
+  assert.equal(EVM_LADDER.one, EVM_POOL_MIN_DEPOSIT);
+  // a rung of one MIN_DEPOSIT passes the bound; one wei under it is refused (the amount case above)
+  assert.throws(() => checkEvmDeposit(txOf(), ASK, ctxOf({ precommitment: EVM_DEPOSIT_FIELD_P }), readsOf()), refusedAs("precommitment"));
 });
