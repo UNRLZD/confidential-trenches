@@ -1,7 +1,9 @@
 // node packages/wallet/scripts/near-prepay-taken-mutants.mjs (card wallet-near-prepay-taken, audit V-01): plants one
 // mutant at a time in the value check (bind.ts ownRow, callAmount, and their two uses) and in the resend (follow.ts:
-// U's refund bound on U's next second-arrival note, the stranger's note never counted), runs the named test, expects it
-// to fail, puts the source back.
+// U's refund bound on U's next second-arrival note, the stranger's note never counted), in a landed note's calls still
+// out (the review of 20766bb9) and in the ran call's receipts (the review of 9c218554: amount_above_balance settled, the
+// FINAL gate with the relayer named, a failed key read's pace), runs the named test, expects it to fail, puts the source
+// back.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -20,11 +22,16 @@ const M = [
   ["a stranger's note counted", F, "      else theirs.add(note.id);", "      else ours.set(note.id, p.value);", V, "a stranger takes P after the relayer's prepay"],
   ["the refund bound on the taken note", F, "let note = mine.find((x) => x.note.leaf === undefined)?.note;", "let note = mine[0]!.note;", V, "a stranger takes P after the relayer's prepay"],
   // a landed note's calls still out (the review's M1, L2, L3)
-  ["no wait for a call still out", F, "else if (low <= live.reduce((m, c) => (c.max_block_height > m ? c.max_block_height : m), 0n) + LAPSE_MARGIN) out = true;", "else if (false) out = true;", V, "answer lost"],
+  ["no wait for a call still out", F, "        } else if (low <= window) out = true;", "        } else if (false) out = true;", V, "answer lost"],
   ["calls out never read", F, "const calls = out === undefined ? await callsOut() :", "const calls = false ? await callsOut() :", V, "answer lost"],
   ["the slow refund at the slow pace", F, "    if (calls.due) fast = true;", "    if (calls.out) fast = true;", V, "refund slow"],
   ["final before the refund window", F, "const idle = out === undefined && !calls.late &&", "const idle = out === undefined && !calls.due &&", V, "refund slow"],
-  ["no resend of U's refund", F, "if (amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {", "if (amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT && out !== undefined) {", V, "a stranger takes P after the relayer's prepay"],
+  ["no resend of U's refund", F, "if (!outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {", "if (!outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT && out !== undefined) {", V, "a stranger takes P after the relayer's prepay"],
+  // the ran call's receipts (the review of 9c218554: M1, L1)
+  ["amount_above_balance refused", B, '"p_used", "amount_above_balance"]);', '"p_used"]);', V, "release relayer not named"],
+  ["amount_above_balance refused in the bind", B, '"p_used", "amount_above_balance"]);', '"p_used"]);', TB, "amount_above_balance settles"],
+  ["no FINAL gate with the relayer named", F, "    if (relayer === null) return true;\n", "    return true;\n", V, "release relayer named"],
+  ["a failed key read keeps the poll's pace", F, "if (u === null) return { out: true, due: owed(), late: true };", "if (u === null) return { out: true, due: true, late: true };", V, "L1"],
 ];
 const src = { [B]: readFileSync(B, "utf8"), [F]: readFileSync(F, "utf8") };
 let ok = 0;

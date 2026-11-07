@@ -457,8 +457,11 @@ function previousRef(ref: NoteRef): NoteRef | null {
 const isUs = (ref: NoteRef, s: bigint, i: number) =>
   (ref.kind === "deposit" && ref.s === s && ref.i === i) || (ref.kind === "second" && ref.id.id === "U" && ref.id.s === s && ref.id.i === i);
 
-// Codes that say the call may still be (or have been) carried: the pages and U's nonce settle it.
-const SETTLE = new Set(["in_flight", "expired", "bad_nonce", "p_used"]);
+// Codes that say the call may still be (or have been) carried: the pages and U's nonce settle it. amount_above_balance
+// too: the device signed only after reading U's USDC at or above the amount on both RPCs, so a relayer's read short of
+// it is stale (a ran call's debit before its refund, audit V-01) or hostile, and the chain decides: the call lapses
+// and is signed again at its nonce once U holds the amount.
+const SETTLE = new Set(["in_flight", "expired", "bad_nonce", "p_used", "amount_above_balance"]);
 // Codes that say wait and send the same bytes again while their window is ahead.
 const RETRY = new Set(["token_halted", "relayer_low"]);
 // Codes on which the device's own reads may continue (one RPC behind or down, a halt, USDC not back yet).

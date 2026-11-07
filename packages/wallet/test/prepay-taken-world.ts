@@ -6,9 +6,14 @@
 // The chain is a mock behind the testnet pair: U's reads are test/vectors/deposit-account.json's real answers
 // (replay-deposit-reads.ts), the vault's pages test/vectors/deposit-bind-pages.json's real testnet pages with the rows
 // the world writes, 1Click's status the recorded live answer's quoteResponse with this world's address and U. The relayer
-// decodes every body with the helper's own decoder (apps/helper/src/bind/checks.ts) and runs the helper's order: R2's
-// prepay_open while U has a prepay no deposit used, then storage_prepay(P), then U's call. The vault's rule is the
-// shipped one: the depositor is the message's word, so a stranger may name U (deposit.rs:80-93).
+// decodes every body with the helper's own decoder (apps/helper/src/bind/checks.ts) and runs the helper's order: U's
+// USDC read first (checks.ts:197, amount_above_balance), the key's nonce, R2's prepay_open while U has a prepay no
+// deposit used or a send on another P not FINAL (send.ts:590-593), then storage_prepay(P), then U's call. The vault's
+// rule is the shipped one: the depositor is the message's word, so a stranger may name U (deposit.rs:80-93).
+//   A call runs as on NEAR (testnet tx 2Q4pYKQ9RRwHWofzuKmwvJBn3dxfVMxsH6Dx32pWneMV: the tx at 275892006,
+// ft_transfer_call 275892007, ft_on_transfer 275892008, ft_resolve_transfer 275892009): the Delegate uses U's nonce at
+// its height, the token debits U debitGap heights later, the vault's row (or its refusal) a height after that, and the
+// refund and FINAL refundBlocks heights after the Delegate. The relayer's `tx` answers FINAL from then on.
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
 import { decodeSignedDelegate } from "../../../apps/helper/src/bind/checks.ts";
@@ -29,13 +34,17 @@ export const MIN_OUT = LIVE.quote.minAmountOut as string;
 export const ORIGIN = LIVE.quoteRequest.originAsset as string;
 /** The vault's MIN_DEPOSIT: the stranger's cheapest take (1 USDC). */
 export const ONE_USDC = 1_000_000n;
+/** The release relayer's account the tests name (the follow's relayerAccount): the `tx` read's sender. */
+export const RELAYER = "bind.blindfill-test.testnet";
 const publicKeyOf = (u: string) => `ed25519:${base58.encode(Uint8Array.from(u.match(/../g)!, (h) => parseInt(h, 16)))}`;
 
 type Row = { index: number; precommitment: string; label: string; value: string; leaf_index: number; depositor: string };
 /** A stranger who reads the relayer's prepays and takes the first one: its message names `depositor` (any account, U too). */
 export type Stranger = { depositor: string; value: bigint };
 /** One call the relayer heard: U's nonce, its P and amount; what came of it. */
-export type Carried = { nonce: bigint; p: bigint; amount: bigint; fate: "landed" | "refunded" | "prepay_open" };
+export type Carried = { nonce: bigint; p: bigint; amount: bigint; fate: "landed" | "refunded" | "failed" };
+/** A call the relayer carried, as its `tx` read shows it (deposit-bind.test.ts txView), FINAL from height `final`. */
+type Sent = { hash: string; p: bigint; final: bigint; sender: string; receiver: string; nonce: bigint; mbh: bigint; pk: string; sig: string; inner: unknown };
 
 export class V01World {
   readonly u: string;
@@ -52,12 +61,23 @@ export class V01World {
   stranger: Stranger | null;
   /** The stranger's own USDC that went into the vault. */
   strangerPaid = 0n;
-  /** Blocks from U's refused call to its refund reaching U (the token's ft_resolve_transfer, receipts after the vault's
-   *  panic): the call takes U's USDC at once, the refund brings it back this many blocks later. */
+  /** Heights from U's call (its Delegate, U's nonce used) to the token's debit of U (ft_transfer_call): 1 on NEAR. */
+  debitGap = 1n;
+  /** Heights from U's call to its refund reaching U and every receipt done (ft_resolve_transfer, FINAL): 3 on NEAR. */
   refundBlocks = 3n;
+  /** The calls the relayer carried, for its `tx` read. */
+  sent: Sent[] = [];
+  /** A relayer that carries every call at once: no read of U's USDC, no R2 hold until the old P's send is FINAL. */
+  carryAtOnce = false;
+  /** The second RPC's key reads fail (an outage, a 429): readU has no answer. */
+  keysDown = false;
   /** Lose the relayer's answer to U's first call (a timeout, a closed tab) and carry that call this many blocks later. */
   loseFirst: bigint | null = null;
   private refunds: { at: bigint; amount: bigint }[] = [];
+  private debits: { at: bigint; nonce: bigint; p: bigint; amount: bigint; call: bigint }[] = [];
+  private landings: { at: bigint; p: bigint; amount: bigint }[] = [];
+  /** The helper's own record of each send it made (answer heard or not): FINAL from `at`. */
+  private finals: { p: bigint; at: bigint }[] = [];
   private carries: { at: bigint; nonce: bigint; p: bigint; amount: bigint }[] = [];
   /** Rows the second RPC does not show yet, from the pages' end (a provider behind on the vault's pages). */
   hideOnB = 0;
@@ -70,19 +90,29 @@ export class V01World {
   tick() {
     this.height++;
     for (const c of this.carries.filter((c) => c.at <= this.height)) (this.carries.splice(this.carries.indexOf(c), 1), this.run(c.nonce, c.p, c.amount));
+    for (const x of this.debits.filter((x) => x.at <= this.height)) (this.debits.splice(this.debits.indexOf(x), 1), this.debit(x));
+    for (const l of this.landings.filter((l) => l.at <= this.height)) (this.landings.splice(this.landings.indexOf(l), 1), this.addRow(l.p, this.u, l.amount));
     for (const r of this.refunds.filter((r) => r.at <= this.height)) (this.refunds.splice(this.refunds.indexOf(r), 1), (this.balance += r.amount));
   }
-  /** U's call runs: its nonce used, its USDC taken; the vault refuses a used P, and USDC refunds U refundBlocks later. */
-  private run(nonce: bigint, p: bigint, amount: bigint) {
+  /** U's call runs: its Delegate uses U's nonce now; the token's receipt debits U debitGap heights later. */
+  private run(nonce: bigint, p: bigint, amount: bigint): bigint {
     this.nonce = nonce;
-    this.balance -= amount;
-    if (this.used(p)) {
-      this.carried.push({ nonce, p, amount, fate: "refunded" });
-      this.refunds.push({ at: this.height + this.refundBlocks, amount });
+    this.debits.push({ at: this.height + this.debitGap, nonce, p, amount, call: this.height });
+    this.finals.push({ p, at: this.height + this.refundBlocks });
+    return this.height + this.refundBlocks;
+  }
+  /** The token's ft_transfer_call: U holding too little fails it (nothing moves); else the vault takes P a height later,
+   *  or refuses a used P and USDC refunds U refundBlocks after the call. */
+  private debit(x: { nonce: bigint; p: bigint; amount: bigint; call: bigint }) {
+    if (this.balance < x.amount) return void this.carried.push({ nonce: x.nonce, p: x.p, amount: x.amount, fate: "failed" });
+    this.balance -= x.amount;
+    if (this.used(x.p) || this.landings.some((l) => l.p === x.p)) {
+      this.carried.push({ nonce: x.nonce, p: x.p, amount: x.amount, fate: "refunded" });
+      this.refunds.push({ at: x.call + this.refundBlocks, amount: x.amount });
     } else {
-      this.addRow(p, this.u, amount);
-      this.prepaid.delete(p.toString());
-      this.carried.push({ nonce, p, amount, fate: "landed" });
+      this.landings.push({ at: this.height + 1n, p: x.p, amount: x.amount });
+      this.prepaid.delete(x.p.toString());
+      this.carried.push({ nonce: x.nonce, p: x.p, amount: x.amount, fate: "landed" });
     }
   }
   private addRow(p: bigint, depositor: string, value: bigint) {
@@ -94,20 +124,19 @@ export class V01World {
   /** The relayer's POST /v1/bind: R2, then storage_prepay(P) (P on chain: the stranger's turn), then U's call. */
   private bind(body: string): Response {
     const dl = decodeSignedDelegate(new Uint8Array(Buffer.from(JSON.parse(body).signed_delegate, "base64")));
-    const fc = dl.actions[0] as { args: Uint8Array };
+    const fc = dl.actions[0] as { method_name: string; args: Uint8Array; gas: bigint; deposit: bigint };
     const args = JSON.parse(Buffer.from(fc.args).toString());
     const p = BigInt(JSON.parse(args.msg).precommitment);
     const amount = BigInt(args.amount);
-    this.height++; // the hop to the relayer and back takes a block
-    // the relayer's checks: a nonce U's key has used, or a call of U it is still carrying (the helper's one slot per U)
-    if (dl.nonce <= this.nonce) return (this.answers.push("bad_nonce"), Response.json({ error: { code: "bad_nonce" } }, { status: 400 }));
-    if (this.carries.length > 0) return (this.answers.push("in_flight"), Response.json({ error: { code: "in_flight" } }, { status: 409 }));
-    // R2: one prepay per U that no deposit has used (the helper's prepay_open)
-    if ([...this.prepaid].some((k) => k !== p.toString())) {
-      this.carried.push({ nonce: dl.nonce, p, amount, fate: "prepay_open" });
-      this.answers.push("prepay_open");
-      return Response.json({ error: { code: "prepay_open" } }, { status: 409 });
-    }
+    this.tick(); // the hop to the relayer and back takes a block: the token's receipts run on the way
+    const no = (code: string, status: number) => (this.answers.push(code), Response.json({ error: { code } }, { status }));
+    // the relayer's checks in the helper's order: U's USDC at final (checks.ts:197), a nonce U's key has used, a call of
+    // U it is still carrying (the helper's one slot per U)
+    if (!this.carryAtOnce && amount > this.balance) return no("amount_above_balance", 400);
+    if (dl.nonce <= this.nonce) return no("bad_nonce", 400);
+    if (this.carries.length > 0) return no("in_flight", 409);
+    // R2: one prepay per U that no deposit has used, and nothing sent on another P that is not FINAL (send.ts:590-593)
+    if ([...this.prepaid].some((k) => k !== p.toString()) || (!this.carryAtOnce && this.finals.some((x) => x.p !== p && x.at > this.height))) return no("prepay_open", 409);
     if (!this.used(p) && !this.prepaid.has(p.toString())) (this.prepaid.add(p.toString()), this.prepays.push(p));
     // P is public now: the stranger's 1 USDC naming P lands first and uses the prepaid record
     if (this.stranger !== null && this.prepaid.has(p.toString())) {
@@ -122,10 +151,40 @@ export class V01World {
       this.answers.push("lost");
       throw new TypeError("fetch failed");
     }
-    // U's call: the Delegate runs (U's nonce used); the vault refuses a used P and USDC refunds U in full, later
-    this.run(dl.nonce, p, amount);
+    // U's call: the Delegate runs (U's nonce used); the token debits U, the vault refuses a used P and USDC refunds U
+    const final = this.run(dl.nonce, p, amount);
+    const hash = base58.encode(new Uint8Array(32).fill(this.sent.length + 1));
+    this.sent.push({
+      hash, p, final, sender: dl.sender_id, receiver: dl.receiver_id, nonce: dl.nonce, mbh: dl.max_block_height,
+      pk: `ed25519:${base58.encode(dl.public_key)}`, sig: `ed25519:${base58.encode(dl.signature)}`,
+      inner: { FunctionCall: { method_name: fc.method_name, args: Buffer.from(fc.args).toString("base64"), gas: Number(fc.gas), deposit: fc.deposit.toString() } },
+    });
     this.answers.push("tx");
-    return Response.json({ tx_hash: base58.encode(new Uint8Array(32).fill(this.carried.length)) });
+    return Response.json({ tx_hash: hash });
+  }
+
+  /** The relayer's tx as a `tx` read shows it (deposit-bind.test.ts txView): FINAL once every receipt ran, else not. */
+  private txRead(hash: string, relayer: unknown, height: bigint) {
+    const t = this.sent.find((x) => x.hash === hash);
+    if (t === undefined || relayer !== RELAYER) return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+    const rid = `r${hash}`;
+    return {
+      jsonrpc: "2.0",
+      id: "x",
+      result: {
+        final_execution_status: height >= t.final ? "FINAL" : "EXECUTED_OPTIMISTIC",
+        status: { SuccessValue: "" },
+        transaction: {
+          hash, signer_id: RELAYER, receiver_id: t.sender,
+          actions: [{ Delegate: { delegate_action: { sender_id: t.sender, receiver_id: t.receiver, actions: [t.inner], nonce: Number(t.nonce), max_block_height: Number(t.mbh), public_key: t.pk }, signature: t.sig } }],
+        },
+        transaction_outcome: { id: hash, outcome: { executor_id: RELAYER, receipt_ids: [rid], status: { SuccessReceiptId: rid } } },
+        receipts_outcome: [
+          { id: rid, outcome: { executor_id: t.sender, receipt_ids: [`${rid}x`], status: { SuccessValue: "" } } },
+          { id: `${rid}x`, outcome: { executor_id: t.receiver, receipt_ids: [], status: { SuccessValue: "" } } },
+        ],
+      },
+    };
   }
 
   /** The helper's routes this world answers: 1Click's status (SUCCESS, the live answer) and POST /v1/bind. */
@@ -145,7 +204,7 @@ export class V01World {
     const replay = replayDepositReads("testnet", publicKeyOf(this.u));
     const side = (k: 0 | 1, r: NearRpc): FollowRpc => ({
       name: r.name,
-      tx: async () => ({ jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } }),
+      tx: async (params) => this.txRead(params.tx_hash as string, params.sender_account_id, this.height + BigInt(k)),
       block: async () => ({ jsonrpc: "2.0", id: "x", result: { header: { height: Number(this.height + BigInt(k)), timestamp_nanosec: (BigInt(this.timeMs) * 1_000_000n).toString() } } }),
       query: async (params) => {
         const height = this.height + BigInt(k);
@@ -162,6 +221,7 @@ export class V01World {
           return stamp(j);
         }
         if (params.method_name === "mt_balance_of") return stamp({ jsonrpc: "2.0", id: "x", result: { result: [...Buffer.from(JSON.stringify("0"))], logs: [] } });
+        if (k === 1 && this.keysDown && params.request_type === "view_access_key_list") return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "TOO_MANY_REQUESTS" } } };
         const j = stamp((await r.query(params)) as any);
         if (params.request_type === "view_access_key_list") {
           j.result.keys[0].public_key = publicKeyOf(this.u);

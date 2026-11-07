@@ -131,6 +131,46 @@ test("V-01 with the refund slow (10 blocks after the call): no wait past the pol
   assert.deepEqual(f.world.carried.map((c) => c.fate), ["refunded", "landed"]);
 });
 
+// The review of 9c218554 (M1): on NEAR the Delegate uses U's nonce a height before the token debits U, and the refund
+// lands two heights after the debit (the world's debitGap and refundBlocks). A next call signed in between is signed
+// from USDC the ran call has not taken yet.
+for (const [name, set] of [["the first answer lost", (w: V01World) => (w.loseFirst = 3n)], ["the debit 2 heights after the nonce", (w: V01World) => (w.debitGap = 2n)]] as const) {
+  test(`M1, the release relayer not named (mainnet today), ${name}: the helper's read of U's USDC short of the call is settled by the chain, the call signed again at its nonce, U's refund lands on P'`, async () => {
+    const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => (set(world), { relayerAccount: null }));
+    await recovered(t, ONE_USDC);
+    assert.ok(!t.world.carried.some((c) => c.fate === "failed"), "no call the token fails");
+  });
+  test(`M1, the release relayer named, ${name}: the next call is signed only once the ran call is FINAL (its tx on both RPCs, else its window): the relayer never reads U short, and one that carries at once never gets a call the token fails`, async () => {
+    for (const carryAtOnce of [false, true]) {
+      resetBindSession();
+      const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => (set(world), (world.carryAtOnce = carryAtOnce), {}));
+      await recovered(t, ONE_USDC);
+      assert.ok(t.world.answers.every((a) => a === "tx" || a === "lost"), `carryAtOnce ${carryAtOnce}: no call refused: ${t.world.answers.join()}`);
+      assert.ok(!t.world.carried.some((c) => c.fate === "failed"), "no call the token fails");
+    }
+  });
+}
+
+test("L1: U's key reads failing on one RPC after done: nothing final, and the rounds back off past the poll", async () => {
+  let n = 0;
+  let down = -1;
+  const later: number[] = [];
+  const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => ({
+    untilFinal: true,
+    sleep: async (ms) => {
+      if (world.balance === 0n && world.carried.length === 2 && down < 0) ((down = n), (world.keysDown = true));
+      if (down >= 0) world.timeMs += 600_000; // the quote's deadline passes: only the failed read holds final
+      later.push(down >= 0 ? ms : 0);
+      n++;
+      world.tick();
+      await turn();
+      if (down >= 0 && n - down >= 12) throw new Error("budget");
+    },
+  })).catch((e) => e);
+  assert.equal(String((t as Error).message), "budget");
+  assert.ok(later.filter((ms) => ms > 0).some((ms) => ms > POLL_MS), `the rounds back off on a failed read: ${later.filter((ms) => ms > 0).join()}`);
+});
+
 test("V-01 while the two RPCs disagree on the pages (one lacks the stranger's row): the device waits, never binds", async () => {
   let during = -1;
   const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => {

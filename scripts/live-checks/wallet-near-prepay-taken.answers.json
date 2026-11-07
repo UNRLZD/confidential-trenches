@@ -1,7 +1,7 @@
 {
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-eKgpgown34gtyROExcbskrgDIBBJFyOW/ec9dG2zfzIQoHM6pTBhH2SX4Bs38221\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-eKgpgown34gtyROExcbskrgDIBBJFyOW/ec9dG2zfzIQoHM6pTBhH2SX4Bs38221",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-D9ZrURJ93jMvOrkl6i1jZp3pLMjtoEBO3iwgiq5BYEzWVg6up2K11WlDiGo6/OxZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-D9ZrURJ93jMvOrkl6i1jZp3pLMjtoEBO3iwgiq5BYEzWVg6up2K11WlDiGo6/OxZ",
     "value_read": true,
     "lock": true
   },

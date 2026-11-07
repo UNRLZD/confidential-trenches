@@ -690,6 +690,15 @@ for (const code of ["in_flight", "p_used", "expired", "bad_nonce"]) {
     assert.equal(t.sent.length, 1);
   });
 }
+// The review of 9c218554 (M1): the device signs only after reading U's USDC at or above the amount on both RPCs, so a
+// relayer's read short of it (a ran call's debit before its refund, audit V-01) is no refusal: the chain settles it.
+test("amount_above_balance settles from the pages and U's nonce: nothing carried, the call lapses and is signed again at its own nonce, never refused", async () => {
+  const t = await setup(["amount_above_balance", "tx"]);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.nonce, t.sent[0]!.nonce, "signed again at the same nonce: the first never ran");
+  assert.ok(t.sent[1]!.mbh > t.sent[0]!.mbh, "a fresh window");
+});
 for (const code of ["token_halted", "relayer_low"]) {
   test(`REVIEW I (expect PASS; kills M44): ${code} waits and sends the same signed bytes`, async () => {
     const t = await setup([code, "tx"]);
