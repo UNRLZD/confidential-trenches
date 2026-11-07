@@ -16,8 +16,14 @@
 //   again   the pre-state read again after the simulations
 //   checks  from the last call's answer to "signed": the checks S1-S13 on the bytes, on the device
 //
-//   node packages/kit/test/solana-quote-timing.ts --dry [--n 20] [--gap-ms 4000] [--route side:mint:amount]...
-//     [--wallet <address>] [--out <file>] [--no-bound]
+// Connections, as a page has them: Node's fetch speaks HTTP/1.1 and opens a connection per call in flight, where a
+// browser holds one HTTP/2 connection to each host, already open from the page's own reads before a tap. So by default
+// each run uses one HTTP/2 agent (Node's own undici, allowH2) and first warms it with one read to each host (the
+// helper's /health, provider A's getHealth), not timed. --cold makes a new agent each run with no warm-up: every
+// connection's TCP and TLS handshakes inside the quote.
+//
+//   node packages/kit/test/solana-quote-timing.ts --dry [--n 20] [--gap-ms 10000] [--route side:mint:amount]...
+//     [--wallet <address>] [--cold] [--out <file>] [--no-bound]
 // Exits 1 when the bound fails (red), or when any run is refused or its checks fail.
 import { writeFileSync } from "node:fs";
 import {
@@ -44,14 +50,34 @@ const WALLET = args("--wallet")[0] ?? "9UnZnrFJ1CXCmCorgGU9NvYkX5np1h4v4ympx3Nrd
 const ROUTES = (args("--route").length ? args("--route") : [
   "buy:EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump:10000000",
   "buy:MukLDtJ8Cx9DxLbeyLRSWPSposTMWuwHANbuaudpump:10000000",
-  "buy:CniPCE4b3s8gSUPhUiyMjXnytrEqUrMfSsnbBjLCpump:10000000",
+  "buy:J8PSdNP3QewKq2Z1JJJFDMaqF7KcaiJhR7gbr5KZpump:10000000",
 ]).map((r) => {
   const [side, mint, amount] = r.split(":");
   if ((side !== "buy" && side !== "sell") || !mint || !amount) throw new Error(`--route ${r} is not side:mint:amount`);
   return { side, mint, amount: BigInt(amount) } as const;
 });
 const N = Number(args("--n")[0] ?? 20);
-const GAP_MS = Number(args("--gap-ms")[0] ?? 4000);
+const COLD = process.argv.includes("--cold");
+// Node's fetch is undici; its agent class is reached through the global dispatcher Node sets on the first fetch.
+const DISPATCHER = Symbol.for("undici.globalDispatcher.1");
+await fetch(`${HELPER}/health`).then((r) => r.arrayBuffer()).catch(() => undefined);
+const AgentOf = (globalThis as Record<symbol, { constructor: new (o: object) => { close(): Promise<void> } }>)[DISPATCHER]?.constructor;
+if (!AgentOf) throw new Error("no undici agent to set");
+const Agent = AgentOf;
+async function connections(): Promise<void> {
+  const g = globalThis as Record<symbol, unknown>;
+  const old = g[DISPATCHER] as { close?: () => Promise<void> } | undefined;
+  g[DISPATCHER] = new Agent({ allowH2: true, keepAliveTimeout: 60_000, keepAliveMaxTimeout: 60_000 });
+  await old?.close?.().catch(() => undefined);
+  if (COLD) return;
+  await Promise.all([
+    fetch(`${HELPER}/health`).then((r) => r.arrayBuffer()),
+    fetch(PROVIDER_A, { method: "POST", headers: { "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' }).then((r) => r.arrayBuffer()),
+  ]).catch(() => undefined);
+}
+// 10 s apart: the helper's /v1/rpc takes 16 calls of one caller in 10 s (apps/helper/src/rpc/rpc.ts RPC_CLIENT_MAX) and a
+// quote with its dry send asks about 14 of provider B
+const GAP_MS = Number(args("--gap-ms")[0] ?? 10_000);
 
 type Call = { at: "A" | "B" | "helper" | "ref"; method: string; start: number; end: number; keys?: number; err?: string };
 
@@ -156,6 +182,7 @@ const runs: Awaited<ReturnType<typeof once>>[] = [];
 for (let i = 0; i < N; i++) {
   for (const route of ROUTES) {
     let r;
+    await connections();
     try {
       r = await once(route);
     } catch (e) {
@@ -181,7 +208,7 @@ const byRoute = Object.fromEntries(ROUTES.map((rt) => {
 const p50 = quotes.length ? pct(quotes, 50) : Infinity;
 const p95 = quotes.length ? pct(quotes, 95) : Infinity;
 const bound = { p50Under: 1_000, p95Under: 1_300, pass: p50 < 1_000 && p95 < 1_300 };
-const summary = { dry: true, at: new Date().toISOString(), helper: HELPER, providers: [PROVIDER_A, `${HELPER}/v1/rpc/solana`], wallet: WALLET, n: runs.length, ok: good.length, secondSimulation: good.filter((r) => r.secondSimulation).length, table, byRoute, bound };
+const summary = { dry: true, at: new Date().toISOString(), connections: COLD ? "cold: a new agent each run, no warm-up" : "warm: one HTTP/2 agent a run, warmed by one read to each host", helper: HELPER, providers: [PROVIDER_A, `${HELPER}/v1/rpc/solana`], wallet: WALLET, n: runs.length, ok: good.length, secondSimulation: good.filter((r) => r.secondSimulation).length, table, byRoute, bound };
 const out = args("--out")[0];
 if (out) writeFileSync(out, `${JSON.stringify({ ...summary, runs }, null, 1)}\n`);
 console.log(JSON.stringify(summary, null, 1));
