@@ -251,12 +251,19 @@ export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KE
  *  solana-release-reads-paced): when a caller holds the provider under a limit (a paced wrapper made, a set or trade
  *  started), every call takes its turn in the provider's shared queue under the limits named there, naming none of its
  *  own; a provider no caller paces is called as given. The provider is called synchronously inside its turn, so a paced
- *  wrapper given here is that turn's own call, never queued twice. */
-export function solanaTimedRpc(rpc: SolanaRpc, ms: number): SolanaRpc {
+ *  wrapper given here is that turn's own call, never queued twice. `ms` as a function is asked when the turn comes (a
+ *  throw there ends the call unsent, its error the call's); `late` makes the timeout's error (the caller's own type). */
+export function solanaTimedRpc(rpc: SolanaRpc, ms: number | (() => number), late?: (ms: number) => Error): SolanaRpc {
   const timed = solanaWrappedRpc(rpc, (method, params) => {
     let p: Promise<unknown>;
-    try { p = Promise.resolve(rpc(method, params)); } catch (e) { p = Promise.reject(e); }
-    return withTimeout(p, ms);
+    let bound: number;
+    try {
+      bound = typeof ms === "function" ? ms() : ms;
+      p = Promise.resolve(rpc(method, params));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return withTimeout(p, bound, late);
   });
   const bare = bareOf.get(rpc) ?? rpc;
   const queue = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
@@ -315,9 +322,9 @@ export type SolanaSetOptions = {
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e).slice(0, 200);
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number, late?: (ms: number) => Error): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
+  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(late ? late(ms) : new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
 }
 
 async function readBounded(r: Response): Promise<string> {

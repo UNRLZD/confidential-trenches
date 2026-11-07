@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { solanaPacedRpc } from "../src/trade/solana/send.ts";
 import { base64 } from "@scure/base";
 import {
   POOL_USD_BLOCK_MAX_AGE_S,
@@ -630,4 +631,24 @@ test("poolUsdGoodUntilS reads POOL_USD_FEEDS only by an own key: a chain outside
     delete P.polluted;
   }
   assert.equal(good("solana"), 1_000 + POOL_USD_FEEDS.solana.maxAgeS);
+});
+
+// Card solana-release-reads-paced: the signing page hands the price read its paced pair (pageSolanaRpcs). With a
+// provider's pace full, the read waits for its turn and its try's bound (POOL_USD_CALL_TIMEOUT_MS) counts from when the
+// call goes out, never from that wait, so a wait past 5 s still answers the price, never NoAnswer. Real time (the
+// provider queue runs on performance.now()), on URLs of its own, so the limit named here binds no other test's provider.
+test("card solana-release-reads-paced: with a provider's pace full the price read waits for its turn and still answers", async () => {
+  const sent: number[] = [];
+  const a = Object.assign(async () => { sent.push(performance.now()); return GOOD(); }, { url: "https://pace-usd-a.example/" });
+  const b = Object.assign(async () => GOOD(), { url: "https://pace-usd-b.example/" });
+  const limit = { windowMs: 5_600, total: 1, perMethod: 1 };
+  const paced = solanaPacedRpc(a, limit);
+  // the pace full: a caller holding provider A under 1 call in any 5.6 s has made its call
+  await solanaPacedRpc(Object.assign(async () => null, { url: a.url }), limit)("getSlot", []);
+  const full = performance.now();
+  const r = await poolUsdToUnits({ chain: "solana", usd: "100", rpcs: [paced, b], nowMs: NOW }).then((v) => ({ v }), (e: unknown) => ({ e }));
+  assert.ok("v" in r, `the price read answered: ${"e" in r ? String((r.e as Error)?.message ?? r.e) : ""}`);
+  assert.equal(r.v, UNITS);
+  assert.equal(sent.length, 1, "one read on A, once its turn came");
+  assert.ok(sent[0]! - full >= 5_500, `the read on A went out once the pace let it: ${Math.round(sent[0]! - full)} ms`);
 });

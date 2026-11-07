@@ -9,7 +9,9 @@
 //   - timed: the kit's timed reads (send.ts solanaTimedRpc) call the provider inside its turn and time that call, then
 //     pace the timed call under the limit the provider's queue already holds, so a wait for a turn never counts
 //     against the read's timeout; and the reference's reads (pool.ts readSolanaReference), the rent read (pool-buy.ts
-//     readSolanaRent) and the tx-end reads (send.ts readSolanaTxEnd) go through it.
+//     readSolanaRent) and the tx-end reads (send.ts readSolanaTxEnd) go through it;
+//   - price: the page's price read (kit price/pool-usd.ts) takes each try through it, the try's bound taken at its turn
+//     (none sent once the read's bound has ended) and its timeout the read's own NoAnswer, which slow() asks again.
 // What each does is held by the card's tests (packages/kit/test/solana-pool.test.ts, packages/signpage/test/trade.test.ts
 // and page-rpc.test.ts, each "card solana-release-reads-paced"); the recorded answers are facts() over each tree's
 // packages/signpage/index.html and public/app.js (this file reaches no package code: the import check holds it).
@@ -30,10 +32,11 @@ const NOFN = "(?:(?!function )[\\s\\S])";
 const esc = (s) => s.replace(/\$/g, "\\$");
 // the kit's paced wrapper: a call inside its own queue's slot is that slot's call, any other takes a slot (rpcSlot)
 const PACED = new RegExp(`function (${N})\\((${N}),${N}=${N}\\)\\{${NOFN}{0,200}?\\{if\\(${N}===${N}\\)return \\2\\(${N},${N}\\);let ${N}=${N}\\(\\2,${N},${N}\\);return ${N}\\.wait\\?`);
-// the timed read: the provider called inside the wrapper, synchronously, and that call timed; then the timed wrapper
-// (never the provider under it) paced under the limit the provider's queue already names
+// the timed read: its bound taken when its turn comes, the provider called inside the wrapper, synchronously, and that
+// call timed (with the caller's late error); then the timed wrapper (never the provider under it) paced under the limit
+// the provider's queue already names
 const TIMED = (p) =>
-  new RegExp(`function (${N})\\((${N}),(${N})\\)\\{let (${N})=${N}\\(\\2,\\((${N}),(${N})\\)=>\\{let (${N});try\\{\\7=Promise\\.resolve\\(\\2\\(\\5,\\6\\)\\)\\}catch\\((${N})\\)\\{\\7=Promise\\.reject\\(\\8\\)\\}return ${N}\\(\\7,\\3\\)\\}\\)${NOFN}{0,200}?\\.limits\\.values\\(\\)\\.next\\(\\)\\.value;return (${N})\\?${esc(p)}\\(\\4,\\9\\):\\4\\}`);
+  new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{let (${N})=${N}\\(\\2,\\((${N}),(${N})\\)=>\\{let (${N}),(${N});try\\{\\9=typeof \\3==${Q}function${Q}\\?\\3\\(\\):\\3,\\8=Promise\\.resolve\\(\\2\\(\\6,\\7\\)\\)\\}catch\\((${N})\\)\\{return Promise\\.reject\\(\\10\\)\\}return ${N}\\(\\8,\\9,\\4\\)\\}\\)${NOFN}{0,200}?\\.limits\\.values\\(\\)\\.next\\(\\)\\.value;return (${N})\\?${esc(p)}\\(\\5,\\11\\):\\5\\}`);
 // every name the bundle binds to `url` (a module may keep its own copy of the constant), as one alternation
 const urlVar = (js, url) => {
   const names = [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=${Q}${url.replace(/[.]/g, "\\.")}${Q}`, "g"))].map((m) => esc(m[1]));
@@ -60,10 +63,14 @@ export function facts(index, js) {
     new RegExp(`${esc(t)}\\(${N},${N}\\)\\(${Q}getAccountInfo${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)`).test(js) &&
     // the tx-end reads (send.ts readSolanaTxEnd)
     new RegExp(`let (${N})=${esc(t)}\\(${N},${N}\\),${N}=\\((${N}),(${N})\\)=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>\\1\\(\\2,\\3\\)\\)`).test(js);
-  return { index, sha384: sha384(js), release, pair, timed };
+  // the price read (kit price/pool-usd.ts call): each try through the timed read, its bound taken at its turn and none
+  // sent once the read's bound has ended, its timeout the read's own NoAnswer, which its slow() asks again
+  const priceAt = t ? new RegExp(`let (${N})=${esc(t)}\\(${N},\\(\\)=>\\{if\\(${N}\\.stopped\\)return ${N}\\(${Q}\\$\\{${N}\\}: not asked again, the read has ended${Q}\\);let (${N})=${N}\\.end-Date\\.now\\(\\);if\\(\\2<=0\\)throw new (${N})\\(${Q}\\$\\{${N}\\}: no turn inside the read's bound${Q}\\);return Math\\.min\\(${N},\\2\\)\\},(${N})=>new \\3\\(${Q}\\$\\{${N}\\}: no answer in \\$\\{\\4\\} ms${Q}\\)\\);try\\{return await Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>\\1\\(${N},${N}\\)\\)\\}`).exec(js) : null;
+  const price = !!priceAt && new RegExp(`=(${N})=>\\1 instanceof ${esc(priceAt[3])}\\|\\|`).test(js);
+  return { index, sha384: sha384(js), release, pair, timed, price };
 }
 
-/** The verdict on an answer { index, sha384, release, pair, timed }. */
+/** The verdict on an answer { index, sha384, release, pair, timed, price }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -73,6 +80,7 @@ export function judge(a) {
   if (a?.release !== true) bad("the release's reference reads on a pair outside the trade's pace: a release under load can trip a provider's limit and be refused as down");
   if (a?.pair !== true) bad("the page's Solana pair is made unpaced: pool buy, sell, withdraw and settle reads skip the provider's queue");
   if (a?.timed !== true) bad("the kit's reference, rent or tx-end reads skip the provider's queue or count their wait against their timeout: a read behind a full pace is refused as down");
+  if (a?.price !== true) bad("the page's price read counts its wait for a turn against its try's bound: behind a full pace it fails as no answer");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 

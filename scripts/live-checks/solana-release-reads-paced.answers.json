@@ -1,20 +1,22 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as built at card/solana-release-reads-paced a9eea896 (build-app.mjs), before its release cut; recorded again on the release's build once its number is given",
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as built at card/solana-release-reads-paced with the pool-usd fold (build-app.mjs), before its release cut; recorded again on the release's build once its number is given",
     "bad": "main 5a9e5d8c's build (mainnet, release-83): the release's reference reads on its own unpaced pair, the page's pair unpaced, the kit's reads outside the queue with their timeout over any wait"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5NK+oYt///N7U+S8rTCm6J3niLUkTHOXgJBTU5jQEx6coQo9KZzkqi784bU31Ocx\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-5NK+oYt///N7U+S8rTCm6J3niLUkTHOXgJBTU5jQEx6coQo9KZzkqi784bU31Ocx",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-KGXdbxrVKYM/4/jxM3pn+AhGKltOn4cyavpBeSmqnJY868m810PEItz4Cod3J8mB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-KGXdbxrVKYM/4/jxM3pn+AhGKltOn4cyavpBeSmqnJY868m810PEItz4Cod3J8mB",
     "release": true,
     "pair": true,
-    "timed": true
+    "timed": true,
+    "price": true
   },
   "bad": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p",
     "release": false,
     "pair": false,
-    "timed": false
+    "timed": false,
+    "price": false
   }
 }
