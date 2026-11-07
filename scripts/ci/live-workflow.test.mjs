@@ -119,10 +119,11 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's forty-two checks (signpage-shell runs four ways, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's forty-three checks (signpage-shell runs four ways, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 42);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 43);
   assert.ok(sign.include.some((e) => e.key === "solana-release-reads-paced" && !e.chrome && e.args === ""), "solana-release-reads-paced runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-deposit-sent-end" && !e.chrome && e.args === ""), "pool-deposit-sent-end runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-written-accounts-whole" && !e.chrome && e.args === ""), "solana-written-accounts-whole runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-legs-checked" && !e.chrome && e.args === ""), "solana-legs-checked runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
@@ -170,7 +171,10 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   assert.deepEqual(fee.RELEASE_RELAYER, { mainnet: null, testnet: null }, "the release names a relayer now: run the check, drop the skip");
   assert.deepEqual(Object.keys(SKIPPED).sort(), ["helper-proxy", "relayer-withdraw-fee"], "a new skip needs a reason this test checks");
   const plan = await planFor("helper", { commit: COMMIT });
-  const na = existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"];
+  const na = [
+    ...(existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"]),
+    ...(existsSync(path.join(ROOT, "contracts/vault/deployments/mainnet-v1.json")) ? [] : ["skipped-not-applicable: helper-bind-relayer-mainnet"]),
+  ];
   assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
   assert.ok(!plan.include.some((e) => keysOf(e).some((k) => SKIPPED[k])), "a skipped check is never in the matrix");
   for (const key of ["solana-jupiter-build", "wallet-per-buy", "helper-usdc-pending-pause"]) assert.ok(plan.include.some((e) => keysOf(e).includes(key) && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
@@ -323,9 +327,41 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
     const b = await planFor("helper", { commit: COMMIT, root: devnet });
     assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]);
     assert.deepEqual(b.skipped.filter((s) => s.key === "helper-pool-senders").map((s) => s.detail), ["no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist"]);
-    assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-pool-senders", "helper-proxy", "relayer-withdraw-fee"], "the whole skips stay skipped");
+    assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-bind-relayer-mainnet", "helper-pool-senders", "helper-proxy", "relayer-withdraw-fee"], "the whole skips stay skipped");
   } finally {
     for (const r of [none, devnet]) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+// card helper-bind-relayer-mainnet: the mainnet deposit carry exists only once the mainnet vault's record does
+// (deploy/bind-relayer-key.sh refuses before it), so its check runs on no deploy until then, never failing one
+test("the plan runs helper-bind-relayer-mainnet once contracts/vault/deployments/mainnet-v1.json exists; before it, no run and the reason", async () => {
+  const { LIVE_CHECKS, bindMainnetPlan } = await import("./helper-live-checks.mjs");
+  const real = (edit) =>
+    fixture((r) => {
+      cpSync(path.join(ROOT, "scripts/ci/helper-live-checks.mjs"), path.join(r, "scripts/ci/helper-live-checks.mjs"));
+      cpSync(path.join(ROOT, "scripts/live-checks/pool-redeploys.mjs"), path.join(r, "scripts/live-checks/pool-redeploys.mjs"));
+      for (const k of LIVE_CHECKS) cpSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), path.join(r, "scripts/live-checks", `${k}.mjs`));
+      edit(r);
+    });
+  const before = real(() => {});
+  const after = real((r) => {
+    mkdirSync(path.join(r, "contracts/vault/deployments"), { recursive: true });
+    writeFileSync(path.join(r, "contracts/vault/deployments/mainnet-v1.json"), JSON.stringify({ network: "mainnet", account_id: "vault.confidential.unrlzd.near" }));
+  });
+  try {
+    const reason = "the mainnet vault is not deployed: contracts/vault/deployments/mainnet-v1.json does not exist";
+    assert.deepEqual(bindMainnetPlan(before), { runs: [], notApplicable: reason });
+    const a = await planFor("helper", { commit: COMMIT, root: before });
+    assert.ok(!a.include.some((e) => keysOf(e).includes("helper-bind-relayer-mainnet")), "no mainnet vault: no run, so no deploy fails on it");
+    assert.deepEqual(a.skipped.filter((s) => s.key === "helper-bind-relayer-mainnet"), [{ key: "helper-bind-relayer-mainnet", reason: "not-applicable", detail: reason }]);
+    assert.deepEqual(bindMainnetPlan(after), { runs: ["scripts/live-checks/helper-bind-relayer-mainnet.mjs --commit {commit}"], notApplicable: null });
+    const b = await planFor("helper", { commit: COMMIT, root: after });
+    // review FIX 1: the health answer names no vault, so the check pins the deployed commit and reads that commit's pin
+    assert.deepEqual(b.include.filter((e) => e.key === "helper-bind-relayer-mainnet").map((e) => e.args), [`--commit ${COMMIT}`], "one run, after every helper deploy, pinned to the deployed commit");
+    assert.ok(!b.skipped.some((s) => s.key === "helper-bind-relayer-mainnet"));
+  } finally {
+    for (const r of [before, after]) rmSync(r, { recursive: true, force: true });
   }
 });
 

@@ -109,11 +109,13 @@ test("in a mixed set, only the legs armed by the device's own withdrawal are bui
   assert.equal(r.legs[0]?.signature, undefined);
 });
 
-test("no reference pool, no build: every leg is refused", async () => {
+test("no reference pool: every leg is refused; its build, out with the first reads (card solana-quote-under-1s), is dropped and nothing signed", async () => {
   const fetched: string[] = [];
   const r = await runSolanaTrade({ side: "sell", token: TOKEN, slippageBps: 100, wallets: WALLETS, legs: [{ wallet: W1, amount: 5n, arm: { own: true } }] }, deps({ fetched, reference: async () => null }));
-  assert.deepEqual(fetched, []);
+  assert.ok(fetched.length <= 1, `${fetched.length} builds`);
   assert.match(r.legs[0]?.refused ?? "", /no reference pool/);
+  assert.equal(r.legs[0]?.verdict, undefined);
+  assert.equal(r.legs[0]?.signature, undefined);
 });
 
 test("the request is checked before anything is read", async () => {

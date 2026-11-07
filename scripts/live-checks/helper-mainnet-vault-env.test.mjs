@@ -1,8 +1,10 @@
 // node --test scripts/live-checks/helper-mainnet-vault-env.test.mjs: the live check replays recorded runs
-// (helper-mainnet-vault-env.answers.json). good: apps/helper at this card's branch run with node src/server.ts, mainnet
-// carried for the record's vault, with a stand-in relayer account that exists on mainnet: PASS. bad_deployed: the
-// deployed helper before this card (main 358d8f4), mainnet not carried: FAIL. bad_other_vault: main before this card
-// run the same way with WITHDRAW_VAULT_MAINNET naming another account, which it took (no pin): every probe 503, FAIL. Made from the good run: an
+// (helper-mainnet-vault-env.answers.json). good: apps/helper at card/vault-mainnet-record run with node src/server.ts,
+// mainnet carried for the v1 record's vault, with a throwaway implicit relayer holding its own key: PASS. bad_vault_test:
+// the earlier good, made for vault-test before the v1 record: FAIL against today's record. bad_deployed: the
+// deployed helper (af75100a, before the cutover) read for today's record, mainnet not carried: FAIL. bad_other_vault:
+// main before this card (358d8f4, no pin) run the same way with WITHDRAW_VAULT_MAINNET naming vault-test, a real
+// mainnet vault, read for today's record: the record's probe bad_proof, FAIL. Made from the good run: an
 // implicit relayer without its own key, a relayer under the floor, absent, read on one operator or at two blocks, the
 // two RPCs disagreeing, a fee answer that holds, a send: each FAIL.
 import assert from "node:assert/strict";
@@ -34,14 +36,32 @@ test("recorded good run: the record's vault past check 2 (bad_fee_recipient), an
   assert.deepEqual(A.good.record, loadRecord());
 });
 
-test("recorded bad runs: the deployed helper not carrying mainnet, and a helper carrying another vault: FAIL", () => {
-  const d = judge(A.bad_deployed);
+test("recorded bad runs, judged against today's record: the deployed helper not carrying mainnet, and a helper carrying another real vault: FAIL", () => {
+  const rec = loadRecord();
+  for (const k of ["bad_deployed", "bad_other_vault"]) assert.deepEqual(A[k].record, rec, `${k} was read for today's record`);
+  const d = judge(A.bad_deployed, rec);
   assert.equal(d.ok, false);
-  assert.ok(bad(d).includes("BAD the record's vault: 400 bad_shape (want 400 bad_fee_recipient)"), bad(d).join("\n"));
-  assert.ok(bad(d).includes("BAD fee: 404 not_found (want 200)"), bad(d).join("\n"));
-  const o = judge(A.bad_other_vault);
+  assert.deepEqual(bad(d), [
+    "BAD fee: 404 not_found (want 200)",
+    "BAD fee: relayer undefined, fee recipient undefined (neither the vault nor intents.near)",
+    "BAD the record's vault: 400 bad_shape (want 400 bad_fee_recipient)",
+    "BAD another vault: 400 bad_shape (want 400 bad_proof)",
+    "BAD the relayer account on two mainnet RPCs: the fee answer names no relayer account",
+  ]);
+  // the other vault is vault-test, a real mainnet vault and the decoy for today's record: the helper carrying it lets the
+  // decoy probe past check 2 and refuses the record's at check 2
+  assert.notEqual(rec.account_id, "vault-test.confidential.unrlzd.near");
+  assert.equal(decoyFor(rec), "vault-test.confidential.unrlzd.near");
+  const o = judge(A.bad_other_vault, rec);
   assert.equal(o.ok, false);
-  assert.ok(bad(o).includes("BAD the record's vault: 503 upstream (want 400 bad_fee_recipient)"), bad(o).join("\n"));
+  assert.deepEqual(bad(o), ["BAD the record's vault: 400 bad_proof (want 400 bad_fee_recipient)", "BAD another vault: 400 bad_fee_recipient (want 400 bad_proof)"]);
+});
+
+test("recorded bad run: the good run made for vault-test before the v1 record FAILs against today's record", () => {
+  assert.equal(judge(A.bad_vault_test).ok, true, "it passed for the record it was made with");
+  const v = judge(A.bad_vault_test, loadRecord());
+  assert.equal(v.ok, false);
+  assert.deepEqual(bad(v), [`BAD the deploy record's vault: ${loadRecord().account_id} (scope ${loadRecord().scope.slice(0, 12)}...)`]);
 });
 
 test("made from the good run: each break of the relayer account or the answers FAILs", () => {
@@ -122,7 +142,7 @@ test("the probes: the record's vault is the helper's pin, and the two bodies dif
   for (const a of asks(rec)) for (const [s] of a.want) assert.ok(s === 200 ? a.method === "GET" : s >= 400 && s < 500, a.name);
 });
 
-test("the record by the kit's rule: mainnet-v1.json's once it exists, else mainnet-test.json's", () => {
+test("the record by the helper's pin rule: mainnet-v1.json's once it exists, else mainnet-test.json's", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "hmve-rec-"));
   const rec = (id) => JSON.stringify({ network: "mainnet", account_id: id, scope: "7" });
   writeFileSync(path.join(dir, "mainnet-test.json"), rec("vault-test.confidential.unrlzd.near"));
@@ -133,7 +153,7 @@ test("the record by the kit's rule: mainnet-v1.json's once it exists, else mainn
   assert.equal(loadRecord(recordFile(dir)).account_id, "vault.confidential.unrlzd.near");
 });
 
-test("the decoy is chosen at run time to differ from the record's vault, and the judge refuses a run whose two probes name one vault", () => {
+test("the decoy is chosen at run time to differ from the record's vault, its probe's vault signal differs from the record's, and the recorded good run's other-vault line names it", () => {
   for (const id of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "other.near"]) {
     const record = { account_id: id, scope: "7" };
     assert.notEqual(decoyFor(record), id, id);

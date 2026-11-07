@@ -20,12 +20,13 @@ Object.freeze(NEAR_RPC_URLS);
 export const NEAR_NETWORKS = {
   // vault: the release's vault on this network, the only receiver a deposit call names (wallet.md:898, "the vault id
   // written into the release"); null until the release writes one, and the device signs no deposit call there.
-  // Mainnet: none yet (the vault is deployed at the freeze). Testnet: contracts/vault/deployments/testnet-v1.json,
+  // Mainnet: contracts/vault/deployments/mainnet-v1.json, account_id: the keyless vault deployed 7 Nov, registered on
+  // mainnet USDC (scripts/live-checks/vault-mainnet-deploy.mjs reads both). Testnet: contracts/vault/deployments/testnet-v1.json,
   // account_id: a keyless vault whose config() names this token as its asset, registered on it (its registration_tx;
   // scripts/live-checks/vault-testnet-t01.mjs reads both).
   // usdc: the vault's asset, the token contract. Mainnet's is the kit's VAULT_CONSTANTS.TOKEN, copied here so the
   // signing page carries no kit code for it; test/near-networks.test.ts holds the two equal.
-  mainnet: { usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", vault: null, fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
+  mainnet: { usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", vault: "vault.confidential.unrlzd.near", fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
   testnet: {
     usdc: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
     vault: "vault.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)

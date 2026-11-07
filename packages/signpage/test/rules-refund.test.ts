@@ -4,12 +4,12 @@
 // bad field is refused not_allowed, named by its rule; only the object a check returned signs, with its own key.
 // 1Click answers come from the H-1c mock (test/oneclick-mock.ts), signed by a key only this process trusts. Keys: RFC 8032
 // test 1 (the id) and test 2 (the Solana W), the Hardhat mnemonic's account 0 (the EVM W): published test vectors.
-// Mainnet has no vault yet (kit near/networks.ts), so a load hook gives this process a networks.ts whose mainnet names
-// VAULT, a test id, frozen as the real one is: every "never the vault" rule then runs against a vault that is there.
+// Every "never the vault" rule runs against mainnet's real vault, the kit's NEAR_NETWORKS.mainnet.vault, held here to
+// the v1 deploy record's account (contracts/vault/deployments/mainnet-v1.json).
 //   node --test test/rules-refund.test.ts      (from packages/signpage)
 /// <reference types="node" />
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -20,26 +20,14 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
 import type { OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 import { ATTACKER, COLLECTOR, NEAR_USDC, NOW, SOL_USDC, liveAnswer, mockKey, signAnswer, type Answer } from "./oneclick-mock.ts";
-const VAULT = "vault.blindfill-test.near";
-const NETWORKS_URL = new URL("../../kit/src/near/networks.ts", import.meta.url).href;
-registerHooks({
-  load(url, context, next) {
-    if (url !== NETWORKS_URL) return next(url, context);
-    // the real module under another address (the hook passes it through), its mainnet with VAULT, frozen
-    const real = JSON.stringify(`${NETWORKS_URL}?real`);
-    const source = `import { NEAR_NETWORKS as REAL } from ${real};
-export * from ${real};
-export const NEAR_NETWORKS = Object.freeze({ ...REAL, mainnet: Object.freeze({ ...REAL.mainnet, vault: ${JSON.stringify(VAULT)} }) });
-`;
-    return { format: "module", source, shortCircuit: true };
-  },
-});
 // after the mock, so the rule loads the mock's 1Click keys (a static import would load the kit's first)
 const R = await import("../src/rules/refund.ts");
 const { NEAR_NETWORKS } = await import("../../kit/src/near/networks.ts");
 const { VAULT_TOKEN_CODE_HASH } = await import("../../kit/src/vault/shapes.ts");
 const { DEPOSIT_ASSET_CHAINS } = await import("../src/rules/deposit-dry.ts");
-if (NEAR_NETWORKS.mainnet.vault !== VAULT) throw new Error("rules-refund.test.ts: networks.ts was loaded before the vault hook");
+const VAULT = NEAR_NETWORKS.mainnet.vault;
+const RECORD = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/mainnet-v1.json", import.meta.url), "utf8")) as { account_id: string };
+if (VAULT !== RECORD.account_id) throw new Error(`rules-refund.test.ts: mainnet's vault ${VAULT} is not the v1 record's ${RECORD.account_id}`);
 type IdIntentRead = import("../src/rules/refund.ts").IdIntentRead;
 type IdIntentContext = import("../src/rules/refund.ts").IdIntentContext;
 type FtWithdrawReads = import("../src/rules/refund.ts").FtWithdrawReads;

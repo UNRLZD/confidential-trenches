@@ -51,13 +51,13 @@ function call(method: string, path: string, headers: Record<string, string> = {}
   });
 }
 
-test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status), delegate up (/v1/bind) and the other three down, the commit in the body and in X-Helper-Commit", async () => {
+test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status), delegate up (/v1/bind), intents up (/v1/intents) and the other two down, the commit in the body and in X-Helper-Commit", async () => {
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
   // solana: this environment sets no SOLANA_RPC_URL, so the RPC slot is the public endpoint (card helper-solana-failover)
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" }, rpc: { solana: [], base: [], robinhood: [], near: [] } });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" || p === "intents" ? "up" : "down"])), solana: { rpc: "public" }, rpc: { solana: [], base: [], robinhood: [], near: [] }, bind: {} });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -80,12 +80,72 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
     assert.equal(r.status, 200);
     const b = JSON.parse(r.body);
     assert.equal(b.release, 12);
-    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana", "rpc"]);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana", "rpc", "bind"]);
     assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }
+});
+
+// card helper-bind-relayer-mainnet: each network POST /v1/bind carries, its gas account (public), so the live check reads
+// the account to fund after deploy/bind-relayer-key.sh; a sender that names none answers {}
+test("GET /v1/health lists each network the bind sender carries with its gas account, within 1 KB", async (t) => {
+  const carried = { mainnet: "ab".repeat(32), testnet: "c".repeat(64) };
+  const bind: BindSender = { carry: async () => ({ status: 400, body: { error: { code: "bad_shape" as const } } }), warm: () => undefined, stop: () => undefined, carried: () => carried };
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind, 12));
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.body).bind, carried);
+  assert.ok(Buffer.byteLength(r.body) <= 1024, `1 KB limit (H7): ${Buffer.byteLength(r.body)}`);
+});
+
+// review FIX 1 (card helper-bind-relayer-mainnet): the kit's frozen row bounds GET /v1/health at 1 KB
+// (packages/kit/src/helper/v1.ts HELPER_V1_PATHS), so the body is held at its longest full config, not with empty lists:
+// every one of the 18 keyed names set (rpc/rpc.ts RPC_UPSTREAMS keyed) on the companies the host uses, each in its
+// longest state ("wrong chain", NEAR's two spares keyless), every Solana slot on "fallback", the longest release, not
+// ready, and both networks carried by the real bind sender with 64-hex gas accounts (the longest account id). A field
+// that grows the body past the bound fails here.
+test("GET /v1/health stays within the kit's 1 KB at the helper's longest full config: 18 keyed URLs in their longest state, Solana on fallback, both bind carries", async (t) => {
+  const { bindSenderFromEnv } = await import("./bind/env.ts");
+  const { MAINNET_VAULT } = await import("./withdraw/send.ts");
+  const { RPC_UPSTREAMS, KEYED_CHAINS } = await import("./rpc/rpc.ts");
+  const { createPrivateKey, createPublicKey } = await import("node:crypto");
+  const keyOf = (fill: number) => {
+    const seed = Buffer.alloc(32, fill);
+    const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+    const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+    return { key: `ed25519:${b58encode(Buffer.concat([seed, pub]))}`, account: pub.toString("hex") };
+  };
+  const [m, n] = [keyOf(7), keyOf(9)];
+  const bind = bindSenderFromEnv(
+    { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: m.account, BIND_RELAYER_KEY_MAINNET: m.key, BIND_VAULT_TESTNET: "vault.bf-vt-20261102t071444.testnet", BIND_RELAYER_TESTNET: n.account, BIND_RELAYER_KEY_TESTNET: n.key, BIND_MARGIN_K: "600", HELPER_RELEASE: "999999999", HELPER_STORE_DIR: fs.mkdtempSync(join((await import("node:os")).tmpdir(), "health-max-")) },
+    {},
+    async () => { throw new Error("no network in this test"); },
+  );
+  t.after(() => bind.stop());
+  const companies = {
+    solana: ["helius-rpc.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    base: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    robinhood: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    near: ["fastnear.com", "fastnear.com keyless", "lava.build keyless"],
+  };
+  const keyed = Object.fromEntries(KEYED_CHAINS.map((c) => [c, companies[c].map((co) => `${co} wrong chain`)])) as Record<(typeof KEYED_CHAINS)[number], string[]>;
+  assert.equal(Object.values(keyed).flat().length, 18);
+  assert.deepEqual(Object.fromEntries(KEYED_CHAINS.map((c) => [c, keyed[c].length])), Object.fromEntries(KEYED_CHAINS.map((c) => [c, RPC_UPSTREAMS[c].keyed.length])), "one entry per keyed name");
+  const rpc = { ...createRpc({}), keyed: () => keyed } as ReturnType<typeof createRpc>;
+  const fallback = { rpc: "fallback", holders: "fallback", trades: "fallback", stream: "fallback" } as const;
+  const helper = createServer(handler(COMMIT, undefined, rpc, undefined, undefined, undefined, undefined, undefined, bind, 999999999, undefined, undefined, undefined, undefined, undefined, () => false, undefined, () => fallback));
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  const b = JSON.parse(r.body);
+  assert.deepEqual([b.release, b.ready, b.solana, b.rpc], [999999999, false, fallback, keyed], "the longest config is the one served");
+  assert.deepEqual(Object.keys(b.bind), ["mainnet", "testnet"], "both carries listed");
+  assert.ok(Buffer.byteLength(r.body) <= 1024, `GET /v1/health at its longest full config is ${Buffer.byteLength(r.body)} bytes, over the kit's 1024 (HELPER_V1_PATHS)`);
 });
 
 test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials; Retry-After is exposed", async () => {
@@ -338,6 +398,33 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }
+});
+
+test("POST /v1/intents (card helper-id-intents): mounted, never 404; with no network set a signer the helper never saw is 403 id_not_ours, a body that is not one signed intent 400 bad_shape (the device's probe), over 8 KB 413; GET 405", async () => {
+  const payload = JSON.stringify({ signer_id: "a".repeat(64), verifying_contract: "intents.near", deadline: "2026-11-07T18:02:00.000Z", nonce: Buffer.alloc(32).toString("base64"), intents: [{ intent: "ft_withdraw", token: "usdc.near", receiver_id: "vault.confidential.unrlzd.near", amount: "1" }] });
+  const body = JSON.stringify({ signed_intent: { standard: "raw_ed25519", payload, public_key: `ed25519:${b58encode(new Uint8Array(32))}`, signature: `ed25519:${b58encode(new Uint8Array(64))}` } });
+  const a = await call("POST", "/v1/intents", { ...JSON_H, origin: SIGN }, body);
+  assert.deepEqual([a.status, JSON.parse(a.body)], [403, { error: { code: "id_not_ours" } }]);
+  assert.equal(a.headers["x-helper-commit"], COMMIT);
+  const p = await call("POST", "/v1/intents", JSON_H, "{}");
+  assert.deepEqual([p.status, JSON.parse(p.body)], [400, { error: { code: "bad_shape" } }]);
+  const n = await call("POST", "/v1/intents", JSON_H, "{not json");
+  assert.deepEqual([n.status, JSON.parse(n.body)], [400, { error: { code: "bad_shape" } }]);
+  const big = await call("POST", "/v1/intents", JSON_H, JSON.stringify({ signed_intent: "A".repeat(8_192) }));
+  assert.deepEqual([big.status, JSON.parse(big.body)], [413, { error: { code: "too_large" } }]);
+  const g = await call("GET", "/v1/intents");
+  assert.deepEqual([g.status, g.headers["allow"]], [405, "POST, OPTIONS"]);
+});
+
+test("card helper-id-intents: the handler hands each landed withdrawal's recipient from the withdrawal relayer to the bind sender's intents gate", () => {
+  let cb: ((to: string) => void) | undefined;
+  const armed: string[] = [];
+  const withdraw = { carry: async () => ({ status: 503, body: { error: { code: "upstream" } } }), warm: () => undefined, stop: () => undefined, onLanded: (f: (to: string) => void) => void (cb = f) } as unknown as WithdrawSender;
+  const bind: BindSender = { carry: async () => ({ status: 503, body: { error: { code: "upstream" } } }), warm: () => undefined, stop: () => undefined, armed: (to) => void armed.push(to) };
+  handler(COMMIT, undefined, undefined, undefined, undefined, undefined, withdraw, undefined, bind);
+  assert.ok(cb !== undefined, "subscribed");
+  cb!("a".repeat(64));
+  assert.deepEqual(armed, ["a".repeat(64)]);
 });
 
 test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async (t) => {

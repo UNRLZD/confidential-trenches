@@ -14,7 +14,9 @@ import { MAINNET_VAULT } from "../src/withdraw/send.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "withdraw-relayer-key.sh");
-const RECORD = path.join(HERE, "../../../contracts/vault/deployments/mainnet-test.json");
+// the repo's mainnet deploy record by the kit's rule (the script's own): mainnet-v1.json once it exists, else mainnet-test.json
+const DEPLOYMENTS = path.join(HERE, "../../../contracts/vault/deployments");
+const RECORD = path.join(DEPLOYMENTS, existsSync(path.join(DEPLOYMENTS, "mainnet-v1.json")) ? "mainnet-v1.json" : "mainnet-test.json");
 const COMMIT = "a".repeat(40);
 const NAMES = ["WITHDRAW_VAULT_MAINNET", "WITHDRAW_RELAYER_MAINNET", "WITHDRAW_FEE_RECIPIENT_MAINNET", "WITHDRAW_RELAYER_KEYS_MAINNET"];
 
@@ -26,7 +28,7 @@ function server({ env = `HELPER_COMMIT=${COMMIT}\nHELPER_RELEASE=3\nJUPITER_API_
   chmodSync(path.join(deploy, "withdraw-relayer-key.sh"), 0o755);
   if (record !== null) {
     mkdirSync(path.join(dir, "contracts/vault/deployments"), { recursive: true });
-    writeFileSync(path.join(dir, "contracts/vault/deployments/mainnet-test.json"), record);
+    writeFileSync(path.join(dir, "contracts/vault/deployments", path.basename(RECORD)), record);
   }
   if (env !== null) writeFileSync(path.join(deploy, ".env"), env, { mode: 0o600 });
   const bin = path.join(dir, "bin");
@@ -167,7 +169,20 @@ test("a .env whose last line has no newline keeps it whole: the four lines start
   assert.ok(lines[2].startsWith("WITHDRAW_VAULT_MAINNET="));
 });
 
-test("once mainnet-v1.json exists the vault is its account_id (the kit's rule, as send.ts MAINNET_VAULT follows it)", () => {
+// card helper-v1-cutover: on the server the checkout is a git checkout, and the printed step 1 names its commit
+test("in a git checkout, the printed step 1 names the checkout's commit", () => {
+  const s = server();
+  const git = (...a) => spawnSync("git", ["-C", s.dir, "-c", "core.hooksPath=/dev/null", "-c", "user.email=t@example.com", "-c", "user.name=t", ...a], { encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  assert.equal(git("commit", "-q", "--allow-empty", "-m", "t").status, 0);
+  const sha = git("rev-parse", "HEAD").stdout.trim();
+  assert.match(sha, /^[0-9a-f]{40}$/);
+  const r = s.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(`withdraw-relayer-key: 1. apps/helper/deploy/redeploy.sh ${sha}, so the helper starts with the four lines\n`), r.stdout);
+});
+
+test("once mainnet-v1.json exists the vault is its account_id (the helper's pin rule, send.ts MAINNET_VAULT; the kit's, mainnet-v1.json's or null, meets it there)", () => {
   const s = server();
   const v1 = JSON.stringify({ ...JSON.parse(readFileSync(RECORD, "utf8")), account_id: "vault.confidential.unrlzd.near" });
   writeFileSync(path.join(s.dir, "contracts/vault/deployments/mainnet-v1.json"), v1);

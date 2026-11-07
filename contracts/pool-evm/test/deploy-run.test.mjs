@@ -1034,8 +1034,11 @@ test("mainnet review 2: a failed git fetch is refused as itself, never as a pool
   const no = { status: 1 };
   await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "fetch" ? no : ok) }), (e) => /^git fetch origin main failed, so main's record could not be read: nothing was sent/.test(e.message) && !/deployed/.test(e.message));
   await assert.rejects(deployedElsewhere("base", { git: (cmd) => (cmd === "rev-parse" ? no : ok) }), (e) => /^origin\/main is not in this checkout, so main's record could not be read: nothing was sent/.test(e.message));
-  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok) }), null);
+  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok), venues: async () => ({}) }), null);
   assert.equal(await deployedElsewhere("base", { git: () => ok }), "origin/main holds contracts/pool-evm/deployments/base.json");
+  // card pool-evm-deploy-mainnet: the kit pins base's pool from its record, so with no record on main the kit's pin refuses
+  const base = JSON.parse(readFileSync(new URL("../deployments/base.json", import.meta.url), "utf8"));
+  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok) }), `the kit pins the base pool ${base.contracts.PrivacyPoolSimple.address}`);
 });
 
 test("card evm-paste-fold: a mainnet paste in a checkout that is not main's code is refused before any read, key or funding line; a loopback rehearsal is not held to it", OPTS, async (t) => {

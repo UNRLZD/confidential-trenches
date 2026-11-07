@@ -19,6 +19,9 @@ import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWa
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
 import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
+import { createIntentsCarry, parseBody, type IntentsAnswer, type IntentsCarry } from "../intents/carry.ts";
+import { intentsReads } from "../intents/reads.ts";
+import { createIntentsStore, onArmed, onQuoteAnswer, onStatusAnswer as onIntentsStatus, type IntentsStore } from "../intents/records.ts";
 
 /** Per network: the release's vault, the gas account that sends deposits (bind.<ours>) and its one full-access key. */
 export const BIND_ENV = {
@@ -35,11 +38,28 @@ export type BindSender = {
   warm(): void;
   stop(): void;
   /**
+   * POST /v1/intents for a parsed body (card helper-id-intents, intents/carry.ts): mainnet's carry (intents.near is a
+   * mainnet contract), sent by mainnet's bind relayer with its key and nonce counter. With mainnet not carried, nothing
+   * is recorded, so every signer answers id_not_ours.
+   */
+  intents?(body: unknown): Promise<IntentsAnswer>;
+  /** A 1Click /v0/quote answer the proxy carried, after it was answered: a live quote recorded (intents/records.ts). */
+  quoted?(body: string): void;
+  /** A mainnet withdrawal our relayer carried landed to `recipient` (withdraw/send.ts onLanded): an arming A is seen. */
+  armed?(recipient: string): void;
+  /**
    * A 1Click /v0/status answer the proxy carried, after it was answered (create.ts onStatusAnswer): a delivery to a
    * one-time id on a carried network's token creates that id once. Returns at once; nothing it does reaches the
    * answer, and a failure is logged only.
    */
   delivered?(body: string): void;
+  /**
+   * Each carried network's gas account (public, on chain with every deposit it signs), for /v1/health (card
+   * helper-bind-relayer-mainnet): set at start from the host's lines, whether or not the account exists or is funded
+   * yet. The vault is not listed: mainnet's is the release's pin (MAINNET_VAULT, checked at start above), and the
+   * health body must stay within the kit's 1 KB (review FIX 1).
+   */
+  carried?(): Partial<Record<TokenNetwork, string>>;
 };
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
@@ -175,6 +195,30 @@ export function bindSenderFromEnv(
     }
     return p;
   };
+  // card helper-id-intents: POST /v1/intents on mainnet's bind relayer, and its records under HELPER_STORE_DIR/intents-mainnet
+  const mainnet = carried.get(WATCHED.mainnet.token);
+  let intentsStore: IntentsStore | null = null;
+  const openIntents = (): IntentsStore | null => {
+    if (mainnet === undefined) return null;
+    if (intentsStore === null) intentsStore = createIntentsStore(join(storeDir, "intents-mainnet"));
+    return intentsStore;
+  };
+  // the carry's relayer is mainnet's bind relayer, started only at the first send: the gate and the checks before the
+  // simulation answer with no start and no chain read (intents/carry.ts)
+  let intentsCarry: IntentsCarry | null = null;
+  const intentsOf = (net: Net): IntentsCarry => {
+    if (intentsCarry === null) {
+      const relayer = async () => (await started(net)).relayer;
+      intentsCarry = createIntentsCarry({
+        vault: net.vault,
+        usdc: WATCHED.mainnet.token,
+        store: openIntents()!,
+        reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]),
+        relayer: { send: async (...a) => (await relayer()).send(...a), resolve: async (...a) => (await relayer()).resolve(...a), balance: async () => (await relayer()).balance() },
+      });
+    }
+    return intentsCarry;
+  };
   let stopped = false;
   const warmNet = (net: Net) =>
     started(net).catch(() => {
@@ -195,7 +239,44 @@ export function bindSenderFromEnv(
       return carryDeposit(body, deps);
     },
     warm: () => carried.forEach((net) => void warmNet(net)),
+    async intents(body) {
+      if (mainnet === undefined) {
+        const code = parseBody(body) === null ? "bad_shape" : "id_not_ours";
+        return { status: STATUS[code] ?? 400, body: { error: { code } } };
+      }
+      let c: IntentsCarry;
+      try {
+        c = intentsOf(mainnet); // opens the store (no chain read); a store another process holds answers upstream
+      } catch {
+        return { status: STATUS.upstream ?? 503, body: { error: { code: "upstream" } } };
+      }
+      return c.carry(body);
+    },
+    quoted(body) {
+      const fail = () => console.error("helper: intents quote_record_failed");
+      try {
+        const s = openIntents();
+        if (s !== null) void onQuoteAnswer(body, s).catch(fail);
+      } catch {
+        fail();
+      }
+    },
+    armed(recipient) {
+      try {
+        const s = openIntents();
+        if (s !== null) onArmed(recipient, s);
+      } catch {
+        console.error("helper: intents armed_record_failed");
+      }
+    },
+    carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, net.account])),
     delivered(body) {
+      try {
+        const s = openIntents();
+        if (s !== null) onIntentsStatus(body, s);
+      } catch {
+        console.error("helper: intents status_record_failed");
+      }
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
       void onStatusAnswer(body, nets).then(
         (a) => ((l) => l !== null && console.log(l))(createLine(a)),
