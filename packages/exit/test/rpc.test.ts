@@ -93,9 +93,22 @@ test("only the release's pair is read: two hosts of one operator, another provid
   // mainnet's pair on testnet, and testnet's on mainnet
   await assert.rejects(exitReadPages({ network: "testnet", rpcs: [named(EXIT_NETWORKS.mainnet.rpcs[0]), named(EXIT_NETWORKS.mainnet.rpcs[1], B)] }), refused);
   await assert.rejects(exitReadPages({ network: "mainnet", vault: PAGES.vault, rpcs: [replayRpc(A), replayRpc(B)] }), refused);
-  // no vault on mainnet yet, and no network but the two
-  await assert.rejects(exitReadPages({ network: "mainnet" }), /no vault on mainnet yet/);
+  // no network but the two
   await assert.rejects(exitReadPages({ network: "betanet" as "mainnet" }), refused);
+});
+
+test("mainnet: with only the network named, the read asks the v1 record's vault on mainnet's FastNEAR and dRPC", async () => {
+  const record = JSON.parse(readFileSync(new URL("contracts/vault/deployments/mainnet-v1.json", ROOT), "utf8"));
+  const asked: { url: string; account: unknown }[] = [];
+  const offline = (async (url: string, init: RequestInit) => {
+    const q = JSON.parse(String(init.body)) as { params: { account_id?: unknown } };
+    asked.push({ url, account: q.params.account_id });
+    throw new Error("offline");
+  }) as unknown as typeof fetch;
+  await assert.rejects(exitReadPages({ network: "mainnet", fetchFn: offline }), VaultSyncStopped);
+  assert.deepEqual([...new Set(asked.map((a) => a.url))].sort(), [...EXIT_NETWORKS.mainnet.rpcs].sort());
+  assert.ok(asked.length >= 2 && asked.every((a) => a.account === record.account_id || a.account === undefined), JSON.stringify(asked));
+  assert.ok(asked.some((a) => a.account === record.account_id), JSON.stringify(asked));
 });
 
 test("the pinned pairs and vault are the kit's and the deploy record's", () => {
@@ -105,7 +118,8 @@ test("the pinned pairs and vault are the kit's and the deploy record's", () => {
   }
   const record = JSON.parse(readFileSync(new URL("contracts/vault/deployments/testnet-v1.json", ROOT), "utf8"));
   assert.equal(EXIT_NETWORKS.testnet.vault, record.account_id);
-  assert.equal(EXIT_NETWORKS.mainnet.vault, null);
+  const main = JSON.parse(readFileSync(new URL("contracts/vault/deployments/mainnet-v1.json", ROOT), "utf8"));
+  assert.equal(EXIT_NETWORKS.mainnet.vault, main.account_id);
   assert.ok(Object.isFrozen(EXIT_NETWORKS) && Object.isFrozen(EXIT_NETWORKS.testnet) && Object.isFrozen(EXIT_NETWORKS.testnet.rpcs));
 });
 

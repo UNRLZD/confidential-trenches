@@ -1,23 +1,25 @@
 {
  "good": {
-  "readAt": "2026-11-02T17:26:18.165Z",
-  "base": "http://127.0.0.1:18094",
+  "note": "the deployed helper (HELPER_HOST, testnet carried, mainnet not), read 2026-11-07 17:13Z by this check at card/vault-mainnet-record: mainnet USDC with the v1 record vault vault.confidential.unrlzd.near as the watched account and the testnet token on FastNEAR and dRPC, the history on api.nearblocks.io and archival-rpc.mainnet.fastnear.com, the probe halt on archival-rpc.testnet.fastnear.com",
+  "readAt": "2026-11-07T17:13:20.012Z",
+  "base": "https://api.confidential.unrealized.trade",
   "helper": {
    "mainnet": {
     "status": 200,
-    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222749702,\"last_event\":null}"
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":223495963,\"last_event\":null}"
    },
    "testnet": {
     "status": 200,
-    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275929724,\"last_event\":null}"
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":276660319,\"last_event\":null}"
    }
   },
   "nets": {
    "mainnet": {
+    "watched": "vault.confidential.unrlzd.near",
     "code": {
      "https://rpc.mainnet.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222749718,
+      "block_height": 223495979,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -40,7 +42,7 @@
      },
      "https://near.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222749721,
+      "block_height": 223495982,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -65,39 +67,40 @@
     "state": {
      "https://rpc.mainnet.fastnear.com": {
       "halt": {
-       "at": 222749704,
-       "answer": "\"20000\""
+       "at": 223495964,
+       "answer": "\"0\""
       },
       "blocked": {
-       "at": 222749704,
+       "at": 223495964,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222749704
+       "block_height": 223495964
       }
      },
      "https://near.drpc.org": {
       "halt": {
-       "at": 222749707,
-       "answer": "\"20000\""
+       "at": 223495967,
+       "answer": "\"0\""
       },
       "blocked": {
-       "at": 222749707,
+       "at": 223495967,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222749707
+       "block_height": 223495967
       }
      }
     }
    },
    "testnet": {
+    "watched": "vault.bf-vt-20261102t071444.testnet",
     "code": {
      "https://test.rpc.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275929739,
+      "block_height": 276660333,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -120,7 +123,7 @@
      },
      "https://near-testnet.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275929743,
+      "block_height": 276660337,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -145,30 +148,30 @@
     "state": {
      "https://test.rpc.fastnear.com": {
       "halt": {
-       "at": 275929726,
+       "at": 276660321,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275929726,
+       "at": 276660321,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275929726
+       "block_height": 276660321
       }
      },
      "https://near-testnet.drpc.org": {
       "halt": {
-       "at": 275929728,
+       "at": 276660323,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275929728,
+       "at": 276660323,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275929728
+       "block_height": 276660323
       }
      }
     }
@@ -299,8 +302,7 @@
      }
     }
    }
-  },
-  "note": "apps/helper at a3fb4a3 run locally (node src/server.ts) with testnet carried (BIND_*_TESTNET set, its relayer key a throwaway never on chain), read 2026-11-03: the helper on 127.0.0.1, mainnet USDC and the testnet token on FastNEAR and dRPC, the history on api.nearblocks.io and archival-rpc.mainnet.fastnear.com, the probe's halt on archival-rpc.testnet.fastnear.com"
+  }
  },
  "bad_deployed_before": {
   "readAt": "2026-11-02T15:53:11.432Z",
@@ -394,7 +396,8 @@
        "block_height": 222740093
       }
      }
-    }
+    },
+    "watched": "da179a3b4754fa92c637a90533071075142fd931dcd4987e8f362dedc6e0087d"
    },
    "testnet": {
     "code": {
@@ -474,7 +477,8 @@
        "block_height": 275920210
       }
      }
-    }
+    },
+    "watched": "vault.bf-vt-20261102t071444.testnet"
    }
   },
   "history": {
@@ -531,27 +535,29 @@
     }
    ]
   },
-  "note": "the deployed helper at 350a7db (before this card): its watch never answers caught up, so every move on testnet is held"
+  "note": "the deployed helper at 350a7db (before this card): its watch never answers caught up, so every move on testnet is held (its account fields written in: mainnet read for da179a3b..., the one account USDC ever blocklisted, before the v1 vault; testnet for its vault)"
  },
  "bad_provider_mismatch": {
-  "readAt": "2026-11-02T15:51:11.070Z",
-  "base": "http://127.0.0.1:18094",
+  "note": "planted from the good run: dRPC answers is_blocklisted true on mainnet at its block while FastNEAR answers false (a provider mismatch)",
+  "readAt": "2026-11-07T17:13:20.012Z",
+  "base": "https://api.confidential.unrealized.trade",
   "helper": {
    "mainnet": {
     "status": 200,
-    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222739876,\"last_event\":null}"
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":223495963,\"last_event\":null}"
    },
    "testnet": {
     "status": 200,
-    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275920000,\"last_event\":null}"
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":276660319,\"last_event\":null}"
    }
   },
   "nets": {
    "mainnet": {
+    "watched": "vault.confidential.unrlzd.near",
     "code": {
      "https://rpc.mainnet.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222739890,
+      "block_height": 223495979,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -574,7 +580,7 @@
      },
      "https://near.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222739893,
+      "block_height": 223495982,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -599,39 +605,40 @@
     "state": {
      "https://rpc.mainnet.fastnear.com": {
       "halt": {
-       "at": 222739877,
-       "answer": "\"20000\""
+       "at": 223495964,
+       "answer": "\"0\""
       },
       "blocked": {
-       "at": 222739877,
+       "at": 223495964,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222739877
+       "block_height": 223495964
       }
      },
      "https://near.drpc.org": {
       "halt": {
-       "at": 222739879,
-       "answer": "\"20000\""
+       "at": 223495967,
+       "answer": "\"0\""
       },
       "blocked": {
-       "at": 222739879,
+       "at": 223495967,
        "answer": "true"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222739879
+       "block_height": 223495967
       }
      }
     }
    },
    "testnet": {
+    "watched": "vault.bf-vt-20261102t071444.testnet",
     "code": {
      "https://test.rpc.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275920017,
+      "block_height": 276660333,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -654,7 +661,7 @@
      },
      "https://near-testnet.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275920019,
+      "block_height": 276660337,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -679,30 +686,30 @@
     "state": {
      "https://test.rpc.fastnear.com": {
       "halt": {
-       "at": 275920001,
+       "at": 276660321,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275920001,
+       "at": 276660321,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275920001
+       "block_height": 276660321
       }
      },
      "https://near-testnet.drpc.org": {
       "halt": {
-       "at": 275920004,
+       "at": 276660323,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275920004,
+       "at": 276660323,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275920004
+       "block_height": 276660323
       }
      }
     }
@@ -762,27 +769,100 @@
     }
    ]
   },
-  "note": "planted from the good run: dRPC answers is_blocklisted true on mainnet at its block while FastNEAR answers false (a provider mismatch)"
+  "probe": {
+   "txs": {
+    "GfFB4jfhviTTj4xQd3tLPLBKRSCbGZjwaLGsdRTeL8fK": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    },
+    "3GXgvpDwGpf8v9j5NerAGUWdbYFqxatvueR7X86ZgPth": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    },
+    "2eUSm5iLg8k8DRkSW444jWCWk7ebHsNue8D4Uyi3XmwZ": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    },
+    "DoQYjLCp6rwwxyHt4hiJXDy2pupUDETeg1zpDA9Tfmni": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    }
+   },
+   "blocks": {
+    "275929377": {
+     "height": 275929377,
+     "hash": "DvgZVtec5cmwN1jcfuuANVCtWTwo2bbEYogScTFAXHf9",
+     "prev_hash": "AAepAPSXmgytYA7zSvciwhZATQeERmb9HbDaWtx7t4Lm",
+     "code": {
+      "before": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "at": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q"
+     },
+     "before": {
+      "at": 275929376,
+      "answer": "\"1000000000000\"",
+      "block_hash": "AAepAPSXmgytYA7zSvciwhZATQeERmb9HbDaWtx7t4Lm"
+     },
+     "at": {
+      "at": 275929377,
+      "panic": "FiatToken: paused",
+      "block_hash": "DvgZVtec5cmwN1jcfuuANVCtWTwo2bbEYogScTFAXHf9"
+     }
+    },
+    "275929392": {
+     "height": 275929392,
+     "hash": "6HmWwt8EWrQhVJArN3dz4B9RYVSVkEed3eFTJCsjpDt9",
+     "prev_hash": "2fqynZoU5LMeFgd76esGTjTy9f8JQgJ47zn3xbuJedQA",
+     "code": {
+      "before": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "at": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q"
+     },
+     "before": {
+      "at": 275929391,
+      "panic": "FiatToken: paused",
+      "block_hash": "2fqynZoU5LMeFgd76esGTjTy9f8JQgJ47zn3xbuJedQA"
+     },
+     "at": {
+      "at": 275929392,
+      "answer": "\"1000000000000\"",
+      "block_hash": "6HmWwt8EWrQhVJArN3dz4B9RYVSVkEed3eFTJCsjpDt9"
+     }
+    }
+   }
+  }
  },
  "bad_history_mismatch": {
-  "readAt": "2026-11-02T15:51:11.070Z",
-  "base": "http://127.0.0.1:18094",
+  "note": "planted from the good run: the archival view at the blocklist receipt block reads false, against the indexer event (a history mismatch)",
+  "readAt": "2026-11-07T17:13:20.012Z",
+  "base": "https://api.confidential.unrealized.trade",
   "helper": {
    "mainnet": {
     "status": 200,
-    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":222739876,\"last_event\":null}"
+    "body": "{\"token\":\"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"caught_up\":false,\"halted\":null,\"vault_blocked\":null,\"code_hash_ok\":null,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":223495963,\"last_event\":null}"
    },
    "testnet": {
     "status": 200,
-    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":275920000,\"last_event\":null}"
+    "body": "{\"token\":\"bf-usdc-20261101t022248.testnet\",\"caught_up\":true,\"halted\":false,\"vault_blocked\":false,\"code_hash_ok\":true,\"code_hash\":\"DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q\",\"block_height\":276660319,\"last_event\":null}"
    }
   },
   "nets": {
    "mainnet": {
+    "watched": "vault.confidential.unrlzd.near",
     "code": {
      "https://rpc.mainnet.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222739890,
+      "block_height": 223495979,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -805,7 +885,7 @@
      },
      "https://near.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 222739893,
+      "block_height": 223495982,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -830,39 +910,40 @@
     "state": {
      "https://rpc.mainnet.fastnear.com": {
       "halt": {
-       "at": 222739877,
-       "answer": "\"20000\""
+       "at": 223495964,
+       "answer": "\"0\""
       },
       "blocked": {
-       "at": 222739877,
+       "at": 223495964,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222739877
+       "block_height": 223495964
       }
      },
      "https://near.drpc.org": {
       "halt": {
-       "at": 222739879,
-       "answer": "\"20000\""
+       "at": 223495967,
+       "answer": "\"0\""
       },
       "blocked": {
-       "at": 222739879,
+       "at": 223495967,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 222739879
+       "block_height": 223495967
       }
      }
     }
    },
    "testnet": {
+    "watched": "vault.bf-vt-20261102t071444.testnet",
     "code": {
      "https://test.rpc.fastnear.com": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275920017,
+      "block_height": 276660333,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -885,7 +966,7 @@
      },
      "https://near-testnet.drpc.org": {
       "hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-      "block_height": 275920019,
+      "block_height": 276660337,
       "bytes": 321491,
       "sha256": "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6",
       "exports": [
@@ -910,30 +991,30 @@
     "state": {
      "https://test.rpc.fastnear.com": {
       "halt": {
-       "at": 275920001,
+       "at": 276660321,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275920001,
+       "at": 276660321,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275920001
+       "block_height": 276660321
       }
      },
      "https://near-testnet.drpc.org": {
       "halt": {
-       "at": 275920004,
+       "at": 276660323,
        "answer": "\"500000\""
       },
       "blocked": {
-       "at": 275920004,
+       "at": 276660323,
        "answer": "false"
       },
       "account": {
        "code_hash": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
-       "block_height": 275920004
+       "block_height": 276660323
       }
      }
     }
@@ -993,6 +1074,77 @@
     }
    ]
   },
-  "note": "planted from the good run: the archival view at the blocklist receipt's block reads false, against the indexer's event (a history mismatch)"
+  "probe": {
+   "txs": {
+    "GfFB4jfhviTTj4xQd3tLPLBKRSCbGZjwaLGsdRTeL8fK": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    },
+    "3GXgvpDwGpf8v9j5NerAGUWdbYFqxatvueR7X86ZgPth": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    },
+    "2eUSm5iLg8k8DRkSW444jWCWk7ebHsNue8D4Uyi3XmwZ": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    },
+    "DoQYjLCp6rwwxyHt4hiJXDy2pupUDETeg1zpDA9Tfmni": {
+     "final": "FINAL",
+     "ok": true,
+     "status": {
+      "SuccessValue": ""
+     }
+    }
+   },
+   "blocks": {
+    "275929377": {
+     "height": 275929377,
+     "hash": "DvgZVtec5cmwN1jcfuuANVCtWTwo2bbEYogScTFAXHf9",
+     "prev_hash": "AAepAPSXmgytYA7zSvciwhZATQeERmb9HbDaWtx7t4Lm",
+     "code": {
+      "before": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "at": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q"
+     },
+     "before": {
+      "at": 275929376,
+      "answer": "\"1000000000000\"",
+      "block_hash": "AAepAPSXmgytYA7zSvciwhZATQeERmb9HbDaWtx7t4Lm"
+     },
+     "at": {
+      "at": 275929377,
+      "panic": "FiatToken: paused",
+      "block_hash": "DvgZVtec5cmwN1jcfuuANVCtWTwo2bbEYogScTFAXHf9"
+     }
+    },
+    "275929392": {
+     "height": 275929392,
+     "hash": "6HmWwt8EWrQhVJArN3dz4B9RYVSVkEed3eFTJCsjpDt9",
+     "prev_hash": "2fqynZoU5LMeFgd76esGTjTy9f8JQgJ47zn3xbuJedQA",
+     "code": {
+      "before": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+      "at": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q"
+     },
+     "before": {
+      "at": 275929391,
+      "panic": "FiatToken: paused",
+      "block_hash": "2fqynZoU5LMeFgd76esGTjTy9f8JQgJ47zn3xbuJedQA"
+     },
+     "at": {
+      "at": 275929392,
+      "answer": "\"1000000000000\"",
+      "block_hash": "6HmWwt8EWrQhVJArN3dz4B9RYVSVkEed3eFTJCsjpDt9"
+     }
+    }
+   }
+  }
  }
 }

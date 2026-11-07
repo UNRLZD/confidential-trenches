@@ -11,8 +11,8 @@
 //   refused, as is any other provider. The URLs are the ones the kit and the terminal's Verify screen already pin
 //   (packages/kit/src/near/networks.ts, apps/terminal/src/screens/verify/release.ts); test/rpc.test.ts holds them to
 //   the kit's rule.
-// - The vault is the release's: the testnet vault's deploy record (contracts/vault/deployments/testnet-v1.json,
-//   account_id); mainnet has none until the vault is deployed there, and the tool reads nothing on it until then.
+// - The vault is the release's: each network's deploy record (contracts/vault/deployments/mainnet-v1.json and
+//   testnet-v1.json, account_id), so the 12 words alone read either network's vault.
 // - Pages any public RPC serves: the kit's read starts each list at a page of about 125 Tgas and halves it (at most
 //   three times) when an RPC refuses it as too heavy (review R-03, the kit's VAULT_SYNC_PAGE and vaultViewTooHeavy),
 //   so a long list reads whole on both RPCs.
@@ -29,9 +29,9 @@ import {
   type VaultSyncRpc,
 } from "@blindfill/kit";
 
-/** Per network: the release's vault (null until one is deployed there) and its pair of public RPCs. */
-export const EXIT_NETWORKS: Readonly<Record<NearNetwork, { readonly vault: string | null; readonly rpcs: readonly [string, string] }>> = Object.freeze({
-  mainnet: Object.freeze({ vault: null, rpcs: Object.freeze(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"] as const) }),
+/** Per network: the release's vault and its pair of public RPCs. */
+export const EXIT_NETWORKS: Readonly<Record<NearNetwork, { readonly vault: string; readonly rpcs: readonly [string, string] }>> = Object.freeze({
+  mainnet: Object.freeze({ vault: "vault.confidential.unrlzd.near", rpcs: Object.freeze(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"] as const) }),
   testnet: Object.freeze({
     vault: "vault.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
     rpcs: Object.freeze(["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] as const),
@@ -41,7 +41,7 @@ export const EXIT_NETWORKS: Readonly<Record<NearNetwork, { readonly vault: strin
 /** How long one RPC answer may take before the read stops ("rpc"). */
 export const EXIT_RPC_TIMEOUT_MS = 15_000;
 
-/** A refusal before anything is read: an unknown network, no vault there yet, or a pair that is not the release's. */
+/** A refusal before anything is read: an unknown network, or a pair that is not the release's. */
 export class ExitRpcRefused extends Error {
   constructor(detail: string) {
     super(`exit: ${detail}`);
@@ -98,7 +98,6 @@ export async function exitReadPages(args: ExitReadArgs): Promise<VaultSyncResult
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
   const net = EXIT_NETWORKS[network];
   const vault = args.vault ?? net.vault;
-  if (vault === null) throw new ExitRpcRefused(`no vault on ${network} yet`);
   const fetchFn = args.fetchFn ?? fetch;
   const rpcs = args.rpcs ?? ([exitRpc(net.rpcs[0], fetchFn), exitRpc(net.rpcs[1], fetchFn)] as const);
   if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
