@@ -14,3 +14,5 @@ Paste 4 (14:37:19Z): storage_deposit of 0.00125 NEAR on mainnet USDC, registerin
     ok  vault.confidential.unrlzd.near key list is [] on FastNEAR and dRPC, code hash C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u on both
     ok  config() on both: blindfill-vault 0.1.0 mainnet, mainnet USDC, scope 2696045386038969515385069783440640732471742599039067451316404212202914210601
     Recorded run: vault-mainnet-deploy.answers.json (7 Nov), replayed by vault-mainnet-deploy.test.mjs.
+
+Helper redeploy: after this card merges, helper-usdc-event-watch FAILs on the deployed helper until the mainnet env cutover (its recorded bad_mainnet_not_carried run), so the helper redeploy for this card goes together with the cutover (apps/helper/deploy/vault-lines.sh, card helper-bind-relayer-mainnet), never before it.
