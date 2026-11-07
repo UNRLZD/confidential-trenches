@@ -664,6 +664,22 @@ test("past the blockhash's last height on both RPCs with no mark: not_landed, th
   assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
 });
 
+test("card pool-deposits I-3, every path: a stranger's system account at the return note's mark is no mark: the sell is planned and sent, its drop read as dropped (never pending for ever), and the next sell takes the account over and fills", async () => {
+  const plant: Plant = { lands: false };
+  const w = await world(plant);
+  const at = markOf(preOf(RETURN));
+  w.c.accounts.set(at, { owner: "11111111111111111111111111111111", lamports: 1_000_000, data: new Uint8Array(0) });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+  const [n] = (await w.ns.list()).filter((x) => x.scope === SCOPE);
+  assert.deepEqual({ ref: n!.ref, state: n!.state }, { ref: RETURN, state: "PLANNED" });
+  plant.lands = true;
+  const b = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.equal(w.c.accounts.get(at)!.owner, PROGRAM);
+});
+
 test("another deposit takes the return note's precommitment first: the sell fails on chain as a whole, refused, and that deposit is stored as the user's own note (only the seed names it)", async () => {
   const w = await world({ frontRun: true });
   const a = await runPoolSell(w.host, ASK);
