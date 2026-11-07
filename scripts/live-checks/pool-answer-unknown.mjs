@@ -4,10 +4,13 @@
 //   - deposit (pool-deposit.ts): a read back after U's send that does not check out answers "sent" with the sends of
 //     notes still open, never failed (an app told failed may ask the user to deposit again);
 //   - deposit: a mark one RPC holds and the other not yet is pending, never built again or stuck;
-//   - deposit: a rung that landed counts whether or not an RPC names its tx, and a later fault answers part_filled
-//     with that count, never failed or down;
-//   - the kit's pacing (send.ts): a slot calls the outermost wrapper it was given, so the page's fault watch runs
-//     under it, and a paced provider called inside its own queue's slot is that slot's call, never queued behind it;
+//   - deposit: a rung that landed counts whether or not an RPC names its tx, and every end that answers part_filled
+//     (a mark on one RPC, a second note left short, a refusal of the read back or of the kit, any other fault) answers
+//     it on that count with the landed list, never failed or down; the pass with no ask answers not_funded only when
+//     that count is 0;
+//   - the kit's pacing (send.ts): a slot calls the provider it was handed, and the paced wrapper hands it the
+//     outermost wrapper it was given (never the bare provider under it), so the page's fault watch runs under it; a
+//     paced provider called inside its own queue's slot is that slot's call, never queued behind it;
 //   - vault buy (trade.ts): a provider read that fails past its retry before any signature answers down, at the pick
 //     (before the kit runs) and in place of the kit's plain failed, never over its price check.
 // What each does is held by the card's tests (packages/signpage/test/pool-deposit.test.ts and trade.test.ts, each
@@ -30,16 +33,42 @@ const UNREAD = new RegExp(`[\\w$]+\\.code===${Q}failed${Q}&&[\\w$]+\\(\\)\\.leng
 const ONE = new RegExp(`===${Q}one${Q}\\?${Q}pending${Q}`);
 const PICK = new RegExp(`[\\w$]+ instanceof [\\w$]+\\?${Q}down${Q}:${Q}failed${Q}`);
 const RECORD = new RegExp(`[\\w$]+&&![\\w$]+&&[\\w$]+===${Q}failed${Q}\\?${Q}down${Q}:[\\w$]+`);
-// the landed count: bumped for each of the ask's notes landed beside the tx list (named or not), and the answer's
-// part_filled on that count with that list
-const LANDED = new RegExp(`([\\w$]+)\\.push\\(\\{chain:${Q}solana${Q},hash:[\\w$]+\\}\\),[\\w$]+&&([\\w$]+)\\+\\+,[\\w$]+\\.landed\\?\\.\\([\\s\\S]{0,20000}?if\\(\\2\\)return\\{stage:${Q}part_filled${Q},txs:\\1\\}`);
-// the slot's call: the wrapper it was given, its queue marked while it runs; and the paced wrapper's own call inside it
-const SLOT = new RegExp(`let ([\\w$]+)=([\\w$]+);\\2=[\\w$]+;try\\{return [\\w$]+\\([\\w$]+,[\\w$]+\\)\\}finally\\{\\2=\\1,`);
-const INSLOT = new RegExp(`\\{if\\([\\w$]+===[\\w$]+\\)return [\\w$]+\\([\\w$]+,[\\w$]+\\);let [\\w$]+=[\\w$]+\\([\\w$]+,[\\w$]+,[\\w$]+\\);return [\\w$]+\\.wait\\?`);
+// the landed count: bumped for each of the ask's notes landed beside the tx list (named or not); every part_filled
+// after it on that count with that list, and the no-ask pass's not_funded only at a count of 0
+const LANDED_AT = new RegExp(`([\\w$]+)\\.push\\(\\{chain:${Q}solana${Q},hash:[\\w$]+\\}\\),[\\w$]+&&([\\w$]+)\\+\\+,[\\w$]+\\.landed\\?\\.\\(`);
+const esc = (s) => s.replace(/\$/g, "\\$");
+const PART = (l) => `\\{stage:${Q}part_filled${Q},txs:${esc(l)}\\}`;
+const LANDED_PATHS = [
+  // a mark on one RPC
+  (c, l) => `===${Q}one${Q}\\)return ${esc(c)}\\?${PART(l)}:\\{stage:${Q}not_landed${Q},txs:\\[\\]\\}`,
+  // a second note left short
+  (c, l) => `continue\\}return ${esc(c)}\\?${PART(l)}:await `,
+  // the read back's refusal
+  (c, l) => `\\{stage:${Q}not_landed${Q},txs:[\\w$]+\\}:${esc(c)}\\?${PART(l)}:`,
+  // the kit's refusal
+  (c, l) => ` instanceof [\\w$]+\\)return ${esc(c)}\\?${PART(l)}:[\\w$]+\\(\\)\\.length\\?\\{stage:${Q}sent${Q}`,
+  // any other fault
+  (c, l) => `if\\(${esc(c)}\\)return${PART(l)};`,
+  // the pass with no ask
+  (c) => `&&[\\w$]+\\.length===0&&${esc(c)}===0\\?\\{error:${Q}not_funded${Q}\\}`,
+];
+function landedHeld(js) {
+  const m = LANDED_AT.exec(js);
+  if (!m) return false;
+  const after = js.slice(m.index, m.index + 20000);
+  return LANDED_PATHS.every((p) => new RegExp(p(m[2], m[1])).test(after));
+}
+// the slot's call: the provider rpcSlot was handed (its first parameter, never another name taken from it), its queue
+// marked while it runs; and the paced wrapper's own call inside its slot, which hands rpcSlot the wrapper it was given
+// (its own first parameter), never the bare provider under it. No other function's header between either one's
+// header and its mark.
+const NOFN = "(?:(?!function )[\\s\\S])";
+const SLOT = new RegExp(`function [\\w$]+\\(([\\w$]+),[\\w$]+,[\\w$]+\\)\\{${NOFN}{0,1500}?let ([\\w$]+)=([\\w$]+);\\3=[\\w$]+;try\\{return \\1\\([\\w$]+,[\\w$]+\\)\\}finally\\{\\3=\\2,`);
+const INSLOT = new RegExp(`function [\\w$]+\\(([\\w$]+),[\\w$]+=[\\w$]+\\)\\{${NOFN}{0,200}?\\{if\\([\\w$]+===[\\w$]+\\)return \\1\\([\\w$]+,[\\w$]+\\);let [\\w$]+=[\\w$]+\\(\\1,[\\w$]+,[\\w$]+\\);return [\\w$]+\\.wait\\?`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), unread: UNREAD.test(js), one: ONE.test(js), pick: PICK.test(js), record: RECORD.test(js), landed: LANDED.test(js), paced: SLOT.test(js) && INSLOT.test(js) };
+  return { index, sha384: sha384(js), unread: UNREAD.test(js), one: ONE.test(js), pick: PICK.test(js), record: RECORD.test(js), landed: landedHeld(js), paced: SLOT.test(js) && INSLOT.test(js) };
 }
 
 /** The verdict on an answer { index, sha384, unread, one, pick, record, landed, paced }. */
