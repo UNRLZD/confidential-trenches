@@ -1,0 +1,34 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build: packages/signpage/index.html and public/app.js as built at card/pool-deposit-sent-end on main 5a9e5d8c (build-app.mjs --check equal), the Solana and EVM kinds each reading an ask's open notes on after its run",
+    "bad": "main 5a9e5d8c's build (release-83's tree, with pool-deposits): no reads after a run, so a sent deposit leaves the app at sent: FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-07T09:28Z, before this card's deploy: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9uXi7KnAjZ+IBAjy0y6NKi/4RdXLzk5gpvZTrpH8CcC0j/Z5W/6vZ57NxWzvG3op\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-9uXi7KnAjZ+IBAjy0y6NKi/4RdXLzk5gpvZTrpH8CcC0j/Z5W/6vZ57NxWzvG3op",
+    "solDead": true,
+    "solKind": true,
+    "evmDead": true,
+    "evmKind": true,
+    "loops": 2
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p",
+    "solDead": false,
+    "solKind": false,
+    "evmDead": false,
+    "evmKind": false,
+    "loops": 0
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bGLtyo4VzwZ+JJg1UjEwjR0Avljhackjdqxf149BeJ7Ekdj24qnc++qpG9hgCm6p",
+    "solDead": false,
+    "solKind": false,
+    "evmDead": false,
+    "evmKind": false,
+    "loops": 0
+  }
+}
