@@ -456,3 +456,16 @@ test("at the retry cap from the start (the live check's retry shapes): one call 
   await assert.rejects(fetchSolanaJupiterBuild(ORIGIN, R0, { fetch: none.f, atRetryCap: true }), (e: unknown) => e instanceof SolanaBuildError && e.code === "no_route");
   assert.equal(none.calls.length, 1);
 });
+
+test("solanaNextCap reads SOLANA_JUPITER_CAP_UP only by an own key: a polluted Object.prototype names no step up (card oneclick-fee-path-own-key)", async () => {
+  const { solanaNextCap } = await import("../src/trade/solana/build.ts");
+  const P = Object.prototype as Record<string, unknown>;
+  try {
+    P["44"] = 63; // a cap with no step up of its own; the walk then goes half way between lo and hi
+    assert.equal(solanaNextCap(44, "no_route", 44, 65), null);
+    assert.equal(solanaNextCap(44, "no_route", 44, 60), 52);
+  } finally {
+    delete P["44"];
+  }
+  assert.equal(solanaNextCap(40, "no_route", 40, 65), 48);
+});

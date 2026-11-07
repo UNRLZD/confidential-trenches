@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { poolFile } from "./pool-evm-deploy.mjs";
 import { recorder, replayer } from "./wallet-restore-transfer-rpcs.mjs";
 
 const KEY = "evm-pool-reads-throttle";
@@ -37,8 +38,8 @@ export const CHECK = path.join(REPO, "packages", "wallet", "scripts", "pool-read
 export const NETWORK = "base-sepolia";
 /** The fee recipient the binding names: a test address, neither the pool nor zero (no fee is ever paid here). */
 export const FEE_TO = "0x000000000000000000000000000000000000fee1";
-/** The pool's deploy (scripts/live-checks/pool-evm-deploy.base-sepolia.json): its receipt's block is the sync's start. */
-const DEPLOY = JSON.parse(readFileSync(path.join(HERE, "pool-evm-deploy.base-sepolia.json"), "utf8")).txs.find((t) => t.step === "deploy PrivacyPoolSimple").hash;
+/** The pool's deploy (its newest pool set's record, pool-evm-deploy.mjs poolFile): its receipt's block is the sync's start. */
+const DEPLOY = JSON.parse(readFileSync(poolFile(NETWORK), "utf8")).txs.find((t) => t.step === "deploy PrivacyPoolSimple").hash;
 /** The sync's pair: two keyless providers of two operators that page the pool's logs wide (see the header). */
 export const SYNC = Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"]);
 /** The kinds of read the stand-in throttles once on each sync provider; each must be met (a fee provider: a view). */

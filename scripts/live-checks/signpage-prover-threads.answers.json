@@ -1,7 +1,7 @@
 {
  "good": {
   "source": "harness, SIGN_HOST from a fresh deploy.mjs --dry-run build",
-  "at": "2026-11-03T20:31:56.488Z",
+  "at": "2026-11-07T06:17:40.663Z",
   "browser": "WebKit 26.6, Playwright's build",
   "files": {
    "/prover-thread.js": {
@@ -10,7 +10,7 @@
     "sha256": "d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46",
     "headers": {
      "content-type": "text/javascript; charset=utf-8",
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -46,18 +46,18 @@
     {
      "proof": {
       "pi_a": [
-       "9727432752975228124494532091520535200937840917534211532272205204920129871511",
-       "14447349231101058094374151021325449611640515852619911277383372211298016540137",
+       "20698886763311093459066133333006576320959462187342597906757192472686034114887",
+       "5525064312303081447695748471378811036498155034728567304474625090312317020134",
        "1"
       ],
       "pi_b": [
        [
-        "17182167606815622869512402452011596484424125549913160581102450125533987956628",
-        "17253426605970933425694491408805954974600450617875768412096551908028854331163"
+        "10053295898849328320722120308493051582889198929624881462757110275573819598003",
+        "4729390162389294475145510636184311612110016294309050658575744435099145848940"
        ],
        [
-        "15738052087453071355360402306552545606729404492472799410300399907057941214645",
-        "13966997153069474716418443565359935512758978027101825917310345657733713732559"
+        "19378557656932490374112501606206826368482115341258950249020810337840723621354",
+        "316534681334823348185700726401263554468446925577708167598681406602299937385"
        ],
        [
         "1",
@@ -65,8 +65,8 @@
        ]
       ],
       "pi_c": [
-       "20005385944057846527187304768237142327216653609427099103593832233631108415803",
-       "12913797770168866559365640212521135442095674959242541151124043495108268589502",
+       "17567112657273013684806537642551782412177119680059115859218626230990183370104",
+       "20237082569462525527407828582059378657530575042056766002348064473325730152447",
        "1"
       ],
       "protocol": "groth16",
@@ -82,24 +82,24 @@
       "3",
       "802377141111801993956095990454547848147819793756653330486998369192452016786"
      ],
-     "proveMs": 1674,
+     "proveMs": 1313,
      "threads": 4
     },
     {
      "proof": {
       "pi_a": [
-       "12444114402190189471314092371249832389679050961784546525668093849249201767386",
-       "12371887849965072506996305355503617628126207315847476354818925962214274983269",
+       "17549739258720914406452409846349017679073626359851163930094736498275504319499",
+       "14359044710889578643586139481029175152191683420916039192869646348144093313296",
        "1"
       ],
       "pi_b": [
        [
-        "9547541725934437632721246766738811136631489603899158150100814268641185153",
-        "17116056448721738228829310087514771275966841941149709907986414045801297005232"
+        "16908167283940481790142040226753189423280044325037047920101370304730219477363",
+        "2309949238819242179156262094616566454379655433603490234318121753101762708620"
        ],
        [
-        "5394939492141455228713998755300230966881615588972720413923908594151354848712",
-        "3540159633064902581590051900699756467904387561961620424845963482971808659731"
+        "839443307243982260559040912734064924363532663655938172647321550301266227665",
+        "13643816859137893617552712671338661033830221673368837967009244787870768377487"
        ],
        [
         "1",
@@ -107,8 +107,8 @@
        ]
       ],
       "pi_c": [
-       "20899294147569215745871363910358959752925492941170545947223956388693228688324",
-       "8602888935482701538916272776331950396096564087783516900394238682984673754140",
+       "16941399736718195738919901146507462659321086545234203848171719006590533731835",
+       "12532723978205400764064956113569416206008280069622369847373324435445127903901",
        "1"
       ],
       "protocol": "groth16",
@@ -124,24 +124,24 @@
       "3",
       "802377141111801993956095990454547848147819793756653330486998369192452016786"
      ],
-     "proveMs": 1593,
+     "proveMs": 1295,
      "threads": 4
     },
     {
      "proof": {
       "pi_a": [
-       "20848553305051708378774210884827527030473782370081514499100747857319978943091",
-       "4764902162891552955646326820019985074461607805255355341197213062108675785590",
+       "15705097142617674499214471055132031212539279766569723598353878103356352716222",
+       "490936038421098366633883082281156079744229979560968918417887924458462772741",
        "1"
       ],
       "pi_b": [
        [
-        "16370816425958556132851495631503782608972230866764663957158891726736558222527",
-        "19636371356815403450433069644819830979665868771511552997974930140754575599257"
+        "5134801044810373872257682486865442030469576802592503723643484371194022859488",
+        "2413468280772686525402857457987795479693711190846068137214937032400686335341"
        ],
        [
-        "20379379054552133732066526243440987844140976067811654348111151297365280412318",
-        "946745098141537479920871868690604190743790350196390857101380144938970702068"
+        "11812774857608398017820242402842573997032898232352201604411497030099685759329",
+        "2771371073264462832647010798037525372730667746341275616774233632015216143240"
        ],
        [
         "1",
@@ -149,8 +149,8 @@
        ]
       ],
       "pi_c": [
-       "4522557071983388276352926270384789677093061961952670253744713891604659206350",
-       "8163344551314978785085547760820265379422360497891674836056306976142116292861",
+       "19579522787170815810979240281408133127101954630600560898824993831183849029793",
+       "5818514346330171170193555806924187555184765862961816361894778814987616151600",
        "1"
       ],
       "protocol": "groth16",
@@ -166,14 +166,14 @@
       "3",
       "802377141111801993956095990454547848147819793756653330486998369192452016786"
      ],
-     "proveMs": 1575,
+     "proveMs": 1329,
      "threads": 4
     }
    ],
-   "loadMs": 314,
+   "loadMs": 296,
    "console": [
     "error Refused to load data:text/javascript,postMessage('ran') because it does not appear in the worker-src directive of the Content Security Policy.",
-    "error Refused to load blob:https://sign.confidential.unrealized.trade/98685f60-b412-43dd-9d70-09a4a516a500 because it does not appear in the worker-src directive of the Content Security Policy.",
+    "error Refused to load blob:https://sign.confidential.unrealized.trade/78443cb9-4f46-4212-9b36-56a93151ed85 because it does not appear in the worker-src directive of the Content Security Policy.",
     "worker https://sign.confidential.unrealized.trade/prover-worker.js"
    ],
    "workerScripts": [
@@ -187,8 +187,8 @@
  },
  "goodChromium": {
   "source": "harness, SIGN_HOST from a fresh deploy.mjs --dry-run build",
-  "at": "2026-11-03T20:32:02.532Z",
-  "browser": "Chrome 156.0.8078.80, sandbox on",
+  "at": "2026-11-07T06:17:47.937Z",
+  "browser": "Chrome 156.0.8078.79, sandbox on",
   "files": {
    "/prover-thread.js": {
     "status": 200,
@@ -196,7 +196,7 @@
     "sha256": "d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46",
     "headers": {
      "content-type": "text/javascript; charset=utf-8",
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -215,7 +215,7 @@
      "blocked": "blob"
     }
    ],
-   "cores": 12,
+   "cores": 16,
    "planted": {
     "data": {
      "made": "yes",
@@ -232,18 +232,18 @@
     {
      "proof": {
       "pi_a": [
-       "14398881987110589338529993047218621863976052431847266589677057123199563778286",
-       "12764194672613064212249732011635439940792933546207438409521425213263068494720",
+       "18733187784055444312975904772119872556712593954619753660280552944172280473153",
+       "12589189709697383275733467288886075727552926731555306264539122746614099677519",
        "1"
       ],
       "pi_b": [
        [
-        "1533307308287450331337422606812639665408243408304748442281189838972038720485",
-        "13221244946193122216522674107098753948362021672783072475611712511520935414691"
+        "20942858971633097129634963954943739775987505632031600950971037301428382330896",
+        "5084136556234745975436831631907100651790756983392622088064446226794958040858"
        ],
        [
-        "11690082102192589520211384374362590594597622600311230882566233126179009152909",
-        "4570669581564855250519472344663432299410659137670387409513437728541504248054"
+        "1199228216384316116763360100698910076420162392213325778573124832170955574543",
+        "11354129612417323273167799219962127929641379784405385090214728965659161883815"
        ],
        [
         "1",
@@ -251,8 +251,8 @@
        ]
       ],
       "pi_c": [
-       "17437923170900363893247661441209393979730248707028026728500764064251033427509",
-       "21134601323384035161533370836650968865196587211758245779596261984309923056066",
+       "10601295165060964618817981430641116854692832248309576053735586002936579478678",
+       "21060923730226147576553942242772428565957373082085230400657731722106469995527",
        "1"
       ],
       "protocol": "groth16",
@@ -268,24 +268,24 @@
       "3",
       "802377141111801993956095990454547848147819793756653330486998369192452016786"
      ],
-     "proveMs": 1589,
+     "proveMs": 1631,
      "threads": 4
     },
     {
      "proof": {
       "pi_a": [
-       "5939397243238772432154959701516281274760952289516264679591899208788399068036",
-       "1169950098954613927782841118858247167058137498469066150254462691781496505526",
+       "13187945621993418181284184134400717930634148232471011558275351535850085829527",
+       "14863524600950019640214094908795079291582410315764277596599714455192416350457",
        "1"
       ],
       "pi_b": [
        [
-        "16503858412979852072955011560507456728893050990625890832612373175102538649654",
-        "11443468104579262483065324335377590649229480277895170954085918180564059819883"
+        "13036124623954690129171504441615545309244068320907800501547478196223721041592",
+        "7708464520859740382880742576876387798909231133043403330222579372889997996444"
        ],
        [
-        "20377382235968373568193746369892184217278097099878144835822595314315325304200",
-        "7872938741361418909211983067557842932224317561232436031380044033526821797285"
+        "3309914199004555134198271434453746707299980406775392658286668441857339670482",
+        "19792594573640849629780496397717016068544794134575363459259716690192092823068"
        ],
        [
         "1",
@@ -293,8 +293,8 @@
        ]
       ],
       "pi_c": [
-       "4605560504098877548955348233790543076512397102405059276825231894404682711455",
-       "6145142663162498962111651765236501928380068565017430563009713916932503942887",
+       "18098094116326221873602606521494648726486285107131401706728081020392322981236",
+       "21532743040133515941273065768989118411912473984134408399207182208640617989968",
        "1"
       ],
       "protocol": "groth16",
@@ -310,24 +310,24 @@
       "3",
       "802377141111801993956095990454547848147819793756653330486998369192452016786"
      ],
-     "proveMs": 1457,
+     "proveMs": 1525,
      "threads": 4
     },
     {
      "proof": {
       "pi_a": [
-       "602281875265853495459751484467763193072884968729131062163693955891563161368",
-       "9713484914079655836777246732053147894244201303449059737886238075325839185525",
+       "7484248621527016698737798361589310118327104151025804670079442544822912312268",
+       "17300969509603532468758496428095098281926627149230347005347669464462064951091",
        "1"
       ],
       "pi_b": [
        [
-        "2079732823775202984785265506811705708208971288623462234746153908649016258863",
-        "1603016607248046420140546716542834544028857055647264513536175164502278667528"
+        "18561740354511276051981474039437200693473791203384480389018670864913284789623",
+        "12304851232443929570937872736247173050900303258491247639525538474490543276624"
        ],
        [
-        "6360365548731068419946833447898547955413841724178973350024888069174469408286",
-        "3256611361472230200182773747818358632813656656923110077010601490765304251657"
+        "17468987149629497235460499675377910013086413485950887609729793616093147933643",
+        "10608394469280314813908645270067505471902412066826640358487667209398620147744"
        ],
        [
         "1",
@@ -335,8 +335,8 @@
        ]
       ],
       "pi_c": [
-       "16293283177627758798960056411779208111208042314830529477102841106013614962837",
-       "13702268003235330166017047539344510947050929060064778883828938623943373224068",
+       "905411817902569849423705176691932501802923171483008326801340308047810016554",
+       "20877857416768827356936968496920120392340961706455487781981069908986342988388",
        "1"
       ],
       "protocol": "groth16",
@@ -352,15 +352,15 @@
       "3",
       "802377141111801993956095990454547848147819793756653330486998369192452016786"
      ],
-     "proveMs": 1430,
+     "proveMs": 1608,
      "threads": 4
     }
    ],
-   "loadMs": 55,
+   "loadMs": 81,
    "console": [
-    "error Failed to load resource: the server responded with a status of 404 ()",
+    "warning Error with Permissions-Policy header: Unrecognized feature: 'bluetooth'.",
     "error Creating a worker from 'data:text/javascript,postMessage('ran')' violates the following Content Security Policy directive: \"worker-src 'self'\". The action has been blocked.",
-    "error Creating a worker from 'blob:https://sign.confidential.unrealized.trade/19496269-5ee8-4c03-8080-2cc0ce0bc92c' violates the following Content Security Policy directive: \"worker-src 'self'\". The action has been blocked.",
+    "error Creating a worker from 'blob:https://sign.confidential.unrealized.trade/4d54f1d7-4114-4bc0-8d46-35bc592f9d43' violates the following Content Security Policy directive: \"worker-src 'self'\". The action has been blocked.",
     "worker https://sign.confidential.unrealized.trade/prover-worker.js",
     "worker https://sign.confidential.unrealized.trade/prover-thread.js",
     "worker https://sign.confidential.unrealized.trade/prover-thread.js",

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.28;
 
+import {Vm} from 'forge-std/Vm.sol';
 import {console} from 'forge-std/console.sol';
 
 import {PrivacyPoolSimple} from '../src/PrivacyPoolSimple.sol';
@@ -103,6 +104,62 @@ abstract contract BuyBase is Signing {
   ) internal {
     vm.prank(address(0xBEEF));
     pool.buy(_withdrawal(_name), _proof(_name), _fee, _b, _sig);
+  }
+
+  /// Any revert, for _paysOut's reason
+  bytes4 internal constant ANY_REVERT = 0x00000000;
+  /// No reason check, for _paysOut (a swap that burns all the gas it is given cannot be run apart in a test)
+  bytes4 internal constant NO_REASON = 0xffffffff;
+
+  /// The swap of `_b` fails, with `_err` when run apart as the pool runs it (buySwap from the pool), so the buy lands
+  /// as a withdraw: buy returns false, the note is spent, the change leaf inserted, the fee paid to the request's fee
+  /// recipient, W paid the rest in the native asset, the adapter left nothing, and the pool's one log is Withdrawn,
+  /// byte for byte as withdraw emits it
+  function _paysOut(
+    string memory _name,
+    uint256 _fee,
+    IPrivacyPoolSimple.Buy memory _b,
+    bytes memory _sig,
+    bytes4 _err
+  ) internal {
+    ProofLib.WithdrawProof memory _p = _proof(_name);
+    uint256 _rest = _p.pubSignals[2] - _fee;
+    if (_err != NO_REASON) {
+      uint256 _snap = vm.snapshotState();
+      vm.prank(POOL);
+      if (_err == ANY_REVERT) vm.expectRevert();
+      else vm.expectRevert(_err);
+      pool.buySwap(_b, W, _rest);
+      vm.revertToState(_snap);
+    }
+    address _fr = _request(_name).feeRecipient;
+    uint256[5] memory _before = [_fr.balance, W.balance, POOL.balance, pool.currentTreeSize(), _b.adapter.balance];
+    vm.recordLogs();
+    vm.prank(address(0xBEEF));
+    assertFalse(pool.buy(_withdrawal(_name), _p, _fee, _b, _sig), 'buy says the swap failed');
+    _onlyWithdrawn(_fr, _p, _fee);
+    assertTrue(pool.nullifierHashes(_p.pubSignals[1]), 'the note is spent');
+    assertEq(pool.currentTreeSize(), _before[3] + 1, 'the change leaf is in');
+    assertEq(_fr.balance - _before[0], _fee, 'the fee recipient got the fee');
+    assertEq(W.balance - _before[1], _rest, 'W got the rest in the native asset');
+    assertEq(_before[2] - POOL.balance, _p.pubSignals[2], 'the pool paid out the chunk');
+    assertEq(_b.adapter.balance, _before[4], 'the adapter kept nothing');
+  }
+
+  /// The recorded logs hold one release log from the pool (LeafInserted aside): Withdrawn for W, `_fr`, `_p` and
+  /// `_fee`, as withdraw emits it, and no Bought
+  function _onlyWithdrawn(address _fr, ProofLib.WithdrawProof memory _p, uint256 _fee) internal {
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _n;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].emitter != POOL || _logs[_i].topics[0] == IState.LeafInserted.selector) continue;
+      ++_n;
+      assertEq(_logs[_i].topics.length, 2);
+      assertEq(_logs[_i].topics[0], IPrivacyPool.Withdrawn.selector, 'Withdrawn');
+      assertEq(_logs[_i].topics[1], bytes32(uint256(uint160(W))), 'topic 1 is W');
+      assertEq(_logs[_i].data, abi.encode(_fr, _p.pubSignals[2], _fee, _p.pubSignals[1], _p.pubSignals[0]));
+    }
+    assertEq(_n, 1, 'the pool emits one release log');
   }
 }
 
@@ -326,25 +383,192 @@ contract BuyTest is BuyBase {
     _refusesBuy('local.buy', 0, _b, _signed(_b, 'local.buy'), IPrivacyPoolSimple.InvalidMinOut.selector);
   }
 
-  function test_minOutNotMetIsRefused() public {
+  /// Too little out: the swap is undone and the buy pays out as a withdraw, the fee paid (card pool-evm-buy-pays-revert)
+  function test_minOutNotMetPaysOut() public {
+    uint256 _snap = vm.snapshotState();
     adapter.setMode(MockAdapter.Mode.Short);
-    _refusesBuy('local.buy', 0, _fixtureBuy(), _fixtureSig(), IPrivacyPoolSimple.MinOutNotMet.selector);
-    assertFalse(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'the note is not spent');
+    _paysOut('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig(), IPrivacyPoolSimple.MinOutNotMet.selector);
+    assertEq(token.balanceOf(W), 0, 'W holds none of the token');
+    vm.revertToState(_snap);
     adapter.setMode(MockAdapter.Mode.Exact);
     _buy('local.buy', 0, _fixtureBuy(), _fixtureSig());
     assertEq(token.balanceOf(W), _fixtureBuy().minOut, 'exactly minOut lands');
   }
 
-  function test_anAdapterThatSendsElsewhereIsRefused() public {
+  function test_anAdapterThatSendsElsewherePaysOut() public {
     adapter.setMode(MockAdapter.Mode.Elsewhere);
-    _refusesBuy('local.buy', 0, _fixtureBuy(), _fixtureSig(), IPrivacyPoolSimple.MinOutNotMet.selector);
+    _paysOut('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig(), IPrivacyPoolSimple.MinOutNotMet.selector);
+    assertEq(token.balanceOf(address(0xD0D0)), 0, 'what the adapter sent elsewhere is undone');
   }
 
   /// Tokens W already holds count for nothing: only the rise does.
   function test_tokensWAlreadyHoldsDoNotCount() public {
     token.mint(W, 1_000_000);
     adapter.setMode(MockAdapter.Mode.Nothing);
-    _refusesBuy('local.buy', 0, _fixtureBuy(), _fixtureSig(), IPrivacyPoolSimple.MinOutNotMet.selector);
+    _paysOut('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig(), IPrivacyPoolSimple.MinOutNotMet.selector);
+  }
+
+  /*///////////////////////////////////////////////////////////////
+                A SWAP THAT FAILS (pool-evm-buy-pays-revert)
+  //////////////////////////////////////////////////////////////*/
+
+  /// The adapter reverts: the buy lands, the fee paid, W paid the rest
+  function test_anAdapterThatRevertsPaysOut() public {
+    adapter.setMode(MockAdapter.Mode.Revert);
+    _paysOut('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig(), MockAdapter.Refused.selector);
+  }
+
+  /// The token's balanceOf reverts on an odd block (the review's griefer, 02:31Z): a simulation on an even block
+  /// passes, and the buy that lands on an odd block still lands and pays the fee
+  function test_aTokenWhoseBalanceOfRevertsPaysOut() public {
+    address _parity = address(0xC0FFEE);
+    deployCodeTo('Buy.t.sol:ParityToken', _parity);
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    _b.token = _parity;
+    bytes memory _sig = _signed(_b, 'local.buy');
+    uint256 _snap = vm.snapshotState();
+    vm.roll(1000);
+    assertTrue(_bought('local.buy', 0.01 ether, _b, _sig), 'the even block buys');
+    assertEq(ParityToken(_parity).held(W), adapter.rate() * 0.39 ether);
+    vm.revertToState(_snap);
+    vm.roll(1001);
+    _paysOut('local.buy', 0.01 ether, _b, _sig, ParityToken.Odd.selector);
+    assertEq(ParityToken(_parity).held(W), 0, 'the mint is undone');
+  }
+
+  /// The token's balanceOf answers the first read and reverts on the second, after the adapter paid W
+  function test_aTokenWhoseSecondBalanceOfRevertsPaysOut() public {
+    address _parity = address(0xC0FFEE);
+    deployCodeTo('Buy.t.sol:ParityToken', _parity);
+    ParityToken(_parity).revertOnceHolding();
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    _b.token = _parity;
+    vm.roll(1000);
+    _paysOut('local.buy', 0.01 ether, _b, _signed(_b, 'local.buy'), ParityToken.Odd.selector);
+  }
+
+  /// buy as the sender calls it, its answer
+  function _bought(
+    string memory _name,
+    uint256 _fee,
+    IPrivacyPoolSimple.Buy memory _b,
+    bytes memory _sig
+  ) internal returns (bool) {
+    vm.prank(address(0xBEEF));
+    return pool.buy(_withdrawal(_name), _proof(_name), _fee, _b, _sig);
+  }
+
+  /// A swap that burns every unit of gas it is given: from the least gas that passes the floor up to 10,000,000 the
+  /// buy lands and pays out; with less it reverts at the floor (SwapGasTooLow) and spends nothing
+  function test_aSwapThatBurnsAllItsGasPaysOut() public {
+    address _hog = address(0xADA1);
+    vm.etch(_hog, address(new GasHogAdapter()).code);
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    _b.adapter = _hog;
+    bytes memory _sig = _signed(_b, 'local.buy');
+    uint256 _least = _leastGas(_b, _sig);
+    console.log('least gas a buy with a swap that burns all its gas lands with:', _least);
+    uint256[5] memory _gs = [_least, _least + 1, _least + 63, _least + 1_000_000, 10_000_000];
+    for (uint256 _i; _i < 5; ++_i) {
+      uint256 _snap = vm.snapshotState();
+      vm.prank(address(0xBEEF));
+      assertFalse(pool.buy{gas: _gs[_i]}(_withdrawal('local.buy'), _proof('local.buy'), 0.01 ether, _b, _sig));
+      assertTrue(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'spent');
+      assertEq(W.balance, 0.39 ether, 'W paid the rest');
+      assertEq(RELAYER.balance, 0.01 ether, 'the fee paid');
+      vm.revertToState(_snap);
+    }
+    vm.prank(address(0xBEEF));
+    vm.expectRevert(IPrivacyPoolSimple.SwapGasTooLow.selector);
+    pool.buy{gas: _least - 1}(_withdrawal('local.buy'), _proof('local.buy'), 0.01 ether, _b, _sig);
+    assertFalse(pool.nullifierHashes(_proof('local.buy').pubSignals[1]), 'below the floor nothing is spent');
+    _paysOut('local.buy', 0.01 ether, _b, _sig, NO_REASON);
+  }
+
+  /// The least gas limit with which buy does not revert (binary search; each try rolled back)
+  function _leastGas(IPrivacyPoolSimple.Buy memory _b, bytes memory _sig) internal returns (uint256 _hi) {
+    IPrivacyPool.Withdrawal memory _w = _withdrawal('local.buy');
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    uint256 _lo = 100_000;
+    _hi = 10_000_000;
+    while (_hi - _lo > 1) {
+      uint256 _mid = (_lo + _hi) / 2;
+      uint256 _snap = vm.snapshotState();
+      vm.prank(address(0xBEEF));
+      try pool.buy{gas: _mid}(_w, _p, 0.01 ether, _b, _sig) returns (bool) {
+        _hi = _mid;
+      } catch {
+        _lo = _mid;
+      }
+      vm.revertToState(_snap);
+    }
+  }
+
+  /// The reserve: with the least gas, the swap burns all it gets, and what the failure path leaves unspent of
+  /// BUY_FAIL_GAS (vm.lastCallGas) shows what it used: one push to an empty W (a new account) and Withdrawn
+  function test_gasTheFailurePathUsesOfItsReserve() public {
+    address _hog = address(0xADA1);
+    vm.etch(_hog, address(new GasHogAdapter()).code);
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    _b.adapter = _hog;
+    bytes memory _sig = _signed(_b, 'local.buy');
+    uint256 _least = _leastGas(_b, _sig);
+    assertEq(W.balance, 0);
+    assertEq(vm.getNonce(W), 0, 'W is an empty account: the push pays for a new account');
+    vm.prank(address(0xBEEF));
+    assertFalse(pool.buy{gas: _least}(_withdrawal('local.buy'), _proof('local.buy'), 0.01 ether, _b, _sig));
+    Vm.Gas memory _g = vm.lastCallGas();
+    console.log('failure path: gas left of the reserve at the least gas:', _g.gasRemaining);
+    console.log('failure path: used of BUY_FAIL_GAS:', pool.BUY_FAIL_GAS() - _g.gasRemaining);
+    assertLt(pool.BUY_FAIL_GAS() - _g.gasRemaining, pool.BUY_FAIL_GAS() / 2, 'the reserve is over twice what it needs');
+  }
+
+  /// buySwap gets at least BUY_SWAP_GAS: at the least gas that passes the floor, the adapter's frame starts with 63/64
+  /// of it less buySwap's own first steps (the calldata, a cold token's balanceOf: under 20,000)
+  function test_theSwapGetsAtLeastBuySwapGas() public {
+    address _meter = address(0xADA2);
+    vm.etch(_meter, address(new GasMeterAdapter()).code);
+    IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
+    _b.adapter = _meter;
+    bytes memory _sig = _signed(_b, 'local.buy');
+    uint256 _least = _leastGas(_b, _sig);
+    vm.prank(address(0xBEEF));
+    pool.buy{gas: _least}(_withdrawal('local.buy'), _proof('local.buy'), 0.01 ether, _b, _sig);
+    uint256 _got = uint256(vm.load(_meter, 0));
+    console.log('the adapter starts with, at the least gas:', _got);
+    assertGe(_got, (pool.BUY_SWAP_GAS() - 20_000) * 63 / 64);
+  }
+
+  /// buySwap answers only the pool: a direct call, and the adapter calling it from inside a buy, are refused
+  function test_onlyThePoolCallsBuySwap() public {
+    vm.prank(address(0xBEEF));
+    vm.expectRevert(IPrivacyPoolSimple.OnlyPool.selector);
+    pool.buySwap(_fixtureBuy(), address(0xBEEF), 1 ether);
+    adapter.setReenter(POOL, abi.encodeCall(pool.buySwap, (_fixtureBuy(), address(adapter), 1 ether)));
+    assertTrue(_bought('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig()), 'the buy itself lands');
+    assertEq(bytes4(adapter.err()), IPrivacyPoolSimple.OnlyPool.selector, 'the inner call is refused');
+  }
+
+  /// A landed buy's one release log is Bought (beside LeafInserted), byte for byte as before this card: the same topics (its signature's hash
+  /// and W) and the same data, in the same order; buy answers true
+  function test_boughtIsByteEqual() public {
+    ProofLib.WithdrawProof memory _p = _proof('local.buy');
+    vm.recordLogs();
+    assertTrue(_bought('local.buy', 0.01 ether, _fixtureBuy(), _fixtureSig()));
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _n;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].emitter != POOL || _logs[_i].topics[0] == IState.LeafInserted.selector) continue;
+      ++_n;
+      assertEq(_logs[_i].topics.length, 2);
+      assertEq(_logs[_i].topics[0], keccak256('Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)'));
+      assertEq(_logs[_i].topics[1], bytes32(uint256(uint160(W))));
+      assertEq(
+        _logs[_i].data,
+        abi.encode(RELAYER, 0.4 ether, 0.01 ether, _p.pubSignals[1], _p.pubSignals[0], address(token), 1000 * 0.39 ether)
+      );
+    }
+    assertEq(_n, 1, 'the pool emits one release log');
   }
 
   /// The adapter, paid by a buy, calls withdraw with another valid proof, or buy again: the guard refuses both.
@@ -609,7 +833,8 @@ contract BuyTest is BuyBase {
     _refusesBuy('local.buy', 0, _fixtureBuy(), _c, IPrivacyPool.InvalidSignature.selector);
   }
 
-  /// A buy sent with too little gas for its adapter reverts whole: the note stays unspent and nothing is paid
+  /// A buy sent with too little gas for the floor reverts whole: the note stays unspent and nothing is paid; with
+  /// enough for the floor, a swap that burns all its gas pays out (test_aSwapThatBurnsAllItsGasPaysOut)
   function test_R_gasGriefingLandsNothing() public {
     address _hog = address(0xADA1);
     vm.etch(_hog, address(new GasHogAdapter()).code);
@@ -619,10 +844,10 @@ contract BuyTest is BuyBase {
     IPrivacyPoolSimple.Buy memory _b = _fixtureBuy();
     _b.adapter = _hog;
     bytes memory _sig = _signed(_b, 'local.buy');
-    for (uint256 _g = 500_000; _g <= 3_000_000; _g += 500_000) {
+    for (uint256 _g = 300_000; _g <= 900_000; _g += 100_000) {
       vm.prank(address(0xBEEF));
       try pool.buy{gas: _g}(_w, _p, 0.01 ether, _b, _sig) {
-        revert('a buy whose adapter ran out of gas landed');
+        revert('a buy with too little gas for the floor landed');
       } catch {}
       assertFalse(pool.nullifierHashes(_p.pubSignals[1]), 'the note is not spent');
       assertEq(POOL.balance, _poolBefore, 'the pool paid nothing');
@@ -661,6 +886,38 @@ contract GasHogAdapter is IBuyAdapter {
   }
 }
 
+/// An adapter that writes the gas it starts with to slot 0 and buys exactly minOut
+contract GasMeterAdapter is IBuyAdapter {
+  function buy(address _token, address _recipient, uint256 _minOut, bytes calldata) external payable {
+    uint256 _g = gasleft();
+    assembly {
+      sstore(0, _g)
+    }
+    MockToken(_token).mint(_recipient, _minOut);
+  }
+}
+
+/// A token whose balanceOf reverts on an odd block, or, once set, on the read after W first holds some
+contract ParityToken {
+  error Odd();
+
+  mapping(address => uint256) public held;
+  bool internal once;
+
+  function revertOnceHolding() external {
+    once = true;
+  }
+
+  function mint(address _to, uint256 _amount) external {
+    held[_to] += _amount;
+  }
+
+  function balanceOf(address _a) external view returns (uint256) {
+    if (block.number % 2 == 1 || (once && held[_a] != 0)) revert Odd();
+    return held[_a];
+  }
+}
+
 /// A fee recipient that, when paid, makes a call set in advance and keeps its error
 contract FeeReenter {
   address internal target;
@@ -696,8 +953,11 @@ contract MockAdapter is IBuyAdapter {
     Exact,
     Short,
     Elsewhere,
-    Nothing
+    Nothing,
+    Revert
   }
+
+  error Refused();
 
   uint256 public constant rate = 1000;
   Mode internal mode;
@@ -723,5 +983,6 @@ contract MockAdapter is IBuyAdapter {
     if (mode == Mode.Exact) MockToken(_token).mint(_recipient, _minOut);
     if (mode == Mode.Short) MockToken(_token).mint(_recipient, _minOut - 1);
     if (mode == Mode.Elsewhere) MockToken(_token).mint(address(0xD0D0), msg.value * rate);
+    if (mode == Mode.Revert) revert Refused();
   }
 }

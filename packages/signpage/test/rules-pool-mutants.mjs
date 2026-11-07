@@ -14,6 +14,8 @@ const POOL = fileURLToPath(new URL("../src/rules/pool.ts", import.meta.url));
 const TEST = "rules-pool.test.ts";
 const ONWARD = "rules-pool-onward.test.ts";
 const ATTACKS = "rules-pool-attacks.test.ts";
+const DEPEVM = "rules-pool-deposit-evm.test.ts";
+const DROOM = "EVM deposit: the headroom is G(depth)";
 const testOf = (file) => fileURLToPath(new URL(`./${file}`, import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/rules/.pool-mutant-${process.pid}.ts`, import.meta.url));
 const mutantTestOf = (file) => fileURLToPath(new URL(`./.${file.replace(/\.test\.ts$/, "")}-mutant-${process.pid}.test.ts`, import.meta.url));
@@ -39,6 +41,9 @@ const ONF = "EVM onward send: a max fee under";
 const ONS = "EVM onward send: signs as W";
 const ESIM = "EVM sim sell:";
 const EFEE = "card evm-testnet-delegate-review3: an EVM sell pays";
+const DREF = "EVM deposit: one refusal per field";
+const DOK = "EVM deposit: U's one rung";
+const DSIGN = "EVM deposit: signs as U";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
 export const MUTANTS = [
@@ -235,6 +240,49 @@ export const MUTANTS = [
   ['if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");', "", ONS, ONWARD],
   [' || now.accessList.length !== 0) return refuse("unchecked");', ') return refuse("unchecked");', ONS, ONWARD],
   ['!== read.wallet) return refuse("wallet");', '=== "") return refuse("wallet");', ONS, ONWARD],
+  // U's EVM deposit (card pool-deposits): checkEvmDeposit and signEvmDeposit
+  ['if (ask.kind !== "pool.deposit") return refuse("kind");', "", DREF, DEPEVM],
+  ['refuse("kind");\n  if (ask.chain === "solana") return refuse("chain");\n  const pin = ctx?.pin;', 'refuse("kind");\n  const pin = ctx?.pin;', DREF, DEPEVM],
+  [' || pin.network !== EVM_NETWORK_OF[ask.chain][testnet ? 1 : 0]) return refuse("evm_not_pinned");', ') return refuse("evm_not_pinned");', DREF, DEPEVM],
+  ['if (typeof u !== "string" || !EVM_ADDRESS.test(u)) return refuse("wallet");', "", DREF, DEPEVM],
+  ["const uNonce = agreed(reads.nonce, isUint);", "const uNonce = reads.nonce[0];", DREF, DEPEVM],
+  ["const base = agreed(reads.baseFee, isUint);", "const base = reads.baseFee[0];", DREF, DEPEVM],
+  ["const estimate = agreed(reads.estimate, isUint);", "const estimate = reads.estimate[0];", DREF, DEPEVM],
+  ["const l1 = agreed(reads.l1Fee, isUint);", "const l1 = reads.l1Fee[0];", DREF, DEPEVM],
+  ["const stateDepth = agreed(reads.stateDepth, isUint);", "const stateDepth = reads.stateDepth[0];", DREF, DEPEVM],
+  ["const labelDepth = agreed(reads.labelDepth, isUint);", "const labelDepth = reads.labelDepth[0];", DREF, DEPEVM],
+  ['if (ask.chain === "robinhood" && l1 !== 0n) return refuse("l1_fee");', "", DREF, DEPEVM],
+  ['if (d.chainId !== chainId) return refuse("chain_id");', "", DREF, DEPEVM],
+  ["!Object.isFrozen(call) || ", "", DREF, DEPEVM],
+  ["lower(call.to) !== lower(pin.pool) || ", "", DREF, DEPEVM],
+  [' || lower(d.to) !== lower(pin.pool)) return refuse("to");', ') return refuse("to");', DREF, DEPEVM],
+  ["if (rung < EVM_DEPOSIT_MIN || ", "if (", DREF, DEPEVM],
+  [' || rung > ask.amount) return refuse("amount");', ') return refuse("amount");', DREF, DEPEVM],
+  ['if (d.value !== rung) return refuse("value");', "", DREF, DEPEVM],
+  ['if (typeof pre !== "bigint" || pre <= 0n || pre >= EVM_DEPOSIT_FIELD_P) return refuse("precommitment");', "", DREF, DEPEVM],
+  [' || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");', ') return refuse("data");', DREF, DEPEVM],
+  [' || data.slice(0, 10) !== "0xe2bbb158"', "", DREF, DEPEVM],
+  ['if (lower(d.data) !== data) return refuse("data");', "", DREF, DEPEVM],
+  ['if (d.nonce !== uNonce) return refuse("nonce");', "", DREF, DEPEVM],
+  ['if (d.accessList.length > 0) return refuse("access_list");', "", DREF, DEPEVM],
+  ['if (estimate === 0n || estimate > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");', "", DREF, DEPEVM],
+  ["if (estimate === 0n || ", "if (", DREF, DEPEVM],
+  ['if (d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)) return refuse("gas_estimate");', "", DREF, DEPEVM],
+  ["d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)", "d.gasLimit > estimate + evmDepositHeadroom(stateDepth, labelDepth)", DREF, DEPEVM],
+  ["d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)", "d.gasLimit < estimate", DREF, DEPEVM],
+  ["return (stateDepth + 1n + labelDepth + 1n) * EVM_DEPOSIT_GAS_PER_LEVEL;", "return (stateDepth + labelDepth) * EVM_DEPOSIT_GAS_PER_LEVEL;", DROOM, DEPEVM],
+  ['|| d > EVM_DEPOSIT_MAX_DEPTH) throw new PoolRuleRefused("depth");', ') throw new PoolRuleRefused("depth");', DREF, DEPEVM],
+  ["if (d.maxPriorityFeePerGas > tipCap || ", "if (", DREF, DEPEVM],
+  [' || d.maxPriorityFeePerGas > d.maxFeePerGas) return refuse("priority_fee");', ') return refuse("priority_fee");', DREF, DEPEVM],
+  ["if (d.maxFeePerGas > 2n * base + tipCap || ", "if (", DREF, DEPEVM],
+  [' || d.maxFeePerGas < base) return refuse("max_fee");', ') return refuse("max_fee");', DREF, DEPEVM],
+  ["const bound = d.gasLimit * d.maxFeePerGas + l1;", "const bound = d.gasLimit * d.maxFeePerGas;", DOK, DEPEVM],
+  ['if (reads.balance.some((b) => rung + bound > b)) return refuse("balance");', "", DREF, DEPEVM],
+  ["reads.balance.some((b) => rung + bound > b)", "reads.balance.every((b) => rung + bound > b)", DREF, DEPEVM],
+  ["  DEPOSIT_CHECKED.set(tx, Object.freeze({ ...d, wallet: lower(u) }));\n", "", DSIGN, DEPEVM],
+  ['if (passed === undefined) return refuse("unchecked");', "", DSIGN, DEPEVM],
+  ['if (keys.some((k) => again[k] !== passed[k]) || again.accessList.length > 0) return refuse("unchecked");', "", DSIGN, DEPEVM],
+  ['if (signer !== passed.wallet) return refuse("wallet");', "", DSIGN, DEPEVM],
 ];
 
 // a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
@@ -250,7 +298,7 @@ const run = (name, file) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const original = readFileSync(POOL, "utf8");
-  const files = [TEST, ONWARD];
+  const files = [TEST, ONWARD, DEPEVM];
   process.on("exit", () => { for (const f of files) rmSync(mutantTestOf(f), { force: true }); rmSync(MUTANT_SRC, { force: true }); });
   for (const f of files) {
     const test = readFileSync(testOf(f), "utf8");

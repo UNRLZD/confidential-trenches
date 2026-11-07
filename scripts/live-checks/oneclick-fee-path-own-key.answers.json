@@ -1,0 +1,63 @@
+{
+ "_note": "good: card oneclick-fee-path-own-key's SIGN_HOST build, packages/signpage/index.html and public/app.js as committed on the card branch after the review folds (merged with main 698891b4 and rebuilt: /app.js sha384-BB808782…, release-74), read with facts() on a real parse: both fee tables are read by path only where a guard of typeof e == \"string\" and Object.hasOwn for that table and key, with its refusal naming \"no such 1Click path\", dominates the read in its own function, e that function's own unassigned parameter. bad: SIGN_HOST as served 2026-11-07T02:15Z (release-68, /app.js sha384-09FwH003…), recorded with --record: both tables read as wl[e] and Tl[e] through the prototype chain.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BB8087827fEz+7bOWGBpUriuMO51F8I/GyKVlJXbAgYDNra595mEDOowYQ360sNw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-BB8087827fEz+7bOWGBpUriuMO51F8I/GyKVlJXbAgYDNra595mEDOowYQ360sNw",
+  "tables": {
+   "ONECLICK_FEE_BPS": [
+    "wl"
+   ],
+   "ONECLICK_PAIR_FEE_BPS": [
+    "Tl"
+   ]
+  },
+  "reads": [
+   {
+    "table": "ONECLICK_FEE_BPS",
+    "name": "wl",
+    "key": "e",
+    "owns": true,
+    "typed": true,
+    "scoped": true,
+    "refuses": true
+   },
+   {
+    "table": "ONECLICK_PAIR_FEE_BPS",
+    "name": "Tl",
+    "key": "e",
+    "owns": true,
+    "typed": true,
+    "scoped": true,
+    "refuses": true
+   }
+  ]
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-09FwH003b7rvqH9xG6FrbJUL2Z9uolMoNzdJ7f9BuwUXkbErB/UyK/TOqf4y65oC\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-09FwH003b7rvqH9xG6FrbJUL2Z9uolMoNzdJ7f9BuwUXkbErB/UyK/TOqf4y65oC",
+  "tables": {
+   "ONECLICK_FEE_BPS": [
+    "wl"
+   ],
+   "ONECLICK_PAIR_FEE_BPS": [
+    "Tl"
+   ]
+  },
+  "reads": [
+   {
+    "table": "ONECLICK_FEE_BPS",
+    "name": "wl",
+    "key": "e",
+    "owns": false,
+    "refuses": false
+   },
+   {
+    "table": "ONECLICK_PAIR_FEE_BPS",
+    "name": "Tl",
+    "key": "e",
+    "owns": false,
+    "refuses": false
+   }
+  ]
+ }
+}

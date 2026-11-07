@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { nearPairNetwork, nearPairRule, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { headersFor, MAINNET_RPCS, nearNetwork, networkOf, TESTNET_RPCS } from "../build/network.mjs";
+import { EVM_RPCS } from "../scripts/check-deploy.ts";
 import { liveVerify } from "../src/screens/verify/live.ts";
 import type { VerifyView } from "../src/screens/verify/model.ts";
 import { buildNetwork, VERIFY_RELEASES, type VerifyRelease } from "../src/screens/verify/release.ts";
@@ -87,7 +88,8 @@ test("each network's pair is the kit's pair for that network, and the build's CS
   assert.equal(headersFor("mainnet", shipped), shipped);
   const t = headersFor("testnet", shipped);
   const connect = /connect-src ([^;]+);/.exec(t)![1]!.split(" ");
-  assert.deepEqual(connect.filter((s) => /rpc|drpc/.test(s)), [...TESTNET.rpcs]);
+  // the kit's EVM providers' origins (card page-evm-rpc-csp) are the same on both networks; every other RPC is the pair
+  assert.deepEqual(connect.filter((s) => /rpc|drpc/.test(s) && !EVM_RPCS.includes(s)), [...TESTNET.rpcs]);
   assert.equal(t.replace(TESTNET_RPCS, MAINNET_RPCS), shipped);
   assert.throws(() => headersFor("testnet", shipped.replace(MAINNET_RPCS, "https://near.drpc.org")), /exactly once/);
 });

@@ -1,0 +1,46 @@
+{
+ "set": "card pool-deposits slice 3: U^evm_{s,i} = HKDF-SHA512(seed64, \"blindfill/v1\", \"onetime/in/evm\" ‖ s ‖ i, 32 B), secp256k1",
+ "note": "The A.8 public test seed: never fund any address below. Written by test/record-evm-deposit-id.mjs (Node crypto, apart from src/derive).",
+ "ids": [
+  {
+   "name": "U^evm_{0,0}",
+   "s": "0000000000000000000000000000000000000000000000000000000000000000",
+   "i": 0,
+   "info": "6f6e6574696d652f696e2f65766d000000000000000000000000000000000000000000000000000000000000000000000000",
+   "publicKey": "02f6aadbd58edd3b6a86c50ae4804f5ba70bad40f87c36055b2d8b1b88e2f77ab9",
+   "address": "0x2A7E61e38FCf77c721aeF52929CF9417e7c048ba"
+  },
+  {
+   "name": "U^evm_{0,1}",
+   "s": "0000000000000000000000000000000000000000000000000000000000000000",
+   "i": 1,
+   "info": "6f6e6574696d652f696e2f65766d000000000000000000000000000000000000000000000000000000000000000000000001",
+   "publicKey": "0200947c6e6b65a66d005c64905c7c3084af01a9bef75b90273f444f5730c98704",
+   "address": "0x1FB460C90DdDcC12f0FEF79a777d5b0bCaFc3565"
+  },
+  {
+   "name": "U^evm_{s,0}",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 0,
+   "info": "6f6e6574696d652f696e2f65766d2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc00000000",
+   "publicKey": "03b26b16ddaa6c2a0e00366fef590511e72d53fb33fd13d4c807c23a0d874931d9",
+   "address": "0x32F9c6cFe5623BFdfe43C3D1b3b10973BF49B6d5"
+  },
+  {
+   "name": "U^evm_{s,1}",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 1,
+   "info": "6f6e6574696d652f696e2f65766d2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc00000001",
+   "publicKey": "02c5bf3314acd64ab8d0da7c55097dcce1e4e261f21a983e393d2ecd00f1af6469",
+   "address": "0x8197497527de3445286E0De3843BB060686b8431"
+  },
+  {
+   "name": "U^evm_{s,2^32-1}",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 4294967295,
+   "info": "6f6e6574696d652f696e2f65766d2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fcffffffff",
+   "publicKey": "02b8ebf8169789057d07da07c0a160ece208562cf8ba14ec6f4f6b1b5dfd8efb9d",
+   "address": "0x7aEB0Dc373d5A627Af97887b4635253e9C8Af31C"
+  }
+ ]
+}
