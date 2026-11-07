@@ -13,6 +13,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { evmPoolRouteData, evmPoolVenues } from "@blindfill/kit";
 
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const OUT = join(ROOT, "apps/helper/src/pool/fixtures/release-cast.json");
@@ -53,7 +54,10 @@ const proof = `([${p[0]},${p[1]}],[[${p[2]},${p[3]}],[${p[4]},${p[5]}]],[${p[6]}
 /** The Buy's token, Base Sepolia's USDC; the fixture names it `coin` (a key named token beside a hex value reads as a
  *  secret to gitleaks' generic rule). */
 const COIN = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
-const BUY = { adapter: "0x5b6ee2e1c3ec4c6e5bb1d1b4b0f4b8b9d8c2a1f0", data: `0x${"ab".repeat(70)}`, minOut: "2360180", token: COIN };
+// a buy the device's builder makes: Base Sepolia's pinned v4 adapter, native to the coin in one v4 hop (the helper
+// carries only a pinned adapter's route the kit's builder encodes, evmBuyRouteOf)
+const ROUTE = { venue: "uniswap-v4", currencyIn: "0x0000000000000000000000000000000000000000", hops: [{ currency: COIN, fee: 500, tickSpacing: 10, hooks: "0x0000000000000000000000000000000000000000", hookData: "0x" }] };
+const BUY = { adapter: evmPoolVenues()["base-sepolia"].adapters.v4, data: `0x${Buffer.from(evmPoolRouteData("base-sepolia", ROUTE).data).toString("hex")}`, minOut: "2360180", token: COIN };
 
 const tmp = mkdtempSync(join(tmpdir(), "release-cast-"));
 let n = 0;

@@ -10,8 +10,9 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, evmPoolVenues } from "@blindfill/kit";
-import { BUY_SELECTOR, BUY_SIGNATURE, EVM_BODY_DATA_MAX, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
+import { EVM_POOL_TX_BYTES, evmPoolRouteData, evmPoolVenues } from "@blindfill/kit";
+import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
+import { BOUGHT_TOPIC, BUY_SELECTOR, BUY_SIGNATURE, EVM_BODY_DATA_MAX, evmAddressOf, evmPoolSender, evmReadBuy, evmReadRelease, evmReleaseDigest, evmReleaseSigner, rlp, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const CAST = JSON.parse(readFileSync(new URL("./fixtures/release-cast.json", import.meta.url), "utf8")) as {
@@ -36,7 +37,7 @@ const NOW = 2_000_000_000_000 - 100_000;
 const EPOCH = 1_999_999_860_000;
 const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("currentTreeDepth()"))).subarray(0, 4).toString("hex")}`;
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpc(calls: Calls, chain = "0x14a34"): EvmRpc {
+function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }): EvmRpc {
   const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
   return async (method, params) => {
     calls.push({ method, params });
@@ -53,13 +54,13 @@ function rpc(calls: Calls, chain = "0x14a34"): EvmRpc {
       case "eth_maxPriorityFeePerGas": return "0x5f5e100";
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
-      case "eth_getTransactionReceipt": return { status: "0x1" };
+      case "eth_getTransactionReceipt": return receipt;
       default: throw new Error(`unexpected ${method}`);
     }
   };
 }
-const senderOf = (calls: Calls, network = "base-sepolia", chain = "0x14a34", venues?: Parameters<typeof evmPoolSender>[0]["venues"]) =>
-  evmPoolSender({ network, pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, ...(venues ? { venues } : {}) }, [rpc(calls, chain), rpc([], chain)], () => NOW);
+const senderOf = (calls: Calls, network = "base-sepolia", chain = "0x14a34", venues?: Parameters<typeof evmPoolSender>[0]["venues"], receipts?: [unknown, unknown]) =>
+  evmPoolSender({ network, pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, ...(venues ? { venues } : {}) }, [rpc(calls, chain, receipts?.[0]), rpc([], chain, receipts?.[1])], () => NOW);
 const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
 const sends = (calls: Calls) => calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
 
@@ -147,7 +148,7 @@ test("W's signature only in its one form: v 27 or 28, r and s in range, s low (t
 });
 
 test("buy's calldata is read in its one canonical encoding: every offset, length and padding as solc writes them, a 65-byte signature, nothing after; else bad_shape before any RPC call", async () => {
-  const good = CAST.cases.buyBaseSepolia!.callData; // the Buy's tail at word 29, its data (70 bytes) at word 34, the signature's length at word 37
+  const good = CAST.cases.buyBaseSepolia!.callData; // the Buy's tail at word 29, its data (320 bytes: abi.encode of a one-hop v4 route) at word 34, the signature's length at word 44
   assert.doesNotThrow(() => evmReadBuy(bytes(good)));
   const bad: [string, string, RegExp][] = [
     ["a word after", `${good}${"00".repeat(32)}`, /the buy's length/],
@@ -155,16 +156,16 @@ test("buy's calldata is read in its one canonical encoding: every offset, length
     ["a byte after", `${good}00`, /not buy's calldata/],
     ["the Withdrawal's offset", setWord(good, 0, w32(19n * 32n)), /withdrawal's offset/],
     ["the Buy's offset", setWord(good, 18, w32(30n * 32n)), /the buy's offset/],
-    ["the signature's offset", setWord(good, 19, w32(38n * 32n)), /signature's offset/],
+    ["the signature's offset", setWord(good, 19, w32(45n * 32n)), /signature's offset/],
     ["the buy data's offset", setWord(good, 30, w32(5n * 32n)), /buy data's offset/],
-    ["the buy data's length, a word more", setWord(good, 33, w32(102n)), /the buy's length/],
-    ["the buy data's length, one byte less", setWord(good, 33, w32(69n)), /buy data's padding/],
+    ["the buy data's length, a word more", setWord(good, 33, w32(352n)), /the buy's length/],
+    ["the buy data's length, a byte more", setWord(good, 33, w32(321n)), /the buy's length/],
     ["the buy data's length past the calldata", setWord(good, 33, w32(1n << 64n)), /buy data's length/],
     ["the adapter's padding", setWord(good, 29, `01${good.slice(10 + 64 * 29 + 2, 10 + 64 * 30)}`), /address's padding/],
     ["the token's padding", setWord(good, 32, `01${good.slice(10 + 64 * 32 + 2, 10 + 64 * 33)}`), /address's padding/],
-    ["the buy data's padding", setWord(good, 36, `${good.slice(10 + 64 * 36, 10 + 64 * 36 + 12)}${"01".padStart(52, "0")}`), /buy data's padding/],
-    ["a 64-byte signature", setWord(good, 37, w32(64n)), /signature's layout/],
-    ["a 66-byte signature", setWord(good, 37, w32(66n)), /signature's layout/],
+    ["the buy data's padding: a byte less, the byte past it not zero", setWord(setWord(good, 33, w32(319n)), 43, w32(1n)), /buy data's padding/],
+    ["a 64-byte signature", setWord(good, 44, w32(64n)), /signature's layout/],
+    ["a 66-byte signature", setWord(good, 44, w32(66n)), /signature's layout/],
     ["the signature's padding", `${good.slice(0, -2)}01`, /signature's layout/],
     ["the relay data's length", setWord(good, 22, w32(224n)), /withdrawal's layout/],
     ["the selector", `0x94374b2b${good.slice(10)}`, /not withdraw's calldata/],
@@ -188,9 +189,9 @@ test("a release's calldata is at most EVM_BODY_DATA_MAX, the most whose signed t
   // a buy whose data makes its calldata a word over the bound, else canonical
   const good = CAST.cases.buyBaseSepolia!.callData;
   const extra = (EVM_BODY_DATA_MAX + 32 - (good.length - 2) / 2) / 32 + 0; // words of data to add
-  const dataWords = 3 + Math.ceil(extra);
+  const dataWords = 10 + Math.ceil(extra);
   const len = BigInt(32 * dataWords);
-  const long = `${setWord(setWord(good.slice(0, 10 + 64 * 34), 19, w32(BigInt(32 * (34 + dataWords)))), 33, w32(len))}${"ab".repeat(32 * dataWords)}${good.slice(10 + 64 * 37)}`;
+  const long = `${setWord(setWord(good.slice(0, 10 + 64 * 34), 19, w32(BigInt(32 * (34 + dataWords)))), 33, w32(len))}${"ab".repeat(32 * dataWords)}${good.slice(10 + 64 * 44)}`;
   assert.ok((long.length - 2) / 2 > EVM_BODY_DATA_MAX, `${(long.length - 2) / 2} bytes`);
   assert.throws(() => evmReadBuy(bytes(long)), /not buy's calldata/);
   assert.equal(code(await senderOf([]).carry({ pool: POOL, data: long, epoch: EPOCH })), "bad_shape");
@@ -206,4 +207,124 @@ test("the chain id is the kit's pin: providers naming another chain are upstream
   const b = await senderOf(x, "base-sepolia", "0x14a34", {}).carry({ pool: POOL, data: c.callData, epoch: EPOCH });
   assert.deepEqual([b.status, code(b)], [503, "not_configured"], JSON.stringify(b.body));
   assert.equal(x.length, 0);
+});
+
+// ---- review a2ff5521 L1: every relay word and the processooor in their one encoding, a dirty high or low bit refused ----
+test("a dirty processooor, recipient or feeRecipient high bit, deadlineMs over 64 bits or salt's low 16 bytes: bad_shape before any RPC call, withdraw and buy alike", async () => {
+  // the Withdrawal's tail: processooor at the head's end (withdraw 19, buy 20), then 64, 192 and the six relay words
+  for (const [name, head] of [["withdrawBaseSepolia", 19], ["buyBaseSepolia", 20]] as const) {
+    const good = CAST.cases[name]!.callData;
+    const at = (i: number) => BigInt(`0x${good.slice(10 + 64 * i, 10 + 64 * (i + 1))}`);
+    const rows: [string, number, bigint, RegExp][] = [
+      ["the processooor's high bits", head, 1n << 160n, /withdrawal's layout/],
+      ["the processooor's top bit", head, 1n << 255n, /withdrawal's layout/],
+      ["the recipient's high bits", head + 3, 1n << 160n, /relay data's padding/],
+      ["the feeRecipient's high bits", head + 4, 1n << 200n, /relay data's padding/],
+      ["deadlineMs over 64 bits", head + 6, 1n << 64n, /relay data's padding/],
+      ["deadlineMs's top bit", head + 6, 1n << 255n, /relay data's padding/],
+      ["salt's lowest bit", head + 8, 1n, /relay data's padding/],
+      ["salt's low 16 bytes' top bit", head + 8, 1n << 127n, /relay data's padding/],
+    ];
+    for (const [what, i, bit, why] of rows) {
+      const data = setWord(good, i, w32(at(i) | bit));
+      assert.throws(() => evmReadRelease(bytes(data)), why, `${name}: ${what}`);
+      const x: Calls = [];
+      const a = await senderOf(x).carry({ pool: POOL, data, epoch: EPOCH });
+      assert.deepEqual([a.status, code(a)], [400, "bad_shape"], `${name}: ${what}`);
+      assert.equal(x.length, 0, `${name}: ${what}: no RPC call`);
+    }
+  }
+});
+
+// ---- review a2ff5521 H1: a buy runs only a pinned adapter's builder route, and its gas is held until it lands ----
+/** The cast buy's calldata with recipient W (the test key's), its Buy's adapter and data replaced, the nullifier plus
+ *  `n`, signed by W: every check but the one a test plants passes. */
+function buyAs(o: { adapter?: string; data?: string; n?: bigint; key?: Uint8Array<ArrayBuffer>; coin?: string } = {}): string {
+  const good = CAST.cases.buyBaseSepolia!.callData;
+  const word = (i: number) => (i === 32 && o.coin !== undefined ? o.coin.slice(2).padStart(64, "0") : good.slice(10 + 64 * i, 10 + 64 * (i + 1)));
+  // another coin: the builder's one-hop v4 route to it
+  const coinData = o.coin === undefined ? undefined : hexOf(evmPoolRouteData("base-sepolia", { venue: "uniswap-v4", currencyIn: "0x0000000000000000000000000000000000000000", hops: [{ currency: o.coin, fee: 500, tickSpacing: 10, hooks: "0x0000000000000000000000000000000000000000", hookData: "0x" }] }).data);
+  const d = (o.data ?? coinData ?? CAST.cases.buyBaseSepolia!.data!).slice(2);
+  const words = Math.ceil(d.length / 64);
+  const tail = `${w32(BigInt(o.adapter ?? CAST.cases.buyBaseSepolia!.adapter!))}${w32(128n)}${word(31)}${word(32)}${w32(BigInt(d.length / 2))}${d.padEnd(64 * words, "0")}${good.slice(-64 * 4)}`;
+  let data = `${good.slice(0, 10 + 64 * 29)}${tail}`;
+  data = setWord(data, 19, w32(BigInt(32 * (34 + words))));
+  data = setWord(data, 23, (o.key === undefined ? W : evmAddressOf(o.key)).slice(2).padStart(64, "0"));
+  data = setWord(data, 10, w32(BigInt(`0x${word(10)}`) + (o.n ?? 0n)));
+  return o.key === undefined ? signRelease(data, POOL) : signRelease(data, POOL, 84_532n, o.key);
+}
+/** A receipt of `data`'s buy: `status`, its gas at 2.1 gwei, and the pool's Bought log of it when `bought`. */
+function receiptOf(data: string, status: "0x1" | "0x0", bought: boolean, gasUsed = "0x95433") {
+  const r = evmReadRelease(bytes(data));
+  const pad = (a: string) => a.slice(2).padStart(64, "0");
+  const log = { address: POOL, topics: [BOUGHT_TOPIC, `0x${pad(r.recipient)}`], data: `0x${pad(r.feeRecipient)}${w32(r.value)}${w32(r.fee)}${r.nullifier}${w32(7n)}${pad(r.buy!.token)}${w32(2_360_180n)}` };
+  return { status, gasUsed, effectiveGasPrice: "0x7d2b7500", logs: bought ? [log] : [] };
+}
+const settle = () => new Promise((r) => setTimeout(r, 50));
+
+test("a buy through any adapter but the kit's pinned two, or data not the kit's builder's bytes for its route: bad_route, signed by W, with no RPC call", async () => {
+  const BS = evmPoolVenues()["base-sepolia"];
+  const good = buyAs();
+  assert.equal(code(await senderOf([]).carry({ pool: POOL, data: good, epoch: EPOCH })), "ok", "the builder's route through the pinned v4 adapter");
+  const cases: [string, string][] = [
+    ["a foreign adapter", buyAs({ adapter: "0x5b6ee2e1c3ec4c6e5bb1d1b4b0f4b8b9d8c2a1f0" })],
+    ["the pool as the adapter", buyAs({ adapter: POOL })],
+    ["Robinhood testnet's pinned adapter", buyAs({ adapter: evmPoolVenues()["robinhood-testnet"].adapters!.v4! })],
+    ["the v3 adapter with v4 data", buyAs({ adapter: BS.adapters!.v3! })],
+    ["the data with a word after it", buyAs({ data: `${CAST.cases.buyBaseSepolia!.data!}${"00".repeat(32)}` })],
+    ["the data a byte short", buyAs({ data: CAST.cases.buyBaseSepolia!.data!.slice(0, -2) })],
+    ["the path's offset moved", buyAs({ data: `0x${CAST.cases.buyBaseSepolia!.data!.slice(2, 66)}${w32(0x60n)}${"00".repeat(32)}${CAST.cases.buyBaseSepolia!.data!.slice(130)}` })],
+    ["hook data the device never makes", buyAs({ data: `${CAST.cases.buyBaseSepolia!.data!.slice(0, -128)}${w32(1n)}${"ab".padEnd(64, "0")}` })],
+    ["junk", buyAs({ data: `0x${"ab".repeat(70)}` })],
+  ];
+  for (const [what, data] of cases) {
+    const x: Calls = [];
+    const a = await senderOf(x).carry({ pool: POOL, data, epoch: EPOCH });
+    assert.deepEqual([a.status, code(a)], [422, "bad_route"], `${what}: ${JSON.stringify(a.body)}`);
+    assert.equal(x.length, 0, `${what}: no RPC call`);
+  }
+});
+
+test("a buy's worst gas is held against W, the client and the token until it lands: one that reverts on chain is charged and the next over the cap is 429 with Retry-After; one with the pool's Bought log on both providers clears its hold", async () => {
+  // reverted on chain (its minOut not met after the sim passed): its whole cost, 611,391 gas at 2.1 gwei, over W's cap
+  const first = buyAs();
+  const rc: Calls = [];
+  const reverted = senderOf(rc, "base-sepolia", "0x14a34", undefined, [receiptOf(first, "0x0", false), receiptOf(first, "0x0", false)]);
+  assert.equal(code(await reverted.carry({ pool: POOL, data: first, epoch: EPOCH }, "203.0.113.7")), "ok");
+  await settle();
+  const before = rc.length;
+  const next = await reverted.carry({ pool: POOL, data: buyAs({ n: 1n }), epoch: EPOCH }, "203.0.113.7");
+  assert.deepEqual([next.status, code(next)], [429, "rate_limited"], JSON.stringify(next.body));
+  assert.match(JSON.stringify(next.body), /unpaid buy gas \d+ wei for W, cap 1000000000000000/);
+  assert.ok(next.retryAfterS !== undefined && next.retryAfterS > 0 && next.retryAfterS <= 3600, `Retry-After ${next.retryAfterS}`);
+  assert.equal(rc.length, before, "no RPC call");
+  // another W from another client, the same token: held by the token's cap; another W and token from the same client:
+  // held by the client's
+  const W2 = new Uint8Array(createHash("sha256").update("helper-evm-sender-2/test-key/W2").digest());
+  assert.match(JSON.stringify((await reverted.carry({ pool: POOL, data: buyAs({ n: 2n, key: W2 }), epoch: EPOCH }, "198.51.100.9")).body), /unpaid buy gas \d+ wei for this token/);
+  assert.match(JSON.stringify((await reverted.carry({ pool: POOL, data: buyAs({ n: 3n, key: W2, coin: "0x0000000000000000000000000000000000007070" }), epoch: EPOCH }, "203.0.113.7")).body), /unpaid buy gas \d+ wei for this client/);
+  assert.equal(code(await reverted.carry({ pool: POOL, data: buyAs({ n: 4n, key: W2, coin: "0x0000000000000000000000000000000000007070" }), epoch: EPOCH }, "198.51.100.9")), "ok", "another W, token and client: only the budget holds it");
+  // a withdraw is never held by the buys' caps, and the reverted buy's proof still withdraws in its epoch (review a2ff5521
+  // L2: the reverted set is keyed by method); the reverted buy itself is never sent again in its epoch
+  assert.equal(code(await reverted.carry({ pool: POOL, data: CAST.cases.withdrawBaseSepolia!.callData, epoch: EPOCH }, "203.0.113.7")), "ok", "the same proof's withdraw, from the same client");
+  assert.equal(code(await reverted.carry({ pool: POOL, data: first, epoch: EPOCH }, "198.51.100.200")), "reverted", "the reverted buy again");
+  // a cheap revert held, then a buy whose worst would pass W's cap: refused at the worst's check, after the reads
+  const cheap = senderOf([], "base-sepolia", "0x14a34", undefined, [receiptOf(first, "0x0", false, "0x5208"), receiptOf(first, "0x0", false, "0x5208")]);
+  assert.equal(code(await cheap.carry({ pool: POOL, data: first, epoch: EPOCH })), "ok");
+  await settle();
+  const worst = await cheap.carry({ pool: POOL, data: buyAs({ n: 1n }), epoch: EPOCH });
+  assert.match(JSON.stringify(worst.body), /unpaid buy gas 39500909133000 wei for W/, "21,000 gas at its maxFeePerGas (fee / gas) held: 1 wei more passes, the next buy's worst does not");
+  // proven only by status 1 and the pool's Bought log of this buy on both providers; anything less stays charged
+  for (const [what, ra, rb, held] of [
+    ["status 1 and Bought on both", receiptOf(first, "0x1", true), receiptOf(first, "0x1", true), false],
+    ["status 1, Bought on one provider only", receiptOf(first, "0x1", true), receiptOf(first, "0x1", false), true],
+    ["status 1 and no Bought log", receiptOf(first, "0x1", false), receiptOf(first, "0x1", false), true],
+    ["a Bought log for another nullifier", receiptOf(first, "0x1", true), receiptOf(buyAs({ n: 9n }), "0x1", true), true],
+  ] as const) {
+    const s = senderOf([], "base-sepolia", "0x14a34", undefined, [ra, rb]);
+    assert.equal(code(await s.carry({ pool: POOL, data: first, epoch: EPOCH })), "ok", what);
+    await settle();
+    const a = await s.carry({ pool: POOL, data: buyAs({ n: 1n }), epoch: EPOCH });
+    assert.equal(code(a), held ? "rate_limited" : "ok", `${what}: ${JSON.stringify(a.body)}`);
+  }
 });

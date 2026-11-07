@@ -5,7 +5,7 @@
 // resolves the same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named
 // test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
 // once (the style of sell-mutants.mjs).
-//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 34 test runs, one per mutant)
+//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 54 test runs, one per mutant)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check, as the pool's own
 // ecrecover makes it): the v test (a v but 27 or 28 gives a recovery id below 0 or above 1, which recovers no key or
@@ -33,6 +33,7 @@ function movedAfter(line, after) {
   return [find, find.slice(line.length) + line];
 }
 const SIG_CHECK = EVM_TEXT.slice(EVM_TEXT.indexOf("    const signer = evmReleaseSigner(releaseChainId, pool, w);\n"), EVM_TEXT.indexOf("\n", EVM_TEXT.indexOf("    if (signer !== w.recipient) return no(422")) + 1);
+const ROUTE_CHECK = EVM_TEXT.slice(EVM_TEXT.indexOf("    if (w.buy !== undefined) {\n      try {\n        evmBuyRouteOf("), EVM_TEXT.indexOf("\n    }\n", EVM_TEXT.indexOf("        evmBuyRouteOf(")) + 7);
 const FEE_CAP_LINE = '    if (w.fee > w.feeCap) return no(422, "fee_over_cap", `fee ${w.fee}, cap ${w.feeCap}`);\n';
 
 const DIGEST = "the helper's release digest is the pool's";
@@ -42,6 +43,9 @@ const FORM = "W's signature only in its one form";
 const BUY = "buy's calldata is read in its one canonical encoding";
 const MAX = "a release's calldata is at most EVM_BODY_DATA_MAX";
 const PIN = "the chain id is the kit's pin";
+const DIRTY = "a dirty processooor, recipient or feeRecipient high bit";
+const ROUTE = "a buy through any adapter but the kit's pinned two";
+const HOLD = "a buy's worst gas is held against W, the client and the token";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -83,6 +87,30 @@ export const MUTANTS = [
   [EVM, "  const releaseChainId = sellVenue === undefined ? undefined : BigInt(sellVenue.chainId);", "  const releaseChainId = sellVenue === undefined ? undefined : 84532n;", T, GOOD],
   [EVM, '    if (releaseChainId === undefined) return no(503, "not_configured"', '    if (false) return no(503, "not_configured"', T, PIN],
   [EVM, '      if (id !== releaseChainId) return no(503, "upstream"', '      if (false) return no(503, "upstream"', T, PIN],
+  // review a2ff5521 L1: the relay words and the processooor in their one encoding
+  [EVM, "  if (!isAddressWord(processooor) || word(d, head + 1)", "  if (word(d, head + 1)", T, DIRTY],
+  [EVM, "  if (!isAddressWord(r(0)) || !isAddressWord(r(1)) ||", "  if (!isAddressWord(r(1)) ||", T, DIRTY],
+  [EVM, "  if (!isAddressWord(r(0)) || !isAddressWord(r(1)) ||", "  if (!isAddressWord(r(0)) ||", T, DIRTY],
+  [EVM, " || r(3) >> 64n !== 0n || ", " || ", T, DIRTY],
+  [EVM, " || (r(5) & ((1n << 128n) - 1n)) !== 0n) throw", ") throw", T, DIRTY],
+  // review a2ff5521 H1: a buy only through a pinned adapter's builder route, before any read
+  [EVM, "    if (w.buy !== undefined) {\n      try {\n        evmBuyRouteOf(", "    if (false) {\n      try {\n        evmBuyRouteOf(", T, ROUTE],
+  [EVM, ...movedAfter(ROUTE_CHECK, FEE_CAP_LINE), T, ROUTE],
+  [EVM, "evmBuyRouteOf(sellChain!, { adapter: w.buy.adapter, data: `0x${hex(w.buy.data)}`", "evmBuyRouteOf(sellChain!, { adapter: w.buy.adapter, data: `0x${hex(w.buy.data).slice(0, 640)}`", T, ROUTE],
+  // H1: a buy's worst gas held until it lands, by W, client, token and the buys' budget
+  [EVM, "    if (keys !== undefined) {\n      const capped = overCap(keys, 1n);", "    if (false) {\n      const capped = overCap(keys, 1n);", T, HOLD],
+  [EVM, "    if (keys !== undefined) {\n      const capped = overCap(keys, worst);", "    if (false) {\n      const capped = overCap(keys, worst);", T, HOLD],
+  [EVM, "landedBuy(charge(keys, worst), w, gas", "landedBuy({ at: now(), wei: worst }, w, gas", T, HOLD],
+  [EVM, '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', "  const ok = true;", T, HOLD],
+  [EVM, '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1");', T, HOLD],
+  [EVM, '  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', '  const ok = [ra].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));', T, HOLD],
+  [EVM, " && at(3) === buy.nullifier", "", T, HOLD],
+  [EVM, '["buys", `w:${w}`, `t:${token}`, ...(client', '["buys", `w:${w}`, ...(client', T, HOLD],
+  [EVM, '["buys", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])]', '["buys", `w:${w}`, `t:${token}`]', T, HOLD],
+  [EVM, '  const budget = k === "all" || k === "buys";', '  const budget = k === "all";', T, HOLD],
+  [EVM, "      if (sum > 0n && sum + extra > cap) {", "      if (sum + extra > cap) {", T, GOOD],
+  // review a2ff5521 L2: a revert is held against its method, so the same proof still withdraws in its epoch
+  [EVM, "        if (was === epoch && how === w.method) return no(422, \"reverted\");", "        if (was === epoch) return no(422, \"reverted\");", T, HOLD],
   // a withdraw's request read as before (evm.test.ts's signed requests)
   [EVM, '  if (word(d, 18) !== BigInt(32 * (HEAD_WORDS + W_WORDS))) throw new Error("the signature\'s offset");\n', "", T2, "withdraw's signature is read in its one canonical form"],
 ];
