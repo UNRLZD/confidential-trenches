@@ -37,6 +37,8 @@ export * from "./trade/solana/build.ts";
 export * from "./trade/solana/flow.ts";
 export * from "./trade/solana/pool.ts";
 export * from "./trade/solana/pool-buy.ts";
+// the same-chain pool deposit of one note of the ladder plan (card pool-deposits)
+export * from "./trade/solana/pool-deposit.ts";
 export * from "./trade/evm/pool-fee.ts";
 export * from "./trade/evm/buy.ts";
 export * from "./trade/evm/sell.ts";

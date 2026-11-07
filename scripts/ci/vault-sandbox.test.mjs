@@ -143,6 +143,16 @@ test("every test target is in exactly one shard", () => {
   assert.throws(() => shardArgs(SHARDS.length + 1), /no shard/);
 });
 
+// tests/harness/run.sh runs every #[ignore] vault test (VT-P01's long run, tests/tree_prop.rs); a plain cargo test skips them
+test("the suite runs the vault's ignored long runs", () => {
+  const run = readFileSync(path.join(ROOT, "contracts/vault/tests/harness/run.sh"), "utf8");
+  const line = run.split("\n").filter((l) => /^cargo \$TC test /.test(l));
+  assert.equal(line.length, 1, "run.sh has one cargo test line");
+  assert.match(line[0], / -- .*--include-ignored/, line[0]);
+  const prop = readFileSync(path.join(ROOT, "contracts/vault/tests/tree_prop.rs"), "utf8");
+  assert.match(prop, /#\[ignore = [^\]]*\]\nfn the_on_chain_store_gives_lean_imt_roots_after_every_insert_to_100000\(\)/);
+});
+
 test("planted: a test target in no shard, in two, or gone fails", () => {
   const all = targets();
   assert.deepEqual(shardProblems(SHARDS, [...all, "s99"]), ["s99 is in no shard, so CI never runs it"]);

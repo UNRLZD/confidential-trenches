@@ -1,22 +1,38 @@
-// POST /v1/pool/evm/send (card helper-pool-senders; v2 M3): the helper's EVM sender carries a pool withdraw the device
-// built, byte for byte as its calldata, or refuses it. The sender is an operating key holding only gas, read from the
+// POST /v1/pool/evm/send (card helper-pool-senders; v2 M3; card helper-evm-sender-2): the helper's EVM sender carries a
+// pool withdraw or buy the device built and W signed, byte for byte as its calldata, or refuses it. The sender is an operating key holding only gas, read from the
 // host's environment; it signs one EIP-1559 transaction to the pool with value 0 and exactly the calldata received, and
 // takes only the fee the proof's context caps, paid to the release's fee recipient.
 //
 // The body: { "pool": "0x<the pool>", "data": "0x<calldata>", "epoch": <the start, ms, of the epoch whose fee the
 // proof binds> }. Checks, each a refusal before any send (422 unless named):
 //   bad_shape        not withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes),
-//                    PrivacyPool.withdraw(Withdrawal, WithdrawProof, fee, W's signature) as the pool compiles it
-//                    (contracts/pool-evm/abi.json, card helper-evm-abi-tie), in its one canonical ABI encoding (every
-//                    offset, length and padding as the encoder writes them, a 65-byte signature, nothing after), or over
-//                    EVM_BODY_DATA_MAX (400);
+//                    PrivacyPool.withdraw(Withdrawal, WithdrawProof, fee, W's signature), nor buy((address,bytes),
+//                    (uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes),
+//                    PrivacyPoolSimple.buy(Withdrawal, WithdrawProof, fee, Buy, W's signature), as the pool compiles
+//                    them (contracts/pool-evm/abi.json, card helper-evm-abi-tie), in its one canonical ABI encoding
+//                    (every offset, length and padding as the encoder writes them, a 65-byte signature, nothing after),
+//                    or over EVM_BODY_DATA_MAX (400);
 //   not_pool         the withdrawal's processooor is not the pool the body names, which this helper carries;
 //   fee_recipient    the request pays the fee to anyone but this release's fee recipient;
+//   not_configured (503) the kit pins no chain id for the network (evmPoolVenues): every release, nothing read;
+//   bad_signature    W's signature does not recover to the request's recipient over the pool's own EIP-712 digest of
+//                    exactly this release (evmReleaseDigest: domain Blindfill, 1, the network's pinned chain id, the
+//                    pool; Withdraw(uint256 nullifier,uint256 context,uint256 value), or Buy(address adapter,bytes data,
+//                    uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value) with the proof's
+//                    pubSignals 1, 7 and 2; M354, M357), or its v is not 27 or 28, r or s is 0 or not under n, or s is
+//                    over n / 2 (the pool's HALF_N); checked before any RPC call, so a forged or replayed release, or
+//                    one W signed for another value, nullifier, context, chain, pool or method, costs no read;
+//   bad_route        a buy's adapter is not one of the kit's pinned adapters for the network, or its data is not the
+//                    bytes the kit's builder makes for the route it reads as (the kit's evmBuyRouteOf, the one
+//                    definition, as a sale's evmSellRouteOf: decoded, encoded again as the device builds every buy,
+//                    byte for byte, buying the Buy's token); before any RPC call (the adapter runs whatever code it
+//                    holds, at the sender's gas);
 //   epoch_off        the epoch is not inside the proof's life (deadlineMs - POOL_LIFE_MAX_MS up to the deadline), is
 //                    outside [now - POOL_LIFE_MAX_MS, now], or the chain has no block in it yet;
 //   deadline_near    the deadline is under now + EVM_POOL_SEND_MARGIN_MS (these first checks make no RPC call);
-//   reverted         this nullifier's send in this epoch reverted on chain: it is never sent again in this epoch
-//                    (M356 (1)); a new proof in a later epoch is its own send;
+//   reverted         this nullifier's send by this method in this epoch reverted on chain: it is never sent again by
+//                    that method in this epoch (M356 (1)); the same proof by the other method (a withdraw after its buy
+//                    missed minOut) and a new proof in a later epoch are each their own send;
 //   fee_off          the fee is not the fee this helper publishes for that epoch: the kit's evmPoolFee (trade/evm/
 //                    pool-fee.ts, the device's own rule) at the epoch's first block, with G at the pool's tree depth
 //                    there and the chain fee there, each read at that block's hash on both providers;
@@ -31,15 +47,30 @@
 //   rate_limited (429) EVM_QUEUE_MAX sends are already waiting (Retry-After EVM_BUSY_RETRY_S; card helper-abuse-limits:
 //                    the helper's own budget is a wait, never a 503); or a provider throttled a read or the send (its
 //                    HTTP 429, a rate-limit error, EIP-1474's -32005; Retry-After 1, limits.ts throttleOf);
+//   rate_limited (429) for a buy: the unpaid gas held against its W, the client, its token (each
+//                    EVM_SELL_UNPAID_CAP_WEI, shared with the sales) or the withdraw sender's whole buy budget
+//                    (EVM_SELL_UNPAID_BUDGET_WEI) in EVM_SELL_UNPAID_WINDOW_MS would pass its cap, before any read and
+//                    again with this buy's worst cost, Retry-After until the oldest leaves it (a key holding nothing
+//                    takes one buy whatever its worst); a repeat of a release already sent gets its first hash, never
+//                    this; or the sender's lower pending balance on the two providers, less the buys in flight at
+//                    their worst and this one's, would fall under the withdraws' reserve (EVM_WITHDRAW_RESERVE_SENDS x
+//                    EVM_GAS_MAX x (2 x base + tip)), Retry-After EVM_LANE_RETRY_S; withdraws are never held by these;
 //   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
 //                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
 //   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error),
-//                    or the two providers name different chains.
+//                    or the two providers name different chains, or a chain other than the network's pinned one
+//                    (M356 (6)): the send is signed only for the chain W signed for.
 // A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
-// reverted is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the sender never pays more
-// gas than the fee, and a send the helper accepts either lands and spends or fails in the simulation.
-// Answer: 200 { hash }. pool-evm-buy adds buy() with W's EIP-712 signature: its selector goes in SELECTORS with its own
-// decoder, and the same fee, recipient, simulation and send rules apply.
+// reverted by the same method is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the
+// sender never pays more gas than the fee. A withdraw the helper accepts lands or fails in the simulation (the recipient
+// holds no code); a buy can still revert on chain after its simulation passed (its adapter's swap misses minOut once
+// the price moves), and then the sender pays its gas and gets no fee: so a buy's worst cost (gas x maxFeePerGas) is held
+// against its caps from the send, and its receipts, read in the background on both providers, release it only when both
+// read status 1 and each carries the pool's Bought log of this buy (from the pool, recipient W, this fee recipient,
+// fee, nullifier and token), to its cost less the fee, at least 0; any other receipt pair is charged its whole cost
+// (evmBuyUnpaid), and a proven buy marks its W and client as a paid sale does.
+// Answer: 200 { hash }. A buy runs every rule a withdraw does, on the same lane and once key (one proof serves either
+// method, and W's signature picks which; one send in flight per nullifier).
 //
 // POST /v1/pool/evm/sell (card helper-evm-sender): W's sell of its token back into the pool. W holds no ETH and sends
 // nothing: the device sends W's EIP-712 Sell inside SellDelegate.sell's calldata and W's EIP-7702 authorization of the
@@ -97,9 +128,12 @@
 //   rate_limited (429) the sell lane's queue is full; or the unpaid gas held against W, the client, the token (each
 //                    EVM_SELL_UNPAID_CAP_WEI) or the sender's whole sell budget (EVM_SELL_UNPAID_BUDGET_WEI) in the
 //                    window would pass its cap with this sale's worst cost, each with Retry-After until the oldest
-//                    leaves it; a caller (W or client) whose own sale landed and paid in the window is held by its own
-//                    W and client caps and the budget, never by the token's, so unpaid gas never passes the budget.
-//                    Withdraws are never held by these;
+//                    leaves it (a cap holding nothing takes one sale whatever its worst, which a gas spike can lift past
+//                    the cap: one such sale per empty key); a caller (W or client) whose own sale landed and paid in the
+//                    window is held by its own W and client caps and the budget, never by the token's, so unpaid gas
+//                    never passes the budget by more than one sale.
+//                    Withdraws are never held by these; buys are, by the same W, client and token caps and their own
+//                    budget (above);
 //   in_flight (429)  as the withdraw: one held limit per client across both routes.
 // The send: from the sell sender's own key (never the withdraw sender's) on its own queue and nonce lane; gas exactly
 // EVM_POOL_SELL_GAS and maxPriorityFeePerGas exactly the kit's evmPoolSellTip (pins the device's sim copies, never
@@ -149,6 +183,7 @@ import {
   evmPoolFee,
   evmPoolGas,
   evmPoolSellTip,
+  evmBuyRouteOf,
   evmPoolVenues,
   evmRpcOperator,
   evmSellRouteOf,
@@ -160,9 +195,13 @@ import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, type ProviderHolds } from "../limits/limits.ts";
 
-/** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 32 = 1,028 bytes, WITHDRAW_LEN). */
-export const POOL_EVM_BODY_MAX = 4_096;
-export const EVM_BODY_DATA_MAX = 2_048;
+/** POST /v1/pool/evm/send's body limit, and the calldata's: a withdraw is 4 + 32 x 32 = 1,028 bytes (WITHDRAW_LEN), a buy
+ *  1,220 bytes plus its swap data padded; the most a release's calldata can be is the most whose signed transaction, at
+ *  every field's longest, fits the kit's EVM_POOL_TX_BYTES (2,600), the bytes the epoch fee pays the chain fee for (a
+ *  larger one would be sent at the sender's cost): 2,404 bytes (evm.test.ts holds it), which takes the kit's longest
+ *  route with no hook data, 4 v4 hops, at 2,212. */
+export const POOL_EVM_BODY_MAX = 8_192;
+export const EVM_BODY_DATA_MAX = 2_404;
 /** The most gas the helper pays for one withdraw: the measured Privacy Pools withdrawal is 611,391 (M349), so 2.5x [design]. */
 export const EVM_GAS_MAX = 1_500_000n;
 
@@ -172,35 +211,79 @@ const selectorOf = (sig: string): string => hex(keccak_256(new TextEncoder().enc
 /** The pool's withdraw as it compiles (contracts/pool-evm/abi.json; contracts/pool-evm/test/abi-tie.test.mjs ties it). */
 export const WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)";
 export const WITHDRAW_SELECTOR = selectorOf(WITHDRAW_SIGNATURE);
+/** The pool's buy as it compiles (PrivacyPoolSimple.buy: Withdrawal, WithdrawProof, fee, Buy, W's signature). */
+export const BUY_SIGNATURE = "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)";
+export const BUY_SELECTOR = selectorOf(BUY_SIGNATURE);
 
 const word = (d: Uint8Array, i: number): bigint => BigInt(`0x${hex(d.subarray(4 + 32 * i, 4 + 32 * (i + 1))) || "0"}`);
 const HEAD_WORDS = 19; // the Withdrawal's offset, the proof's 16 words, the fee, the signature's offset
-const W_OFFSET = BigInt(32 * HEAD_WORDS); // the Withdrawal tuple's tail starts after the head
+const BUY_HEAD_WORDS = 20; // the Withdrawal's offset, the proof's 16 words, the fee, the Buy's offset, the signature's offset
 const RELAY_WORDS = 6; // recipient, feeRecipient, feeCap, deadlineMs, refundPrecommitment, salt
 const W_WORDS = 3 + RELAY_WORDS; // processooor, the data's offset (64), its length (192), the data
-const SIG_OFFSET = BigInt(32 * (HEAD_WORDS + W_WORDS)); // W's signature's tail, after the Withdrawal's
 const SIG_WORDS = 4; // its length (65), r, s, v and 31 zero bytes
+const BUY_WORDS = 5; // adapter, the data's offset (128), minOut, token, the data's length; then the data, padded
 const WITHDRAW_LEN = 4 + 32 * (HEAD_WORDS + W_WORDS + SIG_WORDS);
+const BUY_LEN_MIN = 4 + 32 * (BUY_HEAD_WORDS + W_WORDS + BUY_WORDS + SIG_WORDS);
 const isAddressWord = (w: bigint) => w >> 160n === 0n;
 const addr = (w: bigint) => `0x${w.toString(16).padStart(40, "0")}`;
 
-export type EvmWithdraw = { processooor: string; recipient: string; feeRecipient: string; feeCap: bigint; deadlineMs: bigint; fee: bigint; nullifier: string };
+/** A release's calldata read back: the request, the fee, the proof's nullifier (hex, the send's once key), value and
+ *  context (pubSignals 1, 2 and 7: ProofLib.sol), W's 65 signature bytes, and for a buy its Buy. */
+export type EvmRelease = {
+  method: "withdraw" | "buy";
+  processooor: string; recipient: string; feeRecipient: string; feeCap: bigint; deadlineMs: bigint; fee: bigint;
+  nullifier: string; value: bigint; context: bigint; signature: Uint8Array;
+  buy?: { adapter: string; data: Uint8Array; minOut: bigint; token: string };
+};
+export type EvmWithdraw = EvmRelease;
+
+/** The words a withdraw and a buy share, read from a head of `head` words: the Withdrawal's offset and its tail (exactly
+ *  abi.encode(RelayData), as the pool's _relayData takes only 192 bytes), the fee, the proof's public values. */
+function readRelease(d: Uint8Array, head: number, method: EvmRelease["method"], sigAt: number): EvmRelease {
+  if (word(d, 0) !== BigInt(32 * head)) throw new Error("the withdrawal's offset");
+  const processooor = word(d, head);
+  if (!isAddressWord(processooor) || word(d, head + 1) !== 64n || word(d, head + 2) !== BigInt(32 * RELAY_WORDS)) throw new Error("the withdrawal's layout");
+  const r = (i: number) => word(d, head + 3 + i);
+  if (!isAddressWord(r(0)) || !isAddressWord(r(1)) || r(3) >> 64n !== 0n || (r(5) & ((1n << 128n) - 1n)) !== 0n) throw new Error("the relay data's padding");
+  // the signature: 65 bytes, as the pool's _signer takes only 65; the rest of its last word zero
+  if (word(d, sigAt) !== 65n || (word(d, sigAt + 3) & ((1n << 248n) - 1n)) !== 0n) throw new Error("the signature's layout");
+  const at = 4 + 32 * (sigAt + 1);
+  // the proof's pubSignals start at head word 9 (after pA 2, pB 4, pC 2): [1] the nullifier, [2] the value, [7] the context
+  return {
+    method, processooor: addr(processooor), recipient: addr(r(0)), feeRecipient: addr(r(1)), feeCap: r(2), deadlineMs: r(3), fee: word(d, 17),
+    nullifier: word(d, 10).toString(16).padStart(64, "0"), value: word(d, 11), context: word(d, 16), signature: d.slice(at, at + 65),
+  };
+}
 
 /** A withdraw's calldata read back; throws unless it is exactly the one canonical encoding. */
-export function evmReadWithdraw(d: Uint8Array): EvmWithdraw {
+export function evmReadWithdraw(d: Uint8Array): EvmRelease {
   if (d.length !== WITHDRAW_LEN || hex(d.subarray(0, 4)) !== WITHDRAW_SELECTOR) throw new Error("not withdraw's calldata");
-  if (word(d, 0) !== W_OFFSET) throw new Error("the withdrawal's offset");
-  const fee = word(d, 17);
-  if (word(d, 18) !== SIG_OFFSET) throw new Error("the signature's offset");
-  const processooor = word(d, HEAD_WORDS);
-  if (!isAddressWord(processooor) || word(d, HEAD_WORDS + 1) !== 64n || word(d, HEAD_WORDS + 2) !== BigInt(32 * RELAY_WORDS)) throw new Error("the withdrawal's layout");
-  const at = HEAD_WORDS + W_WORDS; // the signature: 65 bytes, as the pool's _signer takes only 65; the rest of its word zero
-  if (word(d, at) !== 65n || (word(d, at + 3) & ((1n << 248n) - 1n)) !== 0n) throw new Error("the signature's layout");
-  const r = (i: number) => word(d, HEAD_WORDS + 3 + i);
-  if (!isAddressWord(r(0)) || !isAddressWord(r(1)) || r(3) >> 64n !== 0n || (r(5) & ((1n << 128n) - 1n)) !== 0n) throw new Error("the relay data's padding");
-  // pubSignals[1], existingNullifierHash: head word 1 + 2 (pA) + 4 (pB) + 2 (pC) + 1
-  const nullifier = word(d, 10).toString(16).padStart(64, "0");
-  return { processooor: addr(processooor), recipient: addr(r(0)), feeRecipient: addr(r(1)), feeCap: r(2), deadlineMs: r(3), fee, nullifier };
+  if (word(d, 18) !== BigInt(32 * (HEAD_WORDS + W_WORDS))) throw new Error("the signature's offset");
+  return readRelease(d, HEAD_WORDS, "withdraw", HEAD_WORDS + W_WORDS);
+}
+
+/** A buy's calldata read back; throws unless it is exactly the one canonical encoding, nothing after the signature. */
+export function evmReadBuy(d: Uint8Array): EvmRelease {
+  if (d.length < BUY_LEN_MIN || d.length > EVM_BODY_DATA_MAX || (d.length - 4) % 32 !== 0 || hex(d.subarray(0, 4)) !== BUY_SELECTOR) throw new Error("not buy's calldata");
+  const at = BUY_HEAD_WORDS + W_WORDS; // the Buy's tail, after the Withdrawal's
+  if (word(d, 18) !== BigInt(32 * at)) throw new Error("the buy's offset");
+  const b = (i: number) => word(d, at + i);
+  if (!isAddressWord(b(0)) || !isAddressWord(b(3))) throw new Error("an address's padding");
+  if (b(1) !== BigInt(32 * 4)) throw new Error("the buy data's offset");
+  const len = b(4);
+  if (len > BigInt(d.length)) throw new Error("the buy data's length");
+  const padded = Math.ceil(Number(len) / 32);
+  const sigAt = at + BUY_WORDS + padded;
+  if ((d.length - 4) / 32 !== sigAt + SIG_WORDS) throw new Error("the buy's length");
+  if (word(d, 19) !== BigInt(32 * sigAt)) throw new Error("the signature's offset");
+  const dataAt = 4 + 32 * (at + BUY_WORDS);
+  if (d.subarray(dataAt + Number(len), dataAt + 32 * padded).some((x) => x !== 0)) throw new Error("the buy data's padding");
+  return { ...readRelease(d, BUY_HEAD_WORDS, "buy", sigAt), buy: { adapter: addr(b(0)), data: d.slice(dataAt, dataAt + Number(len)), minOut: b(2), token: addr(b(3)) } };
+}
+
+/** A withdraw's or a buy's calldata, by its selector; throws on any other. */
+export function evmReadRelease(d: Uint8Array): EvmRelease {
+  return hex(d.subarray(0, 4)) === BUY_SELECTOR ? evmReadBuy(d) : evmReadWithdraw(d);
 }
 
 // ---- RLP and the EIP-1559 transaction ----
@@ -317,6 +400,23 @@ export function evmSellDigest(chainId: bigint, w: string, s: EvmSell): Uint8Arra
   return keccak_256(Uint8Array.from([0x19, 0x01, ...domain, ...struct]));
 }
 
+/** The pool's release types (PrivacyPool.sol WITHDRAW_TYPEHASH, PrivacyPoolSimple.sol BUY_TYPEHASH; M354, M357 (2)). */
+const WITHDRAW_TYPE = keccak_256(utf8("Withdraw(uint256 nullifier,uint256 context,uint256 value)"));
+const BUY_TYPE = keccak_256(utf8("Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)"));
+/** The EIP-712 digest W signs to take a proof as `r`'s method, as the pool's _typedDigest makes it: domain Blindfill,
+ *  1, `chainId`, verifyingContract the pool; the struct the method's type with the Buy's fields (a buy) and the proof's
+ *  nullifier, context and value. */
+export function evmReleaseDigest(chainId: bigint, pool: string, r: EvmRelease): Uint8Array {
+  const domain = keccak_256(Uint8Array.from([...DOMAIN_TYPE, ...keccak_256(utf8("Blindfill")), ...keccak_256(utf8("1")), ...w32(chainId), ...w32(BigInt(pool))]));
+  const proof = [BigInt(`0x${r.nullifier}`), r.context, r.value].map(w32).flatMap((x) => [...x]);
+  const b = r.buy;
+  if ((r.method === "buy") !== (b !== undefined)) throw new Error("a buy is exactly a release with its Buy");
+  const struct = b !== undefined
+    ? keccak_256(Uint8Array.from([...BUY_TYPE, ...w32(BigInt(b.adapter)), ...keccak_256(b.data), ...w32(b.minOut), ...w32(BigInt(b.token)), ...proof]))
+    : keccak_256(Uint8Array.from([...WITHDRAW_TYPE, ...proof]));
+  return keccak_256(Uint8Array.from([0x19, 0x01, ...domain, ...struct]));
+}
+
 const N = secp256k1.Point.CURVE().n;
 /** The address that signed `digest` with (recovery, r, s), or null where none does. */
 function recoverAddress(digest: Uint8Array, recovery: number, r: bigint, s: bigint): string | null {
@@ -327,6 +427,17 @@ function recoverAddress(digest: Uint8Array, recovery: number, r: bigint, s: bigi
   } catch {
     return null;
   }
+}
+
+/** The address whose signature `r` carries over its digest on `pool` and chain `chainId`, as the pool's _signer reads
+ *  it (r ‖ s ‖ v), or null unless it is in its one form: v 27 or 28, r and s in 1..n-1, s at most n / 2 (EIP-2), as the
+ *  pool's HALF_N; a signature with s high is refused even where its low twin is W's (the pool reverts it). */
+export function evmReleaseSigner(chainId: bigint, pool: string, r: EvmRelease): string | null {
+  const sig = r.signature;
+  if (sig.length !== 65) return null;
+  const [sr, ss, sv] = [BigInt(`0x${hex(sig.subarray(0, 32))}`), BigInt(`0x${hex(sig.subarray(32, 64))}`), sig[64]!];
+  if ((sv !== 27 && sv !== 28) || sr === 0n || sr >= N || ss === 0n || ss > N / 2n) return null;
+  return recoverAddress(evmReleaseDigest(chainId, pool, r), sv - 27, sr, ss);
 }
 
 // ---- The epoch fee (M352 (2)) ----
@@ -350,6 +461,17 @@ export const EVM_QUEUE_MAX = 64;
 export const EVM_IN_FLIGHT_MAX = 2;
 /** The wait a full queue or a client's held limit names [design: a send's reads and send take about a second]. */
 export const EVM_BUSY_RETRY_S = 2;
+/**
+ * The withdraws whose gas the withdraw sender always keeps for them, at their worst (EVM_GAS_MAX x (2 x base + tip)):
+ * a buy is refused (429) when the lower of the two providers' pending balances, less every buy still in flight at its
+ * worst and this buy's worst, would fall under it (review of 7d210cb5, M1). A buy whose coin or hook reverts on
+ * chain after its simulation passed costs its sender gas and pays no fee, so buys could spend the float the withdraws
+ * need; with this reserve they stop first and every withdraw still goes. N = EVM_QUEUE_MAX: every withdraw the lane can
+ * hold at once, so a full lane of withdraws is paid at the worst price any of them can be sent at; the fees those
+ * withdraws pay go to the fee recipient (the sender itself unless POOL_EVM_FEE_RECIPIENT_<NETWORK> names another), and
+ * the operator refills the sender from that.
+ */
+export const EVM_WITHDRAW_RESERVE_SENDS = EVM_QUEUE_MAX;
 /**
  * How long past a Sell's deadline, on our clock, a sale with no receipt and no transaction on either provider still
  * holds its (W, Sell nonce): SellDelegate checks the deadline against the block's time, so a helper whose clock runs up
@@ -446,6 +568,49 @@ export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, un
   const cost = ca > cb ? ca : cb;
   const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmSalePaid(r, sale.collector, sale.w, sale.fee));
   return { proven: ok, paid: ok && cost <= sale.fee, unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };
+}
+export const BOUGHT_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)")))}`;
+/** Whether receipt `r` carries the pool's Bought log of this buy: from the pool, `_recipient` W (its one indexed
+ *  field), and in its data (IPrivacyPool.sol Bought) the fee recipient, the fee, the spent nullifier and the token the
+ *  buy signed. Only the pool emits it, and only after the adapter ran and W's balance rose by minOut
+ *  (PrivacyPoolSimple.buy): the adapter's own logs, whatever code it runs, prove nothing. */
+export function evmBuyLanded(r: unknown, buy: { pool: string; w: string; feeRecipient: string; fee: bigint; nullifier: string; token: string }): boolean {
+  const logs = (r as { logs?: unknown } | null)?.logs;
+  if (!Array.isArray(logs)) return false;
+  const pad = (a: string) => a.slice(2).toLowerCase().padStart(64, "0");
+  return logs.some((l) => {
+    if (typeof l !== "object" || l === null) return false;
+    const { address, topics, data, removed } = l as { address?: unknown; topics?: unknown; data?: unknown; removed?: unknown };
+    if (removed === true || evmRpcHex(address) !== buy.pool || !Array.isArray(topics) || topics.length !== 2) return false;
+    if (evmRpcHex(topics[0]) !== BOUGHT_TOPIC || evmRpcHex(topics[1]) !== `0x${pad(buy.w)}`) return false;
+    const d = evmRpcHex(data);
+    if (d === null || d.length !== 2 + 7 * 64) return false;
+    const at = (i: number) => d.slice(2 + 64 * i, 2 + 64 * (i + 1));
+    return at(0) === pad(buy.feeRecipient) && BigInt(`0x${at(2)}`) === buy.fee && at(3) === buy.nullifier && at(5) === pad(buy.token);
+  });
+}
+/**
+ * What a sent buy left unpaid, from its two receipts, one per provider, read as hostile (card helper-evm-sender-2, review
+ * a2ff5521 H1): the adapter runs code the sender cannot vet, so a buy can revert on chain after its simulation passed.
+ * Proven only when both read status 1 and each carries the pool's Bought log of this buy (evmBuyLanded): then the fee
+ * was paid and what is held is the cost less the fee, at least 0 (the fee caps the gas, maxFeePerGas at most fee / gas,
+ * but not the receipt's l1Fee), as evmSaleUnpaid holds a sale. Any other pair is charged its whole cost: the higher of the two receipts' gasUsed x effectiveGasPrice + l1Fee, each part held to what the buy can cost
+ * (gasUsed at most the gas it was sent with, effectiveGasPrice at most its maxFeePerGas, l1Fee at most `worst`); a
+ * receipt whose cost cannot be read counts `worst`.
+ */
+export function evmBuyUnpaid(ra: Record<string, unknown>, rb: Record<string, unknown>, buy: { pool: string; w: string; feeRecipient: string; fee: bigint; nullifier: string; token: string; gas: bigint; maxFeePerGas: bigint }, worst: bigint): { proven: boolean; unpaid: bigint } {
+  const most = (v: bigint, cap: bigint) => (v < cap ? v : cap);
+  const costOf = (r: Record<string, unknown>): bigint => {
+    try {
+      return most(qty(r.gasUsed), buy.gas) * most(qty(r.effectiveGasPrice), buy.maxFeePerGas) + (r.l1Fee === undefined || r.l1Fee === null ? 0n : most(qty(r.l1Fee), worst));
+    } catch {
+      return worst;
+    }
+  };
+  const [ca, cb] = [costOf(ra), costOf(rb)];
+  const cost = ca > cb ? ca : cb;
+  const ok = [ra, rb].every((r) => evmRpcHex(r.status) === "0x1" && evmBuyLanded(r, buy));
+  return { proven: ok, unpaid: ok ? (cost > buy.fee ? cost - buy.fee : 0n) : cost };
 }
 /** The first wait before a sent transaction's receipt is read, doubling each read up to EVM_RECEIPT_POLL_BACKOFF times
  *  it (400 ms to 30 s), until its deadline plus the send margin [design: two of Base's 200 ms blocks (2 s, one block,
@@ -643,7 +808,10 @@ export function evmPoolSender(
   const sentIn = new WeakMap<Promise<PoolEvmAnswer>, number>();
   /** Each remembered send's deadline (ms), so a repeat can tell a dropped withdraw from a waiting one. */
   const sentDeadline = new WeakMap<Promise<PoolEvmAnswer>, number>();
-  /** `${epoch}:${nullifier}` of every send that reverted on chain, the oldest dropped first (M356 (1)). */
+  /** Each remembered send's method, so a revert is held against the method that reverted. */
+  const sentMethod = new WeakMap<Promise<PoolEvmAnswer>, EvmRelease["method"]>();
+  /** `${epoch}:${method}:${nullifier}` of every send that reverted on chain, the oldest dropped first (M356 (1)): a buy
+   *  that reverted (its minOut not met) leaves the same proof free to withdraw in its epoch, and the reverse. */
   const reverted = new Set<string>();
   const revertMemory = cfg.memory ?? POOL_SEND_MEMORY;
   const fees = new Map<number, Promise<{ block: EvmBlock; fee: bigint } | null>>();
@@ -654,6 +822,9 @@ export function evmPoolSender(
   const sellChain = sellVenue === undefined ? undefined : (cfg.network as EvmPoolChain);
   const pinned = sellVenue !== undefined && Object.hasOwn(sellVenue, "sellDelegate") && typeof sellVenue.sellDelegate === "string" ? sellVenue.sellDelegate.toLowerCase() : undefined;
   const sellDelegate = pinned !== undefined && ADDRESS.test(pinned) ? pinned : undefined;
+  // the chain id a withdraw's or a buy's W signature is checked under and its send signed for: the kit's pin for the
+  // network (M356 (6)); a network the kit does not list refuses every release
+  const releaseChainId = sellVenue === undefined ? undefined : BigInt(sellVenue.chainId);
   const sells = oncePerNullifier<PoolEvmAnswer>(cfg.memory);
   /** Each remembered sale's Sell deadline (unix seconds), so a repeat can tell a dropped sale from a waiting one. */
   const sellDeadline = new WeakMap<Promise<PoolEvmAnswer>, bigint>();
@@ -663,6 +834,10 @@ export function evmPoolSender(
    *  every key of its sale, so its receipt updates them all at once. */
   type Charge = { at: number; wei: bigint };
   const unpaid = new Map<string, Charge[]>();
+  /** Each buy sent whose two receipts are not yet read, its worst held: the withdraws' reserve counts them as spent. */
+  const buysInFlight = new Set<Charge>();
+  /** Whether the last buy that read the reserve stopped at it: one log line per stop and per start again. */
+  let reserveHeld = false;
   const live = (k: string, t: number): Charge[] => {
     const l = (unpaid.get(k) ?? []).filter((c) => c.at > t - EVM_SELL_UNPAID_WINDOW_MS);
     if (l.length === 0) unpaid.delete(k);
@@ -678,11 +853,18 @@ export function evmPoolSender(
     for (const k of keys) {
       if (known && k.startsWith("t:")) continue;
       const l = live(k, t);
-      const cap = k === "all" ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;
+      const budget = k === "all" || k === "buys";
+      const cap = budget ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;
       const sum = l.reduce((x, c) => x + c.wei, 0n);
-      if (sum + extra > cap) {
+      // a key with nothing held takes one send whatever its worst (a buy's worst is at most its fee, which a gas spike
+      // can lift past a cap: one buy is never refused for its own size). So a key holds at most its cap plus the one
+      // send that found it empty: a W, client or token key, which buys and sales share, its cap plus one buy and one
+      // sale (each may find it empty at once). A sale's worst, gas x min(2 x base + tip, (fee - the chain fee) / gas), has
+      // no ceiling of its own (EVM_SELL_MAX_FEE_PER_GAS caps only the lane's replacements), so in a gas spike it too can
+      // pass the cap: one such sale per empty key
+      if (sum > 0n && sum + extra > cap) {
         const oldest = l.length > 0 ? l[0]!.at : t;
-        return { ...no(429, "rate_limited", `unpaid sell gas ${sum} wei for ${k === "all" ? "this sender" : k.slice(0, 1) === "w" ? "W" : k.slice(0, 1) === "c" ? "this client" : "this token"}, cap ${cap}`), retryAfterS: Math.max(1, Math.ceil((oldest + EVM_SELL_UNPAID_WINDOW_MS - t) / 1000)) };
+        return { ...no(429, "rate_limited", `unpaid ${keys[0] === "buys" ? "buy" : "sell"} gas ${sum} wei for ${budget ? "this sender" : k.slice(0, 1) === "w" ? "W" : k.slice(0, 1) === "c" ? "this client" : "this token"}, cap ${cap}`), retryAfterS: Math.max(1, Math.ceil((oldest + EVM_SELL_UNPAID_WINDOW_MS - t) / 1000)) };
       }
     }
     return null;
@@ -693,6 +875,9 @@ export function evmPoolSender(
     return c;
   };
   const sellKeys = (w: string, client: string | undefined, token: string) => ["all", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])];
+  // a buy's keys (card helper-evm-sender-2, review a2ff5521 H1): the same W, client and token caps as a sale (one
+  // caller's unpaid gas, either route), and the withdraw sender's own budget ("buys"), as the sell sender has "all"
+  const buyKeys = (w: string, client: string | undefined, token: string) => ["buys", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])];
   const no = (status: number, code: PoolEvmCode, detail?: string): PoolEvmAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
   // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
   // upstream (card helper-abuse-limits: a 503 never means "wait")
@@ -756,7 +941,7 @@ export function evmPoolSender(
     p.then(leave, leave);
     return p;
   };
-  const carry = (body: unknown, client?: string): Promise<PoolEvmAnswer> => holding(client, () => carryHeld(body));
+  const carry = (body: unknown, client?: string): Promise<PoolEvmAnswer> => holding(client, () => carryHeld(body, client));
   const sell = (body: unknown, client?: string): Promise<PoolEvmAnswer> => holding(client, () => sellHeld(body, client));
   // one queue and one nonce lane per key: each send waits for the one before it on its lane
   const enqueue = (lane: Lane, job: () => Promise<PoolEvmAnswer>): Promise<PoolEvmAnswer> => {
@@ -769,20 +954,36 @@ export function evmPoolSender(
     lane.queue = run.catch(() => {});
     return run;
   };
-  const carryHeld = async (body: unknown): Promise<PoolEvmAnswer> => {
+  const carryHeld = async (body: unknown, client: string | undefined): Promise<PoolEvmAnswer> => {
     if (typeof body !== "object" || body === null || Array.isArray(body) || Object.keys(body).length !== 3) return no(400, "bad_shape");
     const { pool: p, data, epoch } = body as { pool?: unknown; data?: unknown; epoch?: unknown };
     if (p !== pool || typeof data !== "string" || data.length > 2 + 2 * EVM_BODY_DATA_MAX || !HEX.test(data)) return no(400, "bad_shape");
     if (typeof epoch !== "number" || !Number.isSafeInteger(epoch) || epoch <= 0 || epoch % POOL_EPOCH_MS !== 0) return no(400, "bad_shape");
     const bytes = unhex(data.slice(2));
-    let w: EvmWithdraw;
+    let w: EvmRelease;
     try {
-      w = evmReadWithdraw(bytes);
+      w = evmReadRelease(bytes);
     } catch (e) {
       return no(400, "bad_shape", (e as Error).message);
     }
     if (w.processooor !== pool) return no(422, "not_pool");
     if (w.feeRecipient !== feeRecipient) return no(422, "fee_recipient");
+    // W picked this release (M354, M357): its signature of exactly this method, Buy, nullifier, context and value, on
+    // this pool and the network's pinned chain id, in its one form (65 bytes, v 27 or 28, s low), by the recipient, as
+    // the pool's _release checks it; no RPC call before it, so a forged or replayed release costs no read
+    if (releaseChainId === undefined) return no(503, "not_configured", `the kit pins no chain id for ${cfg.network}`);
+    const signer = evmReleaseSigner(releaseChainId, pool, w);
+    if (signer !== w.recipient) return no(422, "bad_signature", signer === null ? "not one signature: v not 27 or 28, r or s out of range, s high, or no key" : `signed by ${signer}, not the recipient W`);
+    // a buy's adapter runs whatever code it holds, at the sender's gas: only one of the kit's pinned adapters, along a
+    // route the device's own builder makes for this Buy, byte for byte (the kit's evmBuyRouteOf, the one definition, as
+    // a sale's evmSellRouteOf); no RPC call before it
+    if (w.buy !== undefined) {
+      try {
+        evmBuyRouteOf(sellChain!, { adapter: w.buy.adapter, data: `0x${hex(w.buy.data)}`, minOut: w.buy.minOut, token: w.buy.token });
+      } catch (e) {
+        return no(422, "bad_route", String((e as Error).message).slice(0, 200));
+      }
+    }
     // the proof's epoch: inside its life (at most POOL_LIFE_MAX_MS before its deadline, before the deadline), never
     // later than the epoch now nor older than a proof's life; then a deadline at least the send margin away. No RPC
     // call before these, so an old or expired request costs no read (M356 (3)).
@@ -790,7 +991,15 @@ export function evmPoolSender(
     const t = now();
     if (epoch < deadline - POOL_LIFE_MAX_MS || epoch >= deadline || epoch > epochStartOf(t) || epoch < t - POOL_LIFE_MAX_MS) return no(422, "epoch_off");
     if (deadline < t + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${deadline}, now ${t}`);
-    if (reverted.has(`${epoch}:${w.nullifier}`)) return no(422, "reverted");
+    if (reverted.has(`${epoch}:${w.method}:${w.nullifier}`)) return no(422, "reverted");
+    // a buy's unpaid-gas caps, before any read: a W, client or token already at its cap, or the buys' budget spent, waits;
+    // a repeat of a release already sent is not held here (its own held worst may fill the cap): it gets its first hash
+    // below, and a repeat after that send ended is held just before its new send
+    const keys = w.buy === undefined ? undefined : buyKeys(w.recipient, client, w.buy.token);
+    if (keys !== undefined && once.get(w.nullifier) === undefined) {
+      const capped = overCap(keys, 1n);
+      if (capped !== null) return capped;
+    }
     let epochFee: { block: EvmBlock; fee: bigint } | null;
     try {
       epochFee = await feeOf(epoch);
@@ -814,34 +1023,45 @@ export function evmPoolSender(
       if (end === "waiting") return first;
       if (end === "reverted") {
         const was = sentIn.get(prior) ?? epoch;
-        reverted.add(`${was}:${w.nullifier}`);
+        const how = sentMethod.get(prior) ?? w.method;
+        reverted.add(`${was}:${how}:${w.nullifier}`);
         while (reverted.size > revertMemory) reverted.delete(reverted.values().next().value as string);
         once.forget(w.nullifier, prior);
-        if (was === epoch) return no(422, "reverted");
+        if (was === epoch && how === w.method) return no(422, "reverted");
       } else once.forget(w.nullifier, prior);
+      if (keys !== undefined) {
+        const capped = overCap(keys, 1n);
+        if (capped !== null) return capped;
+      }
     }
-    const entry = once.run(w.nullifier, () => enqueue(withdrawLane, () => simulateSignSend(data, bytes, w)));
+    const entry = once.run(w.nullifier, () => enqueue(withdrawLane, () => simulateSignSend(data, bytes, w, keys)));
     sentIn.set(entry, epoch);
+    if (!sentMethod.has(entry)) sentMethod.set(entry, w.method);
     if (!sentDeadline.has(entry)) sentDeadline.set(entry, Number(w.deadlineMs));
     return entry;
   };
-  async function simulateSignSend(data: string, bytes: Uint8Array, w: EvmWithdraw): Promise<PoolEvmAnswer> {
+  async function simulateSignSend(data: string, bytes: Uint8Array, w: EvmRelease, keys: readonly string[] | undefined): Promise<PoolEvmAnswer> {
     // the deadline again after the queue's wait: a send that waited past the margin would pay for the pool's revert
     if (Number(w.deadlineMs) < now() + EVM_POOL_SEND_MARGIN_MS) return no(422, "deadline_near", `deadline ${w.deadlineMs}, now ${now()} after the queue`);
     const call = { from: sender, to: pool, data, value: "0x0" };
     let id: bigint, base: bigint, tip: bigint, pa: bigint, pb: bigint;
+    let balA = 0n, balB = 0n;
     try {
       const stuck = await laneHeld(withdrawLane);
       if (stuck !== null) return stuck;
       id = await chain();
+      // the chain W signed for (M356 (6)): the providers must name the network's pinned chain id, never another
+      if (id !== releaseChainId) return no(503, "upstream", `the providers name chain ${id}, not ${releaseChainId}`);
       // a recipient with code could revert the pool's push after the simulation: refused on either provider, at
       // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
       const codes = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map((at) => r("eth_getCode", [w.recipient, at]))));
       if (codes.some((c) => c !== "0x")) return no(422, "recipient_code");
-      const [block, t, n, m, ln, lm] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), a("eth_getTransactionCount", [sender, "pending"]), b("eth_getTransactionCount", [sender, "pending"]), a("eth_getTransactionCount", [sender, "latest"]), b("eth_getTransactionCount", [sender, "latest"])]);
+      // a buy reads the sender's pending balance on both providers too (the withdraws' reserve)
+      const [block, t, n, m, ln, lm, ...bal] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), a("eth_getTransactionCount", [sender, "pending"]), b("eth_getTransactionCount", [sender, "pending"]), a("eth_getTransactionCount", [sender, "latest"]), b("eth_getTransactionCount", [sender, "latest"]), ...(keys === undefined ? [] : [a("eth_getBalance", [sender, "pending"]), b("eth_getBalance", [sender, "pending"])])]);
       base = qty((block as { baseFeePerGas?: unknown })?.baseFeePerGas);
       tip = qty(t);
       [pa, pb] = [qty(n), qty(m)];
+      if (bal.length === 2) [balA, balB] = [qty(bal[0]), qty(bal[1])];
       behindOf(withdrawLane, qty(ln), qty(lm));
     } catch (e) {
       return unread(e);
@@ -860,6 +1080,29 @@ export function evmPoolSender(
     if (cap < base) return no(422, "fee_stale", `fee ${w.fee} / gas ${gas} = ${cap} under the base fee ${base}`);
     const maxFeePerGas = 2n * base + tip < cap ? 2n * base + tip : cap;
     const maxPriorityFeePerGas = tip < maxFeePerGas ? tip : maxFeePerGas;
+    // a buy's caps again with its worst cost held: the gas it can pay (the chain's L1 fee is read by the fee check,
+    // card helper-evm-sender-3; a receipt's l1Fee is charged when the buy does not land)
+    const worst = gas * maxFeePerGas;
+    if (keys !== undefined) {
+      const capped = overCap(keys, worst);
+      if (capped !== null) return capped;
+      // the withdraws' reserve: buys stop before the float the withdraws need is spent (EVM_WITHDRAW_RESERVE_SENDS)
+      const t = now();
+      for (const c of buysInFlight) if (c.at <= t - EVM_SELL_UNPAID_WINDOW_MS) buysInFlight.delete(c);
+      const flying = [...buysInFlight].reduce((x, c) => x + c.wei, 0n);
+      const reserve = BigInt(EVM_WITHDRAW_RESERVE_SENDS) * EVM_GAS_MAX * (2n * base + tip);
+      const low = balA < balB ? balA : balB;
+      // one log line when buys first stop at the reserve and one when they go again, so the operator learns of a refill
+      // need from the log, not from users
+      const said = `${sender}'s lower pending balance ${low} wei, reserve ${reserve} wei, buys in flight ${flying} wei`;
+      if (low < reserve + flying + worst) {
+        if (!reserveHeld) log(`evm ${cfg.network}: buys stop at the withdraws' reserve: ${said}; refill the sender`);
+        reserveHeld = true;
+        return { ...no(429, "rate_limited", `the sender keeps ${reserve} wei for withdraws: balance ${low}, buys in flight ${flying}, this buy ${worst}`), retryAfterS: EVM_LANE_RETRY_S };
+      }
+      if (reserveHeld) log(`evm ${cfg.network}: buys go again over the withdraws' reserve: ${said}`);
+      reserveHeld = false;
+    }
     // the simulation is the transaction as it will be signed: at pending, from the sender, with its gas and fee fields
     // (a call that reverts only at a real gas price is caught here, not paid for on chain)
     try {
@@ -874,7 +1117,13 @@ export function evmPoolSender(
     if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(w.deadlineMs) + EVM_POOL_SEND_MARGIN_MS;
     sentAt(withdrawLane, nonce, until, maxFeePerGas, maxPriorityFeePerGas, hash, false);
-    watch(withdrawLane, nonce, hash, until);
+    let landed: ((ra: Record<string, unknown>, rb: Record<string, unknown>) => void) | undefined;
+    if (keys !== undefined && w.buy !== undefined) {
+      const held = charge(keys, worst);
+      buysInFlight.add(held);
+      landed = landedBuy(held, w, gas, maxFeePerGas, keys);
+    }
+    watch(withdrawLane, nonce, hash, until, landed);
     return { status: 200, body: { hash } };
   }
   /** POST /v1/pool/evm/sell: the static checks, none of which reads a provider, then one send per (W, Sell nonce). */
@@ -1279,6 +1528,21 @@ export function evmPoolSender(
     const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);
     held.wei = r.unpaid;
     if (!r.paid) return;
+    for (const k of keys) {
+      if (!k.startsWith("w:") && !k.startsWith("c:")) continue;
+      paid.delete(k);
+      paid.set(k, now());
+    }
+    while (paid.size > revertMemory) paid.delete(paid.keys().next().value as string);
+  };
+  /** A buy's two receipts, one per provider, turn its held worst cost into what went unpaid (evmBuyUnpaid): 0 once both
+   *  read status 1 and the pool's Bought log of this buy, which marks its W and client as a paid sale does; else its whole
+   *  cost. A buy whose receipt both providers never return keeps its worst cost held for the window. */
+  const landedBuy = (held: Charge, w: EvmRelease, gas: bigint, maxFeePerGas: bigint, keys: readonly string[]) => (ra: Record<string, unknown>, rb: Record<string, unknown>): void => {
+    buysInFlight.delete(held);
+    const r = evmBuyUnpaid(ra, rb, { pool, w: w.recipient, feeRecipient: w.feeRecipient, fee: w.fee, nullifier: w.nullifier, token: w.buy!.token, gas, maxFeePerGas }, held.wei);
+    held.wei = r.unpaid;
+    if (!r.proven) return;
     for (const k of keys) {
       if (!k.startsWith("w:") && !k.startsWith("c:")) continue;
       paid.delete(k);

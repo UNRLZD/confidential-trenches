@@ -737,3 +737,66 @@ export function pinnedSignBuy(venues: EvmPoolVenueList, secretKey: Uint8Array, c
   }
   return evmPoolSignBuyUnpinned(secretKey, chain, pool, built, proof);
 }
+
+/** A signed Buy as a sender reads it back from PrivacyPoolSimple.buy's calldata: the adapter, its data, minOut, token. */
+export type EvmSignedBuy = { adapter: string; data: string; minOut: bigint; token: string };
+
+/** The route a signed Buy's (adapter, data) encodes, when it is one the device's builder makes for that Buy; refused
+ *  (throws EvmPoolBuyError) otherwise. The adapter must be the chain's pinned v3 or v4 adapter (not_pinned; a chain with
+ *  neither, not_deployed), its data is decoded loosely into a route (v3: the packed path; v4: abi.encode(address
+ *  currencyIn, PathKey[])), encoded again with the builder's own encoder as the device builds every buy (routeData,
+ *  quoted: evmPoolBuildQuoted, the index's only builder) and held byte-equal to the data signed, and the token it buys
+ *  must be the Buy's token (token_mismatch). So a sender carries a buy only through a pinned adapter, along a route the
+ *  device's builder takes (card helper-evm-sender-2: the helper's sender pays the gas of every buy W signs; the adapter
+ *  runs it, and a foreign adapter could run anything). */
+export function evmBuyRouteOf(chain: EvmPoolChain, buy: EvmSignedBuy): EvmRoute {
+  if (typeof buy !== "object" || buy === null) return refuse("bad_route", "a signed buy is an object");
+  const { adapter, data, minOut, token } = buy;
+  if (!isAddress(adapter) || !isAddress(token) || lower(token) === NATIVE) return refuse("bad_route", "the adapter or the token is not an address");
+  if (typeof minOut !== "bigint" || minOut <= 0n || minOut >= 1n << 256n) return refuse("bad_amount", "minOut is a uint256 above 0");
+  if (typeof data !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(data) || data.length > 2 + 2 * 4096) return refuse("bad_route", "the data is not 0x hex, or too long");
+  const pins = venuePins(evmPoolVenues(), chain);
+  if (pins.v3 === undefined && pins.v4 === undefined) return refuse("not_deployed", `${chain} has no pinned adapter yet`);
+  const d = hexBytes(data.toLowerCase());
+  const at = (i: number): bigint => {
+    if (i < 0 || i + 32 > d.length) return refuse("bad_route", "the data is too short");
+    let v = 0n;
+    for (let k = i; k < i + 32; k++) v = (v << 8n) | BigInt(d[k]!);
+    return v;
+  };
+  const small = (v: bigint, below: number, what: string): number => (v < BigInt(below) ? Number(v) : refuse("bad_route", `${what} is out of range`));
+  const asAddress = (v: bigint): string => (v >> 160n === 0n ? `0x${v.toString(16).padStart(40, "0")}` : refuse("bad_route", "an address word's high bytes"));
+  let route: EvmRoute;
+  if (pins.v3 !== undefined && samePin(adapter, pins.v3)) {
+    // the packed path: token (20), then fee (3) and token (20) per hop
+    if (d.length < 43 || (d.length - 20) % 23 !== 0) return refuse("bad_route", "a v3 path is a token, then a fee and a token per hop");
+    const tokens = [toHex(d.slice(0, 20))];
+    const fees: number[] = [];
+    for (let o = 20; o < d.length; o += 23) {
+      fees.push((d[o]! << 16) | (d[o + 1]! << 8) | d[o + 2]!);
+      tokens.push(toHex(d.slice(o + 3, o + 23)));
+    }
+    route = { venue: "uniswap-v3", tokens, fees };
+  } else if (pins.v4 !== undefined && samePin(adapter, pins.v4)) {
+    // abi.encode(address currencyIn, PathKey[]): currencyIn, the array's offset, then its length, one offset per
+    // element (from the first offset's word), and each element
+    const currencyIn = asAddress(at(0));
+    const base = 32 + small(at(32), 0x10000, "the path's offset");
+    const n = small(at(base - 32), EVM_POOL_MAX_HOPS + 1, "the path's length");
+    const hops: EvmV4Hop[] = [];
+    for (let i = 0; i < n; i++) {
+      const e = base + small(at(base + 32 * i), 0x10000, "a hop's offset");
+      const hd = e + small(at(e + 128), 0x10000, "a hop's hook data offset");
+      const len = small(at(hd), EVM_POOL_MAX_HOOK_DATA + 1, "a hop's hook data length");
+      if (hd + 32 + len > d.length) return refuse("bad_route", "a hop's hook data runs past the data");
+      hops.push({ currency: asAddress(at(e)), fee: small(at(e + 32), U24 + 1, "a fee"), tickSpacing: small(at(e + 64), MAX_TICK_SPACING + 1, "a tick spacing"), hooks: asAddress(at(e + 96)), hookData: toHex(d.slice(hd + 32, hd + 32 + len)) });
+    }
+    route = { venue: "uniswap-v4", currencyIn, hops };
+  } else return refuse("not_pinned", `the adapter is not one of ${chain}'s pinned adapters`);
+  // the builder's own encoding of that route, as the device builds it: any other byte (an offset, a padding, a trailing
+  // byte, hook data) is refused here
+  const again = routeData(chain, route, true);
+  if (toHex(again.data) !== lower(data)) return refuse("bad_route", "the data is not the builder's encoding of its route");
+  if (lower(again.token) !== lower(token)) return refuse("token_mismatch", `the route buys ${again.token}, not ${token}`);
+  return route;
+}

@@ -279,5 +279,345 @@
     "body": "{\"error\":{\"code\":\"not_found\"}}"
    }
   ]
- }
+ },
+ "evm_bad": [
+  {
+   "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+   "code": [
+    {
+     "url": "https://sepolia.base.org",
+     "readAt": "2026-11-07T01:12:24.702Z",
+     "status": 200,
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0xef0100d6cedde84be40893d153be9d467cd6ad37875b28\"}"
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "readAt": "2026-11-07T01:12:24.882Z",
+     "status": 200,
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0xef0100d6cedde84be40893d153be9d467cd6ad37875b28\"}"
+    }
+   ],
+   "reads": [
+    {
+     "asked": "fee",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:23.848Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794013920000,\"block\":\"0x34e41a0\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "fee",
+     "origin": false,
+     "readAt": "2026-11-07T01:12:24.384Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794013920000,\"block\":\"0x34e41a0\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "evm_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:25.500Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"RPC error 3: execution reverted\"}}"
+    },
+    {
+     "asked": "evm_buy_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:25.731Z",
+     "status": 400,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not withdraw's calldata\"}}"
+    },
+    {
+     "asked": "evm_deadline_expired",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:25.906Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794013919000, now 1794013945820\"}}"
+    },
+    {
+     "asked": "evm_recipient_code",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:26.256Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"recipient_code\"}}"
+    }
+   ]
+  },
+  {
+   "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+   "code": [
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "readAt": "2026-11-07T01:12:30.305Z",
+     "status": 200,
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0xef0100f23ace89edc5ce47305938087ec407daf4061e9f\"}\n"
+    },
+    {
+     "url": "https://robinhood-testnet.drpc.org",
+     "readAt": "2026-11-07T01:12:30.973Z",
+     "status": 200,
+     "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0xef0100f23ace89edc5ce47305938087ec407daf4061e9f\"}"
+    }
+   ],
+   "reads": [
+    {
+     "asked": "fee",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:29.473Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1794013920000,\"block\":\"0x8ed5312\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "fee",
+     "origin": false,
+     "readAt": "2026-11-07T01:12:30.008Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1794013920000,\"block\":\"0x8ed5312\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "evm_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:32.197Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"simulation_failed\",\"detail\":\"RPC error 3: execution reverted\"}}"
+    },
+    {
+     "asked": "evm_buy_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:32.375Z",
+     "status": 400,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not withdraw's calldata\"}}"
+    },
+    {
+     "asked": "evm_deadline_expired",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:32.552Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794013919000, now 1794013952464\"}}"
+    },
+    {
+     "asked": "evm_recipient_code",
+     "origin": true,
+     "readAt": "2026-11-07T01:12:32.930Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "63c90229cb3a450bbee530160f1aeba292272b06",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"recipient_code\"}}"
+    }
+   ]
+  }
+ ],
+ "evm_good": [
+  {
+   "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+   "code": [
+    {
+     "url": "https://sepolia.base.org",
+     "readAt": "2026-11-07T01:24:15.850Z",
+     "status": 200,
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0xef0100d6cedde84be40893d153be9d467cd6ad37875b28\"}"
+    },
+    {
+     "url": "https://base-sepolia-rpc.publicnode.com",
+     "readAt": "2026-11-07T01:24:16.017Z",
+     "status": 200,
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0xef0100d6cedde84be40893d153be9d467cd6ad37875b28\"}"
+    }
+   ],
+   "reads": [
+    {
+     "asked": "fee",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:15.443Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x7c9533ab27756751280cab5c69609985b0ac4d76\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794014640000,\"block\":\"0x34e4fb0\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "fee",
+     "origin": false,
+     "readAt": "2026-11-07T01:24:15.449Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xb239a38af69b68e6c5c305df64985f283b5d5fe5\",\"fee_recipient\":\"0x7c9533ab27756751280cab5c69609985b0ac4d76\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794014640000,\"block\":\"0x34e4fb0\",\"fee\":\"10000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "evm_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:16.048Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0x28ae05b9985bd779eea64705abed62524ef0a86f, not the recipient W\"}}"
+    },
+    {
+     "asked": "evm_buy_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:16.051Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0x8d96daff158769d5392ff832d52b8aa57e4ee9d9, not the recipient W\"}}"
+    },
+    {
+     "asked": "evm_deadline_expired",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:16.054Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794014639000, now 1794014656054\"}}"
+    },
+    {
+     "asked": "evm_recipient_code",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:16.726Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"recipient_code\"}}"
+    }
+   ]
+  },
+  {
+   "pool": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+   "code": [
+    {
+     "url": "https://rpc.testnet.chain.robinhood.com",
+     "readAt": "2026-11-07T01:24:20.184Z",
+     "status": 200,
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0xef0100f23ace89edc5ce47305938087ec407daf4061e9f\"}\n"
+    },
+    {
+     "url": "https://robinhood-testnet.drpc.org",
+     "readAt": "2026-11-07T01:24:20.607Z",
+     "status": 200,
+     "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0xef0100f23ace89edc5ce47305938087ec407daf4061e9f\"}"
+    }
+   ],
+   "reads": [
+    {
+     "asked": "fee",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:19.897Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xbbefcb2b9b11579ca607509fea6ea2eab7e3d335\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794014640000,\"block\":\"0x8ed61c7\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "fee",
+     "origin": false,
+     "readAt": "2026-11-07T01:24:19.900Z",
+     "status": 200,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f"
+     },
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xe5e948414a89c23e73d76cd740dacdd9364c25d5\",\"fee_recipient\":\"0xbbefcb2b9b11579ca607509fea6ea2eab7e3d335\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794014640000,\"block\":\"0x8ed61c7\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+     "asked": "evm_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:20.633Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0xcd80e0c43d3fdc87f76b45eb15565cd8e083c16c, not the recipient W\"}}"
+    },
+    {
+     "asked": "evm_buy_bad_signature",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:20.636Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0xaf866eb5bdfd6c0fbf1552a3b43eec1ffe67fc0f, not the recipient W\"}}"
+    },
+    {
+     "asked": "evm_deadline_expired",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:20.640Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794014639000, now 1794014660639\"}}"
+    },
+    {
+     "asked": "evm_recipient_code",
+     "origin": true,
+     "readAt": "2026-11-07T01:24:21.213Z",
+     "status": 422,
+     "headers": {
+      "x-helper-commit": "51fb5eb6fcae51a69fcdd5687c90b4cf4ef0368f",
+      "access-control-allow-origin": "https://confidential.unrealized.trade"
+     },
+     "body": "{\"error\":{\"code\":\"recipient_code\"}}"
+    }
+   ]
+  }
+ ]
 }
