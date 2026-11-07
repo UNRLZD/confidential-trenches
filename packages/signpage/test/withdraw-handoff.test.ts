@@ -54,7 +54,8 @@ const FEE_READS = JSON.parse(readFileSync(new URL("../../wallet/test/vectors/wit
 };
 const bytes = (v: unknown) => [...new TextEncoder().encode(JSON.stringify(v))];
 const view = (v: unknown, height: number) => ({ jsonrpc: "2.0", result: { result: bytes(v), logs: [], block_height: height, block_hash: "x" } });
-/** The release pair of `net` as recorded, plus the token's storage views (A unregistered, the bounds' min MIN). */
+/** The release pair of `net` as recorded, plus the token's storage views (A unregistered, the bounds' min MIN); `asked`
+ * keeps every account a storage_balance_of names. */
 function pair(net: NearNetwork, asked: string[] = [], minOf: (side: "a" | "b") => bigint = () => MIN): [RelayRpc, RelayRpc] {
   const rec = FEE_READS.answers[net];
   const one = (side: "a" | "b"): RelayRpc => ({
@@ -292,7 +293,7 @@ test("the hand-off proves on the page's prover, RESERVES the note with its reque
   const a = armAccount(SEED, spent.leaf!.label, 0);
   a.secretKey.fill(0);
   assert.equal(req.body.withdrawal.recipient, a.id);
-  assert.deepEqual(asked, [a.id, a.id], "one read of A on each RPC, and no other id");
+  assert.deepEqual(asked, [], "no read names A: register_deposit is the token's minimum for every A (card relayer-cost-guards, review F2)");
   assert.equal(req.body.withdrawal.register_deposit, String(MIN));
   assert.equal(req.body.withdrawal.fee_recipient, R.fee_recipient);
   assert.equal(req.body.withdrawal.relay_fee, String(RELAY_FEE));
