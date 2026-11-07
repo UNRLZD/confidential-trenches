@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { fingerprintOf, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { fingerprintOf, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
@@ -57,7 +57,7 @@ test("F1, F7: a request that pays anyone but the named account, funds a recipien
 test("F1, F7: the driver withdraws the note's whole value less one fee to --to, through the wallet's own request", () => {
   assert.match(SRC, /amount: value - fee\.relayFee, to,/);
   assert.doesNotMatch(SRC, /withdrawHandoff\(/, "the form's two-quote draw leaves a lower quote's difference as change");
-  assert.match(SRC, /requestProblems\(req, to\)[\s\S]{0,400}relayWithdraw\(/, "the request is checked before it is sent");
+  assert.match(SRC, /requestProblems\(req, to\)[\s\S]{0,700}relayWithdraw\(/, "the request is checked before it is sent");
 });
 
 test("F2: resume is a command, the wait for U has no time bound, and U holds at least min_deposit, not a fixed amount", () => {
@@ -263,6 +263,21 @@ test("M1: record takes --deposit-tx and --withdraw-tx, checks every relayer tx a
   assert.match(SRC, /relayerTxProblems\("withdraw", t, want\)/);
   assert.doesNotMatch(SRC, /\(\) => \{\}\)/, "no send drops its hash");
   assert.match(SRC, /keep\(hash\); \/\/ the hash is kept before it is sent/);
+});
+
+test("L2: resume withdraws the run's UNSPENT note of its label (the deposit note, or its refund note after a refunded payout), never a zero change or another label's", () => {
+  const leaf = (label: bigint, value: bigint) => ({ value, label, commitment: 1n, leafIndex: 0n });
+  const dep = (state: string) => ({ id: "d", ref: { kind: "deposit", s: 1n, i: 3 }, state, leaf: leaf(7n, 5_000_000n) });
+  const refund = { id: "r", ref: { kind: "refund", l: 7n, j: 0 }, state: "UNSPENT", leaf: leaf(7n, 4_816_554n) };
+  const zero = { id: "c", ref: { kind: "change", l: 7n, j: 0 }, state: "UNSPENT", leaf: leaf(7n, 0n) };
+  const other = { id: "o", ref: { kind: "deposit", s: 1n, i: 11 }, state: "UNSPENT", leaf: leaf(9n, 1_000_000n) };
+  assert.equal(noteToWithdraw([dep("UNSPENT"), other], 3)?.id, "d");
+  assert.equal(noteToWithdraw([dep("SPENT"), refund, zero, other], 3)?.id, "r");
+  assert.equal(noteToWithdraw([dep("SPENT"), zero, other], 3), null);
+  assert.equal(noteToWithdraw([other], 3), null);
+  // the arrival read follows the note withdrawn last, and the request must spend the picked note
+  assert.match(SRC, /const pick = noteToWithdraw\(/);
+  assert.match(SRC, /req\.noteId !== pick\.id/);
 });
 
 test("the usage line names every command", () => {

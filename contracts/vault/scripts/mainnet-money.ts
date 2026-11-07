@@ -171,6 +171,17 @@ export function sweepProblems(a: { balance: bigint; toRegistered: boolean }): st
   return [];
 }
 
+/**
+ * The note the run withdraws next: the UNSPENT note of the run's deposit label with a value, the deposit note at index i
+ * or a refund note of that label after a refunded payout; null when the deposit is not in the store or nothing of its
+ * label is left (a zero change note is never withdrawn).
+ */
+export function noteToWithdraw<N extends { id: string; ref: { kind: string; i?: number }; state: string; leaf?: { label: bigint; value: bigint } }>(notes: N[], i: number): N | null {
+  const dep = notes.find((n) => n.ref.kind === "deposit" && n.ref.i === i && n.leaf !== undefined);
+  if (dep === undefined) return null;
+  return notes.find((n) => n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.label === dep.leaf!.label && n.leaf.value > 0n) ?? null;
+}
+
 /** A run's fingerprint of its seed, kept in its run step: a step of another seed is never used. */
 export const fingerprintOf = (seed: Buffer): string => createHash("sha256").update(seed).update("vault-mainnet-money/fingerprint").digest("hex");
 
@@ -540,10 +551,14 @@ async function go(argv: string[], create: boolean) {
     st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
   }
 
-  const nf: bigint = noteSecrets(seed64, note.ref).nullifierHash;
-  if (note.state === "UNSPENT") {
+  // the note to withdraw: the run's UNSPENT note of its label, the deposit note or, after a refunded payout, its refund
+  // note (settle writes it); none once the last one is spent, and the arrival read follows the note withdrawn last
+  const pick = noteToWithdraw(await ns.list(), i);
+  const last = st.read("withdraw");
+  const nf: bigint = pick !== null ? noteSecrets(seed64, pick.ref).nullifierHash : last?.nullifier_hash !== undefined ? BigInt(last.nullifier_hash) : noteSecrets(seed64, note.ref).nullifierHash;
+  if (pick !== null) {
     // the whole note to `to`, less the fee of this one quote: withdrawn = value, so no change note is left
-    const value: bigint = note.leaf.value;
+    const value: bigint = pick.leaf.value;
     const fee = await feeOf(value);
     const prover = await nodeProver();
     const trees = treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] }));
@@ -555,6 +570,7 @@ async function go(argv: string[], create: boolean) {
       amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(ns2), blockTimestampNanosec: ns2,
     });
     const rp = requestProblems(req, to);
+    if (req.noteId !== pick.id) rp.push(`the wallet's request spends note ${req.noteId}, not the run's ${pick.id}`);
     if (rp.length) throw new Error(`refused, the proof made and nothing sent: ${rp.join("; ")}; the note stays in the vault, and resume makes a new request`);
     st.write("withdraw", { to, value: String(value), relay_fee: String(fee.relayFee), fee_recipient: fee.feeRecipient, nullifier_hash: String(nf), prove_ms: prover.times, before });
     const out = await relayWithdraw(seed64, req, { notes: ns, network, rpcs, priceRpcs: network === "mainnet" ? rpcs : await opened_mainnet_pair(), fetchFn: watch });
@@ -563,6 +579,7 @@ async function go(argv: string[], create: boolean) {
   }
   // the arrival at `to`: the spend row paid to it, read on both RPCs (arrival.ts)
   const arrival = await withdrawArrival({ network, rpcs, nullifierHash: nf, recipient: to });
+  if (arrival.kind === "refunded") throw new Error(`the payout to ${to} was refunded into the vault (${json(arrival.spend)}): once its settle writes the refund note, resume withdraws that note to ${to}`);
   if (arrival.kind !== "arrived") throw new Error(`the withdrawal ${arrival.kind}: ${json(arrival.spend)}`);
   const s = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["spends", "leaves"] });
   const row = s.spends.find((x: { nullifierHash: bigint }) => x.nullifierHash === nf)!;
