@@ -12,6 +12,7 @@ import type { IncomingMessage } from "node:http";
 import { isIPv6 } from "node:net";
 import { WINDOW_MS } from "../data/gecko.ts";
 import { resetMs } from "../proxy/proxy.ts";
+import type { DayPeers } from "./day-spend.ts";
 
 /** The window every limit counts in [design: 10 s, the pool routes' window since M356 (3)]. */
 export const LIMIT_WINDOW_MS = 10_000;
@@ -138,6 +139,9 @@ export type ProviderHolds = {
   heldMs(url: string): number;
   hold(url: string, seconds: number): void;
   take(url: string, calls: number, background: boolean, sender?: boolean): number;
+  /** True when `url`'s daily budget (Pace day) cannot fit `calls` more today: out for the rest of the UTC day, which is
+   *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429). */
+  dayOut(url: string, calls: number): boolean;
   reserve(url: string): void;
   room(url: string): number;
   paceOf(url: string): Pace | undefined;
@@ -210,8 +214,10 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
  *     least "50,400 CUs per minute, which is equivalent to 40 eth_call requests", "Batch requests are limited to 3
  *     items", and Pay as You Go "100 RPS" (drpc.org/docs/howitworks/ratelimiting and /docs/pricing/requests, read
  *     2026-11-07 07:29Z). The limit is per IP, and the owner's three keys (three accounts, rpc.ts keyedAccountOf) all
- *     send from the helper's one: each key paced at 13 calls a second, 13 at once, 3 a post, so the three together
- *     average 39 a second, 46,800 CU a minute at 20 a call (KEYED_COST), under the free floor's 50,400.
+ *     send from the helper's one, as does its keyless robinhood.drpc.org (PROVIDER_PACE, 15 a second, 15 at once),
+ *     which dRPC may count with them (review L2 of 424dce1e; no page says either way): each key paced at 8 calls a
+ *     second, 8 at once, 3 a post. The worst minute, every bucket full at its start, is 3 x (8 x 60 + 8) + (15 x 60 +
+ *     15) = 2,379 calls, 47,580 CU at 20 a call (KEYED_COST), under the free floor's 50,400 (a test holds the sum).
  *   - FastNear: the paid plans name requests a month only, "Dev Plan $69 /month 10M RPC requests/month", Pro 36M,
  *     Business 100M, and no rate (fastnear.com, read 2026-11-07 07:29Z; docs.fastnear.com/auth names none). Paced at
  *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s). That pace all month long
@@ -219,7 +225,7 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
  */
 export const KEYED_PACE = {
   quicknode: { perS: 7, burst: 7, unit: "call", group: "quicknode" },
-  drpc: { perS: 13, burst: 13, unit: "call", group: "drpc", batch: 3 },
+  drpc: { perS: 8, burst: 8, unit: "call", group: "drpc", batch: 3 },
   fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
 } as const satisfies Readonly<Record<string, Pace>>;
 export type KeyedProvider = keyof typeof KEYED_PACE;
@@ -249,6 +255,10 @@ export const KEYED_COST: Readonly<Record<KeyedProvider, Readonly<Record<"evm" | 
 export const keyedDayEnv = (p: KeyedProvider): string => `RPC_DAY_${p.toUpperCase()}`;
 /** A UTC day, the daily budget's window. */
 const DAY_MS = 86_400_000;
+/** How often a helper re-reads the other helpers' day files, and at most how often it writes its own (day-spend.ts):
+ *  the two helpers of a handover count each other's spend within about this. [design: a second: a company's pace sends
+ *  at most 14 calls in it (QuickNode's 7 a second and 7 at once), 420 credits on Solana, 0.13% of its day.] */
+export const DAY_SYNC_MS = 1_000;
 /** Providers that refuse every `eth_getLogs` and answer the other reads: no path sends them one (rpc.ts callEvm, the
  *  swap reads), so a log read never holds the provider for the reads it does answer. mainnet.base.org answered every
  *  eth_getLogs, of 1 to 1,000 blocks, from the helper box and from the Mac, -32011 "request limit reached" (HTTP 429;
@@ -273,7 +283,10 @@ export const SENDER_ROOM = 0.125;
 
 // the holds' and paces' clock: monotonic, in epoch ms, as rpc.ts's (card helper-crowd-429: the box's wall clock stepped
 // back inside a test, which would hold a provider for the step's length)
-export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE): ProviderHolds {
+// `peers`: the day files (limits/day-spend.ts dayFiles) where each account's daily spend is kept and the other helpers'
+// is read (review H1 of 424dce1e: a restart resumes the day's spend, a handover's two helpers share one budget); none:
+// memory only
+export function providerHolds(now: () => number = () => performance.timeOrigin + performance.now(), pace: Readonly<Record<string, Pace>> = PROVIDER_PACE, peers?: DayPeers): ProviderHolds {
   const until = new Map<string, number>();
   const buckets = new Map<string, { tokens: number; at: number }>();
   /** Per provider: until when a caller's read that found no room waits for it (card helper-deploy-reads-fast). Background
@@ -286,10 +299,54 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
   const reserved = new Set<string>();
   /** Per group (else URL) with a daily budget: the UTC day and the units spent in it (Pace day, cost). */
   const spent = new Map<string, { day: number; units: number }>();
+  /** The other helpers' spend (peers): of day `day`, read at `at`. */
+  const others = { day: -1, at: -Infinity, units: new Map<string, number>() };
+  const othersOf = (k: string, day: number, t: number): number => {
+    if (peers === undefined) return 0;
+    if (others.day !== day || t - others.at >= DAY_SYNC_MS) {
+      try {
+        others.units = peers.read(day);
+      } catch {
+        // the store unreadable a moment: the last read stands until the next
+      }
+      others.day = day;
+      others.at = t;
+    }
+    return others.units.get(k) ?? 0;
+  };
   const usedToday = (k: string, t: number): number => {
     const s = spent.get(k);
-    return s !== undefined && s.day === Math.floor(t / DAY_MS) ? s.units : 0;
+    const day = Math.floor(t / DAY_MS);
+    return (s !== undefined && s.day === day ? s.units : 0) + othersOf(k, day, t);
   };
+  // this helper's spend to its day file: at once when the last write is DAY_SYNC_MS old, else at the end of that wait
+  // (so the last spend before a stop is kept too)
+  let wroteAt = -Infinity;
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const save = (day: number) => {
+    if (peers === undefined) return;
+    const units = new Map([...spent].filter(([, s]) => s.day === day).map(([k, s]) => [k, s.units]));
+    try {
+      peers.write(day, units);
+    } catch {
+      // the store unwritable a moment: the next spend writes again
+    }
+  };
+  const saveSoon = (day: number, t: number) => {
+    if (peers === undefined) return;
+    if (t - wroteAt >= DAY_SYNC_MS) {
+      wroteAt = t;
+      save(day);
+    } else if (pending === undefined) {
+      pending = setTimeout(() => {
+        pending = undefined;
+        wroteAt = now();
+        save(day);
+      }, DAY_SYNC_MS);
+      pending.unref?.();
+    }
+  };
+  const dayOut = (k: string, p: Pace, calls: number, t: number): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > p.day;
   // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
   const fill = (url: string, p: Pace) => {
     const t = now();
@@ -310,9 +367,13 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       // the day's budget (review M2): a draw it cannot fit waits for the next UTC day, so every path asks another
       // provider; a pool sender's few reads are never refused by it (pool/evm.ts pacedEvmRpc waits out what take names)
       const need = Math.max(calls, 1) * (p.cost ?? 1);
-      if (p.day !== undefined && !sender && usedToday(k, t) + need > p.day) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
+      if (!sender && dayOut(k, p, calls, t)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
       const spend = () => {
-        if (p.day !== undefined) spent.set(k, { day: Math.floor(t / DAY_MS), units: usedToday(k, t) + need });
+        if (p.day === undefined) return;
+        const day = Math.floor(t / DAY_MS);
+        const s = spent.get(k);
+        spent.set(k, { day, units: (s !== undefined && s.day === day ? s.units : 0) + need });
+        saveSoon(day, t);
       };
       const waiting = (callerWaits.get(k) ?? 0) - t;
       if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
@@ -330,6 +391,10 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
       if (!background) keep(Math.max(w, CALLER_HOLD_MS));
       return w;
+    },
+    dayOut(url, calls) {
+      const p = pace[url];
+      return p !== undefined && dayOut(p.group ?? url, p, calls, now());
     },
     reserve(url) {
       reserved.add(url);

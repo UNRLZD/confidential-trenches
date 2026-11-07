@@ -86,6 +86,19 @@ export const PACE_SECOND_MS = 1_100;
  * SOLANA_CALL_TIMEOUT_MS (packages/kit/src/trade/solana/send.ts:61).]
  */
 export const HOLD_WAIT_MS = 1_500;
+/** The longest a caller's read spends walking its providers, from the read's start (review L4 of 424dce1e): each send
+ *  times out by it, and no send starts within WALK_SEND_MIN_MS of it, so a read whose providers hang one after another
+ *  is answered (503: the device reads its own) inside the server's 15 s request timeout (server.ts requestTimeout), never
+ *  cut off by it. [design: 12 s: the first send keeps its whole RPC_TIMEOUT_MS (NEAR's send_tx waits for execution), and
+ *  3 s is left for the answer's write.] */
+export const WALK_MS = 12_000;
+/** The least time left for a walk's next send to start. [design: a quarter second, about one provider's answer.] */
+const WALK_SEND_MIN_MS = 250;
+/** A send's timeout with `left` ms of its walk's time left: RPC_TIMEOUT_MS at most, whole ms (AbortSignal.timeout refuses
+ *  a fraction, and the clock is a monotonic one in fractional ms). */
+const sendMs = (left: number): number => Math.max(1, Math.floor(Math.min(RPC_TIMEOUT_MS, left)));
+/** A JSON-RPC answer (one, or a batch) whose error says the provider's plan is spent (slot.ts CREDITS). */
+const planSpent = (answer: unknown): boolean => (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")));
 /** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
  *  hold's length can wake 1 ms inside it (seen on the box: every caller of a crowd woke inside a 1 s hold). */
 const HOLD_MARGIN_MS = 5;
@@ -646,11 +659,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // card rpc-keyed-lists: past the first (fallen back, or held by its 429), its keyed spares on their own budget, then
     // the public endpoint
     // review L2: a company's URL first (SOLANA_RPC_URL unset): the whole keyed list is walked under each company's pace
-    if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, c, 0);
-    if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, SPARES_KEY);
-    if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved);
-    if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved);
-    return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved);
+    // review L4: the read's whole walk, every path below, ends by `by`
+    const by = now() + WALK_MS;
+    if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, by, c, 0);
+    if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY);
+    if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved, by);
+    if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved, by);
+    return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved, by);
   }
 
   /**
@@ -658,16 +673,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * rpc-keyed-lists): the keyed spares in order (callList, the read already drawn on the chain's budget), and only when
    * none of them answers, the public endpoint on its own budget (or 503 for a slot with no public fallback). `key`: the
    * budget the spares draw on (SPARES_KEY) when the read drew on none yet; none when it already drew on the chain's.
-   * `from`: the first keyed URL asked (0 when a company's URL is first, review L2).
+   * `from`: the first keyed URL asked (0 when a company's URL is first, review L2). `by`: the read's walk's end (WALK_MS).
    */
-  async function solanaRest(forward: string, methods: string[], client: string | undefined, reserved: boolean, key: string | null = null, from = 1): Promise<Answer> {
+  async function solanaRest(forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = null, from = 1): Promise<Answer> {
     const spares = upstreams.solana.keyed.slice(from).map((k) => k.url);
     if (spares.length > 0) {
-      const a = await callList("solana", spares, forward, methods, client, reserved, key);
+      const a = await callList("solana", spares, forward, methods, client, reserved, by, key);
       // a spare's answer; a 429 or 503 here is ours (every spare held, out of pace or down), never a provider's
       if (a.status !== 429 && a.status !== 503) return a;
     }
-    return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved) : UPSTREAM();
+    return publicFallback ? call(PUBLIC_KEY, SOLANA_PUBLIC, [], forward, methods, client, reserved, by) : UPSTREAM();
   }
 
   /**
@@ -687,8 +702,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    */
   // card rpc-keyed-lists: the walk of any chain's list (listOf: its keyed URLs, then the public spares; Solana's spares
   // after its first keyed one). `key`: the budget the read draws on, the chain's by default; null when it already drew
-  // (Solana's first key failed it after its draw)
-  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, key: string | null = c): Promise<Answer> {
+  // (Solana's first key failed it after its draw). `by`: the read's walk's end (WALK_MS, review L4)
+  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = c): Promise<Answer> {
     const holds = holdsAll;
     // review L4: a read that drew on the chain's budget before (Solana's first key failed it) draws its retry on the
     // spares' budget, never the chain's, which that key's 429 holds
@@ -711,11 +726,21 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let shaped: { status: number; body: string } | undefined;
       let capped: { span: bigint; status: number; body: string } | undefined;
       for (const url of list) {
+        // review L4: no send starts once the walk's time is nearly spent; the read is answered inside the server's timeout
+        if (by - now() < WALK_SEND_MIN_MS) {
+          down = true;
+          break;
+        }
         const secretForms = formsByUrl.get(url) ?? [];
         // review M1, L3: a URL whose plan takes fewer requests a post than this read carries (dRPC free: 3, its HTTP 400
         // code 31 past it), or whose second's bucket is smaller than the read, is out for this read: the next is asked
         const p = holds.paceOf(url);
         if (p !== undefined && (methods.length > (p.batch ?? Infinity) || (p.unit === "call" && methods.length > p.burst))) {
+          down = true;
+          continue;
+        }
+        // review M3: a URL past its day's budget is out until the next UTC day, which is no wait: down for this read
+        if (holds.dayOut(url, methods.length)) {
           down = true;
           continue;
         }
@@ -740,7 +765,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         let text: string | undefined;
         sent = true;
         try {
-          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
           if (r.status === 429) {
             await r.body?.cancel();
             const s = upstreamRetryAfterS(r.headers, now());
@@ -763,6 +788,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         try {
           answer = JSON.parse(text);
         } catch {
+          down = true;
+          continue;
+        }
+        // review M2: a keyed URL whose plan is spent may answer 200 with a JSON-RPC error naming it: that URL is down for
+        // this read, as call() takes it for Solana's first key, and the next is asked
+        if (formsByUrl.has(url) && planSpent(answer)) {
           down = true;
           continue;
         }
@@ -791,7 +822,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           else shaped = { status: r.status, body: text };
           continue;
         }
-        if (leaks) return UPSTREAM();
+        // review L3: an answer echoing the key is that provider down for this read (never forwarded); the next is asked
+        if (leaks) {
+          down = true;
+          continue;
+        }
         return { status: r.status, body: text };
       }
       // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
@@ -810,8 +845,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       // read's answer)
       if (capped !== undefined) return { status: capped.status, body: capped.body };
       if (shaped !== undefined && soonestMs === Infinity) return { status: shaped.status, body: shaped.body };
-      // every provider failed (none held or out of room): upstream, so the device reads its own; else the soonest wait
-      // (a company past its day's budget names the next UTC day: the caller's wait is at most RETRY_AFTER_MAX_S)
+      // every provider failed (none held or out of room; a company past its day's budget is down, review M3): upstream,
+      // so the device reads its own; else the soonest wait
       return down && soonestMs === Infinity ? UPSTREAM() : throttled(soonestMs === Infinity ? RETRY_AFTER_MAX_S : Math.min(RETRY_AFTER_MAX_S, Math.max(1, Math.ceil(soonestMs / 1000))), undefined, `${c} every provider held`);
     }
   }
@@ -823,7 +858,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * one per request in it, all or none. A keyed Solana provider that fails the call (rpc/slot.ts) has it carried to the
    * public endpoint at once, so its fall never reaches the caller as an error.
    */
-  async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean): Promise<Answer> {
+  async function call(key: string, url: string, secretForms: Buffer[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number): Promise<Answer> {
     const c = (key === PUBLIC_KEY ? "solana" : key) as RpcChain;
     const viaSlot = c === "solana" && keyed && key !== PUBLIC_KEY;
     const begun = now();
@@ -838,7 +873,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     /** The key failed this call: the slot is told, and the call goes to the public endpoint (or 503 with none). */
     const fellBack = (): Promise<Answer> =>
       publicFallback
-        ? solanaRest(forward, methods, client, reserved).then((a) => ({ ...a, timing: [`rpc-keyed;dur=${Math.round(now() - begun)};desc="fell back"`, ...(a.timing ?? [])] }))
+        ? solanaRest(forward, methods, client, reserved, by).then((a) => ({ ...a, timing: [`rpc-keyed;dur=${Math.round(now() - begun)};desc="fell back"`, ...(a.timing ?? [])] }))
         : Promise.resolve(UPSTREAM());
     // card helper-crowd-429: a hold that ends within HOLD_WAIT_MS is waited out and the send paced from its end, and a
     // send the provider throttles is sent once more after its short hold, all by `deadline`; a longer hold is the
@@ -875,6 +910,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         gate = pacer.go(p!.url, methods.length, p!.perSecond);
       }
       if (heldAt() > 0) return throttled(Math.max(1, heldAt()), undefined, `${key} held`);
+      // review L4: the public endpoint after a walk's spares is sent only inside the read's walk time
+      if (by - now() < WALK_SEND_MIN_MS) return UPSTREAM();
       sent = now();
       try {
         r = await doFetch(url, {
@@ -882,7 +919,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           headers: { accept: "application/json", "content-type": "application/json" },
           body: forward,
           redirect: "error",
-          signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+          signal: AbortSignal.timeout(sendMs(by - now())),
         });
         if (r.status === 429) {
           const body = viaSlot ? ((await readAnswer(r).catch(() => undefined)) ?? "") : (await r.body?.cancel(), "");
@@ -924,7 +961,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return viaSlot ? (slot.unanswered(sent), fellBack()) : UPSTREAM();
     }
     // a JSON-RPC error that says the plan is spent is the key's end, as a 401 is
-    if (viaSlot && (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")))) return slot.fail("credits"), fellBack();
+    if (viaSlot && planSpent(answer)) return slot.fail("credits"), fellBack();
     // an EVM provider's throttle in any answer (evmLimited: -32005 or a rate or request limit message) is its throttle, as
     // its 429 is: the chain is held for the backoff it names (Infura's error.data.backoff_seconds), else 1 s
     const limited = evmLimited(c, answer);
@@ -1039,6 +1076,15 @@ export function companyOf(host: string): string {
   const h = host.replace(/:\d+$/, "");
   if (/^[\d.]+$/.test(h) || h.startsWith("[")) return h;
   return h.split(".").slice(-2).join(".");
+}
+/** Each company's other domain, folded into the one companyOf names for it: dRPC's keyed endpoints are lb.drpc.live
+ *  (drpc.org/docs/gettingstarted/firstrequest), its keyless ones *.drpc.org. */
+const SAME_COMPANY: Readonly<Record<string, string>> = { "drpc.live": "drpc.org" };
+/** The company that runs a provider URL (companyOf, its other domains folded in): two answers "agree" only from two of
+ *  these (review M1 of 424dce1e: dRPC's key 1 and key 2 are one operator answering twice). */
+export function operatorOf(url: string): string {
+  const c = companyOf(new URL(url).host);
+  return SAME_COMPANY[c] ?? c;
 }
 /** A keyed name's key of several at one company, as /v1/health names it (" key2" for a chain's _DRPC_2), else none: each
  *  is its own account, so the live check counts each as its own keyed provider. */

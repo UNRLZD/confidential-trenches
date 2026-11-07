@@ -4,9 +4,12 @@
 // in the health. Every URL here is made up; the keys are planted strings.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as rpcModule from "./rpc.ts";
 import { createRpc } from "./rpc.ts";
-import { providerHolds, type Pace } from "../limits/limits.ts";
+import { PROVIDER_PACE, providerHolds, type Pace } from "../limits/limits.ts";
 import * as serverModule from "../server.ts";
 import { health, PARTS } from "../health.ts";
 import { HELPER_V1_PATHS } from "../../../../packages/kit/src/index.ts";
@@ -543,4 +546,172 @@ test("owner 09:16Z: with dRPC's three keys all held, the public spares serve, on
 test("owner 09:16Z: /v1/health names each dRPC key as its own entry (key1, key2, key3), in order after QuickNode", () => {
   const env: Record<string, string> = Object.fromEntries([...LISTS.base.map(([n, u]) => [n, u as string]), ...DRPC_MORE.base]);
   assert.deepEqual((createRpc(env) as Rpc).keyed?.().base, ["alchemy.test unread", "quiknode.test unread", "drpc.test key1 unread", "drpc.test key2 unread", "drpc.test key3 unread"]);
+});
+
+// ---- the delta review of 424dce1e (H1, M2, M3, L2, L3, L4) ----
+
+/** The keyed accounts' shared daily spend (review H1), read off the module so this file loads at a base without it. */
+const daySpend = (await import("../limits/day-spend.ts").catch(() => ({}))) as { dayFiles?: (dir: string, id: string) => unknown };
+const dayStart = () => Math.ceil((performance.timeOrigin + performance.now()) / 86_400_000) * 86_400_000 + 1_000;
+const holdsOn = (now: () => number, pace: Record<string, Pace>, peers: unknown) => (providerHolds as unknown as (n: () => number, p: Record<string, Pace>, d?: unknown) => ReturnType<typeof providerHolds>)(now, pace, peers);
+
+test("review H1: a helper restart (a deploy) resumes the day's spend from the helper's store: two starts on one store send one day's budget, not two", () => {
+  const qn = LISTS.base[1][1];
+  const env = { BASE_RPC_URL_QUICKNODE: qn, RPC_DAY_QUICKNODE: "200" }; // 10 Base calls of 20 credits a day
+  const dir = mkdtempSync(join(tmpdir(), "ct-rpc-day-"));
+  const t = { v: dayStart() };
+  let sent = 0;
+  for (let start = 0; start < 2; start++) {
+    const holds = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, `0000000${start}-aaaa-bbbb-cccc-000000000000`));
+    for (let i = 0; i < 20; i++) {
+      t.v += 1_000;
+      if (holds.take(qn, 1, false) === 0) sent++;
+    }
+  }
+  assert.equal(sent, 10, `${sent} calls sent in one UTC day against a budget of 10: each start spent the day again`);
+  // the next UTC day: a full budget again
+  t.v += 86_400_000;
+  const next = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, "00000009-aaaa-bbbb-cccc-000000000000"));
+  assert.equal(next.take(qn, 1, false), 0);
+});
+
+test("review H1: during a deploy's handover the old and the new helper draw one day's budget between them", () => {
+  const dr = LISTS.base[2][1];
+  const env = { BASE_RPC_URL_DRPC_1: dr, RPC_DAY_DRPC: "200" }; // 10 calls of 20 CU
+  const dir = mkdtempSync(join(tmpdir(), "ct-rpc-day-"));
+  const t = { v: dayStart() };
+  const old = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, "0000000a-aaaa-bbbb-cccc-000000000000"));
+  const neu = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, "0000000b-aaaa-bbbb-cccc-000000000000"));
+  let sent = 0;
+  for (let i = 0; i < 20; i++) {
+    t.v += 1_100; // past the peers' re-read and the write's pace each step
+    if ((i % 2 === 0 ? old : neu).take(dr, 1, false) === 0) sent++;
+  }
+  assert.ok(sent <= 10, `${sent} calls sent by the two helpers against one budget of 10`);
+  assert.equal(holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, "0000000c-aaaa-bbbb-cccc-000000000000")).room(dr), 0, "a third start sees the day spent");
+});
+
+test("review H1: the day files are hostile input: a file that does not parse, a negative or non-number spend, another day's file or a stranger's name counts nothing; an old day's file is removed", () => {
+  const qn = LISTS.base[1][1];
+  const env = { BASE_RPC_URL_QUICKNODE: qn, RPC_DAY_QUICKNODE: "200" };
+  const dir = mkdtempSync(join(tmpdir(), "ct-rpc-day-"));
+  const t = { v: dayStart() };
+  const day = Math.floor(t.v / 86_400_000);
+  const first = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, "0000000d-aaaa-bbbb-cccc-000000000000"));
+  assert.equal(first.take(qn, 1, false), 0); // makes the folder
+  const sub = readdirSync(dir).find((n) => !n.startsWith("."))!;
+  const group = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, undefined).paceOf(qn)!.group!;
+  writeFileSync(join(dir, sub, "0000000e-aaaa-bbbb-cccc-000000000000.json"), "{not json");
+  writeFileSync(join(dir, sub, "0000000f-aaaa-bbbb-cccc-000000000000.json"), JSON.stringify({ day, units: { [group]: -1e9 } }));
+  writeFileSync(join(dir, sub, "00000010-aaaa-bbbb-cccc-000000000000.json"), JSON.stringify({ day, units: { [group]: "180" } }));
+  writeFileSync(join(dir, sub, "00000011-aaaa-bbbb-cccc-000000000000.json"), JSON.stringify({ day: day - 1, units: { [group]: 180 } }));
+  writeFileSync(join(dir, sub, "notahelper.json"), JSON.stringify({ day, units: { [group]: 180 } }));
+  t.v += 1_100;
+  const second = holdsOn(() => t.v, keyedPaces?.(env) ?? {}, daySpend.dayFiles?.(dir, "00000012-aaaa-bbbb-cccc-000000000000"));
+  let sent = 0;
+  for (let i = 0; i < 12; i++) if ((t.v += 1_100), second.take(qn, 1, false) === 0) sent++;
+  assert.equal(sent, 9, "the first start's one call counts, nothing else");
+  assert.ok(!readdirSync(join(dir, sub)).includes("00000011-aaaa-bbbb-cccc-000000000000.json"), "yesterday's file is removed");
+});
+
+test("review H1: the server keeps each account's daily spend in its store (HELPER_STORE_DIR), shared with the helper it replaces", () => {
+  const main = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  assert.match(main, /providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, /);
+});
+
+for (const chain of ["solana", "base"] as const) {
+  test(`review M2 (${chain}): a keyed URL whose plan is spent, answering HTTP 200 with a JSON-RPC error naming its credits, is down for the read: the next provider answers`, async () => {
+    const qn = chain === "solana" ? LISTS.solana[1][1] : LISTS.base[1][1];
+    const dr = chain === "solana" ? LISTS.solana[2][1] : LISTS.base[2][1];
+    const env: Record<string, string> = chain === "solana" ? { SOLANA_RPC_URL_QUICKNODE: qn, SOLANA_RPC_URL_DRPC_1: dr } : { BASE_RPC_URL_QUICKNODE: qn, BASE_RPC_URL_DRPC_1: dr };
+    const asked: string[] = [];
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      asked.push(url);
+      const id = (JSON.parse(String(init.body)) as { id: unknown }).id;
+      if (url === qn) return json({ jsonrpc: "2.0", id, error: { code: -32603, message: "Your monthly API credits are exhausted. Upgrade your plan." } });
+      return json({ jsonrpc: "2.0", id, result: "from-drpc" });
+    };
+    const c = clock();
+    const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), pinned: { base: ["https://p1.test"] }, now: c.now, sleep: c.sleep, log: () => undefined });
+    const a = await r.handle(chain, "application/json", JSON.stringify(READ[chain]), "198.51.100.4");
+    assert.equal(a.status, 200, a.body);
+    assert.equal(JSON.parse(a.body).result, "from-drpc", `the caller got the spent key's answer: ${a.body}`);
+    assert.deepEqual(asked, [qn, dr]);
+  });
+}
+
+test("review M3: a key past its day with every other provider down answers 503 (the device reads its own), never a 429 wait", async () => {
+  const qn = LISTS.base[1][1];
+  const env = { BASE_RPC_URL_QUICKNODE: qn, RPC_DAY_QUICKNODE: "20" };
+  const c = clock();
+  c.t.v = dayStart();
+  let down = false;
+  const fetch = async (_url: string, init: RequestInit): Promise<Response> => (down ? new Response("down", { status: 503 }) : answer(init, "0x1"));
+  const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), pinned: { base: ["https://p1.test", "https://p2.test"] }, now: c.now, sleep: c.sleep, log: () => undefined });
+  assert.equal((await r.handle("base", "application/json", JSON.stringify(READ.base), "198.51.100.1")).status, 200); // QuickNode's 20 credits
+  down = true;
+  c.t.v += 2_000;
+  const a = await r.handle("base", "application/json", JSON.stringify(READ.base), "198.51.100.2");
+  assert.equal(a.status, 503, `${a.status} ${a.body} ${JSON.stringify(a.headers ?? {})}`);
+});
+
+test("review L3: a keyed URL that echoes its key in an answer is down for the read: the next provider answers, and the echo is never forwarded", async () => {
+  for (const chain of ["base", "near"] as const) {
+    const [first, second, third] = urlsOf(chain);
+    const env = Object.fromEntries(LISTS[chain].map(([n, u]) => [n, u as string]));
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => answer(init, url === first ? `echo ${url}` : url === second ? "clean" : "third");
+    const c = clock();
+    const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), pinned: { base: ["https://p1.test"] }, now: c.now, sleep: c.sleep, log: () => undefined });
+    const a = await r.handle(chain, "application/json", JSON.stringify(READ[chain]), "198.51.100.5");
+    assert.equal(a.status, 200, `${chain}: ${a.status} ${a.body}`);
+    assert.equal(JSON.parse(a.body).result, "clean");
+    assert.ok(!a.body.includes(first.slice(-20)) && !a.body.includes(third.slice(-20)));
+  }
+});
+
+test("review L4: a walk ends inside the server's 15 s request timeout however slow its providers: no send starts past WALK_MS, and each send's timeout ends by it", async () => {
+  const { WALK_MS } = rpcModule as unknown as { WALK_MS?: number };
+  assert.ok(typeof WALK_MS === "number" && WALK_MS < 15_000, "rpc.ts WALK_MS, under the server's requestTimeout");
+  // NEAR's list (FastNear, NEAR_RPC_URL, NEAR_RPC_URL_B, the public one): each answers 503 after 6 s
+  const env = Object.fromEntries(LISTS.near.map(([n, u]) => [n, u as string]));
+  const c = clock();
+  c.t.v += 0.37; // the monotonic clock's fractional ms: each send's timeout is still a whole number of ms
+  const begun = c.t.v;
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    asked.push(url);
+    assert.ok(init.signal instanceof AbortSignal, "every send has a timeout");
+    c.t.v += 6_000.21;
+    return new Response("slow and down", { status: 503 });
+  };
+  const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
+  const a = await r.handle("near", "application/json", JSON.stringify(READ.near), "198.51.100.6");
+  assert.equal(a.status, 503, a.body);
+  assert.ok(c.t.v - begun <= WALK_MS + 6_000, `the walk ran ${c.t.v - begun} ms`);
+  assert.equal(asked.length, Math.ceil(WALK_MS / 6_000), `${asked.length} sends`);
+});
+
+test("review L4: Solana's first key slow then failing leaves its spares only the rest of the request's WALK_MS, not a second full walk", async () => {
+  const { WALK_MS } = rpcModule as unknown as { WALK_MS?: number };
+  assert.ok(typeof WALK_MS === "number");
+  const env: Record<string, string> = { ...Object.fromEntries(LISTS.solana.map(([n, u]) => [n, u as string])), ...Object.fromEntries(DRPC_MORE.solana) };
+  const c = clock();
+  const begun = c.t.v;
+  const fetch = async (): Promise<Response> => ((c.t.v += 4_000), new Response("slow and down", { status: 503 }));
+  const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
+  const a = await r.handle("solana", "application/json", JSON.stringify(READ.solana), "198.51.100.7");
+  assert.equal(a.status, 503, a.body);
+  assert.ok(c.t.v - begun <= WALK_MS + 4_000, `the read ran ${c.t.v - begun} ms against WALK_MS ${WALK_MS}`);
+});
+
+test("review L2: every dRPC URL the helper paces (the three keys and its keyless robinhood.drpc.org, one IP) fits dRPC's free floor of 50,400 CU a minute in the worst minute", () => {
+  const env: Record<string, string> = { ...ENV, ...Object.fromEntries(DRPC_MORE.base) };
+  const keyless = PROVIDER_PACE["https://robinhood.drpc.org"]!;
+  // one bucket per account: each key's group once (its URLs on every chain share it)
+  const keys = new Map<string, Pace>();
+  for (const [u, p] of Object.entries(keyedPaces?.(env) ?? {})) if (/drpc/.test(new URL(u).host)) keys.set(p.group ?? u, p);
+  assert.equal(keys.size, 3, "three dRPC accounts");
+  const all = [...keys.values(), keyless];
+  const worstMinute = all.reduce((s, p) => s + (p.perS * 60 + p.burst) * 20, 0); // 20 CU a call (KEYED_COST)
+  assert.ok(worstMinute <= 50_400, `${worstMinute} CU in the worst minute from the helper's IP`);
 });

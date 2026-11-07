@@ -32,6 +32,7 @@ import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solan
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
+import { dayFiles } from "./limits/day-spend.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
@@ -886,11 +887,13 @@ if (import.meta.main) {
   try {
     checkVendorPlans(process.env);
     // card helper-deploy-reads-fast: a deploy's two helpers draw on one key per vendor, so each counts the other's calls
-    const proxy = createProxy(process.env, { peers: callsFiles(storeDir, randomUUID()) });
+    const id = randomUUID();
+    const proxy = createProxy(process.env, { peers: callsFiles(storeDir, id) });
     // one hold per provider, shared by every path that reads it (card helper-robinhood-capacity: the swap and maker reads
     // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
-    // card rpc-keyed-lists: with every keyed URL's company pace (limits.ts KEYED_PACE)
-    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env) });
+    // card rpc-keyed-lists: with every keyed URL's company pace (limits.ts KEYED_PACE), each account's daily spend kept
+    // in the store and shared with the helper this one replaces (limits/day-spend.ts, review H1)
+    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env) }, dayFiles(storeDir, id));
     // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
     // (rpc.ts callEvm): a user's call never pays for the helper's background load
     const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
