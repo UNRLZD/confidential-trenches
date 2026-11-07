@@ -1124,22 +1124,27 @@ test("S11 review PROBE-2: the wallet's account of the token handed to another ow
     assert.match(v.detail, new RegExp(`provider A: the wallet's account of the token ${OWN} is left with its owner changed`));
   }
 });
-// Provider A reads a stranger as its delegate and close authority, provider B a clean account: no baseline is taken from
-// A alone (mutant N4b), so the account after is held to a clean base and the delegate A claimed is refused.
+// Provider A alone reads a stranger as its delegate (for 7) and close authority, provider B a clean account, and the
+// simulation leaves every field of A's read but the amount as A read it: no baseline is taken from A alone (mutant N4b
+// takes A's read and passes this account, unchanged against it; the d1806532 review's RVW-7), so the account after is
+// held to a clean base and the delegate A claimed is refused.
 test("S11 review PROBE-5: the providers disagree on the wallet's account of the token; a delegate only provider A read before, left after, is refused", () => {
   for (const make of [buyCase, sellCase]) {
     const c = make();
     const clean = wide(held(W, F.mint, T22, c.req.side === "buy" ? 0n : buyToken, 1_513_840n));
     const lied = hostile(clean);
+    setU64(lied.data, 121, 7n);
     c.reads.writable = { ...c.reads.writable, [OWN]: [lied, clean] };
-    setOwn(c, (a) => { const x = copyHeld(lied); x.data.set(a.data.subarray(64, 72), 64); x.data.set(a.data.subarray(64, 72), 121); return x; });
+    setOwn(c, (a) => { const x = copyHeld(lied); x.data.set(a.data.subarray(64, 72), 64); return x; });
     const v = s11(run(c));
     assert.equal(v.ok, false, `${c.req.side}: ${v.detail}`);
-    assert.match(v.detail, new RegExp(`the wallet's account of the token ${OWN} is left with its delegate, (delegated_amount, )?close authority changed`)); // the sold-out account delegates 0
+    assert.match(v.detail, new RegExp(`the wallet's account of the token ${OWN} is left with its delegate, delegated_amount, close authority changed`));
   }
 });
-// A sell that closes the account of the token: its rent is the wallet's (review PROBE-1 found it could go anywhere).
-test("S11 review PROBE-1: a sell that closes the account of the token counts its rent: back to the wallet passes, to anyone else is refused", () => {
+// A sell that closes the account of the token: its rent is the wallet's (review PROBE-1 found it could go anywhere, uncounted). It is
+// counted as the wallet's lamports, like a closed wSOL account's: sent anywhere else, it is proceeds the sell did not
+// get, held by minOut here and by S12's slack (the d1806532 review's RVW-5: within that slack it passes, as any shortfall).
+test("S11 review PROBE-1: a sell that closes the account of the token counts its rent against the proceeds: back to the wallet passes, elsewhere it fails at the floor", () => {
   for (const gone of [null, CLOSED]) {
     const home = sellCase();
     setOwn(home, () => gone);
@@ -1178,4 +1183,118 @@ test("S11 review PROBE-3: a Token-2022 account of the wallet's grown past its si
   const off = copyHeld(memo);
   off.data[off.data.length - 1] = 0;
   assert.equal(writtenUsdc([memo, off], memo).v.detail, `the providers disagree on the wallet's account ${ata}`);
+});
+
+// Card solana-written-accounts-whole, the independent review of d1806532 (7 Nov): its probes RVW-1..3 and its three
+// surviving mutants N5a, N5b and N15, each now a test (the pool-usd sweep, test/pool-usd-mutants.mjs, holds the kills).
+const s10 = (v: ReturnType<typeof checkSolanaQuote>) => v.results.find((r) => r.id === "S10")!;
+const asMint = (c: ReturnType<typeof buyCase>, m: SolanaAccountRead): void => { (c.reads as { mint: unknown }).mint = [m, { owner: m.owner, data: Uint8Array.from(m.data) }]; };
+const rentAt = (n: number): bigint => BigInt((n + 128) * 5080); // the fixture's rent: 170 bytes -> 1,513,840
+const fails = (v: ReturnType<typeof checkSolanaQuote>): string => v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | ");
+// Token-2022 at program@v11.1.0 lists PermissionedBurn (28) after PausableAccount, a mint's extension that asks nothing of
+// an account (RVW-1). S10 and the size rule read one list: a number S10 admits always has a size, and one not in the
+// list (29, past the enum; 27 and 2, an account's extensions, on a mint) is refused by S10 by its number, and by S11 for
+// the same reason, never as a size changed.
+test("S11 review RVW-1: PermissionedBurn (28) passes S10 and S11 on a buy creating 170 bytes; an extension not in the one list is refused by S10 by its number", () => {
+  const m0 = buyCase().reads.mint[0] as SolanaAccountRead;
+  const c = buyCase();
+  const m = withExt(m0, 28, new Uint8Array(32).fill(9));
+  asMint(c, m);
+  assert.equal(solanaTokenAccountSize(m), 170);
+  const v = run(c);
+  assert.equal(v.ok, true, fails(v));
+  assert.equal(s10(v).detail, "Token-2022 extensions 18,19,28");
+  for (const t of [29, 27, 2, 0xffff]) {
+    const x = buyCase();
+    const mx = withExt(m0, t, new Uint8Array(4));
+    asMint(x, mx);
+    const vx = run(x);
+    refusedBy("S10", vx);
+    assert.equal(s10(vx).detail, `Token-2022 extension ${t} not known`);
+    assert.equal(s11(vx).detail, `no size for the wallet's account of the token: Token-2022 extension ${t} not known`);
+    assert.throws(() => solanaTokenAccountSize(mx), new RegExp(`^Error: Token-2022 extension ${t} not known$`));
+  }
+});
+// Token-2022 stores a mint whose extensions would end at 355 bytes (a multisig's length) 2 bytes longer
+// (adjust_len_for_multisig), and its walk ends where fewer than 2 bytes remain or at type 0 (RVW-2). A nonzero type
+// with no room for its length is malformed there, and refused here by both.
+test("S11 review RVW-2: a mint Token-2022 stored at 357 bytes (355 + 2 zero bytes) passes S10, the size rule and S11; a nonzero type with no room for its length is refused", () => {
+  const m0 = buyCase().reads.mint[0] as SolanaAccountRead;
+  assert.equal(m0.data[166], 18); // MetadataPointer first, 64 bytes, to 234
+  const at355 = new Uint8Array(355);
+  at355.set(m0.data.subarray(0, 234));
+  setU16(at355, 234, 19); setU16(at355, 236, 117); at355.fill(65, 238, 355); // a TokenMetadata TLV ending at 355
+  const c = buyCase();
+  const m = { owner: m0.owner, data: Uint8Array.from([...at355, 0, 0]) };
+  asMint(c, m);
+  assert.equal(solanaTokenAccountSize(m), 170);
+  const v = run(c);
+  assert.equal(v.ok, true, fails(v));
+  assert.equal(s10(v).detail, "Token-2022 extensions 18,19");
+  for (const tail of [[3, 0], [3, 0, 0]]) {
+    const x = buyCase();
+    const mx = { owner: m0.owner, data: Uint8Array.from([...at355, ...tail]) };
+    asMint(x, mx);
+    const vx = run(x);
+    refusedBy("S10", vx);
+    assert.equal(s10(vx).detail, "extension 3 has no room for its length");
+    assert.throws(() => solanaTokenAccountSize(mx), /^Error: extension 3 has no room for its length$/);
+  }
+});
+// A Pausable mint (26) gets a 174-byte account (PausableAccount, 27): S11 bounds the buy by the rent read for the size
+// the one rule gives (RVW-3; the flow reads it for that size, test/solana-flow-replay.test.ts), and a rent read for 170
+// is 4 bytes short.
+test("S11 review RVW-3: a Pausable mint's buy creating its 174-byte account passes with the rent read at the rule's 174; read at 170 it is refused", () => {
+  const m = withExt(buyCase().reads.mint[0] as SolanaAccountRead, 26, new Uint8Array(33));
+  assert.equal(solanaTokenAccountSize(m), 174);
+  for (const readAt of [174, 170]) {
+    const c = buyCase();
+    asMint(c, m);
+    (c.reads as { rent: unknown }).rent = { tokenAccount: [rentAt(readAt), rentAt(readAt)], pumpVolumeAccumulator: c.reads.rent.pumpVolumeAccumulator };
+    const own = wide(held(W, F.mint, T22, buyToken, rentAt(174)));
+    const d = new Uint8Array(174);
+    d.set(own.data);
+    setU16(d, 170, 27);
+    setOwn(c, () => ({ ...own, data: d }));
+    for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.tokenAccountLamports.post = rentAt(174); x.walletLamports.post -= rentAt(174) - rentAt(170); }
+    const v = s11(run(c));
+    if (readAt === 174) assert.equal(v.ok, true, v.detail);
+    else assert.match(v.detail, /provider A: native out \d+ > \d+/);
+  }
+});
+// N5a: a token account read back under the other token program is refused, on each of the three kinds S11 holds (the
+// account of the token, a wSOL account, any other). On chain no program reassigns a token account inside a tx, so only a
+// provider answering falsely reaches these lines; every external answer is held as hostile.
+test("S11 review N5a: an account of the wallet's read back under the other token program is refused: the account of the token, a wSOL account, a USDC account", () => {
+  const c = buyCase();
+  setOwn(c, (a) => ({ ...copyHeld(a), owner: TOKEN }));
+  assert.match(s11(run(c)).detail, new RegExp(`provider A: the wallet's account of the token ${OWN} is left with its program changed`));
+  const w = buyCase();
+  w.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  for (const s of w.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: { ...copyHeld(wsolHeld), owner: T22 } }; }
+  assert.match(s11(run(w)).detail, new RegExp(`provider A: the wallet's wSOL account ${WSOL_ATA} is left with its program changed`));
+  const before = held(W, USDC, TOKEN, 7_000_000n);
+  const { ata, v } = writtenUsdc([before, before], { ...copyHeld(before), owner: T22 });
+  assert.match(v.detail, new RegExp(`provider A: the wallet's account ${ata} moves: 7000000 -> 7000000, lamports 2039280 -> 2039280, its program changed`));
+});
+// N5b: the providers reading one account of the wallet's under two token programs, every byte the same, disagree.
+test("S11 review N5b: the providers reading the wallet's USDC account under two token programs, its bytes the same, is refused as a disagreement", () => {
+  const before = held(W, USDC, TOKEN, 7_000_000n);
+  const { ata, v } = writtenUsdc([before, { ...copyHeld(before), owner: T22 }], before);
+  assert.equal(v.detail, `the providers disagree on the wallet's account ${ata}`);
+});
+// N15: the account of the token, read the same by both providers before, keeps its base and size as read: one that is
+// not clean (a delegate the wallet set, or grown by a Reallocate for a required memo) and that the sell leaves as it was
+// passes; held to a clean base instead, it would be refused.
+test("S11 review N15: an agreed account of the token that is not clean (a delegate set before; grown to 175 bytes before) and left as it was passes a sell", () => {
+  const delegated = (a: SolanaHeldRead): SolanaHeldRead => { const x = copyHeld(a); setU32(x.data, 72, 1); x.data.fill(5, 76, 108); setU64(x.data, 121, 9n); return x; };
+  const grown = (a: SolanaHeldRead): SolanaHeldRead => { const d = new Uint8Array(175); d.set(a.data); setU16(d, 170, 8); setU16(d, 172, 1); d[174] = 1; return { ...a, data: d }; };
+  for (const shape of [delegated, grown]) {
+    const c = sellCase();
+    const before = shape(wide(held(W, F.mint, T22, buyToken, 1_513_840n)));
+    c.reads.writable = { [OWN]: [before, copyHeld(before)] };
+    setOwn(c, () => { const x = copyHeld(before); setU64(x.data, 64, 0n); return x; });
+    const v = s11(run(c));
+    assert.equal(v.ok, true, v.detail);
+  }
 });

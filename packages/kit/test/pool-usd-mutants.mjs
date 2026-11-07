@@ -6,7 +6,8 @@
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side), and the mint's agreement on both providers that S6 and S10 share (solanaMintAgreed,
 // test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
-// test/solana-pool.test.ts): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, and S11's hold on the wallet's token accounts
+// (test/solana-quote.test.ts "S11 review", card solana-written-accounts-whole): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -26,6 +27,7 @@ const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 const S10_TEST = path.join(BASE, "test/solana-quote.test.ts");
 const POOL = path.join(BASE, "src/trade/solana/pool.ts");
 const POOL_TEST = path.join(BASE, "test/solana-pool.test.ts");
+const RVW1 = "S11 review RVW-1";
 
 const AGREE = "agreement";
 const STALE = "staleness";
@@ -98,8 +100,24 @@ export const MUTANTS = [
   [PRICE, "    bound.stopped = true;\n", "", RETRY],
   [PRICE, "if (bound.stopped) return fail(", "if (false) return fail(", RETRY],
   // a Token-2022 mint that lists one extension type twice
-  [S6, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
+  [S6, "if (seen.has(type)) return", "if (false) return", T22, BUY_TEST],
   [S6, "    seen.add(type);\n", "", T22, BUY_TEST],
+  // card solana-written-accounts-whole, the d1806532 review: S10 and the size rule read one list of Token-2022 mint
+  // extensions through one walk (PermissionedBurn, 28, in it; a number not in it refused by S10 by its number and by S11
+  // for that reason), walked as Token-2022 walks it (a 357-byte mint's 2 zero bytes; no room for a length)
+  [S6, "if (!T22_MINT_EXT.has(type)) return", "if (false) return", RVW1, S10_TEST],
+  [S6, "[26, 0], [28, null],", "[26, 0],", RVW1, S10_TEST],
+  [S6, "if (typeof size === \"string\") return fail(\"S11\"", "if (false) return fail(\"S11\"", RVW1, S10_TEST],
+  [S6, "while (d.length - at >= 2) {", "while (d.length - at >= 4) {", "S11 review RVW-2", S10_TEST],
+  // the same review's survivors of the last one, each now killed by its own test: the program compared after the tx on
+  // each of the three kinds (N5a), the providers' agreement on the program (N5b), an agreed account of the token kept as
+  // read (N15); and no baseline from provider A alone (N4b, PROBE-5 in RVW-7's shape)
+  [S6, "still.owner !== c.tokenProgram ? [\"program\"]", "false ? [\"program\"]", "S11 review N5a", S10_TEST],
+  [S6, "still.owner !== p.owner ? [\"program\"] : baseChanges(p.data, still.data, false);\n      if (!still || left.length)", "false ? [\"program\"] : baseChanges(p.data, still.data, false);\n      if (!still || left.length)", "S11 review N5a", S10_TEST],
+  [S6, "still.owner !== p.owner ? [\"program\"] : baseChanges(p.data, still.data, false);\n    if (left.length", "false ? [\"program\"] : baseChanges(p.data, still.data, false);\n    if (left.length", "S11 review N5a", S10_TEST],
+  [S6, "a.owner === b.owner && a.lamports === b.lamports && eqBytes", "a.lamports === b.lamports && eqBytes", "S11 review N5b", S10_TEST],
+  [S6, "m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] :", "false ? [] :", "S11 review N15", S10_TEST],
+  [S6, "pre: agreed ? a : null", "pre: walletToken(a, w) ? a : null", "S11 review PROBE-5", S10_TEST],
   // S6 on a shared route: each side the wallet's own account or the authority's ATA, the source side unbounded, a
   // Token-2022 destination through the authority's ATA only for a mint read equal on both providers without a transfer
   // fee or hook

@@ -774,40 +774,65 @@ function s10(c: Ctx): SolanaQuoteResult {
   const d = a.data;
   if (d.length === 82) return pass("S10", "Token-2022 mint without extensions");
   if (d.length < 166 || d[165] !== 1) return fail("S10", `Token-2022 mint of ${d.length} bytes without the mint account type`);
-  const found: number[] = [];
+  const ext = t22MintExtensions(d);
+  if (typeof ext === "string") return fail("S10", ext);
   const refused: string[] = [];
-  let o = 166;
-  while (o + 4 <= d.length) {
-    const type = u16(d, o);
-    const len = u16(d, o + 2);
-    if (type === 0) break; // Uninitialized: the rest is padding
-    if (o + 4 + len > d.length) return fail("S10", `extension ${type} runs past the mint`);
-    const body = d.subarray(o + 4, o + 4 + len);
-    found.push(type);
+  for (const { type, body } of ext) {
     if (EXT_CONFIDENTIAL.has(type)) refused.push(`confidential transfer (${type})`);
     if (type === EXT_NON_TRANSFERABLE) refused.push("non-transferable");
-    if (type === EXT_TRANSFER_HOOK && (len !== 64 || body.subarray(0, 32).some((x) => x !== 0))) refused.push("transfer hook whose authority can change it");
-    o += 4 + len;
+    if (type === EXT_TRANSFER_HOOK && (body.length !== 64 || body.subarray(0, 32).some((x) => x !== 0))) refused.push("transfer hook whose authority can change it");
   }
-  if (o !== d.length && d.subarray(o).some((x) => x !== 0)) return fail("S10", "bytes after the last extension");
-  return refused.length ? fail("S10", `Token-2022 mint with ${refused.join(", ")}`) : pass("S10", `Token-2022 extensions ${found.join(",") || "none"}`);
+  return refused.length ? fail("S10", `Token-2022 mint with ${refused.join(", ")}`) : pass("S10", `Token-2022 extensions ${ext.map((e) => e.type).join(",") || "none"}`);
 }
 
-/** Token-2022 mint extensions (spl-token-2022 ExtensionType) that add nothing to a new token account. */
-const T22_MINT_ONLY = new Set([3, 4, 6, 10, 12, 16, 18, 19, 20, 21, 22, 23, 24, 25]);
-/** Mint extensions that a new token account carries one of (get_required_init_account_extensions): TransferFeeConfig
- * -> TransferFeeAmount (8 bytes), NonTransferable -> NonTransferableAccount (0), TransferHook -> TransferHookAccount
- * (1), Pausable -> PausableAccount (0). */
-const T22_ACCOUNT_EXT = new Map([[1, 8], [9, 0], [14, 1], [26, 0]]);
+/** Token-2022's mint extensions by number, each with the account extension it asks of a new token account: the bytes of
+ * its value, or null for none. From solana-program/token-2022 at program@v11.1.0 (read 2026-11-07 12:55Z),
+ * interface/src/extension/mod.rs: ExtensionType :1076-1141 gives the numbers, get_account_type :1254-1292 which are a
+ * mint's, required_init_account_extensions :1296-1309 what each asks of an account: TransferFeeConfig 1 ->
+ * TransferFeeAmount (a u64, transfer_fee/mod.rs:178-181), NonTransferable 9 -> NonTransferableAccount (empty) and
+ * ImmutableOwner (which every associated account has already), TransferHook 14 -> TransferHookAccount (a bool,
+ * transfer_hook/mod.rs:45-48), Pausable 26 (PausableConfig, 33 bytes, pausable/mod.rs:22-28) -> PausableAccount 27
+ * (empty, :35); PermissionedBurn 28 (one 32-byte authority, permissioned_burn/mod.rs:21-25) asks none, nor does any
+ * other here. Any other number, an account's extension among them, no mint holds or this kit does not know: S10
+ * refuses it by its number and the size rule with it, both from one walk (t22MintExtensions), so they never disagree. */
+const T22_MINT_EXT: ReadonlyMap<number, number | null> = new Map([
+  [1, 8], [3, null], [4, null], [6, null], [9, 0], [10, null], [12, null], [14, 1], [16, null], [18, null], [19, null],
+  [20, null], [21, null], [22, null], [23, null], [24, null], [25, null], [26, 0], [28, null],
+]);
+/** A Token-2022 mint's extensions (`d` past 82 bytes, its account type byte read), walked as Token-2022 walks them
+ * (try_for_each_tlv_extension_type, mod.rs:205-240): the walk ends where fewer than 2 bytes remain or at an
+ * Uninitialized type (0), so a mint Token-2022 stored 2 bytes longer to keep it off a multisig's 355 bytes
+ * (adjust_len_for_multisig, :128-134) walks clean, and a nonzero type with no room for its length, or a value past the
+ * end, is malformed. Each type once and in T22_MINT_EXT, and only zero bytes after the walk's end; or why not. S10 and
+ * the size rule (solanaTokenAccountSize) both read a mint through this walk alone. */
+function t22MintExtensions(d: Uint8Array): { type: number; body: Uint8Array }[] | string {
+  const out: { type: number; body: Uint8Array }[] = [];
+  const seen = new Set<number>(); // Token-2022 holds at most one extension of each type: a mint listing one twice is forged
+  let at = 166;
+  while (d.length - at >= 2) {
+    const type = u16(d, at);
+    if (type === 0) break; // Uninitialized: the rest is padding
+    if (d.length - at < 4) return `extension ${type} has no room for its length`;
+    const len = u16(d, at + 2);
+    if (at + 4 + len > d.length) return `extension ${type} runs past the mint`;
+    if (seen.has(type)) return `the mint lists extension ${type} twice`;
+    seen.add(type);
+    if (!T22_MINT_EXT.has(type)) return `Token-2022 extension ${type} not known`;
+    out.push({ type, body: d.subarray(at + 4, at + 4 + len) });
+    at += 4 + len;
+  }
+  return d.subarray(at).some((x) => x !== 0) ? "bytes after the last extension" : out;
+}
 
 /** The largest new token account W can get for a mint the venue reader admits (solanaTokenAccountSize): a Token-2022
- * account with its type byte, ImmutableOwner, and each of the four extensions a mint can ask of it once (Token-2022
- * holds one extension of each type): 195 bytes. */
-export const SOLANA_TOKEN_ACCOUNT_MAX_SIZE = 165 + 1 + 4 + [...T22_ACCOUNT_EXT.values()].reduce((s, x) => s + 4 + x, 0);
+ * account with its type byte, ImmutableOwner, and each account extension a mint can ask of it once (Token-2022 holds
+ * one extension of each type): 195 bytes. */
+export const SOLANA_TOKEN_ACCOUNT_MAX_SIZE = 165 + 1 + 4 + [...T22_MINT_EXT.values()].reduce((s: number, x) => s + (x === null ? 0 : 4 + x), 0);
 /** The size of W's new associated token account for `mint` (S11 holds the wallet's account of the token the tx creates
- * to it; the pool buy prices its rent by it): 165 for Token; for Token-2022 165, the account type byte
- * and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it) and the one each
- * mint extension asks. A mint extension this list does not know is refused. */
+ * to it, the flow reads its rent for it, the pool buy prices its rent by it): 165 for Token; for Token-2022 165, the
+ * account type byte and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it)
+ * and the one each mint extension asks (T22_MINT_EXT). A mint S10 refuses for its walk is refused here with S10's
+ * reason. */
 export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }): number {
   if (mint.owner === SOLANA_TOKEN_PROGRAM) {
     if (mint.data.length !== 82) throw new Error("not a Token mint");
@@ -818,19 +843,11 @@ export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }
   let size = 165 + 1 + 4; // account type, ImmutableOwner
   if (d.length === 82) return size;
   if (d.length < 166 || d[165] !== 1) throw new Error("not a Token-2022 mint");
-  const seen = new Set<number>(); // Token-2022 holds at most one extension of each type: a mint listing one twice is forged
-  for (let at = 166; at < d.length; ) {
-    if (at + 4 > d.length) throw new Error("a Token-2022 extension runs past the mint");
-    const type = d[at]! | (d[at + 1]! << 8);
-    const len = d[at + 2]! | (d[at + 3]! << 8);
-    if (type === 0) break; // Uninitialized: the rest is padding
-    if (seen.has(type)) throw new Error(`a Token-2022 mint lists extension ${type} twice`);
-    seen.add(type);
-    at += 4 + len;
-    if (at > d.length) throw new Error("a Token-2022 extension runs past the mint");
-    const extra = T22_ACCOUNT_EXT.get(type);
-    if (extra !== undefined) size += 4 + extra;
-    else if (!T22_MINT_ONLY.has(type)) throw new Error(`a Token-2022 mint extension ${type} not known here`);
+  const ext = t22MintExtensions(d);
+  if (typeof ext === "string") throw new Error(ext);
+  for (const { type } of ext) {
+    const extra = T22_MINT_EXT.get(type);
+    if (extra !== null && extra !== undefined) size += 4 + extra;
   }
   return size;
 }
@@ -882,16 +899,18 @@ function cleanBase(mint: string, wallet: string): Uint8Array {
 // bounds both), or close, and its base and size after are the ones before or, when the tx creates it, a clean base of
 // the token at the size the associated token program gives it (solanaTokenAccountSize). So no route leaves a delegate, a
 // close authority, another owner, a frozen state or an added extension on any account of the wallet's.
-// The size of the wallet's account of the token when the tx creates it, from provider A's mint (S10 holds B's to it); -1
-// (no account matches) when the mint is not read or has an extension the size rule does not know.
-const newSize = (c: Ctx): number => {
+// The size of the wallet's account of the token when the tx creates it, from provider A's mint (S10 holds B's to it), or
+// why it has none: the mint is not read, or S10 refuses its walk (S11 then refuses with the same reason).
+const newSize = (c: Ctx): number | string => {
+  const m = c.reads.mint[0];
+  if (!m) return "the mint is not read";
   try {
-    return c.reads.mint[0] ? solanaTokenAccountSize(c.reads.mint[0]) : -1;
-  } catch {
-    return -1;
+    return solanaTokenAccountSize(m);
+  } catch (e) {
+    return (e as Error).message;
   }
 };
-function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: Ctx): { out: bigint; wrong: string[] } {
+function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: Ctx, size: number): { out: bigint; wrong: string[] } {
   const wallet = c.req.wallet;
   let pre = sim.walletLamports.pre;
   let post = sim.walletLamports.post;
@@ -910,7 +929,7 @@ function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: C
         else if (m.disputed) wrong.push(`the providers disagree on the wallet's account of the token ${m.key}, which the tx closes`);
         continue;
       }
-      const left = !still ? ["owner"] : still.owner !== c.tokenProgram ? ["program"] : m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] : [...baseChanges(cleanBase(c.req.token, wallet), still.data.subarray(0, 165), false), ...(still.data.length !== newSize(c) ? ["size"] : [])];
+      const left = !still ? ["owner"] : still.owner !== c.tokenProgram ? ["program"] : m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] : [...baseChanges(cleanBase(c.req.token, wallet), still.data.subarray(0, 165), false), ...(still.data.length !== size ? ["size"] : [])];
       if (left.length) wrong.push(`the wallet's account of the token ${m.key} is left with its ${left.join(", ")} changed`);
       continue;
     }
@@ -965,11 +984,13 @@ function s11(c: Ctx): SolanaQuoteResult {
   if (rentTa !== rentTb || rentPa !== rentPb || rentTa < 0n || rentPa < 0n) return fail("S11", `the providers disagree on rent: token account ${rentTa}/${rentTb}, pump volume account ${rentPa}/${rentPb}`);
   const mine = walletAccountsOf(c);
   if (typeof mine === "string") return fail("S11", mine);
+  const size = newSize(c);
+  if (typeof size === "string") return fail("S11", `no size for the wallet's account of the token: ${size}`);
   for (const [p, sim] of c.reads.simulations.entries()) {
     const at = p === 0 ? "A" : "B";
     if (!sim) { wrong.push(`no simulation on provider ${at}`); continue; }
     if (sim.err !== null) { wrong.push(`provider ${at}: simulation error ${JSON.stringify(sim.err)}`); continue; }
-    const moved = nativeOutOf(sim, mine, c);
+    const moved = nativeOutOf(sim, mine, c, size);
     for (const x of moved.wrong) wrong.push(`provider ${at}: ${x}`);
     const nativeOut = moved.out;
     const tokenDelta = sim.tokenAccount.post - sim.tokenAccount.pre;
@@ -1003,8 +1024,9 @@ function simulatedOut(c: Ctx): bigint | null {
   const fees = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(c.tx.signatures) + (b.price * BigInt(b.limit) + 999_999n) / 1_000_000n;
   const mine = walletAccountsOf(c);
   if (typeof mine === "string") return null;
+  // the out alone (the size decides only what nativeOutOf finds wrong, which S11 reads)
   const outs = c.reads.simulations.map((s) =>
-    !s || s.err !== null ? null : c.req.side === "buy" ? s.tokenAccount.post - s.tokenAccount.pre : -nativeOutOf(s, mine, c).out + fees + SOLANA_SENDER_TIP + SOLANA_JITO_TIP,
+    !s || s.err !== null ? null : c.req.side === "buy" ? s.tokenAccount.post - s.tokenAccount.pre : -nativeOutOf(s, mine, c, -1).out + fees + SOLANA_SENDER_TIP + SOLANA_JITO_TIP,
   );
   if (outs.some((x) => x === null)) return null;
   return (outs as bigint[]).reduce((m, x) => (x < m ? x : m));
