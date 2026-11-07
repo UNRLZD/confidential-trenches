@@ -31,7 +31,7 @@ export const APP_DIR = path.join(ROOT, "apps/terminal/dist");
 const viaRead = (key) => ({ key, host: "sign", run: async (m, f) => m.judge(await m.read(f)) });
 /** The checks run in this process, each from scripts/live-checks/<key>.mjs. */
 export const IN_PROCESS = [
-  ...["signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "evm-pool-sync-wide-pages", "kit-deposit-calls", "kit-frame-version", "kit-oneclick-pins-frozen"].map(viaRead),
+  ...["signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "evm-pool-sync-wide-pages", "kit-deposit-calls", "kit-frame-version", "kit-oneclick-pins-frozen", "pool-answer-unknown"].map(viaRead),
   { key: "signpage-withdraw-form", host: "sign", run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
   { key: "app-harness-signin-e2e", host: "sign", run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["sign"], f)) },
