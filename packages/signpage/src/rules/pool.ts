@@ -366,8 +366,9 @@ const sameList = (got: Ix["accounts"], want: readonly { key: string; signer: boo
 function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, precommitment: bigint, reads: SolanaPoolReads): bigint {
   if (x.program !== pin.program) return refuse("program");
   if (x.data.length !== SOLANA_POOL_DEPOSIT_LEN || x.data[0] !== SOLANA_POOL_TAG_DEPOSIT) return refuse("deposit_data");
-  // the kit's tag 1: the six, then each tree's next page (deposit.rs:72-76 since d3edab1, state.rs page_for)
-  if (x.accounts.length !== 8) return refuse("deposit_accounts");
+  // tag 1 takes the six, or the six then each tree's next page (deposit.rs:72-76 since d3edab1, state.rs page_for): every
+  // sender names them where they fit (a sell's largest transaction does not); either form moves only what its bytes say
+  if (x.accounts.length !== 6 && x.accounts.length !== 8) return refuse("deposit_accounts");
   const [pool, from, statePage, labelPage, mark, system, nextState, nextLabel] = x.accounts;
   if (!same(pool, pin.pool, false, true)) return refuse("pool");
   if (!same(from, depositor, true, true)) return refuse("depositor");
@@ -377,8 +378,8 @@ function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, 
   if (!same(labelPage, solanaPoolPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");
   if (!same(mark, solanaProgramAddress([new TextEncoder().encode("pre"), pre], pin.program), false, true)) return refuse("precommitment_mark");
   if (!same(system, SOLANA_SYSTEM_PROGRAM, false, false)) return refuse("system");
-  if (!same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");
-  if (!same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");
+  if (x.accounts.length === 8 && !same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");
+  if (x.accounts.length === 8 && !same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");
   const value = u64le(x.data, 1);
   if (value === 0n) return refuse("amount");
   return value;

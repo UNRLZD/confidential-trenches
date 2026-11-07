@@ -57,11 +57,11 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_SELL_FEE, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
-import { solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, type SolanaHeldRead, type SolanaTeardownSimulation } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -513,8 +513,11 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     // the transaction: the venue's sell, then last the deposit of `value` with the note's precommitment, W the payer
     const steps = solanaPoolSellSteps(venue, w.address, amount, minOut);
     const pre = be32(precommitment);
+    // the deposit names each tree's next page when the transaction still fits 1,232 bytes with them (a PumpSwap cashback
+    // sell with no lookup table does not: it keeps the six, as before d3edab1); the size does not depend on the value
+    const next = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const build = (value: bigint): { message: Uint8Array; wire: Uint8Array } => {
-      const { message } = solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, value)], bh.blockhash, []);
+      const { message } = solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)], bh.blockhash, []);
       return { message, wire: wireOf(message) };
     };
     // the fee both RPCs price the message at: per signature, with no compute budget, so the deposit's value (the one
@@ -634,8 +637,10 @@ async function depositHeld(rpcs: Rpcs, program: string, sizes: { stateSize: numb
 const faultOf = (e: unknown): string =>
   e instanceof SolanaRpcTransportError ? `${e.fault} at ${e.host}` : e instanceof Refused ? `refused ${e.code}` : e instanceof PoolRuleRefused ? `check ${e.rule}` : e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 160) : "unknown";
 
-/** The tag 1 deposit of `value` from W into the pinned pool on `pre`, at the tree sizes read. */
-const depositIx = (program: string, pool: string, wallet: string, sizes: { stateSize: number; labelSize: number }, pre: Uint8Array, value: bigint) => ({
+/** The tag 1 deposit of `value` from W into the pinned pool on `pre`, at the tree sizes read: the six accounts, then with
+ *  `next` each tree's next page (contracts/pool-solana/src/deposit.rs:72-76 since d3edab1), so an insert that lands first
+ *  and turns a page does not fail it (state.rs page_for). */
+const depositIx = (program: string, pool: string, wallet: string, sizes: { stateSize: number; labelSize: number }, pre: Uint8Array, value: bigint, next = true) => ({
   program,
   accounts: [
     { key: pool, signer: false, writable: true },
@@ -644,6 +649,12 @@ const depositIx = (program: string, pool: string, wallet: string, sizes: { state
     { key: solanaPoolPage(program, 1, sizes.labelSize), signer: false, writable: true },
     { key: markAddress(program, pre), signer: false, writable: true },
     { key: SOLANA_SYSTEM_PROGRAM, signer: false, writable: false },
+    ...(next
+      ? [
+          { key: solanaPoolNextPage(program, 0, sizes.stateSize), signer: false, writable: true },
+          { key: solanaPoolNextPage(program, 1, sizes.labelSize), signer: false, writable: true },
+        ]
+      : []),
   ],
   data: Uint8Array.of(1, ...u64le(value), ...pre),
 });

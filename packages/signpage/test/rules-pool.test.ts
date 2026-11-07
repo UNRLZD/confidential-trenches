@@ -223,11 +223,12 @@ test("Solana deposit: another program, pool, depositor, amount, precommitment, p
     [ok([cuLimit, depositIx({ pre: PRE + 1n })]), "precommitment"],
     [ok([cuLimit, depositIx({ state: 2_000 })]), "state_page"],
     [ok([cuLimit, depositIx({ label: 1_100 })]), "label_page"],
-    // card pool-senders-next-page: the next pages are each tree's page after its size's, writable; the six alone are not the kit's
+    // card pool-senders-next-page: the next pages are each tree's page after its size's, writable; a seventh account or a ninth is no form
     [ok([cuLimit, depositIx({ nextState: solanaPoolPage(PROGRAM, 0, 2048) })]), "state_page"],
     [ok([cuLimit, depositIx({ nextState: solanaPoolPage(PROGRAM, 1, 1024) })]), "state_page"],
     [ok([cuLimit, depositIx({ nextLabel: solanaPoolPage(PROGRAM, 1, 0) })]), "label_page"],
-    [ok([cuLimit, depositIx({ six: true })]), "deposit_accounts"],
+    [ok([cuLimit, { ...depositIx(), accounts: depositIx().accounts.slice(0, 7) }]), "deposit_accounts"],
+    [ok([cuLimit, { ...depositIx(), accounts: [...depositIx().accounts, acc(SOLANA_SYSTEM_PROGRAM, false, false)] }]), "deposit_accounts"],
     [ok([cuLimit, depositIx()], { bh: key(8) }), "blockhash"],
     [ok([cuLimit, depositIx(), { program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(SOL_W, true, true), acc(other, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(1n)) }]), "instructions"],
     [ok([depositIx(), cuLimit]), "compute_budget"],

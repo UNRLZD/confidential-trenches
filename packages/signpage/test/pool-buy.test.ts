@@ -149,7 +149,8 @@ function otherBuyOf(sent: Uint8Array): Uint8Array {
   const data = solanaDecodeMessage(body).instructions.at(-1)!.data;
   let at = -1;
   for (let i = 0; i + data.length <= body.length && at < 0; i++) if (data.every((x, k) => body[i + k] === x)) at = i;
-  assert.ok(at >= 0 && data[0] === 3 && data[1] === 1, "the tag 3, compressed");
+  // the tag 3, compressed (flag bit 0), naming the next state page when it fits (bit 1, card pool-senders-next-page)
+  assert.ok(at >= 0 && data[0] === 3 && (data[1]! & 1) === 1, "the tag 3, compressed");
   // the salt: the last 16 of the release's 130 field bytes, after tag, flags and the 128-byte proof
   body[at + 2 + 128 + 114] ^= 0xff;
   tx.set(base58.decode(OTHER_SIG), 1);

@@ -1499,6 +1499,9 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
       { key: solanaPoolPage(PROGRAM, 1, sizes.labelSize), signer: false, writable: true },
       { key: markOf(p), signer: false, writable: true },
       { key: "11111111111111111111111111111111", signer: false, writable: false },
+      // each tree's next page (card pool-senders-next-page: the rule takes the six with them, never alone)
+      { key: solanaPoolPage(PROGRAM, 0, (Math.floor(sizes.stateSize / 1024) + 1) * 1024), signer: false, writable: true },
+      { key: solanaPoolPage(PROGRAM, 1, (Math.floor(sizes.labelSize / 1024) + 1) * 1024), signer: false, writable: true },
     ],
     data: Uint8Array.of(1, ...new Uint8Array(new BigUint64Array([value]).buffer), ...be32(p)),
   });
@@ -1539,7 +1542,7 @@ test("the sweep's rule refuses a note under the smallest one a withdraw spends (
   const held = { mark: [null, null], state: [page, page], label: [page, page] } as const;
   const costs = BigInt(FEE) + rentMin(17) + GROWTH;
   const wire = (value: bigint) => {
-    const { message } = solanaCompileV0(W.address, [{ program: PROGRAM, accounts: [{ key: POOL, signer: false, writable: true }, { key: W.address, signer: true, writable: true }, { key: solanaPoolPage(PROGRAM, 0, sizes.stateSize), signer: false, writable: true }, { key: solanaPoolPage(PROGRAM, 1, sizes.labelSize), signer: false, writable: true }, { key: markOf(pre), signer: false, writable: true }, { key: "11111111111111111111111111111111", signer: false, writable: false }], data: Uint8Array.of(1, ...new Uint8Array(new BigUint64Array([value]).buffer), ...be32(pre)) }], BLOCKHASH, []);
+    const { message } = solanaCompileV0(W.address, [{ program: PROGRAM, accounts: [{ key: POOL, signer: false, writable: true }, { key: W.address, signer: true, writable: true }, { key: solanaPoolPage(PROGRAM, 0, sizes.stateSize), signer: false, writable: true }, { key: solanaPoolPage(PROGRAM, 1, sizes.labelSize), signer: false, writable: true }, { key: markOf(pre), signer: false, writable: true }, { key: "11111111111111111111111111111111", signer: false, writable: false }, { key: solanaPoolPage(PROGRAM, 0, (Math.floor(sizes.stateSize / 1024) + 1) * 1024), signer: false, writable: true }, { key: solanaPoolPage(PROGRAM, 1, (Math.floor(sizes.labelSize / 1024) + 1) * 1024), signer: false, writable: true }], data: Uint8Array.of(1, ...new Uint8Array(new BigUint64Array([value]).buffer), ...be32(pre)) }], BLOCKHASH, []);
     const x = new Uint8Array(65 + message.length);
     x[0] = 1;
     x.set(message, 65);
@@ -1760,3 +1763,32 @@ for (const p of [0, 1] as const) {
     assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
   });
 }
+
+// Card pool-senders-next-page: the sell's deposit back names each tree's next page (tag 1 of 8 accounts, deposit.rs:72-76
+// since d3edab1) whenever the sell still fits 1,232 bytes with them; the largest, a PumpSwap cashback sell with no lookup
+// table, keeps the six (the form before d3edab1), and the rule takes both.
+test("the sell's deposit names each tree's next page when the sell fits 1,232 bytes with them; a PumpSwap cashback sell keeps the six", async () => {
+  const depositOf = (w: Awaited<ReturnType<typeof world>>) => {
+    const sent = w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => base64.decode(c.params[0] as string));
+    assert.ok(sent.length > 0, "a sell sent");
+    const tx = sent[0]!;
+    const m = solanaDecodeMessage(tx.subarray(65));
+    const ix = m.instructions.at(-1)!;
+    return { size: tx.length, keys: ix.accounts.map((i) => m.staticKeys[i]) };
+  };
+  const next = (tree: 0 | 1) => solanaPoolPage(PROGRAM, tree, (Math.floor(N / 1024) + 1) * 1024);
+  const pump = await world({});
+  const s = await runPoolSell(pump.host, ASK);
+  assert.equal("stage" in s && s.stage, "filled", JSON.stringify(s));
+  const p = depositOf(pump);
+  assert.equal(p.keys.length, 8, `pump: ${p.size} B`);
+  assert.deepEqual(p.keys.slice(6), [next(0), next(1)]);
+  const ask = { ...ASK, token: VF.pumpswap.mint };
+  const cashbackRent = rentMin(137) + rentMin(165);
+  const big = await world({ venue: "pumpswap", cashback: true, lamports: Number(BigInt(FEE) + rentMin(165) + cashbackRent) });
+  const a = await runPoolSell(big.host, ask);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const b = depositOf(big);
+  assert.equal(b.keys.length, 6, `pumpswap cashback: ${b.size} B`);
+  assert.ok(b.size + 64 > 1232, `pumpswap cashback: ${b.size} B fits the next pages`);
+});
