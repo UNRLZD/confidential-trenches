@@ -581,7 +581,9 @@ export function handler(
               ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
               : rpc.handle(chain, req.headers["content-type"], body, clientOf(req)),
           )
-          .then(reply)
+          // card solana-quote-under-1s: every answer's waits, its send and the provider's environment name (rpc.ts Trace),
+          // in the standard Server-Timing header, 429 and 503 included
+          .then((a) => reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...(a as { headers?: Headers }).headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a))
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }

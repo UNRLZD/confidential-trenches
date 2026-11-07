@@ -15,8 +15,10 @@
 //
 // A ban expires (review of 919742f5, F2: a permanent ban let one bad read cost a token its honest market on this device
 // for good): the first lasts EVM_SELL_BAN_FIRST_MS, each repeat after it expired lasts twice the one before, at most
-// EVM_SELL_BAN_MAX_MS. So a hostile pool costs at most one failed try per ban, and a pool banned in error is quoted again
-// within the hour.
+// EVM_SELL_BAN_MAX_MS. So a hostile pool the kit's evidence names costs at most one failed try per ban, and a pool
+// banned in error is quoted again within the hour. Where the evidence names an honest pool in a hostile one's place
+// (checks/evm/quote.ts step 4's open cases M, Y and C, card evm-hook-honest-fee-skimmer), the hostile pool costs a
+// failed try each time the route is taken, and the honest one is banned as above.
 //
 // One record per (chain, token): meta evm-bans/<chain>/<token> (../store/index.ts WALLET_BAN_PREFIX),
 // { v: 2, pools: [{ id, until, n }] }: each pool's PoolId (0x and 64 lower-case hex digits), the ms its ban ends, and

@@ -24,6 +24,17 @@
 //!    next blocks: the lib tests in src/settle.rs refuse it, and VT-S17 records a failed callback's state.)
 //!
 //! Prints the gas of each settle (the vault's receipt, with the trees' depths) and the gas table.
+//!
+//! kit_settle_mock (card vault-kit-settle): the kit's own settle, `vaultSettleOwn`, driven through its CLI (`node
+//! packages/kit/test/vault-settle-cli.mjs`, one process per run) on the mock token. fee_bounces and recipient_bounces
+//! as in 1 and 2 above, so the state tree holds 8 leaves at depth 3 and fee_bounces' 7,000,000 is refund_pending on a
+//! reserve of exactly 389 B. The device's own account ("device") runs the kit's settle: the kit reads the spend
+//! refund_pending, sends settle with its 150 Tgas and 148 B x 1e19, reads it settled and writes the refund note of
+//! exactly 7,000,000 (the fixture's refunds[0], leaf 8, its label) into the store. That note is the 9th leaf, so the
+//! tree grows a level: settle uses 74 B of the 148 B attached and the other 74 B come back to the device, the payer
+//! (the relayer) getting nothing. A second settle by hand is refused AlreadySettled with nothing changed; the kit's
+//! second run sends nothing and writes nothing. Every outcome is read on chain through the harness's RPC, never taken
+//! from the CLI's answer alone.
 #![cfg(feature = "sandbox")]
 
 mod harness;
@@ -32,6 +43,9 @@ use harness::{Harness, Outcome, Receipt, TokenKind, R, YOCTO_PER_BYTE};
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::Account;
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 const DEPOSITS: &str = include_str!("fixtures/withdraw-spends.json");
 const SPENDS: &str = include_str!("fixtures/settle-spends.json");
@@ -312,4 +326,108 @@ async fn vt_s08_mock() -> R<()> {
 #[tokio::test]
 async fn vt_s08_usdc() -> R<()> {
     vt_s08(TokenKind::Usdc).await
+}
+
+/// `node packages/kit/test/vault-settle-cli.mjs` with `input` on stdin; its one stdout line as JSON.
+async fn kit_cli(input: Value) -> R<Value> {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/kit/test/vault-settle-cli.mjs");
+    if !script.is_file() {
+        return Err(format!("{}: not found (the kit's settle CLI)", script.display()).into());
+    }
+    let out = tokio::task::spawn_blocking(move || -> Result<std::process::Output, String> {
+        let mut child = Command::new("node")
+            .arg(&script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("node {}: {e}", script.display()))?;
+        child.stdin.take().ok_or("no stdin")?.write_all(input.to_string().as_bytes()).map_err(|e| e.to_string())?;
+        child.wait_with_output().map_err(|e| e.to_string())
+    })
+    .await??;
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    if !out.status.success() {
+        return Err(format!("node exited {:?}; stderr: {stderr}", out.status.code()).into());
+    }
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.len() != 1 {
+        return Err(format!("node printed {} lines, want one: {stdout}; stderr: {stderr}", lines.len()).into());
+    }
+    Ok(serde_json::from_str(lines[0])?)
+}
+
+#[tokio::test]
+async fn kit_settle_mock() -> R<()> {
+    let (h, relayer, alice) = deposited(TokenKind::Mock).await?;
+    let f = json_of(SPENDS);
+    let newcomer = h.account("newcomer", 5).await?;
+    let device = h.account("device", 50).await?;
+    let _ = h.storage_deposit(&h.root, newcomer.id()).await?;
+    // the fee recipient (the relayer) is not registered on the token: the one payout receipt fails whole
+    let need = row14_need(relayer.id().as_str(), newcomer.id().as_str(), REGISTER, 2);
+    let o = withdraw(&h, &relayer, "fee_bounces", need).await?;
+    paid_out(&h, &o, "fee_bounces", 0, 7_000_000)?;
+    let r = spend_row(&h, "fee_bounces").await?;
+    let reserve = REFUND_RESERVE_BYTES * YOCTO_PER_BYTE;
+    assert_eq!((r["status"].as_str(), r["refund_value"].as_str(), r["reserve"].clone()), (Some("refund_pending"), Some("7000000"), json!(reserve.to_string())), "{r}");
+    // recipient_bounces as in vt_s08 2, so fee_bounces' refund note is the 9th state leaf and the tree grows a level
+    let _ = h.storage_deposit(&h.root, relayer.id()).await?;
+    let need_rb = row14_need(relayer.id().as_str(), alice.id().as_str(), 0, 2);
+    let o = withdraw(&h, &relayer, "recipient_bounces", need_rb + SURPLUS).await?;
+    paid_out(&h, &o, "recipient_bounces", 0, 2_000_000)?;
+    let st = h.view(&h.vault, "state_tree", json!({})).await?;
+    assert_eq!((st["size"].as_u64(), st["depth"].as_u64()), (Some(8), Some(3)), "{st}");
+    let (used, payer0) = (storage_usage(&h).await?, h.near_balance(relayer.id()).await?);
+
+    let rpc = h.worker.rpc_addr();
+    let r_p = args("fee_bounces")["withdrawal"]["refund_precommitment"].clone();
+    let n_fb = nullifier("fee_bounces");
+    let input = |notes: Value| {
+        json!({
+            "rpc": [rpc, rpc], "vault": h.vault, "scope": json_of(DEPOSITS)["scope"],
+            "signer": {"account_id": device.id(), "secret_key": device.secret_key().to_string()},
+            "spends": [{"nullifierHash": n_fb, "refundPrecommitment": r_p, "ref": {"kind": "refund", "l": "1", "j": 0}, "parent": "deposit-note"}],
+            "notes": notes,
+        })
+    };
+    let v = kit_cli(input(json!([]))).await?;
+    println!("kit settle: {v}");
+    let note = &f["refunds"][0];
+    let sent = v["sent"].as_array().ok_or("sent")?;
+    assert_eq!(sent.len(), 1, "one settle sent: {v}");
+    let leaf = json!({"value": note["value"], "label": note["label"], "commitment": note["commitment"], "leafIndex": "8"});
+    assert_eq!(v["outcomes"], json!([{"nullifierHash": n_fb, "state": "refund_note", "leaf": leaf, "written": true, "txHash": sent[0]}]), "{v}");
+    assert_eq!(v["notes"], json!([{"ref": {"kind": "refund", "l": "1", "j": 0}, "scope": json_of(DEPOSITS)["scope"], "precommitment": r_p, "state": "UNSPENT", "parent": "deposit-note", "leaf": leaf}]), "{v}");
+    // on chain: the device's own transaction, the kit's call, every receipt a success; the spend settled with the note
+    let t = h.rpc("EXPERIMENTAL_tx_status", json!({"tx_hash": sent[0], "sender_account_id": device.id(), "wait_until": "FINAL"})).await?;
+    let action = &t["result"]["transaction"]["actions"][0]["FunctionCall"];
+    assert_eq!((action["method_name"].as_str(), action["deposit"].as_str(), action["gas"].as_u64()), (Some("settle"), Some("1480000000000000000000"), Some(150_000_000_000_000)), "the kit's call: {t}");
+    let vault_rc: Vec<&Value> = t["result"]["receipts_outcome"].as_array().ok_or("receipts")?.iter().filter(|x| x["outcome"]["executor_id"] == h.vault.as_str()).collect();
+    assert_eq!(vault_rc.len(), 1, "{t}");
+    assert!(vault_rc[0]["outcome"]["status"]["SuccessValue"].is_string(), "{t}");
+    println!("kit settle fee_bounces: gas burnt {:.3} Tgas", vault_rc[0]["outcome"]["gas_burnt"].as_u64().unwrap_or(0) as f64 / 1e12);
+    // the tree grew a level: 389 + 74 B written, 74 B of the 148 B back to the device, nothing to the payer
+    let st = h.view(&h.vault, "state_tree", json!({})).await?;
+    assert_eq!((st["size"].as_u64(), st["depth"].as_u64()), (Some(9), Some(4)), "{st}");
+    assert_eq!(storage_usage(&h).await? - used, REFUND_RESERVE_BYTES + LEVEL_BYTES, "settle's bytes when the state tree grows a level");
+    let to_device = transferred(&h, sent[0].as_str().ok_or("sent[0]")?, device.id().as_str(), h.vault.as_str(), device.id().as_str()).await?;
+    assert_eq!(to_device, LEVEL_BYTES * YOCTO_PER_BYTE, "74 B of the 148 B back to the device");
+    assert_eq!(h.near_balance(relayer.id()).await?, payer0, "the reserve was all used: nothing to the payer");
+    let r = spend_row(&h, "fee_bounces").await?;
+    assert_eq!(
+        (r["status"].as_str(), r["reserve"].as_str(), r["refund_value"].as_str(), &r["refund_label"], r["refund_leaf_index"].as_u64()),
+        (Some("settled"), Some("0"), Some("7000000"), &note["label"], Some(8)),
+        "{r}"
+    );
+    let leaves = h.view(&h.vault, "leaves", json!({"from": 8, "limit": 1})).await?;
+    assert_eq!(leaves, json!([note["commitment"]]), "the state tree's leaf 8 is the refund note");
+    // a second settle is refused, and the kit's second run sends nothing and writes nothing
+    refused(&h, &device, &relayer, &n_fb, 0, "AlreadySettled").await?;
+    let again = kit_cli(input(v["notes"].clone())).await?;
+    assert_eq!(again["sent"], json!([]), "{again}");
+    assert_eq!(again["outcomes"], json!([{"nullifierHash": n_fb, "state": "refund_note", "leaf": leaf, "written": false}]), "{again}");
+    assert_eq!(again["notes"], v["notes"], "the store changed");
+    h.i1().await?;
+    Ok(())
 }

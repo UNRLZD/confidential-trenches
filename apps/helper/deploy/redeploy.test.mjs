@@ -36,6 +36,7 @@ function server() {
   const commit = (text, msg) => {
     writeFileSync(path.join(remote, REL), text, { mode: 0o755 });
     writeFileSync(path.join(remote, "apps/helper/deploy/compose.yaml"), `# ${msg}\n`);
+    writeFileSync(path.join(remote, "apps/helper/deploy/Caddyfile"), `# the Caddyfile of ${msg}\n`);
     git(remote, "add", "--", "apps");
     git(remote, "commit", "-q", "--no-gpg-sign", "-m", msg);
     return git(remote, "rev-parse", "HEAD");
@@ -54,7 +55,10 @@ function server() {
   // of the statuses; `compose up --scale helper=<n>` first starts the stopped containers it counts (as compose does),
   // then adds new-<k> from ct-helper:$HELPER_COMMIT until there are n, and with no --scale adds one; it exits 1 after
   // that when STUB_READY=0 (compose does the same when --wait times out). `compose run` (the settings check) exits 2 when
-// STUB_ENV=1. STUB_ADD=0 makes it add none and STUB_IMAGE
+// STUB_ENV=1. Caddy is one container apart from the helper's: `compose ps -q caddy` prints caddy-1 unless STUB_CADDY=none,
+  // and `compose exec -T caddy sh -c 'test -S <socket>'` passes only with STUB_CADDY=socket (the default; nosocket: a Caddy
+  // started with admin off). The other `compose exec` (the Caddy reload) writes its stdin to reload.in and exits 1 when
+  // STUB_RELOAD=0 (a Caddyfile Caddy refuses). STUB_ADD=0 makes it add none and STUB_IMAGE
   // names the image it adds. `inspect -f <fmt> <id>` prints the id's image; `stop -t <s> <id>` leaves it exited;
   // `rm [-f] <id>` takes it out. Every call is logged as "<cwd>|<args>|<HELPER_COMMIT>|<HELPER_RELEASE>".
   const state = path.join(dir, "containers");
@@ -68,6 +72,8 @@ drop() { awk -v id="$1" '$1 != id' "$S" > "$S.tmp"; mv "$S.tmp" "$S"; }
 mark() { awk -v id="$1" -v st="$2" '$1 == id { $2 = st } { print }' "$S" > "$S.tmp"; mv "$S.tmp" "$S"; }
 case "$1 $2" in
   "compose ps")
+    for last; do :; done
+    if [ "$last" = caddy ]; then [ "\${STUB_CADDY:-socket}" = none ] || echo caddy-1; exit 0; fi
     all=0; want=""
     shift 2
     while [ $# -gt 0 ]; do
@@ -78,6 +84,10 @@ case "$1 $2" in
     elif [ $all = 1 ]; then awk '{ print $1 }' "$S"
     else awk '$2 == "running" { print $1 }' "$S"; fi ;;
   "compose build") ;;
+  "compose exec")
+    case "$*" in *"test -S /config/caddy-admin.sock"*) [ "\${STUB_CADDY:-socket}" = socket ]; exit $? ;; esac
+    cat > "${dir}/reload.in"
+    [ "\${STUB_RELOAD:-1}" = 1 ] || { echo "Error: dial unix /config/caddy-admin.sock: connect: no such file or directory" >&2; exit 1; } ;;
   "compose run") [ "\${STUB_ENV:-0}" = 0 ] || { echo "helper env: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address" >&2; exit 2; } ;;
   "compose up")
     want=$(echo "$*" | sed -n 's/.*--scale helper=\\([0-9]*\\).*/\\1/p')
@@ -123,7 +133,8 @@ exit 0
     const t = readFileSync(env, "utf8");
     return { commit: /^HELPER_COMMIT=(.*)$/m.exec(t)?.[1], release: /^HELPER_RELEASE=(.*)$/m.exec(t)?.[1] };
   };
-  return { dir, root, A, B, env, git, run, runWith, docker, running, all, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
+  const reloaded = () => (existsSync(path.join(dir, "reload.in")) ? readFileSync(path.join(dir, "reload.in"), "utf8") : null);
+  return { dir, root, A, B, env, reloaded, git, run, runWith, docker, running, all, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const mode = (f) => statSync(f).mode & 0o777;
@@ -521,6 +532,108 @@ test("a first deploy (no helper running) brings the whole stack up with --wait a
     } finally {
       first.done();
     }
+  } finally {
+    s.done();
+  }
+});
+
+// card solana-quote-under-1s: a Caddyfile change reaches the running Caddy on every redeploy through its admin socket,
+// inside the container only (deploy/Caddyfile `admin unix//config/caddy-admin.sock`). The checkout's file goes in on
+// stdin: compose mounts the one file, and a checkout writes a new file (a new inode), which a running container's
+// single-file mount never sees. Caddy loads the new config with no gap, and skips it when it is unchanged.
+const RELOAD = "compose exec -T caddy caddy reload --config - --adapter caddyfile --address unix//config/caddy-admin.sock";
+
+test("a swap reloads Caddy with the checkout's Caddyfile through its admin socket, after the new helper is ready; a Caddy running with no helper reloads after the up", () => {
+  const s = server();
+  try {
+    s.seed("old-1");
+    const r = s.run(s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    const reload = calls.indexOf(RELOAD);
+    assert.ok(reload > calls.indexOf("rm old-1") && calls.indexOf("rm old-1") > 0, `reload after the swap:\n${calls.join("\n")}`);
+    assert.equal(calls.filter((c) => c === RELOAD).length, 1, "one reload");
+    assert.equal(s.reloaded(), "# the Caddyfile of B\n", "the checkout's Caddyfile, on stdin");
+    assert.ok(!calls.some((c) => /caddy/.test(c) && /(--force-recreate|restart|stop|rm)\b/.test(c)), `Caddy is never restarted:\n${calls.join("\n")}`);
+    assert.match(r.out, /redeploy: Caddy reloaded the Caddyfile/);
+  } finally {
+    s.done();
+  }
+  const first = server();
+  try {
+    const r = first.run(first.A);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(first);
+    assert.ok(calls.indexOf(RELOAD) > calls.indexOf("compose up -d --wait --wait-timeout 300"), calls.join("\n"));
+    assert.equal(first.reloaded(), "# the Caddyfile of A\n");
+  } finally {
+    first.done();
+  }
+});
+
+test("a Caddy that refuses the reload (a bad Caddyfile, its socket there): exit 1, Caddy keeps its config; the helper swap stands", () => {
+  const s = server();
+  try {
+    s.seed("old-1");
+    const r = s.runWith({ STUB_RELOAD: "0" }, s.B);
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /redeploy: Caddy did not reload the Caddyfile \(above\); it keeps the config it had/);
+    assert.deepEqual(s.running(), ["new-1"], "the new helper keeps serving");
+  } finally {
+    s.done();
+  }
+});
+
+// The first redeploy after the socket landed meets a Caddy started with `admin off`: it is refused before the checkout,
+// so the result is never a new helper behind the old Caddy.
+const PROBE = "compose exec -T caddy sh -c test -S /config/caddy-admin.sock";
+
+test("a running Caddy with no admin socket, or a helper with no Caddy: refused before the checkout, naming the one fix; nothing changes, the helper included", () => {
+  for (const [stub, fix] of [
+    ["nosocket", /the running Caddy has no admin socket .*nothing changed\. Recreate it once from this checkout, then run this again: cd apps\/helper\/deploy && docker compose up -d --no-deps --force-recreate caddy/],
+    ["none", /a helper runs with no Caddy in front of it; nothing changed\. Start it from this checkout, then run this again: cd apps\/helper\/deploy && docker compose up -d --no-deps caddy/],
+  ]) {
+    const s = server();
+    try {
+      s.seed("old-1");
+      const r = s.runWith({ STUB_CADDY: stub }, s.B);
+      assert.equal(r.status, 1, `${stub}: ${r.out}`);
+      assert.match(r.out, fix, stub);
+      assert.equal(s.head(), s.A, `${stub}: the checkout stays at A`);
+      assert.equal(existsSync(s.env), false, `${stub}: no .env written`);
+      const calls = lines(s);
+      assert.ok(!calls.some((c) => /^compose (build|run|up|exec -T caddy caddy reload)\b/.test(c)), `${stub}: nothing built, run, started or reloaded:\n${calls.join("\n")}`);
+      assert.ok(!calls.some((c) => /^(stop|rm)\b/.test(c)), `${stub}: nothing stopped or removed`);
+      assert.deepEqual(s.running(), ["old-1"], `${stub}: the old helper still serves`);
+    } finally {
+      s.done();
+    }
+  }
+  // with its socket the same deploy goes through: probed once before the build, reloaded once after the swap
+  const s = server();
+  try {
+    s.seed("old-1");
+    const r = s.run(s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    assert.equal(calls.filter((c) => c === PROBE).length, 1, "one probe");
+    assert.ok(calls.indexOf(PROBE) < calls.indexOf("compose build helper"), `probe before the build:\n${calls.join("\n")}`);
+    assert.ok(calls.indexOf(RELOAD) > calls.indexOf("rm old-1"), "reload after the swap");
+  } finally {
+    s.done();
+  }
+});
+
+test("a first deploy (no Caddy, no helper running): the stack comes up from this checkout and Caddy is not reloaded", () => {
+  const s = server();
+  try {
+    const r = s.runWith({ STUB_CADDY: "none" }, s.A);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    assert.ok(calls.includes("compose up -d --wait --wait-timeout 300"), calls.join("\n"));
+    assert.ok(!calls.includes(RELOAD) && !calls.includes(PROBE), `no probe, no reload:\n${calls.join("\n")}`);
+    assert.equal(s.reloaded(), null);
+    assert.match(r.out, /redeploy: Caddy started with this checkout's Caddyfile \(none ran before\); no reload/);
   } finally {
     s.done();
   }
