@@ -18,7 +18,7 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { EVM_DEPOSIT_GAS_MAX } from "../src/rules/pool.ts";
-import { EVM_DEPOSIT_PRIORITY_CAP } from "../src/pool-deposit-evm.ts";
+import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_AFTER_MS } from "../src/pool-deposit-evm.ts";
 import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -172,14 +172,14 @@ test("a funded U deposits its rung: INCOMING with { hash, nonce, value } before 
     void ns.get(planned.id).then((n) => atSend.push(n));
     ch.land(raw);
   };
-  const h = hostOf(ch, ns);
+  const h = hostOf(ch, ns, { now: () => 1_800_000_000_000n });
   const a = await runPoolDepositEvm(h, ASK);
   assert.equal(ch.c.sent.length, 1);
   const s = sentOf(ch.c.sent[0]!);
   assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: s.hash }] });
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(atSend[0]!.state, "INCOMING", "INCOMING before the tx left");
-  assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG }]);
+  assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG, sentMs: 1_800_000_000_000n }]);
   assert.equal(s.pre, planned.precommitment, "the planned note's precommitment");
   const n = await ns.get(planned.id);
   assert.equal(n!.state, "UNSPENT");
@@ -330,4 +330,51 @@ test("not_funded names the ask's first rung and the fee bound less U's lower bal
   const bound = EVM_DEPOSIT_GAS_MAX * (2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n; // the cap's gas at the max fee, and the L1 fee bound
   assert.deepEqual(shorts, [[u, first + bound - 5n * 10n ** 14n]]);
   assert.ok(first > EVM_POOL_MIN_DEPOSIT, "the ask's rung, not the pool's least deposit");
+});
+
+/** A run whose send reached neither RPC (neither knows its hash, U's nonce not moved), at the device's clock T0. */
+async function unsent() {
+  const f = await funded(RUNG + FEE);
+  const T0 = 1_800_000_000_000n;
+  const a = await runPoolDepositEvm(hostOf(f.ch, f.ns, { now: () => T0 }), ASK);
+  assert.equal("stage" in a && a.stage, "sent");
+  assert.equal((await f.ns.get(f.planned.id))!.evmSends![0]!.sentMs, T0, "sentMs written with the send");
+  return { ...f, T0, first: sentOf(f.ch.c.sent[0]!) };
+}
+
+test("a send that reached neither RPC is built again at the SAME nonce (same note, value, fresh fees); the two sends land as one deposit and one UNSPENT note", async () => {
+  const { ch, ns, planned, T0, first } = await unsent();
+  ch.c.onSend = (raw) => ch.land(raw);
+  ch.c.baseFee += 1n; // fresh fee reads: the base fee moved
+  const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + EVM_DEPOSIT_RESEND_AFTER_MS }), ASK);
+  assert.equal(ch.c.sent.length, 2, "built again");
+  const second = sentOf(ch.c.sent[1]!);
+  assert.deepEqual([second.nonce, second.pre, second.value], [first.nonce, first.pre, first.value], "the same nonce, note and value");
+  assert.notEqual(second.hash, first.hash);
+  const n = (await ns.get(planned.id))!;
+  assert.deepEqual(n.evmSends!.map((x) => [x.hash, x.nonce]), [[first.hash, 0n], [second.hash, 0n]], "every hash kept");
+  assert.equal(n.state, "UNSPENT");
+  assert.equal(ch.c.events.filter((e) => e.precommitment === planned.precommitment).length, 1, "one deposit");
+  assert.equal((await ours(ns)).filter((x) => x.state === "UNSPENT").length, 1, "one note");
+  assert.equal("stage" in r && r.stage, "filled");
+});
+
+test("the same-nonce rebuild is refused when either RPC knows a hash, when either RPC's pending nonce is past the send's, and before EVM_DEPOSIT_RESEND_AFTER_MS", async () => {
+  for (const [what, set] of [
+    ["RPC 1 knows the hash", (c: ReturnType<typeof chain>["c"], h: string) => void c.known[1]!.add(h)],
+    ["RPC 0 knows the hash", (c: ReturnType<typeof chain>["c"], h: string) => void c.known[0]!.add(h)],
+    ["RPC 0's pending nonce past it", (c: ReturnType<typeof chain>["c"]) => void (c.pending[0] = 1n)],
+    ["RPC 1's pending nonce past it", (c: ReturnType<typeof chain>["c"]) => void (c.pending[1] = 1n)],
+  ] as const) {
+    const { ch, ns, planned, T0, first } = await unsent();
+    set(ch.c, first.hash);
+    const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + EVM_DEPOSIT_RESEND_AFTER_MS }), ASK);
+    assert.deepEqual(r, { stage: "not_landed", txs: [] }, what);
+    assert.equal(ch.c.sent.length, 1, `${what}: not built again`);
+    assert.equal((await ns.get(planned.id))!.state, "INCOMING", what);
+  }
+  const { ch, ns, T0 } = await unsent();
+  const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + EVM_DEPOSIT_RESEND_AFTER_MS - 1n }), ASK);
+  assert.deepEqual(r, { stage: "not_landed", txs: [] }, "too soon");
+  assert.equal(ch.c.sent.length, 1, "too soon: not built again");
 });
