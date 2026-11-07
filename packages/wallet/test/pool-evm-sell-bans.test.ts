@@ -14,14 +14,17 @@ const open = async (idb: IDBFactory, onEvent?: (e: WalletEvent) => void) => {
   opened.push(s);
   return s;
 };
-const TOKEN = "0x1111111111111111111111111111111111111111";
-const P = (n: number) => "0x" + n.toString(16).padStart(64, "0");
+const TOKEN = "0xabcdef1111111111111111111111111111111111";
+const UP = (h: string) => "0x" + h.slice(2).toUpperCase();
+const P = (n: number) => "0x" + (0xabc0 + n).toString(16).padStart(64, "0");
 
 test("a ban is kept per chain and token, read back oldest first, each pool once; another token or chain reads none", async () => {
   const s = await open(new IDBFactory());
   assert.deepEqual(await evmSellBanned(s, "base", TOKEN), []);
   assert.deepEqual(await evmSellBan(s, "base", TOKEN, [P(1)]), [P(1)]);
-  assert.deepEqual(await evmSellBan(s, "base", TOKEN.toUpperCase().replace("0X", "0x"), [P(2).toUpperCase().replace("0X", "0x"), P(1)]), [P(1), P(2)]);
+  // a token or a pool id in capitals is the same token and pool
+  assert.deepEqual(await evmSellBan(s, "base", UP(TOKEN), [UP(P(2)), P(1)]), [P(1), P(2)]);
+  assert.deepEqual(await evmSellBanned(s, "base", UP(TOKEN)), [P(1), P(2)]);
   assert.deepEqual(await evmSellBanned(s, "base", TOKEN), [P(1), P(2)]);
   assert.deepEqual(await evmSellBanned(s, "robinhood", TOKEN), []);
   assert.deepEqual(await evmSellBanned(s, "base", "0x2222222222222222222222222222222222222222"), []);

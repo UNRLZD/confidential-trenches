@@ -4734,8 +4734,9 @@ test("HC5 a sell quote's banned is a list of at most 4096 pool ids, each 0x and 
   }
   const ok = await hcQuote([market], token, logs, ["0x" + "AB".repeat(32), ...Array.from({ length: 4095 }, () => "0x" + "ab".repeat(32))]);
   assert.ok(!("code" in ok) && ok.amountOut === AMOUNT, show(ok));
-  // a banned listed or hookless pool is dropped too: with the market banned, nothing is left
+  // a banned listed or hookless pool is dropped too: with the market banned, nothing is left; an id in capitals bans it too
   assert.deepEqual(await hcQuote([market], token, logs, [hcPid(market.key)]), { code: "no_quote" });
+  assert.deepEqual(await hcQuote([market], token, logs, ["0x" + hcPid(market.key).slice(2).toUpperCase()]), { code: "no_quote" });
 });
 
 test("HC6 the device's quote of a sale through an unlisted hook builds, and the sender's read-back takes it; the builder takes such a hook on no other route", async () => {

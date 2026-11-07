@@ -420,7 +420,9 @@ export const MUTANTS = [
   [QUOTE, "override: { [lower(w)]: { code: EVM_SELL_PROBE_CODE } }", "override: { [lower(w)]: { code: EVM_NOOP_HOOK_CODE } }", S, "the device picks the pool"],
   [QUOTE, 'if (route.venue === "uniswap-v4") to = v.poolManager!;', 'if (route.venue === "uniswap-v4") to = lower(w);', S, "the device picks the pool"],
   [QUOTE, 'to = "0x" + p.toString(16).padStart(40, "0");', "to = router!;", S, "a v3 pool is picked"],
-  [QUOTE, "const pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "const pick = routes.filter((r) => evmSellExits(chain, t, r.route))[0] ?? null;", S, "the device picks the pool"],
+  // (card evm-sell-hook-converge: no mutant takes the first route the builder takes for the best: where that pick is
+  // more than the slippage under the reference, the pick falls back to the reference's own route, so best() decides only
+  // among routes within the slippage, at one minOut, the reference's)
   [QUOTE, 'fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route, amountOut: out(c.at)! }] : []', "out(c.at) !== null ? [{ route: c.route, amountOut: out(c.at)! }] : []", S, "planted: a pool that runs out"],
   [QUOTE, "return x !== null && x > 0n && (y === null ? !isV3 : y > x);", "return x !== null && x > 0n && (y === null ? true : y > x);", S, "planted: a pool that runs out"],
   [QUOTE, "return x !== null && x > 0n && (y === null ? !isV3 : y > x);", "return x !== null && x > 0n && (y === null ? !isV3 : true);", S, "planted: a pool that runs out"],
@@ -437,9 +439,10 @@ export const MUTANTS = [
   // markets of another currency, the bought-in pool), and its pick is held to a reference
   [QUOTE, 'if (!evmSellExits(chain, token, route)) return refuse("no_exit",', 'if (false) return refuse("no_exit",', R, "L1 "],
   [QUOTE, 'if (!evmSellExits(chain, token, route)) return refuse("no_exit",', 'if (false) return refuse("no_exit",', R, "P4 "],
-  [QUOTE, "if (reference !== null && pick.amountOut * 10000n < reference.amountOut * BigInt(10000 - slippageBps)) {", "if (false) {", R, "P2 "],
-  [QUOTE, "pick.amountOut * 10000n < reference.amountOut * BigInt(10000 - slippageBps)) {", "pick.amountOut * 10000n < reference.amountOut * 10000n) {", R, "P2 "],
-  [QUOTE, "const pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "const pick = best(routes);", R, "P2 "],
+  // (card evm-sell-hook-converge: no mutant drops the below_reference refusal itself: a reference's route is always one
+  // the builder takes with any hook, so the pick falls back to it first; the refusal is the backstop)
+  [QUOTE, "p.amountOut * 10000n < reference.amountOut * BigInt(10000 - slippageBps));", "p.amountOut * 10000n < reference.amountOut * 10000n);", R, "HC4 "],
+  [QUOTE, "let pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "let pick = best(routes);", R, "HC4 "],
   [QUOTE, "  if (bought !== null) {\n    const x = bought.route.venue", "  if (false) {\n    const x = bought.route.venue", R, "P3 "],
   [QUOTE, 'if (lower(evmPoolRouteDataQuoted(chain, bought).token) !== lower(token)) return refuse("token_mismatch", "the bought route buys another token");', "", R, "P3 "],
   [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", "rpcs, scan: undefined, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", R, "P1 "],
@@ -470,6 +473,24 @@ export const MUTANTS = [
   [SELLU, 'if (pinsOf(venues, chain).sellDelegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);\n  return evmPoolSignSimSellUnpinned', "return evmPoolSignSimSellUnpinned", S, "planted: the sim signer"],
   [SELLU, "pool: EVM_SELL_SIM, precommitment: 0n, feeCap: 0n,", "pool: venue.weth, precommitment: 0n, feeCap: 0n,", S, "planted: the sim signer"],
   [SELLU, "    if (!anyHook && lower(hooks as string) !== NATIVE) {", "    if (lower(hooks as string) !== NATIVE) {", R, "PE a pool"],
+  // card evm-sell-hook-converge: a route through an unlisted hook that sets the reference is the pick at its minOut, its
+  // pools named (hooked); a banned pool is no route; the builder takes such a hook only on the device's quote, and the
+  // sender's read-back takes any
+  [QUOTE, "if (under(pick) && reference !== null && evmSellExits(chain, t, reference.route, true)) pick =", "if (false) pick =", R, "HC1 "],
+  [QUOTE, "evmSellExits(chain, t, reference.route, true)) pick =", "evmSellExits(chain, t, reference.route)) pick =", R, "HC1 "],
+  [QUOTE, "if (under(pick) && reference !== null && evmSellExits", "if (reference !== null && evmSellExits", R, "HC4 "],
+  [QUOTE, "const filled = found.filter((r) => !(r.route.venue === \"uniswap-v4\" && hopKeys(r.route).some((k) => banned.has(\"0x\" + poolId(k)))));", "const filled = found;", R, "HC1 "],
+  [QUOTE, "if (!Array.isArray(b) || b.length > EVM_SELL_BANNED_MAX) return refuse(", "if (!Array.isArray(b)) return refuse(", R, "HC5 "],
+  [QUOTE, "if (typeof x !== \"string\" || !/^0x[0-9a-fA-F]{64}$/.test(x)) return refuse(", "if (typeof x !== \"string\") return refuse(", R, "HC5 "],
+  [QUOTE, "    out.add(x.toLowerCase());", "    out.add(x);", R, "HC5 "],
+  [QUOTE, "const hooked = Object.freeze(pick.route.venue === \"uniswap-v4\" ?", "const hooked = Object.freeze(false ?", R, "HC1 "],
+  [QUOTE, ".filter((k) => k.hooks !== NATIVE && !evmHookListed(chain, k.hooks, k.fee, k.tickSpacing)).map((k) => \"0x\" + poolId(k))", ".filter((k) => k.hooks !== NATIVE).map((k) => \"0x\" + poolId(k))", S, "planted: an unlisted hook"],
+  [QD, "nonce }, hooked.length > 0);", "nonce });", R, "HC6 "],
+  [SELLU, "if (swapData(chain, token, route, target, w, amount, minOut, true) !== lower(data))", "if (swapData(chain, token, route, target, w, amount, minOut) !== lower(data))", R, "HC6 "],
+  [SELLU, "  evmSellRouteCheck(chain, token, route, true);\n  return route;", "  evmSellRouteCheck(chain, token, route);\n  return route;", R, "HC6 "],
+  [SELLU, "return v4Data(chain, token, (route as Record<string, unknown>).hops, anyHook);", "return v4Data(chain, token, (route as Record<string, unknown>).hops, true);", R, "HC6 "],
+  [SELLU, "const built = evmPoolBuildSellUnpinned(chain, { ...req, pool }, anyHook);", "const built = evmPoolBuildSellUnpinned(chain, { ...req, pool });", R, "HC6 "],
+  [SELLU, "  if (route.venue === \"uniswap-v4\") v4Data(chain, token, route.hops, anyHook);", "  if (route.venue === \"uniswap-v4\") v4Data(chain, token, route.hops, true);", R, "HC6 "],
   // the sim sent as the sale (review of the exec sim, HIGH 1): from the pinned sender, the sale's gas and fees, the
   // agreed block's base fee agreed on both providers; no sender pinned, no sim
   [QUOTE, 'pins.sellDelegate !== undefined && pins.sellSender !== undefined ? "sim"', 'pins.sellDelegate !== undefined ? "sim"', R, "PE5 "],
