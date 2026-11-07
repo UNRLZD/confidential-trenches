@@ -596,6 +596,18 @@ export const MUTANTS = [
   [QUOTE, "l1Gas: rc.gasUsedForL1 === undefined ? \"0x0\" : str(rc, \"gasUsedForL1\", who),", "l1Gas: \"0x0\",", R, "review of da11bbb6, L1"],
   // review of da11bbb6, L2: a proper set's read that answers 0 counts the sale's route for nothing (mutant R6)
   [QUOTE, "      if (x === null || x === 0n) return null;\n", "      if (x === null) return null;\n", R, "review of da11bbb6, L2"],
+  // review of ca907a05: its mutants Y1-Y3 and Y6-Y9, and PREVRANDAO set on Robinhood. Its Y4 (a trade's override
+  // replaces the whole account) and Y5 (a system word kept as the provider wrote it) are equivalent: no trade override
+  // names a system account (an L1Block or EIP-2935 hook fails v4's flag rule, EIP-4788's code reverts beforeInitialize),
+  // and every provider read pads its words to 32 bytes
+  [QUOTE, 'const opStack = chain === "base" || chain === "base-sepolia";', 'const opStack = chain === "base";', R, "review of ca907a05, LOW 2 (buy, base-sepolia)"],
+  [QUOTE, 'const opStack = chain === "base" || chain === "base-sepolia";', "const opStack = true;", R, "review of ca907a05, LOW 2 (buy, Robinhood)"],
+  [QUOTE, "[[EVM_HISTORY, [(n - 1n) % 393168n]]]", "[[EVM_HISTORY, [n % 393168n]]]", R, "review of ca907a05, LOW 2 (buy, Robinhood)"],
+  [QUOTE, 'if (chain === "robinhood" || chain === "robinhood-testnet") return', 'if (chain === "robinhood") return', R, "review of da11bbb6, H1 evmSystemSlotsOf"],
+  [QUOTE, 'ss.map((s) => [a, "0x" + word(s)] as const)', 'ss.map((s) => [a, "0x" + s.toString(16)] as const)', R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
+  [QUOTE, '() => refuse("rpc_disagree", `the providers answer the system state', '() => refuse("rpc_error", `the providers answer the system state', R, "review of da11bbb6, H1 the system slots are read"],
+  [QUOTE, "  if (sysSlots.length > 0) {\n", "  if (sysSlots.length > 19) {\n", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
+  [QUOTE, "  if (BigInt(sale.l1Gas) !== 0n) return [];\n", "  if (BigInt(sale.l1Gas) > 1n) return [];\n", R, "review of da11bbb6, L1"],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => boughtOf(r) === true, (r) => !r.ok);", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],

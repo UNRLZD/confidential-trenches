@@ -2759,10 +2759,19 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    - both: the gas limit and coinbase are the parent header's, equal to the trade's block's but at a gas-limit change
 //      (Base's coinbase is its fee vault 0x4200…0011; Nitro's a constant); and the state an earlier transaction of the
 //      block changed (HC2 below);
-//    - Robinhood (Nitro): NUMBER answers the L1 block number from ArbOS's state, never the override (at L2 block
-//      108,429,325 the replay and the block itself both answered 0x1924523), and ArbOS keeps that number in hashed
-//      storage its block-start transaction writes, with no clean override; so a hook keyed on NUMBER sees the parent's
-//      L1 number and escapes only at an L2 block where the L1 number steps (time-keyed hooks are caught). Open gap.
+//    - Robinhood (Nitro): the writes of ArbOS's block-start transaction, which runs before a block's first transaction
+//      and keeps its results in ArbOS's own hashed storage (no override here models it: its layout is Nitro's, by ArbOS
+//      version). Two are open, and a hook keyed on either escapes in the blocks where it steps:
+//      - the L1 block number, which NUMBER answers from ArbOS's state, never the override (at L2 block 108,429,325 the
+//        replay and the block itself both answered 0x1924523): the replay sees the parent's, which differs where the L1
+//        number steps, about 1 L2 block in 120 (an L1 block every ~12 s, ~10 L2 blocks a second);
+//      - the gas-pricing backlog, which any contract reads through ArbGasInfo (0x…6c, getGasPricingConstraints on
+//        mainnet's ArbOS 116, getGasBacklog on the testnet): the block start decays it by the time passed, so in a block
+//        whose time stepped the trade reads the decayed backlog while BASEFEE (the header's, set in the replay) is still
+//        the pre-decay price, and the replay reads the parent's backlog; that held in 4 of 4 such blocks of 41 on
+//        rpc.mainnet.chain.robinhood.com and 4 of 4 of 37 on robinhood.drpc.org (review of ca907a05, HIGH 1,
+//        2026-11-07 ~14:35Z), about 1 block in 10.
+//      Both close with HC2 below, in card evm-sell-hook-intrablock: the replay at the trade's true pre-state.
 //      A trade with poster gas (its receipt's gasUsedForL1 above 0) is no evidence at all (below); every one is 0 today;
 // 3. the market held: V4Quoter, at the parent block, prices the quote's route with its hooks as they are at the
 //    quote's minOut or more, so the price did not move: the hooks treated the sale and the quoter apart. A price that
@@ -2785,8 +2794,11 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 // The gap still open (HC2): a hook flipped by a transaction earlier in the sale's own block leaves no evidence at the
 // parent block, so it is never banned and can freeze the sale until card evm-sell-hook-intrablock proves the sale's true
 // pre-state. Every block has such transactions that cost an attacker nothing: its system calls, the OP Stack's
-// L1-attributes deposit among them. Those writes are closed here (evmSystemSlotsOf); what stays open is the state any
-// other earlier transaction of the block changed: an attacker's own, landed ahead of the trade, or anyone's.
+// L1-attributes deposit among them. On Base those writes are closed here (evmSystemSlotsOf: L1Block, EIP-4788 and
+// EIP-2935); on Robinhood only EIP-2935's is, and ArbOS's block-start writes stay open (the L1 block number, about 1
+// block in 120, and the gas-pricing backlog's decay, about 1 in 10: step 2 above). Also open, on both chains: the state
+// any other earlier transaction of the block changed, an attacker's own, landed ahead of the trade, or anyone's.
+// Card evm-sell-hook-intrablock closes all of it, buy and sale, Base and Robinhood.
 
 /** The PoolIds of the quote's `hooked` pools that the sale `txHash`'s revert proves at fault (see above), on the
  *  chain's pinned providers; [] where nothing is proved. The caller bans these (wallet pool/evm-sell-bans.ts). */
@@ -2872,7 +2884,8 @@ async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
 //   block's time) reads: a replay at an epoch's first block reverted where the trade's block answered) and EIP-2935's
 //   history (slot (N-1) % 8191: every replay answered a hash 8,191 blocks old for block N-1).
 // - Robinhood and its testnet (Arbitrum Nitro): no L1Block and no EIP-4788; EIP-2935's history is ArbOS's, its ring
-//   393,168 blocks (its code's 0x05ffd0), slot (N-1) % 393168, the replay's answer stale as on Base.
+//   393,168 blocks (its code's 0x05ffd0), slot (N-1) % 393168, the replay's answer stale as on Base. ArbOS's own
+//   block-start writes (the L1 block number, the gas-pricing backlog) are not here: step 2 of the evidence names them.
 /** The system slots of block `n` at time `time` on `chain`, each account's slots as numbers (tests only). Not in the index. */
 export function evmSystemSlotsOf(chain: EvmPoolChain, n: bigint, time: bigint): [string, bigint[]][] {
   if (chain === "base" || chain === "base-sepolia") return [[EVM_L1_BLOCK, Array.from({ length: 16 }, (_, i) => BigInt(i))], [EVM_BEACON_ROOTS, [time % 8191n, (time % 8191n) + 8191n]], [EVM_HISTORY, [(n - 1n) % 8191n]]];
