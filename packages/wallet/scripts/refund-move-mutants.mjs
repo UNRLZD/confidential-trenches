@@ -3,7 +3,7 @@
 // that rule, expects it to fail, and puts the source back. Each rule is wallet.md §2.4 point 8 and the §2.8 refund move
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
 // Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held; then the delta review
-// of cf8a5524 (M1, L2, L4, L5 and its three pins).
+// of cf8a5524 (M1, L2, L4, L5 and its three pins); then the delta review of 8c046c2d (L1 to L4).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -91,8 +91,8 @@ const M = [
   ["a record failure swallowed: the move sent unrecorded", REFUND,
     [["await deps.record(move);", "await deps.record(move).catch(() => {});"]], WR, "a record that fails"],
   // the delta review of cf8a5524
-  ["M1 (delta): a held op's move keeps U followed past its deadline", FOLLOW,
-    [["(op.stage !== \"held\" || !(await pastOnBoth(rpcs, m.deadline_ms)))", "true"]], WT, "M1 \\(delta\\)"],
+  ["M1 (delta): a held op's move never read: it keeps U followed for good", FOLLOW,
+    [["if (op.stage !== \"held\" || m === undefined || !(await pastOnBoth(rpcs, m.deadline_ms))) continue;", "continue;"]], WT, "M1 \\(delta\\)|REVIEW R2"],
   ["L2 (delta): a read below the floor accepted", FOLLOW,
     [["if (r === null || r.height < floor) return null;", "if (r === null) return null;"]], WT, "L2 \\(delta\\)"],
   ["L2 (delta): the move's own block not kept as a floor", FOLLOW,
@@ -113,6 +113,19 @@ const M = [
     [["export const INTENTS_ANSWER_MAX_BYTES = 1_024;", "export const INTENTS_ANSWER_MAX_BYTES = 1_025;"]], WR, "pin \\(delta\\)"],
   ["pin (delta): the relayer's answer cut short of 1024 B", REFUND,
     [["export const INTENTS_ANSWER_MAX_BYTES = 1_024;", "export const INTENTS_ANSWER_MAX_BYTES = 1_023;"]], WR, "pin \\(delta\\)"],
+  // the delta review of 8c046c2d (L1 to L4)
+  ["L1: an op refunded after the strike is never held", FOLLOW,
+    [["if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && (holds.get(op.follow.origin) ?? 0n) > 0n) await write(id, \"held\", legFacts(op, \"held\"), { why: \"sender_struck\" });", ""]], WT, "REVIEW R1 \\(L1\\):"],
+  ["L1: the strike not read back from the store after a reload", FOLLOW,
+    [["if (all.some(([, op]) => op.follow.intents_struck === true)) struck = true;", ""]], WT, "REVIEW R1 \\(L1, after a reload\\)"],
+  ["L2: the block that read a move through not kept", FOLLOW,
+    [["// through on its own debit, read at a final block on both RPCs. Whatever U holds after it is moved by a new move\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }", "// through on its own debit, read at a final block on both RPCs. Whatever U holds after it is moved by a new move\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: undefined }"]], WT, "REVIEW R4"],
+  ["L3: a held op's landed move cleared, its USDC never bound", FOLLOW,
+    [["if (at.used || (at.held < BigInt(m.amount) && m.foreign !== true)) {", "if (false) {"]], WT, "REVIEW R2"],
+  ["L3: a held op's move does not keep U followed (a done op final first)", FOLLOW,
+    [["for (const [, op] of await opsOfU()) if (op.follow.move !== undefined) moveOut = true;", "for (const [, op] of await opsOfU()) if (op.follow.move !== undefined && op.stage !== \"held\") moveOut = true;"]], WT, "REVIEW R2"],
+  ["L4 (P1): the session floor never raised", FOLLOW,
+    [["readFloor = Math.max(readFloor, r.height);", "void readFloor;"]], WT, "REVIEW R3"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {

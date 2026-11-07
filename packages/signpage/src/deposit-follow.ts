@@ -7,10 +7,10 @@
 //   secret) and followed at once. Every stage the follow writes reaches the app in state.ops, posted again on each change.
 // - deposit.confirm { deposit_address }: answered with the stage and facts of the op that names that address (no op:
 //   not_allowed), and each later stage goes out as the request's progress; the op is followed if no follow runs for it.
-// - settle(): each signed-in landing resumes every deposit op no follow has ended (wallet follow.ts followEnded: held, or
-//   done past its quote's deadline on both RPCs), so a reload or a closed tab carries on from its stage, an op past its
-//   deadline (expired, refunded, waiting) reads U's balances on the chain again, and a done op's U is followed to its
-//   deadline (an older quote's late send to U is bound). The follows run on the wallet store's handle they opened on:
+// - settle(): each signed-in landing resumes every deposit op no follow has ended (wallet follow.ts followEnded: held
+//   with no refund move out, or done past its quote's deadline on both RPCs), so a reload or a closed tab carries on
+//   from its stage, an op past its deadline (expired, refunded, waiting) reads U's balances on the chain again, and a
+//   done op's U is followed to its deadline (an older quote's late send to U is bound). The follows run on the wallet store's handle they opened on:
 //   when that connection closes (another tab's upgrade or delete), storeClosed() ends them, which frees U's lock, and
 //   main.ts settles them again once the store is opened next; a settle() that finds another handle ends them first.
 // - One follower per U across tabs: the lock below, held while any op of U is followed; another tab's follow of U waits

@@ -108,6 +108,33 @@ const call = async (fetchFn, url, method, args, block) => {
  *  shape (the helper's 404 {error: "not_found"} among them) is no code. */
 export const relayCode = (body) => (typeof body?.error === "object" && body.error !== null && typeof body.error.code === "string" ? body.error.code : null);
 
+/** The device's cap on the relayer's answer (wallet refund.ts INTENTS_ANSWER_MAX_BYTES; the test pins the two equal). */
+export const RELAY_ANSWER_MAX_BYTES = 1_024;
+/** The relayer's answer read as the device reads it (wallet refund.ts postIntents, capped.ts readCapped): its bytes, a
+ *  declared or streamed length over the cap refused unread, strict UTF-8, then JSON; any of those failing is no code. */
+export async function relayAnswer(res) {
+  try {
+    if (Number(res.headers.get("content-length") ?? "0") > RELAY_ANSWER_MAX_BYTES) return null;
+    if (res.body === null) return null;
+    const reader = res.body.getReader();
+    const parts = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > RELAY_ANSWER_MAX_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      parts.push(value);
+    }
+    return relayCode(JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(parts))));
+  } catch {
+    return null;
+  }
+}
+
 export async function read(fetchFn = fetch, now = Date.now()) {
   const get = async (path) => {
     const r = await fetchFn(`${SIGN}${path}`, { redirect: "error" });
@@ -134,8 +161,7 @@ export async function read(fetchFn = fetch, now = Date.now()) {
     }),
   );
   const rr = await fetchFn(INTENTS_URL, { method: "POST", redirect: "error", headers: { "content-type": "application/json", origin: SIGN }, body: "{}" });
-  const relayBody = await rr.json().catch(() => null);
-  return { index, sha384: sha384(js), intents_url: js.includes(INTENTS_URL), quote: quoteFacts(qr.status, request, answer), near, relay: { status: rr.status, code: relayCode(relayBody), cors: rr.headers.get("access-control-allow-origin") } };
+  return { index, sha384: sha384(js), intents_url: js.includes(INTENTS_URL), quote: quoteFacts(qr.status, request, answer), near, relay: { status: rr.status, code: await relayAnswer(rr), cors: rr.headers.get("access-control-allow-origin") } };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {

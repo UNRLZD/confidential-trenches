@@ -1768,7 +1768,7 @@ test("L1: two refunded ops on one U in two assets: when A's move lands, B (its o
 });
 
 // ---------- review wrm-cf8a5524 (delta) ----------
-test("M1 (delta): U's done op gets its final once a held op's move is past its deadline on both RPCs: a struck op's move does not keep U followed", async () => {
+test("M1 (delta): U's done op gets its final once a held op's move is read over past its deadline on both RPCs: a struck op's move does not keep U followed after that", async () => {
   const t = await setup(["REFUNDED"]);
   t.chain.a.held = t.chain.b.held = CREDIT;
   const start = t.chain.a.timeMs;
@@ -1781,7 +1781,9 @@ test("M1 (delta): U's done op gets its final once a held op's move is past its d
   // B's own follow returned held; U's follower runs on for A (adopted) until A's final or the stop at 60 rounds
   for (let k = 0; k < 5000 && !sig.aborted && (await opOf(t.w, "dq-A")).follow.final !== true; k++) await turn();
   const a = await opOf(t.w, "dq-A"), b = await opOf(t.w);
-  assert.deepEqual([b.stage, b.follow.why, b.follow.move !== undefined], ["held", "sender_struck", true], "B held with its struck move recorded");
+  // L3 (review wrm-8c046c2d): the struck move is read at a block past its deadline, its nonce unused and U still holding
+  // the refund: over unlanded, so the move is cleared and B stays held for the way out
+  assert.deepEqual([b.stage, b.follow.why, b.follow.move !== undefined, b.follow.prior_ms !== undefined], ["held", "sender_struck", false, true], "B held, its struck move read over");
   assert.equal(a.follow.final, true, "A's deadline past on both RPCs, nothing to bind or move: A is final");
 });
 
@@ -1807,6 +1809,8 @@ test("L4 (delta): sender_struck on a move holds only U's ops whose money waits u
   await t.w.put("ops", "dq-C", { kind: "deposit", stage: "waiting", since_ms: NOW, txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: C, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "KNOWN_DEPOSIT_TX" } });
   const pa = perAddress(t.u, { [ADDR]: ["REFUNDED"], [C]: ["KNOWN_DEPOSIT_TX"] });
   const log: string[] = [];
+  // the chain's clock runs: the struck move is read over past its deadline, and only then does the op's follow end (L3)
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 30_000);
   const out = await followDeposit(t.args, { ...t.deps, fetchFn: pa.fetchFn, refundMove: answered(log, 403, "sender_struck"), signal: stop(t, 20) }).catch((e) => ({ kind: `threw ${e.message}` }));
   assert.equal(out.kind, "held");
   assert.equal((await opOf(t.w)).follow.why, "sender_struck");
@@ -1961,4 +1965,205 @@ test("L2 (delta), after a reload: the block that found the last move over is kep
   t.onTick.fn = () => {};
   await followDeposit(t.args, { ...t.deps, refundMove: mover(() => {}), signal: stop(t, 2) }).catch(() => {});
   assert.notEqual((await opOf(t.w)).follow.why, "moved_out");
+});
+
+// ---------- the delta review wrm-8c046c2d (L1 to L4), folded ----------
+const argsOf = (t: { args: FollowArgs }, opId: string, address: string): FollowArgs => ({ ...t.args, opId, address });
+
+test("REVIEW R1 (L1): an op whose send was in flight at sender_struck and is refunded later in the same session is held sender_struck (the way out), and nothing more is signed", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const C = "c".repeat(64);
+  await t.w.put("ops", "dq-C", { kind: "deposit", stage: "waiting", since_ms: NOW, txs: [], created_ms: NOW + 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: C, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "KNOWN_DEPOSIT_TX" } });
+  // C: in flight for a few reads, then 1Click refunds it too (its refund lands under U with A's)
+  const pa = perAddress(t.u, { [ADDR]: ["REFUNDED"], [C]: ["KNOWN_DEPOSIT_TX", "KNOWN_DEPOSIT_TX", "KNOWN_DEPOSIT_TX", "REFUNDED"] });
+  const log: string[] = [];
+  t.onTick.fn = (k) => {
+    // the chain's clock runs: A's struck move is read over past its deadline, and A's follow ends then (L3)
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 30_000;
+    if (k === 6) t.chain.a.held = t.chain.b.held = 2n * CREDIT;
+  };
+  const deps = { ...t.deps, fetchFn: pa.fetchFn, refundMove: answered(log, 403, "sender_struck"), signal: stop(t, 120) };
+  const [a, c] = await Promise.all([followDeposit(t.args, deps), followDeposit(argsOf(t, "dq-C", C), deps)].map((p) => p.catch((e) => ({ kind: `threw ${e.message}` }))));
+  const opC = await opOf(t.w, "dq-C");
+  assert.equal(a!.kind, "held");
+  assert.equal(c!.kind, "held", "C's own follow ends held, not on the test's stop");
+  assert.deepEqual([opC.stage, opC.follow.why, opC.follow.status, opC.follow.move], ["held", "sender_struck", "REFUNDED", undefined]);
+  assert.deepEqual(log, ["move probe=true"], "one move, struck: none after it");
+  assert.equal((await opOf(t.w)).follow.intents_struck, true, "the strike is kept in the store");
+});
+
+test("REVIEW R1 (L1, after a reload): the strike is kept in the store, so a refund that shows only after the reload is held sender_struck with no probe, quote, seed or signature", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const C = "c".repeat(64);
+  await t.w.put("ops", "dq-C", { kind: "deposit", stage: "waiting", since_ms: NOW, txs: [], created_ms: NOW + 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: C, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "KNOWN_DEPOSIT_TX" } });
+  const log: string[] = [];
+  // the first session: A's move is struck while C's send is in flight
+  const pa1 = perAddress(t.u, { [ADDR]: ["REFUNDED"], [C]: ["KNOWN_DEPOSIT_TX"] });
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 30_000);
+  const sig1 = stop(t, 10);
+  assert.equal((await followDeposit(t.args, { ...t.deps, fetchFn: pa1.fetchFn, refundMove: answered(log, 403, "sender_struck"), signal: sig1 }).catch((e) => ({ kind: `threw ${e.message}` }))).kind, "held");
+  // the page closes: the first session's follower (kept on by A's struck move, L3) ends with it
+  for (let k = 0; k < 5000 && !sig1.aborted; k++) await turn();
+  for (let k = 0; k < 50; k++) await turn();
+  assert.equal((await opOf(t.w, "dq-C")).stage, "waiting");
+  // the reload: 1Click refunds C, its refund lands under U
+  t.onTick.fn = () => {};
+  t.chain.a.held = t.chain.b.held = 2n * CREDIT;
+  const seedsBefore = t.seeds.length;
+  const log2: string[] = [];
+  const pa2 = perAddress(t.u, { [ADDR]: ["REFUNDED"], [C]: ["REFUNDED"] });
+  const out = await followDeposit(argsOf(t, "dq-C", C), { ...t.deps, fetchFn: pa2.fetchFn, refundMove: answered(log2, 403, "sender_struck"), signal: stop(t, 40) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  const opC = await opOf(t.w, "dq-C");
+  assert.deepEqual(log2, [], "nothing handed to the helper that struck U");
+  assert.equal(t.seeds.length, seedsBefore, "the seed never opened for it");
+  assert.equal(out.kind, "held");
+  assert.deepEqual([opC.stage, opC.follow.why], ["held", "sender_struck"]);
+});
+
+test("REVIEW R2 (L3): a held op's move that did land (the helper answered sender_struck and carried it) is read past its deadline: the op is followed on as moved until its USDC binds, and U's done op goes final only after the move is read", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const start = t.chain.a.timeMs;
+  await t.w.put("ops", "dq-A", { kind: "deposit", stage: "done", since_ms: NOW, amount_usd: "1", txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: "c".repeat(64), deadline_ms: start + 300_000, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "SUCCESS", delivered: MIN_OUT, notes: [t.note.id], bound: MIN_OUT } });
+  const log: string[] = [];
+  // a hostile helper: answers sender_struck, and lands the intent anyway (nonce used, U's refund gone into 1Click)
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const r = await answered(log, 403, "sender_struck")(ask);
+    if (r.kind === "sent") (t.chain.used.add(r.move.nonce), (t.chain.a.held = t.chain.b.held = 0n));
+    return r;
+  };
+  let credited = false, finalBeforeMoved = false;
+  t.onTick.fn = async () => {
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000;
+    const b = await opOf(t.w);
+    if (!credited && (await opOf(t.w, "dq-A")).follow.final === true && b.follow.move !== undefined) finalBeforeMoved = true;
+    // 1Click delivers the move's USDC to U on the token, a few rounds after the move was read through
+    // (with A's share: A's note in this harness is the one the credit binds into)
+    if (!credited && b.follow.moved === true) (credited = true), t.chain.credit(2n * CREDIT);
+  };
+  const sig = stop(t, 200);
+  const out = await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: sig }).catch((e) => ({ kind: `threw ${e.message}` }));
+  for (let k = 0; k < 20000 && !sig.aborted && (await opOf(t.w)).follow.final !== true; k++) await turn();
+  const a = await opOf(t.w, "dq-A"), b = await opOf(t.w);
+  const ticksAtFinal = t.ticks();
+  for (let k = 0; k < 2000; k++) await turn();
+  assert.equal(t.ticks(), ticksAtFinal, "U's follow ends on its own once B is final");
+  assert.equal(sig.aborted, false);
+  assert.equal(out.kind, "done", "B's own follow runs on past the strike, to its money bound");
+  assert.equal(finalBeforeMoved, false, "A is not final while B's move is still unread");
+  assert.equal(b.follow.moved, true, "B's move read through past its deadline");
+  assert.ok(t.binds.length >= 1, "the move's USDC under U on the token is bound");
+  assert.deepEqual([b.stage, b.follow.why, b.follow.move, b.follow.final], ["done", undefined, undefined, true], "B done on its money back, followed to its final");
+  assert.equal(a.follow.final, true);
+});
+
+test("REVIEW R3 (L4, the session floor): after a move reads through at height H, a read below H (one RPC's final steps back, within the spread) that still shows the refund is no read: no second move is signed for money already moved", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let land = Number.MAX_SAFE_INTEGER;
+  t.chain.heldAt = (_k, at) => (at >= BigInt(land) ? 0n : CREDIT);
+  const moves: string[] = [];
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const r = await mover(() => {})(ask);
+    moves.push(`h=${ask.height} held=${ask.reads[0].held}`);
+    if (moves.length === 1 && r.kind === "sent") {
+      land = Number(t.chain.a.height) + 1;
+      t.chain.usedFrom.set(r.move.nonce, BigInt(land));
+    }
+    return r;
+  };
+  let stepped = false;
+  t.onTick.fn = async () => {
+    const op = await opOf(t.w);
+    if (op.follow.moved === true && !stepped) (stepped = true), (t.chain.a.height = BigInt(land) - 3n);
+  };
+  await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 8) }).catch(() => {});
+  assert.equal(stepped, true);
+  assert.equal(moves.length, 1, `no second move for the refund the first one moved: ${moves.join(" | ")}`);
+});
+
+test("REVIEW R4 (L2, the floor across a reload): the block that read a move through is kept, so a first read below it in the new session never signs a second move for money already moved", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let land = Number.MAX_SAFE_INTEGER;
+  t.chain.heldAt = (_k, at) => (at >= BigInt(land) ? 0n : CREDIT);
+  const moves: string[] = [];
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const r = await mover(() => {})(ask);
+    moves.push(`h=${ask.height} held=${ask.reads[0].held}`);
+    if (moves.length === 1 && r.kind === "sent") {
+      land = Number(t.chain.a.height) + 1;
+      t.chain.usedFrom.set(r.move.nonce, BigInt(land));
+    }
+    return r;
+  };
+  const ac = new AbortController();
+  t.onTick.fn = async () => {
+    if ((await opOf(t.w)).follow.moved === true) ac.abort(new Error("reload"));
+  };
+  await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: ac.signal }).catch(() => {});
+  const op1 = await opOf(t.w);
+  assert.equal(op1.follow.moved, true);
+  assert.ok((op1.follow.prior_height ?? 0) >= land, "the through read's block kept with the op");
+  // the new session: side a's first final is 3 blocks below the through read, b ahead, within the spread
+  t.chain.a.height = BigInt(land) - 3n;
+  t.onTick.fn = () => {};
+  await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 4) }).catch(() => {});
+  assert.equal(moves.length, 1, `no second move for the refund the first one moved: ${moves.join(" | ")}`);
+});
+
+test("REVIEW R5 (the route down, then up): the route answers 404 for the session's first probes, then comes up: in the same session the refund is signed, carried, lands and is bound", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let clock = NOW;
+  const log: string[] = [];
+  const sleep = async (ms: number) => {
+    clock += ms;
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + ms;
+    await t.deps.sleep!(ms);
+  };
+  let probes = 0;
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    if (ask.probe === true && ++probes <= 3) return (log.push("probe 404"), { kind: "refused", why: "relay" });
+    log.push(`move probe=${ask.probe === true}`);
+    return await mover((_u, m) => {
+      // carried and landed: U's refund leaves, 1Click delivers its USDC to U on the token
+      t.chain.used.add(m.nonce);
+      t.chain.a.held = t.chain.b.held = 0n;
+      t.chain.credit(CREDIT);
+    })(ask);
+  };
+  await followDeposit(t.args, { ...t.deps, now: () => clock, sleep, refundMove, untilFinal: true, signal: stop(t, 200) }).catch(() => {});
+  const op = await opOf(t.w);
+  assert.deepEqual(log, ["probe 404", "probe 404", "probe 404", "move probe=true"]);
+  assert.equal(op.follow.moved, true);
+  assert.ok(t.binds.length >= 1, "the moved USDC bound");
+});
+
+test("REVIEW R2 (L3, U's only op): a struck move that landed anyway keeps its own op followed (a reload resumes it) until its USDC binds", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const log: string[] = [];
+  let heldWithMove = false;
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const r = await answered(log, 403, "sender_struck")(ask);
+    if (r.kind === "sent") (t.chain.used.add(r.move.nonce), (t.chain.a.held = t.chain.b.held = 0n));
+    return r;
+  };
+  let credited = false;
+  t.onTick.fn = async () => {
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000;
+    const b = await opOf(t.w);
+    if (b.stage === "held" && b.follow.move !== undefined && !followEnded(b)) heldWithMove = true;
+    if (!credited && b.follow.moved === true) (credited = true), t.chain.credit(CREDIT);
+  };
+  const out = await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 200) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  const b = await opOf(t.w);
+  assert.equal(heldWithMove, true, "held with its move out, and not ended: a reload (SIGN_HOST settle) resumes it");
+  assert.equal(out.kind, "done");
+  assert.deepEqual([b.stage, b.follow.moved, b.follow.final], ["done", true, true]);
+  assert.ok(t.binds.length >= 1, "the move's USDC bound");
+  assert.deepEqual(log, ["move probe=true"]);
 });

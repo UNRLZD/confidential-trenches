@@ -6,11 +6,13 @@
 // 19:18Z (HTTP 404 {error: "not_found"}, no code by the device's rule): FAIL, each fact named. Planted on the good one:
 // another /app.js, no move in the bundle, a quote the rule refused or did not read, a quote that is not a refund move's,
 // a quote answered 502, the salts or heights apart, a used nonce, a 404 relay, a listed code at 200, 399 or 500, a code
-// not listed, an answer SIGN_HOST may not read (no access-control-allow-origin, "*", another origin): each FAIL. The quote is kept as facts (status, the rule's verdict at read time, depositType, to U), not its signature.
+// not listed, an answer SIGN_HOST may not read (no access-control-allow-origin, "*", another origin): each FAIL. The
+// relay's answer is read as the device reads it (bytes capped at 1024, strict UTF-8): a 1025-byte refusal is no code.
+// /v1/intents read again 8 Nov 21:09:59Z: still 404 {"error":"not_found"}, so the good answer's relay stays the contract's. The quote is kept as facts (status, the rule's verdict at read time, depositType, to U), not its signature.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { INTENTS_URL, judge, read, relayCode } from "./wallet-refund-move.mjs";
+import { INTENTS_URL, judge, read, RELAY_ANSWER_MAX_BYTES, relayAnswer, relayCode } from "./wallet-refund-move.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-refund-move.answers.json", import.meta.url), "utf8"));
 
@@ -94,4 +96,44 @@ test("the relay's code read as the device reads it: only a route refusal {error:
   assert.equal(relayCode({ error: { code: 1 } }), null);
   assert.equal(relayCode({ code: "bad_shape" }), null);
   assert.equal(relayCode(null), null);
+});
+
+test("the relay's answer read as the device reads it: bytes capped at the device's 1024, strict UTF-8; an answer over the cap is no code", async () => {
+  // the device's cap, INTENTS_ANSWER_MAX_BYTES, is pinned at 1024 by packages/wallet/test/deposit-refund.test.ts ("pin
+  // (delta)"); the live check reaches only the kit, so it holds the same number here
+  assert.equal(RELAY_ANSWER_MAX_BYTES, 1024);
+  const refusal = (n) => {
+    const head = '{"error":{"code":"bad_shape","detail":"';
+    const tail = '"}}';
+    return head + "x".repeat(n - head.length - tail.length) + tail;
+  };
+  const stream = (text) => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } }), { status: 400 });
+  assert.equal(refusal(1024).length, 1024);
+  assert.equal(await relayAnswer(new Response(refusal(1024), { status: 400 })), "bad_shape", "1024 B: read");
+  assert.equal(await relayAnswer(stream(refusal(1024))), "bad_shape", "1024 B streamed: read");
+  // planted: 1025 B, declared or streamed with no length, is no code (the device's probe reads none)
+  assert.equal(await relayAnswer(new Response(refusal(1025), { status: 400 })), null, "1025 B: no code");
+  assert.equal(await relayAnswer(stream(refusal(1025))), null, "1025 B streamed: no code");
+  // planted: not strict UTF-8 (a lone 0xff in the detail) is no code
+  const bytes = new TextEncoder().encode(refusal(100));
+  bytes[40] = 0xff;
+  assert.equal(await relayAnswer(new Response(bytes, { status: 400 })), null, "bad UTF-8: no code");
+  assert.equal(await relayAnswer(new Response("not json", { status: 400 })), null);
+  assert.equal(await relayAnswer(Response.json({ error: "not_found" }, { status: 404 })), null);
+});
+
+test("read() reads the relay's answer through the cap: a 1025-byte refusal from /v1/intents records no code", async () => {
+  const big = '{"error":{"code":"bad_shape","detail":"' + "x".repeat(1025) + '"}}';
+  const fetchFn = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    if (url.endsWith("/app.js")) return new Response(`x ${INTENTS_URL}`);
+    if (url.startsWith("https://sign.")) return new Response(A.good.index);
+    if (url.endsWith("/v0/quote")) return Response.json({ quote: {}, quoteRequest: {} }, { status: 201 });
+    if (url.endsWith("/v1/intents")) return new Response(big, { status: 400, headers: { "access-control-allow-origin": "https://sign.confidential.unrealized.trade" } });
+    const value = body.params.method_name === "current_salt" ? "252812b3" : false;
+    return Response.json({ result: { block_height: body.params.block_id ?? 100, result: [...Buffer.from(JSON.stringify(value))] } });
+  };
+  const a = await read(fetchFn, Date.parse("2026-11-07T14:40:00Z"));
+  assert.deepEqual(a.relay, { status: 400, code: null, cors: "https://sign.confidential.unrealized.trade" });
+  assert.ok(judge(a).lines.some((l) => l.startsWith("BAD the helper carries no id's intent: POST /v1/intents answers 400 null")));
 });
