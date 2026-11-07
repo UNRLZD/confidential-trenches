@@ -38,13 +38,13 @@ const args = (k: string) => process.argv.flatMap((v, i) => (process.argv[i - 1] 
 const HELPER = args("--helper")[0] ?? "https://api.confidential.unrealized.trade";
 const PROVIDER_A = "https://solana-rpc.publicnode.com";
 const SLIPPAGE_BPS = 500;
-// A wallet that holds SOL, wSOL (FVee…8qQi) and EQM29…pump (the card's measured wallet: a buy from it writes its wSOL
+// A wallet that holds SOL and wSOL (FVee…8qQi) (the card's measured wallet: a buy from it writes its wSOL
 // account, so the second simulation runs). Read live each run; it is a stand-in, never a wallet of ours.
 const WALLET = args("--wallet")[0] ?? "9UnZnrFJ1CXCmCorgGU9NvYkX5np1h4v4ympx3Nrdw3v";
 const ROUTES = (args("--route").length ? args("--route") : [
   "buy:EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump:10000000",
   "buy:MukLDtJ8Cx9DxLbeyLRSWPSposTMWuwHANbuaudpump:10000000",
-  "sell:EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump:50000000000",
+  "buy:CniPCE4b3s8gSUPhUiyMjXnytrEqUrMfSsnbBjLCpump:10000000",
 ]).map((r) => {
   const [side, mint, amount] = r.split(":");
   if ((side !== "buy" && side !== "sell") || !mint || !amount) throw new Error(`--route ${r} is not side:mint:amount`);
@@ -53,7 +53,7 @@ const ROUTES = (args("--route").length ? args("--route") : [
 const N = Number(args("--n")[0] ?? 20);
 const GAP_MS = Number(args("--gap-ms")[0] ?? 4000);
 
-type Call = { at: "A" | "B" | "helper" | "ref"; method: string; start: number; end: number; keys?: number };
+type Call = { at: "A" | "B" | "helper" | "ref"; method: string; start: number; end: number; keys?: number; err?: string };
 
 async function once(route: (typeof ROUTES)[number]) {
   const calls: Call[] = [];
@@ -61,11 +61,15 @@ async function once(route: (typeof ROUTES)[number]) {
   const rel = () => performance.now() - t0;
   const timed = (rpc: SolanaRpc, at: "A" | "B"): SolanaRpc => async (method, params) => {
     const start = rel();
+    let err: string | undefined;
     try {
       return await rpc(method, params);
+    } catch (e) {
+      err = String((e as Error)?.message ?? e).slice(0, 80);
+      throw e;
     } finally {
       const keys = method === "simulateTransaction" ? ((params[1] as { accounts?: { addresses?: unknown[] } })?.accounts?.addresses?.length ?? 0) : method === "getMultipleAccounts" ? (params[0] as unknown[]).length : undefined;
-      calls.push({ at, method, start, end: rel(), ...(keys !== undefined ? { keys } : {}) });
+      calls.push({ at, method, start, end: rel(), ...(keys !== undefined ? { keys } : {}), ...(err ? { err } : {}) });
     }
   };
   // fresh provider functions each run: new paced queues, as on a page just opened
@@ -85,12 +89,17 @@ async function once(route: (typeof ROUTES)[number]) {
           calls.push({ at: "ref", method: "reference", start, end: rel() });
         }
       },
+      // the build's whole answer, its body read in full: the kit reads the body before it parses
       fetch: async (url: string, init: RequestInit) => {
         const start = rel();
+        let err: string | undefined;
         try {
-          return await fetch(url, init);
+          const r = await fetch(url, init);
+          const body = await r.text();
+          if (r.status !== 200) err = `HTTP ${r.status}`;
+          return new Response(body, { status: r.status, headers: r.headers });
         } finally {
-          calls.push({ at: "helper", method: "build", start, end: rel() });
+          calls.push({ at: "helper", method: "build", start, end: rel(), ...(err ? { err } : {}) });
         }
       },
       paths: solanaSendPaths({ helper: solanaHelperRpc(HELPER) }),
@@ -135,7 +144,7 @@ async function once(route: (typeof ROUTES)[number]) {
     refused: leg.refused ?? null,
     simulationErrors: leg.simulationErrors ?? null,
     rpcCalls: { A: calls.filter((c) => c.at === "A" && c.end <= quote).length, B: calls.filter((c) => c.at === "B" && c.end <= quote).length },
-    calls: calls.sort((x, y) => x.start - y.start).map((c) => `${c.at} ${c.method}${c.keys !== undefined ? `/${c.keys}` : ""} ${Math.round(c.start)}-${Math.round(c.end)}`),
+    calls: calls.sort((x, y) => x.start - y.start).map((c) => `${c.at} ${c.method}${c.keys !== undefined ? `/${c.keys}` : ""} ${Math.round(c.start)}-${Math.round(c.end)}${c.err ? ` ${c.err}` : ""}`),
   };
 }
 
