@@ -165,3 +165,25 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
   assert.ok(reads.length > 0, "the hook ran once the senders were this helper's");
   assert.ok(worst < 50, `worst event-loop gap ${Math.round(worst)} ms`);
 });
+
+test("card helper-id-intents: a 1Click quote answer the proxy carried (200 or 201) reaches bind.quoted once, after the device's answer; another path does not", async (t) => {
+  const QUOTE = JSON.stringify((RECORDED.answers.success_usdc as { quoteResponse: unknown }).quoteResponse);
+  const quoted: string[] = [];
+  for (const status of [200, 201]) {
+    const h = await helper({ ...sender(), quoted: (b) => void quoted.push(b) }, () => ({ status, body: QUOTE }));
+    t.after(() => h.close());
+    const a = await call(h.port, "/v1/proxy/oneclick/v0/quote", JSON.stringify({ dry: false }));
+    assert.equal(a.status, status);
+    assert.equal(a.body, QUOTE);
+    await turns();
+  }
+  assert.deepEqual(quoted, [QUOTE, QUOTE]);
+  const other = await helper({ ...sender(), quoted: (b) => void quoted.push(b) }, () => ({ status: 200, body: QUOTE }));
+  t.after(() => other.close());
+  await call(other.port, STATUS_PATH);
+  const refused = await helper({ ...sender(), quoted: (b) => void quoted.push(b) }, () => ({ status: 400, body: "{}" }));
+  t.after(() => refused.close());
+  await call(refused.port, "/v1/proxy/oneclick/v0/quote", "{}");
+  await turns();
+  assert.equal(quoted.length, 2, "a status, or a refused quote, is not recorded");
+});

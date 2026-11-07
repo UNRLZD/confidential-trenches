@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { VAULT_CONSTANTS, vaultWithdrawYocto } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
+import { encodeAction, encodeTransaction, RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, type CheckedWithdraw, type WithdrawConfig } from "./checks.ts";
 import { TESTNET_TOKEN } from "./fee.ts";
@@ -37,6 +37,7 @@ import {
   newestFinalMs,
   outcomeOf,
   outcomeRound,
+  recipientOfSigned,
   readChecks,
   withdrawSenderFromEnv,
   type ChainReads,
@@ -69,6 +70,8 @@ type Chain = {
   registered: [boolean, boolean];
   min: bigint;
   spendStatus: string;
+  /** The spends row's refund_value (the vault's on_payout: the withdrawn amount when the payout bounced), "0" unless set. */
+  spendRefund?: string;
   spendIndex: number;
   /** The nullifier the spends row at spendIndex names (NF unless a test plants another). */
   spendNf?: bigint;
@@ -148,7 +151,7 @@ function provider(c: Chain, i: 0 | 1): Rpc {
       else if (p.method_name === "is_blocklisted" && args.account_id === W.recipient) v = c.recipientListed[i];
       else if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
-      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus }] : [];
+      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus, refund_value: c.spendRefund ?? "0" }] : [];
       else if (p.method_name === "is_known_state_root") v = c.stateKnown;
       else if (p.method_name === "is_known_label_root") v = c.labelKnown;
       else if (p.method_name === "totals") v = { deposited: c.totals[0].toString(), spent: c.totals[1].toString(), returned: c.totals[2].toString() };
@@ -180,7 +183,9 @@ function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & 
       if (code !== null) return { kind: "guarded" as const, code };
       const n = counters.get(key) ?? 1n;
       counters.set(key, n + 1n);
-      const tx: TxRef = { tx_hash: base58(createHash("sha256").update(`${key} ${n}`).digest()), nonce: n.toString(), height: "999", block_hash: hashOf(999), signed_tx: Buffer.from(`${key} ${n}`).toString("base64") };
+      // a call's bytes as the relayer signs them (bind/send.ts encodeTransaction), a zero signature after them
+      const bytes = action.kind === "call" ? Buffer.concat([encodeTransaction({ signer: name, publicKey: new Uint8Array(32), nonce: n, receiver: action.receiver, blockHash: new Uint8Array(32), action: encodeAction(action) }), Buffer.alloc(65)]) : Buffer.from(`${key} ${n}`);
+      const tx: TxRef = { tx_hash: base58(createHash("sha256").update(`${key} ${n}`).digest()), nonce: n.toString(), height: "999", block_hash: hashOf(999), signed_tx: bytes.toString("base64") };
       before(tx); // a throw here drops the bytes: nothing is recorded as sent
       r.sent.push({ action, tx });
       return { kind: "unknown" as const, tx_hash: tx.tx_hash, why: "sent" };
@@ -455,6 +460,36 @@ test("relayer_low: under one withdraw's gas bought up front, its attachment and 
   at.relayer.near = SETTLE_FLOOR_YOCTO;
   await outcomeRound(at.deps);
   assert.equal(at.relayer.sent.length, 2);
+});
+
+// ---- card helper-id-intents: the arming account A a valid proof landed to ----
+
+test("onLanded hears a withdrawal's signed recipient only once its spends row reads paid, or settled with refund_value 0: a bounced payout (refund_pending, or settled with a refund) and a failed send open no gate on POST /v1/intents", async () => {
+  // one withdrawal read succeeded, its spends row then read as `status` with `refund`; what onLanded heard
+  const run = async (status: string, refund = "0", ran = true) => {
+    const s = setup();
+    const heard: string[] = [];
+    s.deps.onLanded = (to) => void heard.push(to);
+    assert.equal(code(await carryWithdraw(req(), s.deps)), "ok");
+    const tx = s.relayer.sent[0]!.tx;
+    assert.equal(recipientOfSigned(tx.signed_tx), W.recipient);
+    await outcomeRound(s.deps);
+    assert.deepEqual(heard, [], "not before its outcome is read");
+    s.outcomes.set(tx.tx_hash, final(tx.tx_hash, ran, DEADLINE - 1n));
+    await outcomeRound(s.deps);
+    assert.deepEqual(heard, [], "not on the withdraw transaction alone: its payout may have bounced");
+    s.c.spendStatus = status;
+    s.c.spendRefund = refund;
+    await outcomeRound(s.deps);
+    return heard;
+  };
+  assert.deepEqual(await run("paid"), [W.recipient], "paid: the recipient received the money");
+  assert.deepEqual(await run("settled", "0"), [W.recipient], "settled by another caller after a payout that paid");
+  assert.deepEqual(await run("refund_pending", "1000000"), [], "a bounced payout: nothing received");
+  assert.deepEqual(await run("settled", "1000000"), [], "settled with a refund note: the payout bounced");
+  assert.deepEqual(await run("in_flight"), [], "the payout's callback has not run");
+  assert.deepEqual(await run("paid", "0", false), [], "a withdraw that failed on chain is never settled");
+  assert.equal(recipientOfSigned(Buffer.from("not a transaction").toString("base64")), null);
 });
 
 // ---- Check 7b: the fee account (card vault-review-fixes-1, review F-1) ----

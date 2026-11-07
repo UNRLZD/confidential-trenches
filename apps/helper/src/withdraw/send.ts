@@ -118,6 +118,14 @@ export type WithdrawSendDeps = {
   now?: () => number;
   /** The helper's log; console.log under "helper: " by default. */
   log?: (line: string) => void;
+  /**
+   * A withdrawal whose payout reached its recipient, with the recipient as signed (card helper-id-intents: the arming
+   * account A a valid proof landed to is the gate's second path on POST /v1/intents): heard from the settle round's
+   * spends read, the row paid or settled with refund_value 0, never from the withdraw transaction alone, which also
+   * succeeds when the payout bounces (on_payout: refund_pending, refund_value the withdrawn amount). Not awaited; a
+   * throw is ignored.
+   */
+  onLanded?: (recipient: string) => void;
 };
 
 const no = (code: HelperWithdrawCode | "upstream", status = 400): WithdrawAnswer => ({ status, body: { error: { code } } });
@@ -404,15 +412,65 @@ export function outcomeOf(out: TxOutcome, deadline_ms: number): Parameters<Withd
   return r.ms > BigInt(deadline_ms) ? { kind: "deadline" } : { kind: "failed", error: r.failure };
 }
 
-/** The spend's status in the vault's spends list at one final block on both providers, or null when not read. */
-async function spendStatus(deps: WithdrawSendDeps, nf: bigint): Promise<string | null> {
+/** The spend's row in the vault's spends list at one final block on both providers (its status and refund_value), or null when not read. */
+async function spendRow(deps: WithdrawSendDeps, nf: bigint): Promise<{ status: string | null; refund_value: unknown } | null> {
   let i = deps.index.indexOf(nf);
   if (i === null && (await deps.index.reach(await deps.index.finalHeight()))) i = deps.index.indexOf(nf);
   if (i === null) return null;
   const block = await agreedBlock(deps.rpcs, deps.now ?? Date.now);
   const [row] = await pagesAt(deps.rpcs, deps.cfg.vault, "spends", block.height, i, 1);
   if (row === undefined || decimal(row.nullifier_hash, 1n << 256n) !== nf) throw new Error("spends: the row is not this nullifier's");
-  return typeof row.status === "string" ? row.status : null;
+  return { status: typeof row.status === "string" ? row.status : null, refund_value: row.refund_value };
+}
+
+/** The spend's status in the vault's spends list at one final block on both providers, or null when not read. */
+async function spendStatus(deps: WithdrawSendDeps, nf: bigint): Promise<string | null> {
+  return (await spendRow(deps, nf))?.status ?? null;
+}
+
+/** Card helper-id-intents: the payout reached the recipient: the row paid, or settled with no refund (a bounced one is refund_pending, then settled with refund_value the withdrawn amount). */
+const delivered = (row: { status: string | null; refund_value: unknown }) => row.status === "paid" || (row.status === "settled" && row.refund_value === "0");
+
+/** deps.onLanded with the recipient of our signed withdraw; a hook that throws changes nothing. */
+function heardLanded(deps: WithdrawSendDeps, signedTx: string): void {
+  const to = deps.onLanded === undefined ? null : recipientOfSigned(signedTx);
+  if (to === null) return;
+  try {
+    deps.onLanded!(to);
+  } catch {
+    // the settle goes on; a failed hook changes nothing
+  }
+}
+
+/**
+ * The withdrawal's recipient in one of our signed withdraw transactions (signer, key, nonce, receiver, block hash, one
+ * FunctionCall: its method and its JSON args, withdrawArgs'), or null when the bytes are not that.
+ */
+export function recipientOfSigned(signedTx: string): string | null {
+  try {
+    const b = Buffer.from(signedTx, "base64");
+    let at = 0;
+    const str = () => {
+      const n = b.readUInt32LE(at);
+      const v = b.subarray(at + 4, at + 4 + n);
+      if (v.length !== n) throw new Error("short");
+      at += 4 + n;
+      return v;
+    };
+    str(); // signer
+    at += 1 + 32 + 8; // key type, public key, nonce
+    str(); // receiver
+    at += 32; // block hash
+    if (b.readUInt32LE(at) !== 1) return null;
+    at += 4;
+    if (b[at] !== 2) return null; // FunctionCall
+    at += 1;
+    if (str().toString("utf8") !== "withdraw") return null;
+    const args = JSON.parse(str().toString("utf8")) as { withdrawal?: { recipient?: unknown } };
+    return typeof args.withdrawal?.recipient === "string" ? args.withdrawal.recipient : null;
+  } catch {
+    return null;
+  }
 }
 
 /** One round: every open send resent and read, then every succeeded send settled. Errors keep a row for the next round. */
@@ -463,7 +521,9 @@ async function settleOne(deps: WithdrawSendDeps, nf: bigint, byKey: Map<string, 
     }
     return deps.store.setSettle(nf, null);
   }
-  const status = await spendStatus(deps, nf);
+  const row = await spendRow(deps, nf);
+  const status = row?.status ?? null;
+  if (row !== null && delivered(row)) heardLanded(deps, rec.signed_tx); // card helper-id-intents: before the settle is sent
   if (status === "settled") return deps.store.setSettle(nf, { tx: null, done: true }); // another caller settled it (anyone may)
   if (status !== "paid" && status !== "refund_pending") return; // in_flight: its callback has not run yet
   const relayer = deps.relayers[turn++ % deps.relayers.length]!;
@@ -518,6 +578,8 @@ export const MAINNET_VAULT = "vault-test.confidential.unrlzd.near";
 export type WithdrawSender = {
   /** POST /v1/withdraw for a parsed body: the network from its token; a token this relayer does not carry is bad_shape. */
   carry(body: unknown): Promise<WithdrawAnswer>;
+  /** Card helper-id-intents: `cb` hears each mainnet withdrawal whose payout reached its recipient, with the recipient (deps.onLanded). */
+  onLanded?(cb: (recipient: string) => void): void;
   /**
    * At the helper's start: every carried network started now, so a restart resends its open sends and settles within
    * one round whether or not a request comes; a start that fails is tried again every OUTCOME_ROUND_MS.
@@ -567,6 +629,7 @@ export function withdrawSenderFromEnv(
   }
 
   const ready = new Map<FeeNetwork, Promise<WithdrawSendDeps>>();
+  const landed: ((recipient: string) => void)[] = [];
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<WithdrawSendDeps> => {
     const rpcs = urls[net.network].map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
@@ -592,6 +655,8 @@ export function withdrawSenderFromEnv(
         relayers,
         // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
         tokenStatus: watch ?? (async () => ({ token: TOKENS[net.network], caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
+        // mainnet only: intents.near, where an arming account's intents go, is a mainnet contract
+        ...(net.network === "mainnet" && { onLanded: (to: string) => landed.forEach((cb) => cb(to)) }),
       };
       stops.push(await startOutcomeRounds(deps));
       return deps;
@@ -615,6 +680,7 @@ export function withdrawSenderFromEnv(
       if (!stopped) setTimeout(() => warmNet(net), OUTCOME_ROUND_MS).unref();
     });
   return {
+    onLanded: (cb) => void landed.push(cb),
     async carry(body) {
       const token = isObj(body) ? body.token : undefined;
       const net = typeof token === "string" ? nets.get(token) : undefined;
