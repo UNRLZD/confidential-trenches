@@ -24,7 +24,12 @@
 #      running (a first deploy) docker compose up -d --wait brings the stack up; otherwise starts the new helper beside the
 #      old one (docker compose up --no-deps --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck
 #      (compose.yaml: /v1/health says ready), and only then stops (30 s) and removes each old container. Past the bound
-#      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1.
+#      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1;
+#   4. reloads Caddy with this checkout's Caddyfile through its admin socket inside the container (Caddyfile: admin
+#      unix//config/caddy-admin.sock): Caddy swaps to the new config with no gap and skips a config that is unchanged. The
+#      file goes in on stdin, since compose mounts the one file and a checkout writes a new one, which the running
+#      container's mount never sees. A refused reload (a bad Caddyfile, or a Caddy started before it had the socket) leaves
+#      Caddy on the config it had and exits 1, naming the one recreate that gives it the socket.
 # It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
@@ -65,6 +70,17 @@ main() {
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
   swap_helper "$wait_s" "$sha"
+  reload_caddy
+}
+
+# Step 4. Caddy validates the new config before it swaps to it; on any refusal it keeps serving the one it had.
+reload_caddy() {
+  echo "redeploy: docker compose exec -T caddy caddy reload (the Caddyfile, through the admin socket)"
+  if ! docker compose exec -T caddy caddy reload --config - --adapter caddyfile --address unix//config/caddy-admin.sock <Caddyfile; then
+    echo "redeploy: Caddy did not reload the Caddyfile; it keeps the config it had. A Caddy started before its admin socket needs one recreate: cd apps/helper/deploy && docker compose up -d --no-deps --force-recreate caddy" >&2
+    exit 1
+  fi
+  echo "redeploy: Caddy reloaded the Caddyfile (unchanged: Caddy kept its config)"
 }
 
 # Step 3. The new helper starts next to the old one (docker-rollout's pattern: --no-recreate keeps the running container
