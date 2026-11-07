@@ -75,9 +75,9 @@ test("planted: /app.js changed under the old pin: every check FAILs", async () =
 test("planted: a check that reads past the build, or throws, FAILs with ERROR", async () => {
   const dir = signCopy();
   try {
-    const past = { key: "signpage-withdraw-own-spend", host: "sign", run: async (_m, f) => ((await f("https://rpc.example/")), { ok: true, lines: [] }) };
-    const throws = { key: "signpage-withdraw-own-spend", host: "sign", run: async () => { throw new Error("planted"); } };
-    const passes = { key: "signpage-withdraw-own-spend", host: "sign", run: async (m, f) => m.judge(await m.read(f)) };
+    const past = { key: "signpage-withdraw-own-spend", host: "sign", load: () => import("../live-checks/signpage-withdraw-own-spend.mjs"), run: async (_m, f) => ((await f("https://rpc.example/")), { ok: true, lines: [] }) };
+    const throws = { key: "signpage-withdraw-own-spend", host: "sign", load: () => import("../live-checks/signpage-withdraw-own-spend.mjs"), run: async () => { throw new Error("planted"); } };
+    const passes = { key: "signpage-withdraw-own-spend", host: "sign", load: () => import("../live-checks/signpage-withdraw-own-spend.mjs"), run: async (m, f) => m.judge(await m.read(f)) };
     const out = await run({ sign: dir, app: dir, inProcess: [past, throws, passes], childRuns: [] });
     assert.deepEqual(out.map((r) => r.ok), [false, false, true]);
     assert.match(out[0].lines[0], /^ERROR https:\/\/rpc\.example: not this build/);

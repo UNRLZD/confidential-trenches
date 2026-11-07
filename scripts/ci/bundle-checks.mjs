@@ -20,7 +20,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const SIGN = "https://sign.confidential.unrealized.trade";
@@ -28,14 +28,24 @@ export const APP = "https://confidential.unrealized.trade";
 export const SIGN_DIR = path.join(ROOT, "packages/signpage");
 export const APP_DIR = path.join(ROOT, "apps/terminal/dist");
 
-const viaRead = (key) => ({ key, host: "sign", run: async (m, f) => m.judge(await m.read(f)) });
-/** The checks run in this process, each from scripts/live-checks/<key>.mjs. */
+const viaRead = (key, load) => ({ key, host: "sign", load, run: async (m, f) => m.judge(await m.read(f)) });
+/** The checks run in this process: each loads scripts/live-checks/<key>.mjs (a static import, which check:imports reads). */
 export const IN_PROCESS = [
-  ...["signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "evm-pool-sync-wide-pages", "kit-deposit-calls", "kit-frame-version", "kit-oneclick-pins-frozen", "pool-answer-unknown"].map(viaRead),
-  { key: "signpage-withdraw-form", host: "sign", run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
-  { key: "signpage-pool-kinds", host: "sign", run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
-  { key: "app-harness-signin-e2e", host: "sign", run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["sign"], f)) },
-  { key: "app-harness-signin-e2e", host: "app", run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["app"], f)) },
+  viaRead("signpage-withdraw-own-spend", () => import("../live-checks/signpage-withdraw-own-spend.mjs")),
+  viaRead("signpage-buy-own-spend", () => import("../live-checks/signpage-buy-own-spend.mjs")),
+  viaRead("signpage-sent-read-back", () => import("../live-checks/signpage-sent-read-back.mjs")),
+  viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
+  viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
+  viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
+  viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
+  viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
+  viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
+  viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
+  viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
+  { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
+  { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
+  { key: "app-harness-signin-e2e", host: "sign", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["sign"], f)) },
+  { key: "app-harness-signin-e2e", host: "app", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["app"], f)) },
 ];
 /** The checks run in their own local mode, as a child process: the arguments after the check's path. */
 export const CHILD_RUNS = [
@@ -117,7 +127,7 @@ export async function run({ sign = SIGN_DIR, app = APP_DIR, inProcess = IN_PROCE
   const out = [];
   for (const c of inProcess) {
     try {
-      const m = await import(pathToFileURL(path.join(root, "scripts/live-checks", `${c.key}.mjs`)).href);
+      const m = await c.load();
       const v = await c.run(m, f, { sign, app });
       const ok = (v?.ok ?? v?.pass) === true; // the checks' judges answer { ok, lines } or { pass, lines }
       out.push({ key: c.key, host: c.host, ok, lines: ok ? [] : (v?.lines ?? []) });
