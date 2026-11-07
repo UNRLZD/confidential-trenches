@@ -1,0 +1,61 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-07T04:53:50.482Z",
+  "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+  "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+  "venues": [],
+  "asked": [
+    "v4"
+  ],
+  "relayer": "0xab86f0b3975226ddf06dc107512519523995de65",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2065890000016032",
+  "restore": null,
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0xb72ccd73f348d22786551c0264fb76773c3b66e1d85c46d4177bfea6eaaf9e3a",
+      "from": "0xab86f0b3975226ddf06dc107512519523995de65",
+      "kind": "deposit",
+      "block": "55526463",
+      "gasUsed": "294162",
+      "commitment": "13127839541391648385586051712212009969645461622143642734487493880164039304296",
+      "label": "17806949083158033649142620028360926546866726582695102961861959684321211371658",
+      "value": "2000000000000000",
+      "precommitment": "12941796862048362790330344155495562803592569484907210146407182230333112002070"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0x0c1940a59de8f190b1e115c32196f062d08630700dbe2b5a6589709b356d67ca",
+      "from": "0xab86f0b3975226ddf06dc107512519523995de65",
+      "kind": "withdraw",
+      "w": "0x47a88dea14d2e0285dda0e6c7efb7fc45fee8387",
+      "nullifier": "537542779449543808941077031556673344804604587031424638618679267974390140524",
+      "value": "2000000000000000",
+      "fee": "10000000000000",
+      "block": "55526765",
+      "gasUsed": "475765",
+      "newCommitment": "13110894539877083188463085144422132041341529682023935810504015956621123157773"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0xbe58de5e23175a493942ba554345e6dd91efef6fb70f180ec39ad8a448e29cea",
+      "from": "0x47a88dea14d2e0285dda0e6c7efb7fc45fee8387",
+      "kind": "sweep",
+      "w": "0x47a88dea14d2e0285dda0e6c7efb7fc45fee8387",
+      "block": "55526781",
+      "gasUsed": "21000"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0xb3ee1f3ebaf38ff458e06303a78bd075d61bd8eb5dc150a7c9d228f5b43f91f2",
+      "from": "0xab86f0b3975226ddf06dc107512519523995de65",
+      "kind": "sweep",
+      "block": "55526798",
+      "gasUsed": "21000"
+    }
+  ]
+}

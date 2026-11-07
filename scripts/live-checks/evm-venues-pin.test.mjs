@@ -1,4 +1,4 @@
-// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-06 for card
+// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-07 for card pool-evm-buy-pays-revert, the testnets' new pools; 2026-11-06 for card
 // evm-testnet-delegate-review3) through the live check: the recorded good answers pass on both testnets; the same recording with one
 // thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH
 // with other code, another chain id, a kit pin that is not the record's (the sell delegate's record is the newest
@@ -98,8 +98,11 @@ test("a kit pin whose code is a build the build file froze fails: main's pins at
   const F = A.frozenPin;
   for (const chain of A.chains) {
     const pin = F.pins[chain];
-    const deployment = { ...RECORD[chain], contracts: { ...RECORD[chain].contracts, SellDelegate: { address: pin } } };
-    const r = await run(chain, { answers: F.answers, venue: { ...evmPoolVenues()[chain], sellDelegate: pin }, deployment });
+    // recorded 6 Nov, before card pool-evm-buy-pays-revert's pools: the pool and its verifier then (its record,
+    // pool-evm-deploy.<chain>.json), whose reads the recording holds
+    const then = JSON.parse(readFileSync(new URL(`./pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts;
+    const deployment = { ...RECORD[chain], contracts: { ...RECORD[chain].contracts, PrivacyPoolSimple: then.PrivacyPoolSimple, WithdrawalVerifier: then.WithdrawalVerifier, SellDelegate: { address: pin } } };
+    const r = await run(chain, { answers: F.answers, venue: { ...evmPoolVenues()[chain], pool: then.PrivacyPoolSimple.address, sellDelegate: pin }, deployment });
     fails(r, new RegExp(`the sell delegate ${pin} is the build's SellDelegate`));
   }
 });

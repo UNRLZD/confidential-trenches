@@ -99,6 +99,14 @@ export function withdrawDigest(chainId, pool, nullifier, context, value) {
   const struct = bytes(keccak(Buffer.concat([bytes(keccak(utf8("Withdraw(uint256 nullifier,uint256 context,uint256 value)"))), w32(nullifier), w32(context), w32(value)])));
   return bytes(keccak(Buffer.concat([Buffer.from([0x19, 0x01]), domain, struct])));
 }
+/** The EIP-712 digest of Buy(adapter, data, minOut, token, nullifier, context, value) under {Blindfill, 1, chainId,
+ *  pool} (PrivacyPoolSimple.sol BUY_TYPEHASH, _buyDigest), for --fail-buy alone: a buy whose minOut the swap cannot
+ *  meet, which the kit's signer never signs (card pool-evm-buy-pays-revert) */
+export function buyDigest(chainId, pool, built, nullifier, context, value) {
+  const domain = bytes(keccak(Buffer.concat([bytes(keccak(utf8("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))), bytes(keccak(utf8("Blindfill"))), bytes(keccak(utf8("1"))), w32(chainId), w32(pool)])));
+  const struct = bytes(keccak(Buffer.concat([bytes(keccak(utf8("Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)"))), w32(built.adapter), bytes(keccak(bytes(built.data))), w32(built.minOut), w32(built.token), w32(nullifier), w32(context), w32(value)])));
+  return bytes(keccak(Buffer.concat([Buffer.from([0x19, 0x01]), domain, struct])));
+}
 /** W's 65-byte r ‖ s ‖ v signature of a digest, s low, v 27 or 28 */
 export function sign65(digest, sk) {
   const rec = secp256k1.sign(digest, sk, { prehash: false, lowS: true, format: "recovered" });

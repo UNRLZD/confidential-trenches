@@ -119,13 +119,14 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's thirty-six checks (signpage-shell runs four ways, kit-oneclick-pins-frozen and pool-deposits the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's thirty-seven checks (signpage-shell runs four ways, pool-deposits and pool-answer-unknown the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 36);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 37);
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposits" && !e.chrome && e.args === ""), "pool-deposits runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-answer-unknown" && !e.chrome && e.args === ""), "pool-answer-unknown runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-frame-version" && !e.chrome && e.args === ""), "kit-frame-version runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-assets-dry" && e.chrome && e.args === ""), "kit-deposit-assets-dry runs after every sign deploy, in Chrome");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-calls" && !e.chrome && e.args === ""), "kit-deposit-calls runs after every sign deploy");
@@ -302,6 +303,7 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
   const real = (edit) =>
     fixture((r) => {
       cpSync(path.join(ROOT, "scripts/ci/helper-live-checks.mjs"), path.join(r, "scripts/ci/helper-live-checks.mjs"));
+      cpSync(path.join(ROOT, "scripts/live-checks/pool-redeploys.mjs"), path.join(r, "scripts/live-checks/pool-redeploys.mjs"));
       for (const k of LIVE_CHECKS) cpSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), path.join(r, "scripts/live-checks", `${k}.mjs`));
       edit(r);
     });
@@ -330,7 +332,8 @@ test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deplo
   // card helper-evm-sender-2: one run for each EVM network a pool deploys to, its record where the deploy writes it
   const deploy = await import("../live-checks/pool-evm-deploy.mjs");
   assert.deepEqual([...POOL_EVM_NETWORKS].sort(), [...Object.keys(deploy.CHAINS), ...Object.keys(deploy.MAINNETS)].sort(), "each network pool-evm-deploy.mjs deploys a pool to");
-  for (const n of POOL_EVM_NETWORKS) assert.equal(evmPoolRecord(n), path.relative(ROOT, deploy.deploymentFile(n)), n);
+  // a testnet's newest pool set (card pool-evm-buy-pays-revert's), a mainnet's deploy record: pool-evm-deploy.mjs poolFile
+  for (const n of POOL_EVM_NETWORKS) assert.equal(evmPoolRecord(n), path.relative(ROOT, deploy.poolFile(n)), n);
   for (const n of POOL_EVM_NETWORKS) {
     const f = path.join(ROOT, evmPoolRecord(n));
     assert.equal(evmPools()[n], existsSync(f) ? JSON.parse(readFileSync(f, "utf8")).contracts.PrivacyPoolSimple.address.toLowerCase() : null, n);
@@ -339,8 +342,8 @@ test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deplo
   assert.ok(!poolSenderPlan().runs.some((r) => /--pool 0x/.test(r)), "no EVM pool in helper-pool-senders' plan");
   const root = mkdtempSync(path.join(tmpdir(), "evm-pool-records-"));
   const evm = (n, body) => {
-    mkdirSync(path.dirname(path.join(root, evmPoolRecord(n))), { recursive: true });
-    writeFileSync(path.join(root, evmPoolRecord(n)), typeof body === "string" ? body : JSON.stringify(body));
+    mkdirSync(path.dirname(path.join(root, evmPoolRecord(n, root))), { recursive: true });
+    writeFileSync(path.join(root, evmPoolRecord(n, root)), typeof body === "string" ? body : JSON.stringify(body));
   };
   try {
     assert.deepEqual(evmPools(root), Object.fromEntries(POOL_EVM_NETWORKS.map((n) => [n, null])));
@@ -356,6 +359,13 @@ test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deplo
     evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: B } } });
     evm("robinhood-testnet", "{");
     assert.throws(() => evmPools(root), /pool-evm-deploy\.robinhood-testnet\.json is not JSON/);
+    // a pool set redeployed by a later card (pool-redeploys.mjs POOL_REDEPLOYS) is the testnet's pool, over the first set's
+    evm("robinhood-testnet", { chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: B } } });
+    const R = "0x00000000000000000000000000000000000000aa";
+    writeFileSync(path.join(root, "scripts/live-checks/pool-evm-buy-pays-revert.robinhood-testnet.json"), JSON.stringify({ chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: R } } }));
+    assert.equal(evmPoolRecord("robinhood-testnet", root), "scripts/live-checks/pool-evm-buy-pays-revert.robinhood-testnet.json");
+    assert.equal(evmPools(root)["robinhood-testnet"], R);
+    assert.equal(evmPools(root)["base-sepolia"], B.toLowerCase());
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

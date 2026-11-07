@@ -122,6 +122,8 @@ test("planted: an unlisted hook is never quoted; a listed one is, with its own k
   const only = (p: Pool) => (p.hooks[0] === clanker.hooks.toLowerCase() ? 5n * p.amount : p.amount);
   const q = await sellQuoteWith(req(), [provider({ price: only }), provider({ price: only })], Date.now());
   assert.deepEqual(q.route.venue === "uniswap-v4" && q.route.hops, [{ currency: B.weth.toLowerCase(), fee: clanker.fee, tickSpacing: clanker.tickSpacing, hooks: clanker.hooks.toLowerCase(), hookData: "0x" }]);
+  // a listed launchpad's hook is no pool to ban (card evm-sell-hook-converge): the quote names none
+  assert.deepEqual(q.hooked, []);
   // a token that is a listed hook's own address: that hook is not read for it (its pool would swap through itself)
   const self: Seen = { pools: [], probes: [] };
   await sellQuoteWith(req("base", { token: clanker.hooks, bought: { ...BOUGHT, hops: [{ ...BOUGHT.hops[0]!, currency: clanker.hooks }] } }), [provider({ price: flat }, self), provider({ price: flat })], Date.now());

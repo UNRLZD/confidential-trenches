@@ -171,14 +171,16 @@ const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.leng
 const both = <T>(rpcs: readonly [SolanaRpc, SolanaRpc], f: (rpc: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(rpcs[0]), f(rpcs[1])]);
 type Rpcs = readonly [SolanaRpc, SolanaRpc];
 
-/** One account as an RPC gives it (base64), with the slot it answered at; none when there is no account. */
-async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" | "finalized", minContextSlot?: number): Promise<{ slot: number; owner: string; data: Uint8Array; lamports: bigint } | { slot: number; none: true }> {
+/** One account as an RPC gives it (base64), with the slot it answered at; none when there is no account. `lamports` as
+ *  the RPC wrote it, read only where it is priced (W's balance): the pool's, a mint's or a mark's balance is never a
+ *  number a sell needs, so no size of it ever refuses one. */
+async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" | "finalized", minContextSlot?: number): Promise<{ slot: number; owner: string; data: Uint8Array; lamports: unknown } | { slot: number; none: true }> {
   const r = (await rpc("getAccountInfo", [address, { encoding: "base64", commitment, ...(minContextSlot === undefined ? {} : { minContextSlot }) }])) as { context?: { slot?: unknown }; value?: unknown };
   const slot = int(r?.context?.slot);
   const v = r?.value as { owner?: unknown; data?: unknown; lamports?: unknown } | null | undefined;
   if (v === null) return { slot, none: true };
   if (typeof v?.owner !== "string" || !Array.isArray(v.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string") return no();
-  return { slot, owner: v.owner, data: base64.decode(v.data[0]), lamports: BigInt(int(v.lamports)) };
+  return { slot, owner: v.owner, data: base64.decode(v.data[0]), lamports: v.lamports };
 }
 
 /** Up to 10 accounts in one getMultipleAccounts call (one provider's cap), all at one slot; null: no account. */
@@ -459,7 +461,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     if (tokens.amount < amount) return no("not_funded");
     const lamports = lower(...(await both(rpcs, async (r) => {
       const a = await account(r, w.address, "confirmed");
-      return "none" in a ? 0n : a.lamports;
+      return "none" in a ? 0n : BigInt(int(a.lamports));
     })));
     // W pays the sell's fee before anything runs, and must hold what the sell makes before any proceeds arrive (the
     // kit's solanaPoolSellNeed): short of the cheaper venue's need, no venue can take it, refused before any other read

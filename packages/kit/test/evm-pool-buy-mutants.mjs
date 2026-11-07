@@ -127,11 +127,11 @@ export const MUTANTS = [
   ['v4: ownPin(adapters, "v4")', "v4: (adapters as { v4?: string } | undefined)?.v4", "M370 a polluted Object.prototype names no adapter"],
   ['if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");', "", "M370 a pinned build"],
   // the testnet pins (card evm-venues-pin): each one changed is refused by the kit's own build or signature
-  ['pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5"', 'pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe6"', BUYPIN],
+  ['pool: "0xeb967dfc1b4ffb22942f833c76866ea85fc42266"', 'pool: "0xeb967dfc1b4ffb22942f833c76866ea85fc42267"', BUYPIN],
   ['v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645"', 'v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5646"', BUYPIN],
   ['v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1"', 'v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb2"', BUYPIN],
   ['sellDelegate: "0x7a034461193cc6b1a7d5d0f5fe4a36b34e7ebc12"', 'sellDelegate: "0x7a034461193cc6b1a7d5d0f5fe4a36b34e7ebc13"', SELLPIN],
-  ['pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"', 'pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d6"', BUYPIN],
+  ['pool: "0xed9fac860e6bc5e932455232eedca8b71c44da4d"', 'pool: "0xed9fac860e6bc5e932455232eedca8b71c44da4e"', BUYPIN],
   ['adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', 'adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669798" })', BUYPIN],
   ['adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', 'adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" })', BUYPIN],
   ['sellDelegate: "0xcec6c1b18be682cfa1679568eab309db79fe3cce"', 'sellDelegate: "0xcec6c1b18be682cfa1679568eab309db79fe3ccf"', SELLPIN],

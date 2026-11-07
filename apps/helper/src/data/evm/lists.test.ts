@@ -11,6 +11,8 @@ import { gunzipSync } from "node:zlib";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../../../terminal/src/screens/discover/fields.ts";
 import { geckoBudget, WINDOW_MS } from "../gecko.ts";
+import { SERVED_MAX, SERVED_MS, servedTokens } from "../solana/lists.ts";
+import { evmSwapsFromEnv } from "../../server.ts";
 import {
   batch, blockAt, blockRange, createEvmLists, FACTORIES, GT_BASE, GT_READS, joinLogs, LIST_MS, BATCH_MAX, MAKER_RPCS, makerFilters, padOf, readMakers, RECORDS,
   recordCalls, recordPad, SETTLE_MS, STALE_MS, toRows,
@@ -557,4 +559,100 @@ test("card evm-spare-list-green: a maker read sends Sentio batches of 5 at most,
   const out = await batch(f as never, url, Array.from({ length: 12 }, () => ({ method: "eth_blockNumber", params: [] })));
   assert.deepEqual(sizes, [5, 5, 2]);
   assert.deepEqual(out, Array(12).fill("0x1"));
+});
+
+// card robinhood-listed-tape-opens: helper live run 42345906841 (2026-11-07 06:12Z) read 12 Robinhood tokens from the
+// lists and 3 of their tapes answered 404 not_found in ~800 ms; the three were gone from the next answer. The swap
+// reads' gate read only the newest answer, while a user taps what an earlier one showed.
+const NEW_URL = `${GT_BASE}/networks/base/${GT_READS.new}`;
+/** The recorded lists, with New's next read leaving `drop.token` out once `drop.on`. */
+function dropping() {
+  const r = recorded();
+  const drop = { on: false, token: "" };
+  const f = async (u: string, i: RequestInit): Promise<Response> => {
+    if (!drop.on || u !== NEW_URL) return r.fetch(u, i);
+    const j = JSON.parse(GT[NEW_URL]!) as { data: { relationships?: { base_token?: { data?: { id?: string } } } }[] };
+    j.data = j.data.filter((p) => p.relationships?.base_token?.data?.id?.toLowerCase() !== `base_${drop.token}`);
+    return new Response(JSON.stringify(j), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { fetch: f, drop, calls: r.calls };
+}
+const tokensOf = (body: string): Set<string> => new Set(Object.values((JSON.parse(body) as { lists: Record<string, { token: string }[]> }).lists).flatMap((rows) => rows.map((x) => x.token)));
+
+/** A lists whose first answer holds `token` (a token only New lists) and whose second does not. */
+async function droppedAfterOne(now: { t: number }) {
+  const d = dropping();
+  const l = createEvmLists("base", geckoBudget(() => now.t), { fetch: d.fetch, now: () => now.t });
+  await l.tick();
+  const a = JSON.parse((await l.get()).body) as { lists: Record<string, { token: string }[]> };
+  const trending = new Set([...a.lists.trending_5m!, ...a.lists.trending_1h!].map((x) => x.token));
+  const token = a.lists.new!.map((x) => x.token).find((t) => !trending.has(t))!;
+  assert.ok(token, "the recorded New list holds a token the trending lists do not");
+  d.drop.token = token;
+  d.drop.on = true;
+  now.t += WINDOW_MS; // New, read first, is read again
+  await l.tick();
+  assert.ok(!tokensOf((await l.get()).body).has(token), "the second answer leaves the token out");
+  return { l, token, fetch: d.fetch };
+}
+
+test("card robinhood-listed-tape-opens: a token the lists' last answer held and the next one dropped opens its trades through the helper's wiring (never 404); a token no answer held stays 404", async () => {
+  const now = { t: NOW };
+  const { l, token } = await droppedAfterOne(now);
+  const real = globalThis.fetch;
+  // no chain read answers here: a token past the gate is read and answers 503 (a read that failed), not 404
+  globalThis.fetch = (async () => {
+    throw new Error("no network in this test");
+  }) as typeof fetch;
+  let tape, off;
+  // the lists' search ahead (swaps.ts ahead) is not this test's: it would wait on providers that never answer
+  const swaps = evmSwapsFromEnv({}, { base: { ...l, onAnswer: () => {} } });
+  try {
+    tape = await swaps.base!.trades(token, 10);
+    off = await swaps.base!.trades(`0x${"56".repeat(20)}`, 10);
+  } finally {
+    swaps.base!.stop();
+    globalThis.fetch = real;
+  }
+  assert.notEqual(tape.status, 404, `the dropped token passes the gate: ${tape.body}`);
+  assert.deepEqual([tape.status, JSON.parse(tape.body)], [503, { error: { code: "upstream" } }], "and is read on chain");
+  assert.equal(off.status, 404, "a token no answer held is refused");
+});
+
+test("card robinhood-listed-tape-opens: the lists keep every token an answer held for SERVED_MS after the last that held it, across a restart (the warm state, hostile pairs dropped); never a token no answer held", async () => {
+  const now = { t: NOW };
+  const { l, token, fetch: f } = await droppedAfterOne(now);
+  const never = `0x${"56".repeat(20)}`;
+  assert.equal(await l.listed(token), true, "dropped from the newest answer, still listed");
+  assert.equal(await l.listed(never), false);
+  for (const t of tokensOf((await l.get()).body)) assert.equal(await l.listed(t), true, "every token of the newest answer");
+  const st = l.state();
+  assert.ok(st.served!.some(([t]) => t === token));
+  // a next process takes it over; a pair not an address as the lists write it, or timed past now, is dropped
+  const planted = `0x${"78".repeat(20)}`;
+  const upper = `0x${"9A".repeat(20)}`;
+  const next = createEvmLists("base", geckoBudget(() => now.t), { fetch: f, now: () => now.t });
+  next.restore({ ...st, served: [...st.served!, [planted, now.t + 1], [upper, now.t], [never], "x", [7, now.t]] });
+  assert.equal(await next.listed(token), true, "taken over across a restart");
+  assert.equal(await next.listed(planted), false, "a time past now is no answer's");
+  assert.equal(await next.listed(upper.toLowerCase()), false, "an address not as the lists write it is dropped");
+  // SERVED_MS after the last answer that held it, the token is off the lists
+  const heldAt = st.served!.find(([t]) => t === token)![1];
+  now.t = heldAt + SERVED_MS;
+  assert.equal(await next.listed(token), true, "at SERVED_MS: still listed");
+  now.t = heldAt + SERVED_MS + 1;
+  assert.equal(await next.listed(token), false, "past SERVED_MS: off the lists");
+});
+
+test("card robinhood-listed-tape-opens: the tokens served are bounded at SERVED_MAX, the least recently served dropped first", () => {
+  let t = 0;
+  const s = servedTokens(() => t);
+  s.add(Array.from({ length: SERVED_MAX }, (_, i) => `t${i}`));
+  t = 1;
+  s.add(["t0"]); // served again: the most recent now
+  s.add(["new"]);
+  assert.equal(s.state().length, SERVED_MAX);
+  assert.equal(s.has("t1"), false, "the least recently served is dropped");
+  assert.equal(s.has("t0"), true);
+  assert.equal(s.has("new"), true);
 });

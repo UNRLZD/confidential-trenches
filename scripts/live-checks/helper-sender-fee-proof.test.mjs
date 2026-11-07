@@ -12,10 +12,16 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { collectorRecords, judge, read } from "./helper-sender-fee-proof.mjs";
+import { evmPoolRecords as currentRecords, FIRST_SET } from "./helper-evm-sender.mjs";
+import { collectorRecords, judge as judgeLive, read as readLive } from "./helper-sender-fee-proof.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-sender-fee-proof.answers.json"), "utf8"));
+// The recordings were made 6 Nov on the testnets' first pool set (FIRST_SET), before card pool-evm-buy-pays-revert's
+// pools: a replay judges each on the pools it was recorded on; the live check reads the current set (evmPoolRecords()).
+const RECORDED = currentRecords(undefined, FIRST_SET);
+const judge = (run, o = {}) => judgeLive(run, { records: RECORDED, ...o });
+const read = (base, fetchFn, o = {}) => readLive(base, fetchFn, { records: RECORDED, ...o });
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const copy = (x) => JSON.parse(JSON.stringify(x));
 const at = (run) => judge(run, { commit: run.commit });

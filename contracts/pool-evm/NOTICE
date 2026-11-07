@@ -63,7 +63,8 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      the cap, W's signature, _spendChecked, the backstop). W signs Buy(address adapter,bytes data,uint256 minOut,
      address token,uint256 nullifier,uint256 context,uint256 value), with the proof's nullifier, context and
      withdrawnValue. The fee goes to the fee recipient, the rest of the chunk to the adapter, and W's balance of the
-     token must rise by at least minOut (never 0), else the whole call reverts. The reentrancy guard covers it.
+     token must rise by at least minOut (never 0), else the swap is undone and the buy pays out as a withdraw (change
+     18). The reentrancy guard covers it.
      Adapters are separate contracts with no owner and no storage; src/adapters/UniswapV3Adapter.sol is SwapRouter02's
      exactInput with the native value (the router wraps it), the tokens out to W. A v3 pool may fill only part of an
      exact input (it stops at its price limit), and the router then keeps the rest, as ETH or as a middle token of
@@ -172,6 +173,28 @@ Changes, each for the same reason as the NEAR vault's (contracts/vault/src/lib.r
      The cost: the v4 one hop to ETH 494,066 to 490,040 and at depth 32 1,808,497 to 1,804,471 (two reads saved), the
      v4 one hop to WETH 504,757 to 506,926 (the path decode), the mock-router sell 445,008 to 445,273 (forge 1.7.1,
      test/Sell.t.sol and test/SellV4.t.sol).
+ 18. A buy whose swap fails pays its fee and never reverts (card pool-evm-buy-pays-revert; review of helper-evm-sender-2
+     round 2, M1: a coin or v4 hook that reverts on block.number % 2 passed the helper's simulation about half the time
+     and landed reverted a block later, the note unspent and no fee taken, at the helper's gas). buy now spends the
+     note and pays the fee first, then runs the swap (the adapter call, the two balanceOf reads and the minOut check)
+     in buySwap, an external call to the pool itself that answers only the pool (OnlyPool), so a revert anywhere in it,
+     too little out, or all its gas burnt, undoes the swap alone. When it lands buy emits Bought as before and returns
+     true; when it fails buy pays W the chunk less the fee in the native asset and emits Withdrawn, exactly as
+     withdraw does, and returns false. Withdrawn, not a new event: every reader of the pool's leaves (the device's
+     tree, packages/wallet/src/pool/evm.ts, and the notes reader) reads Deposited, Withdrawn and Bought, so the change
+     leaf of a failed buy is read with no reader changed. The call is encoded first and then given all the gas but
+     BUY_FAIL_GAS (150,000), read at the CALL, so the failure path keeps its reserve whatever the route's length, and
+     its return data is copied only on success (32 bytes, from the pool's own code), so a reverting adapter's return
+     data costs the failure path nothing. The failure path's push to an empty W (a new account) and Withdrawn use
+     51,214 of it (test_gasTheFailurePathUsesOfItsReserve). buySwap gets at least BUY_SWAP_GAS (500,000), or the buy
+     reverts before it (SwapGasTooLow): without the floor, eth_estimateGas would find the gas at which the swap runs
+     out and the failure path lands, and any sender could fail a swap by its gas limit; the heaviest measured routes
+     use under 200,000 (a SwapRouter02 one hop, a v4 two hops). The reentrancy guard still covers the swap (buySwap
+     runs inside buy's guard; an adapter calling buy, withdraw or buySwap is refused). The circuit, the verifier, the
+     Buy struct, the EIP-712 types and the signature are unchanged. The one residual: W's own code (an EIP-7702
+     delegation W sets after the sender's check) can revert or burn the failure path's push, as it can withdraw's.
+     The cost on success: buy, mock adapter, depth 2, 570,422 to 572,894; SwapRouter02 one hop, depth 2, 666,912 to
+     669,240 (forge 1.7.1, test/Buy.t.sol and test/BuyV3.t.sol).
 
 Gas, each pool call its own transaction (isolate = true in foundry.toml), so a figure is what a sender pays: the
 21,000 base, calldata and cold reads included. The kit's real proofs (test/fixtures/buy-proofs.json), fee 0.01 ETH.

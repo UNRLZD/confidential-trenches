@@ -43,7 +43,7 @@ test("evmSellRouteOf: the builder's own v3, v4 and hooked v4 sells read back to 
   assert.equal(code(() => evmSellRouteOf("base-sepolia", call(ts))), "ok");
 });
 
-test("evmSellRouteOf refuses: another target, a changed byte, a word more, a v3 call through the PoolManager, another recipient, amount or minOut, an unlisted hook, hook data", () => {
+test("evmSellRouteOf refuses: another target, a changed byte, a word more, a v3 call through the PoolManager, another recipient, amount or minOut, hook data; an unlisted hook it reads back", () => {
   const v3 = call(built("base", {}));
   const v4 = call(built("base", { target: B.poolManager!, route: { venue: "uniswap-v4", hops: [hop(NATIVE)] } }));
   const flip = (d: string, i: number) => `${d.slice(0, i)}${d[i] === "0" ? "1" : "0"}${d.slice(i + 1)}`;
@@ -72,7 +72,9 @@ test("evmSellRouteOf refuses: another target, a changed byte, a word more, a v3 
     return `0x${w(0x20n)}${w(1n)}${w(0x20n)}${w(NATIVE)}${w(3000n)}${w(60n)}${w(hooks)}${w(0xa0n)}${w(BigInt(hd.length / 2))}${padded}`;
   };
   assert.equal(path(NATIVE, "0x"), v4.data, "the test's encoder is the builder's");
-  cases.push(["v4: an unlisted hook", { ...v4, data: path("0x00000000000000000000000000000000000000cc", "0x") }, "bad_route"]);
+  // an unlisted hook is read back (card evm-sell-hook-converge): the device's quote picks such a route where it sets the
+  // reference, and no sender can tell that route from the Sell; a revert costs the sender that sale's gas, within its caps
+  assert.equal(code(() => evmSellRouteOf("base", { ...v4, data: path("0x00000000000000000000000000000000000000cc", "0x") })), "ok", "v4: an unlisted hook");
   cases.push(["v4: hook data", { ...v4, data: path(NATIVE, "0x01") }, "bad_route"]);
   for (const [name, c, want] of cases) assert.equal(code(() => evmSellRouteOf("base", c)), want, name);
   assert.equal(code(() => evmSellRouteOf("nowhere" as "base", v3)), "bad_route", "a chain the kit does not list");

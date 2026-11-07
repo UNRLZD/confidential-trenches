@@ -1,0 +1,37 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as built at card/pool-answer-unknown (build-app.mjs --check equal), release-75 (re-cut on the merge of main c460d167, release-73's page under it)",
+    "bad": "main d57ecfb9's build (mainnet, release-72): an unread read back after the send answers failed, a mark on one RPC is rebuilt or stuck, and a vault buy's blockhash, mint, build or pick read fault answers failed: FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-07T04:15Z, before this card's deploy: FAIL; its landed and paced facts read from main d57ecfb9's bundle, the same sha384"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-LjK333AzbofVoSv0Xqfxdx4vp0+DsT5Z9DjwTlueoga3I9HzUh9WbwwqX293rYIQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-LjK333AzbofVoSv0Xqfxdx4vp0+DsT5Z9DjwTlueoga3I9HzUh9WbwwqX293rYIQ",
+    "unread": true,
+    "one": true,
+    "pick": true,
+    "record": true,
+    "landed": true,
+    "paced": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0CQ8rX2GOvumi0+n49ONQD6vXpc4ZOD5Cm8DFvxoXlrWnV0em2pMirxR13Ar/AVg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-0CQ8rX2GOvumi0+n49ONQD6vXpc4ZOD5Cm8DFvxoXlrWnV0em2pMirxR13Ar/AVg",
+    "unread": false,
+    "one": false,
+    "pick": false,
+    "record": false,
+    "landed": false,
+    "paced": false
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0CQ8rX2GOvumi0+n49ONQD6vXpc4ZOD5Cm8DFvxoXlrWnV0em2pMirxR13Ar/AVg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-0CQ8rX2GOvumi0+n49ONQD6vXpc4ZOD5Cm8DFvxoXlrWnV0em2pMirxR13Ar/AVg",
+    "unread": false,
+    "one": false,
+    "pick": false,
+    "record": false,
+    "landed": false,
+    "paced": false
+  }
+}
