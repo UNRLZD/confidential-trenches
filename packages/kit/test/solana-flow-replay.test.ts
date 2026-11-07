@@ -1210,3 +1210,39 @@ test("card solana-written-accounts-whole review: the wallet's lamports read diff
   assert.ok(mine.refused, "refused");
   assert.match(String(mine.simulationErrors), /A: the wallet's lamports differ between its simulations/);
 });
+
+// Card solana-written-accounts-whole, the independent review of d1806532 (RVW-3): the flow reads the rent of the wallet's
+// account of the token for the size the one rule gives (solanaTokenAccountSize), the size S11 holds the created account
+// to: a Pausable mint's (26) 174 bytes with PausableAccount, where flow.ts's own rule read 170 and S11 refused the buy by
+// the 4 bytes' rent. A mint that rule refuses (S10 refuses it too) is refused before any build.
+function mintWith(type: number, body: Uint8Array, urls: string[]) {
+  const token = request(BUY).token;
+  const d = deps(BUY, { urls });
+  const asked: number[] = [];
+  const wrap = (p: (typeof d.providers)[number]) => Object.assign(async (method: string, params: readonly unknown[]) => {
+    if (method === "getMinimumBalanceForRentExemption") {
+      asked.push(params[0] as number);
+      return ((params[0] as number) + 128) * 5_080; // the recording's rent, 5,080 a byte: 170 bytes -> 1,513,840
+    }
+    const x = await p(method, params);
+    if (method === "getMultipleAccounts") (params[0] as string[]).forEach((k, i) => {
+      const a = (x as { value: ({ data: [string, string] } | null)[] }).value[i];
+      if (k === token && a) a.data = [base64.encode(Uint8Array.from([...base64.decode(a.data[0]), type & 0xff, type >> 8, body.length & 0xff, body.length >> 8, ...body])), "base64"];
+    });
+    return x;
+  }, { asks: p.asks, times: p.times });
+  return { d: { ...d, providers: [wrap(d.providers[0]), wrap(d.providers[1])] as const }, asked };
+}
+test("card solana-written-accounts-whole review RVW-3: the rent of the account of the token is read for the one rule's size, 174 for a Pausable mint; a mint the rule refuses is refused before any build", async () => {
+  const urls: string[] = [];
+  const p = mintWith(26, new Uint8Array(33), urls);
+  await runSolanaTrade(request(BUY), p.d);
+  assert.deepEqual([...new Set(p.asked)].sort(), [137, 174], `rent asked for ${p.asked.join(", ")}`);
+  assert.ok(urls.length > 0, "built");
+  const none: string[] = [];
+  const u = mintWith(29, new Uint8Array(4), none);
+  const r = await runSolanaTrade(request(BUY), u.d);
+  assert.equal(r.legs[0]?.refused, "the mint on provider A: Token-2022 extension 29 not known");
+  assert.deepEqual(none, [], "no build");
+  assert.deepEqual(u.asked, [], "no rent read");
+});

@@ -45,6 +45,7 @@ import {
   solanaRouteAmounts,
   solanaTeardownAddresses,
   solanaTeardownPlan,
+  solanaTokenAccountSize,
   solanaWalletTokenAccount,
   SolanaWalletLinks,
   type SolanaAccountRead,
@@ -238,27 +239,6 @@ const both = <T>(f: (rpc: SolanaRpc) => Promise<T>, providers: readonly [SolanaR
 const u64 = (d: Uint8Array, o: number): bigint => new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(o, true);
 const tokenAmount = (a: Acc | null): bigint => (a && a.data.length >= 72 ? u64(a.data, 64) : 0n);
 
-/** The size of the wallet's account of a mint: 165 on Token; on Token-2022, 165 + the type byte + ImmutableOwner and
- * the account extensions the mint's own extensions require (TransferFeeAmount 8, NonTransferableAccount 0,
- * TransferHookAccount 1, each with its 4-byte header). A size below the real one only lowers S11's bound. */
-function tokenAccountSize(mint: Acc): number {
-  if (mint.owner === SOLANA_TOKEN_PROGRAM) return 165;
-  let size = 165 + 1 + 4;
-  const d = mint.data;
-  if (d.length > 166) {
-    for (let o = 166; o + 4 <= d.length; ) {
-      const t = d[o]! | (d[o + 1]! << 8);
-      const len = d[o + 2]! | (d[o + 3]! << 8);
-      if (t === 0) break;
-      if (t === 1) size += 4 + 8;
-      if (t === 9) size += 4;
-      if (t === 14) size += 4 + 1;
-      o += 4 + len;
-    }
-  }
-  return size;
-}
-
 /** Token-2022's TransferFeeConfig (extension 1) on the mint. */
 function mintHasTransferFee(mint: Acc): boolean {
   if (mint.owner !== SOLANA_TOKEN_2022_PROGRAM || mint.data.length <= 166) return false;
@@ -404,7 +384,14 @@ async function prepareLeg(
   // token account, its size from the mint, and the pump volume account) and the pre-state the simulation is held to
   // (the wallet, its token account, its two volume accounts: this wallet's only), which also gives spendable.
   const watch = [w, ata, uva, sva];
-  const size = tokenAccountSize(mintA);
+  // its size by the one rule S11 holds the created account to (solanaTokenAccountSize): a mint that rule refuses, S10 refuses
+  let size: number;
+  try {
+    size = solanaTokenAccountSize(mintA);
+  } catch (e) {
+    rec.refused = `the mint on provider A: ${(e as Error).message}`;
+    return null;
+  }
   const rentOf = async (r: SolanaRpc) => {
     const [t, v] = await Promise.all([r("getMinimumBalanceForRentExemption", [size]), r("getMinimumBalanceForRentExemption", [137])]);
     if (!Number.isSafeInteger(t) || !Number.isSafeInteger(v)) throw new Error("rent is not a safe integer");

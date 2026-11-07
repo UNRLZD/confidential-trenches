@@ -6,8 +6,9 @@
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side), and the mint's agreement on both providers that S6 and S10 share (solanaMintAgreed,
 // test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
-// test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, and S11's hold on the wallet's token accounts
-// (test/solana-quote.test.ts "S11 review", card solana-written-accounts-whole): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, S11's hold on the wallet's token accounts
+// and the flow's rent read by that size (test/solana-quote.test.ts "S11 review", test/solana-flow-replay.test.ts, card
+// solana-written-accounts-whole): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -27,6 +28,8 @@ const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 const S10_TEST = path.join(BASE, "test/solana-quote.test.ts");
 const POOL = path.join(BASE, "src/trade/solana/pool.ts");
 const POOL_TEST = path.join(BASE, "test/solana-pool.test.ts");
+const FLOW = path.join(BASE, "src/trade/solana/flow.ts");
+const FLOW_TEST = path.join(BASE, "test/solana-flow-replay.test.ts");
 const RVW1 = "S11 review RVW-1";
 
 const AGREE = "agreement";
@@ -104,11 +107,13 @@ export const MUTANTS = [
   [S6, "    seen.add(type);\n", "", T22, BUY_TEST],
   // card solana-written-accounts-whole, the d1806532 review: S10 and the size rule read one list of Token-2022 mint
   // extensions through one walk (PermissionedBurn, 28, in it; a number not in it refused by S10 by its number and by S11
-  // for that reason), walked as Token-2022 walks it (a 357-byte mint's 2 zero bytes; no room for a length)
+  // for that reason), walked as Token-2022 walks it (a 357-byte mint's 2 zero bytes; no room for a length), and the flow
+  // reads the rent for that rule's size
   [S6, "if (!T22_MINT_EXT.has(type)) return", "if (false) return", RVW1, S10_TEST],
   [S6, "[26, 0], [28, null],", "[26, 0],", RVW1, S10_TEST],
   [S6, "if (typeof size === \"string\") return fail(\"S11\"", "if (false) return fail(\"S11\"", RVW1, S10_TEST],
   [S6, "while (d.length - at >= 2) {", "while (d.length - at >= 4) {", "S11 review RVW-2", S10_TEST],
+  [FLOW, "size = solanaTokenAccountSize(mintA);", "size = 170;", "card solana-written-accounts-whole review RVW-3", FLOW_TEST],
   // the same review's survivors of the last one, each now killed by its own test: the program compared after the tx on
   // each of the three kinds (N5a), the providers' agreement on the program (N5b), an agreed account of the token kept as
   // read (N15); and no baseline from provider A alone (N4b, PROBE-5 in RVW-7's shape)
