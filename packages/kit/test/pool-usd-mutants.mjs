@@ -1,7 +1,7 @@
 // Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them) and its
 // bounded retry of a slow or lagging provider, its one bound per read and its stop once the read ends (card
 // signpage-price-read-retry), and
-// src/trade/solana/pool-buy.ts's refusal of a Token-2022 mint that lists an extension twice, one at a time, and runs
+// the refusal of a Token-2022 mint that lists an extension twice (src/checks/solana/checks.ts, read by the pool buy), one at a time, and runs
 // the tests named for each (test/pool-usd.test.ts "agreement", "staleness" and "retry", test/solana-pool-buy.test.ts
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side), and the mint's agreement on both providers that S6 and S10 share (solanaMintAgreed,
@@ -20,7 +20,6 @@ import { KIT, kitCopy } from "./mutant-copy.mjs";
 const BASE = process.argv[1] === fileURLToPath(import.meta.url) ? kitCopy() : KIT;
 const PRICE = path.join(BASE, "src/price/pool-usd.ts");
 const TEST = path.join(BASE, "test/pool-usd.test.ts");
-const BUY = path.join(BASE, "src/trade/solana/pool-buy.ts");
 const BUY_TEST = path.join(BASE, "test/solana-pool-buy.test.ts");
 const S6 = path.join(BASE, "src/checks/solana/checks.ts");
 const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
@@ -99,8 +98,8 @@ export const MUTANTS = [
   [PRICE, "    bound.stopped = true;\n", "", RETRY],
   [PRICE, "if (bound.stopped) return fail(", "if (false) return fail(", RETRY],
   // a Token-2022 mint that lists one extension type twice
-  [BUY, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
-  [BUY, "    seen.add(type);\n", "", T22, BUY_TEST],
+  [S6, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
+  [S6, "    seen.add(type);\n", "", T22, BUY_TEST],
   // S6 on a shared route: each side the wallet's own account or the authority's ATA, the source side unbounded, a
   // Token-2022 destination through the authority's ATA only for a mint read equal on both providers without a transfer
   // fee or hook
