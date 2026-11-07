@@ -145,6 +145,9 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
   /** The intents out: "<signer>/<nonce>". Set and read with no await between. */
   const out = new Set<string>();
   const tasks = new Set<Promise<void>>();
+  /** The signers whose registration this process is sending now. A pending claim with no transaction that no send here
+   *  holds was never signed (the process stopped before): free again. */
+  const registering = new Set<string>();
   const strike = (signer: string) => {
     const rec = store.signer(signer);
     store.putSigner({ ...rec, failed: rec.failed + 1 });
@@ -189,7 +192,16 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     // the claim, read again after the awaits and written before the send, so two requests never pay two registrations
     const rec: SignerRecord = store.signer(signer);
     if (used(rec.registration)) return no("receiver_not_registered");
-    if (rec.registration !== null) return no("in_flight");
+    if (rec.registration !== null && (rec.registration.tx !== null || registering.has(signer))) return no("in_flight");
+    registering.add(signer);
+    try {
+      return await registerOnce(signer, w, untilMs, rec);
+    } finally {
+      registering.delete(signer);
+    }
+  };
+
+  const registerOnce = async (signer: string, w: Withdraw, untilMs: number, rec: SignerRecord): Promise<IntentsAnswer | null> => {
     store.putSigner({ ...rec, registration: { receiver: w.receiver_id, state: "pending", tx: null } });
     const sentTx: TxRef[] = [];
     let o: TxOutcome;

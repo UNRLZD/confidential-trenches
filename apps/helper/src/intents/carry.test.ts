@@ -399,3 +399,17 @@ test("a quote record that is not depositType INTENTS with an INTENTS refund to t
   }
   s.store.close();
 });
+
+test("a registration claimed but never signed (the process stopped between the claim and the signing) is free again after a restart", async () => {
+  const s = setup();
+  const u = hex();
+  seeSigner(s.store, u);
+  s.store.putSigner({ signer: u, failed: 0, registration: { receiver: "fresh.near", state: "pending", tx: null } });
+  s.store.close();
+  const t = setup({ dir: s.dir });
+  t.chain.storage.set(`${USDC}/fresh.near`, "null");
+  assert.equal(code(await t.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  await t.carry.idle();
+  assert.deepEqual(t.r.sent.map((x) => x.action.method), ["storage_deposit", "execute_intents"]);
+  t.store.close();
+});
