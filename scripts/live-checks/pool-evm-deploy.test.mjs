@@ -60,7 +60,7 @@ test("the recorded good answers pass on both chains, every read on both RPCs", a
 test("other code bytes fail, outside the immutables and in the code's length", async () => {
   const pool = A.deployments["base-sepolia"].contracts.PrivacyPoolSimple.address;
   fails(await run("base-sepolia", mutate("base-sepolia", isCode(pool), (j) => (j.result = flip(j.result, 10)))), /PrivacyPoolSimple \S+ code is the build's/);
-  fails(await run("base-sepolia", mutate("base-sepolia", isCode(pool), (j) => (j.result += "00"))), /PrivacyPoolSimple \S+ code is the build's: 9442 bytes/);
+  fails(await run("base-sepolia", mutate("base-sepolia", isCode(pool), (j) => (j.result += "00"))), new RegExp(`PrivacyPoolSimple \\S+ code is the build's: ${BUILD.contracts.PrivacyPoolSimple.length + 1} bytes`));
 });
 
 test("an immutable that differs between its places fails, though the zeroed code and the getter agree", async () => {
