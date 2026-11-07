@@ -52,7 +52,9 @@ export const STAGES = [
   [{ stage: "into_vault" }, "S4.15"],
   [{ stage: "failed" }, "S4.15"],
   [{ stage: "short" }, "S4.18"],
-  [{ stage: "refunded", refunded: true, held_id: "u1" }, "S4.17"],
+  // `refunded: true` belongs to the legs after the refund (messages.ts DEPOSIT_REFUNDED_STAGES), never to "refunded"
+  // itself: the kit's client drops an op that carries it there
+  [{ stage: "refunded", held_id: "u1" }, "S4.17"],
   [{ stage: "refund_move", refunded: true, held_id: "u1" }, "refund-move"],
   [{ stage: "held", held_id: "u1" }, "held"],
   [{ stage: "halted", hold: "halted", held_id: "u1" }, "held-halted"],
@@ -80,7 +82,7 @@ export function judge(rec) {
     const t = r.tiles ?? [];
     say(same(t.map((x) => x.dest), DESTS) && same(t.map((x) => x.name), DEST_NAMES), `${n}: the To row reads ${JSON.stringify(t.map((x) => x.name ?? x.dest))}, want ${JSON.stringify(DEST_NAMES)}`);
     const marks = t.filter((x) => !(x.loaded === true && typeof x.img === "string" && new RegExp(`/${x.dest}[-.][^/]*\\.(svg|png)$`).test(x.img)));
-    say(t.length === DESTS.length && marks.length === 0, `${n}: ${marks.length ? `the tile(s) ${marks.map((x) => `${x.dest} (${x.img || "no mark"}${x.loaded ? "" : ", not loaded"})`).join(", ")} draw another chain's mark or none` : "each tile draws its own chain's mark"}`);
+    say(t.length === DESTS.length && marks.length === 0, `${n}: ${t.length === 0 ? "no tile draws a mark" : marks.length ? `the tile(s) ${marks.map((x) => `${x.dest} (${x.img || "no mark"}${x.loaded ? "" : ", not loaded"})`).join(", ")} draw another chain's mark or none` : "each tile draws its own chain's mark"}`);
     say(same(t.map((x) => x.on), ["true", "false", "false", "false"]), `${n}: the To row opens on ${t.filter((x) => x.on === "true").map((x) => x.dest).join(", ") || "nothing"}, want the NEAR vault`);
     say(same(t.map((x) => x.fundable), FUNDABLE), `${n}: fundable tiles ${JSON.stringify(t.map((x) => x.fundable))}, want the vault only`);
     for (const p of POOLS) {
