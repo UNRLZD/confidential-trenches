@@ -7,7 +7,9 @@
 //   - the served /app.js is the one index.html pins (its sha384);
 //   - the bundle's wallet store list is the paper's seven stores, no more, and it opens its database at version 1;
 //   - the bundle's store takes owed/<op id> as a meta key (its rule /^owed\/[^/]{1,200}$/), and its reader leaves
-//     owed/ keys out of what it lists for meta;
+//     owed/ keys out of what it lists for meta: the reader's keys() filter, found after the reader's own refusal text,
+//     evaluated on meta/owed/1 (left out) and meta/status (listed), so the minifier's shape of it (!a&&!b, !(a||b) or
+//     any other) is not what is judged (card signpage-check-shapes-on-build);
 //   - the page reads its seed again on another tab's meta write, but never on an owed send's (the store's change event
 //     names the key written, and the seed-move test skips owed/ keys: fold 4).
 // The withdraw run's own-spend reads (src/pool-withdraw.ts spendOwner) are in the testnet build only, which no host
@@ -26,14 +28,132 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const STORES = /\[([`"])notes\1,\1wallets\1,\1quotes\1,\1orders\1,\1ops\1,\1counters\1,\1meta\1((?:,\1[a-z]+\1)*)\]/;
 const OPENS_V1 = /\.open\([A-Za-z_$][\w$]*,1\)/;
 const OWED_KEY = "/^owed\\/[^/]{1,200}$/";
-// the reader's filter: a bare key `!k.startsWith("owed/")`; the seed-move test's: the event's `.key.startsWith("owed/")`
-const READER = /![A-Za-z_$][\w$]*\.startsWith\(([`"])owed\/\1\)/;
+// the seed-move test's: the event's `.key.startsWith("owed/")`
 const SEED_MOVED = /\.key\.startsWith\(([`"])owed\/\1\)/;
+// The reader (packages/wallet/src/store/index.ts, the frame's reader): its get() refuses with this text, and the keys()
+// next to it filters what it lists, `(x) => !(store === "meta" && (... || x.startsWith(WALLET_OWED_PREFIX) || ...))`.
+const READER_AT = "the reader opens meta/status";
+const KEYS = /async keys\(([A-Za-z_$][\w$]*)\)\{[^{}]*?\.filter\(\(?([A-Za-z_$][\w$]*)\)?=>/;
+const TOKEN = /\s*(?:(===|!==|==|!=|&&|\|\||[!().?:])|([A-Za-z_$][\w$]*)|`([^`$\\]*)`|"([^"\\]*)"|'([^'\\]*)'|(\d+))/y;
+
+/** The reader's keys() filter in `js`: { store, key, body } (the arrow's parameter names and its expression), or null. */
+export function readerFilter(js) {
+  const at = js.indexOf(READER_AT);
+  if (at < 0) return null;
+  const tail = js.slice(at, at + 4000);
+  const m = KEYS.exec(tail);
+  if (!m) return null;
+  let depth = 1;
+  let i = m.index + m[0].length;
+  const start = i;
+  for (let q = null; i < tail.length; i++) {
+    const c = tail[i];
+    if (q) {
+      if (c === "\\") i++;
+      else if (c === q) q = null;
+    } else if (c === "`" || c === '"' || c === "'") q = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) break;
+  }
+  return depth === 0 ? { store: m[1], key: m[2], body: tail.slice(start, i) } : null;
+}
+
+/**
+ * The value of a filter body for one store and key: a small evaluator of the forms a minifier writes for it (!, &&, ||,
+ * ?:, ===, !==, ==, !=, parentheses, string and number literals, and <name>.startsWith(<string>)); any other name is
+ * an opaque constant, equal only to itself. Nothing in the bundle is run. Throws on anything else.
+ */
+export function evalFilter({ store, key, body }, storeValue, keyValue) {
+  const toks = [];
+  TOKEN.lastIndex = 0;
+  while (TOKEN.lastIndex < body.trimEnd().length) {
+    const t = TOKEN.exec(body);
+    if (!t) throw new Error(`the reader's filter has a form this check does not read at ${TOKEN.lastIndex}`);
+    toks.push(t[1] ? { p: t[1] } : t[2] ? { id: t[2] } : t[6] ? { v: Number(t[6]) } : { v: t[3] ?? t[4] ?? t[5] });
+  }
+  let n = 0;
+  const peek = (p) => toks[n]?.p === p;
+  const take = (p) => {
+    if (!peek(p)) throw new Error(`the reader's filter: ${p} expected`);
+    n++;
+  };
+  const opaque = new Map();
+  const ternary = () => {
+    const c = or();
+    if (!peek("?")) return c;
+    n++;
+    const a = ternary();
+    take(":");
+    const b = ternary();
+    return c ? a : b;
+  };
+  const or = () => {
+    let v = and();
+    while (peek("||")) {
+      n++;
+      const r = and();
+      v = v || r;
+    }
+    return v;
+  };
+  const and = () => {
+    let v = eq();
+    while (peek("&&")) {
+      n++;
+      const r = eq();
+      v = v && r;
+    }
+    return v;
+  };
+  const eq = () => {
+    const a = unary();
+    const op = toks[n]?.p;
+    if (!["===", "!==", "==", "!="].includes(op)) return a;
+    n++;
+    const same = a === unary();
+    return op.startsWith("=") ? same : !same;
+  };
+  const unary = () => (peek("!") ? (n++, !unary()) : primary());
+  const primary = () => {
+    const t = toks[n++];
+    if (t?.p === "(") {
+      const v = ternary();
+      take(")");
+      return v;
+    }
+    if (t && "v" in t) return t.v;
+    if (!t?.id) throw new Error("the reader's filter: a value expected");
+    const v = t.id === key ? keyValue : t.id === store ? storeValue : opaque.get(t.id) ?? (opaque.set(t.id, { name: t.id }), opaque.get(t.id));
+    if (!peek(".")) return v;
+    n++;
+    const f = toks[n++];
+    if (f?.id !== "startsWith" || typeof v !== "string") throw new Error("the reader's filter: only <key>.startsWith(<string>) is read");
+    take("(");
+    const arg = ternary();
+    take(")");
+    if (typeof arg !== "string") throw new Error("the reader's filter: startsWith takes a string");
+    return v.startsWith(arg);
+  };
+  const v = ternary();
+  if (n !== toks.length) throw new Error("the reader's filter: text after its expression");
+  return v;
+}
+
+/** True when the bundle's reader leaves meta/owed/<op id> out of what it lists and still lists meta/status. */
+export function readerHidesOwed(js) {
+  const f = readerFilter(js);
+  if (!f) return false;
+  try {
+    return !evalFilter(f, "meta", "owed/1") && !!evalFilter(f, "meta", "status");
+  } catch {
+    return false;
+  }
+}
 
 /** What the check keeps of the reads: the index, the served bundle's sha384 and the facts read from it. */
 export function facts(index, js) {
   const m = STORES.exec(js);
-  return { index, sha384: sha384(js), stores: m ? m[0] : null, opensV1: OPENS_V1.test(js), owedKey: js.includes(OWED_KEY), readerHidesOwed: READER.test(js), seedMovedSkipsOwed: SEED_MOVED.test(js) };
+  return { index, sha384: sha384(js), stores: m ? m[0] : null, opensV1: OPENS_V1.test(js), owedKey: js.includes(OWED_KEY), readerHidesOwed: readerHidesOwed(js), seedMovedSkipsOwed: SEED_MOVED.test(js) };
 }
 
 /** The verdict on an answer { index, sha384, stores, opensV1, owedKey, readerHidesOwed, seedMovedSkipsOwed }. */
