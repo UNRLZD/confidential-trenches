@@ -36,7 +36,7 @@
 import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
 import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
-import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, solanaWrappedRpc, SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageReference, pageRpc } from "./page-rpc.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
@@ -263,7 +263,8 @@ export function tradeKind(host: TradeHost): TradeKind {
         give({ error: code });
       };
 
-      // a read that fails before the answer refuses the trade; the op says so
+      // a read that fails before the answer refuses the trade; the op says so. A provider read that failed past its
+      // retry here, at the pick, is "down": nothing is signed yet
       try {
         const set = await locks.request(TRADE_PICK_LOCK, { mode: "exclusive" }, async () => {
           // the op first, under the lock: one id is run once in every tab, and a reload answers it from its record
@@ -276,7 +277,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         if ("answer" in set) return give(set.answer);
         await legsRun(store, set, write, refuse);
       } catch (e) {
-        if (!answer) return refuse("failed");
+        if (!answer) return refuse(e instanceof SolanaRpcTransportError ? "down" : "failed");
         throw e;
       } finally {
         await writes;
@@ -354,10 +355,17 @@ export function tradeKind(host: TradeHost): TradeKind {
       // the legs' signatures the kit kept, from its onSigned: one it dropped as late (the age rule at a signature, card
       // kit-renewal-read-bounded) reaches no answer, stage write or txs, and a teardown's frames are never in it
       const signed: TxRef[] = [];
-      // a reference read that failed past its retry (card pool-read-down): before a leg is signed the trade is "down"
-      // (not now), never a price check or a failure; from the first signature on, never down (a tx may land)
+      // a provider read that failed past its retry, the reference's or any other (cards pool-read-down,
+      // pool-answer-unknown): before a leg is signed the trade is "down" (not now), never a failure, and a price check,
+      // not_armed or no_route the kit answers keeps its own code; from the first signature on, never down (a tx may land)
       let readDown = false;
       let signing = false;
+      const noteDown = (e: unknown): never => {
+        if (e instanceof SolanaRpcTransportError) readDown = true;
+        throw e;
+      };
+      // each provider stays itself to the kit (solanaWrappedRpc): its refusal of two that are one, its URL and its one queue
+      const watched = (rpc: SolanaRpc): SolanaRpc => solanaWrappedRpc(rpc, (method, params) => rpc(method, params).catch(noteDown));
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
         if (stage === "signed") write({ stage, txs: signed.slice() });
@@ -376,11 +384,8 @@ export function tradeKind(host: TradeHost): TradeKind {
         const req: SolanaTradeRequest & { wallets: string[] } = { side, token, slippageBps: params.slippage_bps as number, legs, wallets: set.all };
         record = await run(req, {
           ...host.deps,
-          reference: (q, p) =>
-            host.deps.reference(q, p).catch((e: unknown) => {
-              if (e instanceof SolanaRpcTransportError) readDown = true;
-              throw e;
-            }),
+          providers: [watched(host.deps.providers[0]), watched(host.deps.providers[1])],
+          reference: (q, p) => host.deps.reference(q, p).catch(noteDown),
           sign: (wallet, message, tx) => {
             signing = true;
             return signer.sign(wallet, message, tx);
@@ -396,7 +401,8 @@ export function tradeKind(host: TradeHost): TradeKind {
         await unmark(store, keys, record);
       }
       const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature }] : []));
-      if (!answer) return refuse(readDown && !signing ? "down" : refusalCode(record));
+      const code = refusalCode(record);
+      if (!answer) return refuse(readDown && !signing && code === "failed" ? "down" : code);
       write({ txs });
     }
 

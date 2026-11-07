@@ -60,7 +60,7 @@ contract KeylessTest is Deploy {
   }
 
   function test_theDispatcherHasExactlyTheListedSelectors() public view {
-    bytes4[20] memory _want = [
+    bytes4[23] memory _want = [
       bytes4(0x4800d97f), // ASSET()
       0xc072c05c, // MAX_RELAY_FEE_BPS()
       0xe38df5f0, // MAX_TREE_DEPTH()
@@ -80,7 +80,10 @@ contract KeylessTest is Deploy {
       0x1f79a1e9, // nullifierHashes(uint256)
       0xa1cc748b, // usedPrecommitments(uint256)
       0x94374b2b, // withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)
-      0x3edadd79 // buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)
+      0x3edadd79, // buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)
+      0x25faf2a3, // buySwap((address,bytes,uint256,address),address,uint256), the pool's own call (card pool-evm-buy-pays-revert)
+      0xa27a797e, // BUY_SWAP_GAS()
+      0x92e48cf3 // BUY_FAIL_GAS()
     ];
     (, bytes4[] memory _got) = _walk();
     assertEq(_got.length, _want.length, 'the number of selectors');

@@ -266,7 +266,7 @@ contract SellForkRobinhoodTest is SellForkBase {
 /// pool's SCOPE is the one Base Sepolia's pool has); and Base Sepolia's SwapRouter02 address, the kit's only router there,
 /// holds this fork's SwapRouter02 code. scripts/live-checks/evm-venues-pin.mjs reads the pins' code on Base Sepolia.
 contract SellForkBaseSepoliaPinsTest is SellForkBaseTest {
-  address internal constant PIN_POOL = 0xB239A38Af69B68E6C5C305df64985F283b5d5Fe5;
+  address internal constant PIN_POOL = 0xeB967dFC1B4ffb22942f833c76866Ea85fC42266;
   address internal constant PIN_DELEGATE = 0x7a034461193CC6B1a7d5D0F5FE4A36b34E7EbC12;
   address internal constant PIN_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
   /// Base Sepolia's FeeCollector (card evm-fee-collector), the kit's feeCollector pin: the one fee recipient its pinned

@@ -6,8 +6,9 @@ pragma solidity 0.8.28;
 // fee cap and a deadline), deposit(value, precommitment) with msg.sender the depositor, withdraw with the fee, the
 // Withdrawn event names the payees, the deposit and relay errors moved in from IEntrypoint, no windDown or PoolDied,
 // IncorrectASPRoot is UnknownLabelRoot, the unused ScopeMismatch removed; no ragequit, Ragequit, InvalidCommitment or
-// OnlyOriginalDepositor. Blindfill's buy (IPrivacyPoolSimple): Buy, Bought, buy and its errors; InvalidRelayData;
-// withdraw takes W's EIP-712 signature (InvalidSignature, NOTICE change 13).
+// OnlyOriginalDepositor. Blindfill's buy (IPrivacyPoolSimple): Buy, Bought, buy (its swap in buySwap, NOTICE change
+// 18) and its errors and gas; InvalidRelayData; withdraw takes W's EIP-712 signature (InvalidSignature, NOTICE change
+// 13).
 
 import {ProofLib} from '../lib/ProofLib.sol';
 import {IState} from 'interfaces/IState.sol';
@@ -271,21 +272,50 @@ interface IPrivacyPoolSimple is IPrivacyPool {
   error InvalidMinOut();
 
   /**
-   * @notice Thrown when W's token balance rose by less than the buy's minOut
+   * @notice Thrown inside buySwap when W's token balance rose by less than the buy's minOut: the swap is undone and
+   *         the buy pays out as a withdraw
    */
   error MinOutNotMet();
+
+  /**
+   * @notice Thrown when a buy has too little gas left at its swap to give it BUY_SWAP_GAS and keep BUY_FAIL_GAS
+   */
+  error SwapGasTooLow();
+
+  /**
+   * @notice Thrown when buySwap is called by anyone but the pool
+   */
+  error OnlyPool();
 
   /*///////////////////////////////////////////////////////////////
                               LOGIC
   //////////////////////////////////////////////////////////////*/
 
   /**
+   * @notice The least gas a buy's swap (buySwap) is given; a buy with less left at its swap reverts (SwapGasTooLow)
+   * @return _gas The gas
+   */
+  function BUY_SWAP_GAS() external view returns (uint256 _gas);
+
+  /**
+   * @notice The gas a buy keeps back from its swap, so that when the swap fails, however it fails, the buy still pays
+   *         W and emits Withdrawn
+   * @return _gas The gas
+   */
+  function BUY_FAIL_GAS() external view returns (uint256 _gas);
+
+  /**
    * @notice Release a chunk into a buy for W, signed by W; anyone may submit. The same proof serves withdraw.
+   * @dev The note is spent and the fee paid before the swap. The swap runs in buySwap, a call to the pool itself
+   *      given all the gas but BUY_FAIL_GAS (at least BUY_SWAP_GAS): when it lands, Bought; when it reverts for any
+   *      reason, only the swap is undone, W is paid the chunk less the fee in the native asset and the pool emits
+   *      Withdrawn, as withdraw would. So a swap that fails after a passing simulation still lands, and pays the fee.
    * @param _w The `Withdrawal` struct; its data is abi.encode(RelayData), whose recipient is W
    * @param _p The withdraw proof
    * @param _fee The fee paid to the request's fee recipient, at most its fee cap, out of withdrawnValue
    * @param _buy The buy W signed
    * @param _signature W's EIP-712 signature of the buy and the proof's nullifier, context and value: r, s, v (65 bytes)
+   * @return _bought True when the swap landed (Bought), false when W was paid in the native asset (Withdrawn)
    */
   function buy(
     Withdrawal memory _w,
@@ -293,7 +323,17 @@ interface IPrivacyPoolSimple is IPrivacyPool {
     uint256 _fee,
     Buy memory _buy,
     bytes memory _signature
-  ) external;
+  ) external returns (bool _bought);
+
+  /**
+   * @notice A buy's swap; only the pool calls it, from buy: `_amount` of the native asset to the buy's adapter, and
+   *         W's balance of the token must rise by at least minOut
+   * @param _buy The buy W signed
+   * @param _recipient W
+   * @param _amount The chunk less the fee
+   * @return _out How much W's token balance rose by
+   */
+  function buySwap(Buy calldata _buy, address _recipient, uint256 _amount) external returns (uint256 _out);
 
   /**
    * @notice Thrown when sending less amount of native asset than required

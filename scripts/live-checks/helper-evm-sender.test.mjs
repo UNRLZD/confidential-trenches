@@ -14,11 +14,21 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
 import { evmPoolSignSellAuthorization, evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { checkSells, evmPoolRecords, FIELDS, judge, NETWORKS, PLANTS, plantsOf, randomKey, read, SELL_GAS, SENDER_FIELD, sendersOf } from "./helper-evm-sender.mjs";
+import { checkSells, evmPoolRecords as currentRecords, FIELDS, FIRST_SET, judge as judgeLive, NETWORKS, PLANTS, plantsOf, randomKey, read as readLive, SELL_GAS, SENDER_FIELD, sendersOf } from "./helper-evm-sender.mjs";
 import { replayer } from "./notes-per-pool-evm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-evm-sender.answers.json"), "utf8"));
+// The recordings were made 6 Nov on the testnets' first pool set (FIRST_SET), before card pool-evm-buy-pays-revert's
+// pools: a replay judges each on the pools it was recorded on; the live check reads the current set (evmPoolRecords()).
+const evmPoolRecords = () => currentRecords(undefined, FIRST_SET);
+const judge = (run, o = {}) => judgeLive(run, { records: evmPoolRecords(), ...o });
+const read = (base, fetchFn) => readLive(base, fetchFn, evmPoolRecords());
+test("the recordings name the first set's pools; the live check reads the current set's, each network's newest pool", () => {
+  assert.deepEqual(Object.fromEntries(A.good.pools.map((p) => [p.network, p.pool])), evmPoolRecords());
+  assert.deepEqual(Object.keys(currentRecords()), Object.keys(evmPoolRecords()));
+  for (const n of NETWORKS) assert.equal(currentRecords()[n], JSON.parse(readFileSync(path.join(HERE, `pool-evm-buy-pays-revert.${n}.json`), "utf8")).contracts.PrivacyPoolSimple.address, n);
+});
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 /** The good run with `f` applied to every read named `asked` (on `network`, or on every pool). */
 const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => (network && p.network !== network ? p : { ...p, reads: p.reads.map((x) => (x.asked === asked ? f(x) : x)) })) });

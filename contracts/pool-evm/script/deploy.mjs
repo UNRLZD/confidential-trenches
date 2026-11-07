@@ -232,7 +232,9 @@ export function writeAtomic(file, text) {
 // (CI builds with forge 1.7.1).
 export const MAINNET_INIT = Object.freeze({
   WithdrawalVerifier: { length: 1975, keccak: "0x381df6043b0354b2ff24f5620391b26cb95612f896a258266f3bf798de21910f" },
-  PrivacyPoolSimple: { length: 10142, keccak: "0x50a3d2fa107766537bc20545d46f052b8a355d0986a1e6a11eb55bfff0c733fb" },
+  // card pool-evm-buy-pays-revert (a buy whose swap fails pays out): read from forge build --root contracts/pool-evm
+  // (forge 1.7.1 on the Mac, 2026-11-07), where the other five read as above
+  PrivacyPoolSimple: { length: 10956, keccak: "0x7e8d15c9f42c8866cf0080e49757f0a13139e85ffdffdf638b7a445d5b787e6f" },
   UniswapV4Adapter: { length: 4578, keccak: "0xedc0d3a854fc280089da75b2ed4baf8e3495fdb80eed6632ddfe5421ac96b6ef" },
   UniswapV3Adapter: { length: 2269, keccak: "0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05" },
   SellDelegate: { length: 9479, keccak: "0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132" },
