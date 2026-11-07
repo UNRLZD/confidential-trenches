@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! VT-P02 (vault.md 5, l.1139 at research main): random sequences of prepay, deposit, withdraw, settle and hostile calls
-//! on the vault's state code, with a mock token that fails a part of a payout at random; I1 to I6 (vault.md 3,
-//! l.1101-1105) hold after every step.
+//! VT-P02 (vault.md 5, l.1139 at research main): random sequences of prepay, deposit, withdraw, ragequit, settle and
+//! hostile calls on the vault's state code, with a mock token that fails a part of a payout at random; I1 to I6
+//! (vault.md 3, l.1101-1105) hold after every step.
 //!
 //! The vault runs here as its own Rust code in near-sdk's mocked chain (no wasm, no sandbox): each call gets a fresh
 //! mocked context on the storage the last call left, and a refused call is rolled back as NEAR rolls back a failed
@@ -14,6 +14,13 @@
 //!   vault's trees really had that root: the six deposits first, in order, before any other leaf. The generator puts
 //!   them early most of the time; a case where another leaf comes first is a case of withdrawals against roots the
 //!   vault never had, which I4 requires it to refuse.
+//! - The ragequits are tests/fixtures/ragequit-spends.json's commitment proofs (make-ragequit-spends.mjs, real Groth16
+//!   proofs) of the same six notes, deposit 6 named to q.test.near as that file names it: note 3 by u and note 6 by q
+//!   land once their deposits are in the tree under their own labels; note 2's (withdrawn) shares a nullifier with
+//!   same_nullifier_a and _b, note 3's with one_block_a and _b, note 6's with short_registration, so a nullifier is
+//!   spent by either exit and the other is refused, in both orders; change and unlanded prove notes that are never
+//!   leaves here, zero a 0 note, and refund_note a label no deposit has. A ragequit has no root check (2.5.3); its
+//!   payout and settle are a withdrawal's, to and from the depositor.
 //! - The mock token (`Token`) keeps every account's balance. `ft_transfer_call` moves the amount into the vault before
 //!   `ft_on_transfer` and gives it back when the call refuses. A payout receipt runs its parts in order
 //!   (`storage_deposit`, then `ft_transfer` to the recipient, then to the fee recipient); at random the token fails one
@@ -22,8 +29,11 @@
 //!   the callback is told Failed.
 //! - Payouts stay in flight across steps: a `Resolve` step runs one pending payout receipt and its `on_payout`, so
 //!   several can be in flight while deposits, other withdrawals and settles run.
-//! - Hostile steps: withdrawals against an unknown root, to another recipient than the proof's, of another amount, of
-//!   more than the notes hold, with too little gas or too little NEAR, and the same nullifier again; deposits from a
+//! - Hostile steps: withdrawals against an unknown root, against the same notes' roots on another vault (another
+//!   scope), to another recipient than the proof's, of another amount, of more than the notes hold, with too little gas
+//!   or too little NEAR, and the same nullifier again; ragequits by a stranger or the other depositor, of a refund note,
+//!   on changed signals, of a note not in the tree, of a 0 note, with a 0 refund precommitment, too little gas or too
+//!   little NEAR, and the same nullifier again (after a ragequit or a withdrawal); deposits from a
 //!   caller that is not the token, under MIN_DEPOSIT, on a used precommitment, without a prepay, or on a 756 B prepay
 //!   while a tree grows a level; prepays on 0, on p, on a used precommitment, or short; settles of an unknown, in-flight
 //!   or settled spend; a second callback, a callback with two results, a callback on no spend; plain transfers of the
@@ -47,12 +57,12 @@
 //! taken from the nullifier hash, settle's `nonce += 1` dropped; each fails this test).
 //!
 //! Not here: `#[private]` and `#[payable]` are checked by the wasm export near-sdk generates, which this harness does
-//! not run (VT-S04 and VT-S17 call `on_payout` from a stranger in near-sandbox); ragequit's proofs are not in this
-//! fixture (VT-S09 and VT-S19 hold it).
+//! not run (VT-S04 and VT-S17 call `on_payout` from a stranger in near-sandbox).
 
 use blindfill_vault::constants::{MIN_DEPOSIT, TOKEN};
 use blindfill_vault::context::label_of;
 use blindfill_vault::poseidon::PoseidonT4;
+use blindfill_vault::ragequit::{SIGNAL_COMMITMENT, SIGNAL_LABEL, SIGNAL_NULLIFIER_HASH, SIGNAL_VALUE};
 use blindfill_vault::verifier::Proof;
 use blindfill_vault::withdraw::Withdrawal;
 use blindfill_vault::{field, scope_for, Bytes32, SpendView, Status, Vault};
@@ -65,6 +75,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 const FIXTURE: &str = include_str!("fixtures/withdraw-spends.json");
+const RQ_FIXTURE: &str = include_str!("fixtures/ragequit-spends.json");
 /// The fixed run: `P02_SEED` and `P02_CASES` replace them.
 const SEED: u64 = 0x5602_0000_0000_0001;
 /// The long run's cases (`#[ignore]`d; tests/harness/run.sh runs it) and the smoke run's (every plain `cargo test`).
@@ -101,9 +112,23 @@ struct Spend {
     register: u128,
 }
 
+/// One of ragequit-spends.json's commitment proofs: `[commitment, nullifierHash, value, label]`.
+struct Ragequit {
+    name: String,
+    proof: Proof,
+    signals: [String; 4],
+    register: String,
+    refund_precommitment: String,
+    /// the account that file has sign it
+    depositor: String,
+}
+
 struct Fixture {
     vault: String,
     precommitments: Vec<String>,
+    /// the depositor each of the six deposits names (ragequit-spends.json's: u.test.near, q.test.near for the sixth)
+    depositors: Vec<String>,
+    ragequits: Vec<Ragequit>,
     values: Vec<u128>,
     spends: Vec<Spend>,
     /// (size, state root, label root) for each size a proof names
@@ -148,9 +173,37 @@ fn fixture() -> Fixture {
         }
     }
     assert_eq!(roots.len(), 2, "the fixture's proofs name the trees of 4 and of 6 deposits");
+    // the ragequits' file: the same vault and the same six deposits, each with its depositor
+    let r: Value = serde_json::from_str(RQ_FIXTURE).unwrap();
+    assert_eq!(r["vault"], f["vault"], "ragequit-spends.json is on withdraw-spends.json's vault");
+    let deposits = r["deposits"].as_array().unwrap();
+    assert_eq!(deposits.len(), 6);
+    for (i, d) in deposits.iter().enumerate() {
+        for (k, list) in [("commitment", "leaves"), ("label", "labels"), ("precommitment", "precommitments"), ("value", "values")] {
+            assert_eq!(d[k], f[list][i], "ragequit-spends.json deposit {i}'s {k}");
+        }
+    }
+    let depositors: Vec<String> = deposits.iter().map(|d| d["depositor"].as_str().unwrap().to_string()).collect();
+    // deposit_bytes counts every deposit at DEPOSITOR's length
+    assert!(depositors.iter().all(|d| d.len() == DEPOSITOR.len()), "{depositors:?}");
+    let ragequits = r["ragequits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| Ragequit {
+            name: x["name"].as_str().unwrap().to_string(),
+            proof: serde_json::from_value(x["proof"].clone()).unwrap(),
+            signals: serde_json::from_value(x["public_signals"].clone()).unwrap(),
+            register: x["register_deposit"].as_str().unwrap().to_string(),
+            refund_precommitment: x["refund_precommitment"].as_str().unwrap().to_string(),
+            depositor: x["depositor"].as_str().unwrap().to_string(),
+        })
+        .collect();
     Fixture {
         vault: f["vault"].as_str().unwrap().to_string(),
         precommitments: strs("precommitments"),
+        depositors,
+        ragequits,
         values: strs("values").iter().map(|v| v.parse().unwrap()).collect(),
         spends,
         roots,
@@ -257,10 +310,33 @@ enum Branch {
     CallbackTwoResults,
     CallbackUnknown,
     Stray,
+    /// the same notes' roots on another vault (another scope)
+    WithdrawWrongScope,
+    /// a withdrawal on a nullifier a ragequit spent
+    WithdrawAfterRagequit,
+    RagequitLanded,
+    /// a ragequit signed by a stranger or by the other depositor
+    RagequitWrongCaller,
+    /// a ragequit on a label no deposit has: a refund note's, or one whose deposit has not landed
+    RagequitNoDeposit,
+    /// the same nullifier again after a ragequit
+    RagequitReplayed,
+    /// a ragequit on a nullifier a withdrawal spent
+    RagequitAfterWithdraw,
+    RagequitInvalidProof,
+    RagequitNotInTree,
+    RagequitZeroValue,
+    RagequitZeroRefundPrecommitment,
+    RagequitShortGas,
+    RagequitShortStorage,
+    /// a ragequit's payout delivered to its depositor
+    RagequitPaid,
+    /// a ragequit's failed payout settled into a refund note
+    SettleRagequitRefund,
 }
 
 /// The branches every run must hit at least once.
-const BRANCHES: [Branch; 26] = [
+const BRANCHES: [Branch; 41] = [
     Branch::PayoutDelivered,
     Branch::PayoutStorageDepositFailed,
     Branch::PayoutRecipientFailed,
@@ -287,6 +363,21 @@ const BRANCHES: [Branch; 26] = [
     Branch::CallbackTwoResults,
     Branch::CallbackUnknown,
     Branch::Stray,
+    Branch::WithdrawWrongScope,
+    Branch::WithdrawAfterRagequit,
+    Branch::RagequitLanded,
+    Branch::RagequitWrongCaller,
+    Branch::RagequitNoDeposit,
+    Branch::RagequitReplayed,
+    Branch::RagequitAfterWithdraw,
+    Branch::RagequitInvalidProof,
+    Branch::RagequitNotInTree,
+    Branch::RagequitZeroValue,
+    Branch::RagequitZeroRefundPrecommitment,
+    Branch::RagequitShortGas,
+    Branch::RagequitShortStorage,
+    Branch::RagequitPaid,
+    Branch::SettleRagequitRefund,
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -311,6 +402,22 @@ struct Pending {
     /// the callback receipt's own `to_recipient` and `fee`
     to_recipient: u128,
     fee: u128,
+}
+
+/// A spend the vault wrote, as the model knows it: a withdrawal's request as its proof binds it, or a ragequit's (the
+/// depositor pays, is paid, and no fee).
+#[derive(Clone, Debug)]
+struct Exit {
+    ragequit: bool,
+    name: String,
+    nullifier_hash: String,
+    withdrawn: u128,
+    fee: u128,
+    register: u128,
+    recipient: String,
+    fee_recipient: String,
+    refund_precommitment: String,
+    payer: String,
 }
 
 #[derive(Default)]
@@ -372,12 +479,14 @@ struct Harness {
     /// prepaid precommitments of deposits that are not the fixture's
     others: Vec<String>,
     change_leaves: HashSet<String>,
-    /// nullifier hash -> the fixture spend that landed on it
-    landed: HashMap<String, usize>,
+    /// nullifier hash -> the spend that landed on it
+    landed: HashMap<String, u64>,
     /// spends the vault has written
     spend_count: u64,
-    /// spend index -> the fixture spend it is (two fixture spends can share a nullifier, so never looked up by it)
-    spend_fixture: Vec<usize>,
+    /// spend index -> the exit it is (two fixture spends can share a nullifier, so never looked up by it)
+    exits: Vec<Exit>,
+    /// nonce -> the depositor the deposit of that label named (a refund note's label has none)
+    label_depositor: HashMap<u64, String>,
     pending: Vec<Pending>,
     stray: u128,
     deposited: u128,
@@ -411,8 +520,8 @@ fn amount_be(amount: u128) -> Bytes32 {
     b
 }
 
-fn deposit_msg(p: &str) -> String {
-    format!(r#"{{"precommitment":"{p}","depositor":"{DEPOSITOR}"}}"#)
+fn deposit_msg(p: &str, depositor: &str) -> String {
+    format!(r#"{{"precommitment":"{p}","depositor":"{depositor}"}}"#)
 }
 
 /// A panic's text; the vault's own message when it is the mocked host's `GuestPanic { panic_msg: "..." }`.
@@ -447,7 +556,8 @@ impl Harness {
             change_leaves: HashSet::new(),
             landed: HashMap::new(),
             spend_count: 0,
-            spend_fixture: Vec::new(),
+            exits: Vec::new(),
+            label_depositor: HashMap::new(),
             pending: Vec::new(),
             stray: 0,
             deposited: 0,
@@ -547,7 +657,8 @@ impl Harness {
         match r {
             0..=39 if fixture_left => self.fixture_deposit_step(),
             70..=77 if fixture_left && self.rng.pct(75) => self.fixture_deposit_step(),
-            0..=45 => self.withdraw_step(),
+            0..=33 => self.withdraw_step(),
+            34..=45 => self.ragequit_step(),
             46..=60 => self.resolve_step(),
             61..=69 => self.settle_step(),
             70..=77 => self.other_deposit_step(),
@@ -566,8 +677,8 @@ impl Harness {
         if !self.prepaid.contains_key(&p) && self.rng.pct(85) {
             self.prepay(&p, PREPAY, Ok(()));
         }
-        let value = self.fx.values[k];
-        let landed = self.deposit(TOKEN, &p, value);
+        let (value, depositor) = (self.fx.values[k], self.fx.depositors[k].clone());
+        let landed = self.deposit_as(TOKEN, &depositor, &p, value);
         if landed {
             self.next_fixture += 1;
         }
@@ -645,9 +756,13 @@ impl Harness {
         assert!(o.receipts.is_empty(), "I3: storage_prepay made a receipt");
     }
 
-    /// The token's `ft_transfer_call(vault, value, msg)` by the depositor, or a direct call by `by` when it is not the
-    /// token. Returns whether the deposit landed; checks the model's prediction.
     fn deposit(&mut self, by: &str, p: &str, value: u128) -> bool {
+        self.deposit_as(by, DEPOSITOR, p, value)
+    }
+
+    /// The token's `ft_transfer_call(vault, value, msg)` by the depositor, or a direct call by `by` when it is not the
+    /// token, with `msg` naming `depositor`. Returns whether the deposit landed; checks the model's prediction.
+    fn deposit_as(&mut self, by: &str, depositor: &str, p: &str, value: u128) -> bool {
         let want: Result<(), &str> = if by != TOKEN {
             Err("NotTheToken")
         } else if self.used.contains(p) {
@@ -666,7 +781,7 @@ impl Harness {
             // the token moves the depositor's amount into the vault before it calls the receiver
             self.token.add(&self.fx.vault.clone(), value);
         }
-        let msg = deposit_msg(p);
+        let msg = deposit_msg(p, depositor);
         let o = self.call(by, 0, Gas::from_tgas(100), vec![], |v| v.ft_on_transfer(id(DEPOSITOR), U128(value), msg));
         let o = self.refusal_moves_nothing(o, "ft_on_transfer");
         assert!(o.receipts.is_empty(), "I3: ft_on_transfer made a receipt");
@@ -675,6 +790,7 @@ impl Harness {
                 self.prepaid.remove(p);
                 self.used.insert(p.to_string());
                 self.nonce += 1;
+                self.label_depositor.insert(self.nonce, depositor.to_string());
                 let k = self.fx.precommitments.iter().position(|x| x == p);
                 // fixture deposit k's commitment is the fixture's leaf only under its own label, nonce k + 1
                 let leaf = match k {
@@ -752,7 +868,7 @@ impl Harness {
                 Ok(())
             }
         };
-        let (what, want, branch): (&str, Result<(), &str>, Option<Branch>) = match self.rng.below(11) {
+        let (what, want, branch): (&str, Result<(), &str>, Option<Branch>) = match self.rng.below(12) {
             0 => {
                 let r = self.rng.field();
                 self.false_roots.push(r.clone());
@@ -784,6 +900,17 @@ impl Harness {
                 let want = roots_ok(self, s, s.withdrawn).and_then(|_| after_proof(self, s)).and(Err("InsufficientStorageDeposit"));
                 ("with no NEAR for its storage", want, None)
             }
+            6 => {
+                // the same notes' roots on another vault: both, or the label root alone under the real state root
+                let (other_state, other_label) = self.fx.other_vault.clone();
+                let both = self.rng.pct(50);
+                if both {
+                    signals[3] = other_state;
+                }
+                signals[5] = other_label;
+                let want = if both || !self.state_had(s.size) { "UnknownStateRoot" } else { "UnknownLabelRoot" };
+                ("against another vault's roots", Err(want), Some(Branch::WithdrawWrongScope))
+            }
             _ => ("as proved", roots_ok(self, s, s.withdrawn).and_then(|_| after_proof(self, s)), None),
         };
         let o = self.call(PAYER, attached, gas, vec![], |v| v.withdraw(w, proof, signals));
@@ -791,8 +918,10 @@ impl Harness {
         match (&o.result, want) {
             (Ok(()), Ok(())) => {}
             (Err(e), Err(want)) if e.contains(want) => {
+                let by_ragequit = self.landed.get(&self.fx.spends[i].signals[1]).is_some_and(|j| self.exits[*j as usize].ragequit);
                 let b = branch.unwrap_or_else(|| match want {
                     "UnknownStateRoot" | "UnknownLabelRoot" => Branch::WithdrawUnknownRoot,
+                    "NullifierAlreadySpent" if by_ragequit => Branch::WithdrawAfterRagequit,
                     "NullifierAlreadySpent" => Branch::WithdrawDoubleSpend,
                     "InsufficientStorageDeposit" => Branch::WithdrawShortStorage,
                     "InvalidPoolState" => Branch::WithdrawOverHeld,
@@ -808,18 +937,38 @@ impl Harness {
         // landed: I4 at the call, then its payout receipt as the token will run it (I3)
         let s = &self.fx.spends[i];
         assert!(self.state_had(s.size) && self.nonce as usize >= s.size, "I4: withdraw {name} landed on a root its trees never had");
-        let index = self.spend_count;
-        self.spend_count += 1;
-        let pending = payout_of(&o.receipts, &self.fx.vault, index, s);
-        let (nh, change, withdrawn) = (s.signals[1].clone(), s.signals[0].clone(), s.withdrawn);
-        self.landed.insert(nh.clone(), i);
-        self.spend_fixture.push(i);
-        self.status.push(Status::InFlight);
+        let exit = Exit {
+            ragequit: false,
+            name: name.clone(),
+            nullifier_hash: s.signals[1].clone(),
+            withdrawn: s.withdrawn,
+            fee: s.fee,
+            register: s.register,
+            recipient: s.withdrawal.recipient.to_string(),
+            fee_recipient: s.withdrawal.fee_recipient.to_string(),
+            refund_precommitment: s.withdrawal.refund_precommitment.clone(),
+            payer: PAYER.into(),
+        };
+        let change = s.signals[0].clone();
         self.change_leaves.insert(change.clone());
         self.insert_leaf(Leaf::Other, change);
-        self.spent += withdrawn;
-        self.pending.push(pending);
+        let index = self.land(exit, &o.receipts);
         self.hit(Branch::WithdrawLanded);
+        format!("withdraw {name} {what}: landed as spend {index}")
+    }
+
+    /// A spend the vault wrote: the model's record of it, its payout receipt as the token will run it (I3), and the
+    /// drop-spent mutant's deletion of its `spent` record.
+    fn land(&mut self, exit: Exit, receipts: &[Receipt]) -> u64 {
+        let index = self.spend_count;
+        self.spend_count += 1;
+        let pending = payout_of(receipts, &self.fx.vault, index, &exit);
+        let nh = exit.nullifier_hash.clone();
+        self.landed.insert(nh.clone(), index);
+        self.spent += exit.withdrawn;
+        self.exits.push(exit);
+        self.status.push(Status::InFlight);
+        self.pending.push(pending);
         if self.mutant == Mutant::DropSpent {
             let key: Vec<u8> = self
                 .storage
@@ -832,7 +981,110 @@ impl Harness {
             self.landed.remove(&nh);
             self.forgotten.insert(nh);
         }
-        format!("withdraw {name} {what}: landed as spend {index}")
+        index
+    }
+
+    /// One of the fixture's ragequits, as signed or made hostile, predicted in the vault's order of checks (2.5.3): row 1
+    /// (the refund precommitment, then the value), the gas pre-check, row 2 (the label's deposit names the caller), the
+    /// proof, row 4 (the commitment a leaf), row 5 (the nullifier unspent), row 6 (storage, the last refusal).
+    fn ragequit_step(&mut self) -> String {
+        let r = &self.fx.ragequits[self.rng.below(self.fx.ragequits.len() as u64) as usize];
+        let (name, proof, mut signals, mut refund_pc) = (r.name.clone(), r.proof.clone(), r.signals.clone(), r.refund_precommitment.clone());
+        let mut register: u128 = r.register.parse().unwrap();
+        let mut by = r.depositor.clone();
+        let (mut gas, mut attached) = (Gas::from_tgas(300), ONE_NEAR);
+        let mut changed = false;
+        let what = match self.rng.below(12) {
+            0 => {
+                by = MALLORY.into();
+                "by a stranger"
+            }
+            1 => {
+                by = if by == DEPOSITOR { self.fx.depositors[5].clone() } else { DEPOSITOR.into() };
+                "by the other depositor"
+            }
+            2 => {
+                let v: u128 = signals[SIGNAL_VALUE].parse().unwrap();
+                signals[SIGNAL_VALUE] = (v + 1).to_string();
+                changed = true;
+                "of another value than the proof's"
+            }
+            3 => {
+                signals[SIGNAL_NULLIFIER_HASH] = self.rng.field();
+                changed = true;
+                "on another nullifier hash than the proof's"
+            }
+            4 => {
+                gas = Gas::from_tgas(ragequit_bound(register) - 1);
+                "one Tgas under the bound"
+            }
+            5 => {
+                attached = 0;
+                "with no NEAR for its storage"
+            }
+            6 => {
+                refund_pc = "0".into();
+                "with a 0 refund precommitment"
+            }
+            7 => {
+                // the caller's registration (no proof binds it); under the token's minimum its payout always fails
+                register = if self.rng.pct(50) { REGISTER_MIN } else { REGISTER_MIN - 1 };
+                "with a registration"
+            }
+            _ => "as signed",
+        };
+        let value: u128 = signals[SIGNAL_VALUE].parse().unwrap();
+        let (commitment, nh, label) = (signals[SIGNAL_COMMITMENT].clone(), signals[SIGNAL_NULLIFIER_HASH].clone(), signals[SIGNAL_LABEL].clone());
+        // the nonce whose label this is, of any deposit or refund note so far (refund_note's is this vault's nonce 7,
+        // which a plain deposit can take); a refund note's has no depositor
+        let nonce = (1..=self.nonce).find(|n| dec(&self.label(*n)) == label);
+        let named = nonce.and_then(|n| self.label_depositor.get(&n));
+        let (want, branch): (Result<(), &str>, Branch) = if refund_pc == "0" {
+            (Err("InvalidRefundPrecommitment"), Branch::RagequitZeroRefundPrecommitment)
+        } else if value == 0 {
+            (Err("InvalidWithdrawalAmount"), Branch::RagequitZeroValue)
+        } else if gas < Gas::from_tgas(ragequit_bound(register)) {
+            (Err("InsufficientGas"), Branch::RagequitShortGas)
+        } else if named != Some(&by) {
+            let b = if named.is_none() { Branch::RagequitNoDeposit } else { Branch::RagequitWrongCaller };
+            (Err("OnlyOriginalDepositor"), b)
+        } else if changed {
+            (Err("InvalidProof"), Branch::RagequitInvalidProof)
+        } else if !self.exp_leaves.contains(&commitment) {
+            (Err("InvalidCommitment"), Branch::RagequitNotInTree)
+        } else if let Some(i) = self.landed.get(&nh) {
+            (Err("NullifierAlreadySpent"), if self.exits[*i as usize].ragequit { Branch::RagequitReplayed } else { Branch::RagequitAfterWithdraw })
+        } else if attached == 0 {
+            (Err("InsufficientStorageDeposit"), Branch::RagequitShortStorage)
+        } else {
+            (Ok(()), Branch::RagequitLanded)
+        };
+        let (s2, rp, reg) = (signals.clone(), refund_pc.clone(), register.to_string());
+        let o = self.call(&by, attached, gas, vec![], |v| v.ragequit(proof, s2, reg, rp));
+        let o = self.refusal_moves_nothing(o, "ragequit");
+        match (&o.result, want) {
+            (Ok(()), Ok(())) => {}
+            (Err(e), Err(w)) if e.contains(w) => {
+                self.hit(branch);
+                return format!("ragequit {name} {what} by {by}: refused ({w})");
+            }
+            (got, want) => panic!("ragequit {name} {what} by {by}: got {got:?}, want {want:?}"),
+        }
+        let exit = Exit {
+            ragequit: true,
+            name: format!("ragequit {name}"),
+            nullifier_hash: nh,
+            withdrawn: value,
+            fee: 0,
+            register,
+            recipient: by.clone(),
+            fee_recipient: by.clone(),
+            refund_precommitment: refund_pc,
+            payer: by.clone(),
+        };
+        let index = self.land(exit, &o.receipts);
+        self.hit(Branch::RagequitLanded);
+        format!("ragequit {name} {what} by {by}: landed as spend {index}")
     }
 
     /// The token runs one pending payout receipt, part by part, then the vault's `on_payout` with the callback
@@ -879,18 +1131,16 @@ impl Harness {
             panic!("on_payout of spend {index}: {e}");
         }
         assert!(o.receipts.is_empty(), "I3: on_payout made a receipt");
-        let withdrawn = self.fx.spends[self.spend_of(index)].withdrawn;
+        let (withdrawn, ragequit) = (self.exits[index as usize].withdrawn, self.exits[index as usize].ragequit);
         if failed.is_some() {
             self.returned += withdrawn;
         }
         self.status[index as usize] = if failed.is_some() { Status::RefundPending } else { Status::Paid };
         self.hit(failed.unwrap_or(Branch::PayoutDelivered));
+        if ragequit && failed.is_none() {
+            self.hit(Branch::RagequitPaid);
+        }
         format!("payout of spend {index}: {:?}", failed.unwrap_or(Branch::PayoutDelivered))
-    }
-
-    /// The fixture spend that landed as spend `index`.
-    fn spend_of(&self, index: u64) -> usize {
-        self.spend_fixture[index as usize]
     }
 
     /// `settle` of a spend the model picks, predicted from the model's own status of it (never from the vault's).
@@ -900,7 +1150,7 @@ impl Harness {
             None if self.rng.pct(50) => (self.rng.field(), Err("UnknownSpend")),
             None => (format!("0{}", self.rng.below(1_000) + 1), Err("InvalidNumber")),
             Some(i) => {
-                let nh = self.fx.spends[self.spend_of(i as u64)].signals[1].clone();
+                let nh = self.exits[i].nullifier_hash.clone();
                 let want = if self.forgotten.contains(&nh) {
                     Err("UnknownSpend")
                 } else {
@@ -921,11 +1171,13 @@ impl Harness {
         match (&o.result, want) {
             (Ok(()), Ok(refund)) => {
                 let i = pick.unwrap();
-                // settle sends NEAR only, never the token (I3); the reserve's rest goes to the spend's payer and the
-                // caller attached nothing; it never sends more than the reserve held, which it leaves at 0 (M7)
+                // settle sends NEAR only, never the token (I3); the reserve's rest goes to the spend's payer (a
+                // ragequit's depositor) and the caller attached nothing; it never sends more than the reserve held,
+                // which it leaves at 0 (M7)
+                let payer = self.exits[i].payer.clone();
                 let mut sent = 0u128;
                 for r in &o.receipts {
-                    assert!(r.receiver_id.as_str() == PAYER, "settle (M7): a Transfer to {}, not the payer", r.receiver_id);
+                    assert!(r.receiver_id.as_str() == payer, "settle (M7): a Transfer to {}, not the payer {payer}", r.receiver_id);
                     for a in &r.actions {
                         match a {
                             MockAction::Transfer { deposit, .. } => sent += deposit.as_yoctonear(),
@@ -939,15 +1191,17 @@ impl Harness {
                 assert!(after == 0, "settle (M7): the spend's reserve is {after} after its settle, want 0");
                 self.status[i] = Status::Settled;
                 if refund {
-                    let s = &self.fx.spends[self.spend_of(i as u64)];
-                    let (value, refund_pc) = (s.withdrawn, s.withdrawal.refund_precommitment.clone());
+                    let s = &self.exits[i];
+                    let (value, refund_pc, ragequit) = (s.withdrawn, s.refund_precommitment.clone(), s.ragequit);
                     self.nonce += 1;
                     let leaf = Self::commitment(value, &self.label(self.nonce), &refund_pc);
                     self.insert_leaf(Leaf::Other, leaf);
                     self.hit(Branch::SettleRefundNote);
+                    if ragequit {
+                        self.hit(Branch::SettleRagequitRefund);
+                    }
                     format!("settle of spend {i}'s refund of {value}: a refund note")
                 } else {
-                    assert!(o.receipts.iter().all(|r| r.receiver_id.as_str() == PAYER));
                     self.hit(Branch::SettlePaid);
                     format!("settle of the paid spend {i}")
                 }
@@ -1042,12 +1296,11 @@ impl Harness {
             if *index >= self.spend_count {
                 return Err(format!("I3: a transfer for spend {index}, which the model has not"));
             }
-            let s = &self.fx.spends[self.spend_of(*index)];
-            if s.signals[1] != row.nullifier_hash {
+            let s = &self.exits[*index as usize];
+            if s.nullifier_hash != row.nullifier_hash {
                 return Err(format!("I3: spend {index} is no proof's"));
             }
-            let w = &s.withdrawal;
-            let ok = (to == w.recipient.as_str() && *amount == s.withdrawn - s.fee) || (to == w.fee_recipient.as_str() && *amount == s.fee);
+            let ok = (*to == s.recipient && *amount == s.withdrawn - s.fee) || (s.fee > 0 && *to == s.fee_recipient && *amount == s.fee);
             if !ok {
                 return Err(format!("I3: {amount} to {to} for spend {index}, which its proof does not name"));
             }
@@ -1101,8 +1354,8 @@ impl Harness {
             if i as u64 >= self.spend_count {
                 return Err(format!("I6: spend {i}, which the model has not"));
             }
-            let s = &self.fx.spends[self.spend_of(i as u64)];
-            if s.signals[1] != row.nullifier_hash {
+            let s = &self.exits[i];
+            if s.nullifier_hash != row.nullifier_hash {
                 return Err(format!("I6: spend {i} is no proof's"));
             }
             // every row's status is the one its payout and its settle gave it: a settle that does not mark the spend
@@ -1126,7 +1379,7 @@ impl Harness {
             if refund == 0 {
                 continue;
             }
-            if row.refund_precommitment != s.withdrawal.refund_precommitment {
+            if row.refund_precommitment != s.refund_precommitment {
                 return Err(format!("I6: spend {i}'s refund is not on the precommitment its proof bound"));
             }
             if row.status == Status::Settled {
@@ -1160,6 +1413,13 @@ impl Harness {
         if spends.len() as u64 != self.spend_count {
             return Err(format!("model: {} spends, want {}", spends.len(), self.spend_count));
         }
+        // each record is its exit's: who paid, who is paid, the fee, and a ragequit's context 0 (restore reads it so)
+        for (row, e) in spends.iter().zip(&self.exits) {
+            let got = (row.payer.as_str(), row.recipient.as_str(), row.fee.0, row.context == "0");
+            if got != (e.payer.as_str(), e.recipient.as_str(), e.fee, e.ragequit) {
+                return Err(format!("model: spend {} is {got:?}, want {}'s", row.index, e.name));
+            }
+        }
         // every leaf and label, in order: a deposit's Poseidon(value, label, precommitment) (the kit's for the
         // fixture's six), a change leaf as its proof's newCommitmentHash, a refund note's Poseidon(value, label,
         // refund precommitment); the labels label_of(scope, 1..=nonce), the first six the kit's
@@ -1188,21 +1448,27 @@ impl Harness {
     }
 }
 
-/// The payout receipt `withdraw` made for spend `index` of fixture spend `s`, checked part by part against the request
-/// its proof binds (I3): `[storage_deposit(recipient) with register_deposit when > 0, ft_transfer(recipient,
-/// withdrawn - fee), ft_transfer(fee_recipient, fee) when fee > 0]` to the token, then `on_payout(index)` on the vault.
-fn payout_of(receipts: &[Receipt], vault: &str, index: u64, s: &Spend) -> Pending {
-    assert_eq!(receipts.len(), 2, "I3: a withdrawal makes the payout receipt and its callback");
+/// A ragequit's gas bound (2.5.3 row 1, 2.5.2's pre-check with no fee part): ft_transfer 15 + on_payout 30 + 100 Tgas,
+/// and storage_deposit 10 with a registration.
+fn ragequit_bound(register: u128) -> u64 {
+    100 + 15 + 30 + if register > 0 { 10 } else { 0 }
+}
+
+/// The payout receipt `withdraw` or `ragequit` made for spend `index`, the exit `s`, checked part by part against the
+/// request its proof binds, or a ragequit's depositor and note (I3): `[storage_deposit(recipient) with
+/// register_deposit when > 0, ft_transfer(recipient, withdrawn - fee), ft_transfer(fee_recipient, fee) when fee > 0]` to
+/// the token, then `on_payout(index)` on the vault.
+fn payout_of(receipts: &[Receipt], vault: &str, index: u64, s: &Exit) -> Pending {
+    assert_eq!(receipts.len(), 2, "I3: an exit makes the payout receipt and its callback");
     assert_eq!(receipts[0].receiver_id.as_str(), TOKEN, "I3: the payout goes to the token");
     assert_eq!(receipts[1].receiver_id.as_str(), vault, "the callback goes to the vault");
-    let w = &s.withdrawal;
     let mut want: Vec<(String, String, u128)> = Vec::new();
     if s.register > 0 {
-        want.push(("storage_deposit".into(), format!(r#"{{"account_id":"{}","registration_only":true}}"#, w.recipient), s.register));
+        want.push(("storage_deposit".into(), format!(r#"{{"account_id":"{}","registration_only":true}}"#, s.recipient), s.register));
     }
-    want.push(("ft_transfer".into(), format!(r#"{{"receiver_id":"{}","amount":"{}"}}"#, w.recipient, s.withdrawn - s.fee), 1));
+    want.push(("ft_transfer".into(), format!(r#"{{"receiver_id":"{}","amount":"{}"}}"#, s.recipient, s.withdrawn - s.fee), 1));
     if s.fee > 0 {
-        want.push(("ft_transfer".into(), format!(r#"{{"receiver_id":"{}","amount":"{}"}}"#, w.fee_recipient, s.fee), 1));
+        want.push(("ft_transfer".into(), format!(r#"{{"receiver_id":"{}","amount":"{}"}}"#, s.fee_recipient, s.fee), 1));
     }
     let got: Vec<(String, String, u128)> = receipts[0]
         .actions
@@ -1226,13 +1492,14 @@ fn payout_of(receipts: &[Receipt], vault: &str, index: u64, s: &Spend) -> Pendin
         }
         other => panic!("the callback receipt holds {other:?}"),
     };
+    assert_eq!((to_recipient, fee), (s.withdrawn - s.fee, s.fee), "the callback's own arguments for {}", s.name);
     let mut out = Vec::new();
     if s.register > 0 {
         out.push(Part::Register { yocto: s.register });
     }
-    out.push(Part::Recipient { to: w.recipient.to_string(), amount: s.withdrawn - s.fee });
+    out.push(Part::Recipient { to: s.recipient.clone(), amount: s.withdrawn - s.fee });
     if s.fee > 0 {
-        out.push(Part::Fee { to: w.fee_recipient.to_string(), amount: s.fee });
+        out.push(Part::Fee { to: s.fee_recipient.clone(), amount: s.fee });
     }
     Pending { spend_index: index, parts: out, to_recipient, fee }
 }
@@ -1279,11 +1546,12 @@ fn run(seed: u64, cases: u64, mutant: Mutant, gate: bool) -> BTreeMap<Branch, u6
     total
 }
 
-/// The long run: 24 cases of 48 steps with the branch gate (118 s on the box). A plain `cargo test` skips it; CI's
+/// The long run: 24 cases of 48 steps with the branch gate (424 s on the box on 2026-11-07, when main's run before the
+/// ragequits took 418 s there; 118 s on an earlier day). A plain `cargo test` skips it; CI's
 /// vault-sandbox job runs it in shard 1 (scripts/ci/vault-sandbox.mjs; tests/harness/run.sh passes
 /// `--include-ignored`) on every pull request that touches the vault.
 #[test]
-#[ignore = "the long run (24 x 48, 118 s on the box): cargo test --test p02 -- --ignored; run.sh runs it"]
+#[ignore = "the long run (24 x 48, 424 s on the box): cargo test --test p02 -- --ignored; run.sh runs it"]
 fn vt_p02_i1_to_i6_hold_after_every_step() {
     let counts = run(env_u64("P02_SEED", SEED), env_u64("P02_CASES", CASES), Mutant::from_env(), true);
     for b in [Branch::PayoutStorageDepositFailed, Branch::PayoutRecipientFailed, Branch::PayoutFeeFailed, Branch::SettleRefundNote] {
