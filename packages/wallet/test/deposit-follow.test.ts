@@ -1667,7 +1667,7 @@ test("a move past its window with its nonce unused and U's balance still the mov
   assert.ok(asks.length >= 2 && asks[0] === null && asks[1] !== null, `a new move, the old deadline handed on: ${asks}`);
 });
 
-test("readMoveAt: is_nonce_used read apart, a block or a view answered at another height than asked: no read", async () => {
+test("readMoveAt: is_nonce_used or the salt read apart, a block or a view answered at another height than asked: no read", async () => {
   const t = await setup(["REFUNDED"]);
   t.chain.a.held = t.chain.b.held = CREDIT;
   const n1 = versionedNonce("252812b3", NOW);
@@ -1676,6 +1676,8 @@ test("readMoveAt: is_nonce_used read apart, a block or a view answered at anothe
   const value = (j: any): unknown => JSON.parse(Buffer.from(j.result.result).toString());
   const usedApart: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.method_name === "is_nonce_used") j.result.result = [...Buffer.from(JSON.stringify(!value(j)))]; return j; } };
   assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, usedApart]), null, "is_nonce_used apart");
+  const saltApart: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.method_name === "current_salt" && j.result) j.result.result = [...Buffer.from(JSON.stringify("00000000"))]; return j; } };
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, saltApart]), null, "current_salt apart");
   const blockOff: FollowRpc = { ...b, block: async (p: any) => { const j: any = await b.block(p); if ("block_id" in p && j.result) j.result.header.height += 1; return j; } };
   assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, blockOff]), null, "a block at another height");
   const viewOff: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.block_id !== undefined && j.result) j.result.block_height += 1; return j; } };
