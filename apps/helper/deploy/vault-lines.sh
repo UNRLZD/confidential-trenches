@@ -7,8 +7,10 @@
 # The first deploy of contracts/vault/deployments/mainnet-v1.json, in this order (the one place it is written; the
 # key scripts point here). R is the commit that adds the record and moves MAINNET_VAULT to its account_id (send.test.ts
 # holds the two equal):
-#   1. on the server: git -C <checkout> fetch -q --depth 1 origin R && git -C <checkout> checkout -q --detach R, then
-#      this script: WITHDRAW_VAULT_MAINNET, and BIND_VAULT_MAINNET when set, move to mainnet-v1.json's account_id;
+#   1. on the server: git -C <checkout> fetch -q --depth 1 https://github.com/UNRLZD/confidential-trenches.git R &&
+#      git -C <checkout> checkout -q --detach R (the checkout has no origin remote: redeploy.sh fetches this URL,
+#      REDEPLOY_REMOTE), then this script, with the helper of the commit before R still running (its image reads
+#      the record): WITHDRAW_VAULT_MAINNET, and BIND_VAULT_MAINNET when set, move to mainnet-v1.json's account_id;
 #   2. apps/helper/deploy/redeploy.sh R, holding the helper's live checks (from R on helper-bind-relayer-mainnet is
 #      listed, scripts/ci/helper-live-checks.mjs bindMainnetPlan, and fails until step 4, and a failing check undoes a
 #      deploy). Its settings check (src/env-check.ts, the start's own readers with R's pin) refuses a vault line still
@@ -23,16 +25,21 @@
 # The withdrawal relayer's account, its keys and its fee recipient stay: none of them is tied to a vault.
 #
 # In order, stopping at the first failure with deploy/.env unchanged:
-#   1. refuses (exit 4) when contracts/vault/deployments/mainnet-v1.json does not exist or names no mainnet vault: the
-#      kit names no mainnet vault before that record (packages/wallet/test/deposit-delegate.test.ts: mainnet-v1.json's
-#      or null, never mainnet-test.json's), and this never falls back to the test vault;
-#   2. refuses (exit 1) when either name is set by a line that is not one plain NAME=value line (redeploy.sh's lines_of
+#   1. refuses (exit 4) when contracts/vault/deployments/mainnet-v1.json does not exist; with no deploy/.env there is
+#      nothing to move (exit 0); refuses (exit 6) when deploy/.env names no image (HELPER_COMMIT);
+#   2. reads the record with a real JSON parse (card vault-lines-record-read: the record also holds sources.account_id,
+#      so no text match can tell the two apart), by node in the running helper's image (ct-helper:<HELPER_COMMIT>, no
+#      network, a read-only container, the record on stdin), as bind-relayer-key.sh does: refuses (exit 4) when its
+#      top-level network is not "mainnet" or its top-level account_id is not a NEAR account id, since the kit names no
+#      mainnet vault before that record (packages/wallet/test/deposit-delegate.test.ts: mainnet-v1.json's or null,
+#      never mainnet-test.json's) and this never falls back to the test vault; exit 1 when the reader does not run;
+#   3. refuses (exit 1) when either name is set by a line that is not one plain NAME=value line (redeploy.sh's lines_of
 #      matcher: export, spaces, the NAME: form, or the name twice), as redeploy.sh refuses its own;
-#   3. writes deploy/.env again whole (a mode 600 temporary file beside it, then one rename), every other line kept byte
+#   4. writes deploy/.env again whole (a mode 600 temporary file beside it, then one rename), every other line kept byte
 #      for byte, each of the two lines that is set now naming the record's vault; a name not set stays unset. When both
 #      already name it, nothing is written.
 # It prints the names it moved, never a value.
-# exit 0 done, 2 usage, 4 no mainnet vault record, 1 any other failure
+# exit 0 done, 2 usage, 4 no mainnet vault record, 6 no image, 1 any other failure
 set -euo pipefail
 
 NAMES=(WITHDRAW_VAULT_MAINNET BIND_VAULT_MAINNET)
@@ -44,24 +51,25 @@ lines_of() {
   grep -E "^[[:space:]]*(export[[:space:]]+)?$2[[:space:]]*[=:]" "$1" || true
 }
 
-# The one string value of "key" in the record (a flat JSON object our deploy writes), or nothing when it is not there
-# exactly once.
-field_of() {
-  local found
-  found="$(grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"\\\\]*\"" "$1" || true)"
-  [[ -n "$found" && "$found" != *$'\n'* ]] || return 0
-  found="${found#*:}"
-  found="${found#"${found%%[![:space:]]*}"}"
-  found="${found#\"}"
-  printf '%s' "${found%\"}"
-}
+# The record reader, run by node in the helper's image: the deploy record on stdin, its top-level account_id on stdout
+# when its top-level network is "mainnet" and the id is a NEAR account id (bind-relayer-key.sh's rule), else exit 4.
+read -r -d '' READER <<'JS' || true
+let text = "";
+for await (const c of process.stdin) text += c;
+let rec;
+try { rec = JSON.parse(text); } catch { rec = null; }
+const ACCOUNT = /^(([a-z0-9]+[-_])*[a-z0-9]+\.)*([a-z0-9]+[-_])*[a-z0-9]+$/;
+const ok = (a) => typeof a === "string" && a.length >= 2 && a.length <= 64 && ACCOUNT.test(a);
+if (rec === null || typeof rec !== "object" || Array.isArray(rec) || rec.network !== "mainnet" || !ok(rec.account_id)) process.exit(4);
+process.stdout.write(rec.account_id);
+JS
 
 main() {
   if [[ $# -ne 0 ]]; then
     echo "usage: vault-lines.sh" >&2
     exit 2
   fi
-  local deploy root env record vault network name found tmp moved=()
+  local deploy root env record vault commit name found tmp rc moved=()
   deploy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   root="$(cd "$deploy/../../.." && pwd)"
   env="$deploy/.env"
@@ -71,15 +79,25 @@ main() {
     echo "vault-lines: no contracts/vault/deployments/mainnet-v1.json: the mainnet vault is not deployed at this commit; nothing changed" >&2
     exit 4
   fi
-  network="$(field_of "$record" network)"
-  vault="$(field_of "$record" account_id)"
-  if [[ "$network" != "mainnet" || ${#vault} -lt 2 || ${#vault} -gt 64 || ! "$vault" =~ $ACCOUNT_RE ]]; then
-    echo "vault-lines: mainnet-v1.json names no mainnet vault; nothing changed" >&2
-    exit 4
-  fi
   if [[ ! -e "$env" ]]; then
     echo "vault-lines: no deploy/.env; nothing to move"
     exit 0
+  fi
+  commit="$( { grep -E '^HELPER_COMMIT=[0-9a-f]{40}$' "$env" || true; } | head -n 1 | cut -d= -f2)"
+  if [[ -z "$commit" ]]; then
+    echo "vault-lines: deploy/.env names no HELPER_COMMIT (the running helper's image reads the record); nothing changed" >&2
+    exit 6
+  fi
+  rc=0
+  vault="$(docker run --rm -i --log-driver none --pull never --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+    --entrypoint node "ct-helper:$commit" --input-type=module -e "$READER" < "$record")" || rc=$?
+  if [[ $rc -eq 4 ]] || [[ $rc -eq 0 && ( ${#vault} -lt 2 || ${#vault} -gt 64 || ! "$vault" =~ $ACCOUNT_RE ) ]]; then
+    echo "vault-lines: mainnet-v1.json names no mainnet vault; nothing changed" >&2
+    exit 4
+  fi
+  if [[ $rc -ne 0 ]]; then
+    echo "vault-lines: the record reader stopped (exit $rc); nothing changed" >&2
+    exit 1
   fi
   for name in "${NAMES[@]}"; do
     found="$(lines_of "$env" "$name" | grep -c . || true)"

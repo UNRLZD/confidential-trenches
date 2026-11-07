@@ -37,6 +37,7 @@ import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
+import { INTENTS_BODY_MAX } from "./intents/carry.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
@@ -66,10 +67,13 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // routes are mounted.
 /** The proxy path whose answers create a delivered deposit's id (card helper-create-u, bind/create.ts). */
 const ONECLICK_STATUS = "oneclick/v0/status";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+/** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
+const ONECLICK_QUOTE = "oneclick/v0/quote";
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
+const [INTENTS] = MOUNTED.intents;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
 /** POST /v1/bind's body limit: the kit's HELPER_V1_PATHS row, as bind/checks.ts reads it (4 KB). */
@@ -213,6 +217,9 @@ export function handler(
   refusals: { count(route: string, why: string): void } = refusalLog(),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
+  // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
+  // /v1/intents (the gate's second path)
+  withdraw.onLanded?.((recipient) => bind.armed?.(recipient));
   // GET /v1/token-status serves each network's token from that network's own watch
   const watchOf = new Map<string, TokenWatch>(Object.values(watches).map((w) => [w.token, w]));
   // the per-client limits (limits/limits.ts): in memory for one window, the client's address never logged; the RPC
@@ -408,6 +415,29 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      if (path === INTENTS) {
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        // card helper-id-intents: an id's signed intent (bind/env.ts intents, intents/carry.ts), within the bind's
+        // answer bound, the wait for the senders inside it, as /v1/bind; a body that is not one JSON value is bad_shape
+        void readBody(req, INTENTS_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            if (bind.intents === undefined) return SENDERS_LATE;
+            const t0 = now();
+            if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
+            const a = await bindAnswerWithin(bind.intents(body), BIND_LATE, HELPER_BIND_ANSWER_MS - (now() - t0));
+            return { status: a.status, body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
       if (path === MARKET_LISTS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         // Discover's lists: exactly one chain, Solana (src/data/solana/lists.ts) or an EVM chain this helper serves
@@ -503,6 +533,21 @@ export function handler(
             // senders as /v1/bind does: the deposit store is the senders' holder's, and opening its lock while the
             // helper this one replaces still holds it would stall the event loop. Not held in time: dropped (the
             // device polls again).
+            // card helper-id-intents: a live 1Click quote the device was just answered is recorded the same way, off its
+            // path, for POST /v1/intents's quote check (bind/env.ts quoted)
+            if ((a.status === 200 || a.status === 201) && rest === ONECLICK_QUOTE && bind.quoted !== undefined) {
+              const body = a.body;
+              void heldWithin(senders).then((held) => {
+                if (!held) return;
+                setImmediate(() => {
+                  try {
+                    bind.quoted?.(body);
+                  } catch {
+                    // the answer went; a failed hook changes nothing
+                  }
+                });
+              });
+            }
             if (a.status === 200 && rest === ONECLICK_STATUS && bind.delivered !== undefined) {
               const body = a.body;
               void heldWithin(senders).then((held) => {

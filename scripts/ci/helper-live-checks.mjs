@@ -56,15 +56,17 @@ export const LIVE_CHECKS = [
   "evm-testnet-delegate-review3",
   "robinhood-mainnet-rpcs",
   "helper-usdc-pending-pause",
+  "helper-id-intents",
   "helper-rpc-sell-methods",
   "robinhood-listed-tape-opens",
   "rpc-keyed-lists",
   "helper-mainnet-vault-env",
   "helper-bind-relayer-mainnet",
+  "relayer-cost-guards",
 ];
 
 // `{commit}` is the deployed commit
-export const LIVE_ARGS = { "helper-host-health": "--commit {commit}" };
+export const LIVE_ARGS = { "helper-host-health": "--commit {commit}", "relayer-cost-guards": "--commit {commit}" };
 
 // helper-pool-senders takes one --pool: it runs once for each Solana cluster the helper may serve (the keys of
 // POOL_SOLANA_ENV in apps/helper/src/pool/solana.ts, a test holds them), with the pool its deploy record names, read from
