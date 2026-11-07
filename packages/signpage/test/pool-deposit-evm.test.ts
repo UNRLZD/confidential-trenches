@@ -611,3 +611,18 @@ test("pool-deposit-sent-end (EVM): U's finalized nonce past the send on one RPC 
   assert.equal((await ns.get(planned.id))!.state, "INCOMING", "nothing written: the next load builds it again, as today");
   assert.equal(ch.c.sent.length, 1, "the end's reads send nothing");
 });
+
+test("pool-deposit-sent-end fold: the verdict reads U's finalized nonce before the round, so a send that lands and finalizes between the two reads is landed, never read dead and sent again", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  // the send lands and is final just as the verdict reads U's finalized nonce (planted: between the two reads)
+  let landed = false;
+  const at = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>) => async (m: string, p: readonly unknown[]) => {
+    if (m === "eth_getTransactionCount" && p[1] === "finalized" && !landed && ch.c.sent.length > 0) (landed = true), ch.land(ch.c.sent[0]!);
+    return rpc(m, p);
+  };
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs: [at(ch.rpcs[0]), at(ch.rpcs[1])] as const }), ASK);
+  assert.equal(landed, true, "the planted landing happened");
+  assert.equal(ch.c.sent.length, 1, "never built again on a nonce read before its Deposited");
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+});

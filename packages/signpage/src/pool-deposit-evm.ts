@@ -22,8 +22,8 @@
 //   for both RPCs; a send built again is written first too (addEvmSend), at the note's recorded value.
 // - The verdict: a Deposited naming the precommitment at the round's finalized block (both RPCs, evmTreeSync's events
 //   and evmNextNote) moves the note to UNSPENT with its leaf; one at another value is a take, the note restored at that
-//   value. A send is dead ONLY when U's finalized nonce has passed it on BOTH RPCs and no Deposited names the
-//   precommitment on either (final or not): then it is built again from fresh reads at the new nonce on the SAME note,
+//   value. A send is dead ONLY when U's finalized nonce has passed it on BOTH RPCs, read before the round, and no
+//   Deposited names the precommitment on either (final or not): then it is built again from fresh reads at the new nonce on the SAME note,
 //   never the old bytes, at most POOL_DEPOSIT_EVM_REBUILDS times a run. A send that reached neither RPC is built again
 //   at its own nonce once EVM_DEPOSIT_RESEND_MS has passed on the device's clock since it left (a send again restarts
 //   it). Anything else is pending: the note stays INCOMING and the answer is "sent" or "not_landed", never failed.
@@ -325,6 +325,12 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
 type Verdict = { kind: "landed"; note: NoteRecord; filled: boolean } | { kind: "pending" } | { kind: "dead" } | { kind: "unsent"; nonce: bigint };
 async function verdictOf(r: Run, n: NoteRecord): Promise<Verdict> {
   const first = firstOf(n.ref, r.scope)!;
+  // U's finalized nonce before the round (card pool-deposit-sent-end): a send final by its nonce is then in the round's
+  // events, so one that lands between the two reads is read landed, never dead and built again
+  const last = n.evmSends?.at(-1);
+  const id = depositIdEvm(r.seed, first.s, first.i);
+  r.keys.push(id.secretKey);
+  const fin = last === undefined ? null : await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [id.address, "finalized"]), `rpc ${k} finalized nonce`));
   const round = await r.h.round();
   let pick: ReturnType<typeof evmNextNote>;
   try {
@@ -340,11 +346,7 @@ async function verdictOf(r: Run, n: NoteRecord): Promise<Verdict> {
   }
   // a Deposited naming it in a block not final yet: pending, never dead
   if (pick.pending.some((p) => sameRef(p, n.ref))) return { kind: "pending" };
-  const last = n.evmSends?.at(-1);
-  if (last === undefined) return { kind: "dead" }; // INCOMING with no send: nothing left the device for it
-  const id = depositIdEvm(r.seed, first.s, first.i);
-  r.keys.push(id.secretKey);
-  const fin = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [id.address, "finalized"]), `rpc ${k} finalized nonce`));
+  if (last === undefined || fin === null) return { kind: "dead" }; // INCOMING with no send: nothing left the device for it
   // dead only when U's finalized nonce passed the send on BOTH RPCs and no Deposited names it on either
   if (fin[0] > last.nonce && fin[1] > last.nonce) return { kind: "dead" };
   // reached neither RPC: old enough, no RPC knows any of the note's hashes, and U's latest and pending nonces both still
