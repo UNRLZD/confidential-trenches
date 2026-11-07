@@ -147,7 +147,9 @@ test("the withdraws that landed on Base Sepolia and Robinhood testnet read back,
   const withdrawn = `0x${Buffer.from(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)"))).toString("hex")}`;
   for (const t of landed.txs) {
     assert.equal(t.status, "0x1", t.network);
-    assert.equal(t.to, evmPoolVenues()[t.network as "base-sepolia"].pool, `${t.network}: the kit's pinned pool`);
+    // landed 5 Nov on the first pool set (card pool-evm-deploy's record); the kit pins card pool-evm-buy-pays-revert's since
+    const first = (JSON.parse(readFileSync(new URL(`../../../../scripts/live-checks/pool-evm-deploy.${t.network}.json`, import.meta.url), "utf8")) as { contracts: { PrivacyPoolSimple: { address: string } } }).contracts.PrivacyPoolSimple.address;
+    assert.ok(t.to === evmPoolVenues()[t.network as "base-sepolia"].pool || t.to === first, `${t.network}: the kit's pinned pool or the first set's`);
     assert.equal(t.input.slice(2, 10), WITHDRAW_SELECTOR, `${t.network}: the selector the pool ran`);
     const w = evmReadWithdraw(new Uint8Array(Buffer.from(t.input.slice(2), "hex")));
     const log = t.logs.find((l) => l.topics[0] === withdrawn)!;

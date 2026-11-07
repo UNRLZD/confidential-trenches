@@ -19,7 +19,10 @@ const CAST = JSON.parse(readFileSync(new URL("./fixtures/release-cast.json", imp
   w: string; withdrawType: string; buyType: string;
   cases: Record<string, { method: string; chainId: number; pool: string; nullifier: string; context: string; value: string; adapter?: string; data?: string; minOut?: string; coin?: string; digest: string; signature: string; callData: string; other: Record<string, string> }>;
 };
-const LANDED = JSON.parse(readFileSync(new URL("./fixtures/release-landed.json", import.meta.url), "utf8")) as { txs: { network: string; kind: string; hash: string; pool: string; w: string; input: string }[] };
+const LANDED = JSON.parse(readFileSync(new URL("./fixtures/release-landed.json", import.meta.url), "utf8")) as { txs: { network: string; kind: string; swapFailed?: boolean; hash: string; pool: string; w: string; input: string }[] };
+/** Each testnet's first pool set (card pool-evm-deploy's record), where the first testnet runs landed before card
+ *  pool-evm-buy-pays-revert's pools; the kit pins the newest. */
+const FIRST_POOL = Object.fromEntries(["base-sepolia", "robinhood-testnet"].map((n) => [n, (JSON.parse(readFileSync(new URL(`../../../../scripts/live-checks/pool-evm-deploy.${n}.json`, import.meta.url), "utf8")) as { contracts: { PrivacyPoolSimple: { address: string } } }).contracts.PrivacyPoolSimple.address]));
 const POOL = "0x00000000000000000000000000000000b1f1f001";
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
 const N = secp256k1.Point.CURVE().n;
@@ -85,11 +88,14 @@ test("the helper's release digest is the pool's: cast's EIP-712 of the pool's Wi
   }
 });
 
-test("every withdraw and buy that landed on Base Sepolia and Robinhood testnet recovers to the W its run named, under the kit's pinned chain id and pool", () => {
-  assert.deepEqual(LANDED.txs.map((t) => t.kind).sort(), ["buy", "buy", "buy", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw"]);
+test("every withdraw and buy that landed on Base Sepolia and Robinhood testnet recovers to the W its run named, under the kit's pinned chain id and the pool it ran on", () => {
+  assert.deepEqual(LANDED.txs.map((t) => t.kind).sort(), ["buy", "buy", "buy", "buy", "buy", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw"]);
+  // the kit's pinned Base Sepolia pool has its own landings: a buy that swapped, one whose swap failed, and withdraws
+  const pinned = LANDED.txs.filter((t) => t.network === "base-sepolia" && t.pool === evmPoolVenues()["base-sepolia"].pool);
+  assert.deepEqual(pinned.map((t) => `${t.kind}${t.swapFailed ? " (swap failed)" : ""}`).sort(), ["buy", "buy (swap failed)", "withdraw", "withdraw", "withdraw"]);
   for (const t of LANDED.txs) {
     const v = evmPoolVenues()[t.network as "base-sepolia"];
-    assert.equal(t.pool, v.pool, `${t.hash}: the kit's pinned pool`);
+    assert.ok(t.pool === v.pool || t.pool === FIRST_POOL[t.network], `${t.hash}: the kit's pinned pool or the first set's`);
     const r = evmReadRelease(bytes(t.input));
     assert.equal(r.method, t.kind, t.hash);
     assert.equal(r.processooor, t.pool, t.hash);
