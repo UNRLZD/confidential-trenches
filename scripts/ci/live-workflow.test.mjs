@@ -302,6 +302,7 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
   const real = (edit) =>
     fixture((r) => {
       cpSync(path.join(ROOT, "scripts/ci/helper-live-checks.mjs"), path.join(r, "scripts/ci/helper-live-checks.mjs"));
+      cpSync(path.join(ROOT, "scripts/live-checks/pool-redeploys.mjs"), path.join(r, "scripts/live-checks/pool-redeploys.mjs"));
       for (const k of LIVE_CHECKS) cpSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`), path.join(r, "scripts/live-checks", `${k}.mjs`));
       edit(r);
     });
@@ -357,7 +358,7 @@ test("helper-evm-sender-2 runs on the PrivacyPoolSimple each EVM network's deplo
     evm("base", { chain: "base", contracts: { PrivacyPoolSimple: { address: B } } });
     evm("robinhood-testnet", "{");
     assert.throws(() => evmPools(root), /pool-evm-deploy\.robinhood-testnet\.json is not JSON/);
-    // a pool set redeployed by a later card (pool-evm-deploy.mjs POOL_REDEPLOYS) is the testnet's pool, over the first set's
+    // a pool set redeployed by a later card (pool-redeploys.mjs POOL_REDEPLOYS) is the testnet's pool, over the first set's
     evm("robinhood-testnet", { chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: B } } });
     const R = "0x00000000000000000000000000000000000000aa";
     writeFileSync(path.join(root, "scripts/live-checks/pool-evm-buy-pays-revert.robinhood-testnet.json"), JSON.stringify({ chain: "robinhood-testnet", contracts: { PrivacyPoolSimple: { address: R } } }));

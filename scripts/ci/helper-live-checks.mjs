@@ -7,6 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { poolRecordName } from "../live-checks/pool-redeploys.mjs";
 
 export const LIVE_CHECKS = [
   "helper-host-health",
@@ -90,16 +91,13 @@ export function solanaPools(root = ROOT) {
 // helper-evm-sender-2.mjs runs helper-pool-senders' EVM branch once for each EVM network a pool may be deployed on
 // (card helper-evm-sender-2; the testnets and mainnets of scripts/live-checks/pool-evm-deploy.mjs, CHAINS and MAINNETS,
 // a test holds them), with the PrivacyPoolSimple its deploy record names: a testnet's record is its newest pool set's,
-// scripts/live-checks/<card>.<network>.json for a card of POOL_REDEPLOYS, else pool-evm-deploy.<network>.json; a
-// mainnet's contracts/pool-evm/deployments/<network>.json (pool-evm-deploy.mjs poolFile, a test holds them equal). A
-// network with no record has no run.
+// scripts/live-checks/<card>.<network>.json for a card of POOL_REDEPLOYS (pool-redeploys.mjs poolRecordName, the one
+// list), else pool-evm-deploy.<network>.json; a mainnet's contracts/pool-evm/deployments/<network>.json
+// (pool-evm-deploy.mjs poolFile, a test holds them equal). A network with no record has no run.
 export const POOL_EVM_NETWORKS = ["base", "robinhood", "base-sepolia", "robinhood-testnet"];
 const EVM_MAINNETS = new Set(["base", "robinhood"]);
-const POOL_REDEPLOYS = ["pool-evm-buy-pays-revert"]; // pool-evm-deploy.mjs POOL_REDEPLOYS, newest first
 export const evmPoolRecord = (network, root = ROOT) =>
-  EVM_MAINNETS.has(network)
-    ? `contracts/pool-evm/deployments/${network}.json`
-    : `scripts/live-checks/${POOL_REDEPLOYS.map((k) => `${k}.${network}.json`).find((f) => existsSync(path.join(root, "scripts/live-checks", f))) ?? `pool-evm-deploy.${network}.json`}`;
+  EVM_MAINNETS.has(network) ? `contracts/pool-evm/deployments/${network}.json` : `scripts/live-checks/${poolRecordName(network, path.join(root, "scripts/live-checks"))}`;
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 
 /** The PrivacyPoolSimple each EVM network's deploy record names under `root`, lower case, or null where there is no
