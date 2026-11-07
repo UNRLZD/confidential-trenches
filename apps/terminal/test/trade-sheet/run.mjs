@@ -37,7 +37,8 @@ const WIDTHS = [
 const STATES = [
   ["S8.3", "f=ready", false, 0, null, "Buy TORCH", "Max $100"],
   ["S8.3", "f=ready&pool=sol-ready", false, 0, null, "Buy TORCH", /^Proof ready Max \$\d/],
-  ["S8.3", "f=ready&pool=sol-making", false, 0, null, "Buy TORCH", /^Making proof Max \$\d/],
+  // no proof ready yet: no tap's spend, so no Max (the box's own rule, card trade-box-pool)
+  ["S8.3", "f=ready&pool=sol-making", false, 0, null, "Buy TORCH", "Making proof"],
   ["S8.9", "f=ready&route=1", true, 100, null, "Sending", "Max $100"],
   ["S8.10", "f=ready&route=1", true, 400, "0.4s", "Landing 0.4s", "Max $100"],
   ["S8.11", "f=slow&route=1", true, 6_200, "6.2s", "Slow 6.2s", "Max $100"],
