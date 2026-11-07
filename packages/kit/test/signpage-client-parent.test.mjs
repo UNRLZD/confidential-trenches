@@ -80,6 +80,17 @@ function makeHost(mode = "parent") {
   return { host, shell, self, frames, calls, peer, post, fireWindow, sent, listening: () => on.size > 0 };
 }
 
+
+/** "No state change" now that every snapshot is a copy (card oneclick-fee-path-own-key): no listener has heard a change
+ *  since this call, which is what one object kept the same meant (the client's set() always calls every listener), and
+ *  the snapshot reads the same. */
+function unchanged(c) {
+  let changes = 0;
+  c.subscribe(() => void changes++);
+  const snap = c.snapshot();
+  return { check(msg = "no state change") { assert.equal(changes, 0, msg); assert.deepEqual(c.snapshot(), snap, msg); } };
+}
+
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
@@ -147,7 +158,7 @@ test("parent mode drops, with no state change, a message from another origin or 
   const { id, p, settled } = await open(h, c, "buy");
   const n = h.shell.sent.length;
   const good = answer(id, FIXTURES.buy.result);
-  const before = c.snapshot();
+  const before = unchanged(c);
   const cases = [
     ["APP_HOST's origin", APP_ORIGIN, h.shell, "origin"],
     ["a same-site sibling", "https://evil.unrealized.trade", h.shell, "origin"],
@@ -162,7 +173,7 @@ test("parent mode drops, with no state change, a message from another origin or 
       h.post(data, origin, source);
       await flush();
       assert.equal(c.dropped()[reason], d0 + 1, `${name}: dropped as ${reason}`);
-      assert.equal(c.snapshot(), before, `${name}: no state change`);
+      before.check(`${name}: no state change`);
       assert.equal(settled(), false, `${name}: the request is still open`);
     }
   }

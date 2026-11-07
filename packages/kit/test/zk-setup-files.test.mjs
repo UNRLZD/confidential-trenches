@@ -30,3 +30,15 @@ test("the pins are frozen: no code at run time can swap a hash", () => {
     ZK_SETUP_FILES["other.zkey"] = ZK_SETUP_FILES["withdraw.zkey"];
   }, TypeError);
 });
+
+test("setupFileURL reads ZK_SETUP_FILES only by an own key: a polluted Object.prototype names no file (card oneclick-fee-path-own-key)", async () => {
+  const { setupFileURL } = await import("../src/prover/client.ts");
+  const P = Object.prototype;
+  try {
+    P["evil.zkey"] = { sha256: "f".repeat(64) };
+    for (const name of ["evil.zkey", "toString", "__proto__"]) assert.throws(() => setupFileURL(name, "https://sign.example"), /no such setup file/, name);
+  } finally {
+    delete P["evil.zkey"];
+  }
+  assert.equal(setupFileURL("withdraw.zkey", "https://sign.example"), `https://sign.example/assets/zk/${ZK_SETUP_FILES["withdraw.zkey"].sha256}.zkey`);
+});

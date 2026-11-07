@@ -46,6 +46,8 @@ export interface ProverOptions {
 
 /** The setup file's address on the page's own origin. */
 export function setupFileURL(name: "withdraw.wasm" | "withdraw.zkey" | "commitment.wasm" | "commitment.zkey", origin: string): string {
+  // an own key only: a polluted Object.prototype names no file
+  if (typeof name !== "string" || !Object.hasOwn(ZK_SETUP_FILES, name)) throw new Error(`no such setup file ${typeof name === "string" ? name : typeof name}`);
   const ext = name.slice(name.lastIndexOf(".") + 1);
   return new URL(`/assets/zk/${ZK_SETUP_FILES[name].sha256}.${ext}`, origin).href;
 }
