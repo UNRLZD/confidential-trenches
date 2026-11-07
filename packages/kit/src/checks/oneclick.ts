@@ -261,8 +261,13 @@ export function oneClickFloors(x: OneClickFloorInput): { amountOut: bigint; minA
 }
 
 /** F, 1Click's fee in bps on a quote from `originAsset` to `destinationAsset` on `path`, from the device's own request:
- *  0 on the same asset, ONECLICK_FEE_BPS between two of the release's USDC assets, ONECLICK_PAIR_FEE_BPS otherwise. */
+ *  0 on the same asset, ONECLICK_FEE_BPS between two of the release's USDC assets, ONECLICK_PAIR_FEE_BPS otherwise.
+ *  A path is read only as an own key of both tables (card oneclick-fee-path-own-key): freezing a table does not stop
+ *  `table[path]` from reading Object.prototype, so a path outside keyless and partner is refused by name, on every
+ *  route, same-asset included, even when a polluted page's prototype names a fee for it. */
 export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinationAsset: string): number {
+  if (typeof path !== "string" || !Object.hasOwn(ONECLICK_FEE_BPS, path) || !Object.hasOwn(ONECLICK_PAIR_FEE_BPS, path))
+    fail("request", `no such 1Click path ${typeof path === "string" ? show(path) : `(a ${path === null ? "null" : typeof path})`}`);
   if (originAsset === destinationAsset) return 0;
   const stable = ONECLICK_USDC_ASSETS.includes(originAsset) && ONECLICK_USDC_ASSETS.includes(destinationAsset);
   return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path];

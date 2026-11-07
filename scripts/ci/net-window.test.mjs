@@ -90,6 +90,7 @@ export const CHANGED = [
   "scripts/live-checks/money-gate-testnet.mjs",
   "scripts/live-checks/near-rpc-operators.mjs",
   "scripts/live-checks/notes-per-pool-evm.mjs",
+  "scripts/live-checks/oneclick-fee-path-own-key.mjs",
   "scripts/live-checks/oneclick-partner-fee-live.mjs",
   "scripts/live-checks/pool-answer-unknown.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
