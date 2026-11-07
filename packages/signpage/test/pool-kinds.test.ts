@@ -56,12 +56,13 @@ test("no pool pinned (the page's mainnet today): every pool kind is refused not_
   assert.equal(flows.length, 0);
 });
 
-test("Base and Robinhood refuse a pool.deposit even with their pool pinned, and hand a pool.withdraw to the flow (its onward send has its check, rules/pool.ts checkEvmOnwardSend); Solana's go to the flow", async () => {
+test("Base and Robinhood hand a pinned pool's pool.deposit (its check, rules/pool.ts checkEvmDeposit, card pool-deposits) and pool.withdraw (checkEvmOnwardSend) to the flow; Solana's go to the flow", async () => {
   const flows: PoolAsk[] = [];
   const deps: PoolKindsDeps = { pinned: () => true, rpcs: () => null, flow: (ask) => (flows.push(ask), { error: "busy" }) };
   const k = poolKinds(deps);
-  for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.deposit"]({ chain, amount: "1" }, ctx), { error: "not_allowed" });
-  assert.equal(flows.length, 0);
+  for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.deposit"]({ chain, amount: "0.001" }, ctx), { error: "busy" });
+  assert.deepEqual(flows.map((a) => [a.kind, a.chain, a.amount, a.decimals]), [["pool.deposit", "base", 10n ** 15n, 18], ["pool.deposit", "robinhood", 10n ** 15n, 18]]);
+  flows.length = 0;
   for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.withdraw"]({ chain }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.deposit"]({ chain: "solana", amount: "1.5" }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.withdraw"]({ chain: "solana" }, ctx), { error: "busy" });
@@ -252,8 +253,8 @@ test("card pool-restore-wired: a flow that fails with EvmNotFinalError is answer
 // card precommit-taken-recover: an EVM pool deposit or sell signs on a precommitment anyone who sees it pending can take
 // first with MIN_DEPOSIT. Every device file that builds or signs one (the kit's evmPoolBuildSell or the rule's
 // signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
-// evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
-// (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
+// evmNextNote, which restores a taken note and names the next one to sign. The first that does is the EVM deposit
+// runner (src/pool-deposit-evm.ts, card pool-deposits), whose signEvmDeposit call follows its own evmNextNote pick.
 // card signer-guard-parser (reviewer L3 of pool-restore-wired, the review of 1a8a42f0 and the re-review of 40115c3d): the
 // guard reads code, not names (test/signer-guard.ts has the rules, and what they do not prove): every name is bound to
 // its declaration by the TypeScript compiler; a signer is only called, after an evmNextNote that runs first, or
@@ -276,7 +277,7 @@ const SIGNER_LIST = [
   ...["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell"].map((n) => `packages/kit/src/trade/evm/sell.ts#${n}`),
   ...["evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "evmPoolSignSellAuthorizationUnpinned", "evmPoolBuildSimSellUnpinned", "evmPoolSignSimSellUnpinned", "evmSellCallData", "pinnedBuildSell", "pinnedSignSell", "pinnedSignSimSell", "pinnedSignSellAuthorization"].map((n) => `packages/kit/src/trade/evm/sell-unpinned.ts#${n}`),
   "packages/kit/src/trade/evm/quoted.ts#evmQuotedSell",
-  ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
+  ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization", "signEvmDeposit"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
 ];
 const FIXTURE_SIGNERS = ["packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureSignSell", "packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureBuildSell", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts#fastPath", "packages/signpage/test/fixtures/signer-guard/bad/m1-define-leak.ts#leakSign"];
 // carried from precommit-taken-recover: each signer called with no evmNextNote is refused, and with it (by its own
