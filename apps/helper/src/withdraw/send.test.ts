@@ -70,6 +70,8 @@ type Chain = {
   registered: [boolean, boolean];
   min: bigint;
   spendStatus: string;
+  /** The spends row's refund_value (the vault's on_payout: the withdrawn amount when the payout bounced), "0" unless set. */
+  spendRefund?: string;
   spendIndex: number;
   /** The nullifier the spends row at spendIndex names (NF unless a test plants another). */
   spendNf?: bigint;
@@ -149,7 +151,7 @@ function provider(c: Chain, i: 0 | 1): Rpc {
       else if (p.method_name === "is_blocklisted" && args.account_id === W.recipient) v = c.recipientListed[i];
       else if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
-      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus }] : [];
+      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus, refund_value: c.spendRefund ?? "0" }] : [];
       else if (p.method_name === "is_known_state_root") v = c.stateKnown;
       else if (p.method_name === "is_known_label_root") v = c.labelKnown;
       else if (p.method_name === "totals") v = { deposited: c.totals[0].toString(), spent: c.totals[1].toString(), returned: c.totals[2].toString() };
@@ -462,26 +464,31 @@ test("relayer_low: under one withdraw's gas bought up front, its attachment and 
 
 // ---- card helper-id-intents: the arming account A a valid proof landed to ----
 
-test("a withdrawal read succeeded hands its signed recipient to onLanded (the gate's second path on POST /v1/intents); a failed one does not", async () => {
-  const ok = setup();
-  const heard: string[] = [];
-  ok.deps.onLanded = (to) => void heard.push(to);
-  assert.equal(code(await carryWithdraw(req(), ok.deps)), "ok");
-  const tx = ok.relayer.sent[0]!.tx;
-  assert.equal(recipientOfSigned(tx.signed_tx), W.recipient);
-  await outcomeRound(ok.deps);
-  assert.deepEqual(heard, [], "not before its outcome is read");
-  ok.outcomes.set(tx.tx_hash, final(tx.tx_hash, true, DEADLINE - 1n));
-  await outcomeRound(ok.deps);
-  assert.deepEqual(heard, [W.recipient]);
-  const bad = setup();
-  const none: string[] = [];
-  bad.deps.onLanded = (to) => void none.push(to);
-  assert.equal(code(await carryWithdraw(req(), bad.deps)), "ok");
-  const t2 = bad.relayer.sent[0]!.tx.tx_hash;
-  bad.outcomes.set(t2, final(t2, false, DEADLINE - 1n));
-  await outcomeRound(bad.deps);
-  assert.deepEqual(none, []);
+test("onLanded hears a withdrawal's signed recipient only once its spends row reads paid, or settled with refund_value 0: a bounced payout (refund_pending, or settled with a refund) and a failed send open no gate on POST /v1/intents", async () => {
+  // one withdrawal read succeeded, its spends row then read as `status` with `refund`; what onLanded heard
+  const run = async (status: string, refund = "0", ran = true) => {
+    const s = setup();
+    const heard: string[] = [];
+    s.deps.onLanded = (to) => void heard.push(to);
+    assert.equal(code(await carryWithdraw(req(), s.deps)), "ok");
+    const tx = s.relayer.sent[0]!.tx;
+    assert.equal(recipientOfSigned(tx.signed_tx), W.recipient);
+    await outcomeRound(s.deps);
+    assert.deepEqual(heard, [], "not before its outcome is read");
+    s.outcomes.set(tx.tx_hash, final(tx.tx_hash, ran, DEADLINE - 1n));
+    await outcomeRound(s.deps);
+    assert.deepEqual(heard, [], "not on the withdraw transaction alone: its payout may have bounced");
+    s.c.spendStatus = status;
+    s.c.spendRefund = refund;
+    await outcomeRound(s.deps);
+    return heard;
+  };
+  assert.deepEqual(await run("paid"), [W.recipient], "paid: the recipient received the money");
+  assert.deepEqual(await run("settled", "0"), [W.recipient], "settled by another caller after a payout that paid");
+  assert.deepEqual(await run("refund_pending", "1000000"), [], "a bounced payout: nothing received");
+  assert.deepEqual(await run("settled", "1000000"), [], "settled with a refund note: the payout bounced");
+  assert.deepEqual(await run("in_flight"), [], "the payout's callback has not run");
+  assert.deepEqual(await run("paid", "0", false), [], "a withdraw that failed on chain is never settled");
   assert.equal(recipientOfSigned(Buffer.from("not a transaction").toString("base64")), null);
 });
 

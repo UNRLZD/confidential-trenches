@@ -125,8 +125,8 @@ export function onStatusAnswer(body: string, store: Pick<IntentsStore, "quote" |
 
 /**
  * The gate's second path (H4.3): an arming account A our withdrawal relayer carried a valid proof to. Called when a
- * mainnet withdrawal send with fund_recipient true succeeded on chain (withdraw/send.ts onLanded); A is a 64-hex
- * implicit account. The signer seen, or null.
+ * mainnet withdrawal's payout reached A: its spends row read paid, or settled with refund_value 0, never a bounced one
+ * (withdraw/send.ts onLanded); A is a 64-hex implicit account. The signer seen, or null.
  */
 export function onArmed(recipient: string, store: Pick<IntentsStore, "see">): string | null {
   if (typeof recipient !== "string" || !IMPLICIT.test(recipient)) return null;
