@@ -225,16 +225,19 @@ test("card helper-robinhood-capacity fold 5: the traders' lookups (eth_getTransa
 });
 
 test("card helper-robinhood-capacity fold 5: a /v1/rpc/robinhood caller waits out a short hold the helper shares with its swap reads (helper-crowd-429's rule on callEvm): every provider held 1 s answers 200 after it, one held 30 s is still 429", async () => {
-  const holds = providerHolds();
+  // on this test's clock (card helper-pace-test-clock): the holds and their wait, never wall time, where a busy runner's
+  // stall between the holds and the stopwatch's start would read the wait short
+  let clock = 1_000_000;
+  const holds = providerHolds(() => clock);
   const fetch = async () => Response.json({ jsonrpc: "2.0", id: 1, result: "0x10" });
-  const rpc = createRpc({}, { holds, fetch: fetch as never, pinned: SWAP_RPCS, log: () => {} });
+  const rpc = createRpc({}, { holds, fetch: fetch as never, pinned: SWAP_RPCS, log: () => {}, now: () => clock, sleep: async (ms: number) => void (clock += ms) });
   const call = () => rpc.handle("robinhood", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), "198.51.100.8");
   for (const u of SWAP_RPCS.robinhood) holds.hold(u, 1);
-  const t0 = performance.now();
+  const t0 = clock;
   const a = await call();
-  const ms = performance.now() - t0;
+  const ms = clock - t0;
   assert.equal(a.status, 200, a.body);
-  assert.ok(ms >= 950 && ms < 2_500, `answered after ${Math.round(ms)} ms`);
+  assert.ok(ms >= 1_000 && ms < 2_500, `answered after ${Math.round(ms)} ms`);
   for (const u of SWAP_RPCS.robinhood) holds.hold(u, 30);
   const b = await call();
   assert.equal(b.status, 429, b.body);

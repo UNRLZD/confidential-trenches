@@ -211,14 +211,16 @@ const OTHER_ADDRESS = "0x000000000000000000000000000000000000dead";
 /** One v4 hop to the native coin, fee 3000, tick spacing 60, no hook, as abi.encode(PathKey[]) writes it: the swap data
  *  the kit's sell builder makes for that route through the PoolManager. */
 const ZERO = "0x0000000000000000000000000000000000000000";
-const V4_NATIVE_PATH = `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(ZERO)}${w32(3000n)}${w32(60n)}${a32(ZERO)}${w32(0xa0n)}${w32(0n)}`;
+/** The same hop through the pool behind `hooks` (card evm-sell-hook-converge: a hook no venue lists). */
+export const v4PathThrough = (hooks) => `0x${w32(0x20n)}${w32(1n)}${w32(0x20n)}${a32(ZERO)}${w32(3000n)}${w32(60n)}${a32(hooks)}${w32(0xa0n)}${w32(0n)}`;
+const V4_NATIVE_PATH = v4PathThrough(ZERO);
 
 /**
  * The base sell for `pool` on `network` at `nowMs`, paying its fee to `feeRecipient` (the fee answer's fee_recipient),
  * and each plant made from it, as POST /v1/pool/evm/sell bodies. W and the other signer are throwaway keys made here
- * unless given; `wKey` is returned for the test only.
+ * unless given; `wKey` is returned for the test only. `data`: the swap's data (the hookless hop by default).
  */
-export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey() }) {
+export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey = randomKey(), otherKey = randomKey(), data = V4_NATIVE_PATH }) {
   const v = evmPoolVenues()[network];
   if (!v?.sellDelegate || !v.poolManager) throw new Error(`the kit pins no sell delegate or PoolManager for ${network}`);
   if (typeof feeRecipient !== "string" || !ADDRESS.test(feeRecipient)) throw new Error(`the fee recipient ${show(feeRecipient)} is no address`);
@@ -230,7 +232,7 @@ export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey
     token: "0x0000000000000000000000000000000000007070", // no static check reads it, and W holds none of it
     amount: 10n ** 18n,
     target: v.poolManager.toLowerCase(),
-    data: V4_NATIVE_PATH,
+    data,
     minOut: 10n ** 15n,
     pool,
     precommitment: 12_345n,

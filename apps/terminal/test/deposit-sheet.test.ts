@@ -1,11 +1,14 @@
 // The deposit sheet's state map (card app-deposit-sheet; APU-04, app.md:1326; FR-P7 to FR-P11 and branch D,
-// app.md:1123-1139): the kit's deposit stages and the stages it does not have yet to S4 ids, table driven; the checks
-// AE-09 makes of each branch on the screen's side (each branch its own state, done never before the kit's done, a
-// refused quote never an address); and the one WORDS table.
+// app.md:1123-1139): the kit's deposit stages to S4 ids, table driven; the checks AE-09 makes of each branch on the
+// screen's side (each branch its own state, done never before the kit's done, a refused quote never an address); the one
+// WORDS table; and (card app-deposit-mount) the kit's deposit.assets rows and deposit op facts as the sheet reads them,
+// the pickers, the address heading and the address QR.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
-import type { SignpageResults } from "@blindfill/kit";
-import { ADDRESS_STATES, countdown, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, sheetState, statusState, usd } from "../src/screens/deposit/model.ts";
+import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
+import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
 
@@ -131,4 +134,79 @@ test("WORDS: every word carries its source; no draft is left (owner 2 Nov 06:08Z
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0, k);
   assert.deepEqual([...DRAFTS], []);
   for (const k of ["asset", "chain", "amount", "expiresIn", "expired", "getAddress", "copy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
+});
+
+// card app-deposit-mount: the live source reads the kit's deposit calls as they are on main (kit-deposit-assets-dry,
+// kit-deposit-calls): deposit.assets' rows become the sheet's assets, a deposit op's stage and facts its status, and the
+// address heading names the asset once.
+
+test("deposit.assets: each row is an asset the sheet draws, the chain by its name, the cap as sent", () => {
+  const row: DepositAsset = { origin_asset: "nep141:wrap.near", chain: "near", symbol: "NEAR", decimals: 24, min: "2.1", max_usd: "1000" };
+  assert.deepEqual(assetOf(row), { id: "nep141:wrap.near", chain: "NEAR", symbol: "NEAR", min: "2.1", max_usd: "1000" });
+  const usdc: DepositAsset = { origin_asset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", chain: "base", symbol: "USDC", decimals: 6, min: "1.2", max_usd: "1000" };
+  assert.equal(assetOf(usdc).chain, "Base");
+  assert.equal(assetOf({ ...usdc, chain: "solana" }).chain, "Solana");
+  assert.equal(assetOf({ ...usdc, chain: "robinhood" }).chain, "Robinhood");
+});
+
+test("a deposit op: its stage and every fact the kit sends, nothing else", () => {
+  const op: Operation = { id: "q1", kind: "deposit", stage: "halted", txs: [], hold: "vault_blocked", held_id: "u1", since_ms: 5, refunded: true };
+  assert.deepEqual(statusOf(op), { stage: "halted", hold: "vault_blocked", held_id: "u1", since_ms: 5, refunded: true });
+  assert.deepEqual(statusOf({ id: "q1", kind: "deposit", stage: "done", txs: [], amount_usd: "73.18", since_ms: 1 }), { stage: "done", amount_usd: "73.18", since_ms: 1 });
+  assert.deepEqual(statusOf({ id: "q1", kind: "deposit", stage: "waiting", txs: [] }), { stage: "waiting" });
+  assert.equal(tracked(statusOf(op)), "held-vault-blocked");
+});
+
+test("the address heading names the asset once: NEAR on NEAR is NEAR, USDC on Base is USDC and Base", () => {
+  assert.deepEqual(addressHeading({ symbol: "NEAR", chain: "NEAR" }), ["NEAR"]);
+  assert.deepEqual(addressHeading({ symbol: "near", chain: "NEAR" }), ["near"]);
+  assert.deepEqual(addressHeading({ symbol: "USDC", chain: "Base" }), ["USDC", "Base"]);
+});
+
+test("the address QR is R5's: uqr at error correction H with a one-module border, one square per dark module", () => {
+  // R5's QR of a real 1Click NEAR deposit address (research design/proto/assets/marks.js:3 at design-lock-r5, made with
+  // uqr ecc H as UNRLZD shell/funds/Qr.tsx): 47 modules, its path's sha256 below
+  const q = qrOf("046b61f0a0cb71da75ac26bc7a2a8b3c96f98c2c43e5753eb22b0a0183069e79");
+  assert.equal(q.n, 47);
+  assert.equal(createHash("sha256").update(q.d).digest("hex"), "1d3bf40bc8c4b30f8d0fd08eef8f6348b4ce199c6592a08a3008feca597fb1cf");
+});
+
+test("the pickers: each asset once in the list's order, its chains, and the pick falls back to the asset's first chain", () => {
+  const list: Asset[] = [
+    near,
+    { id: "base-usdc", chain: "Base", symbol: "USDC", min: "1.2", max_usd: "1000" },
+    { id: "sol-usdc", chain: "Solana", symbol: "USDC", min: "1.2", max_usd: "1000" },
+    { id: "sol", chain: "Solana", symbol: "SOL", min: "0.01", max_usd: "1000" },
+  ];
+  assert.deepEqual(symbolsOf(list), ["NEAR", "USDC", "SOL"]);
+  assert.deepEqual(chainsOf(list, "USDC"), ["Base", "Solana"]);
+  assert.equal(pickAsset(list, null)?.id, "nep141:wrap.near", "nothing picked: the list's first");
+  assert.equal(pickAsset(list, { symbol: "USDC", chain: "Solana" })?.id, "sol-usdc");
+  assert.equal(pickAsset(list, { symbol: "USDC", chain: "NEAR" })?.id, "base-usdc", "a chain the asset is not on: its first chain");
+  assert.equal(pickAsset(list, { symbol: "ETH", chain: "Base" })?.id, "nep141:wrap.near", "an asset gone from the list: the list's first");
+  assert.equal(pickAsset([], null), null);
+  assert.equal(pickAsset(null, null), null);
+});
+
+test("Recent: the account's deposits from state.ops, newest first, three at most, each by its stage's word; others left out", () => {
+  const dep = (id: string, stage: Operation["stage"], facts: object = {}) => ({ id, kind: "deposit", stage, txs: [], ...facts }) as Operation;
+  const ops: Operation[] = [
+    dep("a", "done", { amount_usd: "73.18" }),
+    { id: "w", kind: "withdraw", stage: "sent", txs: [] },
+    dep("b", "halted", { hold: "halted", held_id: "u1" }),
+    dep("c", "in_transit", { since_ms: 1 }),
+    dep("d", "refund_move", { refunded: true, since_ms: 1 }),
+  ];
+  assert.deepEqual(recentRows(ops), [
+    { id: "d", word: "refunded" },
+    { id: "c", word: "processing" },
+    { id: "b", word: "held" },
+  ]);
+  assert.deepEqual(recentRows(ops.slice(0, 2)), [{ id: "a", word: "deposited", amount_usd: "73.18" }]);
+  assert.deepEqual(recentRows([dep("r", "done", { refunded: true, amount_usd: "5" })]), [{ id: "r", word: "deposited", amount_usd: "5" }], "a refund moved in is deposited");
+  assert.deepEqual(recentRows([dep("q", "quote_checked"), dep("e", "expired"), dep("s", "short", { since_ms: 1 }), dep("f", "failed", { since_ms: 1 })]).map((r) => r.word), ["processing", "short", "expired"], "four deposits: the newest three");
+  assert.deepEqual(recentRows([dep("q", "quote_checked")]).map((r) => r.word), ["waiting"]);
+  assert.deepEqual(recentRows([]), []);
+  assert.deepEqual(recentRows(undefined), []);
+  for (const k of ["recent", "noActivity"] as const) assert.equal(WORDS[k].draft, false, k);
 });
