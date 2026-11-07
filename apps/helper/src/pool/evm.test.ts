@@ -11,7 +11,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createServer } from "node:http";
 import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
 import { providerHolds, type ProviderHolds } from "../limits/limits.ts";
-import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
+import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, pacedEvmRpc, evmReadWithdraw, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -492,6 +492,9 @@ test("LOW-A the helper refuses an env floor other than the kit's EVM_POOL_FEE_FL
 // available" at 20 s, read 2026-11-04 20:10Z). The start reads that state 600 s back on each provider.
 /** Two JSON-RPC servers on loopback: blocks 0 to 600, 2 s apart from T0; the second answers state calls only for
  *  blocks at or above `keepFrom` (a pruning node), the first for every block. */
+/** Two loopback addresses, one a node: an env pair must be two operators (fold B), and an IP host is its address. */
+const LOOPBACK = ["::1", "127.0.0.1"] as const;
+const URL_HOST = ["[::1]", "127.0.0.1"] as const;
 async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, string]; calls: { url: number; method: string; params: unknown[]; at: number }[]; close(): void }> {
   const calls: { url: number; method: string; params: unknown[]; at: number }[] = [];
   const servers = [0n, keepFrom].map((keep, i) =>
@@ -512,10 +515,10 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
         r.setHeader("content-type", "application/json");
         r.end(JSON.stringify({ jsonrpc: "2.0", id, ...out }));
       });
-    }).listen(0, "127.0.0.1"),
+    }).listen(0, LOOPBACK[i]),
   );
   await Promise.all(servers.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
-  const urls = servers.map((s) => `http://127.0.0.1:${(s.address() as { port: number }).port}`) as [string, string];
+  const urls = servers.map((s, i) => `http://${URL_HOST[i]}:${(s.address() as { port: number }).port}`) as [string, string];
   return { urls, calls, close: () => servers.forEach((s) => s.close()) };
 }
 
@@ -576,10 +579,10 @@ test("MEDIUM-A the start refuses an env RPC that cannot answer the fee's state r
 });
 
 // card robinhood-mainnet-rpcs (helper-evm-sender review 4 Nov 22:38Z, L1): the pool sender's reads draw on the helper's
-// one pace per provider (limits.ts providerHolds, which the swap, maker and /v1/rpc reads draw on) as a caller's reads,
+// one pace per provider (limits.ts providerHolds, which the swap, maker and /v1/rpc reads draw on) from the senders' reserve,
 // and a throttle it is answered holds the provider for every path. Before, the sender's own client sent outside the
 // pace, so a halted chain's start reads and their retries could spend the limit the pace keeps for the rest.
-test("the pool sender's reads draw on the helper's pace per provider, as a caller's, and a throttle it is answered holds the provider for every path", async (t) => {
+test("the pool sender's reads draw on the helper's pace per provider, from the sender's reserve, and a throttle it is answered holds the provider for every path", async (t) => {
   const realNow = Date.now;
   t.after(() => void (Date.now = realNow));
   Date.now = () => Number(T0 + 1_200n) * 1000; // block 600's time, the newest
@@ -588,9 +591,9 @@ test("the pool sender's reads draw on the helper's pace per provider, as a calle
     const env = { POOL_EVM_ADDRESS_BASE_SEPOLIA: POOL, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"), POOL_EVM_RPCS_BASE_SEPOLIA: n.urls.join(",") };
     // one post at a time, 20 a second, on each: a post at most every 50 ms
     const holds = providerHolds(undefined, Object.fromEntries(n.urls.map((u) => [u, { perS: 20, burst: 1, unit: "post" as const }])));
-    const took: boolean[] = [];
+    const took: [boolean, boolean | undefined][] = [];
     const held: string[] = [];
-    const spy: ProviderHolds = { ...holds, take: (u, c, bg) => (took.push(bg), holds.take(u, c, bg)), hold: (u, s) => (held.push(u), holds.hold(u, s)) };
+    const spy: ProviderHolds = { ...holds, take: (u, c, bg, sender) => (took.push([bg, sender]), holds.take(u, c, bg, sender)), hold: (u, s) => (held.push(u), holds.hold(u, s)) };
     await evmPoolSendersFromEnv(env, evmPoolVenues(), spy).get(POOL)!.ready(async () => {});
     for (const u of [0, 1]) {
       const at = n.calls.filter((c) => c.url === u).map((c) => c.at);
@@ -598,11 +601,43 @@ test("the pool sender's reads draw on the helper's pace per provider, as a calle
       const gaps = at.slice(1).map((x, k) => Math.round(x - at[k]!));
       assert.ok(gaps.every((g) => g >= 40), `rpc ${u + 1}: posts ${gaps.join(", ")} ms apart, under the pace's 50`);
     }
-    assert.ok(took.length > 0 && took.every((bg) => bg === false), "every draw a caller's, never background's");
+    assert.ok(took.length > 0 && took.every(([bg, sender]) => bg === false && sender === true), "every draw the sender's, never background's");
     assert.deepEqual(held, [n.urls[1]], "the second's HTTP 429 holds it for every path");
   } finally {
     n.close();
   }
+});
+
+// card robinhood-mainnet-rpcs fold A: the senders draw on a reserve no caller of /v1/rpc and no background read can take.
+// Drawn as a plain caller, a sender shared CALLER_ROOM with every /v1/rpc client, and enough clients (anyone can open
+// many) took each refill first, so a withdraw's reads waited past its deadline.
+test("fold A: with the callers' room kept full by /v1/rpc callers, a pool sender's read still goes out within one pace interval", async () => {
+  const URL_ = "https://rpc.mainnet.chain.robinhood.com";
+  let t = 1_000_000;
+  const holds = providerHolds(() => t, { [URL_]: { perS: 1, burst: 2, unit: "post" } });
+  let callers = 0;
+  // every caller that finds room takes it, at once, whenever the sender waits: the most callers can do
+  const crowd = () => {
+    while (holds.take(URL_, 1, false) === 0) callers++;
+  };
+  crowd();
+  let slept = 0;
+  const sleep = async (ms: number) => {
+    t += ms;
+    slept += ms;
+    if (slept > 10_000) throw new Error(`the sender waited ${slept} ms behind the callers`);
+    crowd();
+  };
+  let sent = 0;
+  const r = pacedEvmRpc(URL_, async () => (sent++, "0x1237"), holds, sleep);
+  // five reads in a row (a withdraw's), each behind the crowd's draw of every refill
+  for (let k = 1; k <= 5; k++) {
+    slept = 0;
+    assert.equal(await r("eth_chainId", []), "0x1237");
+    assert.equal(sent, k);
+    assert.ok(slept <= 1_000, `read ${k}: the sender waited ${slept} ms, over one pace interval (1,000 ms at 1 a second)`);
+  }
+  assert.ok(callers >= 1, "the callers took the room first");
 });
 
 // card evm-buy-hookdata-fee, review of 0b18a71 (b): a 429 or a timeout at the start is asked again, bounded; a
@@ -700,7 +735,7 @@ test("fold 8 a sender with no POOL_EVM_RPCS_* reads only the kit's feeProviders 
     POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"),
   };
   const kit = evmPoolVenues();
-  const fee = ["https://fee-a.fold8.test", "https://fee-b.fold8.test"] as const;
+  const fee = ["https://fee.fold8-a.test", "https://fee.fold8-b.test"] as const; // two operators (fold B)
   const venues = { ...kit, "base-sepolia": { ...kit["base-sepolia"], providers: ["https://quote-a.fold8.test", "https://quote-b.fold8.test", "https://quote-c.fold8.test"], feeProviders: fee } };
   const asked: string[] = [];
   const real = globalThis.fetch;

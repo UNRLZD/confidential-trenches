@@ -81,3 +81,20 @@ test("node src/env-check.ts exits 2 on the deploy's half set (a sender key alone
   const whole = run(Object.fromEntries(names.map((n, i) => [n, EVM[i]!])));
   assert.equal(whole.status, 0, whole.stdout + whole.stderr);
 });
+
+// card robinhood-mainnet-rpcs fold B: a POOL_EVM_RPCS_<NETWORK> the host sets passes the same two-operator check as the
+// kit's pool list (an operator: the host's last two labels, an IP its address): two URLs of one operator are one
+// provider's word, and the start refuses them with the reason, naming the variable and the operator, never a URL's
+// path or query (a key may sit there).
+test("fold B: POOL_EVM_RPCS_* of two URLs of one operator is refused at the start, naming the variable and the operator; two operators, and the kit's fee pairs, are taken", () => {
+  const env = (rpcs: string) => ({ POOL_EVM_ADDRESS_ROBINHOOD: EVM[0]!, POOL_EVM_SENDER_KEY_ROBINHOOD: EVM[1]!, POOL_EVM_RPCS_ROBINHOOD: rpcs });
+  for (const rpcs of ["https://rpc.mainnet.chain.robinhood.com,https://rpc.testnet.chain.robinhood.com/v2/s3cr3tKEY", "https://a.robinhood.com,https://b.robinhood.com", "http://127.0.0.1:1,http://127.0.0.1:2"]) {
+    const why = refusal(env(rpcs));
+    assert.ok(why !== null, `${rpcs}: taken`);
+    assert.match(why, /^POOL_EVM_RPCS_ROBINHOOD must be two RPC URLs of two operators: both are (robinhood\.com|127\.0\.0\.1)$/, why);
+    assert.ok(!why.includes("s3cr3tKEY"), why);
+  }
+  assert.equal(refusal(env("https://rpc.mainnet.chain.robinhood.com,https://robinhood.api.pocket.network")), null);
+  // unset: the kit's fee pair, of two operators on every network
+  for (const [network, names] of Object.entries(POOL_EVM_ENV)) assert.equal(refusal({ [names[0]]: EVM[0]!, [names[1]]: EVM[1]! }), null, network);
+});

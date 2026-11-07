@@ -1433,18 +1433,35 @@ export const POOL_EVM_COLLECTOR_ENV = {
 } as const;
 
 /**
+ * An RPC URL's operator, the rule the kit's pool list is held to (card robinhood-mainnet-rpcs): its host's last two
+ * labels (robinhood.com, pocket.network, drpc.org, publicnode.com), or an IP host's address, never its port. A URL that
+ * does not parse is its own text, so it differs from any other and the client refuses it on its first call.
+ */
+export function evmRpcOperator(url: string): string {
+  let h: string;
+  try {
+    h = new URL(url).hostname.toLowerCase();
+  } catch {
+    return url;
+  }
+  return /^\[|^\d+\.\d+\.\d+\.\d+$/.test(h) ? h : h.split(".").slice(-2).join(".");
+}
+
+/**
  * `rpc` (provider `url`'s client) drawn from the helper's one pace and hold for that provider (card
  * robinhood-mainnet-rpcs; helper-evm-sender review 4 Nov 22:38Z, L1): each call waits while the provider is held, then
- * takes its post as a caller's read (limits.ts take, background false), so it draws the CALLER_ROOM the swap and maker
- * reads leave and never spends the provider's limit outside the pace, however often a halted chain's reads are asked
+ * takes its post from the sender's reserve (limits.ts take with `sender`: down to empty, where callers' reads stop at
+ * SENDER_ROOM and background at CALLER_ROOM, fold A), so no crowd of /v1/rpc callers holds a withdraw past one post's
+ * refill, and it never spends the provider's limit outside the pace, however often a halted chain's reads are asked
  * again; a throttle it is answered holds the provider for every path (its Retry-After, else 1 s). A provider with no
  * pace (an env URL of the host's own) is only held.
  */
 export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, sleep: (ms: number) => Promise<void> = (ms) => new Promise((go) => setTimeout(go, ms))): EvmRpc {
+  holds.reserve(url);
   return async (method, params) => {
     for (;;) {
       const h = holds.heldMs(url);
-      const w = h > 0 ? h : holds.take(url, 1, false);
+      const w = h > 0 ? h : holds.take(url, 1, false, true);
       if (w === 0) break;
       await sleep(w);
     }
@@ -1499,6 +1516,9 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     if (rpcs === "" && pair === undefined) throw new Error(`${names[4]} must be set: the kit lists no fee providers for ${network}`);
     const urls = rpcs === "" ? [...pair!] : rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
+    // fold B: two operators, as the kit's pool list (card robinhood-mainnet-rpcs): two URLs of one operator are one word
+    const ops = urls.map(evmRpcOperator);
+    if (ops[0] === ops[1]) throw new Error(`${names[4]} must be two RPC URLs of two operators: both are ${ops[0]}`);
     // a plain JSON-RPC client, drawn from the helper's pace for its provider when the server gives one
     const providers = urls.map((u) => {
       const r = solanaJsonRpc(u) as unknown as EvmRpc;
