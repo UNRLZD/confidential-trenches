@@ -54,6 +54,7 @@ export const LIVE_CHECKS = [
   "robinhood-mainnet-rpcs",
   "helper-usdc-pending-pause",
   "helper-rpc-sell-methods",
+  "robinhood-listed-tape-opens",
 ];
 
 // `{commit}` is the deployed commit
