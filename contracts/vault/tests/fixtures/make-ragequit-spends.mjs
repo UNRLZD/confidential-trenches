@@ -14,6 +14,10 @@
 //   4. settle writes unregistered's refund note (4,000,000, label of nonce 7, leaf 8, label 6): refund_note is its
 //      commitment proof (refused: no deposit has its label) and refund_w the private withdraw that spends it whole to
 //      alice.test.near, against the trees as step 4 leaves them (9 leaves, 7 labels).
+//   5. one_block_a_change (for VT-P02, tests/p02.rs): withdraw-spends.json's one_block_a takes 4,000,000 of note 3,
+//      so its change note is 6,000,000 on note 3's label, with that file's change secrets
+//      (keccak256("withdraw-spends/one_block_a/change/{nullifier,secret}") mod p); its ragequit by u lands once
+//      one_block_a's change leaf is in the tree. Appended last, so every entry before it keeps its place.
 // Every ragequit's refund_precommitment is Poseidon(nullifier, secret) of a refund note the test knows. Withdraw proofs
 // come from the kit's vaultWithdrawInput; commitment proofs take {value, label, nullifier, secret}
 // (commitment.circom). Both by snarkjs 0.7.5 groth16.fullProve with the pinned packages/kit/zk files, each checked
@@ -138,6 +142,12 @@ leaves.push(refund.commitment);
 labels.push(refundLabel);
 ragequits.push(await ragequit("refund_note", refund, DEPOSITORS[5]));
 ragequits.push(await ragequit("withdrawn", notes[1], DEPOSITORS[1]));
+// one_block_a's change note, derived as make-withdraw-spends.mjs derives it, and checked against that proof's
+// newCommitmentHash
+const oneBlockA = base.spends.find((s) => s.name === "one_block_a");
+const oneBlockAChange = note(VALUES[2] - BigInt(oneBlockA.public_signals[2]), notes[2].label, "one_block_a/change");
+if (oneBlockA.note !== 2 || String(oneBlockAChange.commitment) !== oneBlockA.public_signals[0]) throw new Error("one_block_a's change note");
+ragequits.push(await ragequit("one_block_a_change", oneBlockAChange, DEPOSITORS[2]));
 const refundW = await withdraw("refund_w", refund, refund.value, leaves, labels);
 
 const out = {
