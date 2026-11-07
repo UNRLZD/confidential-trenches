@@ -428,6 +428,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       let notes: NoteStore | null = null;
       return {
         pin: e.pin,
+        testnet: POOL_TESTNET,
         rpcs: e.rpcs,
         round: e.round,
         notes: async () => (notes = await openNoteStore(await page.store())),

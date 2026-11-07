@@ -157,6 +157,7 @@ function hostOf(ch: ReturnType<typeof chain>, ns: NoteStore, o: Partial<PoolDepo
   return {
     seeds,
     pin: PIN,
+    testnet: true,
     rpcs: ch.rpcs,
     round: async () => ({ events: [...ch.c.events], finalBlock: ch.c.fin }),
     notes: async () => ns,
@@ -318,6 +319,19 @@ test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), what
   const fake = Object.assign(new Error("x"), { name: "PoolRuleRefused" });
   const b = await runPoolDepositEvm(hostOf(ch, ns, { round: async () => Promise.reject(fake) }), ASK);
   assert.notDeepEqual(b, { error: "not_allowed" });
+});
+
+test("the rule holds the pin to the page's network, never to the pin's own: a testnet pin on a mainnet page, or a mainnet pin on a testnet page, signs nothing (not_allowed)", async () => {
+  {
+    const { ch, ns } = await funded(RUNG + FEE);
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { testnet: false }), ASK), { error: "not_allowed" }, "Base Sepolia's pin under SIGN_HOST");
+    assert.equal(ch.c.sent.length, 0);
+  }
+  {
+    const { ch, ns } = await funded(RUNG + FEE);
+    assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { testnet: true, pin: { ...PIN, network: "base" } }), ASK), { error: "not_allowed" }, "Base mainnet's pin under the testnet page");
+    assert.equal(ch.c.sent.length, 0);
+  }
 });
 
 test("before a send, two RPCs that read apart (U's nonce, the estimate, the chain fee, the base fee) answer failed; a provider down past the page's retry answers down", async () => {

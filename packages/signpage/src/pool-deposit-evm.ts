@@ -59,6 +59,8 @@ export type EvmDepositRound = { events: readonly EvmPoolEvent[]; finalBlock: big
 export type PoolDepositEvmHost = {
   /** The pinned pool (the wallet's EVM_POOLS entry of this page's network). */
   pin: EvmPoolPin;
+  /** The page's own network (POOL_TESTNET), never read off the pin: the rule holds the pin to it. */
+  testnet: boolean;
   /** Two RPCs of different operators on the pool's network. */
   rpcs: readonly [EvmRpc, EvmRpc];
   /** The pool's events on both RPCs (evmTreeSync over the same pair). */
@@ -274,7 +276,7 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   const ask = sentValue !== undefined ? { ...r.ask, amount: sentValue } : { ...r.ask, amount: want };
   // U's balance at the padded limit: a send again U can no longer pay is `keep`, its top-up named
   if (call.value + gasLimit * maxFee + l1[0] > low) return { kind: "keep", short: call.value + gasLimit * maxFee + l1[0] - low, u };
-  checkEvmDeposit(tx, ask, { wallet: u, precommitment: step.precommitment, call, pin: r.h.pin }, { nonce: acct.nonces, balance: acct.balance, estimate, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip }, r.h.pin.network === "base-sepolia" || r.h.pin.network === "robinhood-testnet");
+  checkEvmDeposit(tx, ask, { wallet: u, precommitment: step.precommitment, call, pin: r.h.pin }, { nonce: acct.nonces, balance: acct.balance, estimate, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip }, r.h.testnet);
   // simulated on both before U signs: a failure on either signs nothing
   const sim = await Promise.allSettled(r.h.rpcs.map((rpc) => rpc("eth_call", [{ from: u, to: call.to, value: qty(call.value), data: call.data, gas: qty(gasLimit) }, acct.tag])));
   if (sim.some((s) => s.status === "rejected")) return { kind: "sim_failed" };

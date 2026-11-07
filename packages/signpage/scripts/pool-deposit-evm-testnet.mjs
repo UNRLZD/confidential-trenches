@@ -78,7 +78,7 @@ const round = async () => {
   return { events: r.events, finalBlock: r.fin.number };
 };
 const shorts = [];
-const host = () => ({ pin: PIN, rpcs, round, notes: async () => ns, seed64: async () => seed64.slice(), short: (u, wei) => (shorts.push([u, wei]), log(`short: U ${u} needs ${wei} wei more`)), progress: (s) => log(`stage ${s}`), wait: sleep });
+const host = () => ({ pin: PIN, testnet: true, rpcs, round, notes: async () => ns, seed64: async () => seed64.slice(), short: (u, wei) => (shorts.push([u, wei]), log(`short: U ${u} needs ${wei} wei more`)), progress: (s) => log(`stage ${s}`), wait: sleep });
 const ASK = { kind: "pool.deposit", chain: "base", token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
 
 const first = await runPoolDepositEvm(host(), ASK);
