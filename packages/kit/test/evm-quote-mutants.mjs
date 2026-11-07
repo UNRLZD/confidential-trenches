@@ -505,7 +505,9 @@ export const MUTANTS = [
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
   [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
-  [QUOTE, "  if (!asIs && errored.length === 0) return [];\n", "", R, "HC2 "],
+  // (card evm-sell-hook-intrablock: the as-is check is `asIs`; the line that returns where it passes and the trace names
+  // no hook, left out, is equivalent: the fault set is then the trace's errored hooks, none, so nothing is banned)
+  [QUOTE, "  const asIs = failed(await replay({}));\n", "  const asIs = true;\n", R, "HC2 "],
   // review of a2d82dc6, F1: the replay runs at the trade's own gas less its authorizations (more gas, or the sender's
   // balance overridden, tells a hook it is replayed), and a sale is evidence only at the gas the device pins
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of a2d82dc6, F1 (buy)"],
