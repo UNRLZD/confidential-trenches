@@ -1488,3 +1488,19 @@ test("readSolanaTxEnd: expired only when A4 holds on both providers", async () =
   const down: SolanaRpc = async () => { throw new Error("HTTP 503"); };
   assert.equal(await readSolanaTxEnd([dead(), down], TX_END), "unknown");
 });
+
+test("solanaWrappedRpc (card pool-answer-unknown): a caller's wrapper is the same provider to solanaSameProvider and in the same queue, its URL carried", async () => {
+  const { solanaWrappedRpc, solanaSameProvider: same, solanaPacedRpc: paced, solanaRpcQueueSize: size } = await import("../src/trade/solana/send.ts");
+  const bare = async (_m: string, _p: readonly unknown[]): Promise<unknown> => ({ value: null });
+  const other = async (_m: string, _p: readonly unknown[]): Promise<unknown> => ({ value: null });
+  const a = solanaWrappedRpc(bare, (m, p) => bare(m, p));
+  const b = solanaWrappedRpc(bare, (m, p) => bare(m, p));
+  assert.equal(same(a, b), true, "one URL-less provider under two wrappers is one");
+  assert.equal(same(a, bare), true);
+  assert.equal(same(a, solanaWrappedRpc(other, (m, p) => other(m, p))), false);
+  const withUrl = Object.assign(async (_m: string, _p: readonly unknown[]): Promise<unknown> => ({ value: null }), { url: "https://a.example/" });
+  assert.equal(solanaWrappedRpc(withUrl, (m, p) => withUrl(m, p)).url, "https://a.example/");
+  // a paced wrapper of the watch books its turns in the bare provider's one queue
+  await paced(a)("getSlot", []);
+  assert.equal(size(bare).started, 1);
+});
