@@ -287,8 +287,11 @@ test("Q7 only a quote the device made builds a buy, and only within 30 s, and W 
   try {
     assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q }), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
     assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q, minOut: 1n }), (e: unknown) => e instanceof EvmQuoteError);
-    // the device's quote passes to the pinned builder, which refuses Base until pool-evm-deploy pins its adapters
-    assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_deployed");
+    // the device's quote passes to the pinned builder: Base's pins (card pool-evm-deploy-mainnet) refuse any other
+    // adapter, and its pinned adapter for the route's venue builds
+    assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_pinned");
+    const own = evmPoolVenues().base.adapters![q.route.venue === "uniswap-v3" ? "v3" : "v4"]!;
+    assert.equal(evmPoolBuildQuoted(own, q).adapter.toLowerCase(), own.toLowerCase());
     // 31 s after its block, the same quote builds nothing
     clock.mock.mockImplementation(() => at + 31_000);
     assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");

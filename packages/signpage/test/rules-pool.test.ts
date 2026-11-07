@@ -436,7 +436,9 @@ function hardhatAccount0(): Uint8Array {
 }
 const EVM_SECRET = hardhatAccount0();
 const EVM_W = hex(keccak_256(secp256k1.getPublicKey(EVM_SECRET, false).slice(1)).slice(12));
-const B = evmPoolVenues().base;
+// Base with its pins taken out (the kit pins Base's mainnet set since card pool-evm-deploy-mainnet): the lists below pin
+// what they name
+const { pool: _p, adapters: _a, sellDelegate: _s, feeCollector: _f, ...B } = evmPoolVenues().base;
 const X = "0xF111111111111111111111111111111111111111";
 const EVM_POOL = "0x00000000000000000000000000000000000f0011";
 const A_V3 = "0x000000000000000000000000000000000000ad03";
