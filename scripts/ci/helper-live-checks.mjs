@@ -84,11 +84,12 @@ export function solanaPools(root = ROOT) {
   );
 }
 
-// It runs once for each EVM network a pool may be deployed on too (card helper-evm-sender-2; the testnets and mainnets of
-// scripts/live-checks/pool-evm-deploy.mjs, CHAINS and MAINNETS, a test holds them), with the PrivacyPoolSimple its deploy
-// record names: a testnet's record is scripts/live-checks/pool-evm-deploy.<network>.json, a mainnet's
-// contracts/pool-evm/deployments/<network>.json (pool-evm-deploy.mjs deploymentFile, where contracts/pool-evm/script/
-// deploy.mjs writes it). A network with no record is not applicable, as a cluster with none is.
+// helper-evm-sender-2.mjs runs helper-pool-senders' EVM branch once for each EVM network a pool may be deployed on
+// (card helper-evm-sender-2; the testnets and mainnets of scripts/live-checks/pool-evm-deploy.mjs, CHAINS and MAINNETS,
+// a test holds them), with the PrivacyPoolSimple its deploy record names: a testnet's record is
+// scripts/live-checks/pool-evm-deploy.<network>.json, a mainnet's contracts/pool-evm/deployments/<network>.json
+// (pool-evm-deploy.mjs deploymentFile, where contracts/pool-evm/script/deploy.mjs writes it). A network with no record
+// has no run.
 export const POOL_EVM_NETWORKS = ["base", "robinhood", "base-sepolia", "robinhood-testnet"];
 const EVM_MAINNETS = new Set(["base", "robinhood"]);
 export const evmPoolRecord = (network) => (EVM_MAINNETS.has(network) ? `contracts/pool-evm/deployments/${network}.json` : `scripts/live-checks/pool-evm-deploy.${network}.json`);
@@ -115,19 +116,14 @@ export function evmPools(root = ROOT) {
   );
 }
 
-/** helper-pool-senders' runs, one per Solana cluster and EVM network with a record, and why the ones with none are not
- *  applicable (or null). */
+/** helper-pool-senders' runs, one per cluster with a record, and why the clusters with none are not applicable (or null).
+ *  The EVM pools run through helper-evm-sender-2.mjs (evmPools), their one owner. */
 export function poolSenderPlan(root = ROOT) {
   const pools = solanaPools(root);
-  const evm = evmPools(root);
-  const run = (pool) => `scripts/live-checks/helper-pool-senders.mjs --pool ${pool}`;
-  const none = [
-    ...POOL_SOLANA_CLUSTERS.filter((c) => !pools[c]).map((c) => `no Solana ${c} pool is deployed: ${poolRecord(c)} does not exist`),
-    ...POOL_EVM_NETWORKS.filter((n) => !evm[n]).map((n) => `no EVM ${n} pool is deployed: ${evmPoolRecord(n)} does not exist`),
-  ];
+  const none = POOL_SOLANA_CLUSTERS.filter((c) => !pools[c]);
   return {
-    runs: [...POOL_SOLANA_CLUSTERS.filter((c) => pools[c]).map((c) => run(pools[c])), ...POOL_EVM_NETWORKS.filter((n) => evm[n]).map((n) => run(evm[n]))],
-    notApplicable: none.length ? none.join("; ") : null,
+    runs: POOL_SOLANA_CLUSTERS.filter((c) => pools[c]).map((c) => `scripts/live-checks/helper-pool-senders.mjs --pool ${pools[c]}`),
+    notApplicable: none.length ? none.map((c) => `no Solana ${c} pool is deployed: ${poolRecord(c)} does not exist`).join("; ") : null,
   };
 }
 

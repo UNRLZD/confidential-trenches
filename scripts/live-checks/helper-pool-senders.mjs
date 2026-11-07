@@ -320,7 +320,6 @@ const TEST_MNEMONIC = "test test test test test test test test test test test ju
 const DOMAIN_TYPE = "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 const WITHDRAW_TYPE = "Withdraw(uint256 nullifier,uint256 context,uint256 value)";
 const BUY_TYPE = "Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)";
-const PROOF_T = "(uint256[2],uint256[2][2],uint256[2],uint256[8])";
 
 const hexOf = (b) => Buffer.from(b).toString("hex");
 const unhex = (h) => new Uint8Array(Buffer.from(h.replace(/^0x/, ""), "hex"));
@@ -356,8 +355,8 @@ function tuple(parts) {
   return head + tail;
 }
 const selector = (sig) => kText(sig).slice(0, 8);
-const WITHDRAW_SELECTOR = selector(`withdraw((address,bytes),${PROOF_T},uint256,bytes)`);
-const BUY_SELECTOR = selector(`buy((address,bytes),${PROOF_T},uint256,(address,bytes,uint256,address),bytes)`);
+const WITHDRAW_SELECTOR = selector("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)");
+const BUY_SELECTOR = selector("buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)");
 
 /** abi.encode(RelayData): recipient, feeRecipient, feeCap, uint64 deadlineMs, refundPrecommitment, bytes16 salt (192 bytes). */
 function relayData({ recipient, feeRecipient, feeCap, deadlineMs, refundPrecommitment, salt }) {

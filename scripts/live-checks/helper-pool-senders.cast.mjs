@@ -78,9 +78,8 @@ if (buySignature !== signDigest(buyDigest)) throw new Error("cast's EIP-712 Buy 
 
 const withdrawal = `(${c.pool},${relayData})`;
 const proof = `([${c.pA.join(",")}],[${c.pB.map((r) => `[${r.join(",")}]`).join(",")}],[${c.pC.join(",")}],[${c.pubSignals.join(",")}])`;
-const PROOF_T = "(uint256[2],uint256[2][2],uint256[2],uint256[8])";
-const withdrawCallData = cast("calldata", `withdraw((address,bytes),${PROOF_T},uint256,bytes)`, withdrawal, proof, c.fee, withdrawSignature);
-const buyCallData = cast("calldata", `buy((address,bytes),${PROOF_T},uint256,(address,bytes,uint256,address),bytes)`, withdrawal, proof, c.fee, `(${c.buy.adapter},${c.buy.data},${c.buy.minOut},${c.buy.token})`, buySignature);
+const withdrawCallData = cast("calldata", "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)", withdrawal, proof, c.fee, withdrawSignature);
+const buyCallData = cast("calldata", "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)", withdrawal, proof, c.fee, `(${c.buy.adapter},${c.buy.data},${c.buy.minOut},${c.buy.token})`, buySignature);
 
 const out = `${JSON.stringify({
   source: `scripts/live-checks/helper-pool-senders.cast.mjs: the type strings of contracts/pool-evm/src/PrivacyPool.sol and PrivacyPoolSimple.sol, every hash, signature and calldata made by ${cast("--version").split("\n")[0]}; W is anvil's account 0 (m/44'/60'/0'/0/0 of the published test mnemonic)`,
