@@ -537,3 +537,77 @@ test("an ask below the ladder's smallest rung is refused with nothing planned, a
   const c = await runPoolDepositEvm(hostOf(ch, ns), { ...ASK, amount: EVM_LADDER.min });
   assert.equal("stage" in c && c.stage, "filled");
 });
+
+// Card pool-deposit-sent-end: the EVM kind answers at the ask's first send and its run reads the verdict once (a
+// Deposited is final only ~1,000 s on), so its end reaches the app only by the kind's reads after the run: filled once a
+// Deposited naming the note at its value is final; not_landed only once U's finalized nonce is past every send of it on
+// BOTH RPCs with no Deposited naming it, or a final Deposited at another value took it.
+function followedEvm(ch: ReturnType<typeof chain>, ns: NoteStore, o: Partial<PoolDepositEvmHost> = {}) {
+  const stages: string[] = [];
+  let ended = false;
+  let ran!: () => void;
+  const runEnd = new Promise<void>((r) => (ran = r));
+  const parked: (() => void)[] = [];
+  let onPark: (() => void) | null = null;
+  let onStage: (() => void) | null = null;
+  const wait = async (): Promise<void> => {
+    if (!ended) return;
+    await new Promise<void>((r) => {
+      parked.push(r);
+      onPark?.();
+    });
+  };
+  const kind = poolDepositEvmKind(() => ({ ...hostOf(ch, ns, { wait, ...o }), end: () => ((ended = true), ran()) }));
+  const r = kind(ASK, { id: "e1", sha: "00", progress: (s) => (stages.push(String(s)), onStage?.()) });
+  const within = (p: Promise<void>, ms = 2_000): Promise<boolean> => Promise.race([p.then(() => true), new Promise<boolean>((ok) => setTimeout(() => ok(false), ms))]);
+  return {
+    r: r as { after: Promise<void>; answer(): unknown },
+    stages,
+    runEnd,
+    parked: () => within(new Promise<void>((ok) => (parked.length ? ok() : (onPark = ok)))),
+    staged: (n: number) => within(new Promise<void>((ok) => (stages.length >= n ? ok() : (onStage = () => stages.length >= n && ok())))),
+    go: () => parked.splice(0).forEach((f) => f()),
+  };
+}
+
+test("pool-deposit-sent-end (EVM): a send that lands after the run, its Deposited final only later, gives filled; while that block is not final, nothing", async () => {
+  const { ch, ns } = await funded(RUNG + FEE);
+  const f = followedEvm(ch, ns);
+  await f.r.after;
+  const s = sentOf(ch.c.sent[0]!);
+  assert.deepEqual(f.r.answer(), { result: { stage: "sent", txs: [{ chain: "base", hash: s.hash }] } });
+  await f.runEnd;
+  assert.deepEqual(f.stages, []);
+  assert.equal(await f.parked(), true, "the end's reads go on after the run: the app is never left at sent");
+  // it lands in a block not final yet: nothing told
+  ch.land(ch.c.sent[0]!); // its Deposited at block 100
+  ch.c.fin = 90n; // finalized only up to 90
+  ch.c.finNonce = [0n, 0n];
+  f.go();
+  assert.equal(await f.parked(), true);
+  assert.deepEqual(f.stages, [], "a Deposited above the finalized block tells nothing");
+  ch.c.fin = 100n;
+  ch.c.finNonce = [1n, 1n];
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["filled"]);
+  assert.equal(ch.c.sent.length, 1, "never sent again");
+});
+
+test("pool-deposit-sent-end (EVM): U's finalized nonce past the send on one RPC alone gives no not_landed; on both, with no Deposited, not_landed", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const f = followedEvm(ch, ns);
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  ch.c.finNonce = [1n, 0n]; // the nonce taken by a tx with no Deposited (a revert), final on RPC 0 only
+  f.go();
+  assert.equal(await f.parked(), true);
+  assert.deepEqual(f.stages, [], "one RPC's word alone tells nothing");
+  ch.c.finNonce = [1n, 1n];
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["not_landed"]);
+  assert.equal((await ns.get(planned.id))!.state, "INCOMING", "nothing written: the next load builds it again, as today");
+  assert.equal(ch.c.sent.length, 1, "the end's reads send nothing");
+});

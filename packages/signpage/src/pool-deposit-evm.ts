@@ -34,6 +34,14 @@
 //   never takes an earlier note's landing or send as its own: it goes on the newest U with no open note, else the
 //   planned index; short there, it waits (not_landed) only when a U still landing a note holds the rung once that note
 //   lands, else not_funded with `short` naming the ask's own U. `sent` and `progress` are the ask's own sends only.
+// - The end after "sent" (card pool-deposit-sent-end, the Solana kind's rule): the run reads its send's verdict once (a
+//   Deposited is final only ~1,000 s on), so a run that ends with no verdict past a send of its ask hands the kind the
+//   ask's notes still INCOMING (`left`), and the kind reads them, with no lock held and nothing written, every
+//   POOL_DEPOSIT_EVM_FOLLOW_MS until each is decided. Landed: a Deposited naming its precommitment at or below the
+//   round's finalized block, at its value. Dead, never one RPC's word: U's finalized nonce past every send of it on BOTH
+//   RPCs, read before the round that finds no Deposited naming it (final or not); or taken (a final Deposited at another
+//   value). Then filled when every open note landed and the ask was all sent, part_filled when any of it landed, else
+//   not_landed; the money of a dead send stays in U, and the next load or ask builds the note again.
 // - Every read names a public account (the pool, U) and no request carries a key, the words or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -80,7 +88,17 @@ export type PoolDepositEvmHost = {
   reads?: number;
   wait?(ms: number): Promise<void>;
   end?(): void;
+  /** The run's end, past a send of its ask: the ask's notes still INCOMING (poolDepositEvmKind reads them on). */
+  left?(left: PoolDepositEvmLeft): void;
 };
+
+/** An ask's notes still INCOMING at its run's end (each: its precommitment, its recorded value, the highest nonce of its
+ *  sends and its U), whether any note of the ask landed, and whether the ask was all sent (`whole`). */
+export type PoolDepositEvmLeft = { notes: { precommitment: bigint; value: bigint; nonce: bigint; u: string }[]; landed: boolean; whole: boolean };
+
+/** The wait between the kind's reads of an ask's open notes once its run ended with no verdict (a Deposited is final
+ *  ~1,000 s after it lands, and each read is a round of the pool's events). */
+export const POOL_DEPOSIT_EVM_FOLLOW_MS = 10_000;
 
 /** The priority fee U offers, wei per gas: 0.01 gwei, above what Base's blocks include at (a tip that never lands
  *  holds U's nonce); Robinhood (Nitro) ignores it. */
@@ -378,6 +396,30 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
   return { kind: "pending" };
 }
 
+/** An open note of an ask, read once with nothing written: "landed", "dead" or null (see the header's end after
+ *  "sent"). U's finalized nonce is read before the round, so a send final by its nonce is in the round's events. */
+async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][number]): Promise<"landed" | "dead" | null> {
+  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));
+  const round = await h.round();
+  const d = round.events.find((e) => e.kind === "deposit" && e.precommitment === n.precommitment);
+  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";
+  return fin[0] > n.nonce && fin[1] > n.nonce ? "dead" : null;
+}
+
+/** The end of an ask whose run ended with no verdict: its open notes read every POOL_DEPOSIT_EVM_FOLLOW_MS until each
+ *  is landed or dead (a read that fails is read again), with no lock held and nothing written. */
+export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepositEvmLeft): Promise<"filled" | "part_filled" | "not_landed"> {
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
+  for (;;) {
+    for (const [k, n] of left.notes.entries()) ends[k] ??= await noteEndEvm(h, n).catch(() => null);
+    if (ends.every((e) => e !== null)) break;
+    await wait(POOL_DEPOSIT_EVM_FOLLOW_MS);
+  }
+  if (left.whole && ends.length > 0 && ends.every((e) => e === "landed")) return "filled";
+  return left.landed || ends.includes("landed") ? "part_filled" : "not_landed";
+}
+
 /** The run: an ask (pool.deposit on an EVM chain), or null to settle the scope's open notes only. */
 export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | null): Promise<PoolDepositAnswer> {
   if (ask !== null && (ask.kind !== "pool.deposit" || ask.chain === "solana")) return { error: "not_allowed" };
@@ -391,8 +433,13 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
   let landed = 0;
   // a send of the pass (an earlier note's, sent again) may land too: the run is never "failed" past it
   let passSent = false;
+  // the ask's own notes sent this run, and whether the ask was all sent: what the kind reads on (`left`)
+  const askNotes: NoteRecord["id"][] = [];
+  let whole = false;
+  let opened: NoteStore | null = null;
   try {
     const store = await h.notes();
+    opened = store;
     const chainId = EVM_CHAIN_IDS[h.pin.network];
     const scope = evmPoolScopeOf(h.pin.pool, chainId);
     const r: Run = { h, store, seed, scope, chainId, keys, ask: ask ?? { kind: "pool.deposit", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 }, sentAt: new Map() };
@@ -451,6 +498,8 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
         t = await tryNote(r, planned.ref as Extract<NoteRef, { kind: "deposit" }>, null, left);
       }
       if (t.kind === "sent") {
+        askNotes.push(t.note.id);
+        whole = left - (t.note.evmSends?.[0]?.value ?? 0n) < EVM_POOL_MIN_DEPOSIT;
         sentTxs.push({ chain, hash: t.hash });
         h.sent?.(t.hash);
         h.progress?.("sent");
@@ -509,6 +558,26 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
     if (passSent) return { stage: "not_landed", txs: [] };
     return { error: "failed" };
   } finally {
+    // past a send of the ask: its notes still INCOMING, for the kind's end (a store that cannot be read hands none, so
+    // nothing is told on a read that did not happen)
+    const store = opened;
+    if (ask !== null && sentTxs.length > 0 && store !== null) {
+      try {
+        const notes: PoolDepositEvmLeft["notes"] = [];
+        for (const id of new Set(askNotes)) {
+          const n = await store.get(id);
+          const sends = n?.evmSends ?? [];
+          if (n?.state !== "INCOMING" || sends.length === 0) continue;
+          const first = firstOf(n.ref, evmPoolScopeOf(h.pin.pool, EVM_CHAIN_IDS[h.pin.network]))!;
+          const id2 = depositIdEvm(seed, first.s, first.i);
+          keys.push(id2.secretKey);
+          notes.push({ precommitment: n.precommitment, value: sends[0]!.value, nonce: sends.reduce((m, x) => (x.nonce > m ? x.nonce : m), 0n), u: id2.address });
+        }
+        h.left?.({ notes, landed: landed > 0, whole });
+      } catch {
+        // no end handed: the note settles at the next load, as before
+      }
+    }
     seed.fill(0);
     for (const k of keys) k.fill(0);
   }
@@ -525,6 +594,8 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
     let fail!: (e: unknown) => void;
     const answered = new Promise<void>((ok, no) => ((give = ok), (fail = no)));
     const chain = ask?.chain ?? "base";
+    // a run that ends with no verdict past its ask's send: its open notes, read on once the locks are let go
+    let follow: { h: PoolDepositEvmHost; left: PoolDepositEvmLeft } | null = null;
     const run = locks
       .request(WALLET_SEED_LOCK, { mode: "shared" }, () =>
         locks.request(POOL_DEPOSIT_LOCK, { mode: "exclusive" }, async () => {
@@ -536,10 +607,16 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
           };
           // the first "sent" is the answer itself
           const progress = (stage: TradeStage): void => (stage === "sent" && first ? void (first = false) : ctx?.progress(stage));
+          let left: PoolDepositEvmLeft | null = null;
           try {
-            const a = await runPoolDepositEvm({ ...h, sent, progress }, ask);
+            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask);
+            const l = left as PoolDepositEvmLeft | null;
+            // filled or part_filled is the ask's end; anything else past a send of the ask (sent, not_landed, a fault)
+            // is no end: its open notes are read on, and the end goes as progress once each is landed or dead
+            const ended = "stage" in a && (a.stage === "filled" || a.stage === "part_filled");
             if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
-            else if ("stage" in a && a.stage !== "sent") ctx?.progress(a.stage);
+            else if (ended) ctx?.progress(a.stage);
+            else if (l !== null) follow = { h, left: l };
           } finally {
             h.end?.();
           }
@@ -551,7 +628,11 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
         if (!answer) answer = { error: "failed" };
         give();
       });
-    void run;
+    // the end, read with no lock held (a sign out never waits on it) and nothing written; a wait that rejects stops it
+    void run.then(() => {
+      const f = follow;
+      if (f !== null && ctx !== null) return followPoolDepositEvm(f.h, f.left).then((stage) => ctx.progress(stage), () => {});
+    });
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }
