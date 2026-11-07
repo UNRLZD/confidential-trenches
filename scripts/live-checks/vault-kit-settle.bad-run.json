@@ -1,0 +1,143 @@
+{
+  "card": "vault-kit-settle (bad: the note at the deposit leaf, the settle step naming the refused settle)",
+  "network": "testnet",
+  "vault": "v4.bf-vt-20261106t125654.testnet",
+  "asset": "bf-usdc-20261101t022248.testnet",
+  "accounts": {
+    "parent": "bf-vt-20261106t125654.testnet",
+    "device": "b6da3205c5a6d6115a2dc9da6cd60f5d3ace5a8f5185eecb934a2bb10252d967",
+    "fee_recipient": "b-b455a54c.bf-vt-20261106t125654.testnet"
+  },
+  "amounts": {
+    "note": "1000000",
+    "fee": "100000",
+    "refund": "1000000"
+  },
+  "bounce": {
+    "nullifier_hash": "3919613366061075089144785801271373676848420365968604831691945321175592349364",
+    "prove_ms": 4070
+  },
+  "settle": {
+    "height": 276684239,
+    "refund_value": "1000000",
+    "refund_label": "9403506093034287659312631493039932612954450475808665008480309398023607129334",
+    "refund_leaf_index": "2",
+    "refund_commitment": "1778809576427669979293643383246515266881100466115402459054118879081077590575",
+    "refund_precommitment": "402029928025285858703320481173363540202665417063078815915914428012866109679",
+    "tx": "Bdi9MHvRqEYyimXLHSpzwU5X3yJeg69x2ZAdyF5mA98x"
+  },
+  "note": {
+    "scope": "20643007839017430765836732312011750509480589884054526939135550666496789917179",
+    "precommitment": "402029928025285858703320481173363540202665417063078815915914428012866109679",
+    "state": "UNSPENT",
+    "parent": "deposit-note",
+    "leaf": {
+      "value": "1000000",
+      "label": "9403506093034287659312631493039932612954450475808665008480309398023607129334",
+      "commitment": "1778809576427669979293643383246515266881100466115402459054118879081077590575",
+      "leafIndex": "0"
+    }
+  },
+  "before": {
+    "at": "2026-11-07T21:14:46.498Z",
+    "D_usdc": "0",
+    "vault_usdc": "0",
+    "B_registered": null,
+    "D_near": "null",
+    "totals": {
+      "deposited": "0",
+      "spent": "0",
+      "returned": "0"
+    }
+  },
+  "after": {
+    "at": "2026-11-07T21:16:10.798Z",
+    "D_usdc": "2000000",
+    "vault_usdc": "1000000",
+    "B_registered": null,
+    "D_near": "969826619394474299999997",
+    "totals": {
+      "deposited": "1000000",
+      "spent": "1000000",
+      "returned": "1000000"
+    }
+  },
+  "txs": [
+    {
+      "step": "setup",
+      "method": "Transfer (D, implicit)",
+      "hash": "FiP8gzcSbMyLXsTE3J4QVefXPBUWomCLomTay6feW3z",
+      "signer": "bf-vt-20261106t125654.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "setup",
+      "method": "storage_deposit (D)",
+      "hash": "ANwAEejcnbd7pSCFcGrYdvqBDxPUz7VzpfVj8yCN8Wwo",
+      "signer": "bf-vt-20261106t125654.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "setup",
+      "method": "CreateAccount (B, no key)",
+      "hash": "BFsRiTjNuMboLf4GoPXGPg9B8qwULdQTgxKFEcLwq49p",
+      "signer": "bf-vt-20261106t125654.testnet",
+      "expect": "success",
+      "vault_gas_burnt": []
+    },
+    {
+      "step": "deposit",
+      "method": "storage_prepay",
+      "hash": "7VmaiEWVeegfKkxjeiivGaxakBsMaKrsKC4p5ySnVGjQ",
+      "signer": "b6da3205c5a6d6115a2dc9da6cd60f5d3ace5a8f5185eecb934a2bb10252d967",
+      "expect": "success",
+      "vault_gas_burnt": [
+        1801015401193
+      ]
+    },
+    {
+      "step": "deposit",
+      "method": "ft_transfer_call (deposit)",
+      "hash": "8vJYpDNjGYx1YvQS2hTkDgKvjYbH6WrenNhW9aCHZQNK",
+      "signer": "b6da3205c5a6d6115a2dc9da6cd60f5d3ace5a8f5185eecb934a2bb10252d967",
+      "expect": "success",
+      "vault_gas_burnt": [
+        6566991784359
+      ]
+    },
+    {
+      "step": "bounce",
+      "method": "withdraw (fee to B, bounces)",
+      "hash": "4b8GQVJpkU11Mzj9vGccrzJKCHLEsVR95PUCmHsHveWs",
+      "signer": "b6da3205c5a6d6115a2dc9da6cd60f5d3ace5a8f5185eecb934a2bb10252d967",
+      "expect": "bounce",
+      "vault_gas_burnt": [
+        40004711744382,
+        223182562500,
+        1815377274763
+      ]
+    },
+    {
+      "step": "settle",
+      "method": "settle (D, the kit's call)",
+      "hash": "CuLykJH4ePG5WF8cBwLR5mffSkhQegB2YvSaSucQwjxS",
+      "signer": "b6da3205c5a6d6115a2dc9da6cd60f5d3ace5a8f5185eecb934a2bb10252d967",
+      "expect": "success",
+      "vault_gas_burnt": [
+        10071839462556
+      ]
+    },
+    {
+      "step": "again",
+      "method": "settle (D, again)",
+      "hash": "CuLykJH4ePG5WF8cBwLR5mffSkhQegB2YvSaSucQwjxS",
+      "signer": "b6da3205c5a6d6115a2dc9da6cd60f5d3ace5a8f5185eecb934a2bb10252d967",
+      "expect": "refused AlreadySettled",
+      "vault_gas_burnt": [
+        1432096419993
+      ]
+    }
+  ]
+}

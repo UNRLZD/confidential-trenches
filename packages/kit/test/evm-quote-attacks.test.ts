@@ -6,6 +6,7 @@
 import { mock, test } from "node:test";
 import { readFileSync } from "node:fs";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { onTestClock } from "./test-clock.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
 import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
@@ -240,7 +241,7 @@ test("R10 a provider whose node is one block behind is asked once more, and refu
   assert.deepEqual(await buy(v3direct, provider(head("0xfe", OLD), flat), lagging(1000)), { accepted: false, code: "rpc_error" });
 });
 
-test("N2 a caller's fetch makes no device quote: the public entry reads only the pinned providers", async () => {
+test("N2 a caller's fetch makes no device quote: the public entry reads only the pinned providers", () => onTestClock(async () => {
   // a fetch that answers both pinned URLs itself, with a fresh head and a route the caller priced
   const rpc = provider({ number: "0x100", hash: NEW, timestamp: "0x" + Math.floor(Date.now() / 1000).toString(16) }, (p) =>
     p.hops === 1 && p.from === NATIVE && p.fees[0] === 500 && p.hooks[0] === NATIVE ? (p.amount === AMOUNT ? 7n : 14n) : null,
@@ -269,7 +270,7 @@ test("N2 a caller's fetch makes no device quote: the public entry reads only the
   assert.equal(evmIsDeviceQuote(q), false, "answers the caller wrote make no device quote");
   assert.ok(q instanceof EvmQuoteError && q.code === "rpc_error", String(q));
   assert.equal(evmPoolBuyQuote.length, 1);
-});
+}));
 
 // ------------------------------------------------------------------ N1: the pools the device finds for a token
 // A modelled chain: `pools` exist in its PoolManager (extsload answers their price and liquidity), each quoting
@@ -1091,7 +1092,7 @@ test("G1 every scan of one quote, the token's and each X's, shares the chain's l
   }
 });
 
-test("G2 an X whose scan fails refuses the quote, as the token's own scan does: nothing is priced on a partial read", async () => {
+test("G2 an X whose scan fails refuses the quote, as the token's own scan does: nothing is priced on a partial read", () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000ff4ff";
   const x = xAt(0x430);
   const real: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
@@ -1108,7 +1109,7 @@ test("G2 an X whose scan fails refuses the quote, as the token's own scan does: 
     return inner(calls);
   };
   assert.deepEqual(await quoteOn([seeded(token), real, market], token, seededRoute(token), broken), { accepted: false, code: "rpc_error" });
-});
+}));
 
 test("G3 the scan provider's head is read once per quote: an X scan that waits behind others reads to the same head", async () => {
   const token = "0x00000000000000000000000000000000000ff5ff";
@@ -1751,7 +1752,7 @@ test("H2 a found pool whose hook reverts every swap cannot set R; one whose hook
   });
 });
 
-test("T7 a provider that answers 429 is asked again a little later; one that keeps answering 429 is a refusal", { timeout: 20_000 }, async () => {
+test("T7 a provider that answers 429 is asked again a little later; one that keeps answering 429 is a refusal", { timeout: 20_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000fe8fe";
   const inner = chain([best(token)], 1);
   // a fetch for provider 2 that answers 429 to its first `n` requests, then as the chain does
@@ -1773,9 +1774,9 @@ test("T7 a provider that answers 429 is asked again a little later; one that kee
   const inBatch: EvmRpc = async (calls) => (left-- > 0 ? calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32016, message: "25/second request limit reached" } })) : inner(calls));
   const w = await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), inBatch], NOW));
   assert.equal(w.accepted, true, String((w as { code?: string }).code));
-});
+}));
 
-test("T7b a request that made no connection (fetch failed, a connect error as its cause) is asked again; one that timed out is not, nor a connection that keeps failing (card evm-quote-warm-round)", { timeout: 20_000 }, async () => {
+test("T7b a request that made no connection (fetch failed, a connect error as its cause) is asked again; one that timed out is not, nor a connection that keeps failing (card evm-quote-warm-round)", { timeout: 20_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000fe8ff";
   const inner = chain([best(token)], 1);
   // provider 2's fetch: its first `n` requests fail as `fail` makes them, then it answers as the chain does
@@ -1814,7 +1815,7 @@ test("T7b a request that made no connection (fetch failed, a connect error as it
   // a fetch failure with no connect error (a TLS or protocol failure after the connection): never asked again
   const other = failing(1, () => new TypeError("fetch failed", { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }));
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain([best(token)], 0), other.rpc], NOW)), { accepted: false, code: "rpc_error" });
-});
+}));
 
 test("T8 a quote's reads go to each provider at most the chain's limit at once (Robinhood's own RPC answers 429 to four)", async () => {
   const token = "0x00000000000000000000000000000000000fe9fe";
@@ -2895,7 +2896,7 @@ test("J1 a scan that lost one span keeps every other: the next quote reads only 
   assert.deepEqual(v, fresh);
 });
 
-test("J2 a span the scan provider throttles past ask's retries is asked again whole, never split into more requests: a limit named in the answer, or HTTP 429", { timeout: 40_000 }, async () => {
+test("J2 a span the scan provider throttles past ask's retries is asked again whole, never split into more requests: a limit named in the answer, or HTTP 429", { timeout: 40_000 }, () => onTestClock(async () => {
   for (const [i, http] of [[0, false], [1, true]] as const) {
     const token = `0x00000000000000000000000000000000000ee0f${6 + i}`;
     const { pools, logs } = warmCase(token, xAt(0x3b20 + 16 * i));
@@ -2922,7 +2923,7 @@ test("J2 a span the scan provider throttles past ask's retries is asked again wh
     const narrow = asked.filter(([a, b]) => a >= 4_490_001 && b <= 4_500_000 && b - a + 1 < 10_000);
     assert.deepEqual(narrow, [], `${http ? "HTTP 429" : "a named limit"}: no half of the throttled span is asked`);
   }
-});
+}));
 
 test("J3 a failed scan whose provider named a head past maxLag of the agreed block keeps nothing: the next quote reads every block again", async () => {
   const token = "0x00000000000000000000000000000000000ee0f8";
@@ -2945,7 +2946,7 @@ test("J3 a failed scan whose provider named a head past maxLag of the agreed blo
   assert.equal(blocks, 1_000_000, "the token's whole depth is read again");
 });
 
-test("V5 a spare is asked only once the second provider is late: as long again as the first took, at least EVM_HEDGE_MS, never on a timer from the start", { timeout: 30_000 }, async () => {
+test("V5 a spare is asked only once the second provider is late: as long again as the first took, at least EVM_HEDGE_MS, never on a timer from the start", { timeout: 30_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000ee0f9";
   const pools = [best(token)];
   const late = (rpc: EvmRpc, ms: number): EvmRpc => async (calls) => {
@@ -2961,7 +2962,7 @@ test("V5 a spare is asked only once the second provider is late: as long again a
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [late(chain(pools, 0), 600), late(chain(pools, 1), 1_100), counted], NOW));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.equal(spare, 0, "the spare is never asked");
-});
+}));
 
 // ------------------------------------------------------------------ the review of bc189de (card evm-quote-warm-round)
 // A value any provider asked contradicts is used only where more than half the listed providers gave it (M-1); a block
@@ -3042,7 +3043,7 @@ test("V7 a fast provider that names its head a block ahead and answers that bloc
   assert.equal((v2 as { accepted: boolean }).accepted, true, big(v2));
 });
 
-test("V8 the first two providers both stuck (failing after 6 s): the spares are asked at 4 x EVM_HEDGE_MS and then EVM_HEDGE_MS after the first spare's own answer", { timeout: 30_000 }, async () => {
+test("V8 the first two providers both stuck (failing after 6 s): the spares are asked at 4 x EVM_HEDGE_MS and then EVM_HEDGE_MS after the first spare's own answer", { timeout: 30_000 }, () => onTestClock(async () => {
   const token = freshToken();
   const pools = [best(token)];
   const stuck = (): EvmRpc => async () => {
@@ -3055,7 +3056,7 @@ test("V8 the first two providers both stuck (failing after 6 s): the spares are 
   assert.equal((v as { accepted: boolean }).accepted, true, big(v));
   // 1,600 ms to the first spare, 400 ms to the second: about 2.0 s (a timer counted from the round's start: 3.2 s)
   assert.ok(ms < 2_600, `${Math.round(ms)} ms`);
-});
+}));
 
 test("V9 the pinned quote asks the kit's providers in their measured order: the venue's first, failing its reads, is asked last by the next quote", async () => {
   const p = builder.evmPoolVenues().base.providers!;
@@ -3376,7 +3377,7 @@ function throttlingScan(logs: { key: EvmPoolKey; at: number }[], throttled: (get
 }
 
 for (const [name, header] of [["TH1 ", "1"], ["TH2 ", null]] as const) {
-  test(`${name}a cold quote whose scan provider answers 429${header === null ? " with no Retry-After" : ", Retry-After: 1,"} for its first 4 s ends as it would unthrottled, never rpc_error`, { timeout: 30_000 }, async () => {
+  test(`${name}a cold quote whose scan provider answers 429${header === null ? " with no Retry-After" : ", Retry-After: 1,"} for its first 4 s ends as it would unthrottled, never rpc_error`, { timeout: 30_000 }, () => onTestClock(async () => {
     const token = freshToken();
     const { pools, logs } = warmCase(token, xAt(0x3e00 + (header === null ? 16 : 0)));
     // the scan's getLogs are throttled for 4 s from the first
@@ -3399,7 +3400,7 @@ for (const [name, header] of [["TH1 ", "1"], ["TH2 ", null]] as const) {
     assert.equal(v.accepted, true, String((v as { code?: string }).code));
     assert.equal(fresh.accepted, true);
     assert.equal(big((v as { amountOut?: bigint }).amountOut), big((fresh as { amountOut?: bigint }).amountOut));
-  });
+  }));
 }
 
 test("TH3 after a 429 the scan never has more requests in flight than its halved limit, which answers raise again", async () => {
@@ -3461,7 +3462,7 @@ test("TH4 a scan provider that throttles past the scan's bound refuses at the bo
   }
 });
 
-test("TH5 a scan provider that slows past the deadline with more than 5 requests in flight: a timeout halves the scan's parallelism, so its median in flight settles at 5 or below and the quote ends ok", { timeout: 60_000 }, async () => {
+test("TH5 a scan provider that slows past the deadline with more than 5 requests in flight: a timeout halves the scan's parallelism, so its median in flight settles at 5 or below and the quote ends ok", { timeout: 60_000 }, () => onTestClock(async () => {
   const token = freshToken();
   const { pools, logs } = warmCase(token, xAt(0x3e80));
   const inner = scanner(5_000_000, logs);
@@ -3506,7 +3507,7 @@ test("TH5 a scan provider that slows past the deadline with more than 5 requests
   // at 7d6ec94's fixed 20: rpc_error after 18.4 s, 790 of 1,541 requests timed out; with the gate, halving at every
   // timeout (f9bd53c): ok in 5.1 s, 93 of 387; halving once per event: ok in 6.9 s, 126 of 447
   assert.ok(timedOut <= 160 && ms < 10_000, `${timedOut} requests ran out of time in ${Math.round(ms)} ms`);
-});
+}));
 
 // ------------------------------------------------------------------ the scan gate's bound, waits and refused connections (re-review of 59a69e2)
 /** The scan provider over HTTP whose getLogs requests `fault(from, to, nth)` judges (nth: how often that range was
@@ -3891,7 +3892,7 @@ test("V20 Base's and Robinhood's quote lists three providers at least on distinc
 });
 
 // ------------------------------------------------------------------ refused connections, counted (re-review of b282ce0: LOW-A, LOW-B, LOW-C)
-test("B1r a scan provider that refuses every getLogs connection after its head: rpc_error at a request's fourth refusal in a row, about 3.5 s in, never at the bound", { timeout: 30_000 }, async () => {
+test("B1r a scan provider that refuses every getLogs connection after its head: rpc_error at a request's fourth refusal in a row, about 3.5 s in, never at the bound", { timeout: 30_000 }, () => onTestClock(async () => {
   const { rpc, st } = faultScan([], () => "unreach");
   const r = await coldQuote(rpc, 0x3f70);
   assert.equal(r.code, "rpc_error", r.message);
@@ -3901,7 +3902,7 @@ test("B1r a scan provider that refuses every getLogs connection after its head: 
   assert.ok(r.ms >= 3_400 && r.ms < 5_000, `refused after ${Math.round(r.ms)} ms and ${st.logs} getLogs`);
   assert.equal(st.halves, 0, `${st.halves} halves`);
   assert.ok(st.logs <= 4 * 100, `${st.logs} getLogs`);
-});
+}));
 
 /** A seeded draw in [0, 1) (mulberry32): the same faults on every run. */
 const draws = (seed: number) => () => {
@@ -3911,7 +3912,7 @@ const draws = (seed: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
 };
 
-test("B5 30% of the scan's connections refused: each of four cold quotes has its verdict within 5 s, quoted or rpc_error at a fourth refusal in a row, never halved", { timeout: 60_000 }, async () => {
+test("B5 30% of the scan's connections refused: each of four cold quotes has its verdict within 5 s, quoted or rpc_error at a fourth refusal in a row, never halved", { timeout: 60_000 }, () => onTestClock(async () => {
   const rows: string[] = [];
   for (let q = 0; q < 4; q++) {
     const draw = draws(0xb5 + q);
@@ -3924,7 +3925,7 @@ test("B5 30% of the scan's connections refused: each of four cold quotes has its
     rows.push(`${r.code} ${Math.round(r.ms)} ms ${st.logs} getLogs`);
   }
   console.log(`B5: ${rows.join("; ")}`);
-});
+}));
 
 test("B8 a refused connection is asked again whole in every runtime: Node's (cause ECONNREFUSED), Chrome's (Failed to fetch) and Safari's (Load failed) each cost two getLogs a span, no halves", { timeout: 30_000 }, async () => {
   for (const [how, x] of [["unreach", 0x3f90], ["chrome", 0x3f91], ["safari", 0x3f92]] as const) {
@@ -3937,7 +3938,7 @@ test("B8 a refused connection is asked again whole in every runtime: Node's (cau
   }
 });
 
-test("B2a every getLogs hangs until aborted (bound 3 s): the verdict comes at the bound and every request is aborted there", { timeout: 60_000 }, async () => {
+test("B2a every getLogs hangs until aborted (bound 3 s): the verdict comes at the bound and every request is aborted there", { timeout: 60_000 }, () => onTestClock(async () => {
   evmScanBound?.(3_000);
   try {
     const token = freshToken();
@@ -3965,9 +3966,9 @@ test("B2a every getLogs hangs until aborted (bound 3 s): the verdict comes at th
   } finally {
     evmScanBound?.();
   }
-});
+}));
 
-test("B1a a scan provider that refuses every getLogs connection (bound 2 s): rpc_error at the bound, the refusals backed off", { timeout: 60_000 }, async () => {
+test("B1a a scan provider that refuses every getLogs connection (bound 2 s): rpc_error at the bound, the refusals backed off", { timeout: 60_000 }, () => onTestClock(async () => {
   evmScanBound?.(2_000);
   try {
     const token = freshToken();
@@ -4003,7 +4004,7 @@ test("B1a a scan provider that refuses every getLogs connection (bound 2 s): rpc
   } finally {
     evmScanBound?.();
   }
-});
+}));
 
 test("B6 a sell's wait for its buy's block, the list reordered by round 1: round 2's block is confirmed by the other provider, never the lower head's own", { timeout: 30_000 }, async () => {
   const { pool, req } = landedSell("0x00000000000000000000000000000000000ba5b6");
@@ -4259,7 +4260,7 @@ test("LW a sell's retry without a held provider waits for the buy's block to the
 
 // the re-review of the fold (card evm-quote-lag-held): RQ1 drpc past its state cut, RQ2-RQ4 a revert is never provider
 // state, LQ3 a refused answer's body, LQ4 a not-yet answer, LQ5 a compute-units limit
-test("RQ1 robinhood.drpc.org's answer past its state cut (200, code 27 \"Unknown state. First available state is 1\") ranks it behind the others, never first by its speed", async () => {
+test("RQ1 robinhood.drpc.org's answer past its state cut (200, code 27 \"Unknown state. First available state is 1\") ranks it behind the others, never first by its speed", () => onTestClock(async () => {
   quoteMod.evmSpeedReset();
   const token = freshToken();
   const pools = [best(token)];
@@ -4284,7 +4285,7 @@ test("RQ1 robinhood.drpc.org's answer past its state cut (200, code 27 \"Unknown
   }
   console.log(`RQ1 quotes took ${ms.join(", ")} ms; ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
   assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "cut.rq1.test", `ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}; quotes took ${ms.join(", ")} ms`);
-});
+}));
 
 test("RQ2 a revert whose string reads like a block not held yet (code 3 \"execution reverted: header not found\") is asked once, never again as a block not held yet", async () => {
   const { pool, req } = landedSell("0x00000000000000000000000000000000000ba7c1");
@@ -4375,7 +4376,7 @@ const pairQuote = async (token: string, first: EvmRpc, second: EvmRpc, chainName
 };
 const realAt = (token: string, at: number) => [{ key: real(token).key, at }];
 
-test("SP1 a first scan provider that refuses connections: the scan goes on at the second at once, on Base and Robinhood", { timeout: 30_000 }, async () => {
+test("SP1 a first scan provider that refuses connections: the scan goes on at the second at once, on Base and Robinhood", { timeout: 30_000 }, () => onTestClock(async () => {
   for (const [c, token] of [["base", "0x00000000000000000000000000000000005c4501"], ["robinhood", "0x00000000000000000000000000000000005c4502"]] as const) {
     // the most times any one range was asked of the first before this ask (0: asked once)
     let again = 0;
@@ -4400,7 +4401,7 @@ test("SP1 a first scan provider that refuses connections: the scan goes on at th
     throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
   }) as unknown as typeof fetch);
   assert.deepEqual((await pairQuote(token, down, scanner(5_000_000, realAt(token, 4_500_000)))).v, below);
-});
+}));
 
 /** A warm quote: the token's scan read up to 5,000,000 by a quote before, the chain's head now 5,000,010, the real pool
  *  made at 5,000,005, so only the second's answer for those ten blocks finds it. */
@@ -4411,7 +4412,7 @@ const warmPair = async (token: string, first: EvmRpc, chainName: "base" | "robin
   return { ...r, asked };
 };
 
-test("SP2 a first scan provider that does not answer a warm scan: the second has its blocks after 2 s, a cold scan keeps the whole bound on the first", { timeout: 30_000 }, async () => {
+test("SP2 a first scan provider that does not answer a warm scan: the second has its blocks after 2 s, a cold scan keeps the whole bound on the first", { timeout: 30_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000005c4504";
   const head = scanner(5_000_010, []);
   // the first answers its head and never a getLogs, until aborted; each abort's reason is kept
@@ -4443,7 +4444,7 @@ test("SP2 a first scan provider that does not answer a warm scan: the second has
   const cold = await pairQuote(token2, late, scanner(5_000_000, [], second));
   assert.deepEqual(cold.v, below);
   assert.equal(second.length, 0, "the second read a cold scan's blocks");
-});
+}));
 
 test("SP3 a first scan provider that answers no logs from behind the head: the second's answer counts; one that answers an error for blocks it holds: never the second's", { timeout: 30_000 }, async () => {
   // base-rpc.publicnode.com's answer to a range past the backend's head (-32602 on blastapi's and bloXroute's: "block
@@ -4575,7 +4576,7 @@ test("SP7 a second whose backend lags the first's head and answers [] past its o
   assert.ok(asked.some(([a, b]) => a <= 5_000_250 && b >= 5_000_250), `block 5,000,250 was not asked again: ${JSON.stringify(asked)}`);
 });
 
-test("SP8 a lone scan provider whose head read takes 2.5 s: the quote waits for it, the 2 s hold is only where a second follows", { timeout: 60_000 }, async () => {
+test("SP8 a lone scan provider whose head read takes 2.5 s: the quote waits for it, the 2 s hold is only where a second follows", { timeout: 60_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000005c450c";
   const inner = scanner(5_000_000, realAt(token, 4_999_000));
   const slowHead: EvmRpc = async (calls) => {
@@ -4585,7 +4586,7 @@ test("SP8 a lone scan provider whose head read takes 2.5 s: the quote waits for 
   const pools = [seeded(token), real(token)];
   const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, slowHead));
   assert.deepEqual(v, below);
-});
+}));
 
 test("SP9 a lone scan provider whose logs backend lags its own head and answers [] past it: those blocks are never kept as read", { timeout: 60_000 }, async () => {
   // review of 22e29c9, B2, on the first's own path (older than the second: the halves of the request up to the head,
@@ -4618,7 +4619,7 @@ const triQuote = async (token: string, scans: EvmRpc[], chainName: "base" | "rob
   return verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scans));
 };
 
-test("SL1 the first two scan providers down (no connection, or HTTP 503, head reads too): the third carries the scan, on Base and Robinhood", { timeout: 60_000 }, async () => {
+test("SL1 the first two scan providers down (no connection, or HTTP 503, head reads too): the third carries the scan, on Base and Robinhood", { timeout: 60_000 }, () => onTestClock(async () => {
   let k = 0;
   for (const c of ["base", "robinhood"] as const) {
     for (const down of [refusing, answering503]) {
@@ -4633,7 +4634,7 @@ test("SL1 the first two scan providers down (no connection, or HTTP 503, head re
       console.log(`SL1 ${c} ${down.name}: ${asked.length} getLogs on the third, ${Math.round(performance.now() - t)} ms`);
     }
   }
-});
+}));
 
 test("SL2 a warm scan with the first two down: the third has its blocks at once, never at the bound", { timeout: 60_000 }, async () => {
   const token = "0x00000000000000000000000000000000005c4610";
