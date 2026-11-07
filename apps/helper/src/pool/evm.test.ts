@@ -176,7 +176,7 @@ test("withdraw's signature is read in its one canonical form: offset after the W
 });
 
 test("the epoch fee is the kit's evmPoolFee: G at the pool's tree depth at the epoch's first block, its base fee and the chain fee there, or the floor", async () => {
-  assert.equal(FEE, 2_880_000_000_000_000n, "2 x (1,435,193 x 1 gwei + 7,917 wei) = 2,870,386,000,015,834 wei, up to the 10,000 gwei step");
+  assert.equal(FEE, 2_910_000_000_000_000n, "2 x (1,451,267 x 1 gwei + 7,917 wei) = 2,902,534,000,015,834 wei, up to the 10,000 gwei step");
   assert.equal(EVM_FEE_STEP, 10n ** 13n);
   // no base fee: 2 x 7,917 wei rounds to one step, the kit's one floor (fold 2 LOW-A; no sender takes another)
   const free = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [rpc([], {}, chainOf({ base: () => 0n })), rpc([], {}, chainOf({ base: () => 0n }))], () => NOW);
@@ -229,12 +229,12 @@ test("a withdraw at its epoch's fee, under its cap, to this release's fee recipi
 });
 
 test("a base fee spike past the fee's cap never overpays: maxFeePerGas x gas limit stays within the fee, and a cap under the base fee is fee_stale", async () => {
-  for (const spike of [1_000n * GWEI, 10n ** 15n, 3_925_475_930n]) {
+  for (const spike of [1_000n * GWEI, 10n ** 15n, 3_966_366_305n]) {
     const calls: Calls = [];
     assert.equal(code(await sender(calls, { spike }).carry(req())), "fee_stale", `spike ${spike}`);
     assert.equal(sends(calls).length, 0);
   }
-  for (const spike of [GWEI / 2n, 2n * GWEI, 3_925_475_929n]) {
+  for (const spike of [GWEI / 2n, 2n * GWEI, 3_966_366_304n]) {
     const calls: Calls = [];
     const a = await sender(calls, { spike }).carry(req());
     assert.equal(a.status, 200, JSON.stringify(a.body));
@@ -242,7 +242,7 @@ test("a base fee spike past the fee's cap never overpays: maxFeePerGas x gas lim
     const [tip, maxFee, gas] = [num(f[2]!), num(f[3]!), num(f[4]!)];
     assert.ok(maxFee * gas <= FEE, `spike ${spike}: ${maxFee} x ${gas} = ${maxFee * gas} over the fee ${FEE}`);
     assert.ok(tip <= maxFee);
-    // the fee is 2,880,000 gwei (feeAt(1 gwei)); the limit is the estimate x 1.2, so the cap is fee / 733,669 = 3,925,475,929 wei
+    // the fee is 2,910,000 gwei (feeAt(1 gwei)); the limit is the estimate x 1.2, so the cap is fee / 733,669 = 3,966,366,304 wei
     if (spike === GWEI / 2n) assert.equal(maxFee, GWEI + 100_000_000n, "under the cap: 2 x base + tip");
     else assert.equal(maxFee, FEE / gas, "past it: the cap");
   }

@@ -25,7 +25,7 @@ const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("current
 const TRUE = `0x${"0".repeat(63)}1`;
 type Calls = { method: string; params: readonly unknown[] }[];
 
-function rpc(calls: Calls, o: { estimate: bigint; latestBase?: bigint }): EvmRpc {
+function rpc(calls: Calls, o: { estimate: bigint; latestBase?: bigint; callAnswer?: string }): EvmRpc {
   const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: `0x${(n === 600n && o.latestBase !== undefined ? o.latestBase : GWEI).toString(16)}` });
   return async (method, params) => {
     calls.push({ method, params });
@@ -35,7 +35,7 @@ function rpc(calls: Calls, o: { estimate: bigint; latestBase?: bigint }): EvmRpc
       case "eth_call": {
         const [{ to, data }, at] = params as [{ to: string; data: string }, unknown];
         if (typeof at === "object" && at !== null && "blockHash" in at) return `0x${(to === "0x420000000000000000000000000000000000000f" ? (data.startsWith("0xf1c7a58b") ? 7_917n : 0n) : data === DEPTH_DATA ? 2n : 0n).toString(16).padStart(64, "0")}`;
-        return TRUE;
+        return o.callAnswer ?? TRUE;
       }
       case "eth_estimateGas": return `0x${o.estimate.toString(16)}`;
       case "eth_getBlockByNumber": return params[0] === "latest" ? block(600n) : BigInt(params[0] as string) <= 600n ? block(BigInt(params[0] as string)) : null;
@@ -71,25 +71,28 @@ function txFields(raw: string): { maxFeePerGas: bigint; gas: bigint } {
   return { maxFeePerGas: items[3]!, gas: items[4]! };
 }
 
-const carry = async (name: "buyBaseSepolia" | "withdrawBaseSepolia", o: { estimate: bigint; latestBase?: bigint }) => {
+const carry = async (name: "buyBaseSepolia" | "withdrawBaseSepolia", o: { estimate: bigint; latestBase?: bigint; callAnswer?: string }) => {
   const calls: Calls = [];
   const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, log: () => {} }, [rpc(calls, o), rpc([], o)], () => NOW);
   const a = await s.carry({ pool: POOL, data: CAST.cases[name]!.callData, epoch: EPOCH });
   const sent = calls.filter((c) => c.method === "eth_sendRawTransaction").map((c) => c.params[0] as string);
-  return { a, sent };
+  // the simulation at "pending" (the fee's reads are eth_calls at a block hash)
+  const sims = calls.filter((c) => c.method === "eth_call" && c.params[1] === "pending").map((c) => c.params[0] as { gas?: string });
+  return { a, sent, sims };
 };
 const code = (a: { body: unknown }) => ((a.body as { error?: { code: string } }).error?.code ?? "ok");
 /** The epoch fee the fixture's releases carry: the kit's rule at depth 2, 1 gwei and a chain fee of 7,917 wei. */
 const FEE = evmPoolFee({ gas: evmPoolGas(2), gasPrice: GWEI, chainFee: 7_917n });
 
 // the least gas measured (forge) plus each route's intrinsic gas: the helper's one-hop test buy (1,252 bytes of calldata,
-// 33,244 intrinsic) and the largest calldata the helper carries (2,404 bytes, its intrinsic bounded at 21,000 + 16 x 2,404)
-// with geth's and reth's 1.5% search slack (x 1000 / 985)
+// 33,244 intrinsic, measured with the top side node unset) and the largest calldata the helper carries (2,404 bytes, its
+// intrinsic bounded at 21,000 + 16 x 2,404) at each depth's heaviest real tree state, with geth's and reth's 1.5% search
+// slack (x 1000 / 985)
 const ONE_HOP_DEPTH_2 = 1_082_371n + 33_244n;
 const ONE_HOP_DEPTH_11 = 1_288_754n + 33_244n;
 const slack = (g: bigint) => (g * 1000n + 984n) / 985n;
-const HEAVIEST_DEPTH_2 = slack(1_101_491n + 21_000n + 16n * 2_404n);
-const HEAVIEST_DEPTH_32 = slack(1_749_570n + 21_000n + 16n * 2_404n);
+const HEAVIEST_DEPTH_2 = slack(1_110_751n + 21_000n + 16n * 2_404n);
+const HEAVIEST_DEPTH_32 = slack(1_732_470n + 21_000n + 16n * 2_404n);
 
 test("depth 11: a buy whose limit is the floor's estimate x 1.2 (1,586,397, over the old 1,500,000) goes out at that limit; a withdraw keeps EVM_GAS_MAX", async () => {
   const { a, sent } = await carry("buyBaseSepolia", { estimate: ONE_HOP_DEPTH_11 });
@@ -99,15 +102,16 @@ test("depth 11: a buy whose limit is the floor's estimate x 1.2 (1,586,397, over
   assert.deepEqual([w.a.status, code(w.a), w.sent.length], [422, "simulation_failed", 0], "a withdraw over 1,500,000 is still refused");
 });
 
-test("depth 32: the heaviest route's limit (2,203,899) goes out, its worst cost (gas x maxFeePerGas) at most the fee; over G(32) is refused", async () => {
-  assert.equal(evmPoolGas(32), 2_203_913n, "the helper's buy gas cap, EVM_BUY_GAS_MAX");
+test("depth 32: the heaviest route's limit (2,183,067) goes out, its worst cost (gas x maxFeePerGas) at most the fee; over G(32) is refused", async () => {
+  assert.equal(evmPoolGas(32), 2_194_363n, "the helper's buy gas cap, EVM_BUY_GAS_MAX");
   const { a, sent } = await carry("buyBaseSepolia", { estimate: HEAVIEST_DEPTH_32 });
   assert.deepEqual([a.status, code(a), sent.length], [200, "ok", 1], JSON.stringify(a.body));
   const { gas, maxFeePerGas } = txFields(sent[0]!);
-  assert.equal(gas, 2_203_899n);
+  assert.equal(gas, 2_183_067n);
   assert.ok(gas * maxFeePerGas <= FEE, `worst ${gas * maxFeePerGas} over the fee ${FEE}`);
   // one estimate whose x 1.2 passes G(32): refused before any eth_call or send
-  const over = (evmPoolGas(32) * 10n) / 12n + 1n;
+  const over = ((evmPoolGas(32) + 1n) * 10n + 11n) / 12n; // the least estimate whose x 1.2 is G(32) + 1 or more
+  assert.ok((over * 12n) / 10n > evmPoolGas(32) && ((over - 1n) * 12n) / 10n <= evmPoolGas(32));
   const r = await carry("buyBaseSepolia", { estimate: over });
   assert.deepEqual([r.a.status, code(r.a), r.sent.length], [422, "simulation_failed", 0]);
   assert.match(JSON.stringify(r.a.body), new RegExp(`over ${evmPoolGas(32)}`));
@@ -120,7 +124,22 @@ test("depth 2: a 7% base-fee rise since the epoch's block still sends; fee_stale
     const doubled = await carry("buyBaseSepolia", { estimate, latestBase: 2n * GWEI });
     assert.deepEqual([doubled.a.status, code(doubled.a)], [200, "ok"], `estimate ${estimate}, base fee doubled: ${JSON.stringify(doubled.a.body)}`);
   }
-  // past fee / limit (2.88e15 / 1,414,362 = 2.036 gwei for the heaviest route): fee_stale, nothing sent
+  // past fee / limit (2.91e15 / 1,425,643 = 2.041 gwei for the heaviest route): fee_stale, nothing sent
   const past = await carry("buyBaseSepolia", { estimate: HEAVIEST_DEPTH_2, latestBase: (GWEI * 205n) / 100n });
   assert.deepEqual([past.a.status, code(past.a), past.sent.length], [422, "fee_stale", 0]);
+});
+
+test("pays-revert M1 on every gas path: a buy goes out only when its simulation at the very limit it signs answers true", async () => {
+  // under the old 1,500,000 and over it, up to the depth-32 cap
+  for (const estimate of [ONE_HOP_DEPTH_2, ONE_HOP_DEPTH_11, HEAVIEST_DEPTH_32]) {
+    const ok = await carry("buyBaseSepolia", { estimate });
+    assert.deepEqual([ok.a.status, ok.sent.length], [200, 1], `estimate ${estimate}: ${JSON.stringify(ok.a.body)}`);
+    assert.equal(ok.sims.length, 1);
+    assert.equal(BigInt(ok.sims[0]!.gas!), txFields(ok.sent[0]!).gas, "simulated at the gas limit it signs");
+    // the swap would fail (buy returns false: the pool takes the fee and pays W ETH), or no word comes back
+    for (const callAnswer of [`0x${"0".repeat(64)}`, "0x", `0x${"0".repeat(63)}2`]) {
+      const no = await carry("buyBaseSepolia", { estimate, callAnswer });
+      assert.deepEqual([no.a.status, code(no.a), no.sent.length], [422, "simulation_failed", 0], `estimate ${estimate}, eth_call ${callAnswer}`);
+    }
+  }
 });

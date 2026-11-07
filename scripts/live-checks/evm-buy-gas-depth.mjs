@@ -10,7 +10,7 @@
 //     hash and one base fee on both, and the pool's currentTreeDepth() at that hash, one word on both;
 //   - the fee is at least 2 x the base fee x G(depth).
 // The helper before this card priced G on the buy's gas used (686,816 at depth 2), under half of its limit: its fee on
-// Base Sepolia at a 0.005 gwei base fee was the one-step floor, 1e13 wei, under 2 x 0.005 gwei x 1,435,193.
+// Base Sepolia at a 0.005 gwei base fee was the one-step floor, 1e13 wei, under 2 x 0.005 gwei x G(4) = 1.477e13.
 // The buy's gas cap (EVM_BUY_GAS_MAX = G(32)) is not visible from outside: its proof is apps/helper/src/pool/
 // evm-buy-gas-depth.test.ts.
 //   node scripts/live-checks/evm-buy-gas-depth.mjs [--base <helper url>] [--record <file> --as good|bad] [--local]

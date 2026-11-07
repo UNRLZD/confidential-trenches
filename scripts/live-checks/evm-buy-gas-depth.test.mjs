@@ -1,8 +1,9 @@
 // Replays card evm-buy-gas-depth's live check on its recorded answers (evm-buy-gas-depth.answers.json).
-// Good: `good`, a real run (2026-11-07) of this card's helper code in process (--local: evmPoolSendersFromEnv with a
-// throwaway sender key, nothing sent) over the kit's fee providers, on both testnet pools: each fee at least 2 x the
-// epoch block's base fee x G(depth). Bad: `bad`, a real run the same day against the deployed helper, which priced G on a
-// buy's gas used: Base Sepolia's fee the 1e13 floor, Robinhood testnet's 2e13, each under 2 x base x G(depth).
+// Good: `good`, a real run (2026-11-07 08:10Z) of this card's helper code in process (--local: evmPoolSendersFromEnv
+// with a throwaway sender key, nothing sent) over the kit's fee providers, on both testnet pools the deploy records name:
+// each fee at least 2 x the epoch block's base fee x G(depth). Bad: `bad`, the same run of the helper code at main 332672aa
+// (before this card), which priced G on a buy's gas used: Base Sepolia's fee the 1e13 floor, Robinhood testnet's 2e13,
+// each under 2 x base x G(depth). The deployed helper did not yet serve these pools (404 on both, read the same minute).
 //   node --test scripts/live-checks/evm-buy-gas-depth.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -10,7 +11,7 @@ import { test } from "node:test";
 import { collect, judge } from "./evm-buy-gas-depth.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-gas-depth.answers.json", import.meta.url), "utf8"));
-const POOLS = ["0xb239a38af69b68e6c5c305df64985f283b5d5fe5", "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"];
+const POOLS = ["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"];
 
 test("the good answer (this card's helper) passes on both testnet pools", () => {
   assert.deepEqual(A.good.runs.map((r) => r.pool), POOLS);
@@ -19,7 +20,7 @@ test("the good answer (this card's helper) passes on both testnet pools", () => 
   assert.equal(r.lines.length, 2);
 });
 
-test("the bad answer (the deployed helper before this card) fails on both pools: the fee is under 2 x base x G(depth)", () => {
+test("the bad answer (the helper at main 332672aa, before this card) fails on both pools: the fee is under 2 x base x G(depth)", () => {
   assert.deepEqual(A.bad.runs.map((r) => r.pool), POOLS);
   const r = judge(A.bad.runs);
   assert.equal(r.ok, false);
