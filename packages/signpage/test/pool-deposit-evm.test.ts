@@ -162,6 +162,7 @@ function hostOf(ch: ReturnType<typeof chain>, ns: NoteStore, o: Partial<PoolDepo
     rpcs: ch.rpcs,
     round: async () => ({ events: [...ch.c.events], finalBlock: ch.c.fin }),
     notes: async () => ns,
+    records: async () => ns.list(),
     seed64: async () => (seeds.push(SEED.slice()), seeds.at(-1)!),
     reads: 2,
     wait: async () => {},
@@ -689,6 +690,21 @@ test("pool-deposit-sent-end review 4 (EVM): the end's reads back off (10 s doubl
   f.go();
   assert.equal(await f.parked(), false, "no read after the sign out");
   assert.deepEqual(f.stages, []);
+});
+
+test("pool-deposit-sent-end fold review 6 (EVM): the end's reads read each note's record read only (records), never opening the note store", async () => {
+  const { ch, ns } = await funded(RUNG + FEE);
+  let opens = 0;
+  let reads = 0;
+  const f = followedEvm(ch, ns, { notes: async () => (opens++, ns), records: async () => (reads++, ns.list()) });
+  await f.r.after;
+  await f.runEnd;
+  const atEnd = opens;
+  assert.equal(await f.parked(), true);
+  f.go();
+  assert.equal(await f.parked(), true);
+  assert.ok(reads >= 2, `the record read on each read: ${reads}`);
+  assert.equal(opens, atEnd, "the note store is never opened by the end's reads");
 });
 
 test("pool-deposit-sent-end review 6 (EVM): the run's end zeroes the seed and U's keys before any store read: a store read that never settles keeps neither", async () => {

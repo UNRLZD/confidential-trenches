@@ -269,6 +269,7 @@ function host(c: ReturnType<typeof chain>, ns: NoteStore, over: Partial<PoolDepo
     pin: PIN,
     rpcs: [c.rpc(), c.rpc()],
     notes: async () => ns,
+    records: async () => ns.list(),
     seed64: async () => {
       const s = SEED64.slice();
       seeds.push(s);
@@ -1816,6 +1817,24 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
   assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "not_landed", "built again and sent: pending");
   assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "filled");
   assert.deepEqual(stages, [], "and the app was never told not_landed for a note that landed");
+});
+
+test("pool-deposit-sent-end fold review 6: the end's reads read each note's record read only (records), never opening the note store, whose open and list settle under the notes lock and may write", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  let opens = 0;
+  let reads = 0;
+  const f = followed(c, ns, { notes: async () => (opens++, ns), records: async () => (reads++, ns.list()) });
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  const atEnd = opens;
+  assert.equal(await f.parked(), true);
+  f.go();
+  assert.equal(await f.parked(), true);
+  assert.ok(reads >= 2, `the record read on each read: ${reads}`);
+  assert.equal(opens, atEnd, "the note store is never opened by the end's reads");
 });
 
 test("pool-deposit-sent-end review 4: the end's reads stop when the page leaves the deposit (signal aborted at sign out): no read, no stage", async () => {

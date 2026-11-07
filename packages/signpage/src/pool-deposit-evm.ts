@@ -76,6 +76,8 @@ export type PoolDepositEvmHost = {
   /** The pool's events on both RPCs (evmTreeSync over the same pair). */
   round(): Promise<EvmDepositRound>;
   notes(): Promise<NoteStore>;
+  /** The notes read only (the wallet's readNotes), for the end's reads: no notes lock, nothing written (fold review 6). */
+  records(): Promise<readonly NoteRecord[]>;
   /** The 64-byte seed; zeroed here when the run ends. */
   seed64(): Promise<Uint8Array>;
   landed?(note: NoteRecord): void;
@@ -413,13 +415,7 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
  *  Deposited naming it: "expired", no end, since the pass builds the note again at U's new nonce from U's money. */
 async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][number]): Promise<"landed" | "dead" | "expired" | null> {
   const scope = evmPoolScopeOf(h.pin.pool, EVM_CHAIN_IDS[h.pin.network]);
-  const store = await h.notes();
-  let rec: NoteRecord | undefined;
-  try {
-    rec = (await store.list()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
-  } finally {
-    h.end?.();
-  }
+  const rec = (await h.records()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
   if (rec !== undefined && rec.state !== "INCOMING") return rec.state === "PLANNED" ? null : rec.leaf?.value === n.value ? "landed" : "dead";
   const nonce = (rec?.evmSends ?? []).reduce((m, x) => (x.nonce > m ? x.nonce : m), n.nonce);
   const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));

@@ -109,6 +109,9 @@ export type PoolDepositHost = {
   rpcs: readonly [SolanaRpc, SolanaRpc];
   /** The note store, opened top-level. */
   notes(): Promise<NoteStore>;
+  /** The notes read only (the wallet's readNotes: no Web Lock, nothing written): what the end's reads read a note's
+   *  record from, so a follow never takes the notes lock or settles the store (fold review 6). */
+  records(): Promise<readonly NoteRecord[]>;
   /** The 64-byte seed; zeroed here when the run ends. */
   seed64(): Promise<Uint8Array>;
   /** A note landed: the proof queue's pass, which makes the next buy's proof ahead. */
@@ -363,13 +366,7 @@ async function leafOf(sync: ReturnType<typeof solanaTreeSync>, scope: bigint, pr
  *  own test); else null (a send may still land, a mark on one RPC only, or a read that does not check out). */
 async function noteEnd(h: PoolDepositHost, sync: ReturnType<typeof solanaTreeSync>, scope: bigint, n: { precommitment: bigint; sends: readonly PoolSend[] }, wait: (ms: number) => Promise<void>): Promise<"landed" | "dead" | "expired" | null> {
   const value = n.sends[0]!.value; // every send of a note is at its recorded value (store addSend)
-  const store = await h.notes();
-  let rec: NoteRecord | undefined;
-  try {
-    rec = (await store.list()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
-  } finally {
-    h.end?.();
-  }
+  const rec = (await h.records()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
   if (rec !== undefined && rec.state !== "INCOMING") return rec.state === "PLANNED" ? null : rec.leaf?.value === value ? "landed" : "dead";
   const sends = rec?.sends?.length ? rec.sends : n.sends;
   const fs = await finals(h);
