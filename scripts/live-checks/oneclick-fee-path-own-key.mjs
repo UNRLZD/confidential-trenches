@@ -8,16 +8,22 @@
 //   - every computed read of either table's binding by a key that is not a literal, T[k], sits in a function (any kind:
 //     a declaration, an expression, an arrow, a class or object method, private, quoted or computed) whose own body,
 //     before the read on every path to it, holds a guard with its refusal: `G || refuse(...)`, `if (!G) refuse(...)` (one
-//     if or several) or `!G ? refuse(...) : <the read>`, where G holds typeof k == "string" and Object.hasOwn(T, k) and
+//     if or several) or `!G ? refuse(...) : <the read>`, where G holds typeof k == "string" and Object.hasOwn(T, k) (or
+//     Object.prototype.hasOwnProperty.call(T, k), or {}.hasOwnProperty.call(T, k); no other object's hasOwnProperty) and
 //     the refusal's text names "no such 1Click path"; and k is that function's own parameter, never shadowed (a for-let,
-//     a catch, a block's let) or assigned in it, so the key read is the key checked. A guard in a nested function, a
-//     guard whose result is unused, or one with the wrong polarity guards nothing.
+//     a catch, a block's let), redeclared (a var, a for-var, a function) or assigned in it, so the key read is the key
+//     checked. A guard in a nested function, a guard whose result is unused, one with the wrong polarity, or a read in a
+//     parameter default (it runs before the body) guards nothing. A table's binding is matched by scope, so a second
+//     table of the same name in another scope has its reads held too.
 // A read through the prototype chain, as SIGN_HOST served before this card (release-68), lets a polluted
 // Object.prototype.nopath = 1 name a fee for a path that does not exist, and a real dry quote on it passed the device's
 // check; without the typeof, a key object whose toString answers "partner" to the checks and "nopath" to the read does
-// the same. Outside what this reads: a read that does not index the table's binding, such as Reflect.get(T, k), a
-// computed destructuring of T, or T passed along and indexed under another name; and what the refusal call does (that
-// it throws is the kit's tests', packages/kit/test/oneclick.test.ts).
+// the same. Known limits, outside what this reads: a read that does not index the table's binding, such as
+// Reflect.get(T, k), a computed destructuring of T, or T passed along and indexed under another name (`const X = T;
+// X[k]`); and what the refusal call does, such as a refusal deferred into a timer (that it throws is the kit's tests',
+// packages/kit/test/oneclick.test.ts). Correct code it fails closed on, never open: the guard as `if (!(G)) refuse()`,
+// as `if (!G) return refuse()`, or as a ternary statement `!G ? refuse() : 0` before the read; and a table bound by
+// assignment to an earlier var (`var T; ... T = {...}`) rather than by its declarator.
 // This file reaches no package code (the import check holds it): its test holds TABLES to the kit's own exports. The
 // parser is the kit's own dev dependency, loaded through the kit's package.json as pool-sol-deploy.mjs loads snarkjs.
 //   node scripts/live-checks/oneclick-fee-path-own-key.mjs [--record <file>] [--answer <file>]
@@ -142,12 +148,17 @@ function typeofString(n, ops) {
   const o = t === n.left ? n.right : n.left;
   return t && str(o) ? t.argument.name : null;
 }
-/** `Object.hasOwn(T, k)` or `Object.prototype.hasOwnProperty.call(T, k)`: [T, k], or null. */
+const unparen = (n) => (n.type === "ParenthesizedExpression" ? unparen(n.expression) : n);
+/** `Object.hasOwn(T, k)`, `Object.prototype.hasOwnProperty.call(T, k)` or `{}.hasOwnProperty.call(T, k)`: [T, k], or null.
+ *  Any other object's hasOwnProperty is not the check: an object the caller passes in can answer what it likes. */
 function hasOwn(n) {
   if (n.type !== "CallExpression" || n.arguments.length !== 2 || !n.arguments.every((a) => a.type === "Identifier")) return null;
   const c = n.callee;
   const own = c.type === "MemberExpression" && !c.computed && c.object.type === "Identifier" && c.object.name === "Object" && c.property.name === "hasOwn";
-  const proto = c.type === "MemberExpression" && !c.computed && c.property.name === "call" && c.object.type === "MemberExpression" && c.object.property?.name === "hasOwnProperty";
+  const m = c.type === "MemberExpression" && !c.computed && c.property.name === "call" ? c.object : null;
+  const x = m?.type === "MemberExpression" && !m.computed && m.property.name === "hasOwnProperty" ? unparen(m.object) : null;
+  const proto = x !== null && ((x.type === "ObjectExpression" && x.properties.length === 0) || (x.type === "MemberExpression" && !x.computed &&
+    x.object.type === "Identifier" && x.object.name === "Object" && x.property.name === "prototype"));
   return own || proto ? [n.arguments[0].name, n.arguments[1].name] : null;
 }
 /** What must hold when `n` is true (a conjunction), or when `n` is false (`negated`: a disjunction of negations). */
@@ -201,6 +212,7 @@ function guardsOfStatement(stmt, out) {
  *  holds the read, and inside that statement's expression before the read. */
 function guardsAt(fn, read) {
   const out = [];
+  if (!within(fn.body, read)) return out; // a read in a parameter default runs before the body
   if (fn.body.type !== "BlockStatement") {
     guardsBeforeIn(fn.body, read, out);
     return out;
@@ -241,8 +253,9 @@ export function facts(index, js) {
     tables[table] = [...new Set(decls.map((d) => d.name))];
     for (const [n, up] of nodes) {
       if (n.type !== "MemberExpression" || !n.computed || n.object.type !== "Identifier") continue;
-      const d = decls.find((x) => x.name === n.object.name);
-      if (!d || bindingScope(d.name, n.object, [...up, n]) !== d.scope) continue; // another binding of that name
+      const at = decls.some((x) => x.name === n.object.name) ? bindingScope(n.object.name, n.object, [...up, n]) : null;
+      const d = decls.find((x) => x.name === n.object.name && x.scope === at);
+      if (!d) continue; // another binding of that name
       const p = n.property;
       if (p.type === "Literal" || (p.type === "TemplateLiteral" && p.expressions.length === 0)) continue;
       const key = js.slice(p.start, p.end);
@@ -250,7 +263,7 @@ export function facts(index, js) {
       const fn = fnAt < 0 ? null : up[fnAt];
       const k = p.type === "Identifier" ? p.name : null;
       const scoped = fn !== null && k !== null && bindingScope(k, p, [...up, n]) === fn &&
-        fn.params.some((q) => patternNames(q).includes(k)) && !assigned(fn, k);
+        fn.params.some((q) => patternNames(q).includes(k)) && !assigned(fn, k) && !(fn.body.type === "BlockStatement" && hoisted(fn.body).has(k));
       const guards = fn === null || k === null ? [] : guardsAt(fn, n);
       const owns = guards.filter((g) => g.holds.has(`own:${d.name}:${k}`));
       const typed = guards.filter((g) => g.holds.has(`typeof:${k}`));

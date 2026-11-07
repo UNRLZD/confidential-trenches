@@ -7,7 +7,9 @@
 // without its typeof; (the delta review of c88a3eeb) an unguarded method body in a class or an object literal, and a
 // typeof chained with the wrong operator; (r3, on a real parse) a private, quoted or computed method, a parameter with
 // parentheses, the key shadowed (for-let, catch, a block's let) or assigned, a guard in a dead inner arrow, unused, with
-// the wrong polarity or after the read: each FAIL; and the text scan's false FAILs (a typeof or an arrow between, a
+// the wrong polarity or after the read: each FAIL; (the r4 delta review of 15750e7c) the key redeclared by a var or a
+// for-var, a second table of the same name in another scope, a read in a parameter default, and a hasOwnProperty taken
+// from an object the caller passes in: each FAIL; and the text scan's false FAILs (a typeof or an arrow between, a
 // ternary guard, "function" in the message, a block after a call, the guard split over two ifs): each PASS. facts() reads a minified bundle of either shape. And the check's tables are the kit's exports, so neither can change alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -100,6 +102,15 @@ test("facts reads a minified bundle: either table's literal in any spacing or qu
     guard_after_read: `function f(e,t){const r=t?a[e]:b[e];${GUARD};return r}`,
   };
   for (const [name, js] of Object.entries(FAILS)) assert.equal(verdict(tables + js).ok, false, name);
+  // planted (the r4 delta review of 15750e7c), read from a real parse: each FAILs (the list names any that PASS)
+  const FAILS_R4 = {
+    N5_var_redeclares_key: `function f(e,t,n){${GUARD};var e=n.path;return t?a[e]:b[e]}`,
+    N6_for_var_of_key: `function f(e,t,n){${GUARD};let r=0;for(var e of t)r+=a[e]+b[e];return r}`,
+    N7_second_table_same_name: `${guarded}function Zm(){var a={keyless:1,partner:1};return e=>a[e]}`,
+    N8_read_in_default_param: `function f(e,t,n=a[e]+b[e]){${GUARD};return n}`,
+    N9_any_hasOwnProperty_call: `function f(e,t,n){return typeof e==\`string\`&&n.hasOwnProperty.call(a,e)&&n.hasOwnProperty.call(b,e)||W(\`${REFUSAL}\`),t?a[e]:b[e]}`,
+  };
+  assert.deepEqual(Object.keys(FAILS_R4).filter((name) => verdict(tables + FAILS_R4[name]).ok), []);
   // and correct bundles PASS, the false FAILs of the text scan among them
   const PASSES = {
     typeof_function_between: `function f(e,t,n){${GUARD};return typeof n==\`function\`&&n(),t?a[e]:b[e]}`,
@@ -109,6 +120,8 @@ test("facts reads a minified bundle: either table's literal in any spacing or qu
     method_call_then_block: `function f(e,t,n){${GUARD};if(t){Al(e);return a[e]}return b[e]}`,
     split_ifs: `function f(e,t,n){if(typeof e!=\`string\`)W(\`${REFUSAL}\`);if(!Object.hasOwn(a,e)||!Object.hasOwn(b,e))W(\`${REFUSAL}\`);return t?a[e]:b[e]}`,
     guarded_method: `class Zq{m(e,t){${GUARD};return t?a[e]:b[e]}}`,
+    prototype_hasOwnProperty_call: `function f(e,t){return typeof e==\`string\`&&Object.prototype.hasOwnProperty.call(a,e)&&Object.prototype.hasOwnProperty.call(b,e)||W(\`${REFUSAL}\`),t?a[e]:b[e]}`,
+    empty_literal_hasOwnProperty_call: `function f(e,t){return typeof e==\`string\`&&{}.hasOwnProperty.call(a,e)&&{}.hasOwnProperty.call(b,e)||W(\`${REFUSAL}\`),t?a[e]:b[e]}`,
   };
   for (const [name, js] of Object.entries(PASSES)) assert.equal(verdict(tables + js).ok, true, name);
   // a function of another binding named like the table reads that binding, not the table: no read
