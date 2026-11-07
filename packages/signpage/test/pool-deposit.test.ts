@@ -734,7 +734,7 @@ test("N1: a same-value deposit by another on the note's precommitment funds the 
   assert.equal(c.lamports(u.address), 50_000_000 - FEE, "only the failed tx's fee left U");
 });
 
-test("N2 (probe G): one RPC's far-future last valid height is capped by the other's height + 151: the dropped send goes again, told to no new ask", async () => {
+test("N2 (probe G): one RPC's far-future last valid height is capped at its own height + 2 x 151 (the slack for a node behind, delta review r2 P8): the dropped send goes again, told to no new ask", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, 3 * (Number(RUNG) + COST));
@@ -747,7 +747,7 @@ test("N2 (probe G): one RPC's far-future last valid height is capped by the othe
   c.lands = false;
   const at = c.height;
   assert.equal(((await runPoolDeposit(host(c, ns, { rpcs: [lie, c.rpc()] }), ask(RUNG))) as { stage: string }).stage, "not_landed");
-  assert.deepEqual((await ours(ns))[0]!.sends!.map((s) => s.last_valid_block_height), [BigInt(at + 151)]);
+  assert.deepEqual((await ours(ns))[0]!.sends!.map((s) => s.last_valid_block_height), [BigInt(at + 2 * 151)]);
   c.lands = true;
   c.height += 10_000;
   const told: string[] = [];
