@@ -13,11 +13,17 @@
 // all non-zero) through an adapter that burns 120,000 gas, the heaviest measured swap, with a fee recipient that holds no
 // ETH (a funded one costs 25,000 less). The least gas a buy lands with: 1,117,427 at depth 0 (one leaf: the crossing to
 // depth 1 writes the depth and a new top side node), 1,105,589 at 1, 1,110,751 at 2, then 21,033 a level from depth 3
-// (all ones) to 1,732,470 at 32 (test/evm-pool-fee.test.ts holds all 33). Forge's least is the call's own gas: a
-// transaction adds 21,000 and its calldata, here at most 16 x 2,404 (every byte priced non-zero), 59,464 in all (an
-// eth_estimateGas of a gasleft() >= 100,000 probe read 21,416 over forge's least with 68 bytes of calldata and 58,292
-// with 2,372). Then G covers, at every depth, 1.2 x the estimate a node may return (geth and reth stop their search up to
-// 1.5% over the least: x 1000/985). The gas a buy uses is unchanged; withdraw (1,139,880 at depth 32) stays under G.
+// (all ones) to 1,732,470 at 32 (test/evm-pool-fee.test.ts holds all 33). G adds to that least a transaction's 21,000
+// and its calldata at its most, 16 x 2,404 (every byte priced non-zero), 59,464 in all, then covers 1.2 x the estimate a
+// node may return (geth and reth stop their search up to 1.5% over the least: x 1000/985). Forge 1.7.1, which made the
+// table, already counts the calldata in its least (the delta review of f7f4631a, 7 Nov, evidence/forge171-variants.log:
+// the same depth-0 buy with all-zero and all-0xff data read 1,103,751 and 1,117,947, 12 x 1,183 bytes), so G counts
+// calldata twice and sits about 46k gas (3-4%) high: it errs safe and moves no fee at today's base fees. Real sends on
+// anvil 1.8.6 (the same review, evidence/anvil-rv3.log: the least gas a sent buy lands with, 2,404 bytes of calldata,
+// 1,798 non-zero; anvil's eth_estimateGas equals it) put the worst limit the helper signs (that least x 1000/985 x 1.2)
+// about 57.5k under G at every depth 3 to 32 (57,522 at 32, where G is 1.027 x that limit) and 63,717 to 78,139 under at
+// depths 0 to 2; an all-non-zero 2,404 bytes adds at most 7,272. The gas a buy uses is unchanged; withdraw (1,139,880 at
+// depth 32) stays under G.
 
 /** Gas a level of the tree adds to G: 21,033 a level measured, x 1.2 / 0.985, rounded up. */
 export const EVM_POOL_GAS_PER_LEVEL = 25_624n;

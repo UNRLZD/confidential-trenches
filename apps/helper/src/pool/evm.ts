@@ -210,8 +210,9 @@ export const EVM_GAS_MAX = 1_500_000n;
  * The most gas the helper pays for one buy (card evm-buy-gas-depth): the kit's G at the deepest tree the pool takes,
  * evmPoolGas(32) = 2,194,363, the most gas any epoch's fee is priced on. PrivacyPoolSimple.buy reverts when gasleft()
  * is under 651,000 before its swap, so eth_estimateGas lands on that floor and a buy's limit (estimate x 1.2) is about
- * twice its gas used: at most 1,433,776 at depth 0 and 2,183,067 at depth 32 on the largest calldata the helper
- * carries, 11,296 under the cap (kit pool-fee.ts and test/evm-pool-fee.test.ts hold the measurements). EVM_GAS_MAX
+ * twice its gas used: on the largest calldata the helper carries, real sends on anvil put it at most 1,387,550 at
+ * depth 0 and 2,136,841 at depth 32, 57,522 under the cap (kit pool-fee.ts holds the measurements; its test's model,
+ * 1,433,776 and 2,183,067, counts calldata twice and errs high). EVM_GAS_MAX
  * refused such a buy from depth 6, and the helper's one-hop test buy from depth 8. This cap does not widen what the
  * unpaid-gas caps bound: a buy's worst cost held against them is gas x maxFeePerGas, and maxFeePerGas is at most
  * fee / gas, so it is at most the fee whatever the gas.

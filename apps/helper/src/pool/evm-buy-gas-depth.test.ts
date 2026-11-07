@@ -2,7 +2,8 @@
 // depth the pool takes, at a fee that survives a normal base-fee rise. PrivacyPoolSimple.buy reverts when gasleft() is
 // under 651,000 before its swap, so eth_estimateGas lands on that floor: the estimates here are the least gas a buy lands
 // with, measured on the pool at card pool-evm-buy-pays-revert (forge, isolate = true), plus the transaction's intrinsic
-// gas (forge's least is the call's own gas). The fake chain is evm-release.test.ts's (Base Sepolia, 1 gwei, the pool's
+// gas (forge 1.7.1's least already holds the calldata, so the heaviest route counts it twice and errs high; kit
+// pool-fee.ts). The fake chain is evm-release.test.ts's (Base Sepolia, 1 gwei, the pool's
 // depth 2 at the epoch block), with the estimate and the latest block's base fee set per case.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -109,6 +110,10 @@ test("depth 32: the heaviest route's limit (2,183,067) goes out, its worst cost 
   const { gas, maxFeePerGas } = txFields(sent[0]!);
   assert.equal(gas, 2_183_067n);
   assert.ok(gas * maxFeePerGas <= FEE, `worst ${gas * maxFeePerGas} over the fee ${FEE}`);
+  // the boundary (review of f7f4631a, L2): an estimate whose x 1.2 is exactly G(32) goes out at G(32)
+  const edge = await carry("buyBaseSepolia", { estimate: 1_828_636n });
+  assert.deepEqual([edge.a.status, code(edge.a), edge.sent.length], [200, "ok", 1], JSON.stringify(edge.a.body));
+  assert.equal(txFields(edge.sent[0]!).gas, evmPoolGas(32));
   // one estimate whose x 1.2 passes G(32): refused before any eth_call or send
   const over = ((evmPoolGas(32) + 1n) * 10n + 11n) / 12n; // the least estimate whose x 1.2 is G(32) + 1 or more
   assert.ok((over * 12n) / 10n > evmPoolGas(32) && ((over - 1n) * 12n) / 10n <= evmPoolGas(32));

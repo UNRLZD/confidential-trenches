@@ -20,7 +20,8 @@ test("G(32) for a buy is at least 1,332,356, and G covers every measured release
 // before the buy's insert: depth 0 is one leaf, its crossing to depth 1 the costliest small state), measured on main
 // 332672aa's pool (forge, isolate = true, 7 Nov; every size 1 to 129, then all ones and the crossing at each depth to 32):
 // a 2,404-byte calldata route (EVM_BODY_DATA_MAX, swap data all non-zero) through an adapter burning 120,000 gas, the fee
-// recipient a new account. Forge's least is the call's gas; a transaction adds 21,000 and its calldata, at most 16 x 2,404.
+// recipient a new account. The limit adds a transaction's 21,000 and its calldata at its most, 16 x 2,404; forge 1.7.1's
+// least already holds the calldata, so this counts it twice and errs safe (src/trade/evm/pool-fee.ts).
 const LEAST_BY_DEPTH = [
   1_117_427, 1_105_589, 1_110_751, 1_122_523, 1_143_556, 1_164_588, 1_185_620, 1_206_652, 1_227_685, 1_248_717,
   1_269_749, 1_290_782, 1_311_814, 1_332_846, 1_353_879, 1_374_911, 1_395_944, 1_416_977, 1_438_009, 1_459_042,
