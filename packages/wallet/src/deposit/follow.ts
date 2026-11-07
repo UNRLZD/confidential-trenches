@@ -374,6 +374,15 @@ const HALTS = new Set(["halted", "token_halted", "relayer_low"]);
  * It only holds final, which waits for the quote's deadline anyway; nothing is signed later for it.
  */
 export const REFUND_FINAL_BLOCKS = 60n;
+/**
+ * Heights from U's nonce moving past a call to every receipt of it done, with no release relayer named to read its tx
+ * FINAL: 3 (testnet tx 2Q4pYKQ9RRwHWofzuKmwvJBn3dxfVMxsH6Dx32pWneMV: the tx at 275892006, ft_transfer_call 275892007,
+ * ft_on_transfer 275892008, ft_resolve_transfer 275892009; a relayed Delegate uses U's nonce at its own receipt's
+ * height, the token's call the next receipt, so the same offsets), about 2 s at mainnet's 600 ms. The count starts at
+ * the first final height the nonce reads past at, at or after the call's own height. A refund slower than that (a
+ * congested shard) is a balance read short at the relayer, settled by the chain (bind.ts SETTLE).
+ */
+export const REFUND_HEIGHTS = 3n;
 /** A refund move's intent deadline past the lower final block time: 5 min. */
 export const REFUND_MOVE_MS = 300_000;
 /** The rounds' pace with nothing in flight: from 15 s, doubling, to 60 s. */
@@ -693,15 +702,21 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   const ran = new Set<string>(); // settled notes whose every call U's key nonce passed
   // A row naming U at the call's own amount counts as U's (ownRow), so a refund to U cannot be ruled out for any landed
   // note whose call ran: no op is final until REFUND_FINAL_BLOCKS past the height its run was first read at.
-  // With the release relayer named, a call whose nonce U's key passed counts as done only once its tx (by a hash heard)
-  // reads FINAL on both RPCs (findDeadCall, the bind's afterRefusal rule): the Delegate uses the nonce a height before
+  // With the release relayer named, a call whose nonce U's key passed counts as done only once the note's last call (its
+  // highest nonce: an earlier one may have run and failed, and the bind signed the next on the same P) reads FINAL on
+  // both RPCs by a hash heard (findDeadCall, the bind's afterRefusal rule): the Delegate uses the nonce a height before
   // the token debits U, so U's USDC read in between is not yet what the call leaves. No hash heard: its window and
-  // LAPSE_MARGIN, as for a call that never ran.
+  // LAPSE_MARGIN, as for a call that never ran. With none named no tx can be read: REFUND_HEIGHTS past the lower final
+  // height U's nonce was first read past the note's calls at, the refund's own distance on NEAR.
   const relayer = deps.relayerAccount === undefined ? RELEASE_RELAYER[network] : deps.relayerAccount;
-  const ranFinal = async (calls: readonly BindCall[]): Promise<boolean> => {
-    if (relayer === null) return true;
-    for (const nonce of new Set(calls.map((c) => c.nonce))) if ((await findDeadCall(calls, nonce, rpcs, relayer)) !== null) return true;
-    return false;
+  const passedAt = new Map<string, bigint>(); // note id -> the lower final height U's nonce was first read past its calls at
+  const ranFinal = async (id: string, calls: readonly BindCall[], low: bigint): Promise<boolean> => {
+    if (relayer === null) {
+      if (!passedAt.has(id)) passedAt.set(id, low);
+      return low >= passedAt.get(id)! + REFUND_HEIGHTS;
+    }
+    const top = calls.reduce((m, c) => (c.nonce > m ? c.nonce : m), 0n);
+    return (await findDeadCall(calls, top, rpcs, relayer)) !== null;
   };
   const callsOut = async (): Promise<{ out: boolean; due: boolean; late: boolean }> => {
     const mine = await notesOfU();
@@ -719,7 +734,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
       for (const { note } of landed.filter(({ note }) => !settled.has(note.id))) {
         const live = note.calls!.filter((c) => c.nonce > u.nonce);
         const window = (live.length === 0 ? note.calls! : live).reduce((m, c) => (c.max_block_height > m ? c.max_block_height : m), 0n) + LAPSE_MARGIN;
-        if (live.length === 0 && (low > window || (await ranFinal(note.calls!)))) {
+        if (live.length === 0 && (low > window || (await ranFinal(note.id, note.calls!, low)))) {
           seenAt.set(note.id, low);
           settled.add(note.id);
           ran.add(note.id);

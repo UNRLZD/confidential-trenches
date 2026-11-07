@@ -152,6 +152,17 @@ const running = new Map<string, number>(); // U -> binds running for it in this 
 // note id -> the call the relayer refused for now (prepay_open, a retry code), so a bind that ended on its wait (onWait
 // threw) sends the same bytes again while ahead of max_block_height, as one that waited would; a reload settles it
 const resend = new Map<string, { nonce: bigint; code: string }>();
+// note id -> the calls of it the relayer answered amount_above_balance (each signed from U's USDC read at or above its
+// amount on both RPCs), by their signed bytes: one per window
+const short = new Map<string, Set<string>>();
+/**
+ * The calls of one note the relayer may answer amount_above_balance before the bind ends refused (held, with that
+ * reason). The honest relayer reads U's USDC at final, so it reads it short of a call the device signed only while a
+ * ran call's debit is in and its refund is not (3 heights on NEAR, REFUND_HEIGHTS in follow.ts); each later call is
+ * signed a lapsed window on (DEPOSIT_WINDOW + LAPSE_MARGIN + 1 = 126 heights, about 76 s). So 3 calls hold a refund
+ * delayed two windows (about 2.5 min) by congestion, and a relayer that reads short past that is refused, not followed.
+ */
+export const SHORT_READ_CALLS = 3;
 
 // ---------- reads on two RPCs ----------
 type Obj = Record<string, unknown>;
@@ -726,6 +737,11 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         continue;
       }
       const answer = await send(out);
+      if (answer !== null && !answer.ok && answer.code === "amount_above_balance") {
+        const seen = short.get(own.noteId) ?? new Set<string>();
+        short.set(own.noteId, seen.add(out.signed_delegate));
+        if (seen.size >= SHORT_READ_CALLS) return { kind: "refused", code: answer.code };
+      }
       if (answer === null || answer.ok || SETTLE.has(answer.code)) step = await settle(out);
       else if (answer.code === "sender_struck") return strike();
       else if (answer.code === "resign_needed") {
@@ -758,4 +774,5 @@ export function resetBindSession(): void {
   struck.clear();
   running.clear();
   resend.clear();
+  short.clear();
 }

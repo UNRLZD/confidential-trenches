@@ -69,6 +69,10 @@ export class V01World {
   sent: Sent[] = [];
   /** A relayer that carries every call at once: no read of U's USDC, no R2 hold until the old P's send is FINAL. */
   carryAtOnce = false;
+  /** A relayer that reads U's USDC short of every call (amount_above_balance), however much U holds. */
+  shortForever = false;
+  /** The token fails U's first call (its ft_transfer_call panics): nothing moves, the Delegate's nonce stays used. */
+  failFirst = false;
   /** The second RPC's key reads fail (an outage, a 429): readU has no answer. */
   keysDown = false;
   /** Lose the relayer's answer to U's first call (a timeout, a closed tab) and carry that call this many blocks later. */
@@ -104,7 +108,7 @@ export class V01World {
   /** The token's ft_transfer_call: U holding too little fails it (nothing moves); else the vault takes P a height later,
    *  or refuses a used P and USDC refunds U refundBlocks after the call. */
   private debit(x: { nonce: bigint; p: bigint; amount: bigint; call: bigint }) {
-    if (this.balance < x.amount) return void this.carried.push({ nonce: x.nonce, p: x.p, amount: x.amount, fate: "failed" });
+    if (this.failFirst || this.balance < x.amount) return ((this.failFirst = false), void this.carried.push({ nonce: x.nonce, p: x.p, amount: x.amount, fate: "failed" }));
     this.balance -= x.amount;
     if (this.used(x.p) || this.landings.some((l) => l.p === x.p)) {
       this.carried.push({ nonce: x.nonce, p: x.p, amount: x.amount, fate: "refunded" });
@@ -132,7 +136,7 @@ export class V01World {
     const no = (code: string, status: number) => (this.answers.push(code), Response.json({ error: { code } }, { status }));
     // the relayer's checks in the helper's order: U's USDC at final (checks.ts:197), a nonce U's key has used, a call of
     // U it is still carrying (the helper's one slot per U)
-    if (!this.carryAtOnce && amount > this.balance) return no("amount_above_balance", 400);
+    if (this.shortForever || (!this.carryAtOnce && amount > this.balance)) return no("amount_above_balance", 400);
     if (dl.nonce <= this.nonce) return no("bad_nonce", 400);
     if (this.carries.length > 0) return no("in_flight", 409);
     // R2: one prepay per U that no deposit has used, and nothing sent on another P that is not FINAL (send.ts:590-593)

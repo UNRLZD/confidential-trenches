@@ -10,8 +10,8 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { depositAccount } from "../src/deposit/account.ts";
-import { callAmount, ownRow, POLL_MS, resetBindSession } from "../src/deposit/bind.ts";
-import { encodeDelegateAction } from "../src/deposit/delegate.ts";
+import { callAmount, ownRow, POLL_MS, resetBindSession, SHORT_READ_CALLS } from "../src/deposit/bind.ts";
+import { encodeDelegateAction, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
 import { restorePages } from "../src/notes/restore.ts";
 import { base64 } from "@scure/base";
 import { type DepositOp, type FollowDeps, followDeposit, usdOf } from "../src/deposit/follow.ts";
@@ -52,7 +52,13 @@ async function run(stranger: (u: string) => Stranger, over: (world: V01World) =>
       rpcs: world.rpcs(),
       seed64: async () => Uint8Array.from(SEED),
       fetchFn: world.fetchFn,
-      sleep: async (ms) => (sleeps.push(ms), world.tick(), await turn()),
+      // a follow that never ends fails at a height budget, not only at the wall clock (a loaded runner)
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        world.tick();
+        await turn();
+        if (sleeps.length > 3000) throw new Error(`no end in 3000 rounds: ${world.answers.join()}`);
+      },
       signal: AbortSignal.timeout(20_000),
       relayerAccount: RELAYER,
       now: () => NOW,
@@ -136,7 +142,8 @@ test("V-01 with the refund slow (10 blocks after the call): no wait past the pol
 // from USDC the ran call has not taken yet.
 for (const [name, set] of [["the first answer lost", (w: V01World) => (w.loseFirst = 3n)], ["the debit 2 heights after the nonce", (w: V01World) => (w.debitGap = 2n)]] as const) {
   test(`M1, the release relayer not named (mainnet today), ${name}: the helper's read of U's USDC short of the call is settled by the chain, the call signed again at its nonce, U's refund lands on P'`, async () => {
-    const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => (set(world), { relayerAccount: null }));
+    // many lapse rounds in real time: a loaded runner took 20.2 s under the run's 20 s signal (16 s alone, 6 s unloaded)
+    const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => (set(world), { relayerAccount: null, signal: AbortSignal.timeout(90_000) }));
     await recovered(t, ONE_USDC);
     assert.ok(!t.world.carried.some((c) => c.fate === "failed"), "no call the token fails");
   });
@@ -150,6 +157,65 @@ for (const [name, set] of [["the first answer lost", (w: V01World) => (w.loseFir
     }
   });
 }
+
+// With no release relayer named the next call waits REFUND_HEIGHTS past U's nonce; a debit congested past that (5
+// heights) is signed for from USDC the ran call has not taken yet, and the honest relayer's read of U's USDC short of
+// it is settled by the chain: the call lapses and is signed again at its nonce once U holds the refund.
+test("M1, the release relayer not named, the debit congested past REFUND_HEIGHTS: the helper's short read is settled by the chain, the call signed again at its nonce, U's refund lands on P'", async () => {
+  const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => ((world.debitGap = 5n), (world.refundBlocks = 7n), { relayerAccount: null, signal: AbortSignal.timeout(90_000) }));
+  await recovered(t, ONE_USDC);
+  assert.deepEqual(t.world.answers, ["tx", "amount_above_balance", "tx"], "the short read settled, never refused");
+  assert.ok(!t.world.carried.some((c) => c.fate === "failed"), "no call the token fails");
+});
+
+// The review of 59c2db71 (L1): a taken note can hold calls at two nonces (U's first call on P ran and the token failed it,
+// so the bind signed the next at nonce+1 on the same P, and the stranger took P before that one ran). The next sign
+// waits for the note's last call's FINAL, never an earlier one's.
+test("two nonces on a taken note, the release relayer named: the next call waits for the last call's FINAL, never the failed first one's", async () => {
+  for (const carryAtOnce of [false, true]) {
+    resetBindSession();
+    const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => {
+      world.debitGap = 2n;
+      world.carryAtOnce = carryAtOnce;
+      world.failFirst = true;
+      const s = world.stranger;
+      world.stranger = null; // the stranger takes P on U's second call on it, not the first
+      const send = world.fetchFn;
+      let armed = false; // once: the stranger takes P on U's second call on it
+      const fetchFn = (async (url: string, init?: RequestInit) => (url === RELEASE_BIND_URL && !armed && world.sent.length === 1 && ((armed = true), (world.stranger = s)), send(url, init))) as typeof fetch;
+      return { fetchFn };
+    });
+    const fates = t.world.carried.map((c) => c.fate);
+    assert.equal(t.out.kind, "done");
+    assert.deepEqual(fates, ["failed", "refunded", "landed"], `carryAtOnce ${carryAtOnce}: the token failed U's first call only: ${fates.join()}`);
+    assert.ok(t.world.answers.every((a) => a === "tx"), `carryAtOnce ${carryAtOnce}: no call refused: ${t.world.answers.join()}`);
+    assert.equal(t.world.balance, 0n, "nothing waits in U");
+  }
+});
+
+// The review of 59c2db71 (L2): with no release relayer named, a relayer that carries every call at once (no balance read,
+// no R2 hold) gets U's next call only once REFUND_HEIGHTS have passed since U's nonce read past the ran one: the
+// refund is in U, so the token never fails it and nothing is left that no rule signs again.
+test("the release relayer not named, a relayer that carries at once: the next call waits REFUND_HEIGHTS past the nonce, the token never fails it, U's refund lands on P'", async () => {
+  for (const set of [(w: V01World) => (w.loseFirst = 3n), (w: V01World) => (w.debitGap = 2n)]) {
+    resetBindSession();
+    const t = await run(() => ({ depositor: "e".repeat(64), value: ONE_USDC }), (world) => (set(world), (world.carryAtOnce = true), { relayerAccount: null, signal: AbortSignal.timeout(90_000) }));
+    assert.ok(!t.world.carried.some((c) => c.fate === "failed"), `no call the token fails: ${t.world.carried.map((c) => c.fate).join()}`);
+    await recovered(t, ONE_USDC);
+  }
+});
+
+// The review of 59c2db71 (Info): a relayer that answers amount_above_balance to every call, though the device read U's
+// USDC at or above it on both RPCs before each, ends held with that reason at SHORT_READ_CALLS calls, never a lapse
+// and a new call every window for good.
+test("a relayer that reads U's USDC short of every call: held with amount_above_balance at SHORT_READ_CALLS calls, the money in U", async () => {
+  const t = await run(() => null as unknown as Stranger, (world) => ((world.stranger = null), (world.shortForever = true), { signal: AbortSignal.timeout(90_000) }));
+  assert.equal(t.out.kind, "held");
+  assert.equal(t.op.stage, "held");
+  assert.equal(t.op.follow.why, "amount_above_balance");
+  assert.deepEqual(t.world.answers, Array(SHORT_READ_CALLS).fill("amount_above_balance"));
+  assert.equal(t.world.balance, CREDIT, "nothing moved: U holds it");
+});
 
 test("L1: U's key reads failing on one RPC after done: nothing final, and the rounds back off past the poll", async () => {
   let n = 0;

@@ -27,6 +27,7 @@ import {
   LAPSE_MARGIN,
   readU,
   resetBindSession,
+  SHORT_READ_CALLS,
   resignDeposit,
   txCarriesFinal,
 } from "../src/deposit/bind.ts";
@@ -698,6 +699,15 @@ test("amount_above_balance settles from the pages and U's nonce: nothing carried
   assert.equal(t.sent.length, 2);
   assert.equal(t.sent[1]!.nonce, t.sent[0]!.nonce, "signed again at the same nonce: the first never ran");
   assert.ok(t.sent[1]!.mbh > t.sent[0]!.mbh, "a fresh window");
+});
+test("amount_above_balance on SHORT_READ_CALLS - 1 calls of a note (a refund delayed two windows) still lands; on SHORT_READ_CALLS it is refused, the money in U", async () => {
+  const t = await setup([...Array(SHORT_READ_CALLS - 1).fill("amount_above_balance"), "tx"]);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, SHORT_READ_CALLS);
+  resetBindSession();
+  const r = await setup(Array(SHORT_READ_CALLS).fill("amount_above_balance"));
+  assert.deepEqual(await bindDeposit(SEED, r.args, r.deps), { kind: "refused", code: "amount_above_balance" });
+  assert.equal(r.sent.length, SHORT_READ_CALLS);
 });
 for (const code of ["token_halted", "relayer_low"]) {
   test(`REVIEW I (expect PASS; kills M44): ${code} waits and sends the same signed bytes`, async () => {
