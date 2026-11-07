@@ -46,6 +46,7 @@ import {
   solanaTeardownAddresses,
   solanaTeardownPlan,
   solanaWalletTokenAccount,
+  SOLANA_SOL_MINT,
   SolanaWalletLinks,
   type SolanaAccountRead,
   type SolanaHeldRead,
@@ -457,7 +458,11 @@ async function prepareLeg(
     if (!Number.isSafeInteger(t) || !Number.isSafeInteger(v)) throw new Error("rent is not a safe integer");
     return [BigInt(t as number), BigInt(v as number)] as const;
   };
-  const sideReads = Promise.all([both(rentOf, deps.providers), both((r) => readAccounts(r, watch, "confirmed"), deps.providers)]);
+  // With the pre-state, in the same read: the wallet's wSOL account, so a tx that writes it (a buy or sell from a wallet
+  // that holds wSOL) has its second simulation sent beside the first (stateOn's `hint`).
+  const wsol = solanaAta(w, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const preKeys = wsol === ata ? watch : [...watch, wsol];
+  const sideReads = Promise.all([both(rentOf, deps.providers), both((r) => readAccounts(r, preKeys, "confirmed"), deps.providers)]);
   sideReads.catch(() => undefined); // awaited below; a refused build must not leave it unhandled
   const found = await search;
   rec.buildCaps = found.steps;
@@ -493,7 +498,9 @@ async function prepareLeg(
   const b = build;
   const growth = ctx.links.grow([], [...b.setup, b.swap, ...(b.cleanup ? [b.cleanup] : []), ...b.other].flatMap((ix) => [ix.program, ...ix.accounts.map((a) => a.key)]));
   growth.catch(() => undefined); // awaited before the check
-  const [rent, pre] = await sideReads;
+  const [rent, preRead] = await sideReads;
+  const pre: [(Acc | null)[], (Acc | null)[]] = [preRead[0].slice(0, watch.length), preRead[1].slice(0, watch.length)];
+  const preWsol: [Acc | null, Acc | null] | undefined = preKeys.length > watch.length ? [preRead[0][watch.length] ?? null, preRead[1][watch.length] ?? null] : undefined;
   // Every account the tx writes, from its own bytes on provider A's tables (S2 holds B's to the same bytes; a key this
   // misses is one the checks find unread and refuse): S6 and S11 find the wallet's token accounts among them.
   let writes: string[] = [];
@@ -511,7 +518,14 @@ async function prepareLeg(
   // No other wallet of the user is in it: S11 refuses a tx that names one, so none can change. It runs with
   // replaceRecentBlockhash, so it holds for this tx on any blockhash (solanaWithBlockhash changes no other byte).
   type State = { simulations: [SolanaSimulation | null, SolanaSimulation | null]; spendable: bigint; writable: Record<string, [Acc | null, Acc | null]> };
-  const stateOn = async (wire: Uint8Array, before: readonly [(Acc | null)[], (Acc | null)[]]): Promise<State | null> => {
+  //
+  // `hint`, the wallet's wSOL account as the pre-state read gave it on each provider: when either reads it as the
+  // wallet's token account and the tx writes it, its second simulation ([wallet, wSOL]) is sent beside the first rather
+  // than after the written accounts' read (card solana-quote-under-1s). It is used only when that read finds exactly this
+  // one account to read back, and finds it on each provider as the pre-state read did, so the simulation still lies
+  // between a read of the account and the read again that must equal it; otherwise it is dropped and the second
+  // simulation runs after the read, as without a hint.
+  const stateOn = async (wire: Uint8Array, before: readonly [(Acc | null)[], (Acc | null)[]], hint?: readonly [Acc | null, Acc | null]): Promise<State | null> => {
     const b64 = btoa(String.fromCharCode(...wire));
     const simErrors: string[] = [];
     const wrote = both((r) => readAccounts(r, writes, "confirmed"), deps.providers);
@@ -526,18 +540,23 @@ async function prepareLeg(
           const accs = Array.isArray(v.accounts) && v.accounts.length === group.length ? v.accounts.map((x, j) => account(x, group[j] as string)) : null;
           return { err: v.err ?? null, accs };
         };
+        const guessed = hint && writes.includes(wsol) && (solanaWalletTokenAccount(hint[0], w) || solanaWalletTokenAccount(hint[1], w)) ? run([w, wsol]) : null;
+        guessed?.catch(() => undefined); // awaited below when it is used
         const main = await run(watch);
         const failed = (err: unknown): SolanaSimulation => ({ err, walletLamports: { pre: 0n, post: 0n }, tokenAccount: { pre: 0n, post: 0n }, tokenAccountLamports: { pre: 0n, post: 0n }, pumpVolumeAccumulator: { pre: 0n, post: 0n }, pumpSwapVolumeAccumulator: { pre: 0n, post: 0n }, walletAccounts: {} });
         if (main.err !== null) return failed(main.err);
         if (!main.accs || !main.accs[0]) { simErrors.push(`${at}: no wallet read back`); return null; }
         const m = main.accs;
-        const mine = mineOf(await wrote);
+        const read = await wrote;
+        const mine = mineOf(read);
+        const wi = writes.indexOf(wsol);
+        const guessHolds = guessed !== null && hint !== undefined && mine.length === 1 && mine[0] === wsol && sameAccounts([hint[0]], [read[0][wi] ?? null]) && sameAccounts([hint[1]], [read[1][wi] ?? null]);
         const walletAccounts: Record<string, Acc | null> = {};
         if (writes.includes(ata)) walletAccounts[ata] = m[1] ?? null;
         let walletPost = (m[0] as Acc).lamports;
         for (let i = 0; i < mine.length; i += 3) {
           const group = mine.slice(i, i + 3);
-          const x = await run([w, ...group]);
+          const x = i === 0 && guessHolds ? await (guessed as ReturnType<typeof run>) : await run([w, ...group]);
           if (x.err !== null) return failed(x.err);
           if (!x.accs || !x.accs[0]) { simErrors.push(`${at}: the wallet's accounts not read back`); return null; }
           if (i > 0 && x.accs[0].lamports !== walletPost) { simErrors.push(`${at}: the wallet's lamports differ between its simulations`); return null; }
@@ -601,7 +620,7 @@ async function prepareLeg(
     const st = await stateOn(assembled.wire, before);
     return st ? (bh, ref) => verdictOn(solanaWithBlockhash(assembled, bh), st, ref) : null;
   };
-  const st = await stateOn(assembled.wire, pre);
+  const st = await stateOn(assembled.wire, pre, preWsol);
   if (!st) return null;
   const out = await verdictOn(assembled, st, { legExpectedOut: rec.legExpectedOut as bigint, expectedOut: rec.expectedOut as bigint });
   rec.quoteMs = now() - t0;
