@@ -278,8 +278,16 @@ try {
     await page.setViewportSize(to);
     let shown;
     if (to.width >= 768) {
-      check(await sheet(page).waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false), `${tag}: the sheet stays open past the phone width`);
-      check((await page.evaluate(() => document.body.style.overflow)) === "", `${tag}: the page stays locked at the desktop width`);
+      // the page's phone layout is display:none at this width, so "hidden" comes with the layout switch itself: the lock
+      // must be gone on that same read (red at 6e575823, where it went only with React's commit of the close), and the
+      // sheet's own state must close (data-open false)
+      check(await sheet(page).waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false), `${tag}: the sheet stays drawn past the phone width`);
+      const atSwitch = await page.evaluate(() => document.body.style.overflow);
+      check(atSwitch === "", `${tag}: the page stays locked at the desktop width (overflow ${JSON.stringify(atSwitch)} as the layout switched)`);
+      const closedState = await settle(() => sheet(page).getAttribute("data-open"), "false");
+      check(closedState === "false", `${tag}: the sheet's state stays open past the phone width (data-open ${closedState})`);
+      const after = await settle(() => page.evaluate(() => document.body.style.overflow), "");
+      check(after === "", `${tag}: the page is locked again after the close (overflow ${JSON.stringify(after)})`);
       shown = desk;
     } else {
       await page.locator(".tkp-phone .tkp-buy").click();

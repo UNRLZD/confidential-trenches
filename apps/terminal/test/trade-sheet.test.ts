@@ -40,7 +40,11 @@ test("the sheet draws the box only through the step: mounted once, hidden (not r
   assert.match(s, /locksPage\(state\)/);
   // a window grown past the phone closes it, so the desktop page is never left locked under a sheet it does not draw
   assert.match(s, /window\.matchMedia\(PHONE\)/);
-  assert.match(s, /!phone\.matches && onClose\(\)/);
+  // the lock is released in the media query's own change event, before the close's commit, and by the cleanup on every
+  // other close and on an unmount; it is never taken off the phone layout
+  assert.match(s, /if \(phone\.matches\) return;\s*release\(\);\s*onClose\(\);/);
+  assert.match(s, /if \(!phone\.matches\) return void onClose\(\);\s*document\.body\.style\.overflow = "hidden";/);
+  assert.match(s, /phone\.removeEventListener\("change", left\);\s*release\(\);/);
   assert.doesNotMatch(s, /window\.confirm|confirm\(|alert\(/);
 });
 

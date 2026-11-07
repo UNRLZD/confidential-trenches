@@ -33,24 +33,31 @@ export function TradeSheet({ state, onClose, label, closeLabel, head, children }
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [state.open, signinOpen, onClose]);
-  // only the phone page draws the sheet: a window that grows past it (a tablet turned sideways) closes it, so the
-  // desktop page is never left locked under a sheet it does not draw
-  useEffect(() => {
-    if (!state.open) return;
-    const phone = window.matchMedia(PHONE);
-    const left = () => !phone.matches && onClose();
-    phone.addEventListener("change", left);
-    return () => phone.removeEventListener("change", left);
-  }, [state.open, onClose]);
+  // the page behind is locked while the sheet is open on the phone layout, and only then. Only the phone page draws the
+  // sheet: a window that grows past it (a tablet turned sideways, a resize) releases the lock in the media query's own
+  // change event, in the same frame as the layout switch and before React's commit, then closes the sheet; the effect's
+  // cleanup releases it on every other close and on an unmount. The desktop page is never drawn locked.
   const lock = locksPage(state);
   useEffect(() => {
     if (!lock) return;
+    const phone = window.matchMedia(PHONE);
     const was = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
+    const release = () => {
       document.body.style.overflow = was;
     };
-  }, [lock]);
+    const left = () => {
+      if (phone.matches) return;
+      release();
+      onClose();
+    };
+    if (!phone.matches) return void onClose();
+    document.body.style.overflow = "hidden";
+    phone.addEventListener("change", left);
+    return () => {
+      phone.removeEventListener("change", left);
+      release();
+    };
+  }, [lock, onClose]);
   if (!state.mounted) return null;
   return (
     <div className="tsh" data-sheet="trade" data-open={state.open}>
