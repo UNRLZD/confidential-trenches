@@ -35,9 +35,12 @@ export const MAINNET = "a real proof for another vault, mainnet USDC";
 /** The crafted asks: each one's method, body and the answers that pass. */
 export function asks(fixture = JSON.parse(readFileSync(FIXTURE, "utf8")).request) {
   const real = (token) => JSON.stringify({ ...fixture, token });
-  // mainnet: the proof's context for another vault than the v1 record's, its fee recipient the fixture's own
-  const decoy = decoyFor(loadRecord());
-  const elsewhere = () => JSON.stringify({ ...probe(decoy, vaultScopeOf(keccak_256, decoy, TOKENS.mainnet).toString(), fixture, fixture.withdrawal.fee_recipient), token: TOKENS.mainnet });
+  // mainnet: the proof's context for another vault than the v1 record's, its fee recipient the record's vault (review
+  // L1: one no helper carries, check 8, as helper-mainnet-vault-env.mjs asks; the fixture's own could one day be the
+  // host's WITHDRAW_FEE_RECIPIENT_MAINNET, and a helper taking any vault would then reach check 4's bad_proof and pass)
+  const record = loadRecord();
+  const decoy = decoyFor(record);
+  const elsewhere = () => JSON.stringify({ ...probe(decoy, vaultScopeOf(keccak_256, decoy, TOKENS.mainnet).toString(), fixture, record.account_id), token: TOKENS.mainnet });
   return [
     { name: "GET", method: "GET", body: undefined, want: [[405, "method_not_allowed"]] },
     { name: "not JSON", method: "POST", body: "{not json", want: [[400, "bad_shape"]] },

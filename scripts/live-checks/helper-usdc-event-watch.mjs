@@ -16,10 +16,13 @@
 // event for the same account, and is_blocklisted of that account reads false, true, true, false at the blocklist's block
 // less one, its block, the unblocklist's block less one and its block (a view at block h includes h's receipts).
 // Then the helper itself (HELPER_HOST's GET /v1/token-status, read with Origin APP_HOST before the providers): on each
-// network it carries (CARRIED), caught_up true, not halted, the vault not blocked, the pin, at a block no more than
-// MAX_LAG behind the providers' final reads that follow it; on a network it does not carry yet (mainnet until the
-// host's environment names its vault: the watch reads the vault's own block, so with no vault it never answers caught
-// up), the kit's not-caught-up answer, halted, vault_blocked and code_hash_ok null.
+// network it carries (CARRIED: both, mainnet's watch on the v1 vault the host's WITHDRAW_VAULT_MAINNET names once the
+// env cutover moves it, apps/helper/deploy/vault-lines.sh), caught_up true, not halted, the vault not blocked, the pin,
+// at a block no more than MAX_LAG behind the providers' final reads that follow it. A network not in CARRIED would be
+// read for the kit's not-caught-up answer (halted, vault_blocked and code_hash_ok null: with no vault named the watch
+// never answers caught up); CARRIED names both today, so that branch runs on none. Until the env cutover the
+// deployed helper answers no caught-up watch on the v1 vault, and this check FAILs on it (as its recorded
+// bad_mainnet_not_carried run does), so the helper redeploy for it goes with the cutover, never before.
 // And the halt itself, seen once (PROBE): testnet's probe token, mainnet USDC's pinned code made with two pausers
 // (contracts/vault/deployments/testnet-usdc-probe.json), paused and unpaused at once by its pausers' multisig on
 // 2026-11-03. On FastNEAR's testnet archive (the one keyless archive), the four transactions read succeeded, and the
@@ -41,7 +44,10 @@ export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
-/** The networks the helper carries, so its watch must answer caught up there: a helper from the v1 release starts only with the mainnet vault named (withdraw/send.ts MAINNET_VAULT), so it carries mainnet too. */
+/** The networks the helper carries, so its watch must answer caught up there. Mainnet is carried because the host names
+ *  its vault (WITHDRAW_VAULT_MAINNET, BIND_VAULT_MAINNET: token-status/status.ts vaultOf), not because the release forces
+ *  it: withdraw/send.ts starts a helper that names no mainnet vault and refuses only one other than MAINNET_VAULT. The
+ *  env cutover names the v1 record's. */
 export const CARRIED = ["testnet", "mainnet"];
 export const MAX_LAG = 100; // blocks (about 60 s) the helper's answer may trail the providers' final reads after it
 export const MAX_SKEW = 30; // blocks between the two providers' final answers (about 18 s): more is a provider behind

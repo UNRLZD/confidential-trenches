@@ -70,10 +70,13 @@ test("every ask the check sends is refused before a chain read or at check 2: no
   const record = loadRecord();
   assert.equal(fixture.vault, record.account_id);
   const main = JSON.parse(asks().find((a) => a.name === MAINNET).body);
-  assert.deepEqual(main.withdrawal, fixture.request.withdrawal);
+  // review L1: its fee recipient is the record's vault, one no helper carries (check 8), never the fixture's own, so a
+  // helper taking any vault stops at check 8 or check 2 and never reaches check 4's bad_proof
+  assert.deepEqual(main.withdrawal, { ...fixture.request.withdrawal, fee_recipient: record.account_id });
+  assert.notEqual(main.withdrawal.fee_recipient, fixture.request.withdrawal.fee_recipient);
   assert.notEqual(main.public_signals[7], fixture.request.public_signals[7]);
-  const contextFor = (vault) => vaultContextOf(keccak_256, vaultContextInput(vault, main.withdrawal), vaultScopeOf(keccak_256, vault, main.token)).toString();
-  assert.equal(contextFor(record.account_id), fixture.request.public_signals[7], "the fixture's context is the v1 vault's");
+  const contextFor = (vault, withdrawal = main.withdrawal) => vaultContextOf(keccak_256, vaultContextInput(vault, withdrawal), vaultScopeOf(keccak_256, vault, main.token)).toString();
+  assert.equal(contextFor(record.account_id, fixture.request.withdrawal), fixture.request.public_signals[7], "the fixture's context is the v1 vault's");
   assert.equal(main.public_signals[7], contextFor(decoyFor(record)));
   assert.notEqual(main.public_signals[7], contextFor(record.account_id));
 });

@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { nearPairNetwork, VaultSyncStopped, VAULT_SYNC_LISTS, VAULT_SYNC_PAGE, vaultViewBusy } from "@blindfill/kit";
+import { nearPairNetwork, nearPairRule, VaultSyncStopped, VAULT_SYNC_LISTS, VAULT_SYNC_PAGE, vaultViewBusy } from "@blindfill/kit";
 import { EXIT_NETWORKS, ExitRpcRefused, exitReadPages, exitRpc } from "../src/rpc.ts";
 import { replayRpc, type PagesFile } from "./replay.ts";
 
@@ -92,7 +92,8 @@ test("only the release's pair is read: two hosts of one operator, another provid
   await assert.rejects(exitReadPages({ network: "testnet", rpcs: [replayRpc(A), named(A.url)] }), refused);
   // mainnet's pair on testnet, and testnet's on mainnet
   await assert.rejects(exitReadPages({ network: "testnet", rpcs: [named(EXIT_NETWORKS.mainnet.rpcs[0]), named(EXIT_NETWORKS.mainnet.rpcs[1], B)] }), refused);
-  await assert.rejects(exitReadPages({ network: "mainnet", vault: PAGES.vault, rpcs: [replayRpc(A), replayRpc(B)] }), refused);
+  // review L2: mainnet's own vault (the default), so the pair rule is what refuses, never the vault rule before it
+  await assert.rejects(exitReadPages({ network: "mainnet", rpcs: [replayRpc(A), replayRpc(B)] }), (e: unknown) => refused(e) && (e as Error).message === `exit: ${nearPairRule("mainnet")}`);
   // no network but the two
   await assert.rejects(exitReadPages({ network: "betanet" as "mainnet" }), refused);
 });
