@@ -2,8 +2,9 @@
 // Live check of card evm-sell-hook-converge on HELPER_HOST (https://api.confidential.unrealized.trade): a sale the
 // device's quote routes through a pool behind a v4 hook no venue lists is one the helper's EVM pool sender carries, so
 // such a pool can never freeze a token's sales. The device's quote takes that route only where it sets the reference,
-// at the reference's minOut, and bans the pool on this device where the real sale reverts (packages/kit/src/checks/evm/
-// quote.ts, packages/wallet/src/pool/evm-sell-bans.ts; the kit's attack tests HC1-HC6 hold that). What is deployed and
+// at the reference's minOut, and bans the pool on this device, for an hour at first, where the real sale's revert proves
+// its hook at fault on the device's own reads (packages/kit/src/checks/evm/quote.ts evmSellRevertedPools,
+// packages/wallet/src/pool/evm-sell-bans.ts; the kit's attack tests HC1-HC6 and RV1-RV10 hold that). What is deployed and
 // read here is the one part on a server: the sender's read-back of a signed Sell (the kit's evmSellRouteOf, the one
 // definition, apps/helper/src/pool/evm.ts sellHeld) takes such a route, where before the card it refused it bad_route.
 // For each testnet pool pool-evm-deploy's records name, it reads GET /v1/pool/fee?pool=<pool> (the fee collector the
