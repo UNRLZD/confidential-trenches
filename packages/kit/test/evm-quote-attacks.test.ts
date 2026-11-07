@@ -5047,3 +5047,32 @@ test("RV11 a reverted sale that is not the quote's own (its token, amount, minOu
   }
   assert.deepEqual(await proved(pools, q1, await land(pools, q1)), [hcPid(a.key)]);
 });
+
+test("RVX two distinct unlisted hooks on one picked route, each reverting the real sale (review of c1f486ae, M1): no one hook's no-op rescues it, the replay with both a no-op does, so both pools are banned and the sale converges; providers that disagree on that replay, or a revert both no-ops leave, ban nothing", async () => {
+  const token = "0x00000000000000000000000000000000000c1e01";
+  const x = xAt(0x7e1);
+  const H1 = "0x00000000000000000000000000000000000061cc";
+  const H2 = "0x00000000000000000000000000000000000062cc";
+  // X's market behind H1 and the token's pool behind H2: each lies 2x to the quoter and the sim and reverts the real
+  // sale; with its hook a no-op each pays as it does with no hook
+  const market: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, H1), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, H2), give: (a) => a, lie: (a) => a, exec: (a, ctx) => (later(ctx) ? null : a) };
+  const logs = [{ key: pool.key, at: 4_500_000 }, { key: market.key, at: 4_100_001 }];
+  const pools = [seeded(token), pool, market];
+  const q1 = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q1) && q1.hooked.length === 2, show(q1));
+  const hash = await land(pools, q1);
+  assert.equal(SALES.get(hash)!.status, "0x0");
+  // the second provider answers the replay with both hooks a no-op (asW and two hooks: three overrides) with a revert
+  const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 3 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
+  // the device's loop: one failed try, both pools banned, then the seeded pool
+  const r = await hcConverge(pools, token, logs, 4);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: [...r.banned].sort() }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(market.key), hcPid(pool.key)].sort() }, show(r));
+  // control: pools that revert the sale with their hooks a no-op too (the revert is not the hooks'): nothing is banned
+  const dead = (k: bigint) => (a: bigint, ctx: SimCtx) => (later(ctx) ? null : k * a);
+  const deadPools = [seeded(token), { ...pool, neutral: dead(1n) }, { ...market, neutral: dead(2n) }];
+  const q2 = await hcQuote(deadPools, token, logs);
+  assert.ok(!("code" in q2) && q2.hooked.length === 2, show(q2));
+  assert.deepEqual(await proved(deadPools, q2, await land(deadPools, q2)), []);
+});

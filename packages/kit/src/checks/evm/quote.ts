@@ -2647,11 +2647,18 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    malformed answer; gas burned), and the override replaces it for every pool behind it, so every pool of the route
 //    behind that hook is banned, each by its PoolId (two pools an attacker built on one hook would otherwise freeze the
 //    sale).
+// 5. every hook together: where no one hook's no-op rescues the sale, the replay with every hook behind a pool of
+//    `hooked` replaced by EVM_NOOP_HOOK_CODE at once succeeds on both providers. Those hooks together stood between the
+//    sale and its minOut (a route through two hooks that each revert the sale: either one's no-op alone still reverts at
+//    the other), so every pool of the route behind any of them is banned.
+// The evidence rule covers one hook, and every hook of the route together; each ban is the route the device itself
+// picked, on providers that agree, after the replay as it ran reverted and the market held, and every ban expires.
 // Anything else bans nothing: providers that disagree, a sale that did not revert, a replay that does not revert, a
-// revert no one hook explains, a chain with no pinned sell delegate. A provider that does not answer (rpc_error) is
-// thrown, so the caller may ask again.
-// The gap: a hook flipped by a transaction earlier in the sale's own block leaves no evidence at the parent block, so it
-// is never banned and can freeze the sale until card evm-sell-hook-intrablock proves the sale's true pre-state.
+// revert that neither one hook nor every hook together explains, a chain with no pinned sell delegate. A provider that
+// does not answer (rpc_error) is thrown, so the caller may ask again.
+// The gap still open (HC2): a hook flipped by a transaction earlier in the sale's own block leaves no evidence at the
+// parent block, so it is never banned and can freeze the sale until card evm-sell-hook-intrablock proves the sale's true
+// pre-state.
 
 /** The PoolIds of the quote's `hooked` pools that the sale `txHash`'s revert proves at fault (see above), on the
  *  chain's pinned providers; [] where nothing is proved. The caller bans these (wallet pool/evm-sell-bans.ts). */
@@ -2777,8 +2784,15 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
     // 4. one hook: the replay with that hook alone a no-op succeeds; every pool of the route behind it is banned
     const keys = hopKeys(bought);
     const out: string[] = [];
-    for (const hk of [...new Set(keys.filter((k) => quote.hooked.includes("0x" + poolId(k))).map((k) => k.hooks))]) {
+    const hooks = [...new Set(keys.filter((k) => quote.hooked.includes("0x" + poolId(k))).map((k) => k.hooks))];
+    for (const hk of hooks) {
       if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys) if (k.hooks === hk && !out.includes("0x" + poolId(k))) out.push("0x" + poolId(k));
+    }
+    // 5. every hook together: where no one hook explains it, the replay with every hook of `hooked` a no-op at once
+    // succeeds; every pool of the route behind any of them is banned
+    if (out.length === 0 && hooks.length > 1) {
+      const all = Object.fromEntries(hooks.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]));
+      if ((await replay(all)).ok) for (const k of keys) if (hooks.includes(k.hooks) && !out.includes("0x" + poolId(k))) out.push("0x" + poolId(k));
     }
     return out;
   } catch (e) {

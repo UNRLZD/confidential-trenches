@@ -505,6 +505,14 @@ export const MUTANTS = [
   [QUOTE, "    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "", R, "RV8 "],
   [QUOTE, "(x, y) => x.ok === y.ok && (x.ok || x.data === (y as { data: string }).data),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
   [QUOTE, "for (const k of keys) if (k.hooks === hk && !out.includes(", "for (const k of keys.filter((x) => x.hooks === hk).slice(0, 1)) if (k.hooks === hk && !out.includes(", R, "RV10 "],
+  // every hook together (review of c1f486ae, M1): where no one hook's no-op rescues the sale, the replay with every hook
+  // a no-op at once, on providers that agree, bans every pool of the route behind any of them; never in place of a
+  // one-hook verdict, never without that replay's success, never on one provider's word, never fewer than all of them
+  [QUOTE, "    if (out.length === 0 && hooks.length > 1) {", "    if (false) {", R, "RVX "],
+  [QUOTE, "      if ((await replay(all)).ok) for (const k of keys)", "      for (const k of keys)", R, "RVX "],
+  [QUOTE, "      if ((await replay(all)).ok) for (const k of keys)", "      if (replayOf((await askAt(rpcs[0]!, [{ method: \"eth_call\", params: [call, parent, { ...asW, ...all }, env] }]))[0], \"provider 1\").ok) for (const k of keys)", R, "RVX "],
+  [QUOTE, "for (const k of keys) if (hooks.includes(k.hooks) && !out.includes(", "for (const k of keys) if (k.hooks === hooks[0] && !out.includes(", R, "RVX "],
+  [QUOTE, "    if (out.length === 0 && hooks.length > 1) {", "    if (hooks.length > 1) {", R, "RV4 "],
   // the sale is the quote's own: each field of the Sell and its route bound (a sale with one off is never evidence)
   [QUOTE, "if (sToken !== BigInt(token) || sAmount", "if (sAmount", R, "RV11 "],
   [QUOTE, " || sAmount !== quote.amountIn || sTarget", " || sTarget", R, "RV11 "],
