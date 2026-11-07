@@ -1,13 +1,14 @@
 {
   "_note": {
-    "good": "this card fold's SIGN_HOST build: packages/signpage/index.html and public/app.js as built at card/pool-deposit-sent-end with review 1-8 folded (main c75c90ae merged in): each kind follows an ask's open notes by their own records to a real end",
+    "good": "this card second fold's SIGN_HOST build: packages/signpage/index.html and public/app.js as built at card/pool-deposit-sent-end with the delta review of 37abecea folded: one end per ask (no stage per rung), the reads read records only and stop only at sign out",
     "bad": "the card's build before the review fold (6f20021b): the reads follow captured sends, tell not_landed on an expiry the pass builds again, read the Solana mark with no slot pin, and never stop or back off: FAIL",
     "bad5a9": "main 5a9e5d8c's build (release-83's tree, with pool-deposits): no reads after a run, so a sent deposit leaves the app at sent: FAIL",
-    "liveBefore": "SIGN_HOST read 2026-11-07T09:28Z, before this card's deploy: FAIL"
+    "liveBefore": "SIGN_HOST read 2026-11-07T09:28Z, before this card's deploy: FAIL",
+    "bad37a": "the card's build at 37abecea, before the delta review fold: each landed rung posted as filled (an end), the reads open the note store and give up after an hour: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-KspATbofBn3Bqu+QSvNLVfawHBiccnq2brulpD3q4QY//kjFOopWhGcQfDEw6Mq2\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-KspATbofBn3Bqu+QSvNLVfawHBiccnq2brulpD3q4QY//kjFOopWhGcQfDEw6Mq2",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Kly9LZKVTiV/q3VES+69+5Ztkll3NxHMZGOOE/95FqbkXNhYq+Kcbka3QgcTNo8Y\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Kly9LZKVTiV/q3VES+69+5Ztkll3NxHMZGOOE/95FqbkXNhYq+Kcbka3QgcTNo8Y",
     "solFinals": true,
     "solMark": true,
     "solEnd": true,
@@ -16,7 +17,24 @@
     "evmEnd": true,
     "evmLeft": true,
     "evmKind": true,
+    "solRung": true,
+    "evmRung": true,
     "loops": 2
+  },
+  "bad37a": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-KspATbofBn3Bqu+QSvNLVfawHBiccnq2brulpD3q4QY//kjFOopWhGcQfDEw6Mq2\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-KspATbofBn3Bqu+QSvNLVfawHBiccnq2brulpD3q4QY//kjFOopWhGcQfDEw6Mq2",
+    "solFinals": true,
+    "solMark": true,
+    "solEnd": false,
+    "solLeft": true,
+    "solKind": false,
+    "evmEnd": false,
+    "evmLeft": true,
+    "evmKind": true,
+    "solRung": false,
+    "evmRung": false,
+    "loops": 0
   },
   "bad": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-i1uacGD2gd2RadTPhdzEjIlMCqQueEEkUyQHf7gdF+LsN7p8QCuFPWUzC+UnSRPN\"></script>\n  </head>\n  <body></body>\n</html>\n",

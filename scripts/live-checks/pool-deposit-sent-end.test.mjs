@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/pool-deposit-sent-end.test.mjs: the live check replays its recorded answers
-// (pool-deposit-sent-end.answers.json). good: this card's build with the review folded: PASS. bad: the card's build
-// before the fold (6f20021b), bad5a9: main 5a9e5d8c's build, and liveBefore: SIGN_HOST before this card's deploy: each
-// FAIL, each path named. Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL. Planted in
+// (pool-deposit-sent-end.answers.json). good: this card's build with the delta review of 37abecea folded: PASS. bad37a:
+// the card's build at 37abecea, bad: the card's build before the first fold (6f20021b), bad5a9: main 5a9e5d8c's build,
+// and liveBefore: SIGN_HOST before this card's deploy: each FAIL, each path named. Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL. Planted in
 // the bundle's own excerpt (pool-deposit-sent-end.excerpt.txt, cut from this build's public/app.js): each mutant the
 // review's finding 7 found the old marks blind to, and each rule of the fold, taken away: the fact it rests on FAILs.
 import assert from "node:assert/strict";
@@ -24,6 +24,12 @@ test("recorded bad answer: the card's build before the review fold (6f20021b): F
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
   assert.deepEqual(v.lines, bad(...MARKS.filter((k) => k !== "solLeft")));
+});
+
+test("recorded bad answer: the card's build at 37abecea, before the delta review fold: FAIL on every rule that fold added", () => {
+  const v = judge(ANSWERS.bad37a);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("solEnd", "solKind", "evmEnd", "solRung", "evmRung", "loops"));
 });
 
 for (const k of ["bad5a9", "liveBefore"]) {
@@ -55,30 +61,37 @@ const PLANTED = [
   ["the Solana heights read on RPC 0 only", [["t(e.rpcs[0]),t(e.rpcs[1])])", "t(e.rpcs[0]),t(e.rpcs[0])])"]], "solFinals"],
   ["failedOnBoth on one RPC", [["n[t]||r.every(e=>e[t])", "n[t]||r.some(e=>e[t])"]], "solEnd"],
   ["the mark read at confirmed", [["await IP(e,i,`finalized`,n?.[t])", "await IP(e,i,`confirmed`,n?.[t])"]], "solMark"],
-  ["noteEnd's leaf check removed", [["?(await GP(t,n,r.precommitment,f),`landed`)", "?`landed`"]], "solEnd"],
-  ["a mark at another value read as landed", [["f.value===a?(await GP", "f.value!==null?(await GP"]], "solEnd"],
+  ["noteEnd's leaf check removed", [["?(await GP(t,n,r.precommitment,d),`landed`)", "?`landed`"]], "solEnd"],
+  ["a mark at another value read as landed", [["d.value===a?(await GP", "d.value!==null?(await GP"]], "solEnd"],
   ["bothLanded on one RPC", [["t.some((e,t)=>n.every(e=>e[t]))", "t.some((e,t)=>n.some(e=>e[t]))"]], "solEnd"],
   // the fold's rules
-  ["every send dead read as dead (review 1)", [["d.every(Boolean)?`expired`:null", "d.every(Boolean)?`dead`:null"]], "solEnd"],
-  ["the note followed by its captured sends only (review 1)", [["let c=s?.sends?.length?s.sends:r.sends,", "let c=r.sends,"]], "solEnd"],
-  ["the mark read with no slot pin (review 2)", [["f=await RP(e,r.precommitment,[l[0].slot,l[1].slot],i)", "f=await RP(e,r.precommitment)"]], "solEnd"],
+  ["every send dead read as dead (review 1)", [["u.every(Boolean)?`expired`:null", "u.every(Boolean)?`dead`:null"]], "solEnd"],
+  ["the note followed by its captured sends only (review 1)", [["let s=o?.sends?.length?o.sends:r.sends,", "let s=r.sends,"]], "solEnd"],
+  ["the mark read with no slot pin (review 2)", [["d=await RP(e,r.precommitment,[c[0].slot,c[1].slot],i)", "d=await RP(e,r.precommitment)"]], "solEnd"],
   ["the account read drops minContextSlot (review 2)", [["...r===void 0?{}:{minContextSlot:r}", "...{}"]], "solMark"],
   ["the heights read with no slot (review 2)", [["slot:AP(t?.absoluteSlot)", "slot:0"]], "solFinals"],
   ["part_filled with an open send read as the end (review 3, Solana)", [["u.stage===`part_filled`&&(e===null||e.notes.length===0)", "u.stage===`part_filled`"]], "solKind"],
   ["the Solana kind's throw path drops the hand-off (review 5)", [["u=null;try{u=await YP(l,n)}finally{try{", "u=await YP(l,n);{try{"]], "solKind"],
-  ["the pass never started (review 1)", [["if(l&&e.settle?.(),", "if("]], "loops"],
-  ["no stop at sign out (review 4)", [["for(;;){if(e.signal?.aborted)return null;let c=!0", "for(;;){let c=!0"]], "loops"],
-  ["no give-up (review 4)", [["s+o>36e5)return null;", "!1)return null;"]], "loops"],
-  ["no backoff (review 4)", [["c&&(o=Math.min(o*2,OP))", "c&&(o=o)"]], "loops"],
+  ["the pass never started (review 1)", [["c&&e.settle?.(),s||(o=DP)", "s||(o=DP)"]], "loops"],
+  ["no stop at sign out (review 4)", [["for(;;){if(e.signal?.aborted)return null;let s=!0", "for(;;){let s=!0"]], "loops"],
+  ["a give-up on a clock back in (fold review 5)", [["s||(o=DP),await n(o),s&&", "s||(o=DP),f+o>36e5)return null;await n(o),f+=o,s&&"]], "loops"],
+  ["no backoff (review 4)", [["s&&(o=Math.min(o*2,OP))", "s&&(o=o)"]], "loops"],
   ["filled without the whole ask sent (S9)", [["return e.signal?.aborted?null:t.whole&&a.length>0", "return e.signal?.aborted?null:a.length>0"]], "loops"],
   ["the hand-off keeps settled sends (S12)", [["let t=new Set(d().map(e=>e.hash))", "let t=new Set(l.map(e=>e.hash))"]], "solLeft"],
-  ["EVM: the round read before U's nonce (E1)", [["o=await uI(e.rpcs,async(e,n)=>oI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),s=await e.round(),", "s=await e.round(),o=await uI(e.rpcs,async(e,n)=>oI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),"]], "evmEnd"],
-  ["EVM: the first send's nonce (E8)", [["(i?.evmSends??[]).reduce((e,t)=>t.nonce>e?t.nonce:e,t.nonce)", "(i?.evmSends?.[0]?.nonce??t.nonce)"]], "evmEnd"],
-  ["EVM: a Deposited not final read as an end (E4)", [["c.block>s.finalBlock?null:", ""]], "evmEnd"],
-  ["EVM: a Deposited at another value read as landed (E5)", [["c.value===t.value?`landed`:`dead`}", "`landed`}"]], "evmEnd"],
-  ["EVM: every send dead read as dead (review 1)", [["o[0]>a&&o[1]>a?`expired`:null", "o[0]>a&&o[1]>a?`dead`:null"]], "evmEnd"],
+  ["EVM: the round read before U's nonce (E1)", [["a=await uI(e.rpcs,async(e,n)=>oI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),o=await e.round(),", "o=await e.round(),a=await uI(e.rpcs,async(e,n)=>oI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),"]], "evmEnd"],
+  ["EVM: the first send's nonce (E8)", [["(r?.evmSends??[]).reduce((e,t)=>t.nonce>e?t.nonce:e,t.nonce)", "(r?.evmSends?.[0]?.nonce??t.nonce)"]], "evmEnd"],
+  ["EVM: a Deposited not final read as an end (E4)", [["s.block>o.finalBlock?null:", ""]], "evmEnd"],
+  ["EVM: a Deposited at another value read as landed (E5)", [["s.value===t.value?`landed`:`dead`}", "`landed`}"]], "evmEnd"],
+  ["EVM: every send dead read as dead (review 1)", [["a[0]>i&&a[1]>i?`expired`:null", "a[0]>i&&a[1]>i?`dead`:null"]], "evmEnd"],
   ["EVM: the store read before the keys are zeroed (review 6)", [["finally{n.fill(0);for(let e of r)e.fill(0);let i=p;", "finally{let i=p;"]], "evmLeft"],
   ["EVM: part_filled with an open note read as the end (review 3)", [["e.stage===`part_filled`&&(a===null||a.notes.length===0)", "e.stage===`part_filled`"]], "evmKind"],
+  // the delta review's fold
+  ["a Solana rung's landing posted as filled (fold review 1)", [["e.landed?.(a),`landed`}", "e.landed?.(a),n&&e.progress?.(`filled`),`landed`}"]], "solRung"],
+  ["an EVM note's landing posted as filled (fold review 1)", [["l.note.leaf.value);continue}", "l.note.leaf.value),e.progress?.(`filled`);continue}"]], "evmRung"],
+  ["the Solana kind posts only part_filled after its answer (fold review 1)", [["i?n?r?.progress(u.stage):", "i?n?u.stage===`part_filled`&&r?.progress(u.stage):"]], "solKind"],
+  ["the EVM kind posts no end after its answer (fold review 1)", [["i?o?r?.progress(e.stage):", "i?o?void 0:"]], "evmKind"],
+  ["the Solana record read through the note store (fold review 6)", [["o=(await e.records()).find(", "o=(await (await e.notes()).list()).find("]], "solEnd"],
+  ["the EVM record read through the note store (fold review 6)", [["r=(await e.records()).find(", "r=(await (await e.notes()).list()).find("]], "evmEnd"],
 ];
 
 for (const [what, pairs, k] of PLANTED) {
