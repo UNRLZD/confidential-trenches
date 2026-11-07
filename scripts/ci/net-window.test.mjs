@@ -19,6 +19,7 @@ export const CHANGED = [
   "contracts/vault/scripts/prepay.mjs",
   "contracts/vault/scripts/testnet-t04.mjs",
   "contracts/vault/scripts/testnet-usdc.mjs",
+  "scripts/ci/jup-idle.mjs",
   "scripts/ci/live-plan.mjs",
   "scripts/ci/money-gate.mjs",
   "scripts/pages-readback.mjs",
