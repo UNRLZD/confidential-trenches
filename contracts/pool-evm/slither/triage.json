@@ -7,15 +7,7 @@
       "file": "src/PrivacyPoolSimple.sol",
       "element": "_push",
       "count": 1,
-      "reason": "_push (PrivacyPoolSimple.sol:157-161) pays only the two payees of a release W signed: the request's recipient (W) and feeRecipient, both bound by the proof's context (PrivacyPool.sol:236, keccak of the whole withdrawal) and checked non-zero and not the pool (PrivacyPool.sol:176-177), with W's EIP-712 signature over the proof required (:181). Callers: withdraw (PrivacyPool.sol:127-128) buy's fee (PrivacyPoolSimple.sol:65) and, when a buy's swap fails, W's rest (:96), each after _spendChecked marks the nullifier. The destination is the one W chose, never the caller's."
-    },
-    {
-      "check": "arbitrary-send-eth",
-      "impact": "High",
-      "file": "src/PrivacyPoolSimple.sol",
-      "element": "buySwap",
-      "count": 1,
-      "reason": "The ETH goes to _buy.adapter (PrivacyPoolSimple.sol:113, in buySwap, which answers only the pool itself, :110, called from buy at :77), which is in the Buy W signs (BUY_TYPEHASH, :39-41; digest :124-139, checked in _release, PrivacyPool.sol:181), after the spend is checked and marked (:64). A relayer cannot change the adapter, route, token or minOut, and W's token balance must rise by minOut (:112-115), else the swap is undone and W is paid as a withdraw (:96, NOTICE change 18). pool-review-3.md, Checked: Proof binding, Buy. Moved from buy to buySwap by card pool-evm-buy-pays-revert."
+      "reason": "_push (PrivacyPoolSimple.sol:158-162) pays only the two payees of a release W signed: the request's recipient (W) and feeRecipient, both bound by the proof's context (PrivacyPool.sol:236, keccak of the whole withdrawal, proven at :257), checked non-zero and not the pool (:176-177), with W's EIP-712 signature over the release required (:181); the amounts are the proof's withdrawnValue less the fee and the fee (at most feeCap, :179, and half, :186). Callers: withdraw (PrivacyPool.sol:127-128), buy's fee (PrivacyPoolSimple.sol:65) and, when a buy's swap fails, W's rest (:97), each after _release marks the nullifier (:64). The destination is the one W chose, never the caller's. A payee whose code refuses or burns the ETH reverts the whole release (FailedToSendNativeAsset, :161): the nullifier stays unmarked and nothing moves, so nothing freezes; a refusing fee recipient is bypassed with fee 0 (:65)."
     },
     {
       "check": "arbitrary-send-eth",
@@ -47,7 +39,7 @@
       "file": "src/PrivacyPoolSimple.sol",
       "element": "buySwap",
       "count": 1,
-      "reason": "_before (PrivacyPoolSimple.sol:112) is read before the adapter call on purpose: _out (:114) is W's balance rise across it, the check that the swap delivered minOut (:115). buySwap answers only the pool (:110) and runs inside buy, which is nonReentrant (:60; transient guard, State.sol:83-88), so the adapter cannot re-enter any pool method, and the spend is marked before the call (:64). The only way to raise _out is to give W tokens, which is W's gain; the adapter is the one W signed. Moved from buy to buySwap by card pool-evm-buy-pays-revert."
+      "reason": "_before (PrivacyPoolSimple.sol:113) is read before the adapter call (:114) on purpose: _out (:115) is W's balance rise across it, the check that the swap delivered minOut (:116). buySwap answers only the pool (:111) and runs inside buy, which is nonReentrant (:60; transient guard, State.sol:83-88), so the adapter cannot re-enter any pool method, and the spend is marked before the call (:64). The only way to raise _out is to give W tokens, which is W's gain; the adapter is the one W signed. Moved from buy to buySwap by card pool-evm-buy-pays-revert."
     },
     {
       "check": "reentrancy-balance",
@@ -87,7 +79,7 @@
       "file": "src/adapters/UniswapV4Adapter.sol",
       "element": "buy",
       "count": 1,
-      "reason": "POOL_MANAGER.unlock (UniswapV4Adapter.sol:87) returns unlockCallback's own return value, which is '' (:137); the swap's checks are in the callback (each hop takes its whole input :121, output at least minOut :126), and the pool rechecks W's balance rise against minOut (PrivacyPoolSimple.sol:63-66)."
+      "reason": "POOL_MANAGER.unlock (UniswapV4Adapter.sol:87) returns unlockCallback's own return value, which is '' (:137); the swap's checks are in the callback (each hop takes its whole input :121, output at least minOut :126), and the pool rechecks W's balance rise against minOut (PrivacyPoolSimple.sol:113-116)."
     },
     {
       "check": "unused-return",
@@ -103,7 +95,7 @@
       "file": "src/adapters/UniswapV3Adapter.sol",
       "element": "buy",
       "count": 1,
-      "reason": "exactInput's amountOut (UniswapV3Adapter.sol:47-49) is checked by SwapRouter02 against amountOutMinimum = minOut, and the pool measures W's actual balance rise against minOut (PrivacyPoolSimple.sol:63-66), which a returned figure could not prove. The adapter also refuses a fill that left ETH or a middle token in the router (:50-55)."
+      "reason": "exactInput's amountOut (UniswapV3Adapter.sol:47-49) is checked by SwapRouter02 against amountOutMinimum = minOut, and the pool measures W's actual balance rise against minOut (PrivacyPoolSimple.sol:113-116), which a returned figure could not prove. The adapter also refuses a fill that left ETH or a middle token in the router (:50-55)."
     },
     {
       "check": "unused-return",
