@@ -16,6 +16,7 @@ export const LIVE_CHECKS = [
   "helper-usdc-event-watch",
   "helper-pool-senders",
   "helper-evm-sender",
+  "helper-evm-sender-2",
   "helper-sell-fee-recipient",
   "helper-sender-fee-proof",
   "helper-abuse-limits",
