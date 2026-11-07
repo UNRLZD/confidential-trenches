@@ -923,9 +923,20 @@ function receiverOf(signedTx: string): string {
   return b.subarray(at + 4, at + 4 + rl).toString("utf8");
 }
 
-/** The relayer as it starts: the validity period read from both providers first, then the gas account. */
+/**
+ * The relayer as it starts: the validity period read from both providers first, then its key read on both at final
+ * (view_access_key): a key the account does not hold as a full-access key, or an account that does not exist, stops the
+ * start, so every carry answers 503 upstream (and the start is tried again) rather than signing what the chain refuses.
+ * Then the gas account.
+ */
 export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
-  return createRelayer(rpcs, archival, account, secretKey, vault, await transactionValidityPeriod(rpcs), store, waitMs);
+  const validity = await transactionValidityPeriod(rpcs);
+  const publicKey = `ed25519:${base58(relayerKey(secretKey).pub)}`;
+  const held = await Promise.all(rpcs.map((r) => readKey(r, { finality: "final", account_id: account, public_key: publicKey })));
+  held.forEach((k, i) => {
+    if (k.kind !== "key" || k.permission !== "FullAccess") throw new Error(`relayer: ${account} does not hold its key ${publicKey} as a full-access key on provider ${i} (${k.kind === "key" ? "not full access" : k.kind})`);
+  });
+  return createRelayer(rpcs, archival, account, secretKey, vault, validity, store, waitMs);
 }
 
 /**

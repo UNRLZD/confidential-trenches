@@ -97,8 +97,11 @@ test("worker-src and default-src are exactly 'none'", () => {
   refused(checkCsp(csp("trusted-types 'none';", "trusted-types default;")), /trusted-types must be exactly 'none'/);
 });
 
-test("connect-src takes only the helper, SIGN_HOST and the three RPCs; a directive outside the policy is refused", () => {
+test("connect-src takes only the helper, SIGN_HOST, the kit's EVM providers and the three RPCs; a directive outside the policy is refused", () => {
   refused(checkCsp(csp("connect-src 'self'", "connect-src 'self' https://evil.ct.test")), /connect-src: https:\/\/evil\.ct\.test is not allowed/);
+  // a kit EVM provider's origin is allowed (card page-evm-rpc-csp), its URL with a path is not (a path may carry a key)
+  assert.deepEqual(checkCsp(csp("connect-src 'self'", "connect-src 'self' https://rpc.sentio.xyz")), []);
+  refused(checkCsp(csp("connect-src 'self'", "connect-src 'self' https://rpc.sentio.xyz/base")), /connect-src: https:\/\/rpc\.sentio\.xyz\/base is not allowed/);
   refused(checkCsp(`${CSP}; report-uri https://evil.ct.test`), /directive report-uri is not in the policy/);
   refused(checkCsp(`${CSP}; script-src 'self' 'unsafe-eval'`), /script-src given twice/);
   refused(checkCsp(`${CSP}, script-src *`), /more than one policy/);
@@ -307,7 +310,8 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
   assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
   const { LIVE_CHECKS } = await import("./deploy.mjs");
-  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain", "evm-quote-warm-round", "evm-quote-lag-held", "rh-cold-quote", "token-page-fills-after"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events, balances-per-chain, evm-quote-warm-round and evm-quote-lag-held (the kit's EVM quote the app's bundle runs), rh-cold-quote, and token-page-fills-after (the token page's re-read)");
+  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain", "evm-quote-warm-round", "evm-quote-lag-held", "rh-cold-quote", "token-page-fills-after", "page-evm-rpc-csp"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events, balances-per-chain, evm-quote-warm-round and evm-quote-lag-held (the kit's EVM quote the app's bundle runs), rh-cold-quote, token-page-fills-after (the token page's re-read), and page-evm-rpc-csp (the policy lets the page reach the kit's EVM providers)");
+  assert.ok(out.includes("scripts/live-checks/page-evm-rpc-csp.mjs --host app"), `the success line does not run page-evm-rpc-csp on APP_HOST alone: ${out}`);
 });
 
 // A build like BUILD with `edit` applied to a fresh copy; its problems from checkDir.

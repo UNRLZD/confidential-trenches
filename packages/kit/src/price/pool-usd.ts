@@ -208,6 +208,8 @@ const goodUntil = (publishedS: number, readS: number, maxAgeS: number): number =
  * a device clock behind the feed would otherwise stretch the bound by as much as it lags.
  */
 export function poolUsdGoodUntilS(chain: PoolUsdChain, publishedS: number, readS: number): number {
+  // an own key only, as checkArgs: a chain outside the table names no bound, even when a polluted Object.prototype has one
+  if (typeof chain !== "string" || !Object.hasOwn(POOL_USD_FEEDS, chain)) fail(`no USD price for chain ${typeof chain === "string" ? chain : typeof chain}`);
   return goodUntil(publishedS, readS, POOL_USD_FEEDS[chain].maxAgeS);
 }
 
