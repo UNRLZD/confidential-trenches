@@ -1,6 +1,8 @@
 // node --test scripts/live-checks/app-host-gate.test.mjs: the live check replays recorded answers
 // (app-host-gate.answers.json). good: card app-in-shell's build (apps/terminal/dist) served by the Pages runtime of
-// wrangler 4.151.1 on a Mac, 2026-11-01: PASS. liveBefore: the live APP_HOST read the same day before app-in-shell's
+// wrangler 4.151.1 on a Mac, 2026-11-01, re-recorded for card page-evm-rpc-csp (the kit's EVM providers in connect-src:
+// apps/terminal/scripts/deploy.mjs --dry-run's build served by the same runtime, 2026-11-07): PASS. beforeEvm: the good
+// answer before that card: FAIL. liveBefore: the live APP_HOST read the same day before app-in-shell's
 // deploy (frame-ancestors 'none', frame-src SIGN_HOST, X-Frame-Options DENY): FAIL. The other bad answers are the good
 // one with 'wasm-unsafe-eval' added to script-src, and with frame-ancestors *: FAIL. predeploy: APP_HOST's real 522
 // before its first deploy: FAIL.
@@ -10,7 +12,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, read } from "./app-host-gate.mjs";
+import { CSP, judge, read } from "./app-host-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-host-gate.answers.json"), "utf8"));
@@ -35,10 +37,21 @@ test("recorded good answer: every header equals the policy: PASS", async () => {
   assert.ok(r.lines.includes("ok  x-frame-options: none, want none"));
 });
 
+// the connect-src a recorded answer has, and the policy's: an answer from before card page-evm-rpc-csp names no EVM provider
+const connectOf = (a) => a.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src ")).slice("connect-src ".length);
+const WANT_CONNECT = CSP.find(([k]) => k === "connect-src")[1];
+
+test("recorded bad answer: the good build before card page-evm-rpc-csp (no kit EVM provider in connect-src): FAIL on connect-src alone", async () => {
+  const r = judge(await read(undefined, replay(ANSWERS.beforeEvm)));
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${connectOf(ANSWERS.beforeEvm)}", want "${WANT_CONNECT}"`]);
+});
+
 test("recorded bad answer: the live APP_HOST before app-in-shell (not frameable by the shell, frames SIGN_HOST): FAIL", async () => {
   const r = judge(await read(undefined, replay(ANSWERS.liveBefore)));
   assert.equal(r.ok, false);
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [
+    `BAD CSP connect-src: "${connectOf(ANSWERS.liveBefore)}", want "${WANT_CONNECT}"`,
     `BAD CSP frame-src: "${SIGN}", want "'none'"`,
     `BAD CSP frame-ancestors: "'none'", want "${SIGN}"`,
     `BAD CSP frame-ancestors is exactly ${SIGN}`,

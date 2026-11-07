@@ -157,6 +157,7 @@ const MONEY_PATHS = {
     "Paid(address,uint256)",
     "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
     "Withdraw(uint256 nullifier,uint256 context,uint256 value)",
+    "Withdrawn(address,address,uint256,uint256,uint256,uint256)", // a buy whose swap failed lands with it (card pool-evm-buy-pays-revert)
     "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
     "currentTreeDepth()",
     "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",

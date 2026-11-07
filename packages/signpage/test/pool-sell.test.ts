@@ -120,6 +120,8 @@ type Plant = {
   frontRun?: boolean;
   /** RPC 1 never shows this account */
   hideOn1?: string;
+  /** RPC p's answer for an account, changed (the chain itself keeps it as it is) */
+  mapOn?: (p: 0 | 1, address: string, a: Acc) => Acc;
   /** RPC 1's simulation of the sell fails */
   simFailOn1?: boolean;
   /** the PumpSwap pool says a cashback coin (its is_cashback_coin byte, 244, set in the recorded reads) */
@@ -354,8 +356,9 @@ function chain(plant: Plant = {}) {
     const answer = (address: string): unknown => {
       if (p === 1 && plant.hideOn1 === address) return null;
       if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
-      const a = accounts.get(address);
-      if (!a) return null;
+      const held = accounts.get(address);
+      if (!held) return null;
+      const a = plant.mapOn ? plant.mapOn(p, address, held) : held;
       const data = p === 1 && address === ata && plant.heldOn1 !== undefined ? tokenAccount(plant.heldOn1, 1, mint) : a.data;
       return { owner: a.owner, lamports: a.lamports, data: [base64.encode(data), "base64"], executable: false, rentEpoch: 0, space: data.length };
     };
@@ -727,6 +730,21 @@ test("a mark for the return note on one RPC only is that RPC's word against the 
   assert.deepEqual(await runPoolSell(w.host, ASK), { error: "failed" });
   assert.ok(!w.c.log.some((x) => /getLatestBlockhash|simulateTransaction|sendTransaction/.test(x)), "refused at the walk, before the quote");
   assert.deepEqual(await ours(w.ns), []);
+});
+
+test("card pool-answer-unknown (review S2): a mark for the return note the two RPCs give at two values is neither's word: failed, nothing sent or stored", async () => {
+  const pre = markOf(preOf(RETURN));
+  const w = await world({ mapOn: (p, address, a) => (p === 1 && address === pre ? { ...a, data: (() => { const d = a.data.slice(); new DataView(d.buffer).setBigUint64(0, 12_345_679n, true); return d; })() } : a) });
+  w.c.deposit(preOf(RETURN), 12_345_678n);
+  assert.deepEqual(await runPoolSell(w.host, ASK), { error: "failed" });
+  assert.ok(!w.c.log.some((x) => /sendTransaction/.test(x)), "nothing sent");
+  assert.deepEqual(await ours(w.ns), []);
+});
+
+test("card pool-answer-unknown (review F5): the pool's, the mint's and the Rent sysvar's balances past 2^53 lamports are never parsed (none is priced): the sell fills", async () => {
+  const w = await world({ mapOn: (_, address, a) => (address === POOL || address === MINT || address === fx.rent.account ? { ...a, lamports: 2 ** 60 } : a) });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
 });
 
 test("a simulation that fails on either RPC is failed: W never derived, nothing sent or stored", async () => {

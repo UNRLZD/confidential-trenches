@@ -150,6 +150,10 @@ abstract contract BuyV4ForkBase is BuyBase {
     assertEq(_pm.codehash, _hash, 'the v4 PoolManager read on chain');
     vm.warp(1_900_000_000);
     _setUpPool(_set);
+    // W is the published test key's address, which carries an EIP-7702 delegation on these mainnets (a sweeper that
+    // forwards the ETH it gets); the device's W is a fresh key with no code, so the fork's W has none either (a buy
+    // whose swap fails pays W in ETH, card pool-evm-buy-pays-revert)
+    vm.etch(W, '');
     pm = IPoolManager(_pm);
     adapter = new UniswapV4Adapter(pm, IWETH9(_weth));
   }
@@ -210,14 +214,11 @@ abstract contract BuyV4ForkBase is BuyBase {
     assertEq(W.balance, 0);
   }
 
-  /// The buy reverts with `_err` and the note stays unspent, the chunk in the pool
+  /// The swap is refused with `_err`, so the buy pays out as a withdraw (card pool-evm-buy-pays-revert): the fee paid,
+  /// W paid the rest in ETH, the note spent, and the PoolManager and the adapter hold what they held
   function _refused(IPrivacyPoolSimple.Buy memory _b, bytes memory _sig, bytes4 _err) internal {
-    uint256 _poolBefore = POOL.balance;
     uint256 _pmBefore = address(pm).balance;
-    vm.expectRevert(_err);
-    _buy(_setName(), FEE, _b, _sig);
-    assertFalse(pool.nullifierHashes(_proof(_setName()).pubSignals[1]), 'the note is not spent');
-    assertEq(POOL.balance, _poolBefore, 'the chunk stays in the pool');
+    _paysOut(_setName(), FEE, _b, _sig, _err);
     assertEq(address(pm).balance, _pmBefore, 'the PoolManager holds what it held');
     assertEq(address(adapter).balance, 0);
   }

@@ -243,6 +243,13 @@ jobs:
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
+      # Every SIGN_HOST and APP_HOST live check that reads only what the host serves from the build runs its own read
+      # and judge on this pull request's build: SIGN_HOST's committed index.html and public/ (the bytes its deploy
+      # serves, held to a fresh build-app.mjs build by the signpage tests above) and the terminal's vite build. A change
+      # that breaks one of their facts, or reshapes the code a check reads, fails here and not on the live host (card
+      # signpage-check-shapes-on-build; scripts/ci/bundle-checks.mjs lists the checks left out, and why).
+      - name: every bundle-reading SIGN_HOST and APP_HOST live check passes on this build
+        run: pnpm --filter terminal build && node scripts/ci/bundle-checks.mjs
 
   # The mutant sweeps: each package's test:mutants but the wallet's (card fresh-run-margin), a shard of their own (card
   # mutant-sweep-no-orphans): in test-packages, after its tests, they grew from 351 s to 502 s and the job hit its
