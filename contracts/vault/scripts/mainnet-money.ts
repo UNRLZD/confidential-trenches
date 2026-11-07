@@ -122,7 +122,9 @@ export function feeProblems(a: { relayFee: bigint; feeMax: bigint; note: bigint 
   if (typeof relayFee !== "bigint" || typeof feeMax !== "bigint" || relayFee < 0n || feeMax < 0n) return ["the fee or its cap is not a whole number of base units"];
   const p: string[] = [];
   if (relayFee > feeMax) p.push(`the relay fee ${relayFee} is above the device's fee_max ${feeMax}`);
+  // withdrawRequest refuses fee >= amount (= note - fee) and the vault fee > withdrawn / 2: both hold when 2 * fee < note
   if (relayFee >= note) p.push(`the relay fee ${relayFee} leaves nothing of the ${note} note to withdraw`);
+  else if (2n * relayFee >= note) p.push(`the relay fee ${relayFee} is half the note ${note} or more: the withdrawal would be refused`);
   return p;
 }
 
@@ -531,6 +533,8 @@ async function go(argv: string[], create: boolean) {
       if (t % 30 === 0) log(`U ${acct === null ? "not read" : acct.some((x) => x === "absent") ? "does not exist yet" : `holds ${usdc ?? "?"} USDC`}`);
       await sleep(POLL_MS);
     }
+    // the fee held again on what is at U, right before U signs: a note the fee would leave unwithdrawable is not made
+    await feeOf(amount);
     const before = await balances({ U });
     const tBind = Date.now();
     const deps: Record<string, unknown> = { store: ns, rpcs: [bindRpc(o.urls[0]), bindRpc(o.urls[1])], fetchFn: watch };

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { fingerprintOf, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { feeProblems, fingerprintOf, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
@@ -278,6 +278,14 @@ test("L2: resume withdraws the run's UNSPENT note of its label (the deposit note
   // the arrival read follows the note withdrawn last, and the request must spend the picked note
   assert.match(SRC, /const pick = noteToWithdraw\(/);
   assert.match(SRC, /req\.noteId !== pick\.id/);
+});
+
+test("L3: the fee is held to the withdrawal's own bound before any deposit: 2 * fee < the note (withdrawRequest's fee < amount, the vault's fee <= withdrawn / 2)", () => {
+  const feeMax = 10_000_000n;
+  assert.deepEqual(feeProblems({ relayFee: 499_999n, feeMax, note: 1_000_000n }), []);
+  for (const relayFee of [500_000n, 700_000n, 999_999n]) assert.match(feeProblems({ relayFee, feeMax, note: 1_000_000n }).join(), /half the note/, String(relayFee));
+  // checked again on the amount at U right before its deposit is signed
+  assert.match(SRC, /await feeOf\(amount\);[\s\S]{0,800}bindDeposit\(seed64/);
 });
 
 test("the usage line names every command", () => {
