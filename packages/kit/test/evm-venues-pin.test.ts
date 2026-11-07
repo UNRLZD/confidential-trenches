@@ -25,7 +25,7 @@ const code = (f: () => unknown): string => {
 };
 // pool-evm-deploy's set, its pool and verifier the chain's newest pool set's (pool-evm-deploy.mjs poolFile: card
 // pool-evm-buy-pays-revert's, whose buy pays a failed swap's chunk to W)
-const record = (chain: string) => {
+const record = (chain: string): Record<string, { address: string }> => {
   const first = JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
   const pool = JSON.parse(readFileSync(DEPLOY.poolFile(chain), "utf8")).contracts as Record<string, { address: string }>;
   return { ...first, PrivacyPoolSimple: pool.PrivacyPoolSimple!, WithdrawalVerifier: pool.WithdrawalVerifier! };
