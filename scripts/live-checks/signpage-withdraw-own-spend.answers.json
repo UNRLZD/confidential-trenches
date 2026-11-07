@@ -1,6 +1,15 @@
 {
- "_note": "good: this card's build (packages/signpage/index.html and public/app.js after fold 5, on main f30c9be: seven stores, version 1, owed/<op id> in meta, the reader hiding it, the seed-move test skipping owed writes). bad: SIGN_HOST read live 5 Nov 03:03Z (release-26 of main 7dcc60a): no owed key rule, a reader that lists every meta key, a seed re-read on every meta write.",
+ "_note": "good: SIGN_HOST's release-73 (bb86bfa7), read live 7 Nov 07:08Z with --record (sha384 below = the /app.js it serves, its index.html pin): the reader's filter minified as !(e===`meta`&&(...||t.startsWith(`owed/`)||...)) after evm-sell-hook-converge's evm-bans/ prefix, which the old regex read as a reader listing owed/ keys (host=sign run 42348279478). goodBefore: the earlier good answer, kept as a PASS case: good: this card's build (packages/signpage/index.html and public/app.js after fold 5, on main f30c9be: seven stores, version 1, owed/<op id> in meta, the reader hiding it, the seed-move test skipping owed writes). bad: SIGN_HOST read live 5 Nov 03:03Z (release-26 of main 7dcc60a): no owed key rule, a reader that lists every meta key, a seed re-read on every meta write. readers: the reader's text (its refusal through its keys()) of release-73's /app.js and of 358d8f4f's, each as the minifier wrote it (!(a||b) and !a&&!b), for the facts test.",
  "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-vLQWvDv0hvHjAFWFBmYIujd62UHOmY1H032VYNpmFKPTtPzwHPsykCexZeLBFR14\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-vLQWvDv0hvHjAFWFBmYIujd62UHOmY1H032VYNpmFKPTtPzwHPsykCexZeLBFR14",
+  "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
+  "opensV1": true,
+  "owedKey": true,
+  "readerHidesOwed": true,
+  "seedMovedSkipsOwed": true
+ },
+ "goodBefore": {
   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-d6NAyriWlrd1E9rmer1F9lurADAiASrZzM7bEEQze2hluHL9dnnHn+EwZbZlOpzD\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "sha384": "sha384-d6NAyriWlrd1E9rmer1F9lurADAiASrZzM7bEEQze2hluHL9dnnHn+EwZbZlOpzD",
   "stores": "[`notes`,`wallets`,`quotes`,`orders`,`ops`,`counters`,`meta`]",
@@ -16,5 +25,9 @@
   "opensV1": true,
   "owedKey": false,
   "readerHidesOwed": false
+ },
+ "readers": {
+  "release-73": "the reader opens meta/status, meta/deposit/<scope> and ops only, not ${e}/${t}`);return rs(c,e,t,await s(e,t))},async keys(e){return Ko(e,`x`),(await Fo(o().transaction(e,`readonly`).objectStore(e).getAllKeys())).map(String).filter(t=>!(e===`meta`&&(t===jo||t===Mo||t.startsWith(`owed/`)||t.startsWith(`sync/`)||t.startsWith(`evm-bans/`))))},close:a}",
+  "358d8f4f": "the reader opens meta/status, meta/deposit/<scope> and ops only, not ${e}/${t}`);return ns(c,e,t,await s(e,t))},async keys(e){return Go(e,`x`),(await Po(o().transaction(e,`readonly`).objectStore(e).getAllKeys())).map(String).filter(t=>e!==`meta`||t!==Ao&&t!==jo&&!t.startsWith(`owed/`)&&!t.startsWith(`sync/`))},close:a}"
  }
 }

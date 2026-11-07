@@ -137,7 +137,7 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
   const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
   const errors: string[] = [];
   t.mock.method(console, "error", (l: string) => void errors.push(l));
-  const bind = bindSenderFromEnv(env, {}, near);
+  const bind = bindSenderFromEnv(env, {}, near, env.BIND_VAULT_MAINNET); // a stand-in vault: its own pin
   t.after(() => bind.stop());
   let handOver: () => void = () => undefined;
   const senders = new Promise<void>((ok) => (handOver = ok));

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { base58 } from "./checks.ts";
 import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV } from "./env.ts";
+import { MAINNET_VAULT } from "../withdraw/send.ts";
 
 const keyOf = (fill: number) => {
   const seed = Buffer.alloc(32, fill);
@@ -33,6 +34,20 @@ test("the names: per network a vault, a gas account and its one key, then the ma
     testnet: ["BIND_VAULT_TESTNET", "BIND_RELAYER_TESTNET", "BIND_RELAYER_KEY_TESTNET"],
   });
   assert.equal(MARGIN_K_ENV, "BIND_MARGIN_K");
+});
+
+test("mainnet deposits are carried only for the vault of the mainnet deploy record: bind set alone with any other vault stops the helper at start", () => {
+  // MAINNET_VAULT is the record's by the kit's rule (withdraw/send.test.ts holds it to mainnet-v1.json or mainnet-test.json)
+  const record = { account_id: MAINNET_VAULT };
+  // bind alone: no WITHDRAW_VAULT_MAINNET, so the same-vault rule has nothing to compare with
+  const env = { BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "bpin-")) };
+  assert.doesNotThrow(() => bindSenderFromEnv({ ...env, BIND_VAULT_MAINNET: record.account_id }, {}).stop());
+  const pin = MAINNET_VAULT.replaceAll(".", "\\.");
+  for (const other of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", `${MAINNET_VAULT}.evil.near`, `x.${MAINNET_VAULT}`, "vault.bf-vt-20261102t071444.testnet"].filter((v) => v !== MAINNET_VAULT)) {
+    assert.throws(() => bindSenderFromEnv({ ...env, BIND_VAULT_MAINNET: other }, {}), new RegExp(`BIND_VAULT_MAINNET must be ${pin},`), other);
+  }
+  // testnet is not pinned here (its vault is the testnet deploy's)
+  assert.doesNotThrow(() => bindSenderFromEnv(good(), {}).stop());
 });
 
 test("nothing set: the helper starts and carries nothing (bad_shape for a body that does not decode, token_not_accepted for a delegate on no carried token)", async () => {
@@ -86,7 +101,7 @@ test("delivered (card helper-create-u): the recorded 1Click SUCCESS on mainnet U
   const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "benv-")) };
   const logged: string[] = [];
   t.mock.method(console, "error", (line: string) => void logged.push(line));
-  const s = bindSenderFromEnv(env, {}, fetchFn);
+  const s = bindSenderFromEnv(env, {}, fetchFn, env.BIND_VAULT_MAINNET); // a stand-in vault: its own pin
   assert.ok(s.delivered);
   assert.equal(s.delivered(JSON.stringify(recorded.answers.success_sol)), undefined);
   assert.equal(s.delivered("not json"), undefined);

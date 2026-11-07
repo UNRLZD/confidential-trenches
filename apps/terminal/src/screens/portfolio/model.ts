@@ -519,7 +519,7 @@ export interface ActRow {
   units: string | null;
   chain: Chain | null;
   token: string | null;
-  txs: TxRef[];
+  txs: readonly TxRef[];
   /** S14.4: the address whose key was exported. */
   address: string | null;
 }

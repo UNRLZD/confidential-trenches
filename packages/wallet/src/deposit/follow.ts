@@ -506,7 +506,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   };
   // each fact only on the stages it belongs to (kit schema.ts depositFactsFit)
   const legFacts = (op: DepositOp, stage: DepositStage, refundedNow = false): DepositFacts => {
-    const out: DepositFacts = { since_ms: op.since_ms ?? now() };
+    const out: { -readonly [K in keyof DepositFacts]: DepositFacts[K] } = { since_ms: op.since_ms ?? now() };
     if ((refundedNow || op.refunded === true || op.stage === "refunded") && DEPOSIT_REFUNDED_STAGES.includes(stage)) out.refunded = true;
     if (stage === "refunded" || stage === "refund_move" || stage === "held" || stage === "halted") out.held_id = U;
     if (stage === "halted") out.hold = "halted";
