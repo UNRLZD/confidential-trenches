@@ -59,16 +59,17 @@ export function useDepositSource(): DepositSource {
   const { hop, locked } = useReturnHop();
   const [assets, setAssets] = useState<{ list: Asset[] | null; refused: QuoteRefusal | null }>({ list: null, refused: null });
   const [asks, setAsks] = useState(0);
-  // the asset list, once the signing page is READY (the fixture brings its own); a later answer of an older ask never lands
+  // the asset list, asked once the signing page is READY and kept while the sheet is open (a READY again does not draw the
+  // skeleton over a list it has); asked again on Retry. The fixture brings its own. An older ask's answer never lands.
+  const loaded = assets.list !== null;
   useEffect(() => {
-    if (fixture || !client || !moneyOn) return;
+    if (fixture || !client || !moneyOn || loaded) return;
     let live = true;
-    setAssets({ list: null, refused: null });
     void client.request("deposit.assets", {}).outcome.then((o) => {
       if (live) setAssets(o.ok ? { list: o.result.assets.map(assetOf), refused: null } : { list: null, refused: refusal(o.error.code) });
     });
     return () => void (live = false);
-  }, [fixture, client, moneyOn, asks]);
+  }, [fixture, client, moneyOn, loaded, asks]);
   const typed = useRef(0);
   const dryQuote = useCallback<DepositSource["dryQuote"]>(
     async (asset, amount) => {
@@ -103,7 +104,10 @@ export function useDepositSource(): DepositSource {
     moneyOn,
     assets: assets.list,
     assetsRefused: assets.refused,
-    retryAssets: () => setAsks((n) => n + 1),
+    retryAssets: () => {
+      setAssets({ list: null, refused: null });
+      setAsks((n) => n + 1);
+    },
     dryQuote,
     quote,
     status,
