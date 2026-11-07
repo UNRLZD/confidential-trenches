@@ -1,0 +1,250 @@
+{
+ "_note": "good: the branch helper at 61f16646 run on the Mac (port 8797), read by robinhood-listed-tape-opens.mjs --base http://127.0.0.1:8797 --record at 2026-11-07T07:04:43.467Z: 4 Robinhood, 4 Base and 6 Solana tokens left the lists within 15-30 s, every one's tape 200: PASS. bad: the helper at 358d8f4f (main, what is deployed) run beside it on the Mac (port 8798), read the same way at 2026-11-07T07:04:43.468Z: 1 of 6 dropped Robinhood tokens and 6 of 6 dropped Solana tokens answered 404 not_found in 2-4 ms: FAIL. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
+ "good": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-07T07:04:43.467Z",
+  "chains": {
+   "robinhood": {
+    "lists": {
+     "status": 200,
+     "tokens": 42
+    },
+    "reads": 2,
+    "waitedMs": 15005,
+    "dropped": [
+     {
+      "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
+      "status": 200,
+      "ms": 1535,
+      "shape": "tape"
+     },
+     {
+      "address": "0xb8fa8010833463aac5595b55b9045479239eff79",
+      "status": 200,
+      "ms": 3893,
+      "shape": "tape"
+     },
+     {
+      "address": "0xb0007d59fe4050a1636c2fa19038973d16481337",
+      "status": 200,
+      "ms": 3893,
+      "shape": "tape"
+     },
+     {
+      "address": "0xdcd885f5c60b3ad49f6d58718696417314e8724d",
+      "status": 200,
+      "ms": 4158,
+      "shape": "tape"
+     }
+    ]
+   },
+   "base": {
+    "lists": {
+     "status": 200,
+     "tokens": 37
+    },
+    "reads": 3,
+    "waitedMs": 30011,
+    "dropped": [
+     {
+      "address": "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842",
+      "status": 200,
+      "ms": 2783,
+      "shape": "tape"
+     },
+     {
+      "address": "0x93918567cdd1bc845be955325a43419a7c56d66f",
+      "status": 200,
+      "ms": 1734,
+      "shape": "tape"
+     },
+     {
+      "address": "0x8c0d3adcf8ce094e1ae437557ec90a6374dc9bdd",
+      "status": 200,
+      "ms": 1298,
+      "shape": "tape"
+     },
+     {
+      "address": "0x63706e401c06ac8513145b7687a14804d17f814b",
+      "status": 200,
+      "ms": 4578,
+      "shape": "tape"
+     }
+    ]
+   },
+   "solana": {
+    "lists": {
+     "status": 200,
+     "tokens": 193
+    },
+    "reads": 2,
+    "waitedMs": 15008,
+    "dropped": [
+     {
+      "address": "ESeKt6VoYiUf2Ypz2wZEAEjiLsVWXeQfq5jZ11yLTodm",
+      "status": 200,
+      "ms": 1102,
+      "shape": "tape"
+     },
+     {
+      "address": "7rV8XUNP7tNP4VoAaE58xnFY6SSozqsGgrZW1Ystpump",
+      "status": 200,
+      "ms": 1628,
+      "shape": "tape"
+     },
+     {
+      "address": "2Sg6E1x7NhnjJqwfuKfam7k55B5Mf7PahkzECUiypump",
+      "status": 200,
+      "ms": 591,
+      "shape": "tape"
+     },
+     {
+      "address": "AREB6UMRnhLtgLqWavRZwP74jY7bfDiEghRZjZ3Spump",
+      "status": 200,
+      "ms": 373,
+      "shape": "tape"
+     },
+     {
+      "address": "VV7G5ARSoRobJRePYRsTkxerL8ywoKRkDoRnGrspump",
+      "status": 200,
+      "ms": 1337,
+      "shape": "tape"
+     },
+     {
+      "address": "H99BbqFCfmZqm71wCa4mdxzn9zopG7XSzKZ6Hyropump",
+      "status": 200,
+      "ms": 1185,
+      "shape": "tape"
+     }
+    ]
+   }
+  }
+ },
+ "bad": {
+  "base": "http://127.0.0.1:8798",
+  "at": "2026-11-07T07:04:43.468Z",
+  "chains": {
+   "robinhood": {
+    "lists": {
+     "status": 200,
+     "tokens": 43
+    },
+    "reads": 2,
+    "waitedMs": 15006,
+    "dropped": [
+     {
+      "address": "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3",
+      "status": 404,
+      "ms": 4,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "address": "0xeeca2e7dc194a320d349122d88259bb9595a4cb0",
+      "status": 200,
+      "ms": 2095,
+      "shape": "tape"
+     },
+     {
+      "address": "0xcfd40b3d8c7c5c5371e1c3ca9df1011d4379104b",
+      "status": 200,
+      "ms": 3634,
+      "shape": "tape"
+     },
+     {
+      "address": "0x11b70d0243baf75e85ce03201a92b5b7c33beb59",
+      "status": 200,
+      "ms": 3929,
+      "shape": "tape"
+     },
+     {
+      "address": "0x232ca0a739c2fefa866ecdd702732a7a4ea2787a",
+      "status": 200,
+      "ms": 3857,
+      "shape": "tape"
+     },
+     {
+      "address": "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111",
+      "status": 200,
+      "ms": 4414,
+      "shape": "tape"
+     }
+    ]
+   },
+   "base": {
+    "lists": {
+     "status": 200,
+     "tokens": 39
+    },
+    "reads": 3,
+    "waitedMs": 30012,
+    "dropped": [
+     {
+      "address": "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842",
+      "status": 200,
+      "ms": 3965,
+      "shape": "tape"
+     },
+     {
+      "address": "0xe125872d91a5a67704fa782aa74014adff7cae7e",
+      "status": 200,
+      "ms": 2382,
+      "shape": "tape"
+     }
+    ]
+   },
+   "solana": {
+    "lists": {
+     "status": 200,
+     "tokens": 194
+    },
+    "reads": 2,
+    "waitedMs": 15010,
+    "dropped": [
+     {
+      "address": "7rV8XUNP7tNP4VoAaE58xnFY6SSozqsGgrZW1Ystpump",
+      "status": 404,
+      "ms": 2,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "address": "2Sg6E1x7NhnjJqwfuKfam7k55B5Mf7PahkzECUiypump",
+      "status": 404,
+      "ms": 2,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "address": "AREB6UMRnhLtgLqWavRZwP74jY7bfDiEghRZjZ3Spump",
+      "status": 404,
+      "ms": 2,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "address": "VV7G5ARSoRobJRePYRsTkxerL8ywoKRkDoRnGrspump",
+      "status": 404,
+      "ms": 2,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "address": "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+      "status": 404,
+      "ms": 3,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     },
+     {
+      "address": "5VCEFq1aATjga39QtDunYjJqYBx67w8V8TXwHrqopump",
+      "status": 404,
+      "ms": 3,
+      "shape": null,
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    ]
+   }
+  }
+ }
+}

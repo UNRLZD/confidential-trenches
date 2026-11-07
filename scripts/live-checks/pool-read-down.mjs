@@ -29,8 +29,12 @@ const KINDS = new RegExp(`Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`);
 const FLOWS = new RegExp(`instanceof [\\w$]+(\\?|\\)return)\\{error:${Q}down${Q}\\}`, "g");
 const WIRE = new RegExp(`\\.catch\\(\\(\\)=>\\{[\\w$]+=\\{error:${Q}down${Q}\\}\\}\\)`);
 const REFERENCE = /a reference must never rest on one provider's word/g;
-const SENT = new RegExp(`if\\([\\w$]+\\.length\\)return\\{stage:${Q}part_filled${Q},txs:[\\w$]+\\};if\\([\\w$]+\\.length\\)return\\{stage:${Q}sent${Q},txs:[\\w$]+\\}`);
-const TRADE = new RegExp(`[\\w$]+&&![\\w$]+\\?${Q}down${Q}:`, "g");
+// what landed (the list's length, or card pool-answer-unknown's count: never the list itself, an array always true),
+// then the sends that may land: a list, or (card pool-answer-unknown) a call naming the sends of notes still open
+const PART = `return\\{stage:${Q}part_filled${Q},txs:`;
+const SENT = new RegExp(`if\\((?:([\\w$]+)\\.length\\)${PART}\\1|(?!([\\w$]+)\\)${PART}\\2\\})[\\w$]+\\)${PART}[\\w$]+)\\};if\\([\\w$]+(?:\\(\\))?\\.length\\)return\\{stage:${Q}sent${Q},txs:[\\w$]+(?:\\(\\))?\\}`);
+// down before a signature; with the kit's record (card pool-answer-unknown) only in place of its plain failed
+const TRADE = new RegExp(`[\\w$]+&&![\\w$]+(?:&&[\\w$]+===${Q}failed${Q})?\\?${Q}down${Q}:`, "g");
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {

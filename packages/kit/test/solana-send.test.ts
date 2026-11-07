@@ -1488,3 +1488,58 @@ test("readSolanaTxEnd: expired only when A4 holds on both providers", async () =
   const down: SolanaRpc = async () => { throw new Error("HTTP 503"); };
   assert.equal(await readSolanaTxEnd([dead(), down], TX_END), "unknown");
 });
+
+test("solanaWrappedRpc (card pool-answer-unknown): a caller's wrapper is the same provider to solanaSameProvider and in the same queue, its URL carried", async () => {
+  const { solanaWrappedRpc, solanaSameProvider: same, solanaPacedRpc: paced, solanaRpcQueueSize: size } = await import("../src/trade/solana/send.ts");
+  const bare = async (_m: string, _p: readonly unknown[]): Promise<unknown> => ({ value: null });
+  const other = async (_m: string, _p: readonly unknown[]): Promise<unknown> => ({ value: null });
+  const a = solanaWrappedRpc(bare, (m, p) => bare(m, p));
+  const b = solanaWrappedRpc(bare, (m, p) => bare(m, p));
+  assert.equal(same(a, b), true, "one URL-less provider under two wrappers is one");
+  assert.equal(same(a, bare), true);
+  assert.equal(same(a, solanaWrappedRpc(other, (m, p) => other(m, p))), false);
+  const withUrl = Object.assign(async (_m: string, _p: readonly unknown[]): Promise<unknown> => ({ value: null }), { url: "https://a.example/" });
+  assert.equal(solanaWrappedRpc(withUrl, (m, p) => withUrl(m, p)).url, "https://a.example/");
+  // a paced wrapper of the watch books its turns in the bare provider's one queue
+  await paced(a)("getSlot", []);
+  assert.equal(size(bare).started, 1);
+});
+
+test("pacing calls the outermost wrapper it was given (card pool-answer-unknown r2): a caller's watch runs under solanaPacedRpc, and a paced provider paced again takes one slot", async () => {
+  const { solanaWrappedRpc, solanaPacedRpc: paced, solanaRpcQueueSize: size, SolanaRpcTransportError: Down } = await import("../src/trade/solana/send.ts");
+  // the watch sees the provider's fault: the bare provider throws, the watch counts it
+  const bare = Object.assign(async (_m: string, _p: readonly unknown[]): Promise<unknown> => { throw new Down("http_429", "HTTP 429", 4, "down.example"); }, { url: "https://watch.example/" });
+  let watched = 0;
+  const watch = solanaWrappedRpc(bare, (m, p) => { watched++; return bare(m, p); });
+  await assert.rejects(paced(watch)("getSlot", []), Down);
+  assert.equal(watched, 1, "the paced call reached the bare provider past the watch");
+  // a paced wrapper paced again (flow.ts paces what the page hands it) calls the watch once, in one slot
+  watched = 0;
+  await assert.rejects(paced(paced(watch))("getSlot", []), Down);
+  assert.equal(watched, 1);
+  // one slot only, under a limit of one call a minute: a second slot would wait the minute out
+  const tight = { windowMs: 60_000, total: 1, perMethod: 1 };
+  const within = <T,>(p: Promise<T>): Promise<T | "waited"> => Promise.race([p, new Promise<"waited">((r) => setTimeout(() => r("waited"), 1_000).unref())]);
+  const ok = async (_m: string, _p: readonly unknown[]): Promise<unknown> => "ok";
+  assert.equal(await within(paced(paced(ok, tight), tight)("getSlot", [])), "ok", "a paced provider paced again queued inside its own slot");
+  assert.equal(size(ok).started, 1);
+  // a caller's wrapper around a paced provider, paced again: its paced call is the outer slot's own call
+  const ok2 = async (_m: string, _p: readonly unknown[]): Promise<unknown> => "ok";
+  const inner = paced(ok2, tight);
+  let ran = 0;
+  const around = solanaWrappedRpc(inner, (m, p) => { ran++; return inner(m, p); });
+  assert.equal(await within(paced(around, tight)("getSlot", [])), "ok", "the paced provider inside the wrapper queued behind the slot it runs in");
+  assert.equal(ran, 1);
+  assert.equal(size(ok2).started, 1);
+});
+
+test("a slot's call is its own queue's only (card pool-answer-unknown r2): another provider paced inside it still books a turn in its own queue", async () => {
+  const { solanaPacedRpc: paced, solanaRpcQueueSize: size } = await import("../src/trade/solana/send.ts");
+  const b = async (_m: string, _p: readonly unknown[]): Promise<unknown> => "b";
+  const pacedB = paced(b);
+  // provider A's call, run in A's slot, calls the other provider's paced wrapper synchronously
+  const a = async (m: string, p: readonly unknown[]): Promise<unknown> => pacedB(m, p);
+  assert.equal(await paced(a)("getSlot", []), "b");
+  assert.equal(size(a).started, 1);
+  assert.equal(size(b).started, 1, "the other provider's call rode A's slot, outside its own queue");
+});

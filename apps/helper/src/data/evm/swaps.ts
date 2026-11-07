@@ -14,8 +14,8 @@
 // the pool, and for a pool it never made (Doppler) v4Key works the key out from the swap's fee and the addresses in its
 // transaction, trusted only when the hash equals the id. A token with
 // no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a Pons curve quoted in a stock token, a venue not listed
-// here) answers an empty chart and tape from our own reads (200, src "chain"), never a guess; 404 is only for a token off
-// the lists or a malformed request. A read that fails is never kept as "no pool": it answers 503 and is read again.
+// here) answers an empty chart and tape from our own reads (200, src "chain"), never a guess; 404 is only for a token no
+// lists answer of the last 6 h held (lists.ts listed, card robinhood-listed-tape-opens) or a malformed request. A read that fails is never kept as "no pool": it answers 503 and is read again.
 //
 // Venues on Base, each address read from the chain on 2026-11-03 17:0xZ (a pool's factory() on base-rpc.publicnode.com,
 // and a PoolCreated or Initialize log of the factory decoded against the pool's token0() and token1()):
@@ -1578,7 +1578,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { pool: best.c, decimals, seed: (refOk && ref) || best.c.quote.kind !== "eth" ? { from, to: head.n, headN: head.n, logs } : undefined };
   }
 
-  /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" off the lists. */
+  /** A listed token's main pool, null when our reads find none (served as an empty chart), "unlisted" when no lists
+   *  answer of the last SERVED_MS held it (deps.listed: lists.ts listed, never only the newest answer). */
   async function mainPool(token: string): Promise<Found | null | "unlisted"> {
     const kept = pools.get(token);
     if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS) return { ...kept.found };
