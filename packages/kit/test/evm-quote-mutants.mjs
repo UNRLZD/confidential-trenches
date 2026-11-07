@@ -437,8 +437,9 @@ export const MUTANTS = [
   [QUOTE, "const v4 = v.v4 !== undefined && (!a.sell || v.poolManager !== undefined);", "const v4 = !a.sell && v.v4 !== undefined;", S, "a chain with no v3 router"],
   // card evm-route-parity: the buy enters only where its sell can leave; the sell's set is the buy's (its scan, the
   // markets of another currency, the bought-in pool), and its pick is held to a reference
-  [QUOTE, 'if (!evmSellExits(chain, token, route)) return refuse("no_exit",', 'if (false) return refuse("no_exit",', R, "L1 "],
-  [QUOTE, 'if (!evmSellExits(chain, token, route)) return refuse("no_exit",', 'if (false) return refuse("no_exit",', R, "P4 "],
+  // (card evm-buy-hook-converge: a hook the venue does not list no longer refuses no_exit; a route its sell cannot
+  // leave by any hook still does)
+  [QUOTE, 'if (!evmSellExits(chain, token, route, true)) return refuse("no_exit",', 'if (false) return refuse("no_exit",', R, "L1b "],
   // (card evm-sell-hook-converge: no mutant drops the below_reference refusal itself: a reference's route is always one
   // the builder takes with any hook, so the pick falls back to it first; the refusal is the backstop)
   [QUOTE, "p.amountOut * 10000n < reference.amountOut * BigInt(10000 - slippageBps));", "p.amountOut * 10000n < reference.amountOut * 10000n);", R, "HC4 "],
@@ -451,7 +452,9 @@ export const MUTANTS = [
   [QUOTE, "if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (markets.has(x) && !a.sell) further.push(x);", R, "PA "],
   [QUOTE, "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));", "quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, amountIn));", R, "PB2 "],
   [QUOTE, "        append(legs, x, { q: quoteOf(second, { venue: \"uniswap-v4\", currencyIn: x, hops: [hopTo(lower(token), p.key)] }, [p.key]), p });\n", "", R, "PB "],
-  [QUOTE, "const exits = evmSellExits(chain, t, bought) ? bought : undefined;", "const exits = bought;", R, "PC "],
+  // (card evm-buy-hook-converge: `bought` is now kept through any hook, and the mutant that keeps it whatever the
+  // builder takes is left out: the routes it would add are only those the buy quote refuses no_exit, L1b; the mutant
+  // below keeps the hook rule itself under PC)
   [QUOTE, "const minOut = (reference!.amountOut * BigInt(10000 - slippageBps)) / 10000n;", "const minOut = (pick.amountOut * BigInt(10000 - slippageBps)) / 10000n;", R, "PD "],
   [QUOTE, "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops.reverse()) });", "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops) });", R, "P4 "],
   // card evm-quote-exec-sim: a route through an unlisted hook above the builder's best counts only where W's own sell
@@ -495,11 +498,11 @@ export const MUTANTS = [
   // reverted, went to W and the replay reverts too; providers that disagree ban nothing; a hook behind two pools of the
   // route explains neither
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
-  [QUOTE, "      if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys)", "      for (const k of keys)", R, "RV4 "],
-  [QUOTE, "      if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys)", "      for (const k of keys)", R, "RV7 "],
+  [QUOTE, "    if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys)", "    for (const k of keys)", R, "RV4 "],
+  [QUOTE, "    if ((await replay({ [hk]: { code: EVM_NOOP_HOOK_CODE } })).ok) for (const k of keys)", "    for (const k of keys)", R, "RV7 "],
   [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }] }]", R, "HC1 "],
-  [QUOTE, "    if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
-  [QUOTE, "    if ((await replay({})).ok) return [];\n", "", R, "HC2 "],
+  [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
+  [QUOTE, "  if ((await replay({})).ok) return [];\n", "", R, "HC2 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
   [QUOTE, "    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "", R, "RV8 "],
@@ -508,11 +511,36 @@ export const MUTANTS = [
   // every hook together (review of c1f486ae, M1): where no one hook's no-op rescues the sale, the replay with every hook
   // a no-op at once, on providers that agree, bans every pool of the route behind any of them; never in place of a
   // one-hook verdict, never without that replay's success, never on one provider's word, never fewer than all of them
-  [QUOTE, "    if (out.length === 0 && hooks.length > 1) {", "    if (false) {", R, "RVX "],
-  [QUOTE, "      if ((await replay(all)).ok) for (const k of keys)", "      for (const k of keys)", R, "RVX "],
-  [QUOTE, "      if ((await replay(all)).ok) for (const k of keys)", "      if (replayOf((await askAt(rpcs[0]!, [{ method: \"eth_call\", params: [call, parent, { ...asW, ...all }, env] }]))[0], \"provider 1\").ok) for (const k of keys)", R, "RVX "],
-  [QUOTE, "for (const k of keys) if (hooks.includes(k.hooks) && !out.includes(", "for (const k of keys) if (k.hooks === hooks[0] && !out.includes(", R, "RVX "],
-  [QUOTE, "    if (out.length === 0 && hooks.length > 1) {", "    if (hooks.length > 1) {", R, "RV4 "],
+  [QUOTE, "  if (out.length === 0 && hooks.length > 1) {", "  if (false) {", R, "RVX "],
+  [QUOTE, "    if ((await replay(all)).ok) {", "    if (true) {", R, "RVX "],
+  [QUOTE, "    if ((await replay(all)).ok) {", "    if (replayOf((await askAt(rpcs[0]!, [{ method: \"eth_call\", params: [call, parent, { ...asW, ...all }, env] }]))[0], \"provider 1\").ok) {", R, "RVX "],
+  [QUOTE, "      for (const hk of hooks) {\n        if ((await replay(", "      for (const hk of hooks.slice(0, 1)) {\n        if ((await replay(", R, "RVX "],
+  // leave one in (card evm-buy-hook-converge): an honest hook beside two that each revert the trade is never banned
+  [QUOTE, "        if ((await replay(noops(hooks.filter((x) => x !== hk)))).ok) continue;\n", "", R, "N1D "],
+  // card evm-buy-hook-converge: the buy takes a route through an unlisted hook (its sell leaves through it), at the lowest
+  // of its reads, only where no route through listed pools is within the slippage of it; a listed route within the
+  // slippage of such a reference is taken at the reference's minOut; a banned pool is no route; each unlisted hook is
+  // read alone (N1, the buy's route and routeSet's); the sale's bought route takes such a hook too
+  [QUOTE, 'if (!evmSellExits(chain, token, route, true)) return refuse("no_exit"', 'if (!evmSellExits(chain, token, route)) return refuse("no_exit"', R, "HB1 "],
+  [QUOTE, "if (listed !== null && near(listed.amountOut, value)) return refuse(", "if (false) return refuse(", R, "HB4 "],
+  [QUOTE, "const underHooked = value < reference.amountOut && hookedRef && unlisted.length === 0 && near(value, reference.amountOut);", "const underHooked = false;", R, "HB4 "],
+  [QUOTE, "const minOut = ((underHooked ? reference.amountOut : value) *", "const minOut = ((value) *", R, "HB4 "],
+  [QUOTE, "the sale's and the buy's alike (card evm-buy-hook-converge)\n  const banned = bannedOf(req.banned);", "the sale's and the buy's alike (card evm-buy-hook-converge)\n  const banned = bannedOf(undefined);", R, "HB5 "],
+  [QUOTE, "if (keys.some((k) => banned.has(\"0x\" + poolId(k)))) return refuse(", "if (false) return refuse(", R, "HB5 "],
+  [QUOTE, "    banned,\n    hints: req.pools,", "    hints: req.pools,", R, "HB1 "],
+  [QUOTE, "const hooked = Object.freeze(hookedKeys.map(", "const hooked = Object.freeze([].map(", R, "HB1 "],
+  [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
+  [QUOTE, "...(unlisted.length > 1 ? unlisted.map((h) => at(route, amountIn, noopOf([h]))) : [])", "...[]", R, "N1B (buy"],
+  [QUOTE, "if (hs.length > 1) c.alone = ", "if (false) c.alone = ", R, "N1B (sell"],
+  [QUOTE, "    for (const i of c.alone ?? []) {", "    for (const i of []) {", R, "N1C (sell"],
+  [QUOTE, "const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;", "const exits = evmSellExits(chain, t, bought) ? bought : undefined;", R, "PC "],
+  // the buy's evidence: the quote's own buy, reverted, to the pinned pool through the pinned adapter, its bytes the route's
+  [QUOTE, " || BigInt(buy.status) !== 0n || buy.to !== v.pool) return [];", " || buy.to !== v.pool) return [];", R, "HB6 "],
+  [QUOTE, " || BigInt(buy.status) !== 0n || buy.to !== v.pool) return [];", " || BigInt(buy.status) !== 0n) return [];", R, "HB6 "],
+  [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],
+  [QUOTE, " || bMinOut !== quote.minOut) return [];", ") return [];", R, "HB6 "],
+  [QUOTE, "    if (data !== \"0x\" + hex(evmPoolRouteDataQuoted(chain, route).data)) return [];\n", "", R, "HB6 "],
+  [QUOTE, "  if (out.length === 0 && hooks.length > 1) {", "  if (hooks.length > 1) {", R, "RV4 "],
   // the sale is the quote's own: each field of the Sell and its route bound (a sale with one off is never evidence)
   [QUOTE, "if (sToken !== BigInt(token) || sAmount", "if (sAmount", R, "RV11 "],
   [QUOTE, " || sAmount !== quote.amountIn || sTarget", " || sTarget", R, "RV11 "],
