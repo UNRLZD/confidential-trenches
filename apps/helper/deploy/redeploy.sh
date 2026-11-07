@@ -2,8 +2,8 @@
 # Redeploys the helper on its server at one commit of the public repo (card helper-release-bump). Run on the server,
 # from the checkout it updates:
 #   apps/helper/deploy/redeploy.sh <40-hex commit>
-# In order, stopping at the first failure (the .env and the budgets are read before step 1, so a refused one changes
-# nothing):
+# In order, stopping at the first failure (the .env, the budgets and Caddy's admin socket are read before step 1, so a
+# refused one changes nothing):
 #   0. every RPC_BUDGET_* and PROXY_BUDGET_* compose may pass, from deploy/.env and from this shell, is checked with the
 #      rule the helper's start applies (src/limits/limits.ts budgetFromEnv): a value it would refuse stops here, naming
 #      the variable only, instead of leaving the container restarting; and each vendor's key (JUPITER_API_KEY,
@@ -28,8 +28,11 @@
 #   4. reloads Caddy with this checkout's Caddyfile through its admin socket inside the container (Caddyfile: admin
 #      unix//config/caddy-admin.sock): Caddy swaps to the new config with no gap and skips a config that is unchanged. The
 #      file goes in on stdin, since compose mounts the one file and a checkout writes a new one, which the running
-#      container's mount never sees. A refused reload (a bad Caddyfile, or a Caddy started before it had the socket) leaves
-#      Caddy on the config it had and exits 1, naming the one recreate that gives it the socket.
+#      container's mount never sees. A Caddy that step 3 started (none ran before) read this checkout's file at its start
+#      and is not reloaded. A refused reload (a bad Caddyfile) leaves Caddy on the config it had and exits 1.
+#   Before step 1, once the commit is fetched (objects only: no checkout, no .env), the socket is read: a running Caddy
+#   with no socket (one started from a Caddyfile with `admin off`), or a helper running with no Caddy, is refused, naming
+#   the one command that fixes it, with nothing changed, so a redeploy never ends with a new helper behind the old Caddy.
 # It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
@@ -59,6 +62,8 @@ main() {
   check_budgets "$env" || exit 1
 
   git -C "$root" fetch -q --depth 1 "$remote" "$sha"
+  local caddy_ran
+  caddy_ran="$(cd "$deploy" && caddy_socket)" || exit 1
   git -C "$root" checkout -q --detach "$sha"
   if [[ "$(git -C "$root" rev-parse HEAD)" != "$sha" ]]; then
     echo "redeploy: the checkout is not the commit" >&2
@@ -70,14 +75,36 @@ main() {
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
   swap_helper "$wait_s" "$sha"
-  reload_caddy
+  if [[ "$caddy_ran" == yes ]]; then
+    reload_caddy
+  else
+    echo "redeploy: Caddy started with this checkout's Caddyfile (none ran before); no reload"
+  fi
+}
+
+# Before step 1: whether the running Caddy has its admin socket (prints yes), or no Caddy and no helper run (a first
+# deploy: prints no). Any other state is refused before anything changes, naming the one command that fixes it, run from
+# a checkout whose Caddyfile names the socket (this one's, once the redeploy is at a commit that has this check).
+caddy_socket() {
+  if [[ -n "$(docker compose ps -q caddy)" ]]; then
+    if ! docker compose exec -T caddy sh -c 'test -S /config/caddy-admin.sock'; then
+      echo "redeploy: the running Caddy has no admin socket (started from a Caddyfile with admin off), so it could not take this Caddyfile after the swap; nothing changed. Recreate it once from this checkout, then run this again: cd apps/helper/deploy && docker compose up -d --no-deps --force-recreate caddy" >&2
+      return 1
+    fi
+    echo yes
+  elif [[ -n "$(docker compose ps -q helper)" ]]; then
+    echo "redeploy: a helper runs with no Caddy in front of it; nothing changed. Start it from this checkout, then run this again: cd apps/helper/deploy && docker compose up -d --no-deps caddy" >&2
+    return 1
+  else
+    echo no
+  fi
 }
 
 # Step 4. Caddy validates the new config before it swaps to it; on any refusal it keeps serving the one it had.
 reload_caddy() {
   echo "redeploy: docker compose exec -T caddy caddy reload (the Caddyfile, through the admin socket)"
   if ! docker compose exec -T caddy caddy reload --config - --adapter caddyfile --address unix//config/caddy-admin.sock <Caddyfile; then
-    echo "redeploy: Caddy did not reload the Caddyfile; it keeps the config it had. A Caddy started before its admin socket needs one recreate: cd apps/helper/deploy && docker compose up -d --no-deps --force-recreate caddy" >&2
+    echo "redeploy: Caddy did not reload the Caddyfile (above); it keeps the config it had, and the new helper serves behind it" >&2
     exit 1
   fi
   echo "redeploy: Caddy reloaded the Caddyfile (unchanged: Caddy kept its config)"
