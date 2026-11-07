@@ -112,8 +112,8 @@ export const MUTANTS = [
   [EVM, '  const budget = k === "all" || k === "buys";', '  const budget = k === "all";', T, HOLD],
   [EVM, "      if (sum > 0n && sum + extra > cap) {", "      if (sum + extra > cap) {", T, GOOD],
   // review of 7d210cb5 M1: the withdraws' reserve
-  [EVM, "      if (low < reserve + flying + worst) return", "      if (false) return", T, RESERVE],
-  [EVM, "      if (low < reserve + flying + worst) return", "      if (low < reserve + worst) return", T, RESERVE],
+  [EVM, "      if (low < reserve + flying + worst) {", "      if (false) {", T, RESERVE],
+  [EVM, "      if (low < reserve + flying + worst) {", "      if (low < reserve + worst) {", T, RESERVE],
   [EVM, "      const low = balA < balB ? balA : balB;", "      const low = balA;", T, RESERVE],
   [EVM, "      buysInFlight.add(held);\n", "", T, RESERVE],
   [EVM, "    buysInFlight.delete(held);\n", "", T, RESERVE],
