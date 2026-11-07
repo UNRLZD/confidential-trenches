@@ -12,13 +12,16 @@
 //   4. not_helper_quote (transfer): our quote record of the deposit address, live (dry false), depositType INTENTS,
 //      refundTo the signer with refundType INTENTS, its deadline not passed;
 //   5. expired: the intent's deadline not ahead of the newer final block time of the two providers;
-//   6. sender_struck (403): three failed sends of this signer here, kept across a restart;
+//   6. sender_struck (403): three failed sends of this signer here, kept across a restart; signer_cap (429): it has had
+//      INTENTS_SENDS_MAX sends carried, landed or not (an id makes two or three moves), so a seen signer cannot
+//      spend the gas account's NEAR by sends that land;
 //   7. in_flight: the same intent (signer and nonce) while one send of it is out;
 //   8. simulation_refused: simulate_intents on both providers at one block, both ran it and their bytes agree;
 //   9. (ft_withdraw) the receiver's registration: storage_balance_of on both; null on both and the token the release's
 //      USDC gets one storage_deposit (registration_only, REGISTRATION_YOCTO) per signer, sent before the intent and
 //      only once it ran; a second one, or another token, gets receiver_not_registered (409);
-//  10. relayer_low (503): the gas account under its floor;
+//  10. relayer_low (503): the gas account under INTENTS_FLOOR_YOCTO, 1 NEAR above the deposits' floor; then expired
+//      again, read after the registration (which can take until the deadline);
 //  11. the send: execute_intents with nothing attached. A send that fails on chain counts toward the signer's three, as
 //      does a registration that fails (registration_failed, no intent sent).
 // No prepay, and never token_halted: neither kind calls the token into the vault (H4.3 "No hold on a halt").
@@ -36,10 +39,25 @@ export const EXECUTE_GAS = 300_000_000_000_000n;
 export const REGISTER_GAS = 30_000_000_000_000n;
 /** USDC's storage_balance_bounds().min on NEAR (D16, 0.00125 N; withdraw/fixtures/withdraw-fee-table.json register_deposit). */
 export const REGISTRATION_YOCTO = 1_250_000_000_000_000_000_000n;
+/**
+ * The gas account's floor for this endpoint: the deposits' floor (bind/send.ts RELAYER_FLOOR_YOCTO) and 1 NEAR above
+ * it, so an intent's send or registration never takes bind.<ours>.near below what a deposit needs (review H1).
+ */
+/**
+ * The most sends this endpoint carries for one signer, landed or failed (review H1): an id makes two or three moves, so
+ * four leave one spare. The fifth answers signer_cap (429), final for that signer here as sender_struck is.
+ * signer_cap is the helper's own code until the kit lists it (HELPER_INTENTS_CODES and HELPER_CODE_STATUS in
+ * packages/kit/src/helper/v1.ts are frozen with kit-v1: adding it there is a kit change with its own tag); the
+ * device reads an unlisted code as a refusal and backs off, sending nothing.
+ */
+export const INTENTS_SENDS_MAX = 4;
+export const SIGNER_CAP_STATUS = 429;
+export const INTENTS_FLOOR_YOCTO = RELAYER_FLOOR_YOCTO + 10n ** 24n;
 /** How often a send whose outcome was not read is read again, until its intent's deadline passes. */
 export const RESOLVE_EVERY_MS = 2_000;
 
-export type IntentsAnswer = { status: number; body: { tx_hash: string } | { error: { code: HelperIntentsCode | "upstream" } } };
+export type IntentsCode = HelperIntentsCode | "signer_cap" | "upstream";
+export type IntentsAnswer = { status: number; body: { tx_hash: string } | { error: { code: IntentsCode } } };
 
 export type IntentsReads = {
   /** The newer final block's time (unix ms) of the two providers; throws when either does not answer. */
@@ -61,8 +79,8 @@ export type IntentsDeps = {
   resolveEveryMs?: number;
 };
 
-const STATUS: Record<string, number> = HELPER_CODE_STATUS;
-const no = (code: HelperIntentsCode | "upstream"): IntentsAnswer => ({ status: STATUS[code] ?? 400, body: { error: { code } } });
+const STATUS: Record<string, number> = { ...HELPER_CODE_STATUS, signer_cap: SIGNER_CAP_STATUS };
+const no = (code: IntentsCode): IntentsAnswer => ({ status: STATUS[code] ?? 400, body: { error: { code } } });
 const sent = (tx_hash: string): IntentsAnswer => ({ status: 200, body: { tx_hash } });
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const keysAre = (o: Record<string, unknown>, keys: readonly string[]) => Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
@@ -152,6 +170,10 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     const rec = store.signer(signer);
     store.putSigner({ ...rec, failed: rec.failed + 1 });
   };
+  const unsend = (signer: string) => {
+    const rec = store.signer(signer);
+    store.putSigner({ ...rec, sent: Math.max(0, (rec.sent ?? 0) - 1) });
+  };
   const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms).unref?.());
 
   /** Reads a send of ours until its outcome is known or `untilMs` passed (it can no longer land). */
@@ -188,7 +210,7 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       }
       store.putSigner({ ...r, registration: null, failed: r.failed + (o.kind === "final" ? 1 : 0) });
     }
-    if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
+    if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
     // the claim, read again after the awaits and written before the send, so two requests never pay two registrations
     const rec: SignerRecord = store.signer(signer);
     if (used(rec.registration)) return no("receiver_not_registered");
@@ -247,6 +269,8 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     if (i.intent === "transfer") {
       const q = store.quote(i.receiver_id);
       if (q === null || q.deposit_type !== "INTENTS" || q.refund_to !== x.signer || q.refund_type !== "INTENTS" || q.deadline_ms <= now()) return no("not_helper_quote");
+      // the quote's own recipient: 1Click would deliver into the vault (or back into intents.near) for it
+      if (q.recipient === vault || q.recipient === INTENTS_CONTRACT) return no("receiver_is_vault");
     }
     // 5. the intent's deadline ahead of the newer final block time
     const deadlineMs = Date.parse(x.deadline);
@@ -259,6 +283,7 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     if (BigInt(deadlineMs) <= finalMs) return no("expired");
     // 6. the strike
     if (store.signer(x.signer).failed >= STRUCK_AT) return no("sender_struck");
+    if ((store.signer(x.signer).sent ?? 0) >= INTENTS_SENDS_MAX) return no("signer_cap");
     // 7. the send lock: test-and-set with no await between
     const key = `${x.signer}/${x.nonce}`;
     if (out.has(key)) return no("in_flight");
@@ -276,12 +301,31 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         if (r !== null) return r;
       }
       // 10. the gas account
-      if ((await relayer.balance()) < RELAYER_FLOOR_YOCTO) return no("relayer_low");
-      // 11. the send: the device's signed intent as it signed it, nothing attached
+      if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO) return no("relayer_low");
+      // the deadline again: a registration can take until it
+      try {
+        if (BigInt(deadlineMs) <= (await reads.finalMs())) return no("expired");
+      } catch {
+        return no("upstream");
+      }
+      // 11. the send: the device's signed intent as it signed it, nothing attached. Its slot under the cap is taken
+      // here, with no await since the check, and given back only when nothing was signed.
+      const rec = store.signer(x.signer);
+      if ((rec.sent ?? 0) >= INTENTS_SENDS_MAX) return no("signer_cap");
+      store.putSigner({ ...rec, sent: (rec.sent ?? 0) + 1 });
       const refs: TxRef[] = [];
-      const o = await relayer.send({ kind: "call", receiver: INTENTS_CONTRACT, method: "execute_intents", args: JSON.stringify({ signed: [x.signed] }), gas: EXECUTE_GAS, deposit: 0n }, async () => null, (t) => void refs.push(t), { wait: false });
+      let o: TxOutcome | { kind: "guarded"; code: string };
+      try {
+        o = await relayer.send({ kind: "call", receiver: INTENTS_CONTRACT, method: "execute_intents", args: JSON.stringify({ signed: [x.signed] }), gas: EXECUTE_GAS, deposit: 0n }, async () => null, (t) => void refs.push(t), { wait: false });
+      } catch (e) {
+        if (refs.length === 0) unsend(x.signer);
+        throw e;
+      }
       const tx = refs[0];
-      if (o.kind === "guarded" || tx === undefined) return no("upstream");
+      if (o.kind === "guarded" || tx === undefined) {
+        if (tx === undefined) unsend(x.signer);
+        return no("upstream");
+      }
       // the answer goes now; the outcome is read after it, and a failure on chain counts
       held = false;
       const task = (async () => {

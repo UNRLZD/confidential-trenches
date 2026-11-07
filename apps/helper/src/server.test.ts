@@ -356,6 +356,17 @@ test("POST /v1/intents (card helper-id-intents): mounted, never 404; with no net
   assert.deepEqual([g.status, g.headers["allow"]], [405, "POST, OPTIONS"]);
 });
 
+test("card helper-id-intents: the handler hands each landed withdrawal's recipient from the withdrawal relayer to the bind sender's intents gate", () => {
+  let cb: ((to: string) => void) | undefined;
+  const armed: string[] = [];
+  const withdraw = { carry: async () => ({ status: 503, body: { error: { code: "upstream" } } }), warm: () => undefined, stop: () => undefined, onLanded: (f: (to: string) => void) => void (cb = f) } as unknown as WithdrawSender;
+  const bind: BindSender = { carry: async () => ({ status: 503, body: { error: { code: "upstream" } } }), warm: () => undefined, stop: () => undefined, armed: (to) => void armed.push(to) };
+  handler(COMMIT, undefined, undefined, undefined, undefined, undefined, withdraw, undefined, bind);
+  assert.ok(cb !== undefined, "subscribed");
+  cb!("a".repeat(64));
+  assert.deepEqual(armed, ["a".repeat(64)]);
+});
+
 test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async (t) => {
   // the deployed composition (no sender handed in, nothing set): the helper starts and answers its not-configured codes
   const decodable = "AAAAAA=="; // not one SignedDelegateAction: check 1

@@ -118,6 +118,11 @@ export type WithdrawSendDeps = {
   now?: () => number;
   /** The helper's log; console.log under "helper: " by default. */
   log?: (line: string) => void;
+  /**
+   * A send read succeeded on chain, with its withdrawal's recipient as signed (card helper-id-intents: the arming
+   * account A a valid proof landed to is the gate's second path on POST /v1/intents). Never awaited; a throw is ignored.
+   */
+  onLanded?: (recipient: string) => void;
 };
 
 const no = (code: HelperWithdrawCode | "upstream", status = 400): WithdrawAnswer => ({ status, body: { error: { code } } });
@@ -415,6 +420,37 @@ async function spendStatus(deps: WithdrawSendDeps, nf: bigint): Promise<string |
   return typeof row.status === "string" ? row.status : null;
 }
 
+/**
+ * The withdrawal's recipient in one of our signed withdraw transactions (signer, key, nonce, receiver, block hash, one
+ * FunctionCall: its method and its JSON args, withdrawArgs'), or null when the bytes are not that.
+ */
+export function recipientOfSigned(signedTx: string): string | null {
+  try {
+    const b = Buffer.from(signedTx, "base64");
+    let at = 0;
+    const str = () => {
+      const n = b.readUInt32LE(at);
+      const v = b.subarray(at + 4, at + 4 + n);
+      if (v.length !== n) throw new Error("short");
+      at += 4 + n;
+      return v;
+    };
+    str(); // signer
+    at += 1 + 32 + 8; // key type, public key, nonce
+    str(); // receiver
+    at += 32; // block hash
+    if (b.readUInt32LE(at) !== 1) return null;
+    at += 4;
+    if (b[at] !== 2) return null; // FunctionCall
+    at += 1;
+    if (str().toString("utf8") !== "withdraw") return null;
+    const args = JSON.parse(str().toString("utf8")) as { withdrawal?: { recipient?: unknown } };
+    return typeof args.withdrawal?.recipient === "string" ? args.withdrawal.recipient : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One round: every open send resent and read, then every succeeded send settled. Errors keep a row for the next round. */
 export async function outcomeRound(deps: WithdrawSendDeps): Promise<void> {
   const byKey = new Map(deps.relayers.map((r) => [r.key, r]));
@@ -426,6 +462,16 @@ export async function outcomeRound(deps: WithdrawSendDeps): Promise<void> {
       if (relayer === undefined) continue; // a key no longer served: its row stays open (H3.6 route 2)
       const o = outcomeOf(await relayer.resolve(rec, { resend: true, fromBlocks: true }), rec.deadline_ms);
       if (o !== null) deps.store.settle(nf, rec.tx_hash, o);
+      if (o?.kind === "succeeded" && deps.onLanded !== undefined) {
+        const to = recipientOfSigned(rec.signed_tx);
+        if (to !== null) {
+          try {
+            deps.onLanded(to);
+          } catch {
+            // the outcome is recorded; a failed hook changes nothing
+          }
+        }
+      }
     } catch {
       // kept: the next round reads again
     }
@@ -516,6 +562,8 @@ export const MAINNET_VAULT = "vault-test.confidential.unrlzd.near";
 export type WithdrawSender = {
   /** POST /v1/withdraw for a parsed body: the network from its token; a token this relayer does not carry is bad_shape. */
   carry(body: unknown): Promise<WithdrawAnswer>;
+  /** Card helper-id-intents: `cb` hears each mainnet withdrawal read succeeded, with its recipient (deps.onLanded). */
+  onLanded?(cb: (recipient: string) => void): void;
   /**
    * At the helper's start: every carried network started now, so a restart resends its open sends and settles within
    * one round whether or not a request comes; a start that fails is tried again every OUTCOME_ROUND_MS.
@@ -565,6 +613,7 @@ export function withdrawSenderFromEnv(
   }
 
   const ready = new Map<FeeNetwork, Promise<WithdrawSendDeps>>();
+  const landed: ((recipient: string) => void)[] = [];
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<WithdrawSendDeps> => {
     const rpcs = urls[net.network].map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
@@ -590,6 +639,8 @@ export function withdrawSenderFromEnv(
         relayers,
         // no watch for this network's token: held (token_halted), as the watch holds while it is not caught up
         tokenStatus: watch ?? (async () => ({ token: TOKENS[net.network], caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: "", block_height: 0, last_event: null })),
+        // mainnet only: intents.near, where an arming account's intents go, is a mainnet contract
+        ...(net.network === "mainnet" && { onLanded: (to: string) => landed.forEach((cb) => cb(to)) }),
       };
       stops.push(await startOutcomeRounds(deps));
       return deps;
@@ -613,6 +664,7 @@ export function withdrawSenderFromEnv(
       if (!stopped) setTimeout(() => warmNet(net), OUTCOME_ROUND_MS).unref();
     });
   return {
+    onLanded: (cb) => void landed.push(cb),
     async carry(body) {
       const token = isObj(body) ? body.token : undefined;
       const net = typeof token === "string" ? nets.get(token) : undefined;

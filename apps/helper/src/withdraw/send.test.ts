@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { VAULT_CONSTANTS, vaultWithdrawYocto } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
+import { encodeAction, encodeTransaction, RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, type CheckedWithdraw, type WithdrawConfig } from "./checks.ts";
 import { TESTNET_TOKEN } from "./fee.ts";
@@ -37,6 +37,7 @@ import {
   newestFinalMs,
   outcomeOf,
   outcomeRound,
+  recipientOfSigned,
   readChecks,
   withdrawSenderFromEnv,
   type ChainReads,
@@ -180,7 +181,9 @@ function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & 
       if (code !== null) return { kind: "guarded" as const, code };
       const n = counters.get(key) ?? 1n;
       counters.set(key, n + 1n);
-      const tx: TxRef = { tx_hash: base58(createHash("sha256").update(`${key} ${n}`).digest()), nonce: n.toString(), height: "999", block_hash: hashOf(999), signed_tx: Buffer.from(`${key} ${n}`).toString("base64") };
+      // a call's bytes as the relayer signs them (bind/send.ts encodeTransaction), a zero signature after them
+      const bytes = action.kind === "call" ? Buffer.concat([encodeTransaction({ signer: name, publicKey: new Uint8Array(32), nonce: n, receiver: action.receiver, blockHash: new Uint8Array(32), action: encodeAction(action) }), Buffer.alloc(65)]) : Buffer.from(`${key} ${n}`);
+      const tx: TxRef = { tx_hash: base58(createHash("sha256").update(`${key} ${n}`).digest()), nonce: n.toString(), height: "999", block_hash: hashOf(999), signed_tx: bytes.toString("base64") };
       before(tx); // a throw here drops the bytes: nothing is recorded as sent
       r.sent.push({ action, tx });
       return { kind: "unknown" as const, tx_hash: tx.tx_hash, why: "sent" };
@@ -455,6 +458,31 @@ test("relayer_low: under one withdraw's gas bought up front, its attachment and 
   at.relayer.near = SETTLE_FLOOR_YOCTO;
   await outcomeRound(at.deps);
   assert.equal(at.relayer.sent.length, 2);
+});
+
+// ---- card helper-id-intents: the arming account A a valid proof landed to ----
+
+test("a withdrawal read succeeded hands its signed recipient to onLanded (the gate's second path on POST /v1/intents); a failed one does not", async () => {
+  const ok = setup();
+  const heard: string[] = [];
+  ok.deps.onLanded = (to) => void heard.push(to);
+  assert.equal(code(await carryWithdraw(req(), ok.deps)), "ok");
+  const tx = ok.relayer.sent[0]!.tx;
+  assert.equal(recipientOfSigned(tx.signed_tx), W.recipient);
+  await outcomeRound(ok.deps);
+  assert.deepEqual(heard, [], "not before its outcome is read");
+  ok.outcomes.set(tx.tx_hash, final(tx.tx_hash, true, DEADLINE - 1n));
+  await outcomeRound(ok.deps);
+  assert.deepEqual(heard, [W.recipient]);
+  const bad = setup();
+  const none: string[] = [];
+  bad.deps.onLanded = (to) => void none.push(to);
+  assert.equal(code(await carryWithdraw(req(), bad.deps)), "ok");
+  const t2 = bad.relayer.sent[0]!.tx.tx_hash;
+  bad.outcomes.set(t2, final(t2, false, DEADLINE - 1n));
+  await outcomeRound(bad.deps);
+  assert.deepEqual(none, []);
+  assert.equal(recipientOfSigned(Buffer.from("not a transaction").toString("base64")), null);
 });
 
 // ---- Check 7b: the fee account (card vault-review-fixes-1, review F-1) ----

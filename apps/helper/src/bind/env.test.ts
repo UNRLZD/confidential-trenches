@@ -146,9 +146,16 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   // the proxy's hooks: our quote with U as refundTo, then 1Click's REFUNDED status for it
   const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
   s.quoted!(JSON.stringify(q));
+  await new Promise((ok) => setTimeout(ok, 100)); // the quote record is written off the event loop
   s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
   const v = await s.intents!(body(MAINNET_VAULT));
   assert.deepEqual([v.status, code(v)], [403, "receiver_is_vault"]);
+  // the gate's second path: a mainnet withdrawal landed to an arming account A (withdraw/send.ts onLanded)
+  const armedA = "e".repeat(64);
+  const bodyA = { signed_intent: { ...body(MAINNET_VAULT).signed_intent, payload: body(MAINNET_VAULT).signed_intent.payload.replace(u, armedA) } };
+  assert.equal(code(await s.intents!(bodyA)), "id_not_ours");
+  s.armed!(armedA);
+  assert.equal(code(await s.intents!(bodyA)), "receiver_is_vault");
   assert.equal(fetched, 0, "no chain read and no relayer start");
   s.stop();
 });

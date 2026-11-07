@@ -21,7 +21,7 @@ import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts"
 import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
 import { createIntentsCarry, parseBody, type IntentsAnswer, type IntentsCarry } from "../intents/carry.ts";
 import { intentsReads } from "../intents/reads.ts";
-import { createIntentsStore, onQuoteAnswer, onStatusAnswer as onIntentsStatus, type IntentsStore } from "../intents/records.ts";
+import { createIntentsStore, onArmed, onQuoteAnswer, onStatusAnswer as onIntentsStatus, type IntentsStore } from "../intents/records.ts";
 
 /** Per network: the release's vault, the gas account that sends deposits (bind.<ours>) and its one full-access key. */
 export const BIND_ENV = {
@@ -45,6 +45,8 @@ export type BindSender = {
   intents?(body: unknown): Promise<IntentsAnswer>;
   /** A 1Click /v0/quote answer the proxy carried, after it was answered: a live quote recorded (intents/records.ts). */
   quoted?(body: string): void;
+  /** A mainnet withdrawal our relayer carried landed to `recipient` (withdraw/send.ts onLanded): an arming A is seen. */
+  armed?(recipient: string): void;
   /**
    * A 1Click /v0/status answer the proxy carried, after it was answered (create.ts onStatusAnswer): a delivery to a
    * one-time id on a carried network's token creates that id once. Returns at once; nothing it does reaches the
@@ -244,11 +246,20 @@ export function bindSenderFromEnv(
       return c.carry(body);
     },
     quoted(body) {
+      const fail = () => console.error("helper: intents quote_record_failed");
       try {
         const s = openIntents();
-        if (s !== null) onQuoteAnswer(body, s);
+        if (s !== null) void onQuoteAnswer(body, s).catch(fail);
       } catch {
-        console.error("helper: intents quote_record_failed");
+        fail();
+      }
+    },
+    armed(recipient) {
+      try {
+        const s = openIntents();
+        if (s !== null) onArmed(recipient, s);
+      } catch {
+        console.error("helper: intents armed_record_failed");
       }
     },
     delivered(body) {

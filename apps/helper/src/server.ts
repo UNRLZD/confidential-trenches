@@ -217,6 +217,9 @@ export function handler(
   refusals: { count(route: string, why: string): void } = refusalLog(),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
+  // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
+  // /v1/intents (the gate's second path)
+  withdraw.onLanded?.((recipient) => bind.armed?.(recipient));
   // GET /v1/token-status serves each network's token from that network's own watch
   const watchOf = new Map<string, TokenWatch>(Object.values(watches).map((w) => [w.token, w]));
   // the per-client limits (limits/limits.ts): in memory for one window, the client's address never logged; the RPC

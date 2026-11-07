@@ -13,16 +13,19 @@
 //
 // One directory owned by one process (store/durable.ts: the lock, whole durable writes). Each file is named by the
 // sha256 of what it is for, so no caller's text is ever a file name.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as nodeFs from "node:fs";
+import * as fsp from "node:fs/promises";
+import { join } from "node:path";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
 import type { TxRef } from "../bind/send.ts";
-import { isAccountId } from "../withdraw/checks.ts";
 
 /** The most of a 1Click answer read (quote or status): a few KB each (bind/create.ts STATUS_ANSWER_MAX). */
 export const ONECLICK_ANSWER_MAX = 65_536;
 /** A quote record is kept this long past its deadline: a refund comes after the deadline, and its status read after it. */
 export const QUOTE_KEEP_MS = 30 * 24 * 3_600_000;
+/** How often the quote records past QUOTE_KEEP_MS are swept while the store is open (and once at its open). */
+export const QUOTE_PRUNE_MS = 3_600_000;
 
 export type QuoteRecord = {
   deposit_address: string;
@@ -40,11 +43,15 @@ export const STRUCK_AT = 3;
 
 /** The registration the relayer pays a signer, once: pending while its storage_deposit is out, landed once it ran. */
 export type Registration = { receiver: string; state: "pending" | "landed"; tx: TxRef | null };
-export type SignerRecord = { signer: string; failed: number; registration: Registration | null };
+/** `sent`: the execute_intents this endpoint sent for the signer, landed or not (carry.ts signer_cap). */
+export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number };
 
 export type IntentsStore = {
   quote(depositAddress: string): QuoteRecord | null;
-  putQuote(q: QuoteRecord): void;
+  /** Create-if-absent, durable when it resolves, off the event loop (every live quote the proxy carries writes one). */
+  putQuote(q: QuoteRecord): Promise<void>;
+  /** Removes the quote records past QUOTE_KEEP_MS, off the event loop; the count removed. */
+  prune(): Promise<number>;
   seen(signer: string): boolean;
   /** Marks `signer` seen, durable before it returns. */
   see(signer: string): void;
@@ -55,6 +62,7 @@ export type IntentsStore = {
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const PLAIN = /^[A-Za-z0-9._:-]{1,128}$/;
+const IMPLICIT = /^[0-9a-f]{64}$/;
 const h = (s: string) => createHash("sha256").update(s).digest("hex");
 
 function parse(body: string): Record<string, unknown> | null {
@@ -86,12 +94,13 @@ export function quoteOf(q: unknown): QuoteRecord | null {
 }
 
 /** The proxy carried a 1Click /v0/quote answer (`body`, as the device got it): a live quote is recorded. */
-export function onQuoteAnswer(body: string, store: Pick<IntentsStore, "quote" | "putQuote">): QuoteRecord | null {
+export async function onQuoteAnswer(body: string, store: Pick<IntentsStore, "quote" | "putQuote">): Promise<QuoteRecord | null> {
   const q = quoteOf(parse(body));
   if (q === null) return null;
-  // a deposit address names one quote: the first record kept, never replaced by a later answer
+  // a deposit address names one quote: the first record kept, never replaced by a later answer (the write is a
+  // create-if-absent too)
   if (store.quote(q.deposit_address) !== null) return null;
-  store.putQuote(q);
+  await store.putQuote(q);
   return q;
 }
 
@@ -108,17 +117,31 @@ export function onStatusAnswer(body: string, store: Pick<IntentsStore, "quote" |
   const rec = store.quote(address);
   if (rec === null) return null;
   const who = a.status === "SUCCESS" ? rec.recipient : rec.refund_to;
-  if (!isAccountId(who)) return null;
+  // a one-time id only (U, R, V: 64-hex implicit), never a named account a withdrawal or a swap delivered to
+  if (!IMPLICIT.test(who)) return null;
   store.see(who);
   return who;
 }
 
-/** The store under `dir` (one process holds it: store/durable.ts). Quote records past QUOTE_KEEP_MS are swept at open. */
-export function createIntentsStore(dir: string, fs: StoreFs = nodeFs, now: () => number = Date.now): IntentsStore {
-  return openDurableDir(dir, fs, (d) => storeOn(d, now()));
+/**
+ * The gate's second path (H4.3): an arming account A our withdrawal relayer carried a valid proof to. Called when a
+ * mainnet withdrawal send with fund_recipient true succeeded on chain (withdraw/send.ts onLanded); A is a 64-hex
+ * implicit account. The signer seen, or null.
+ */
+export function onArmed(recipient: string, store: Pick<IntentsStore, "see">): string | null {
+  if (typeof recipient !== "string" || !IMPLICIT.test(recipient)) return null;
+  store.see(recipient);
+  return recipient;
 }
 
-function storeOn(d: DurableDir, at: number): IntentsStore {
+/** The store under `dir` (one process holds it: store/durable.ts). Quote records past QUOTE_KEEP_MS are swept at open. */
+export function createIntentsStore(dir: string, fs: StoreFs = nodeFs, now: () => number = Date.now, pruneEveryMs = QUOTE_PRUNE_MS): IntentsStore {
+  return openDurableDir(dir, fs, (d) => storeOn(d, dir, now, pruneEveryMs));
+}
+
+function storeOn(d: DurableDir, dir: string, now: () => number, pruneEveryMs: number): IntentsStore {
+  const at = now();
+  let closed = false;
   const read = <T>(name: string): T | null => {
     const t = d.text(name);
     if (t === null) return null;
@@ -134,6 +157,51 @@ function storeOn(d: DurableDir, at: number): IntentsStore {
     if (q !== null && typeof q.deadline_ms === "number" && q.deadline_ms + QUOTE_KEEP_MS < at) d.remove(f);
   }
   const qName = (a: string) => `q-${h(a)}.json`;
+  /** store/durable.ts's create-if-absent, with fs/promises: temp written and synced, linked to the name, the directory synced. */
+  const createOnceAsync = async (name: string, v: string): Promise<void> => {
+    if (closed) throw new Error("intents store: closed");
+    const tmp = join(dir, `.tmp-${randomBytes(12).toString("hex")}`);
+    const f = await fsp.open(tmp, "wx");
+    try {
+      await f.writeFile(v);
+      await f.sync();
+    } finally {
+      await f.close();
+    }
+    try {
+      await fsp.link(tmp, join(dir, name));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    } finally {
+      await fsp.unlink(tmp).catch(() => undefined);
+    }
+    const dh = await fsp.open(dir, "r");
+    try {
+      await dh.sync();
+    } finally {
+      await dh.close();
+    }
+  };
+  const prune = async (): Promise<number> => {
+    let n = 0;
+    const cut = now() - QUOTE_KEEP_MS;
+    for (const f of await fsp.readdir(dir)) {
+      if (closed) break;
+      if (!/^q-[0-9a-f]{64}\.json$/.test(f)) continue;
+      try {
+        const q = JSON.parse(await fsp.readFile(join(dir, f), "utf8")) as QuoteRecord;
+        if (typeof q.deadline_ms === "number" && q.deadline_ms < cut) {
+          await fsp.unlink(join(dir, f));
+          n++;
+        }
+      } catch {
+        // unreadable: kept, as at open
+      }
+    }
+    return n;
+  };
+  const timer = setInterval(() => void prune().catch(() => undefined), pruneEveryMs);
+  timer.unref();
   const gName = (s: string) => `g-${h(s)}.json`;
   const sName = (s: string) => `s-${h(s)}.json`;
   return {
@@ -141,10 +209,11 @@ function storeOn(d: DurableDir, at: number): IntentsStore {
       const q = read<QuoteRecord>(qName(a));
       return q !== null && q.deposit_address === a ? q : null;
     },
-    putQuote(q) {
+    async putQuote(q) {
       d.held();
-      d.createOnce(qName(q.deposit_address), JSON.stringify(q));
+      await createOnceAsync(qName(q.deposit_address), JSON.stringify(q));
     },
+    prune,
     seen: (s) => read<{ signer: string }>(gName(s))?.signer === s,
     see(s) {
       d.held();
@@ -161,6 +230,10 @@ function storeOn(d: DurableDir, at: number): IntentsStore {
       d.held();
       d.replace(sName(rec.signer), JSON.stringify(rec));
     },
-    close: () => d.close(),
+    close: () => {
+      closed = true;
+      clearInterval(timer);
+      d.close();
+    },
   };
 }
