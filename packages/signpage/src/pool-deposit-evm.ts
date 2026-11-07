@@ -420,11 +420,13 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
  *  nonce is in the round's events. A final Deposited at its value: landed; at another value: dead (taken: the pool
  *  refuses a used precommitment, so it is never built again). U's finalized nonce past every send on both RPCs with no
  *  Deposited naming it: "expired", no end, since the pass builds the note again at U's new nonce from U's money. */
-async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][number]): Promise<"landed" | "dead" | "expired" | null> {
+async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][number], seen: (send: string) => void): Promise<"landed" | "dead" | "expired" | null> {
   const scope = evmPoolScopeOf(h.pin.pool, EVM_CHAIN_IDS[h.pin.network]);
   const rec = (await h.records()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
   if (rec !== undefined && rec.state !== "INCOMING") return rec.state === "PLANNED" ? null : rec.leaf?.value === n.value ? "landed" : "dead";
   const nonce = (rec?.evmSends ?? []).reduce((m, x) => (x.nonce > m ? x.nonce : m), n.nonce);
+  const newest = rec?.evmSends?.[rec.evmSends.length - 1];
+  if (newest !== undefined) seen(newest.hash);
   // the sign out read before each read, so no read naming U goes out after it (delta review low 4)
   stopped(h);
   const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));
@@ -444,8 +446,9 @@ async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][
 export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepositEvmLeft): Promise<"filled" | "part_filled" | "not_landed" | null> {
   const wait = h.wait ?? ((ms: number) => followWait(ms, h.signal));
   const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
-  // the ms the end's reads have waited, and each note's landing window's start on that count
+  // the ms the end's reads have waited, each note's newest send read, and its landing window's start on that count
   let waited = 0;
+  const last: (string | undefined)[] = left.notes.map(() => undefined);
   const since = left.notes.map(() => 0);
   let gap = POOL_DEPOSIT_EVM_FOLLOW_MS;
   for (;;) {
@@ -454,12 +457,12 @@ export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepo
     for (const [k, n] of left.notes.entries()) {
       if (ends[k] !== null) continue;
       if (h.signal?.aborted) return null;
-      const e = await noteEndEvm(h, n).catch(() => "fault" as const);
+      // a send not read before, whoever sent it (the pass this end starts, a state read's, the next ask's): a new window
+      const seen = (s: string) => void (s !== last[k] && ((last[k] = s), (since[k] = waited)));
+      const e = await noteEndEvm(h, n, seen).catch(() => "fault" as const);
       if (e === "landed" || e === "dead") ends[k] = e;
-      else if (e === "expired") {
-        kick = true;
-        since[k] = waited; // the pass sends it anew at U's new nonce: a new window
-      } else if (e === null && waited - since[k]! < POOL_DEPOSIT_EVM_LANDING_MS) quiet = false;
+      else if (e === "expired") kick = true;
+      else if (e === null && waited - since[k]! < POOL_DEPOSIT_EVM_LANDING_MS) quiet = false;
     }
     if (ends.every((e) => e !== null)) break;
     if (kick) h.settle?.();

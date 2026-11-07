@@ -888,7 +888,10 @@ test("pool-deposit-sent-end low 1 (EVM, REV E2): a send that never lands and nev
     ...hostOf(ch, ns, { rpcs: [counted(ch.rpcs[0]), counted(ch.rpcs[1])] as const }),
     wait: async (ms: number) => {
       if (cut) throw new Error("cut");
-      if (ended) waits.push(ms);
+      if (ended) {
+        if (sumOf(waits) >= 6 * 3_600_000) throw new Error("cut"); // the follower stops here, not at the 20 ms poll below
+        waits.push(ms);
+      }
     },
     end: () => void (ended = true),
   }));
@@ -1004,4 +1007,36 @@ test("pool-deposit-sent-end low 5 (EVM): the hand-off's store read failing after
   f.go();
   assert.equal(await f.staged(2), true);
   assert.deepEqual(f.stages, ["sent", "filled"]);
+});
+
+test("pool-deposit-sent-end review 2 (info, EVM): a note a pass the follower did not start sends anew (a state read's) gets a new landing window too: read every 10 s again, not a minute on", async () => {
+  const { ch, ns } = await funded(RUNG + FEE);
+  const waits: number[] = [];
+  let ended = false;
+  let cut = false;
+  let killed = -1;
+  const kind = poolDepositEvmKind(() => ({
+    ...hostOf(ch, ns),
+    settle: () => {}, // the follower starts no pass here
+    wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (!ended) return;
+      waits.push(ms);
+      if (killed < 0 && sumOf(waits) > POOL_DEPOSIT_EVM_LANDING_MS + 300_000) {
+        killed = waits.length; // the nonce taken by a tx with no Deposited, final on both: dead
+        ch.c.finNonce = [1n, 1n];
+        ch.c.nonce = 1n;
+        await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), null); // the page's state read: its pass sends the note anew
+      }
+    },
+    end: () => void (ended = true),
+  }));
+  await (kind(ASK, { id: "l1s", sha: "00", progress: () => {} }) as { after: Promise<void> }).after;
+  for (const t0 = Date.now(); (killed < 0 || waits.length < killed + 4) && Date.now() - t0 < 30_000; ) await settleMs(20);
+  cut = true;
+  assert.ok(killed > 0, "the reads went past the window");
+  assert.equal(waits[killed - 1], 60_000, "backed off past the window");
+  assert.equal(ch.c.sent.length, 2, "the state read's pass sent the note anew");
+  assert.equal(sentOf(ch.c.sent[1]!).nonce, 1n);
+  assert.deepEqual(waits.slice(killed, killed + 3), [10_000, 10_000, 10_000], "the new send is read every 10 s");
 });

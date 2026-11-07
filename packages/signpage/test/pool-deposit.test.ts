@@ -2211,7 +2211,10 @@ test("pool-deposit-sent-end low 1: a send that stays 'may land' (never landed, i
     ...host(c, ns),
     wait: async (ms: number) => {
       if (cut) throw new Error("cut");
-      if (ended) waits.push(ms);
+      if (ended) {
+        if (waits.reduce((a, b) => a + b, 0) >= 6 * 3_600_000) throw new Error("cut"); // the follower stops here, not at the 20 ms poll below
+        waits.push(ms);
+      }
     },
     end: () => void (ended = true),
   }));
@@ -2291,4 +2294,60 @@ test("pool-deposit-sent-end low 1: a note the pass sends anew gets a new landing
   assert.equal(waits[killed - 1], 60_000, "backed off past the window");
   assert.equal((await ours(ns))[0]!.sends!.length, 2, "the pass sent the note anew");
   assert.deepEqual(waits.slice(killed, killed + 3), [60_000, 2_000, 2_000], "the dead read waits quiet, then the new send is read every 2 s");
+});
+
+test("pool-deposit-sent-end review 2 M1 (REV2 M1): a sign out while an RPC is behind the mark's slot: no mark read goes out after the sign out, with the follower's wait or the host's", async () => {
+  for (const own of [false, true]) {
+    const c = chain();
+    const ns = await notes();
+    const stop = new AbortController();
+    let after = 0;
+    const behind = (rpc: SolanaRpc): SolanaRpc => async (m, p) => {
+      const pinned = m === "getAccountInfo" && (p[1] as { minContextSlot?: number } | undefined)?.minContextSlot !== undefined;
+      if (stop.signal.aborted) after++;
+      if (pinned) {
+        stop.abort();
+        throw new Error("RPC error -32016 Minimum context slot has not been reached");
+      }
+      return rpc(m, p);
+    };
+    const { wait: _no, ...bare } = host(c, ns);
+    const got = await followPoolDeposit({ ...bare, ...(own ? { wait: async () => {} } : {}), rpcs: [behind(c.rpc()), behind(c.rpc())] as const, signal: stop.signal }, openLeft(1));
+    assert.equal(got, null);
+    assert.equal(after, 1, `only the read already in flight on the other RPC (${own ? "the host's wait" : "the follower's"})`);
+  }
+});
+
+test("pool-deposit-sent-end review 2 (info): a note a pass the follower did not start sends anew (a state read's) gets a new landing window too: read every 2 s again, not a minute on", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  const waits: number[] = [];
+  let ended = false;
+  let cut = false;
+  let killed = -1;
+  const sum = () => waits.reduce((a, b) => a + b, 0);
+  const kind = poolDepositKind(() => ({
+    ...host(c, ns),
+    settle: () => {}, // the follower starts no pass here
+    wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (!ended) return;
+      waits.push(ms);
+      if (killed < 0 && sum() > POOL_DEPOSIT_LANDING_MS + 180_000) {
+        killed = waits.length;
+        c.height += 1_000; // the send past its blockhash's life on both: dead, with no mark
+        await settlePoolDeposits(host(c, ns)); // the page's state read: its pass sends the note anew
+      }
+    },
+    end: () => void (ended = true),
+  }));
+  await (kind(ask(RUNG), { id: "l1s", sha: "00", progress: () => {} }) as { after: Promise<void> }).after;
+  for (const t0 = Date.now(); (killed < 0 || waits.length < killed + 4) && Date.now() - t0 < 30_000; ) await settleMs(20);
+  cut = true;
+  assert.ok(killed > 0, "the reads went past the window");
+  assert.equal(waits[killed - 1], 60_000, "backed off past the window");
+  assert.equal((await ours(ns))[0]!.sends!.length, 2, "the state read's pass sent the note anew");
+  assert.deepEqual(waits.slice(killed, killed + 3), [2_000, 2_000, 2_000], "the new send is read every 2 s");
 });

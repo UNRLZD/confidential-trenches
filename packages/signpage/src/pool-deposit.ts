@@ -82,7 +82,8 @@
 //   filled when every open note landed and every rung was sent, part_filled when any of the ask landed, else not_landed.
 //   The reads come every POOL_DEPOSIT_FOLLOW_MS while a send may land inside its landing window, back off to
 //   POOL_DEPOSIT_FOLLOW_MAX_MS while only the pass can move it, a read fails, or a send stays "may land" past that window
-//   (delta review low 1), and stop only at sign out (`signal`, read before each read), telling nothing: a deposit that waits an
+//   (delta review low 1; the window starts at the first read of the note's newest send, whoever sent it), and stop only
+//   at sign out (`signal`, read before each read and after each wait), telling nothing: a deposit that waits an
 //   hour on a top-up or a provider is still told when it lands, while the page lives (fold review 5; a reload drops the
 //   id's listener, and the note stays INCOMING for the load and state-read pass).
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
@@ -168,7 +169,8 @@ export const POOL_DEPOSIT_FOLLOW_MAX_MS = 60_000;
 /** How long a note's send is read every POOL_DEPOSIT_FOLLOW_MS as one that may land: the run's own verdict window (two
  *  finalizations and a blockhash's life). Past it, a read that stays "may land" (one RPC holding a mark the other never
  *  does, or a finalized height that stops moving) backs off as a quiet one, never stopped (delta review low 1). Counted
- *  per note from the end's first read, and again from each read that finds every send of it dead (the pass sends anew). */
+ *  per note from the first read of its newest send, so any pass that sends it anew (the one the end starts, a state
+ *  read's, the next ask's) starts a new window (delta review 2). */
 export const POOL_DEPOSIT_LANDING_MS = POOL_DEPOSIT_READS * POOL_DEPOSIT_WAIT_MS;
 
 /** The end's wait: ended early, its timer cleared, when `signal` aborts, so a sign out leaves no timer (delta review
@@ -383,11 +385,12 @@ async function leafOf(sync: ReturnType<typeof solanaTreeSync>, scope: bigint, pr
  *  "expired" when every send is dead (past its last valid height at finalized on both RPCs, or failed on both) with no
  *  mark read at or past those heights' slots: no end, since the pass builds that note again from U's money (the rebuild's
  *  own test); else null (a send may still land, a mark on one RPC only, or a read that does not check out). */
-async function noteEnd(h: PoolDepositHost, sync: ReturnType<typeof solanaTreeSync>, scope: bigint, n: { precommitment: bigint; sends: readonly PoolSend[] }, wait: (ms: number) => Promise<void>): Promise<"landed" | "dead" | "expired" | null> {
+async function noteEnd(h: PoolDepositHost, sync: ReturnType<typeof solanaTreeSync>, scope: bigint, n: { precommitment: bigint; sends: readonly PoolSend[] }, wait: (ms: number) => Promise<void>, seen: (send: string) => void): Promise<"landed" | "dead" | "expired" | null> {
   const value = n.sends[0]!.value; // every send of a note is at its recorded value (store addSend)
   const rec = (await h.records()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
   if (rec !== undefined && rec.state !== "INCOMING") return rec.state === "PLANNED" ? null : rec.leaf?.value === value ? "landed" : "dead";
   const sends = rec?.sends?.length ? rec.sends : n.sends;
+  seen(sends[sends.length - 1]!.signature);
   // the sign out read before each read, so no read naming U goes out after it (delta review low 4)
   stopped(h);
   const fs = await finals(h);
@@ -418,12 +421,19 @@ export function stopped(h: { signal?: AbortSignal }): void {
  *  deposit (`signal`, read before each read, and the wait ends with it: low 4), never on a clock: a top-up that comes
  *  hours on is still told (fold review 5). */
 export async function followPoolDeposit(h: PoolDepositHost, left: PoolDepositLeft): Promise<"filled" | "part_filled" | "not_landed" | null> {
-  const wait = h.wait ?? ((ms: number) => followWait(ms, h.signal));
+  const pause = h.wait ?? ((ms: number) => followWait(ms, h.signal));
+  // a wait inside a note's reads (the mark's read again while an RPC is behind) ends in the stop at a sign out, so no
+  // read goes out after it with no gap (delta review 2 M1)
+  const wait = async (ms: number) => {
+    await pause(ms);
+    stopped(h);
+  };
   const sync = solanaTreeSync(h.rpcs, h.pin.program);
   const { scope } = solanaPoolOf(h.pin.program);
   const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
-  // the ms the end's reads have waited, and each note's landing window's start on that count
+  // the ms the end's reads have waited, each note's newest send read, and its landing window's start on that count
   let waited = 0;
+  const last: (string | undefined)[] = left.notes.map(() => undefined);
   const since = left.notes.map(() => 0);
   let gap = POOL_DEPOSIT_FOLLOW_MS;
   for (;;) {
@@ -433,17 +443,17 @@ export async function followPoolDeposit(h: PoolDepositHost, left: PoolDepositLef
     for (const [k, n] of left.notes.entries()) {
       if (ends[k] !== null) continue;
       if (h.signal?.aborted) return null;
-      const e = await noteEnd(h, sync, scope, n, wait).catch(() => "fault" as const);
+      // a send not read before, whoever sent it (the pass this end starts, a state read's, the next ask's): a new window
+      const seen = (s: string) => void (s !== last[k] && ((last[k] = s), (since[k] = waited)));
+      const e = await noteEnd(h, sync, scope, n, wait, seen).catch(() => "fault" as const);
       if (e === "landed" || e === "dead") ends[k] = e;
-      else if (e === "expired") {
-        kick = true;
-        since[k] = waited; // the pass sends it anew: a new window
-      } else if (e === null && waited - since[k]! < POOL_DEPOSIT_LANDING_MS) quiet = false;
+      else if (e === "expired") kick = true;
+      else if (e === null && waited - since[k]! < POOL_DEPOSIT_LANDING_MS) quiet = false;
     }
     if (ends.every((e) => e !== null)) break;
     if (kick) h.settle?.();
     if (!quiet) gap = POOL_DEPOSIT_FOLLOW_MS;
-    await wait(gap);
+    await pause(gap);
     waited += gap;
     if (quiet) gap = Math.min(gap * 2, POOL_DEPOSIT_FOLLOW_MAX_MS);
   }
