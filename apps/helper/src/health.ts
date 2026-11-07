@@ -10,6 +10,8 @@
 import { HELPER_PARTS, type HelperPart, type HelperPartState } from "@blindfill/kit";
 import { RELEASE_ENV } from "./withdraw/send.ts";
 import type { SlotName, SlotState } from "./rpc/slot.ts";
+import type { KeyedChain } from "./rpc/rpc.ts";
+import type { TokenNetwork } from "./token-status/status.ts";
 
 export const PARTS = HELPER_PARTS;
 export type Part = HelperPart;
@@ -18,7 +20,14 @@ export type PartState = HelperPartState;
 // `solana` (card helper-solana-failover): each Solana provider slot the host sets (SOLANA_RPC_URL, _TRADES_, _HOLDERS_,
 // SOLANA_STREAM_WS_URL) "keyed" while its key serves, "fallback" while the public endpoint stands in, "public" when none
 // is set; never a URL or a key.
-export type Health = { ok: true; commit: string; release: number | null; ready: boolean; parts: Record<Part, PartState>; solana: Partial<Record<SlotName, SlotState>> };
+// `rpc` (card rpc-keyed-lists): each mainnet chain's keyed URLs in the order its reads ask them (rpc/rpc.ts
+// RPC_UPSTREAMS keyed), each "<company's domain> <state>" (rpc.ts companyOf) with its last identity read (rpc.ts
+// probe): "answers" its chain, "wrong chain", "held", "down" or "unread"; never a path, a query or a key.
+// `bind` (card helper-bind-relayer-mainnet): each network POST /v1/bind carries, with its gas account (public, on chain
+// with every deposit), so the operator's live check reads which account to fund; {} when none. No vault: mainnet's is
+// the release's pin (withdraw/send.ts MAINNET_VAULT, bind/env.ts refuses any other at start), and the body stays within
+// the kit's 1 KB at the longest full config (server.test.ts holds it).
+export type Health = { ok: true; commit: string; release: number | null; ready: boolean; parts: Record<Part, PartState>; solana: Partial<Record<SlotName, SlotState>>; rpc: Partial<Record<KeyedChain, string[]>>; bind: Partial<Record<TokenNetwork, string>> };
 
 /** HELPER_RELEASE as the relayers read it (send.ts, bind/env.ts: 1 to 9 digits, no leading zero), else null. */
 export function releaseOf(env: Record<string, string | undefined>): number | null {
@@ -26,8 +35,8 @@ export function releaseOf(env: Record<string, string | undefined>): number | nul
   return /^[1-9][0-9]{0,8}$/.test(v) ? Number(v) : null;
 }
 
-export function health(commit: string, up: ReadonlySet<Part> = new Set(), release: number | null = null, ready = true, solana: Partial<Record<SlotName, SlotState>> = {}): Health {
+export function health(commit: string, up: ReadonlySet<Part> = new Set(), release: number | null = null, ready = true, solana: Partial<Record<SlotName, SlotState>> = {}, rpc: Health["rpc"] = {}, bind: Health["bind"] = {}): Health {
   const parts = {} as Record<Part, PartState>;
   for (const p of PARTS) parts[p] = up.has(p) ? "up" : "down";
-  return { ok: true, commit, release, ready, parts, solana };
+  return { ok: true, commit, release, ready, parts, solana, rpc, bind };
 }

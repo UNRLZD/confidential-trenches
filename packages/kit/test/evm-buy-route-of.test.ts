@@ -39,7 +39,7 @@ test("evmBuyRouteOf: the device's own quoted v3 and v4 buys read back to their r
   assert.equal(code(() => evmPoolRouteData("base-sepolia", v4)), "middle_not_listed");
 });
 
-test("evmBuyRouteOf refuses a foreign adapter, the other venue's adapter, an unpinned chain, another token, one changed byte", () => {
+test("evmBuyRouteOf refuses a foreign adapter, the other venue's adapter, another chain's adapter, another token, one changed byte", () => {
   const good4 = signed("base-sepolia", BS.adapters!.v4!, v4);
   const good3 = signed("base-sepolia", BS.adapters!.v3!, v3);
   assert.equal(code(() => evmBuyRouteOf("base-sepolia", { ...good4, adapter: "0x5b6ee2e1c3ec4c6e5bb1d1b4b0f4b8b9d8c2a1f0" })), "not_pinned");
@@ -48,8 +48,9 @@ test("evmBuyRouteOf refuses a foreign adapter, the other venue's adapter, an unp
   // the v3 adapter with v4 data, and the v4 adapter with v3 data
   assert.notEqual(code(() => evmBuyRouteOf("base-sepolia", { ...good4, adapter: BS.adapters!.v3! })), "ok");
   assert.notEqual(code(() => evmBuyRouteOf("base-sepolia", { ...good3, adapter: BS.adapters!.v4! })), "ok");
-  // a chain with no pinned adapter
-  assert.equal(code(() => evmBuyRouteOf("base", good4)), "not_deployed");
+  // Base mainnet's pins (card pool-evm-deploy-mainnet; every chain the kit lists pins its adapters now): Base Sepolia's
+  // adapter is foreign there
+  assert.equal(code(() => evmBuyRouteOf("base", good4)), "not_pinned");
   assert.equal(code(() => evmBuyRouteOf("base-sepolia", { ...good4, token: MID })), "token_mismatch");
   assert.equal(code(() => evmBuyRouteOf("base-sepolia", { ...good3, token: BS.weth })), "token_mismatch");
   assert.equal(code(() => evmBuyRouteOf("base-sepolia", { ...good4, minOut: 0n })), "bad_amount");

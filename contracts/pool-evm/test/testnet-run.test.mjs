@@ -281,3 +281,21 @@ test("each testnet's run pair is the kit's pinned providers, never sepolia.base.
     assert.ok(!NETS[c].rpcs.some((u) => new URL(u).hostname === "sepolia.base.org"), c);
   }
 });
+
+test("the run funds each buy for the kit's G(depth) at every tree depth: its limit, the estimate x 13/10, is at most ceil(G x 13/12) (card evm-buy-gas-depth)", () => {
+  const { evmPoolGas, EVM_POOL_MAX_DEPTH } = kitIndex;
+  for (let d = 0; d <= EVM_POOL_MAX_DEPTH; d++) {
+    // G holds the helper's limit (the estimate x 12/10), so the estimate is at most G x 10/12
+    const runLimit = (((evmPoolGas(d) * 10n) / 12n) * 13n) / 10n;
+    assert.ok(run.GAS.buy >= runLimit, `depth ${d}: GAS.buy ${run.GAS.buy} under the run's limit ${runLimit}`);
+  }
+  // the heaviest estimate the kit measures at depth 32 (test/evm-pool-fee.test.ts: forge least 1,732,470, plus 59,464
+  // intrinsic and calldata, x 1000/985) at the run's x 13/10
+  assert.ok(run.GAS.buy >= (1_819_223n * 13n) / 10n);
+  assert.equal(run.GAS.buy, (evmPoolGas(EVM_POOL_MAX_DEPTH) * 13n + 11n) / 12n);
+  assert.equal(run.GAS.buy, 2_377_227n);
+  // and the need carries it, one per venue
+  const maxFee = 2_000_000_000n;
+  const { parts } = run.needOf({ venues: ["a", "b"], maxFee, l1: 5n });
+  assert.equal(Object.fromEntries(parts).buys, 2n * (2_377_227n * maxFee + 5n));
+});

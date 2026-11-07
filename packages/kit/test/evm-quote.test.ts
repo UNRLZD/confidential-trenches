@@ -287,8 +287,11 @@ test("Q7 only a quote the device made builds a buy, and only within 30 s, and W 
   try {
     assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q }), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
     assert.throws(() => evmPoolBuildQuoted(ADAPTER, { ...q, minOut: 1n }), (e: unknown) => e instanceof EvmQuoteError);
-    // the device's quote passes to the pinned builder, which refuses Base until pool-evm-deploy pins its adapters
-    assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_deployed");
+    // the device's quote passes to the pinned builder: Base's pins (card pool-evm-deploy-mainnet) refuse any other
+    // adapter, and its pinned adapter for the route's venue builds
+    assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmPoolBuyError && e.code === "not_pinned");
+    const own = evmPoolVenues().base.adapters![q.route.venue === "uniswap-v3" ? "v3" : "v4"]!;
+    assert.equal(evmPoolBuildQuoted(own, q).adapter.toLowerCase(), own.toLowerCase());
     // 31 s after its block, the same quote builds nothing
     clock.mock.mockImplementation(() => at + 31_000);
     assert.throws(() => evmPoolBuildQuoted(ADAPTER, q), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
@@ -424,9 +427,9 @@ test("Q12 a v3 two-hop route through the listed middle is held to every standard
 
 test("Q13 a token whose only pool sits behind a hook the device has not pinned refuses", async () => {
   assert.equal(F["base-unknown-hook"]!.outcome.code, "no_reference");
-  // card evm-route-parity: its route goes through a hook the sell builder does not take, so the buy is refused before
-  // any read: a buy enters only where its sell can leave
-  await refused(quote("base-unknown-hook"), "no_exit");
+  // card evm-buy-hook-converge: its route through a hook the venue does not list is quoted (its sell leaves through it,
+  // as the sale takes such a route), and refused as recorded: no pool but the route's own holds it (no_reference)
+  await refused(quote("base-unknown-hook"), "no_reference");
   // a pinned launchpad pool is a reference: Clanker's pool for the Clanker token answers, so its route quotes
   assert.ok((await quote("base-hook")).reference !== null);
 });

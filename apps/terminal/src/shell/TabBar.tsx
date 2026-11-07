@@ -1,6 +1,9 @@
-import { NavLink } from "react-router";
+import { NavLink, useMatch } from "react-router";
+import { TOKEN_ROUTE } from "../routes/routes.ts";
 
-// The phone tab bar, R5's four tabs and icons (design/proto/assets/app.js:82-88 and :400-402 at design-lock-r5).
+// The phone tab bar, R5's four tabs and icons (design/proto/assets/app.js:82-88 and :400-402 at design-lock-r5). A token's
+// own page (/token/<chain>/<id>) is pushed over the tabs with its own Back and no tab bar (09-design-brief S7 phone: "a
+// token page pushed over any tab (no tab bar)"); the home route keeps it.
 const TABS = [
   { to: "/", label: "Trenches", d: ["M3 17l5.5-5.5 4 4L21 7", "M15 7h6v6"] },
   { to: "/discover", label: "Discover", d: ["M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0", "M15.5 8.5l-2.2 4.8-4.8 2.2 2.2-4.8z"] },
@@ -9,6 +12,8 @@ const TABS = [
 ] as const;
 
 export function TabBar() {
+  const pushed = useMatch(TOKEN_ROUTE) !== null;
+  if (pushed) return null;
   return (
     <nav className="tabbar">
       {TABS.map((t) => (

@@ -425,7 +425,7 @@ test("the new image's pool senders' settings check refuses (a half set): the red
     t.seed("old-1");
     const r = t.runWith({ STUB_ENV: "1" }, t.B);
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /refuses its pool senders' settings/);
+    assert.match(r.out, /refuses its senders' settings \(above; a vault line on the vault before: apps\/helper\/deploy\/vault-lines\.sh\)/);
     const calls = t.docker().map((l) => l.split("|")[1]);
     const check = calls.findIndex((c) => c === "compose run --rm --no-deps -T helper node src/env-check.ts");
     assert.ok(check > calls.indexOf("compose build helper"), calls.join("\n"));

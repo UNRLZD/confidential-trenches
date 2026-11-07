@@ -1,0 +1,67 @@
+{
+  "chain": "base",
+  "chainId": 8453,
+  "dryRun": false,
+  "at": "2026-11-07T12:46:56.950Z",
+  "deployer": "0xde0ed84472ad53e81ca43aa23734f206498a807c",
+  "return": "0x9b0de76cb0a21cad9fd37675731f65773508af9e",
+  "need": "85281923267456",
+  "build": "solc 0.8.28 (contracts/pool-evm/foundry.toml), forge Version: 1.7.1-Homebrew",
+  "contracts": {
+    "WithdrawalVerifier": {
+      "address": "0xfa1ff42246124a5c67c9e2a29ccea684528d6d5d"
+    },
+    "PrivacyPoolSimple": {
+      "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf"
+    },
+    "UniswapV4Adapter": {
+      "address": "0x9d040a025689a10872f0f2f8b581135dde52ca6f"
+    },
+    "UniswapV3Adapter": {
+      "address": "0x1e62242773f696271b0cc3029b8672c385b7ce45"
+    },
+    "SellDelegate": {
+      "address": "0xe3223113781f527188f634615ad9a3ca0aa20a4d"
+    },
+    "FeeCollector": {
+      "address": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
+      "sink": "0x2139756ab61ad861b4e25a009f092683e7454ee9"
+    }
+  },
+  "txs": [
+    {
+      "step": "deploy WithdrawalVerifier",
+      "hash": "0x35e8186a5ecb572c4fd92fa6cc400aa285764e43da46603888d460aa506febb0",
+      "contract": "WithdrawalVerifier"
+    },
+    {
+      "step": "deploy PrivacyPoolSimple",
+      "hash": "0x2e0cba4bfa2c24ae138ade564a027c5d83943340153dec0ad2e278c8c89b23c7",
+      "contract": "PrivacyPoolSimple"
+    },
+    {
+      "step": "deploy UniswapV4Adapter",
+      "hash": "0xc22297be884ee296ac260de7e88df8ff17ecc479417cd9b65ced0e10a50aa6f6",
+      "contract": "UniswapV4Adapter"
+    },
+    {
+      "step": "deploy UniswapV3Adapter",
+      "hash": "0x5d52f7359745f87a2e8b288162d21728fea5a2b60a4065c3d09ba579dba57b5f",
+      "contract": "UniswapV3Adapter"
+    },
+    {
+      "step": "deploy SellDelegate",
+      "hash": "0xa3e8cc986d5b3f04e5fad91f8cbac395b74e97bf4f644840e451a30e21f6689d",
+      "contract": "SellDelegate"
+    },
+    {
+      "step": "deploy FeeCollector",
+      "hash": "0x300a42cfe561ee67c0ebbc0cd6eccbe1dbc33686b0e99ec7bfdc22e8127d86dc",
+      "contract": "FeeCollector"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x1efa0eb8f8c804d271a37ac41733fdc16a4ed71a4b0cefef78f5ad2721474f73"
+    }
+  ]
+}

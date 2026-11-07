@@ -138,7 +138,9 @@ test("GET /v1/health names each Solana slot keyed, fallback or public, never a U
     await r.handle("solana", JSON_T, read);
     const body = await get();
     assert.deepEqual(JSON.parse(body).solana, { rpc: "fallback" });
-    assert.ok(!body.includes("keyed.test") && !body.includes("1111"));
+    // card rpc-keyed-lists: the keyed list's host is named (its rpc entry), never the URL's path, query or key
+    assert.ok(!body.includes("api-key") && !body.includes("1111"));
+    assert.deepEqual(JSON.parse(body).rpc.solana, ["keyed.test unread"]);
   } finally {
     h.closeAllConnections();
     await new Promise<void>((done) => h.close(() => done()));

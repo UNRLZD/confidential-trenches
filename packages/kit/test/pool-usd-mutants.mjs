@@ -1,12 +1,14 @@
 // Weakens src/price/pool-usd.ts's agreement and staleness checks (Robinhood's hold to Base's ETH/USD among them) and its
 // bounded retry of a slow or lagging provider, its one bound per read and its stop once the read ends (card
 // signpage-price-read-retry), and
-// src/trade/solana/pool-buy.ts's refusal of a Token-2022 mint that lists an extension twice, one at a time, and runs
+// the refusal of a Token-2022 mint that lists an extension twice (src/checks/solana/checks.ts, read by the pool buy), one at a time, and runs
 // the tests named for each (test/pool-usd.test.ts "agreement", "staleness" and "retry", test/solana-pool-buy.test.ts
 // "Token-2022"), and S6's Token-2022 sides of a shared route in src/checks/solana/checks.ts (test/solana-shared-route.test.ts,
 // card solana-shared-2022-side), and the mint's agreement on both providers that S6 and S10 share (solanaMintAgreed,
 // test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
-// test/solana-pool.test.ts): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, S11's hold on the wallet's token accounts
+// and the flow's rent read by that size (test/solana-quote.test.ts "S11 review", test/solana-flow-replay.test.ts, card
+// solana-written-accounts-whole), and the guard on the flow's early [wallet, wSOL] simulation, a dropped leg's build never simulated and an open leg's build held to its own timeout (card solana-quote-under-1s): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -20,13 +22,21 @@ import { KIT, kitCopy } from "./mutant-copy.mjs";
 const BASE = process.argv[1] === fileURLToPath(import.meta.url) ? kitCopy() : KIT;
 const PRICE = path.join(BASE, "src/price/pool-usd.ts");
 const TEST = path.join(BASE, "test/pool-usd.test.ts");
-const BUY = path.join(BASE, "src/trade/solana/pool-buy.ts");
 const BUY_TEST = path.join(BASE, "test/solana-pool-buy.test.ts");
 const S6 = path.join(BASE, "src/checks/solana/checks.ts");
 const S6_TEST = path.join(BASE, "test/solana-shared-route.test.ts");
 const S10_TEST = path.join(BASE, "test/solana-quote.test.ts");
 const POOL = path.join(BASE, "src/trade/solana/pool.ts");
 const POOL_TEST = path.join(BASE, "test/solana-pool.test.ts");
+const FLOW = path.join(BASE, "src/trade/solana/flow.ts");
+const FLOW_TEST = path.join(BASE, "test/solana-flow-replay.test.ts");
+const RVW1 = "S11 review RVW-1";
+
+// fitOn's guard on a leg's build (src/trade/solana/flow.ts), and that guard with the dropped leg let through: its build
+// assembled on its tables and simulated on provider A, as an open leg's would be (card solana-quote-under-1s review)
+const GUARD = "if (!g || rec.refused || !m || (m.owner !== SOLANA_TOKEN_PROGRAM && m.owner !== SOLANA_TOKEN_2022_PROGRAM)) throw new LegGateClosed();";
+const GUARD_OPEN = GUARD.replace("rec.refused || ", "");
+const SIM_DROPPED = "const decX = Object.fromEntries(tableKeys.flatMap((k, i) => (ta[i]?.owner === SOLANA_ALT_PROGRAM ? [[k, solanaDecodeLookupTable(ta[i]!.data)]] : []))); const asmX = assembleSolanaSwap(breq, b, { blockhash: g.blockhash.blockhash, lastValidBlockHeight: g.blockhash.lastValidBlockHeight, tables: decX, tokenProgram: m.owner }, mintHasTransferFee(m) ? { transferFeeMints: [req.token] } : {}); await pa(\"simulateTransaction\", [btoa(String.fromCharCode(...asmX.wire)), { encoding: \"base64\", sigVerify: false, replaceRecentBlockhash: true, commitment: \"confirmed\", accounts: { addresses: [w], encoding: \"base64\" } }]).catch(() => null);";
 
 const AGREE = "agreement";
 const STALE = "staleness";
@@ -97,10 +107,48 @@ export const MUTANTS = [
   [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', '(e instanceof SolanaRpcTransportError && e.fault !== "http_429")', RETRY],
   // a read that has ended asks no provider again
   [PRICE, "    bound.stopped = true;\n", "", RETRY],
-  [PRICE, "if (bound.stopped) return fail(", "if (false) return fail(", RETRY],
+  // a try that waited for its turn in its provider's queue (card solana-release-reads-paced): none sent once the read
+  // has ended or its bound has passed, and its try's bound taken at the turn, not before the wait
+  [PRICE, "if (bound.stopped) throw new Error(", "if (false) throw new Error(", RETRY],
+  [PRICE, "if (left <= 0) throw new NoAnswer(", "if (false) throw new NoAnswer(", RETRY],
   // a Token-2022 mint that lists one extension type twice
-  [BUY, "if (seen.has(type)) throw", "if (false) throw", T22, BUY_TEST],
-  [BUY, "    seen.add(type);\n", "", T22, BUY_TEST],
+  [S6, "if (seen.has(type)) return", "if (false) return", T22, BUY_TEST],
+  [S6, "    seen.add(type);\n", "", T22, BUY_TEST],
+  // card solana-written-accounts-whole, the d1806532 review: S10 and the size rule read one list of Token-2022 mint
+  // extensions through one walk (PermissionedBurn, 28, in it; a number not in it refused by S10 by its number and by S11
+  // for that reason), walked as Token-2022 walks it (a 357-byte mint's 2 zero bytes; no room for a length), and the flow
+  // reads the rent for that rule's size
+  [S6, "if (!T22_MINT_EXT.has(type)) return", "if (false) return", RVW1, S10_TEST],
+  [S6, "[26, 0], [28, null],", "[26, 0],", RVW1, S10_TEST],
+  [S6, "if (typeof size === \"string\") return fail(\"S11\"", "if (false) return fail(\"S11\"", RVW1, S10_TEST],
+  [S6, "while (d.length - at >= 2) {", "while (d.length - at >= 4) {", "S11 review RVW-2", S10_TEST],
+  [FLOW, "size = solanaTokenAccountSize(mintA);", "size = 170;", "card solana-written-accounts-whole review RVW-3", FLOW_TEST],
+  // the early [wallet, wSOL] simulation (card solana-quote-under-1s, review of fd926d82): used only when the written
+  // accounts' read finds that one account to read back, read on provider B as well as on A as the pre-state read gave it.
+  // Dropping `mine[0] === wsol` alone (M5b) changes nothing: the read equal to the hint, the wallet's token account,
+  // puts wSOL in `mine`, so a `mine` of one is [wSOL].
+  [FLOW, "&& sameAccounts([hint[0]], [read[0][wi] ?? null]) && sameAccounts([hint[1]], [read[1][wi] ?? null]);", "&& sameAccounts([hint[0]], [read[0][wi] ?? null]);", "card solana-quote-under-1s review M4", FLOW_TEST],
+  [FLOW, "&& mine.length === 1 && mine[0] === wsol &&", "&& mine[0] === wsol &&", "card solana-quote-under-1s review M5", FLOW_TEST],
+  // a dropped leg asks no build more (M6) and aborts the one in flight (M7). M1 (fitOn assembling a dropped leg's build)
+  // is held only with M6: its next build is what the fetch guard refuses, and an assembly alone changes nothing outside
+  [FLOW, "(closed ? Promise.reject(new LegGateClosed()) : doFetch(", "(false ? Promise.reject(new LegGateClosed()) : doFetch(", "card solana-quote-under-1s review: no reference pool while every build answers no route", FLOW_TEST],
+  [FLOW, "    abort.abort(new LegGateClosed());\n", "", "card solana-quote-under-1s review: no reference pool while every build is in flight", FLOW_TEST],
+  // the review of 5e81420d: a build that fitOn takes on to a simulation is seen in the recorded world, where it fits
+  // once assembled: every build simulated (M1sim), only a dropped leg's (M1simD); and the build's own 5 s timeout, which
+  // reaches its fetch only through the leg's joined signal (R3)
+  [FLOW, GUARD, `${GUARD_OPEN} ${SIM_DROPPED}`, "a floor that rounds to 0", FLOW_TEST],
+  [FLOW, GUARD, `${GUARD_OPEN} if (rec.refused) { ${SIM_DROPPED} throw new LegGateClosed(); }`, "a floor that rounds to 0", FLOW_TEST],
+  [FLOW, GUARD, `${GUARD_OPEN} if (rec.refused) { ${SIM_DROPPED} throw new LegGateClosed(); }`, "card solana-written-accounts-whole review RVW-3", FLOW_TEST],
+  [FLOW, "signal: init.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal", "signal: abort.signal", "card solana-quote-under-1s review: an open leg's build that never answers", FLOW_TEST],
+  // the same review's survivors of the last one, each now killed by its own test: the program compared after the tx on
+  // each of the three kinds (N5a), the providers' agreement on the program (N5b), an agreed account of the token kept as
+  // read (N15); and no baseline from provider A alone (N4b, PROBE-5 in RVW-7's shape)
+  [S6, "still.owner !== c.tokenProgram ? [\"program\"]", "false ? [\"program\"]", "S11 review N5a", S10_TEST],
+  [S6, "still.owner !== p.owner ? [\"program\"] : baseChanges(p.data, still.data, false);\n      if (!still || left.length)", "false ? [\"program\"] : baseChanges(p.data, still.data, false);\n      if (!still || left.length)", "S11 review N5a", S10_TEST],
+  [S6, "still.owner !== p.owner ? [\"program\"] : baseChanges(p.data, still.data, false);\n    if (left.length", "false ? [\"program\"] : baseChanges(p.data, still.data, false);\n    if (left.length", "S11 review N5a", S10_TEST],
+  [S6, "a.owner === b.owner && a.lamports === b.lamports && eqBytes", "a.lamports === b.lamports && eqBytes", "S11 review N5b", S10_TEST],
+  [S6, "m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] :", "false ? [] :", "S11 review N15", S10_TEST],
+  [S6, "pre: agreed ? a : null", "pre: walletToken(a, w) ? a : null", "S11 review PROBE-5", S10_TEST],
   // S6 on a shared route: each side the wallet's own account or the authority's ATA, the source side unbounded, a
   // Token-2022 destination through the authority's ATA only for a mint read equal on both providers without a transfer
   // fee or hook

@@ -57,7 +57,7 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
   // solana: this environment sets no SOLANA_RPC_URL, so the RPC slot is the public endpoint (card helper-solana-failover)
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" } });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" }, rpc: { solana: [], base: [], robinhood: [], near: [] }, bind: {} });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -80,12 +80,72 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
     assert.equal(r.status, 200);
     const b = JSON.parse(r.body);
     assert.equal(b.release, 12);
-    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana"]);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana", "rpc", "bind"]);
     assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }
+});
+
+// card helper-bind-relayer-mainnet: each network POST /v1/bind carries, its gas account (public), so the live check reads
+// the account to fund after deploy/bind-relayer-key.sh; a sender that names none answers {}
+test("GET /v1/health lists each network the bind sender carries with its gas account, within 1 KB", async (t) => {
+  const carried = { mainnet: "ab".repeat(32), testnet: "c".repeat(64) };
+  const bind: BindSender = { carry: async () => ({ status: 400, body: { error: { code: "bad_shape" as const } } }), warm: () => undefined, stop: () => undefined, carried: () => carried };
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind, 12));
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.body).bind, carried);
+  assert.ok(Buffer.byteLength(r.body) <= 1024, `1 KB limit (H7): ${Buffer.byteLength(r.body)}`);
+});
+
+// review FIX 1 (card helper-bind-relayer-mainnet): the kit's frozen row bounds GET /v1/health at 1 KB
+// (packages/kit/src/helper/v1.ts HELPER_V1_PATHS), so the body is held at its longest full config, not with empty lists:
+// every one of the 18 keyed names set (rpc/rpc.ts RPC_UPSTREAMS keyed) on the companies the host uses, each in its
+// longest state ("wrong chain", NEAR's two spares keyless), every Solana slot on "fallback", the longest release, not
+// ready, and both networks carried by the real bind sender with 64-hex gas accounts (the longest account id). A field
+// that grows the body past the bound fails here.
+test("GET /v1/health stays within the kit's 1 KB at the helper's longest full config: 18 keyed URLs in their longest state, Solana on fallback, both bind carries", async (t) => {
+  const { bindSenderFromEnv } = await import("./bind/env.ts");
+  const { MAINNET_VAULT } = await import("./withdraw/send.ts");
+  const { RPC_UPSTREAMS, KEYED_CHAINS } = await import("./rpc/rpc.ts");
+  const { createPrivateKey, createPublicKey } = await import("node:crypto");
+  const keyOf = (fill: number) => {
+    const seed = Buffer.alloc(32, fill);
+    const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+    const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+    return { key: `ed25519:${b58encode(Buffer.concat([seed, pub]))}`, account: pub.toString("hex") };
+  };
+  const [m, n] = [keyOf(7), keyOf(9)];
+  const bind = bindSenderFromEnv(
+    { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: m.account, BIND_RELAYER_KEY_MAINNET: m.key, BIND_VAULT_TESTNET: "vault.bf-vt-20261102t071444.testnet", BIND_RELAYER_TESTNET: n.account, BIND_RELAYER_KEY_TESTNET: n.key, BIND_MARGIN_K: "600", HELPER_RELEASE: "999999999", HELPER_STORE_DIR: fs.mkdtempSync(join((await import("node:os")).tmpdir(), "health-max-")) },
+    {},
+    async () => { throw new Error("no network in this test"); },
+  );
+  t.after(() => bind.stop());
+  const companies = {
+    solana: ["helius-rpc.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    base: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    robinhood: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    near: ["fastnear.com", "fastnear.com keyless", "lava.build keyless"],
+  };
+  const keyed = Object.fromEntries(KEYED_CHAINS.map((c) => [c, companies[c].map((co) => `${co} wrong chain`)])) as Record<(typeof KEYED_CHAINS)[number], string[]>;
+  assert.equal(Object.values(keyed).flat().length, 18);
+  assert.deepEqual(Object.fromEntries(KEYED_CHAINS.map((c) => [c, keyed[c].length])), Object.fromEntries(KEYED_CHAINS.map((c) => [c, RPC_UPSTREAMS[c].keyed.length])), "one entry per keyed name");
+  const rpc = { ...createRpc({}), keyed: () => keyed } as ReturnType<typeof createRpc>;
+  const fallback = { rpc: "fallback", holders: "fallback", trades: "fallback", stream: "fallback" } as const;
+  const helper = createServer(handler(COMMIT, undefined, rpc, undefined, undefined, undefined, undefined, undefined, bind, 999999999, undefined, undefined, undefined, undefined, undefined, () => false, undefined, () => fallback));
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  const b = JSON.parse(r.body);
+  assert.deepEqual([b.release, b.ready, b.solana, b.rpc], [999999999, false, fallback, keyed], "the longest config is the one served");
+  assert.deepEqual(Object.keys(b.bind), ["mainnet", "testnet"], "both carries listed");
+  assert.ok(Buffer.byteLength(r.body) <= 1024, `GET /v1/health at its longest full config is ${Buffer.byteLength(r.body)} bytes, over the kit's 1024 (HELPER_V1_PATHS)`);
 });
 
 test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials; Retry-After is exposed", async () => {
@@ -288,8 +348,11 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
-  assert.equal(main.match(/const holds = providerHolds\(\);/g)?.length, 1);
+  // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
+  // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
+  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
+  assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider
@@ -821,7 +884,9 @@ test("re-check 4 finding 4: a start with a vendor's key unset and no PROXY_BUDGE
   for (const [key, budget] of [["JUPITER_API_KEY", "PROXY_BUDGET_JUPITER"], ["LIFI_API_KEY", "PROXY_BUDGET_LIFI"]] as const) {
     const env: Record<string, string | undefined> = { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: "0", ...TEST_VENDOR_KEYS };
     delete env[key];
-    const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "ignore", "pipe"] });
+    // Node's own ExperimentalWarning is not the helper's output (node:sqlite warns on Node 24.12.0, which engines >=24
+    // allows, and not on 24.22.1): the check reads the helper's stderr alone
+    const c = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", join(import.meta.dirname, "server.ts")], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     c.stderr!.on("data", (d) => (err += d));
     const code = await Promise.race([new Promise<number | null>((ok) => c.on("exit", ok)), new Promise<string>((ok) => setTimeout(() => ok("still running"), 10_000))]);

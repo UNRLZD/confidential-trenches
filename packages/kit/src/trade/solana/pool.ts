@@ -55,7 +55,7 @@ import {
   SOLANA_TOKEN_PROGRAM,
   solanaMintDisagreement,
 } from "../../checks/solana/checks.ts";
-import { solanaSameProvider, type SolanaRpc } from "./send.ts";
+import { solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
 
 /** §2.0 LD1's band between two providers' reads of one reserve. */
 export const SOLANA_POOL_READ_TOL_BPS = 200;
@@ -466,11 +466,6 @@ export function solanaParseAccountsAnswer(answer: unknown, n: number): Read {
   return { slot, accounts };
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
-}
-
 function eqMasked(a: Uint8Array, b: Uint8Array, moving: readonly (readonly [number, number])[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -600,7 +595,7 @@ export async function readSolanaReference(providers: readonly [SolanaRpc, Solana
   // one venue's accounts, one call per provider: each candidate rests on one slot per provider
   const readBoth = (list: string[]): Promise<[Read, Read]> =>
     Promise.all(providers.map((rpc) =>
-      withTimeout(Promise.resolve().then(() => rpc("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])), READ_TIMEOUT_MS).then(
+      Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])).then(
         (ans) => solanaParseAccountsAnswer(ans, list.length),
         () => null,
       ),

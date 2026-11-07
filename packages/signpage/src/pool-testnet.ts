@@ -35,7 +35,7 @@
 //   nothing is read: the state read, the queue and the flow all stop at the missing pin. The testnet constants sit
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
 import { base64 } from "@scure/base";
-import { SOLANA_RPC_RETRY, solanaJsonRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
@@ -85,9 +85,13 @@ export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
 /** The page's Solana pair: two devnet RPCs in the testnet build; SIGN_HOST's provider A and the helper's keyed route
- *  (src/trade.ts, the pair main.ts gives every Solana read, in SIGN_HOST's connect-src) on mainnet. */
-export const pageSolanaRpcs = (): readonly [SolanaRpc, SolanaRpc] =>
-  POOL_TESTNET ? [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])] : [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)];
+ *  (src/trade.ts, the pair main.ts gives every Solana read, in SIGN_HOST's connect-src) on mainnet. Each paced where it
+ *  is made (card solana-release-reads-paced): every pool buy, sell, withdraw, settle and restore read takes its turn in
+ *  the provider's one queue, the trade's own with it. */
+export const pageSolanaRpcs = (): readonly [SolanaRpc, SolanaRpc] => {
+  const [a, b] = POOL_TESTNET ? [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])] : [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)];
+  return [solanaPacedRpc(a), solanaPacedRpc(b)];
+};
 
 /** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
  *  overwrites sent, nor a later part's proving its earlier part's in_transit. */
@@ -222,6 +226,9 @@ export type TestnetOver = {
   evmPin?: (chain: "base" | "robinhood") => EvmPoolPin | undefined;
   evmRpcs?: (chain: "base" | "robinhood") => readonly [EvmRpc, EvmRpc] | null;
   evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc]) => () => Promise<EvmDepositRound>;
+  /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
+   *  (its sign-out signal and its pass, fold review 3). */
+  depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -325,6 +332,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const pin = over.pin ?? PAGE_SOL_PIN;
   const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaRpcs();
   const prover = over.prover ?? proverHost();
+  const solanaDepositKind = over.depositKinds?.solana ?? poolDepositKind;
+  const evmDepositKind = over.depositKinds?.evm ?? poolDepositEvmKind;
 
   // the notes a withdraw op (any tab's) still owes an onward send for: out of every plan and of the proof queue until
   // that op is settled, since a note's W is the same for every spend of it (review #232b MEDIUM 1)
@@ -369,7 +378,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return null;
     }
   };
+  // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
+  let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
+    follows.abort();
+    follows = new AbortController();
     const p = open;
     open = null;
     prover.stop();
@@ -389,8 +402,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       pin: pin!,
       rpcs: rpcs(),
       notes: async () => (notes = await openNoteStore(await page.store())),
+      records: async () => readNotes(await page.store()),
       seed64: page.seed64,
       landed: () => void proofs(),
+      settle: () => void settleSolana(),
+      signal: follows.signal,
       end: () => {
         notes?.close();
         end?.();
@@ -398,7 +414,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
 
-  const deposit = poolDepositKind(() => host());
+  const deposit = solanaDepositKind(() => host());
   // pool.deposit on Base or Robinhood: only with the chain's pin on the page's network and its two RPCs
   const evmPin = over.evmPin ?? ((chain: "base" | "robinhood") => EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain]);
   const evmRpcs = over.evmRpcs ?? ((chain: "base" | "robinhood") => (POOL_TESTNET ? ([testnetRpc(TESTNET_RPCS[chain][0]), testnetRpc(TESTNET_RPCS[chain][1])] as const) : null));
@@ -424,7 +440,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmKind = (chain: "base" | "robinhood", end?: () => void) => {
     const e = evmPool(chain);
     if (e === null) return null;
-    return poolDepositEvmKind(() => {
+    return evmDepositKind(() => {
       let notes: NoteStore | null = null;
       return {
         pin: e.pin,
@@ -432,7 +448,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         rpcs: e.rpcs,
         round: e.round,
         notes: async () => (notes = await openNoteStore(await page.store())),
+        records: async () => readNotes(await page.store()),
         seed64: page.seed64,
+        settle: () => void settleEvm(chain),
+        signal: follows.signal,
         end: () => {
           notes?.close();
           end?.();
@@ -529,7 +548,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (settling === p) settling = null;
     });
     settling = p;
-    const r = poolDepositKind(() => host(done))(null, null);
+    const r = solanaDepositKind(() => host(done))(null, null);
     // refused before it ran (no Web Locks), or failed before its host was made: no end will come
     if ("error" in r) done();
     else

@@ -41,7 +41,8 @@ const sellRecord = (chain: string) => sellFile("evm-testnet-delegate-review3", c
 const collector = (chain: string) => sellFile("evm-fee-collector", chain).FeeCollector!.address;
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
-const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }>; poolFile: (chain: string) => string };
+type DeployChain = { weth: { address: string }; poolManager: { address: string }; router?: { address: string } };
+const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, DeployChain>; MAINNETS: Record<string, DeployChain>; poolFile: (chain: string) => string };
 
 const NOW = 1_800_000_000;
 enableTimers(mock.timers, { apis: ["Date"], now: NOW * 1000 });
@@ -62,7 +63,7 @@ const TESTNETS = [
   { chain: "robinhood-testnet", chainId: 46630, routers: [] },
 ] as const;
 
-test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 adapters, sell delegate, with its WETH and no middle; the mainnets have none", () => {
+test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 adapters, sell delegate, with its WETH and no middle", () => {
   for (const { chain, chainId, routers } of TESTNETS) {
     const v = evmPoolVenues()[chain as EvmPoolChain];
     const r = record(chain);
@@ -83,9 +84,72 @@ test("the testnet chains' pins are pool-evm-deploy's records: pool, v3 and v4 ad
     assert.equal(Object.getPrototypeOf(v.adapters), null, chain);
     assert.ok(Object.isFrozen(v) && Object.isFrozen(v.adapters) && Object.isFrozen(v.middles) && Object.isFrozen(v.routers), chain);
   }
-  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
+});
+
+// Card pool-evm-deploy-mainnet: each mainnet's pins are its deployment record, contracts/pool-evm/deployments/<chain>.json
+// (the owner's paste, contracts/pool-evm/script/mainnet-deploy.sh), read here and never typed: a pin and its record that
+// differ fail. The pool's verifier is held through the pool (its immutable, read on chain by evm-venues-pin.mjs and
+// pool-evm-deploy-mainnet.mjs); the kit pins no verifier of its own, since nothing on the device calls it.
+const MAINNET_SETS = ["base", "robinhood"] as const;
+const mainRecord = (chain: string) => {
+  const d = JSON.parse(readFileSync(new URL(`../../../contracts/pool-evm/deployments/${chain}.json`, import.meta.url), "utf8")) as {
+    chain: string;
+    dryRun: boolean;
+    contracts: Record<string, { address: string; sink?: string }>;
+  };
+  assert.equal(d.chain, chain);
+  assert.equal(d.dryRun, false, `${chain}: a dry run's record is never a pin`);
+  return d.contracts;
+};
+
+test("the mainnet chains' pins are their deployment records: pool, v3 and v4 adapters, sell delegate and fee collector, the collector's sink the sell sender", () => {
+  for (const chain of MAINNET_SETS) {
     const v = evmPoolVenues()[chain];
-    assert.deepEqual([v.pool, v.adapters, v.sellDelegate], [undefined, undefined, undefined], chain);
+    const r = mainRecord(chain);
+    assert.equal(lower(v.pool), lower(r.PrivacyPoolSimple!.address), chain);
+    assert.deepEqual(Object.keys(v.adapters ?? {}).sort(), ["v3", "v4"], chain); // both venues on both mainnets (M365 2: a v3 router is read on Robinhood)
+    assert.equal(lower(v.adapters?.v3), lower(r.UniswapV3Adapter!.address), chain);
+    assert.equal(lower(v.adapters?.v4), lower(r.UniswapV4Adapter!.address), chain);
+    assert.equal(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(v.feeCollector), lower(r.FeeCollector!.address), chain);
+    assert.equal(lower(v.sellSender), lower(r.FeeCollector!.sink), chain);
+    assert.equal(lower(v.weth), lower(DEPLOY.MAINNETS[chain]!.weth.address), chain);
+    assert.equal(lower(v.poolManager), lower(DEPLOY.MAINNETS[chain]!.poolManager.address), chain);
+    assert.deepEqual(v.routers.map(lower), [lower(DEPLOY.MAINNETS[chain]!.router!.address)], chain);
+    assert.equal(Object.getPrototypeOf(v.adapters), null, chain);
+    assert.ok(Object.isFrozen(v) && Object.isFrozen(v.adapters), chain);
+  }
+});
+
+test("on each mainnet a buy builds only through its pinned adapters into its pinned pool, a sell pays only into that pool and its collector, and W's authorization names only its delegate", () => {
+  for (const chain of MAINNET_SETS) {
+    const v = evmPoolVenues()[chain];
+    const r = mainRecord(chain);
+    const pool = r.PrivacyPoolSimple!.address;
+    for (const [route, adapter, other] of [
+      [v4(), r.UniswapV4Adapter!.address, r.UniswapV3Adapter!.address],
+      [v3(v.weth), r.UniswapV3Adapter!.address, r.UniswapV4Adapter!.address],
+    ] as const) {
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, OTHER, route, 1n, X)), "not_pinned", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, other, route, 1n, X)), "not_pinned", chain);
+      const built = pinnedBuild(evmPoolVenues(), chain, adapter, route, 1n, X);
+      assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, OTHER, built, PROOF)), "not_pinned", chain);
+      assert.equal(pinnedSignBuy(evmPoolVenues(), W_KEY, chain, pool, built, PROOF).length, 65, chain);
+      assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, pool, built, PROOF)), "not_built", chain);
+    }
+    const req = {
+      w: W, token: X, amount: 10n ** 18n, target: v.routers[0]!, route: { venue: "uniswap-v3" as const, tokens: [X, v.weth], fees: [500] },
+      minOut: 10n ** 15n, precommitment: 0x5e11n, feeCap: 10n ** 14n, feeRecipient: r.FeeCollector!.address, deadline: BigInt(NOW + 300), nonce: 0n,
+    };
+    const built = pinnedBuildSell(evmPoolVenues(), chain, { ...req, pool: OTHER } as typeof req);
+    assert.equal(lower(built.pool), lower(pool), chain);
+    assert.equal(pinnedSignSell(evmPoolVenues(), W_KEY, chain, built).length, 65, chain);
+    assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, { ...req, feeRecipient: OTHER })), "not_pinned", chain);
+    const v4sell = { ...req, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
+    assert.equal(lower(pinnedBuildSell(evmPoolVenues(), chain, v4sell).pool), lower(pool), chain);
+    const a = kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n);
+    assert.equal(lower(a.address), lower(r.SellDelegate!.address), chain);
+    assert.equal(a.chainId, evmPoolVenues()[chain].chainId, chain);
   }
 });
 

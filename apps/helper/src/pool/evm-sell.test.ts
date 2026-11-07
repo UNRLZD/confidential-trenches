@@ -452,13 +452,21 @@ test("the authorization: chainId 0, another chain's id, another delegate, anothe
   const digest = keccak_256(cat(Uint8Array.of(5), enc([int(CHAIN_ID), unhex(DELEGATE), int(W_NONCE)])));
   const flipped = secp256k1.Signature.fromBytes(unhex(`${high.r}${high.s.slice(2)}`), "compact").addRecoveryBit(Number(BigInt(high.yParity)));
   assert.equal(hex(flipped.recoverPublicKey(digest).toBytes(true)), hex(secp256k1.getPublicKey(W_KEY, true)));
-  // base (mainnet) pins no sell delegate yet: every sell there is refused, fail closed
+  // a network whose venue pins no sell delegate (a list without Base's: the kit pins it since card
+  // pool-evm-deploy-mainnet): every sell there is refused, fail closed
   const calls: Calls = [];
-  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR }, [rpc(calls), rpc(calls)], () => NOW);
-  assert.equal(Object.hasOwn(evmPoolVenues().base, "sellDelegate"), false);
+  const { sellDelegate: _d, ...baseNoDelegate } = evmPoolVenues().base;
+  const m = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, venues: { ...evmPoolVenues(), base: baseNoDelegate } }, [rpc(calls), rpc(calls)], () => NOW);
   const a = await m.sell(body({ auth: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) }));
   assert.equal(code(a), "bad_authorization", detail(a));
   assert.equal(calls.length, 0);
+  // the kit's own Base pin: an authorization naming any other delegate is refused, nothing read
+  assert.notEqual(evmPoolVenues().base.sellDelegate!.toLowerCase(), DELEGATE.toLowerCase());
+  const pinnedCalls: Calls = [];
+  const mp = evmPoolSender({ network: "base", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR }, [rpc(pinnedCalls), rpc(pinnedCalls)], () => NOW);
+  const ap = await mp.sell(body({ auth: authOf(W_KEY, 8453n, DELEGATE, W_NONCE) }));
+  assert.equal(code(ap), "bad_authorization", detail(ap));
+  assert.equal(pinnedCalls.length, 0);
   // a network the kit does not list: no sender starts on it (the kit has no chain fee rule for it)
   assert.throws(() => senderOf([], {}, [], {}, "unlisted"), /unlisted: no chain fee rule/);
 });
