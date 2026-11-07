@@ -50,6 +50,7 @@ const RESERVE = "a buy is refused (429) when the sender's lower pending balance"
 const RETRY = "a device's retry of its own in-flight buy";
 const PROOF = "evmBuyUnpaid: a proven buy whose receipt cost";
 const PAYS_OUT = "evmBuyLanded: a buy whose swap failed lands on the pool's Withdrawn";
+const SIM_TRUE = "a buy whose own simulation answers false";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -135,6 +136,9 @@ export const MUTANTS = [
   [EVM, "    const bought = evmRpcHex(topics[0]) === BOUGHT_TOPIC;", "    const bought = false;", T, PROOF],
   [EVM, "(!bought && evmRpcHex(topics[0]) !== WITHDRAWN_TOPIC)", "(!bought)", T, PAYS_OUT],
   [EVM, "(bought ? 7 : 5)", "(bought ? 7 : 7)", T, PAYS_OUT],
+  // a buy goes out only where its eth_call answers exactly true (review of 68b0930a, M1)
+  [EVM, "if (w.buy !== undefined && sim !== BUY_TRUE) return", "if (false) return", T, SIM_TRUE],
+  [EVM, "const BUY_TRUE = `0x${\"0\".repeat(63)}1`;", "const BUY_TRUE = `0x${\"0\".repeat(64)}`;", T, SIM_TRUE],
   // review a2ff5521 L2: a revert is held against its method, so the same proof still withdraws in its epoch
   [EVM, "        if (was === epoch && how === w.method) return no(422, \"reverted\");", "        if (was === epoch) return no(422, \"reverted\");", T, HOLD],
   // a withdraw's request read as before (evm.test.ts's signed requests)

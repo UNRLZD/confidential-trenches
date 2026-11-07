@@ -41,7 +41,8 @@
 //                    0xef0100..., too): a contract could revert the pool's push after the simulation;
 //   simulation_failed eth_estimateGas or eth_call of the exact transaction at "pending", from the sender with the gas,
 //                    maxFeePerGas and maxPriorityFeePerGas the send then signs, fails in execution, or its gas is over
-//                    EVM_GAS_MAX;
+//                    EVM_GAS_MAX; or, for a buy, its eth_call answers anything but true (its swap would fail, and the
+//                    pool would take the fee and pay W ETH: card pool-evm-buy-pays-revert);
 //   fee_stale        the fee's cap per gas (fee / gas limit) is under the current base fee: it could not be mined, so
 //                    the device re-proves at a newer epoch's fee (M356 (2));
 //   rate_limited (429) EVM_QUEUE_MAX sends are already waiting (Retry-After EVM_BUSY_RETRY_S; card helper-abuse-limits:
@@ -570,6 +571,8 @@ export function evmSaleUnpaid(ra: Record<string, unknown>, rb: Record<string, un
   return { proven: ok, paid: ok && cost <= sale.fee, unpaid: ok ? (cost > sale.fee ? cost - sale.fee : 0n) : cost };
 }
 export const BOUGHT_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)")))}`;
+/** buy's return as eth_call answers it where the swap lands: abi.encode(true) (card pool-evm-buy-pays-revert). */
+const BUY_TRUE = `0x${"0".repeat(63)}1`;
 export const WITHDRAWN_TOPIC = `0x${hex(keccak_256(new TextEncoder().encode("Withdrawn(address,address,uint256,uint256,uint256,uint256)")))}`;
 /** Whether receipt `r` carries the pool's log of this buy landing: from the pool, `_recipient` W (its one indexed
  *  field), and in its data the fee recipient, the fee and the spent nullifier. Either Bought (IPrivacyPool.sol), with
@@ -1110,11 +1113,16 @@ export function evmPoolSender(
     }
     // the simulation is the transaction as it will be signed: at pending, from the sender, with its gas and fee fields
     // (a call that reverts only at a real gas price is caught here, not paid for on chain)
+    let sim: unknown;
     try {
-      await a("eth_call", [{ ...call, gas: tag(gas), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(maxPriorityFeePerGas) }, "pending"]);
+      sim = await a("eth_call", [{ ...call, gas: tag(gas), maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(maxPriorityFeePerGas) }, "pending"]);
     } catch (e) {
       return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
+    // a buy whose swap fails no longer reverts: the pool takes the fee and pays W the rest in ETH, and buy returns false
+    // (card pool-evm-buy-pays-revert). So a buy goes out only where its simulation, at this very gas limit, answers
+    // exactly true: one that would land as a withdraw is refused before the note is spent (review of 68b0930a, M1)
+    if (w.buy !== undefined && sim !== BUY_TRUE) return no(422, "simulation_failed", `the buy's simulation answers ${String(sim).slice(0, 80)}, not true: its swap would fail and the pool would pay W ETH`);
     const nonce = await nonceFor(withdrawLane, pa, pb);
     const { raw, hash } = signEvmTx({ chainId: id, nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to: pool, data: bytes }, cfg.senderKey);
     const sent = await Promise.allSettled([a("eth_sendRawTransaction", [`0x${hex(raw)}`]), b("eth_sendRawTransaction", [`0x${hex(raw)}`])]);

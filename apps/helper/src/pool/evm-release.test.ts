@@ -37,7 +37,10 @@ const NOW = 2_000_000_000_000 - 100_000;
 const EPOCH = 1_999_999_860_000;
 const DEPTH_DATA = `0x${Buffer.from(keccak_256(new TextEncoder().encode("currentTreeDepth()"))).subarray(0, 4).toString("hex")}`;
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance: bigint | (() => bigint) = 10n ** 20n): EvmRpc {
+// a buy's eth_call at pending answers buy's bool (card pool-evm-buy-pays-revert: true, the swap landed; false, it failed
+// and W is paid ETH); a withdraw's answers nothing
+const BOUGHT_TRUE = `0x${"0".repeat(63)}1`;
+function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1" }, balance: bigint | (() => bigint) = 10n ** 20n, buySim = BOUGHT_TRUE): EvmRpc {
   const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
   return async (method, params) => {
     calls.push({ method, params });
@@ -47,7 +50,7 @@ function rpc(calls: Calls, chain = "0x14a34", receipt: unknown = { status: "0x1"
       case "eth_call": {
         const [{ to, data }, at] = params as [{ to: string; data: string }, unknown];
         if (typeof at === "object" && at !== null && "blockHash" in at) return `0x${(to === "0x420000000000000000000000000000000000000f" ? (data.startsWith("0xf1c7a58b") ? 7_917n : 0n) : data === DEPTH_DATA ? 2n : 0n).toString(16).padStart(64, "0")}`;
-        return "0x";
+        return data.startsWith(`0x${BUY_SELECTOR}`) ? buySim : "0x";
       }
       case "eth_estimateGas": return "0x95433"; // 611,391
       case "eth_getBlockByNumber": return params[0] === "latest" ? block(600n) : BigInt(params[0] as string) <= 600n ? block(BigInt(params[0] as string)) : null;
@@ -465,5 +468,15 @@ test("evmBuyLanded: a buy whose swap failed lands on the pool's Withdrawn of thi
     }
     assert.equal(evmBuyLanded(one(l), buy), false, what);
     assert.deepEqual(evmBuyUnpaid(one(l), ok, buy, 10n ** 18n).proven, false, `${what}: unproven, its whole cost held`);
+  }
+});
+
+test("a buy whose own simulation answers false (its swap fails now: the pool would take the fee and pay W ETH) is refused simulation_failed and never sent; an answer that is not exactly true is refused too (review of 68b0930a, M1)", async () => {
+  const data = CAST.cases.buyBaseSepolia!.callData;
+  for (const [answer, sent] of [[BOUGHT_TRUE, 1], [`0x${"0".repeat(64)}`, 0], ["0x", 0], [`0x${"0".repeat(62)}02`, 0], [`${BOUGHT_TRUE}${"0".repeat(64)}`, 0]] as const) {
+    const calls: Calls = [];
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, receiptPollMs: 1, log: () => {} }, [rpc(calls, "0x14a34", undefined, undefined, answer), rpc([], "0x14a34", undefined, undefined, answer)], () => NOW);
+    const a = await s.carry({ pool: POOL, data, epoch: EPOCH });
+    assert.deepEqual([a.status, code(a), sends(calls).length], sent === 1 ? [200, "ok", 1] : [422, "simulation_failed", 0], `${answer}: ${JSON.stringify(a.body)}`);
   }
 });
