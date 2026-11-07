@@ -1,13 +1,14 @@
 import type { SignpageResults } from "@blindfill/kit";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation } from "react-router";
 import { ROUTES } from "../../routes/routes.ts";
 import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { usd as usdCents } from "../signin/model.ts";
-import { ADDRESS_STATES, countdown, elapsed, getAddressOn, HELD_STATES, parseAmount, sheetState, usd } from "./model.ts";
-import type { Answer, DryQuote, SheetState } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, sheetState, symbolsOf, usd } from "./model.ts";
+import type { Answer, Asset, DryQuote, SheetState } from "./model.ts";
+import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -33,9 +34,12 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   const { pathname } = useLocation();
   const state = src.snapshot.state;
   const balance = useBalance(src.snapshot) ?? 0n;
-  const asset = src.assets?.[0] ?? null;
+  const [picked, setPicked] = useState<{ symbol: string; chain: string } | null>(null);
+  const asset = pickAsset(src.assets, picked);
   const [amount, setAmount] = useState(() => src.start?.amount ?? "");
-  const [dry, setDry] = useState<Answer<DryQuote>>(src.assets?.length === 0 ? { kind: "refused", code: "not_available" } : { kind: "idle" });
+  const [typedDry, setDry] = useState<Answer<DryQuote>>({ kind: "idle" });
+  // no asset list (refused, or none to take) is the sheet's answer before any amount: S4.6, S4.7 or S4.8, never a skeleton
+  const dry: Answer<DryQuote> = src.assetsRefused ? { kind: "refused", code: src.assetsRefused } : src.assets?.length === 0 ? { kind: "refused", code: "not_available" } : typedDry;
   const [checked, setChecked] = useState<Answer<SignpageResults["deposit.quote"]>>({ kind: "idle" });
   const [reqId, setReqId] = useState<string | null>(null);
   const [tries, setTries] = useState(0);
@@ -120,10 +124,14 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
           <Stat tone="blue" label={s === "S4.18" ? <W id="short" /> : <W id="processing" />} counter={elapsed(status?.since_ms, now)} />
         )}
         <div className="addrb">
+          <Qr text={q.deposit_address} />
           <div className="ca">
-            <span>{asset?.symbol}</span>
-            <span className="gap" />
-            <span>{asset?.chain}</span>
+            {asset &&
+              addressHeading(asset).map((t, i) => (
+                <span key={i} className={i ? "c" : undefined}>
+                  {t}
+                </span>
+              ))}
           </div>
           <div className="hex num" data-address={q.deposit_address}>
             {(q.deposit_address.match(/.{1,4}/g) ?? []).join(" ")}
@@ -141,7 +149,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     body = <Stat tone="warn" label={<W id="expired" />} />;
     foot = <Action kind="buy" on={src.moneyOn} control="deposit-get" onClick={again}><W id="getAddress" /></Action>;
   } else {
-    body = <Form s={s} amount={amount} setAmount={setAmount} dry={dry} asset={asset} retry={() => (checked.kind === "refused" ? again() : setTries((t) => t + 1))} />;
+    body = <Form s={s} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />;
     if (s === "S4.19")
       foot = (
         <Action kind="paper" on={src.moneyOn && src.locked === null} control="deposit-backup" onClick={() => void src.hop("backup.open", {}, { ...view, control: "deposit-backup" })}>
@@ -194,7 +202,7 @@ function Stat({ tone, label, counter = null }: { tone: "warn" | "blue"; label: R
   );
 }
 
-function Form({ s, amount, setAmount, dry, asset, retry }: { s: SheetState; amount: string; setAmount(a: string): void; dry: Answer<DryQuote>; asset: { symbol: string; chain: string; min: string; max_usd: string | null } | null; retry(): void }) {
+function Form({ s, amount, setAmount, dry, asset, assets, pick, retry }: { s: SheetState; amount: string; setAmount(a: string): void; dry: Answer<DryQuote>; asset: Asset | null; assets: readonly Asset[]; pick(p: { symbol: string; chain: string }): void; retry(): void }) {
   const loading = s === "S4.1";
   const q = dry.kind === "ok" && !["S4.4", "S4.5"].includes(s) ? dry.value : null;
   const cell = (v: string | null) => (s === "S4.2" ? <span className="sk" /> : <span className={v ? "num" : "num t3"}>{v ?? "—"}</span>);
@@ -223,8 +231,8 @@ function Form({ s, amount, setAmount, dry, asset, retry }: { s: SheetState; amou
   return (
     <>
       <div className="dpicks">
-        <div className="dpick"><div className="lb"><W id="asset" /></div><div className="drow">{loading ? <span className="sk" /> : <span className="nm">{asset?.symbol}</span>}</div></div>
-        <div className="dpick"><div className="lb"><W id="chain" /></div><div className="drow">{loading ? <span className="sk" /> : <span className="nm">{asset?.chain}</span>}</div></div>
+        <Pick label="asset" loading={loading} value={asset?.symbol} rows={symbolsOf(assets)} control="deposit-asset" onPick={(symbol) => pick({ symbol, chain: chainsOf(assets, symbol)[0] ?? "" })} />
+        <Pick label="chain" loading={loading} value={asset?.chain} rows={asset ? chainsOf(assets, asset.symbol) : []} control="deposit-chain" onPick={(chain) => asset && pick({ symbol: asset.symbol, chain })} />
       </div>
       <label className={s === "S4.4" || s === "S4.5" ? "damt bad" : "damt"}>
         <span className="lb"><W id="amount" /></span>
@@ -239,6 +247,44 @@ function Form({ s, amount, setAmount, dry, asset, retry }: { s: SheetState; amou
       </div>
       {quote}
     </>
+  );
+}
+
+/**
+ * One picker (R5's dpick: the label, then the row with the chevron): a native select over the row, so the phone opens its
+ * own list and the keyboard works; its rows are data (symbols, chain names) from the kit's asset list.
+ */
+function Pick({ label, loading, value, rows, control, onPick }: { label: "asset" | "chain"; loading: boolean; value: string | undefined; rows: string[]; control: string; onPick(v: string): void }) {
+  return (
+    <div className="dpick">
+      <div className="lb"><W id={label} /></div>
+      <div className="drow">
+        {loading ? (
+          <span className="sk" />
+        ) : (
+          <>
+            <select className="nm" aria-label={WORDS[label].text} value={value ?? ""} disabled={rows.length < 2} data-control={control} onChange={(e) => onPick(e.target.value)}>
+              {rows.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            {rows.length > 1 && <Icon name="chevDown" size={13} />}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The address's QR (qr.ts), drawn in the text colour on the page colour, so it reads in dark and light. */
+function Qr({ text }: { text: string }) {
+  const { n, d } = useMemo(() => qrOf(text), [text]);
+  return (
+    <div className="qr" data-qr={text}>
+      <svg viewBox={`0 0 ${n} ${n}`} shapeRendering="crispEdges" aria-hidden="true">
+        <path d={d} fill="currentColor" />
+      </svg>
+    </div>
   );
 }
 

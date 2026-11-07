@@ -8,6 +8,7 @@ import { Icon } from "./Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { headerModel, usd } from "./model.ts";
 import type { HeaderModel } from "./model.ts";
+import { useDepositSheet } from "../deposit/source.tsx";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
 import type { SigninSource } from "./source.tsx";
 import { text, W } from "./Word.tsx";
@@ -15,7 +16,8 @@ import "./signin.css";
 
 // The header's account states (S1.1-S1.4) and the account menu (S1.16), R5's top bar right cluster and phone header
 // (design/proto/assets/app.js:349-362 and :393-396 at design-lock-r5; proto.css:110-116, :239-242). The Deposit button
-// and the phone's green + are the deposit card's entry; they are on only while the signing page is READY.
+// and the phone's green + open the shell's one deposit sheet (shell/DepositMount.tsx); they are on only while the signing
+// page is READY.
 
 const routeOf = (pathname: string): RouteId => ROUTES.find((r) => r.path === pathname)?.id ?? "discover";
 
@@ -27,6 +29,7 @@ function Balance({ m }: { m: HeaderModel }) {
 export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean }) {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
+  const deposit = useDepositSheet();
   const m = headerModel(src.snapshot, useBalance(src.snapshot));
   const [menu, setMenu] = useState(initialMenu);
   const box = useRef<HTMLDivElement>(null);
@@ -62,7 +65,7 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
       <div className="balblock">
         <Balance m={m} />
       </div>
-      <button type="button" className="btn-dep" disabled={!src.moneyOn || m.kind === "loading"} data-action="deposit">
+      <button type="button" className="btn-dep" disabled={!src.moneyOn || m.kind === "loading"} data-action="deposit" onClick={() => deposit.setOpen(true)}>
         <W id="deposit" />
       </button>
       <button type="button" className={menu ? "acct open" : "acct"} aria-label={text("account")} aria-expanded={menu} disabled={m.kind === "loading"} onClick={() => setMenu(!menu)}>
@@ -128,6 +131,7 @@ export function AccountMenu({ src, m, onDone, phone = false }: { src: SigninSour
 export function PhoneAccount() {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
+  const deposit = useDepositSheet();
   const m = headerModel(src.snapshot, useBalance(src.snapshot));
   // as on desktop: the skeleton, Sign in and the balance pill are each their own key, so one replaces another (BAR-04)
   if (m.kind === "out")
@@ -142,7 +146,7 @@ export function PhoneAccount() {
     );
   return (
     <div className="tbr-ph" key={m.kind === "loading" ? "loading" : "in"}>
-      <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"}>
+      <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"} onClick={() => deposit.setOpen(true)}>
         <span className="balp">
           <Balance m={m} />
           <span className="plus">

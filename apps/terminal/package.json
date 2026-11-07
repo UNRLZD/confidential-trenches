@@ -15,7 +15,8 @@
     "klinecharts": "10.0.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-router": "8.4.0"
+    "react-router": "8.4.0",
+    "uqr": "0.1.3"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
