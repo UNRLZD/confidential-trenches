@@ -1050,3 +1050,19 @@ test("a set whose every leg is dropped as late never calls onSigned: refused, an
   assert.match(r.legs[0]!.refused ?? "", LATE);
   assert.deepEqual(events, ["refused"]);
 });
+
+test("card solana-legs-checked: the sell wallet that already holds 28.77 wSOL has that account read on both providers and read back after its sell, and its sell is held to its own proceeds", async () => {
+  const d = deps(SELL);
+  const r = await runSolanaTrade(request(SELL), d);
+  const back = JSON.stringify(["simulateTransaction", { addresses: [WSOL_HELD.account], encoding: "base64" }]);
+  for (const p of d.providers) {
+    assert.ok(p.asks.some((k) => k.startsWith('["getMultipleAccounts"') && k.includes(WSOL_HELD.account) && k.includes(WSOL_HELD.wallet)), "read with the accounts its sell writes");
+    assert.ok(p.asks.includes(back), "read back after the sell");
+  }
+  const leg = r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!;
+  assert.equal(leg.verdict?.ok, true, leg.refused);
+  // its native in, as S12 reads it, is the sell's own: the recorded simulation's lamports less the wSOL the close returned
+  const s12 = leg.verdict!.results.find((x) => x.id === "S12")!.detail;
+  const out = BigInt(/^simulated out (\d+)/.exec(s12)![1]!);
+  assert.ok(out > 0n && out < BigInt(WSOL_HELD.lamports), `${out}`);
+});
