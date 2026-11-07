@@ -504,7 +504,7 @@ export const MUTANTS = [
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV4 "],
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
   [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
-  [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
+  [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];\n", "", R, "RV9 "],
   // (card evm-sell-hook-intrablock: the as-is check is `asIs`; the line that returns where it passes and the trace names
   // no hook, left out, is equivalent: the fault set is then the trace's errored hooks, none, so nothing is banned)
   [QUOTE, "  const asIs = failed(await replay({}));\n", "  const asIs = true;\n", R, "HC2 "],
@@ -595,7 +595,7 @@ export const MUTANTS = [
   [QUOTE, "[[EVM_HISTORY, [(n - 1n) % 393168n]]]", "[[EVM_HISTORY, [(n - 1n) % 8191n]]]", R, "review of da11bbb6, H1 evmSystemSlotsOf"],
   // review of da11bbb6, L1: a trade with Nitro poster gas is no evidence
   [QUOTE, "  if (BigInt(sale.l1Gas) !== 0n) return [];\n", "", R, "review of da11bbb6, L1"],
-  [QUOTE, "l1Gas: rc.gasUsedForL1 === undefined ? \"0x0\" : str(rc, \"gasUsedForL1\", who),", "l1Gas: \"0x0\",", R, "review of da11bbb6, L1"],
+  [QUOTE, "l1Gas: rc.gasUsedForL1 === undefined ? \"0x0\" : num(rc, \"gasUsedForL1\", who),", "l1Gas: \"0x0\",", R, "review of da11bbb6, L1"],
   // review of da11bbb6, L2: a proper set's read that answers 0 counts the sale's route for nothing (mutant R6)
   [QUOTE, "      if (x === null || x === 0n) return null;\n", "      if (x === null) return null;\n", R, "review of da11bbb6, L2"],
   // review of ca907a05: its mutants Y1-Y3 and Y6-Y9, and PREVRANDAO set on Robinhood. Its Y4 (a trade's override
@@ -621,11 +621,11 @@ export const MUTANTS = [
   [QUOTE, "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));", "(r) => r.ok, (r) => !r.ok, undefined);", R, "card evm-sell-hook-intrablock, HC2 and HIGH 1 (sell, Robinhood)"],
   [QUOTE, "(r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === false, undefined);", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
   [QUOTE, "    if (!arbos) out[lower(a)] = one;", "    out[lower(a)] = one;", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
-  [QUOTE, "  if (!asIs && errored.length === 0) return unread ? ", "  if (!asIs) return unread ? ", R, "review of ca907a05, HIGH 1 (buy, Robinhood)"],
+  [QUOTE, "  if (!asIs && errored.length === 0) return legUnread ? ", "  if (!asIs) return legUnread ? ", R, "review of ca907a05, HIGH 1 (buy, Robinhood)"],
   // (the trace names only the route's hooks now, review of f0f983d2 item 2, so the off-route frame of the as-is leg's
   // test no longer tells this one: an honest hook beside the errored one does)
-  [QUOTE, "hooks.filter((hk) => tr.errored.includes(lower(hk)))", "(tr.errored.length > 0 ? hooks : [])", R, "review of 29498693, MEDIUM"],
-  [QUOTE, '    (x, y) => JSON.stringify(x) === JSON.stringify(y),\n    () => refuse("rpc_disagree", `the trace providers', '    (x, y) => true,\n    () => refuse("rpc_disagree", `the trace providers', R, "card evm-sell-hook-intrablock, a trace that"],
+  [QUOTE, "hooks.filter((hk) => seen.includes(lower(hk)))", "(seen.length > 0 ? hooks : [])", R, "review of 29498693, MEDIUM"],
+  [QUOTE, '      (x, y) => JSON.stringify(x) === JSON.stringify(y),\n      () => refuse("rpc_disagree", `the trace providers', '      (x, y) => true,\n      () => refuse("rpc_disagree", `the trace providers', R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, ' || typeof root.input !== "string" || lower(root.input) !== sale.input', "", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  if (accounts.filter(([a]) => lower(a) !== EVM_ARBOS_STATE).length > b.accounts) return null;\n", "", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "(arbos ? st.length > b.arbosSlots : (slots += st.length) > b.slots)", "(arbos ? st.length > b.arbosSlots : false)", R, "card evm-sell-hook-intrablock, a trace that"],
@@ -653,7 +653,7 @@ export const MUTANTS = [
   [QUOTE, "  const arbosSlots = Math.floor(g / 800) + 256;", "  const arbosSlots = Math.floor(g / 800) + 257;", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  const accounts = Math.floor(g / 2400) + 64;", "  const accounts = 256;", R, "review of f0f983d2, item 3"],
   [QUOTE, '{ tracer: "prestateTracer", tracerConfig: { disableCode: true } }', '{ tracer: "prestateTracer" }', R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) the replay's override"],
-  [QUOTE, "  if (!asIs && errored.length === 0) return unread ? refuse(", "  if (!asIs && errored.length === 0) return false ? refuse(", R, "review of f0f983d2, item 5a"],
+  [QUOTE, "  if (!asIs && errored.length === 0) return legUnread ? again() : [];", "  if (!asIs && errored.length === 0) return false ? again() : [];", R, "review of f0f983d2, item 5a"],
   [QUOTE, '    if (!(e instanceof EvmQuoteError) || e.code !== "rpc_disagree") unread = true;\n', "", R, "review of f0f983d2, item 5a"],
   // review of de4e3ed5: the market read on the replay's own basis, its state and its block (1); the trace's rpc_error
   // its own reason (2); a hook frame counts only under a PoolManager frame the trade's own target or the pinned v4
@@ -668,6 +668,19 @@ export const MUTANTS = [
   [QUOTE, "const own = new Set([lower(sale.to), ...(adapter !== undefined ? [lower(adapter)] : [])]);", "const own = new Set([...(adapter !== undefined ? [lower(adapter)] : [])]);", R, "review of de4e3ed5, 3"],
   [QUOTE, "      const ownPm = intoPm && isAddress(f.from) && own.has(lower(f.from));", "      const ownPm = intoPm;", R, "review of de4e3ed5, 3"],
   [QUOTE, "  const used = (gas * 5n) / 4n;", "  const used = (gas * 3n) / 2n;", R, "card evm-sell-hook-intrablock, a trace that"],
+  // review of fb923143: each tracer two companies' word apart, so a callTracer no provider answered keeps the prestate
+  // both did, and only the as-is leg is unread (1); a callTracer answered apart or not the trade's own call still drops
+  // the prestate with it (1d); with the prestate unread, step 3's and step 4's [] are asked again (2); a numeric field
+  // that is not a number refuses (question 5)
+  [QUOTE, '    if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };\n', "", R, "review of fb923143, 1a"],
+  [QUOTE, '    if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };\n', "", R, "review of fb923143, 1b"],
+  [QUOTE, 'if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };', 'if (e instanceof EvmQuoteError) return { over, errored: undefined };', R, "review of fb923143, 1d"],
+  [QUOTE, "  return errored === null ? null : { over, errored };", "  return { over, errored: errored ?? undefined };", R, "review of fb923143, 1d"],
+  [QUOTE, "  if (over === null) return null;\n", "", R, "review of fb923143, 1e"],
+  [QUOTE, "  const legUnread = unread || (p !== undefined && p.errored === undefined);", "  const legUnread = unread;", R, "review of fb923143, 1c"],
+  [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];", "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];", R, "review of fb923143, 2 (buy"],
+  [QUOTE, "  return out.length === 0 && unread ? again() : out;", "  return out;", R, "review of fb923143, 2 step 4"],
+  [QUOTE, '!/^0x[0-9a-fA-F]{1,64}$/.test(v)) return refuse("rpc_error", `${who}\'s ${k} is not a number`);', '!/^0x[0-9a-fA-F]{0,64}$/.test(v)) return refuse("rpc_error", `${who}\'s ${k} is not a number`);', R, "review of fb923143, question 5"],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => r.ok, (r) => boughtOf(r) === false, preStateOf(v, trace));", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === true, (r) => !r.ok, preStateOf(v, trace));", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],

@@ -2778,7 +2778,8 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //      A trade with poster gas (its receipt's gasUsedForL1 above 0) is no evidence at all (below); every one is 0 today;
 // 2b. the trade's true pre-state, where the chain has a trace pair (preStateOf; Robinhood mainnet: venue
 //    traceProviders, dRPC and Pocket): the trade's own debug_traceTransaction, prestateTracer (disableCode) and
-//    callTracer each its own request on each provider, each with its own byte cap, equal as JSON on both (tracedPre),
+//    callTracer each its own request on each provider, each with its own byte cap, each equal as JSON on both apart
+//    (tracedPre),
 //    its root frame the transaction's own call (from, to, input, value) and its transaction's index its receipt's,
 //    within the bounds the gas the trade used sets (preBounds: what any trade can touch). The prestate, every account but
 //    ArbOS's state and no code, is the replay's state override over the system slots: the state the trade read at its
@@ -2789,14 +2790,21 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    caught it), called by a PoolManager frame the trade's own target (W for a sale, the pool for a buy) or the pinned
 //    v4 adapter entered, the outermost route hook on it: the hook reverted in the trade itself, read from the trace
 //    (never from the route alone), never a listed hook's frame nor the PoolManager's; those hooks alone are at fault
-//    (step 4 asks no set). A trace that differs or passes its bounds adds nothing: the evidence runs at the parent block
-//    as it does without one; a trace a provider did not answer where the replay without it passes, the one answer only
-//    the trace decides, is thrown (rpc_error, its message EVM_TRACE_UNANSWERED), so the caller asks again; every other
-//    answer is final. Still open there, each costing a failed try each time it is taken, never a ban on an honest hook:
+//    (step 4 asks no set). A trace whose prestate or callTracer differs between the two, passes its bounds or is not the
+//    trade's own call adds nothing: the evidence runs at the parent block as it does without one. A callTracer no
+//    provider answered beside a prestate both did (a hook can flood its frames past callBytes at no gas: review of
+//    fb923143, 1) keeps the prestate for the replay and step 3; only the as-is leg is unread. Thrown (rpc_error, its
+//    message containing EVM_TRACE_UNANSWERED) wherever a trace left unanswered could still change the answer: the as-is
+//    leg unread where the replay passed; and, with the prestate unread, the [] of a market that did not hold (step 3)
+//    and of a step 4 that rescued nothing, both read on the parent basis the pre-state could turn into a ban (review of
+//    fb923143, 2). Every other answer is final. Still open there, each costing a failed try each time it is taken,
+//    never a ban on an honest hook:
 //    - a hook keyed on ArbOS's state that fails the trade without its own frame reverting: a fee through a delta, or a
 //      return the PoolManager refuses (a wrong selector, or a delta larger than the swap);
 //    - a hook keyed on ArbOS's state that floods the callTracer past its bytes (preBounds: a frame's input costs no gas
-//      where it passes memory already paid for): the trace goes unanswered, so the as-is leg is never read for it;
+//      where it passes memory already paid for): the as-is leg is never read for it, so its replay, which passes,
+//      throws EVM_TRACE_UNANSWERED on every ask (a hook an earlier transaction flipped that floods is still banned: the
+//      prestate it cannot inflate holds its replay);
 //    - a hook keyed on an earlier transaction of the block that reads code an earlier transaction of the block deployed
 //      (the prestate carries no code, so the replay sees the parent's);
 //    - a hook that, once an earlier transaction armed it, fails the quoter too: step 3 reads the market at the trade's
@@ -2836,12 +2844,13 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 
 /** The PoolIds of the quote's `hooked` pools that the sale `txHash`'s revert proves at fault (see above), on the
  *  chain's pinned providers; [] where nothing is proved. The caller bans these (wallet pool/evm-sell-bans.ts).
- *  An rpc_error whose message starts with EVM_TRACE_UNANSWERED is the trade's trace left unanswered where only it could
- *  tell (step 2b): the trace of a landed trade does not change, so asking again helps only while a provider is down; a
- *  caller asks again at most 3 times, then takes it as nothing proved (a hook that floods the trace past its bounds is
- *  left in, costing a failed try each time, never a ban on an honest hook). No caller in production asks yet: the kit's
- *  tests and the live check evm-sell-hook-converge do; the device's own ban flow (wallet pool/evm-sell-bans.ts) takes
- *  the answer once it does. */
+ *  An EvmQuoteError rpc_error whose message contains EVM_TRACE_UNANSWERED (the message is "rpc_error: " + that text +
+ *  ": " + the hash) is the trade's trace left unanswered where it could still change the answer (step 2b): the trace of a
+ *  landed trade does not change, so asking again helps only while a provider is down; a caller should ask again a few
+ *  times, then take it as nothing proved (a hook that floods the callTracer is left in, costing a failed try each time,
+ *  never a ban on an honest hook). EVM_TRACE_UNANSWERED is not in the kit's index, so an app reads it from the message.
+ *  Nothing asks again yet: no production code calls this function (the wallet's pool/evm-sell-bans.ts stores the bans a
+ *  caller hands it), the kit's tests assert the error once per case without asking again, and no live check calls it. */
 export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: string): Promise<readonly string[]> {
   if (!evmIsDeviceSellQuote(quote)) return refuse("bad_request", "a ban is proved only against a quote evmPoolSellQuote returned");
   const p = venue(quote.chain).providers;
@@ -2871,6 +2880,13 @@ const str = (r: Record<string, unknown>, k: string, who: string): string => {
   if (typeof v !== "string" || !/^0x[0-9a-fA-F]*$/.test(v) || v.length > 2 + 2 * 65536) return refuse("rpc_error", `${who}'s ${k} is not hex`);
   return v.toLowerCase();
 };
+/** A JSON-RPC quantity of the answer `r`: 0x and 1 to 64 hex digits, so every BigInt of it parses ("0x", which `str`
+ *  takes for a byte string such as an input, is no number: review of fb923143, question 5); else a refusal. */
+const num = (r: Record<string, unknown>, k: string, who: string): string => {
+  const v = r[k];
+  if (typeof v !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(v)) return refuse("rpc_error", `${who}'s ${k} is not a number`);
+  return v.toLowerCase();
+};
 
 /** A reverted trade's transaction and receipt, the same on two of the providers `rpcs` (steps 1 of a sale's and a buy's
  *  evidence). */
@@ -2895,13 +2911,13 @@ async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
       const [t, r] = await askAt(rpc, [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }]);
       const tx = resultOf(t, who, "transaction"), rc = resultOf(r, who, "receipt");
       const auths = tx.authorizationList;
-      const fees: Record<string, string> = typeof tx.maxFeePerGas === "string" ? { maxFeePerGas: str(tx, "maxFeePerGas", who), maxPriorityFeePerGas: str(tx, "maxPriorityFeePerGas", who) } : { gasPrice: str(tx, "gasPrice", who) };
+      const fees: Record<string, string> = typeof tx.maxFeePerGas === "string" ? { maxFeePerGas: num(tx, "maxFeePerGas", who), maxPriorityFeePerGas: num(tx, "maxPriorityFeePerGas", who) } : { gasPrice: num(tx, "gasPrice", who) };
       return {
-        hash: str(tx, "hash", who), from: str(tx, "from", who), to: typeof tx.to === "string" ? str(tx, "to", who) : "", input: str(tx, "input", who), gas: str(tx, "gas", who), value: str(tx, "value", who), fees,
-        auths: Array.isArray(auths) ? auths.length : 0, blockHash: str(tx, "blockHash", who), blockNumber: str(tx, "blockNumber", who), index: str(tx, "transactionIndex", who),
-        status: str(rc, "status", who), rcHash: str(rc, "transactionHash", who), rcBlock: str(rc, "blockHash", who), rcIndex: str(rc, "transactionIndex", who), gasUsed: str(rc, "gasUsed", who), logs: logsOf(rc, who),
+        hash: str(tx, "hash", who), from: str(tx, "from", who), to: typeof tx.to === "string" ? str(tx, "to", who) : "", input: str(tx, "input", who), gas: num(tx, "gas", who), value: num(tx, "value", who), fees,
+        auths: Array.isArray(auths) ? auths.length : 0, blockHash: str(tx, "blockHash", who), blockNumber: num(tx, "blockNumber", who), index: num(tx, "transactionIndex", who),
+        status: num(rc, "status", who), rcHash: str(rc, "transactionHash", who), rcBlock: str(rc, "blockHash", who), rcIndex: num(rc, "transactionIndex", who), gasUsed: num(rc, "gasUsed", who), logs: logsOf(rc, who),
         // Nitro's poster gas, charged inside the trade's gas limit (none on Base: its receipts carry no gasUsedForL1)
-        l1Gas: rc.gasUsedForL1 === undefined ? "0x0" : str(rc, "gasUsedForL1", who),
+        l1Gas: rc.gasUsedForL1 === undefined ? "0x0" : num(rc, "gasUsedForL1", who),
       };
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
@@ -2944,10 +2960,10 @@ const EVM_HISTORY = "0x0000f90827f1c53a10cb7a02335b175320002935";
 type Override = { balance?: string; nonce?: string; code?: string; stateDiff?: Record<string, string> };
 /** The trade's pre-state as a state override, and the callees of the trade's own frames that errored (lowercased,
  *  sorted), each read from its trace. */
-type Pre = { over: Record<string, Override>; errored: string[] };
-/** The start of the message of the rpc_error thrown where a trade's replay passed and its trace, the only evidence that
- *  could still tell, was not answered (step 2b): its own reason, apart from a provider that did not answer any other read,
- *  so a caller can bound how often it asks again. */
+type Pre = { over: Record<string, Override>; errored: string[] | undefined };
+/** The text in the message of the rpc_error thrown where the trade's trace was not answered and could still change the
+ *  answer (step 2b; the message is "rpc_error: " + this + ": " + the trade's hash): its own reason, apart from a provider
+ *  that did not answer any other read, so a caller can bound how often it asks again. */
 export const EVM_TRACE_UNANSWERED = "the trade's trace was not answered and its replay without it passed";
 // ArbOS's state account (Nitro): every pinned Robinhood provider refuses a state override of it, -32000 "overriding
 // address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf not allowed" (rpc.mainnet.chain.robinhood.com, robinhood.drpc.org
@@ -2967,7 +2983,7 @@ const EVM_ARBOS_STATE = "0xa4b05fffffffffffffffffffffffffffffffffff";
 // 272,424 bytes with code and 21,410 without, 2026-11-07 19:04Z), so its answer is at most `preBytes`, and the
 // callTracer's, `callBytes`, each provider read with each cap for its own tracer. Its inputs are not bounded by gas (a
 // frame may pass memory already paid for), so a hook can flood the callTracer past `callBytes`: that is an unanswered
-// trace (rpc_error, step 2b). Gas is held at 64M, past Robinhood's block limit. The override is sent again with every replay of the evidence (the trade as it ran and each
+// callTracer, which leaves the prestate read and only the as-is leg unread (step 2b). Gas is held at 64M, past Robinhood's block limit. The override is sent again with every replay of the evidence (the trade as it ran and each
 // set of hooks asked, at most 16, on two providers each); a ban is read after the trade, never on a quote's path.
 /** The bounds of the trace of a trade that used `gas`, with a quarter more. */
 function preBounds(gas: bigint) {
@@ -3068,26 +3084,34 @@ function erroredOf(r: unknown, sale: Trade, pm: string | undefined, adapter: str
  *  rpc_error (blamed: the trace only ever adds a leg, and a trade it could not read is asked again). */
 async function tracedPre(trace: readonly (readonly [EvmRpc, EvmRpc])[], sale: Trade, pm: string | undefined, adapter: string | undefined, hooks: readonly string[]): Promise<Pre | null> {
   const b = preBounds(BigInt(sale.gasUsed));
-  const { a } = await agreeing(
-    trace.map(([pre]) => pre),
-    async (rpc, k) => {
-      const who = `trace provider ${k + 1}`;
-      const one = async (tracer: object, on: EvmRpc) => {
-        const [x] = await ask(on, [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }]);
+  // one tracer on the two providers (`at`: 0 the prestate's, 1 the callTracer's), read by `of`, equal as JSON on both
+  const read = async <T>(at: 0 | 1, tracer: object, of: (r: unknown) => T | null): Promise<T | null> => {
+    const { a } = await agreeing(
+      trace.map((t) => t[at]),
+      async (rpc, k) => {
+        const [x] = await ask(rpc, [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }]);
         const r = (x as { result?: unknown } | null)?.result;
-        if (r === undefined || r === null) return refuse("rpc_error", `${who} answered no trace of the trade`);
-        return r;
-      };
-      const pre = await one({ tracer: "prestateTracer", tracerConfig: { disableCode: true } }, rpc);
-      const calls = await one({ tracer: "callTracer" }, trace[k]![1]);
-      const over = preOverOf(pre, b);
-      const errored = erroredOf(calls, sale, pm, adapter, hooks, b.frames);
-      return over === null || errored === null ? null : { over, errored };
-    },
-    (x, y) => JSON.stringify(x) === JSON.stringify(y),
-    () => refuse("rpc_disagree", `the trace providers answer the trade ${sale.hash}'s trace differently`),
-  );
-  return a;
+        if (r === undefined || r === null) return refuse("rpc_error", `trace provider ${k + 1} answered no trace of the trade`);
+        return of(r);
+      },
+      (x, y) => JSON.stringify(x) === JSON.stringify(y),
+      () => refuse("rpc_disagree", `the trace providers answer the trade ${sale.hash}'s trace differently`),
+    );
+    return a;
+  };
+  const over = await read(0, { tracer: "prestateTracer", tracerConfig: { disableCode: true } }, (r) => preOverOf(r, b));
+  if (over === null) return null;
+  // a callTracer no provider answered (rpc_error: a hook can flood its frames' inputs past callBytes at no gas, review
+  // of fb923143, 1) leaves the prestate, which gas bounds and two companies agree on, to the replay and step 3: only the
+  // as-is leg is unread. A callTracer the two answer apart, past its bounds or not the trade's own call drops it all.
+  let errored: string[] | null;
+  try {
+    errored = await read(1, { tracer: "callTracer" }, (r) => erroredOf(r, sale, pm, adapter, hooks, b.frames));
+  } catch (e) {
+    if (e instanceof EvmQuoteError && e.code === "rpc_error") return { over, errored: undefined };
+    throw e;
+  }
+  return errored === null ? null : { over, errored };
 }
 /** The true pre-state read of a chain's evidence, the one place it is chosen: a chain whose venue pins a trace pair
  *  (Robinhood: venue traceProviders) reads the trade's own trace there (`trace`, a test's, or the pins', each answer
@@ -3120,7 +3144,7 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
       const who = `provider ${k + 1}`;
       const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }]);
       const r = resultOf(b, who, "block of the sale");
-      return { hash: str(r, "hash", who), number: str(r, "number", who), timestamp: str(r, "timestamp", who), parentHash: str(r, "parentHash", who), baseFeePerGas: str(r, "baseFeePerGas", who), mixHash: str(r, "mixHash", who) };
+      return { hash: str(r, "hash", who), number: num(r, "number", who), timestamp: num(r, "timestamp", who), parentHash: str(r, "parentHash", who), baseFeePerGas: num(r, "baseFeePerGas", who), mixHash: str(r, "mixHash", who) };
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
     () => refuse("rpc_disagree", `the providers answer the sale's block ${sale.blockHash} differently`),
@@ -3160,8 +3184,8 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
     sysSlots.forEach(([a, s], i) => ((sys[a] ??= { stateDiff: {} }).stateDiff[s] = words[i]!));
   }
   // the trade's true pre-state where the chain has one (preStateOf): every account its trace names but ArbOS's state,
-  // over the system slots (a slot both name takes the trace's word). A trace not read, past its bounds or not the two
-  // providers' same word adds nothing: the evidence runs as on a chain with none, at the parent block with its system
+  // over the system slots (a slot both name takes the trace's word). A prestate not read (`unread`), past its bounds or
+  // not the two providers' same word adds nothing: the evidence runs as on a chain with none, at the parent block with its system
   // slots, so a trace a hook makes too big to read never turns off what the replay alone proves (review of 29498693, HIGH)
   const hooks = [...new Set(keys.filter((k) => quote.hooked.includes("0x" + poolId(k))).map((k) => k.hooks))];
   let p: Pre | undefined;
@@ -3195,18 +3219,23 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // trade itself, two companies' word, whatever its replay tells: a hook keyed on ArbOS's backlog or L1 block number,
   // which no replay can carry; never a listed hook's frame, nor the PoolManager's)
   const asIs = failed(await replay({}));
-  const tr = p;
-  const errored = asIs || tr === undefined ? [] : hooks.filter((hk) => tr.errored.includes(lower(hk)));
-  // a replay that passed with no trace read, where only the trace's errored frames could have told: the one answer the
-  // trace decides, so it is asked again (rpc_error, EVM_TRACE_UNANSWERED), never a final word that nothing is at fault
-  // (review of f0f983d2, item 5a; of de4e3ed5, 2: every later [] holds whatever a trace would add)
-  if (!asIs && errored.length === 0) return unread ? refuse("rpc_error", `${EVM_TRACE_UNANSWERED}: ${sale.hash}`) : [];
+  const seen = p?.errored;
+  const errored = asIs || seen === undefined ? [] : hooks.filter((hk) => seen.includes(lower(hk)));
+  // the as-is leg unread: no trace read, or its prestate read and its callTracer not answered
+  const legUnread = unread || (p !== undefined && p.errored === undefined);
+  const again = () => refuse("rpc_error", `${EVM_TRACE_UNANSWERED}: ${sale.hash}`);
+  // a replay that passed with the as-is leg unread, where only the trace's errored frames could have told: asked again
+  // (rpc_error, EVM_TRACE_UNANSWERED), never a final word that nothing is at fault (review of f0f983d2, item 5a; of
+  // de4e3ed5, 2). Past here the replay failed, so the callTracer no longer counts; the prestate still does
+  if (!asIs && errored.length === 0) return legUnread ? again() : [];
   // 3. the market held: the quoter prices the route, its hooks as they are, at minOut or more, on the replay's own basis
   // (the parent block with the system slots and the trade's traced pre-state, at the trade's block's number, time and
   // base fee), so a price an earlier transaction of the block moved, or a hook it armed, is the market the trade met
   // (review of de4e3ed5, 1)
   const [held] = await readBoth(rpcs, blk.parentHash, [{ ...held0, override: base, env }]);
-  if (held!.kind !== "out" || held!.amountOut < quote.minOut) return [];
+  // while no trace was read, this [] and step 4's read the parent basis, which the trade's pre-state could turn into a
+  // ban: asked again too (review of fb923143, 2)
+  if (held!.kind !== "out" || held!.amountOut < quote.minOut) return unread ? again() : [];
   // 4. the hooks at fault: each smallest set of `hooked`'s hooks whose no-op at once rescues the trade (a set holding a
   // smaller one that rescued it is not asked); every pool of the route behind a hook of one is banned. Where the replay
   // passed and the trace named the hooks, those hooks alone: any set's no-op "rescues" a replay that never failed, so no
@@ -3221,7 +3250,7 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   const fault = new Set(asIs ? rescued.flat() : errored);
   const out: string[] = [];
   for (const k of keys) if (fault.has(k.hooks) && !out.includes("0x" + poolId(k))) out.push("0x" + poolId(k));
-  return out;
+  return out.length === 0 && unread ? again() : out;
 }
 
 /** evmSellRevertedPools on the providers `rpcsIn`, the venue list `venues` and, on a chain with a trace pair, the trace
