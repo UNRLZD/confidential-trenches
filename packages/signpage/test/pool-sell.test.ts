@@ -60,6 +60,9 @@ const ENOUGH = 1_000_000_000; // W's lamports: a reserve of 0
 const enc = new TextEncoder();
 const be32 = (x: bigint): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => Number((x >> BigInt(8 * (31 - i))) & 255n));
 const beInt = (b: Uint8Array): bigint => b.reduce((a, x) => (a << 8n) | BigInt(x), 0n);
+/** A front-runner's deposit on the return note's precommitment: the pool's least deposit (contracts/pool-solana/src/lib.rs:78),
+ *  the least the program writes a mark for. */
+const FRONT_RUN = 1_000_000n;
 const markOf = (pre: bigint, program = PROGRAM): string => solanaProgramAddress([enc.encode("pre"), be32(pre)], program);
 const RETURN: NoteRef = { kind: "return", c: "sol", l: L, j: J };
 const SECOND = (n: number): NoteRef => ({ kind: "second", id: { id: "R", c: "sol", l: L, j: J }, n });
@@ -437,7 +440,7 @@ function chain(plant: Plant = {}) {
           const tx = base64.decode(params[0] as string);
           const sig = base58.encode(tx.subarray(1, 65));
           sentTx.set(sig, tx);
-          if (plant.frontRun && !accounts.has(markOf(preOf(RETURN)))) deposit(preOf(RETURN), 1n);
+          if (plant.frontRun && !accounts.has(markOf(preOf(RETURN)))) deposit(preOf(RETURN), FRONT_RUN); // the least the program takes
           if (plant.frontRunSame && !accounts.has(markOf(preOf(RETURN)))) {
             const m = solanaDecodeMessage(tx.subarray(65));
             const dep = m.instructions.at(-1)!;
@@ -684,13 +687,13 @@ test("another deposit takes the return note's precommitment first: the sell fail
   const w = await world({ frontRun: true });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "refused");
-  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: 1n, leafIndex: BigInt(N) }]);
+  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: FRONT_RUN, leafIndex: BigInt(N) }]);
   // the sell dropped, its precommitment taken by another deposit of another value: not the sale's deposit (not
   // filled), and it can never land (its deposit would be refused): not_landed, the note stored with the mark's value
   const x = await world({ frontRun: true, lands: false });
   const b = await runPoolSell(x.host, ASK);
   assert.equal("stage" in b && b.stage, "not_landed");
-  assert.deepEqual(await ours(x.ns), [{ ref: RETURN, state: "UNSPENT", value: 1n, leafIndex: BigInt(N) }]);
+  assert.deepEqual(await ours(x.ns), [{ ref: RETURN, state: "UNSPENT", value: FRONT_RUN, leafIndex: BigInt(N) }]);
   // the next sell of that W takes R 0
   const c = await runPoolSell(w.host, ASK);
   assert.equal("stage" in c && c.stage, "filled");

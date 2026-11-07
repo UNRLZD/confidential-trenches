@@ -178,9 +178,10 @@ function chain() {
       slot += 40;
       c.height += 40;
     },
-    rpc(over: { hide?: (address: string) => boolean; hideStatus?: boolean; blockhashUnknown?: boolean; simFails?: boolean } = {}) {
+    rpc(over: { hide?: (address: string) => boolean; hideStatus?: boolean; blockhashUnknown?: boolean; simFails?: boolean; saysFailed?: boolean; mapAccount?: (address: string, a: Acc) => Acc } = {}) {
       const answer = (address: string) => {
-        const a = over.hide?.(address) ? undefined : accounts.get(address);
+        const held = over.hide?.(address) ? undefined : accounts.get(address);
+        const a = held && over.mapAccount ? over.mapAccount(address, held) : held;
         return a ? { owner: a.owner, lamports: a.lamports, data: [base64.encode(a.data), "base64"], executable: false, rentEpoch: 0, space: a.data.length } : null;
       };
       const id = c.rpcs++;
@@ -202,7 +203,8 @@ function chain() {
           case "getBlockHeight":
             return c.height;
           case "getSignatureStatuses":
-            return { ...ctx, value: (params[0] as string[]).map((s) => (over.hideStatus ? null : (statuses.get(s) ?? null))) };
+            // saysFailed: a lying RPC, every signature finalized with an error
+            return { ...ctx, value: (params[0] as string[]).map((s) => (over.saysFailed ? { err: { InstructionError: [0, "lie"] }, confirmationStatus: "finalized" } : over.hideStatus ? null : (statuses.get(s) ?? null))) };
           case "simulateTransaction": {
             try {
               if (over.simFails) throw new Error("simulation");
@@ -983,6 +985,7 @@ test("pool-deposits (b) I-3: a stranger's lamports at an open note's mark addres
   assert.equal(open!.state, "INCOMING");
   const at = markOf(open!.precommitment);
   c.fund(at, EMPTY_RENT); // a stranger's system account at the mark's address
+  c.fund(u.address, Number(RUNG) + COST - EMPTY_RENT); // only the cost those lamports lower
   // its blockhash still valid: read, not failed, left INCOMING
   assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [] });
   c.lands = true;
@@ -994,7 +997,7 @@ test("pool-deposits (b) I-3: a stranger's lamports at an open note's mark addres
   assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
   assert.equal(c.sent.length, 2);
   assert.equal(c.accounts.get(at)!.owner, FIX.program, "the deposit took the account over");
-  assert.equal(c.lamports(u.address), EMPTY_RENT, "U paid the mark's rent less the stranger's lamports");
+  assert.equal(c.lamports(u.address), 0, "U paid the mark's rent less the stranger's lamports");
   // and an ask runs on
   assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { error?: string }).error, "not_funded");
 });
@@ -1068,4 +1071,32 @@ test("pool-deposits (e): one deposit's numbers are of one slot on each RPC: the 
     const o = optsOf(x.params);
     if (o && "commitment" in o) assert.equal(o.commitment, "confirmed", x.method);
   }
+});
+
+test("pool-deposits (c): one RPC alone saying a send failed never builds it again while its blockhash lives: the note waits, one send", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  c.lands = false; // dropped: the honest RPC has no status for it
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ saysFailed: true })] }), ask(RUNG));
+  assert.deepEqual(got, { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  assert.equal(c.sent.length, 1);
+});
+
+test("pool-deposits (e): a pool the two RPCs give different bytes of is read again, then refused: nothing signed or sent", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  // RPC 1 a slot behind on the pool's nonce from the build's read on (the run's first read of it agrees)
+  let reads = 0;
+  const behind = (address: string, a: Acc): Acc => {
+    if (address !== FIX.pool || ++reads === 1) return a;
+    const data = a.data.slice();
+    data[9] = data[9]! ^ 1;
+    return { ...a, data };
+  };
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: behind })] }), ask(RUNG)), { error: "failed" });
+  assert.equal(c.sent.length, 0);
+  assert.equal(c.calls.filter((x) => x.method === "getMultipleAccounts" && (x.params[0] as string[]).includes(FIX.pool)).length, 6, "three reads on each RPC");
+  assert.equal(c.calls.filter((x) => x.method === "simulateTransaction").length, 0);
 });

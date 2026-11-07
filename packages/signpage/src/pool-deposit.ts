@@ -6,13 +6,19 @@
 //   per scope, so the same U is named until money reaches it). The amount is split on the pool's ladder
 //   (../../wallet/src/pool/ladder.ts ladderSplit): on a new U the first rung is its deposit note, every other rung that
 //   U's next second arrival (n = 0, 1, ...), each its own deposit, the next planned only once the one before is done.
-// - The cost of a rung, read on both RPCs: the rung, the precommitment mark's rent (17 bytes), each tree's page growth (a
-//   72-byte entry, or a new page's rent) and the tx fee (getFeeForMessage, the same on both). U after the deposit holds 0
-//   or at least the rent of an empty account (the runtime refuses less). Short of that: not_funded, nothing written.
-// - Before anything is written: the pool account on both RPCs, byte for byte, gives the tree sizes; the blockhash is read
-//   on one RPC and must be valid on the other; the tx is built here, checked by the rule (rules/pool.ts
-//   checkSolanaDeposit: one tag 1 into the pinned pool, by U, of the rung, with the note's own precommitment) and its
-//   unsigned bytes simulated on both RPCs (sigVerify off, so neither can send it), which must both pass. A simulation
+// - The deposit is the kit's (packages/kit/src/trade/solana/pool-deposit.ts, card pool-deposits): built by
+//   solanaPoolDepositTx, priced by solanaPoolDepositCost as the program charges (the fee, the mark's rent and each page's
+//   rent at its new length, less what each already holds), the pool read by solanaPoolTreeSizes and a mark by
+//   solanaPoolPreMarkOf (a stranger's system account at a mark's address is no mark: the deposit takes it over).
+// - One deposit's numbers are of one slot on each RPC: the pool, the two pages it writes, the mark's address, U and the
+//   Rent sysvar in one getMultipleAccounts at confirmed per RPC (the pool the same bytes on both, the pages the ones its
+//   sizes name, else read again); every other read of a build at confirmed too. The lower of the two RPCs' balances
+//   prices it. U after the deposit holds 0 or at least the rent of an empty account (the runtime refuses less). Short of
+//   that: not_funded, nothing written.
+// - Before anything is written: the blockhash is read on one RPC and must be valid on the other; the tx is checked by
+//   the rule (rules/pool.ts checkSolanaDeposit: one tag 1 into the pinned pool, by U, of the rung, with the note's own
+//   precommitment) and its unsigned bytes simulated on both RPCs (sigVerify off, so neither can send it), which must
+//   both pass before U signs. A simulation
 //   that fails while the note's mark exists (both RPCs, finalized) means another deposit took the precommitment: that
 //   deposit is restored as the user's note (below) and the rung goes on U's next note, nothing signed for this one.
 // - A state and its send are written before the act: PLANNED -> INCOMING carries the send (signature, value, the
@@ -34,9 +40,11 @@
 //   who takes every send never holds the deposit and seed locks (a sign out waits on them) past that. Taken also needs
 //   both RPCs not to say one of the note's sends succeeded (that would contradict the mark: refused). A page closed between a taken PLANNED note's two moves (PLANNED -> INCOMING with no send,
 //   then UNSPENT) leaves it INCOMING with no send: its mark, which never closes, is read again and it is restored.
-//   No mark, read after both RPCs' finalized heights and those heights past every send's last
-//   valid height: sent again at its own value (heights first, so a send that finalizes between the two reads is read
-//   landed, never sent again). Anything else is pending: read again, then not_landed with the note left INCOMING, never
+//   No mark, read after both RPCs' finalized heights and signature statuses, and every send dead by those reads (past
+//   its last valid height on both, or finalized with an error on both: a failed tx never lands): built again at its own
+//   value, the same note and U, from fresh reads (above), never the old bytes (heights and statuses first, so a send
+//   that finalizes between the reads is read landed, never sent again). Anything else is pending: read again, then
+//   not_landed with the note left INCOMING, never
 //   stored as money. Signature statuses only name the tx that landed, in the answer. A send's last valid height is the
 //   lower of the blockhash's on one RPC and the other RPC's height + 151, so no one RPC sets it.
 // - An INCOMING note of the pool's scope (a run a reload cut short) is read once at the start of every run, as its own
@@ -53,10 +61,8 @@
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaRent, solanaPoolPage, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_SYSTEM_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_RENT_SYSVAR, solanaPoolPage, solanaRentMin, solanaRentOf, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SolanaPoolDepositError, solanaPoolDepositCost, solanaPoolDepositTx, solanaPoolPreMark, solanaPoolPreMarkOf, solanaPoolTreeSizes } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -100,18 +106,10 @@ export type PoolDepositAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "
 export const POOL_DEPOSIT_READS = 120;
 export const POOL_DEPOSIT_WAIT_MS = 1_000;
 
-const POOL_LEN = 2179;
-const POOL_DISC = /* @__PURE__ */ new TextEncoder().encode("bfpool01");
-const TREE_LEN = 8 + 1 + 33 * 32;
-const OFF_TREES = 49;
-const PRE_MARK_LEN = 17;
-const MARK_TAG = 1;
-const PAGE_HEADER = 16;
-const PAGE_ENTRY = 72;
-const PAGE_ENTRIES = 1024;
 /** A blockhash is valid for 150 blocks after the one it names (Solana's MAX_PROCESSING_AGE), so at most height + 151. */
 const BLOCKHASH_LIFE = 151n;
-const enc = /* @__PURE__ */ new TextEncoder();
+/** Reads of one deposit's state before it is refused: the pool moved under them, or the RPCs disagree on it. */
+const STATE_READS = 3;
 
 type Code = "not_allowed" | "not_funded" | "failed" | "not_landed";
 class Refused extends Error {
@@ -125,59 +123,83 @@ const int = (x: unknown): number => {
   if (!Number.isSafeInteger(x) || (x as number) < 0) throw new Refused("failed");
   return x as number;
 };
-const be32 = (x: bigint): Uint8Array => {
-  const b = new Uint8Array(32);
-  for (let i = 31, v = x; i >= 0; i--, v >>= 8n) b[i] = Number(v & 255n);
-  return b;
-};
-const u64le = (x: bigint): Uint8Array => {
-  const b = new Uint8Array(8);
-  new DataView(b.buffer).setBigUint64(0, x, true);
-  return b;
-};
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 const both = <T>(h: PoolDepositHost, f: (rpc: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(h.rpcs[0]), f(h.rpcs[1])]);
 
-/** One account as an RPC gives it (base64), with the slot it answered at; none when there is no account. */
-async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" | "finalized"): Promise<{ slot: number; owner: string; data: Uint8Array; lamports: bigint } | { slot: number; none: true }> {
+type Account = { owner: string; data: Uint8Array; lamports: bigint };
+/** An account as an RPC gives it (base64); null when there is none. */
+const accountOf = (v: unknown): Account | null => {
+  if (v === null) return null;
+  const x = v as { owner?: unknown; data?: unknown; lamports?: unknown } | undefined;
+  if (typeof x?.owner !== "string" || !Array.isArray(x.data) || x.data[1] !== "base64" || typeof x.data[0] !== "string") throw new Refused("failed");
+  return { owner: x.owner, data: base64.decode(x.data[0]), lamports: BigInt(int(x.lamports)) };
+};
+const lower = (a: Account | null, b: Account | null): bigint => {
+  const x = a?.lamports ?? 0n, y = b?.lamports ?? 0n;
+  return x < y ? x : y;
+};
+
+/** One account, with the slot the RPC answered at. */
+async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" | "finalized"): Promise<{ slot: number; account: Account | null }> {
   const r = (await rpc("getAccountInfo", [address, { encoding: "base64", commitment }])) as { context?: { slot?: unknown }; value?: unknown };
-  const slot = int(r?.context?.slot);
-  const v = r?.value as { owner?: unknown; data?: unknown; lamports?: unknown } | null | undefined;
-  if (v === null) return { slot, none: true };
-  if (typeof v?.owner !== "string" || !Array.isArray(v.data) || v.data[1] !== "base64" || typeof v.data[0] !== "string") throw new Refused("failed");
-  return { slot, owner: v.owner, data: base64.decode(v.data[0]), lamports: BigInt(int(v.lamports)) };
+  return { slot: int(r?.context?.slot), account: accountOf(r?.value) };
 }
 
-/** The pool account on both RPCs, the same bytes: its two tree sizes. */
+/** The pool account on both RPCs, the same bytes: its two tree sizes (the kit's parse). */
 async function treeSizes(h: PoolDepositHost, pool: string): Promise<{ stateSize: number; labelSize: number }> {
   const [a, b] = await both(h, (r) => account(r, pool, "confirmed"));
-  if ("none" in a || "none" in b) throw new Refused("not_allowed");
-  if (a.owner !== h.pin.program || b.owner !== h.pin.program || !sameBytes(a.data, b.data)) throw new Refused("failed");
-  const d = a.data;
-  if (d.length !== POOL_LEN || !sameBytes(d.subarray(0, 8), POOL_DISC)) throw new Refused("failed");
-  const size = (at: number): number => int(Number(new DataView(d.buffer, d.byteOffset + at, 8).getBigUint64(0, true)));
-  return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };
+  if (a.account === null || b.account === null) throw new Refused("not_allowed");
+  if (!sameBytes(a.account.data, b.account.data)) throw new Refused("failed");
+  solanaPoolTreeSizes(b.account, h.pin.program);
+  return solanaPoolTreeSizes(a.account, h.pin.program);
 }
 
-/** A wallet's lamports: the lower of the two RPCs'. */
-async function balanceOf(h: PoolDepositHost, address: string): Promise<bigint> {
-  const [a, b] = await both(h, async (r) => {
-    const x = await account(r, address, "confirmed");
-    return "none" in x ? 0n : x.lamports;
-  });
-  return a < b ? a : b;
-}
-
-/** The precommitment mark on both RPCs at finalized: the deposit's value and nonce, and the higher slot; null unless both hold it. */
+/** The precommitment mark on both RPCs at finalized (the kit's parse): the deposit's value and nonce, and the higher
+ *  slot; null unless both hold it. A stranger's system account at the address is no mark (I-3: it never fails a run). */
 async function markOf(h: PoolDepositHost, precommitment: bigint): Promise<{ value: bigint; nonce: bigint; slot: number } | null> {
-  const address = solanaProgramAddress([enc.encode("pre"), be32(precommitment)], h.pin.program);
+  const address = solanaPoolPreMark(h.pin.program, precommitment);
   const [a, b] = await both(h, (r) => account(r, address, "finalized"));
-  if ("none" in a || "none" in b) return null;
-  if (a.owner !== h.pin.program || b.owner !== h.pin.program || !sameBytes(a.data, b.data)) throw new Refused("failed");
-  const d = a.data;
-  if (d.length !== PRE_MARK_LEN || d[16] !== MARK_TAG) throw new Refused("failed");
-  const v = new DataView(d.buffer, d.byteOffset, 16);
-  return { value: v.getBigUint64(0, true), nonce: v.getBigUint64(8, true), slot: Math.max(a.slot, b.slot) };
+  const [ma, mb] = [solanaPoolPreMarkOf(a.account, h.pin.program), solanaPoolPreMarkOf(b.account, h.pin.program)];
+  if (ma === null || mb === null) return null;
+  if (ma.value !== mb.value || ma.nonce !== mb.nonce) throw new Refused("failed");
+  return { value: ma.value, nonce: ma.nonce, slot: Math.max(a.slot, b.slot) };
+}
+
+/** What one deposit is priced from, each number of one slot on each RPC: the pool, the two pages its sizes name, the
+ *  mark's address, U and the Rent sysvar, in one getMultipleAccounts at confirmed per RPC. The pool the same bytes on
+ *  both and the pages the ones its sizes name, else read again (an insert moved it), at most STATE_READS times. The
+ *  lower of the two RPCs' balances (a page's or the mark's lower means a higher cost). */
+async function depositState(h: PoolDepositHost, pool: string, guess: { stateSize: number; labelSize: number }, mark: string, u: string) {
+  const program = h.pin.program;
+  for (let t = 0, sizes = guess; t < STATE_READS; t++) {
+    const keys = [pool, solanaPoolPage(program, 0, sizes.stateSize), solanaPoolPage(program, 1, sizes.labelSize), mark, u, SOLANA_RENT_SYSVAR];
+    const [a, b] = await both(h, async (r) => {
+      const v = ((await r("getMultipleAccounts", [keys, { encoding: "base64", commitment: "confirmed" }])) as { value?: unknown })?.value;
+      if (!Array.isArray(v) || v.length !== keys.length) throw new Refused("failed");
+      return v.map(accountOf);
+    });
+    if (a[0] === null || b[0] === null) throw new Refused("not_allowed");
+    const read = solanaPoolTreeSizes(a[0], program);
+    solanaPoolTreeSizes(b[0], program);
+    const same = sameBytes(a[0].data, b[0].data);
+    const pages = solanaPoolPage(program, 0, read.stateSize) === keys[1] && solanaPoolPage(program, 1, read.labelSize) === keys[2];
+    sizes = read;
+    if (!same || !pages) continue;
+    // a mark the program made is priced at what it holds (its simulation then fails: the precommitment is used); any
+    // other owner refused
+    solanaPoolPreMarkOf(a[3]!, program);
+    solanaPoolPreMarkOf(b[3]!, program);
+    let rent: SolanaRent;
+    try {
+      const [ra, rb] = [solanaRentOf(a[5]!), solanaRentOf(b[5]!)];
+      if (ra.lamportsPerByte !== rb.lamportsPerByte || ra.factor !== rb.factor) throw new Error("the RPCs disagree on rent");
+      rent = ra;
+    } catch {
+      throw new Refused("failed");
+    }
+    return { sizes, rent, have: { statePage: lower(a[1]!, b[1]!), labelPage: lower(a[2]!, b[2]!), mark: lower(a[3]!, b[3]!) }, balance: lower(a[4]!, b[4]!) };
+  }
+  throw new Refused("failed");
 }
 
 /** Both RPCs' finalized block height. */
@@ -217,7 +239,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
   const sentTxs: TxRef[] = [];
   const keys: Uint8Array[] = [];
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let rent: SolanaRent | null = null;
+  // the tree sizes last read: which pages a deposit's one read names first
+  let sizes = { stateSize: 0, labelSize: 0 };
   // from U's first signature on, a provider that fails is never "down" (a transaction may land)
   let signing = false;
   try {
@@ -232,7 +255,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     type Built = { tx: string; send: PoolSend; cost: bigint };
     type Unbuilt = { short: bigint } | { simulation: "failed" };
     const build = async (u: { address: string; secretKey: Uint8Array }, precommitment: bigint, value: bigint): Promise<Built | Unbuilt> => {
-      const sizes = await treeSizes(h, pool);
+      const st = await depositState(h, pool, sizes, solanaPoolPreMark(h.pin.program, precommitment), u.address);
+      sizes = st.sizes;
       const bh = (await h.rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])) as { value?: { blockhash?: unknown; lastValidBlockHeight?: unknown } };
       const blockhash = bh?.value?.blockhash;
       if (typeof blockhash !== "string") throw new Refused("failed");
@@ -242,39 +266,21 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       const said = BigInt(int(bh.value!.lastValidBlockHeight));
       const cap = BigInt(int(await h.rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]))) + BLOCKHASH_LIFE;
       const lastValid = said < cap ? said : cap;
-      const pre = be32(precommitment);
-      const ix = {
-        program: h.pin.program,
-        accounts: [
-          { key: pool, signer: false, writable: true },
-          { key: u.address, signer: true, writable: true },
-          { key: solanaPoolPage(h.pin.program, 0, sizes.stateSize), signer: false, writable: true },
-          { key: solanaPoolPage(h.pin.program, 1, sizes.labelSize), signer: false, writable: true },
-          { key: solanaProgramAddress([enc.encode("pre"), pre], h.pin.program), signer: false, writable: true },
-          { key: SOLANA_SYSTEM_PROGRAM, signer: false, writable: false },
-        ],
-        data: Uint8Array.of(1, ...u64le(value), ...pre),
-      };
-      const { message } = solanaCompileV0(u.address, [ix], blockhash, []);
-      const wire = new Uint8Array(1 + 64 + message.length);
-      wire[0] = 1;
-      wire.set(message, 65);
+      const { message, wire } = solanaPoolDepositTx(h.pin.program, u.address, { value, precommitment }, st.sizes, blockhash);
       checkSolanaDeposit(
         wire,
         { ...(ask ?? { kind: "pool.deposit", chain: "solana", token: null, slippageBps: 0, decimals: 9 }), amount: value } as PoolAsk,
         { nowMs: (h.now ?? (() => BigInt(Date.now())))(), wallet: u.address, feeCap: 0n, solana: h.pin, precommitment },
-        { blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize },
+        { blockhash, tables: {}, stateSize: st.sizes.stateSize, labelSize: st.sizes.labelSize },
       );
-      // the cost: the fee both RPCs price this message at, the mark's rent and each page's growth
+      // the cost: the fee both RPCs price this message at, and the rent the program charges (the kit's)
       const [fa, fb] = await both(h, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
       if (fa !== fb) throw new Refused("failed");
-      rent ??= await readSolanaRent(h.rpcs);
-      const grow = (size: number): bigint => (size % PAGE_ENTRIES === 0 ? solanaRentMin(rent!, PAGE_HEADER + PAGE_ENTRY) : BigInt(PAGE_ENTRY) * rent!.lamportsPerByte * rent!.factor);
-      const cost = fa + solanaRentMin(rent, PRE_MARK_LEN) + grow(sizes.stateSize) + grow(sizes.labelSize);
-      const balance = await balanceOf(h, u.address);
-      const left = balance - value - cost;
+      const cost = solanaPoolDepositCost(fa, st.rent, st.sizes, st.have);
+      const left = st.balance - value - cost;
+      const floor = solanaRentMin(st.rent, 0);
       if (left < 0n) return { short: -left };
-      if (left > 0n && left < solanaRentMin(rent, 0)) return { short: solanaRentMin(rent, 0) - left };
+      if (left > 0n && left < floor) return { short: floor - left };
       // unsigned: an RPC cannot send what it simulates
       const sims = await both(h, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } })?.value);
       if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return { simulation: "failed" };
@@ -306,6 +312,18 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
         return Array.isArray(v) && v.length === sigs.length ? v.map((st) => (st as { confirmationStatus?: unknown } | null)?.confirmationStatus === "finalized" && (st as { err?: unknown }).err === null) : sigs.map(() => false);
       });
       return sigs.some((_, k) => ok.every((o) => o[k]));
+    };
+
+    // each send's death read before the mark (with the heights): `expired`, or finalized with an error on both RPCs,
+    // so it can never land. One RPC's word alone keeps it alive
+    const failedOnBoth = async (sends: readonly PoolSend[], expired: readonly boolean[]): Promise<boolean[]> => {
+      const sigs = sends.map((s) => s.signature);
+      const reads = await Promise.allSettled(h.rpcs.map((r) => r("getSignatureStatuses", [sigs, { searchTransactionHistory: true }])));
+      const failed = reads.map((x) => {
+        const v = x.status === "fulfilled" ? (x.value as { value?: unknown })?.value : null;
+        return Array.isArray(v) && v.length === sigs.length ? v.map((st) => { const o = st as { confirmationStatus?: unknown; err?: unknown } | null; return o?.confirmationStatus === "finalized" && o.err !== null && o.err !== undefined; }) : sigs.map(() => false);
+      });
+      return sigs.map((_, k) => expired[k]! || failed.every((f) => f[k]));
     };
 
     // one INCOMING note, read up to `reads` times: landed (UNSPENT), taken (restored UNSPENT at the mark's value),
@@ -353,6 +371,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
         // the heights before the mark: a finalized height past every send's last valid height, read before a mark read
         // that finds none, means no send can land after it
         const hs = await heights(h);
+        const expired = sends.map((x) => hs.every((y) => y > x.last_valid_block_height));
+        const dead = expired.every(Boolean) ? expired : await failedOnBoth(sends, expired);
         const m = await markOf(h, n.precommitment);
         if (m !== null) {
           // a mark of another value is another deposit's: this precommitment is taken, and that deposit is restored.
@@ -370,9 +390,9 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
           if (own) h.progress?.("filled");
           return "landed";
         }
-        // no mark: sent again at its own value only once no send of it can land, on both RPCs
-        const last = sends.reduce((a, x) => (x.last_valid_block_height > a ? x.last_valid_block_height : a), 0n);
-        if (hs.every((x) => x > last)) {
+        // no mark: built again at its own value only once no send of it can land, on both RPCs (past its last valid
+        // height, or failed): from fresh reads, never the old bytes
+        if (dead.every(Boolean)) {
           const u = uOf(n.ref);
           if (!u) throw new Refused("not_allowed");
           const key = uKey(u);
@@ -391,7 +411,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     };
 
     // the pinned pool, on both RPCs, before any note is planned for its scope
-    await treeSizes(h, pool);
+    sizes = await treeSizes(h, pool);
 
     // a run a reload cut short: each INCOMING note of the pool's scope read once, as its own move, never waited on; a U
     // with a note still open is no source this run
@@ -416,8 +436,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
         const mine = open.filter((n) => uOf(n.ref)?.i === i);
         const sigs = mine.flatMap((n) => (n.sends ?? []).map((x) => x.signature));
         const left = await both(h, async (r) => {
-          const a = await account(r, address, "confirmed");
-          const held = "none" in a ? 0n : a.lamports;
+          const held = (await account(r, address, "confirmed")).account?.lamports ?? 0n;
           const v = ((await r("getSignatureStatuses", [sigs, { searchTransactionHistory: false }])) as { value?: unknown })?.value;
           if (!Array.isArray(v) || v.length !== sigs.length) throw new Refused("failed");
           const seen = new Set(sigs.filter((_, k) => (v[k] as { err?: unknown } | null)?.err === null));
@@ -514,6 +533,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
   } catch (e) {
     // the read-back's own verdicts (not landed, taken, stuck), each from reads that answered
     if (e instanceof Refused) return e.code === "not_landed" ? { stage: "not_landed", txs: sentTxs } : landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { error: e.code };
+    // the kit refused a read (a pool or a mark the program never writes): failed, as a refused read here is
+    if (e instanceof SolanaPoolDepositError) return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { error: "failed" };
     if (e instanceof PoolRuleRefused) return { error: "not_allowed" };
     // any other fault past U's send (a provider down after its retry): the transaction may land, so the answer is
     // never failed. What landed is part filled; else "sent" with its signature, and the note, INCOMING, settles at the
