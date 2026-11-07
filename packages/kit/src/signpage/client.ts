@@ -265,9 +265,12 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let view: SignpageClientSnapshot = deepFreeze(structuredClone(snap));
   /** Calls every listener in `fns` with `args`, each on its own: a listener's throw (a write into its frozen snapshot
    *  among them) stops no other listener and none of the client's own steps around the call, and is reported after, on
-   *  its own microtask, as a browser reports an event listener's error (card oneclick-fee-path-own-key, delta review). */
-  const tell = <A extends unknown[]>(fns: Iterable<(...a: A) => void>, ...args: A): void => {
+   *  its own microtask, as a browser reports an event listener's error (card oneclick-fee-path-own-key, delta review).
+   *  The list is the one at the change's start, so a listener added during it hears the next change; and a listener
+   *  removed during it (an unsubscribe, or a destroy) is skipped, as EventTarget skips a removed listener (review r3). */
+  const tell = <A extends unknown[]>(fns: ReadonlySet<(...a: A) => void>, ...args: A): void => {
     for (const f of [...fns]) {
+      if (!fns.has(f)) continue;
       try {
         f(...args);
       } catch (e) {
@@ -323,6 +326,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const down = () => {
     if (destroyed || snap.status === "update") return;
     leave("down");
+    // a "down" listener may have destroyed the client: then no retry is set
+    if (destroyed) return;
     if (retryMs > 0 && retryTimer === null) {
       const wait = Math.min(RETRY_FIRST_MS * 2 ** tries, retryMs);
       tries++;
@@ -499,7 +504,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     }
     if (signpageProgressRouteSchema(m)) {
       const { v: _v, type: _t, id, ...route } = m;
-      tell(routeListeners, id as string, route as BuyRoute);
+      // frozen as the snapshot is: listeners share one route object, and a write into it throws
+      tell(routeListeners, id as string, deepFreeze(route) as BuyRoute);
       return;
     }
     drops.shape++;
@@ -544,10 +550,11 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     dropped: () => ({ ...drops }),
     destroy() {
       if (destroyed) return;
+      // destroyed first: a "down" listener that destroys again returns at once, and down() sets no retry after it
+      destroyed = true;
       clearTimer(retryTimer);
       retryTimer = null;
       leave("down");
-      destroyed = true;
       host.window.removeEventListener("message", onMessage);
       host.window.removeEventListener("online", wake);
       host.window.removeEventListener("visibilitychange", wake);

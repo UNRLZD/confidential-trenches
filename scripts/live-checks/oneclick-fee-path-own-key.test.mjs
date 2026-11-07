@@ -5,7 +5,10 @@
 // pin, a table missing or never read, a read without its own-key check, its typeof or the refusal: each FAIL. Planted
 // bundles (the review of e93dea74): an unguarded arrow after the guarded function, a read by a member key, and the guard
 // without its typeof; (the delta review of c88a3eeb) an unguarded method body in a class or an object literal, and a
-// typeof chained with the wrong operator: each FAIL. facts() reads a minified bundle of either shape. And the check's tables are the kit's exports, so neither can change alone.
+// typeof chained with the wrong operator; (r3, on a real parse) a private, quoted or computed method, a parameter with
+// parentheses, the key shadowed (for-let, catch, a block's let) or assigned, a guard in a dead inner arrow, unused, with
+// the wrong polarity or after the read: each FAIL; and the text scan's false FAILs (a typeof or an arrow between, a
+// ternary guard, "function" in the message, a block after a call, the guard split over two ifs): each PASS. facts() reads a minified bundle of either shape. And the check's tables are the kit's exports, so neither can change alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -19,7 +22,7 @@ const NO_OWN = (table, name) => `BAD ${table} is read as ${name}[e] with no Obje
 test("recorded good answer: this card's build reads both fee tables only as own keys and refuses an unknown path: PASS", () => {
   const v = judge(A.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
-  assert.deepEqual(A.good.reads.map((r) => [r.table, r.owns, r.typed, r.refuses]), [["ONECLICK_FEE_BPS", true, true, true], ["ONECLICK_PAIR_FEE_BPS", true, true, true]]);
+  assert.deepEqual(A.good.reads.map((r) => [r.table, r.owns, r.typed, r.scoped, r.refuses]), [["ONECLICK_FEE_BPS", true, true, true, true], ["ONECLICK_PAIR_FEE_BPS", true, true, true, true]]);
 });
 
 test("recorded bad answer: SIGN_HOST before this card (release-68) reads both tables through the prototype chain: FAIL", () => {
@@ -39,7 +42,9 @@ test("planted on good: another app.js, no pin, a table missing or never read, a 
   }
   assert.deepEqual(with_((a) => { a.reads[1].owns = false; }), [NO_OWN("ONECLICK_PAIR_FEE_BPS", A.good.reads[1].name)]);
   assert.deepEqual(with_((a) => { a.reads[0].typed = false; }), [`BAD ONECLICK_FEE_BPS's read ${A.good.reads[0].name}[e] is not behind typeof e == "string": a key object can answer one name to the check and another to the read`]);
-  assert.deepEqual(with_((a) => { a.reads[0].refuses = false; }), [`BAD ONECLICK_FEE_BPS's read ${A.good.reads[0].name}[e] is in a function without the refusal "${REFUSAL}"`]);
+  assert.deepEqual(with_((a) => { a.reads[0].scoped = false; }), [`BAD ONECLICK_FEE_BPS's read ${A.good.reads[0].name}[e] does not read its function's own parameter e: a key shadowed or assigned after the check is not the key it checked`]);
+  assert.deepEqual(with_((a) => { delete a.reads[0].scoped; }).length, 1, "an answer without scoped is no pass");
+  assert.deepEqual(with_((a) => { a.reads[0].refuses = false; }), [`BAD ONECLICK_FEE_BPS's read ${A.good.reads[0].name}[e] is behind a guard whose refusal does not name "${REFUSAL}"`]);
   assert.equal(judge(null).ok, false);
 });
 
@@ -61,7 +66,8 @@ test("facts reads a minified bundle: either table's literal in any spacing or qu
   const member = facts(index, `${tables}${guarded}function z(e,n){return n.s?a[n.path]:b[ n.path ]}`).reads;
   assert.deepEqual(member.map((r) => [r.key.trim(), r.owns]), [["e", true], ["n.path", false], ["e", true], ["n.path", false]]);
   assert.equal(verdict(`${tables}${guarded}function z(e,n){return n.s?a[n.path]:b[n.path]}`).ok, false);
-  assert.equal(verdict(`${tables}function z(e,n){return typeof n.path==\`string\`&&Object.hasOwn(a,n.path)&&Object.hasOwn(b,n.path)||W(\`${REFUSAL}\`),n.s?a[n.path]:b[n.path]}`).ok, true);
+  // a member key is never the checked key: a getter can answer the check one name and the read another
+  assert.equal(verdict(`${tables}function z(e,n){return typeof n.path==\`string\`&&Object.hasOwn(a,n.path)&&Object.hasOwn(b,n.path)||W(\`${REFUSAL}\`),n.s?a[n.path]:b[n.path]}`).ok, false);
   // the guard without its typeof: a typeof elsewhere in the function, as in the refusal's message, is not the guard's
   assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&", "")).ok, false);
   assert.deepEqual(facts(index, tables + guarded.replace("typeof e==`string`&&", "")).reads.map((r) => [r.owns, r.typed]), [[true, false], [true, false]]);
@@ -77,6 +83,36 @@ test("facts reads a minified bundle: either table's literal in any spacing or qu
   assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&Object.hasOwn(", "typeof e!=`string`&&Object.hasOwn(")).ok, false);
   assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&Object.hasOwn(", "typeof e!=`string`||Object.hasOwn(")).ok, false);
   assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&", "`string`===typeof e&&")).ok, true);
+  // planted (the r3 review of b3a35fa1), read from a real parse: each FAILs
+  const GUARD = `typeof e==\`string\`&&Object.hasOwn(a,e)&&Object.hasOwn(b,e)||W(\`request\`,\`${REFUSAL}\`)`;
+  const FAILS = {
+    private_method: `${guarded}class Zq{#m(e,t){return t?a[e]:b[e]}}`,
+    param_with_parentheses: `${guarded}class Zq{m(e,t=Math.max(1,2)){return t?a[e]:b[e]}}`,
+    quoted_method_name: `${guarded}var Zo={"m-x"(e,t){return t?a[e]:b[e]}};`,
+    computed_method_name: `${guarded}var Zo={[Symbol.iterator](e,t){return t?a[e]:b[e]}};`,
+    for_let_shadow: `function f(e,t,n){${GUARD};let r=0;for(let e of t)r+=a[e]+b[e];return r}`,
+    key_reassigned: `function f(e,t,n){${GUARD};e=n.path;return t?a[e]:b[e]}`,
+    dead_inner_arrow: `function f(e,t,n){const g=()=>${GUARD};return t?a[e]:b[e]}`,
+    guard_unused: `function f(e,t,n){typeof e==\`string\`&&Object.hasOwn(a,e)&&Object.hasOwn(b,e);n||W(\`${REFUSAL}\`);return t?a[e]:b[e]}`,
+    polarity_and: `function f(e,t,n){return typeof e==\`string\`&&Object.hasOwn(a,e)&&Object.hasOwn(b,e)&&W(\`${REFUSAL}\`),t?a[e]:b[e]}`,
+    catch_param_shadow: `function f(e,t,n){${GUARD};try{n()}catch(e){return a[e]+b[e]}return 0}`,
+    block_let_shadow: `function f(e,t,n){${GUARD};{let e=n.path;return a[e]+b[e]}}`,
+    guard_after_read: `function f(e,t){const r=t?a[e]:b[e];${GUARD};return r}`,
+  };
+  for (const [name, js] of Object.entries(FAILS)) assert.equal(verdict(tables + js).ok, false, name);
+  // and correct bundles PASS, the false FAILs of the text scan among them
+  const PASSES = {
+    typeof_function_between: `function f(e,t,n){${GUARD};return typeof n==\`function\`&&n(),t?a[e]:b[e]}`,
+    arrow_between: `function f(e,t,n){${GUARD};return El.some(r=>r===t)?a[e]:b[e]}`,
+    ternary_guard: `function f(e,t,n){return typeof e!=\`string\`||!Object.hasOwn(a,e)||!Object.hasOwn(b,e)?W(\`${REFUSAL}\`):t?a[e]:b[e]}`,
+    word_function_in_message: `function f(e,t,n){return typeof e==\`string\`&&Object.hasOwn(a,e)&&Object.hasOwn(b,e)||W(\`request\`,\`${REFUSAL} (the fee function)\`),t?a[e]:b[e]}`,
+    method_call_then_block: `function f(e,t,n){${GUARD};if(t){Al(e);return a[e]}return b[e]}`,
+    split_ifs: `function f(e,t,n){if(typeof e!=\`string\`)W(\`${REFUSAL}\`);if(!Object.hasOwn(a,e)||!Object.hasOwn(b,e))W(\`${REFUSAL}\`);return t?a[e]:b[e]}`,
+    guarded_method: `class Zq{m(e,t){${GUARD};return t?a[e]:b[e]}}`,
+  };
+  for (const [name, js] of Object.entries(PASSES)) assert.equal(verdict(tables + js).ok, true, name);
+  // a function of another binding named like the table reads that binding, not the table: no read
+  assert.deepEqual(facts(index, `${tables}function z(a,e){return a[e]}`).reads, []);
   // the source's own form passes: typeof path !== "string" || !Object.hasOwn(...)
   assert.equal(verdict(`${tables}function f(e,t){if(typeof e!=="string"||!Object.hasOwn(a,e)||!Object.hasOwn(b,e))W("${REFUSAL}");return t?a[e]:b[e]}`).ok, true);
   // the check in another function, or on another key, or on the other table, guards nothing (an optional-chain read too)

@@ -147,8 +147,8 @@ export interface SignpageParams {
 }
 
 export interface TxRef {
-  chain: Chain;
-  hash: string;
+  readonly chain: Chain;
+  readonly hash: string;
 }
 
 /** A top-level flow is set up: the page wrote its one-use pending-flow record. Its outcome comes back in `state`. */
@@ -362,11 +362,11 @@ export const DEPOSIT_HELD_STAGES: readonly DepositStage[] = Object.freeze(["refu
  * States and amounts only: never a key, the 12 words or which note is whose.
  */
 export interface DepositFacts {
-  refunded?: boolean;
-  hold?: DepositHold;
-  held_id?: string;
-  since_ms?: number;
-  amount_usd?: string;
+  readonly refunded?: boolean;
+  readonly hold?: DepositHold;
+  readonly held_id?: string;
+  readonly since_ms?: number;
+  readonly amount_usd?: string;
 }
 export type WithdrawStage = "proving" | "submitted" | "in_transit" | "sent" | "refunded" | "stopped";
 export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
@@ -391,15 +391,15 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op).
  */
 export type Operation =
-  | ({ id: string; kind: "deposit"; stage: DepositStage; txs: TxRef[] } & DepositFacts)
-  | { id: string; kind: "withdraw"; stage: WithdrawStage; txs: TxRef[] }
-  | { id: string; kind: "buy" | "sell"; stage: TradeStage; txs: TxRef[]; code?: ErrorCode }
-  | { id: string; kind: "hop"; stage: HopStage; txs: TxRef[] }
-  | { id: string; kind: "return"; stage: ReturnStage; txs: TxRef[] }
-  | { id: string; kind: "restore"; stage: RestoreStage; txs: TxRef[] };
+  | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
+  | { readonly id: string; readonly kind: "withdraw"; readonly stage: WithdrawStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "buy" | "sell"; readonly stage: TradeStage; readonly txs: readonly TxRef[]; readonly code?: ErrorCode }
+  | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "return"; readonly stage: ReturnStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "restore"; readonly stage: RestoreStage; readonly txs: readonly TxRef[] };
 
 /** A pool asset's USD price in SignpageState.pools, as the signing page read it (card signpage-pool-price). */
-export type PoolStatePrice = { price: string; expo: number; published_s: number; read_ms: number };
+export type PoolStatePrice = { readonly price: string; readonly expo: number; readonly published_s: number; readonly read_ms: number };
 
 /** What the page tells the app: addresses, balances, tx hashes and states only. */
 export interface SignpageState {

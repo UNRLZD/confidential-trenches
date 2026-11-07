@@ -910,6 +910,10 @@ test("a listener that throws, writing into its frozen snapshot, stops none of th
   c.onProgress(() => { throw new Error("progress listener"); });
   const seen = [];
   c.onProgress((id, stage) => seen.push(stage));
+  // review r3 L3: a throwing route listener ahead of a second; mutant t1 (route through a plain loop) lived
+  c.onRoute((id, r) => { r.out = "999999"; }); // throws: the route is frozen (review r3 info 4)
+  const routes = [];
+  c.onRoute((id, r) => routes.push(r.out));
   await handshake(h);
   assert.equal(c.snapshot().status, "ready", "the handshake reached READY");
   assert.ok(heard.includes("ready"), "the second listener still hears");
@@ -921,6 +925,8 @@ test("a listener that throws, writing into its frozen snapshot, stops none of th
   assert.equal(c.snapshot().state.vault_balance, "5");
   h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
   assert.deepEqual(seen, ["filled"], "a progress listener after a throwing one still hears");
+  h.post({ v: 1, type: "progress", id: "x", out: "1234.5" });
+  assert.deepEqual(routes, ["1234.5"], "a route listener after a throwing one still hears, and reads the route unchanged");
   // down still schedules its retry
   h.frame().fire("error");
   assert.equal(c.snapshot().status, "down");
@@ -930,8 +936,78 @@ test("a listener that throws, writing into its frozen snapshot, stops none of th
   c.destroy();
   assert.equal(h.listening(), false);
   assert.equal(h.frames.at(-1).removed, true);
-  assert.ok(reported.length >= 3 && reported.every((e) => e instanceof Error), "each throw is reported, none lost");
+  assert.ok(reported.length >= 4 && reported.every((e) => e instanceof Error), "each throw is reported, none lost");
   assert.ok(reported.some((e) => e instanceof TypeError), "the write into the frozen snapshot is among them");
+  assert.ok(reported.some((e) => e instanceof TypeError && /out/.test(e.message)), "the write into the frozen route is among them");
+});
+
+// review r3 L2: a change calls the listeners as they stood at its start, less any removed during it, as EventTarget
+// does. Case (c): A unsubscribes B and subscribes D on its first call; B is not called for that change, D hears from the
+// next one. Mutant t8 (a loop over the live Set) calls D in the same change; b3a35fa1 calls B.
+test("a listener removed during a change is not called for it, and one added during it hears from the next change", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
+  let offB;
+  let a = 0;
+  let b = 0;
+  let d = 0;
+  c.subscribe(() => {
+    if (a++ === 0) {
+      offB();
+      c.subscribe(() => void d++);
+    }
+  });
+  offB = c.subscribe(() => void b++);
+  await handshake(h);
+  assert.ok(a >= 2, "the handshake made more than one change");
+  assert.equal(b, 0, "B, removed by A in the change that removed it, is never called");
+  assert.equal(d, a - 1, "D, added by A during the first change, hears every change after it and not that one");
+  c.destroy();
+});
+
+// review r3 L2 case (a): A destroys the client on "ready". The destroy's own "down" reaches B; the outer change's
+// "ready", which predates it, does not: destroy removed B. b3a35fa1 told B "ready" after "down".
+test("a listener that destroys the client on ready leaves no stale ready for the listeners after it", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host, retryMs: 0 });
+  const heard = [];
+  c.subscribe((s) => { if (s.status === "ready") c.destroy(); });
+  c.subscribe((s) => heard.push(s.status));
+  await handshake(h);
+  assert.equal(c.snapshot().status, "down");
+  assert.equal(heard.at(-1), "down", `B's last word is the destroy's down (heard ${JSON.stringify(heard)})`);
+  assert.equal(heard.includes("ready"), false, "B never hears the ready the destroy cut short");
+  assert.equal(h.listening(), false);
+});
+
+// review r3 info 6: destroy() marks the client destroyed before its own leave("down"). Case b1: a "down" listener that
+// destroys once leaves no retry timer (b3a35fa1 set one after the destroy). Case b2: a listener that destroys on every
+// "down" hears down twice (the drop, then the destroy's own) and recurses no further (b3a35fa1 overflowed the stack).
+test("a destroy from a down listener leaves no retry timer and does not recurse", async (t) => {
+  const reported = [];
+  t.mock.method(globalThis, "queueMicrotask", (f) => { try { f(); } catch (e) { reported.push(e); } });
+  {
+    const { h, c } = await readyClient();
+    let once = false;
+    c.subscribe((s) => { if (s.status === "down" && !once) { once = true; c.destroy(); } });
+    const timers = t.mock.method(globalThis, "setTimeout");
+    h.frame().fire("error");
+    assert.equal(timers.mock.callCount(), 0, "b1: no timer is set after the destroy");
+    timers.mock.restore();
+    mock.timers.tick(60_000);
+    assert.equal(h.frames.length, 1, "b1: no fresh iframe");
+    assert.equal(h.listening(), false);
+  }
+  {
+    const { h, c } = await readyClient();
+    let calls = 0;
+    c.subscribe((s) => { if (s.status === "down") { calls++; c.destroy(); } });
+    h.frame().fire("error");
+    assert.equal(calls, 2, "b2: the drop's down and the destroy's own, then no more");
+    assert.equal(c.snapshot().status, "down");
+    assert.equal(h.listening(), false);
+  }
+  assert.deepEqual(reported, [], "no listener threw: no stack overflow");
 });
 
 // delta review L2: the schema checks the request's own copy, never the caller's params; mutant k8 (check `params`) lived
