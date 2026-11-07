@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { VAULT_CONSTANTS, VAULT_SYNC_LAG_MAX, VaultSyncStopped, vaultLabelOf, vaultScopeOf, type VaultSyncRpc } from "@blindfill/kit";
+import { poolWithdrawInput, VAULT_CONSTANTS, VAULT_SYNC_LAG_MAX, VaultSyncStopped, VaultTree, vaultLabelOf, vaultScopeOf, type VaultSyncRpc } from "@blindfill/kit";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import * as d from "../src/derive/index.ts";
@@ -823,5 +823,77 @@ test("R3c, R3d and D5: a TAKEN index and an INCOMING note the vault holds come b
     assert.equal(out.notes.length, 3);
   } finally {
     close();
+  }
+});
+
+// ---------- card wallet-refund-note-by-leaf: a stranger's deposit on a refund's R never strands the refund ----------
+// Two notes on one precommitment share a nullifier (vault.md l.547; deposit.rs:109-110 refuses a repeated P among
+// deposits only, and settle writes none), so a stranger who reads R off a spend row can put 1 USDC on it, before or after
+// the settle. Whichever of the two the device spends first burns the other. THE RULE for any writer of a refund note
+// (today restore.ts:299-310 alone; relay.ts:49 writes none): the refund note is the spend row's own leaf, taken from its
+// refund_value, refund_label and refund_leaf_index and checked against the state tree there; never a row found by R,
+// never the first or lowest leaf on R. scripts/note-restore-refund-mutants.mjs plants those three wrong picks in
+// restore.ts and each must fail here.
+test("refund by leaf: a stranger's 1 USDC on R, before or after the settle, is never the refund note restore writes, spends or ragequits", async () => {
+  for (const strangerFirst of [true, false]) {
+    const v = new Vault();
+    const leaf0: Leaf = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+    const l: bigint = leaf0.label;
+    const cref: NoteRef = { kind: "change", l, j: 0 };
+    const rref: NoteRef = { kind: "refund", l, j: 0 };
+    const R = sec(rref).precommitment;
+    const w = v.withdraw(sec(dep0).nullifierHash, 20_000_000n, { P: sec(cref).precommitment, value: 30_000_000n, label: l }, R, 77n);
+    v.payout(w.spend, 5_000_000n);
+    let theirs: Leaf, refund: Leaf;
+    if (strangerFirst) {
+      theirs = v.deposit(R, 1_000_000n, hex64("stranger"))!;
+      refund = v.settle(w.spend)!;
+    } else {
+      refund = v.settle(w.spend)!;
+      theirs = v.deposit(R, 1_000_000n, hex64("stranger"))!;
+    }
+    const why = strangerFirst ? "stranger before the settle" : "stranger after the settle";
+    assert.ok(theirs && refund, why);
+    assert.notEqual(theirs.commitment, refund.commitment, `${why}: the twin's label is its own`);
+
+    // restore: one note on R, the refund, at the leaf the spend row names
+    const r = restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP });
+    const onR = r.notes.filter((n) => n.precommitment === R);
+    assert.deepEqual(onR.map((n) => refKey(n.ref)), [refKey(rref)], why);
+    assert.deepEqual(onR[0]!.leaf, refund, `${why}: the refund note is the spend row's leaf`);
+    assert.ok(!r.notes.some((n) => n.leaf.leafIndex === theirs.leafIndex), `${why}: the twin's leaf taken on`);
+
+    const ws = await openWalletStore({ indexedDB: new IDBFactory() });
+    const ns = await openNoteStore(ws);
+    try {
+      await writeRestored(ns, r);
+      const stored = (await ns.list()).filter((n) => n.precommitment === R);
+      assert.equal(stored.length, 1, why);
+      const note = stored[0]!;
+      assert.equal(note.state, "UNSPENT", why);
+      assert.deepEqual(note.leaf, refund, `${why}: the store's refund note`);
+
+      // spend: the proof inputs withdrawRequest builds from this record (its value and label, the secrets of its ref)
+      // open the refund's leaf, never the twin's
+      const s = sec(note.ref);
+      const stateTree = new VaultTree(v.leaves);
+      const labelTree = new VaultTree(v.labels);
+      const next = sec({ kind: "change", l: note.leaf!.label, j: 0 });
+      const input = poolWithdrawInput({
+        stateTree, labelTree, newestStateRoot: stateTree.root!, newestLabelRoot: labelTree.root!,
+        note: { value: note.leaf!.value, label: note.leaf!.label, nullifier: s.nullifier, secret: s.secret },
+        newNullifier: next.nullifier, newSecret: next.secret, withdrawn: 1_000_000n, context: 1n,
+      });
+      assert.deepEqual([input.existingValue, input.label, input.stateIndex], [String(refund.value), String(refund.label), String(stateTree.path(refund.commitment).index)], `${why}: the spend opens the refund's leaf`);
+      assert.notEqual(input.stateIndex, String(stateTree.path(theirs.commitment).index), why);
+
+      // ragequit: its public signals (VAULT_RAGEQUIT_SIGNALS: commitment, nullifierHash, value, label) from this record
+      // name the refund's leaf (the vault itself refuses a ragequit of a refund note: settle.rs:13, no label_index row)
+      assert.deepEqual([note.leaf!.commitment, s.nullifierHash, note.leaf!.value, note.leaf!.label], [refund.commitment, s.nullifierHash, refund.value, refund.label], `${why}: a ragequit names the refund`);
+      assert.notEqual(note.leaf!.commitment, theirs.commitment, why);
+    } finally {
+      ns.close();
+      ws.close();
+    }
   }
 });
