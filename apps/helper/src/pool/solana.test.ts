@@ -515,3 +515,28 @@ test("N3: the rent is read once an epoch, so a rent change between two epochs gi
   fail = false;
   assert.equal((await t.fee(NOW)).fee, "2000000");
 });
+
+// ---- The relayer's cost guards (card relayer-cost-guards, audit I-6: the program holds no relay fee floor) ----
+
+test("I-6: a release whose relay fee is 0 is refused (fee_off) before any read, signature or send", async () => {
+  assert.equal(refusal(build({ fee: 0n })), "fee_off");
+  const calls: Calls = [];
+  const sent: Uint8Array[] = [];
+  const s = sender(null, calls, sent);
+  for (const tag of [2, 3] as const) assert.equal(code(await s.carry(body(build({ tag, fee: 0n })))), "fee_off");
+  assert.deepEqual([calls.length, sent.length], [0, 0]);
+});
+
+test("I-6: a release whose venue fails in the simulation is refused unsigned (simulation_failed), and its repeat sends nothing either", async () => {
+  const calls: Calls = [];
+  const sent: Uint8Array[] = [];
+  // the pool instruction (index 2, after the two compute budget ones) fails inside its tag 3 inner call to the venue
+  const s = sender({ InstructionError: [2, { Custom: 6001 }] }, calls, sent);
+  const wire = build({ tag: 3, pre: [cuLimit(400_000), cuPrice(1n)] });
+  for (let i = 0; i < 2; i++) {
+    const a = await s.carry(body(wire));
+    assert.deepEqual([a.status, code(a)], [422, "simulation_failed"]);
+  }
+  assert.equal(sent.length, 0, "nothing signed or sent");
+  assert.ok(calls.every((c) => c.method === "simulateTransaction" || c.method === "getLatestBlockhash"));
+});

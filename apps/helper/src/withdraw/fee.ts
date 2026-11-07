@@ -207,11 +207,28 @@ export async function readPool(rpcs: readonly [Rpc, Rpc], b: Block): Promise<{ t
   return { token, near };
 }
 
-/** The token's storage_balance_bounds().min at block `b` (NEP-145), equal on both providers: what a fresh A registers with. */
+/**
+ * The most register_deposit the relayer attaches to one withdrawal (card relayer-cost-guards, audit V-03): USDC's
+ * storage_balance_bounds().min as read on mainnet, 1,250,000,000,000,000,000,000 yocto (0.00125 N), the same answer on
+ * FastNEAR and dRPC at block 223508269 (A7pdESratFdgQkN2Zs8jpQEgVjBJCB4wko3Qfr9tC7Mt), and on the testnet token
+ * (mainnet USDC's own code) on FastNEAR and dRPC at block 276672519; the answers are recorded in
+ * fixtures/usdc-storage-bounds.json, which fee.test.ts holds this value to. A payout that bounces leaves its
+ * register_deposit in the vault for good (vault payout.rs:83), so a token whose minimum moves off this pin, up or down,
+ * is not carried (503 upstream, no quote) until a release reads and pins the new one.
+ */
+export const REGISTER_DEPOSIT_MAX = 1_250_000_000_000_000_000_000n;
+
+/**
+ * The token's storage_balance_bounds().min at block `b` (NEP-145), equal on both providers: the one register_deposit
+ * check 7 carries. Any minimum but REGISTER_DEPOSIT_MAX throws, so neither the quote nor POST's check 7 takes it: above
+ * the pin a bounced payout would leave more than the pin in the vault, and under it (0 included) check 7 would carry a
+ * register_deposit that cannot register a recipient that unregistered (review F1).
+ */
 export async function readRegisterMin(rpcs: readonly [Rpc, Rpc], b: Block, token: string): Promise<bigint> {
   const bounds = await viewAt(rpcs, b, token, "storage_balance_bounds", {});
   const min = isObj(bounds) ? decimal(bounds.min, U128) : null;
   if (min === null) throw new FeeReadRefused("storage_balance_bounds: no u128 min");
+  if (min !== REGISTER_DEPOSIT_MAX) throw new FeeReadRefused(`storage_balance_bounds: min ${min} is not the pinned ${REGISTER_DEPOSIT_MAX}`);
   return min;
 }
 

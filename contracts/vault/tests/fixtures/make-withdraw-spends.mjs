@@ -12,6 +12,7 @@
 // its roots are real roots this vault never had.
 //
 // Run from the repo root after `pnpm install`: node contracts/vault/tests/fixtures/make-withdraw-spends.mjs
+// (with --relayer it writes withdraw-spends-relayer.json instead; see there)
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -90,6 +91,41 @@ async function spend(name, n, withdrawn, tag, size = notes.length, relayFee = "0
   const p = { a: proof.pi_a.slice(0, 2), b: proof.pi_b.slice(0, 2), c: proof.pi_c.slice(0, 2) };
   console.error(`${name}: note ${n + 1}, withdrawn ${withdrawn}, nullifier hash ${publicSignals[1].slice(0, 12)}...`);
   return { name, note: n, withdrawal, proof: p, public_signals: publicSignals };
+}
+
+// --relayer writes only tests/fixtures/withdraw-spends-relayer.json, leaving withdraw-spends.json as it is: the spends
+// tests/relayer_withdraw.rs carries through the helper to alice.test.near once alice is registered. The helper takes a
+// withdrawal only with register_deposit exactly the token's minimum, registered recipient or not (card
+// relayer-cost-guards, audit V-03): the payout receipt then registers a recipient that left the token again instead
+// of bouncing, and the token refunds the deposit to the vault for one still registered. Same notes, same nullifier
+// hashes as their names in withdraw-spends.json.
+if (process.argv.includes("--relayer")) {
+  const min = { recipient: "alice.test.near", registerDeposit: "1250000000000000000000" };
+  const relayer = [
+    await spend("same_call_min", 0, 2_000_000n, "same_call_min", notes.length, "500000", min),
+    await spend("same_nullifier_a_min", 1, 1_000_000n, "same_nullifier_a_min", notes.length, "0", min),
+    await spend("same_nullifier_b_min", 1, 2_500_000n, "same_nullifier_b_min", notes.length, "0", min),
+    await spend("one_block_a_min", 2, 4_000_000n, "one_block_a_min", notes.length, "0", min),
+  ];
+  const base = JSON.parse(readFileSync(join(here, "withdraw-spends.json"), "utf8"));
+  for (const s of relayer) {
+    const twin = base.spends.find((b) => b.name === s.name.replace(/_min$/, ""));
+    if (twin.public_signals[1] !== s.public_signals[1]) throw new Error(`${s.name}: nullifier hash differs from ${twin.name}'s`);
+    if (base.scope !== String(scope) || base.leaves.join() !== notes.map((x) => String(x.commitment)).join()) throw new Error("withdraw-spends.json: other notes");
+  }
+  const out = {
+    notes: [
+      "Real withdraw proofs for tests/relayer_withdraw.rs, against the six deposits of withdraw-spends.json (same vault, scope, leaves and labels). Test notes only, never money.",
+      "Each spends the note of its name without _min in withdraw-spends.json (same nullifier hash), to alice.test.near with register_deposit the token's minimum, 0.00125 NEAR: the only register_deposit the helper carries (card relayer-cost-guards, audit V-03).",
+      "Made by contracts/vault/tests/fixtures/make-withdraw-spends.mjs --relayer: the kit's vaultWithdrawInput, then snarkjs 0.7.5 groth16.fullProve with packages/kit/zk/withdraw.wasm and withdraw.zkey; snarkjs groth16.verify passes each.",
+    ],
+    vault: VAULT,
+    scope: String(scope),
+    spends: relayer,
+  };
+  writeFileSync(join(here, "withdraw-spends-relayer.json"), JSON.stringify(out, null, 2) + "\n");
+  console.error("wrote withdraw-spends-relayer.json");
+  process.exit(0);
 }
 
 const spends = [
