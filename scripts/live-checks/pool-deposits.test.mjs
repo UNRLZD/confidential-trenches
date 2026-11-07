@@ -3,7 +3,7 @@
 // read on two devnet RPCs, and SIGN_HOST's /app.js with no testnet pin: PASS. bad: the same reads with another
 // precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: the deposit tx failed, the
 // mark's value another, a state leaf another, U not emptied (the cost priced above what the program took): FAIL.
-// Slice 3 (the EVM same-chain deposit): good.evm is the release-79 build's index.html and app.js, which pin each other
+// Slice 3 (the EVM same-chain deposit): good.evm is the release-83 build's index.html and app.js, which pin each other
 // and carry the EVM deposit's marks: PASS; bad.evm is SIGN_HOST's release-72 page, which carries none: FAIL. Planted on
 // the good one: an index.html that pins another bundle, and a bundle with one mark gone: FAIL. The review fold:
 // planted.unrouted is a real build of the fold with the flow's EVM deposit route removed (it still carries every mark,
@@ -72,8 +72,8 @@ test("planted: a real build with pool.deposit on Base and Robinhood no longer ro
   assert.equal(u.pin, u.sha384, "it pins itself");
   assert.ok(Object.keys(EVM_MARKS).every((k) => u.marks[k] === true), "every mark present");
   const r = await run(A.good, undefined, A.good.sign, u);
-  bad(r, "EVM: SIGN_HOST's /app.js is a release-79-or-later build");
-  assert.ok(!r.lines.some((l) => l.startsWith("BAD ") && !l.includes("release-79-or-later")), r.lines.join("\n"));
+  bad(r, "EVM: SIGN_HOST's /app.js is a release-83-or-later build");
+  assert.ok(!r.lines.some((l) => l.startsWith("BAD ") && !l.includes("release-83-or-later")), r.lines.join("\n"));
 });
 
 test("a release cut in parallel on a tree without the route is never read as routed: release-78 (page-evm-rpc-csp) is below ROUTED_FROM", async () => {
