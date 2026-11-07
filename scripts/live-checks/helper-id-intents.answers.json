@@ -1,0 +1,111 @@
+{
+ "source": "good: apps/helper at card/helper-id-intents 9a6b9a4008b50c3b765f51ad6dfc77601c74b931 served locally by start() with mainnet bind set (a key made for the run, a relayer account that does not exist, so nothing could be sent) and one signer seen in its intents store, read 2026-11-07T18:03:26.248Z; bad_deployed: the deployed helper https://api.confidential.unrealized.trade at af75100a34cbd641835ccd30fe4de36509436d5a (before this card), read 2026-11-07T18:02:53.849Z: POST /v1/intents 404.",
+ "good": {
+  "base": "http://127.0.0.1:52306",
+  "vault": "vault-test.confidential.unrlzd.near",
+  "stranger": "fbd8fbcd886093a02f902a48edf00077dcde92b5b55def6bbd484a47b69d1b46",
+  "seen": "c93d2bb20d82724c9b610386e83ce8ba8a1a6c8e46e9c4c21d0d02c2be91e2b3",
+  "now": 1794074606228,
+  "reads": [
+   {
+    "asked": "health",
+    "readAt": "2026-11-07T18:03:26.248Z",
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "9a6b9a4008b50c3b765f51ad6dfc77601c74b931",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"ok\":true,\"commit\":\"9a6b9a4008b50c3b765f51ad6dfc77601c74b931\",\"release\":1,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[]}}"
+   },
+   {
+    "asked": "the probe",
+    "readAt": "2026-11-07T18:03:26.256Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "9a6b9a4008b50c3b765f51ad6dfc77601c74b931",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "a signer never seen",
+    "readAt": "2026-11-07T18:03:26.258Z",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "9a6b9a4008b50c3b765f51ad6dfc77601c74b931",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"id_not_ours\"}}"
+   },
+   {
+    "asked": "a signer never seen, to the vault",
+    "readAt": "2026-11-07T18:03:26.259Z",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "9a6b9a4008b50c3b765f51ad6dfc77601c74b931",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"id_not_ours\"}}"
+   },
+   {
+    "asked": "a seen signer, to the vault",
+    "readAt": "2026-11-07T18:03:26.260Z",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "9a6b9a4008b50c3b765f51ad6dfc77601c74b931",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"receiver_is_vault\"}}"
+   }
+  ]
+ },
+ "bad_deployed": {
+  "base": "https://api.confidential.unrealized.trade",
+  "vault": "vault-test.confidential.unrlzd.near",
+  "stranger": "70bd343af38e2d6d6b784b387d797be130dbc6927f8e12c663449c5fad7d148e",
+  "seen": null,
+  "now": 1794074573111,
+  "reads": [
+   {
+    "asked": "health",
+    "readAt": "2026-11-07T18:02:53.849Z",
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"ok\":true,\"commit\":\"af75100a34cbd641835ccd30fe4de36509436d5a\",\"release\":93,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\"]}}"
+   },
+   {
+    "asked": "the probe",
+    "readAt": "2026-11-07T18:02:54.523Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "a signer never seen",
+    "readAt": "2026-11-07T18:02:54.720Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   },
+   {
+    "asked": "a signer never seen, to the vault",
+    "readAt": "2026-11-07T18:02:54.911Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
+     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   }
+  ]
+ }
+}
