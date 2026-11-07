@@ -445,7 +445,7 @@ export const MUTANTS = [
   [QUOTE, "let pick = best(routes.filter((r) => evmSellExits(chain, t, r.route)));", "let pick = best(routes);", R, "HC4 "],
   [QUOTE, "  if (bought !== null) {\n    const x = bought.route.venue", "  if (false) {\n    const x = bought.route.venue", R, "P3 "],
   [QUOTE, 'if (lower(evmPoolRouteDataQuoted(chain, bought).token) !== lower(token)) return refuse("token_mismatch", "the bought route buys another token");', "", R, "P3 "],
-  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", "rpcs, scan: undefined, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", R, "P1 "],
+  [QUOTE, "rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", "rpcs, scan: undefined, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });", R, "P1 "],
   // the review of edb4dbb: F1 the sell goes further where the buy does; F2 X's markets at the X the token's pool
   // gives; F5 `bought` kept only where the sell builder takes it; F6 minOut off the reference
   [QUOTE, "if (markets.has(x) && (!a.sell || legOf(x) !== null)) further.push(x);", "if (markets.has(x) && !a.sell) further.push(x);", R, "PA "],
