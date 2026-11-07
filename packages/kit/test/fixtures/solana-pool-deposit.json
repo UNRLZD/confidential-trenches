@@ -1,0 +1,19 @@
+{
+ "note": "card pool-deposits: the devnet deposit that made the recorded mark of packages/signpage/test/fixtures/pool-devnet.json (FPiKH9RC...), the pool's first (nonce 1, leaf 0), getTransaction base64 at finalized on both devnet RPCs",
+ "signature": "D2xcLtj9sBWpwT2HoNMt8kromhZKDmnvSVjn78CvHbAGLW8h66tCt8APP11wCWgo94iJwUD69o6ZUCKs8Rd3uwj",
+ "read": "2026-11-07T01:45Z",
+ "answers": [
+  {
+   "rpc": "https://api.devnet.solana.com",
+   "slot": 518321442,
+   "err": null,
+   "transaction": "AQpgocLG0MM/60ZwxFWf+TX0fj7vBv8PvgJBFha4QvGI/ig4uC5D/wvPWlf50SmWg6YsFBGUwH1QWyoGe10gzgYBAAIHkIT+mBymkraxE9jgkiLiDVnxPwJyxTPXvcjHRKLNPPEVSMxuxdjQXsk3mU12mNCnT4AVgf9KGd9NI8jMIZgVqRrtkaOMasApLXGRAJzZNGyDdDtlohseUVvVsZGeGn+iyipKAFGbKJO21SRtKlYei5kasGy4zWcCQi1hA3mjky/V1RwlwOW9RAt+XM2T+rMTpZ+qrPDsIF1frD7ilic8NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQqTcbwp6vRoABSCcU4omKxN3TYVoztjEtoYLi8s3wfS2ZHWBL+HW/WGv1rj3lEs7Uox0OBPCNIAwG/AVmU8tNwEGBgEAAgMEBSkBgJaYAAAAAAAT15XJbwDCpepowV4puplbaRSgDaFuFNnOWW/VeSG8ag=="
+  },
+  {
+   "rpc": "https://solana-devnet.api.onfinality.io/public",
+   "slot": 518321442,
+   "err": null,
+   "transaction": "AQpgocLG0MM/60ZwxFWf+TX0fj7vBv8PvgJBFha4QvGI/ig4uC5D/wvPWlf50SmWg6YsFBGUwH1QWyoGe10gzgYBAAIHkIT+mBymkraxE9jgkiLiDVnxPwJyxTPXvcjHRKLNPPEVSMxuxdjQXsk3mU12mNCnT4AVgf9KGd9NI8jMIZgVqRrtkaOMasApLXGRAJzZNGyDdDtlohseUVvVsZGeGn+iyipKAFGbKJO21SRtKlYei5kasGy4zWcCQi1hA3mjky/V1RwlwOW9RAt+XM2T+rMTpZ+qrPDsIF1frD7ilic8NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQqTcbwp6vRoABSCcU4omKxN3TYVoztjEtoYLi8s3wfS2ZHWBL+HW/WGv1rj3lEs7Uox0OBPCNIAwG/AVmU8tNwEGBgEAAgMEBSkBgJaYAAAAAAAT15XJbwDCpepowV4puplbaRSgDaFuFNnOWW/VeSG8ag=="
+  }
+ ]
+}
