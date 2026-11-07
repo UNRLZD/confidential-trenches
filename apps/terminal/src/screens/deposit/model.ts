@@ -211,3 +211,37 @@ export function pickAsset(assets: readonly Asset[] | null, picked: { symbol: str
   if (!picked) return assets[0]!;
   return assets.find((a) => a.symbol === picked.symbol && a.chain === picked.chain) ?? assets.find((a) => a.symbol === picked.symbol) ?? assets[0]!;
 }
+
+/** A row of the sheet's Recent block: a deposit of this account, its stage's word, and what it credited once done. */
+export interface RecentRow {
+  id: string;
+  word: "deposited" | "waiting" | "processing" | "short" | "refunded" | "held" | "expired";
+  amount_usd?: string;
+}
+
+const RECENT_WORD: Record<DepositStage, RecentRow["word"]> = {
+  quote_checked: "waiting",
+  waiting: "waiting",
+  in_transit: "processing",
+  into_vault: "processing",
+  failed: "processing",
+  done: "deposited",
+  short: "short",
+  refunded: "refunded",
+  refund_move: "refunded",
+  held: "held",
+  halted: "held",
+  expired: "expired",
+};
+
+/** The Recent rows: the deposits in state.ops (oldest first there), newest first, three at most; a refund's later legs read Refunded until done. */
+export function recentRows(ops: readonly Operation[] | undefined): RecentRow[] {
+  const rows: RecentRow[] = [];
+  for (const op of [...(ops ?? [])].reverse()) {
+    if (op.kind !== "deposit") continue;
+    const word = op.refunded && op.stage !== "done" && RECENT_WORD[op.stage] === "processing" ? "refunded" : RECENT_WORD[op.stage];
+    rows.push(op.stage === "done" && op.amount_usd !== undefined ? { id: op.id, word, amount_usd: op.amount_usd } : { id: op.id, word });
+    if (rows.length === 3) break;
+  }
+  return rows;
+}

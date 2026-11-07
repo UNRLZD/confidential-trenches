@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
@@ -186,4 +186,27 @@ test("the pickers: each asset once in the list's order, its chains, and the pick
   assert.equal(pickAsset(list, { symbol: "ETH", chain: "Base" })?.id, "nep141:wrap.near", "an asset gone from the list: the list's first");
   assert.equal(pickAsset([], null), null);
   assert.equal(pickAsset(null, null), null);
+});
+
+test("Recent: the account's deposits from state.ops, newest first, three at most, each by its stage's word; others left out", () => {
+  const dep = (id: string, stage: Operation["stage"], facts: object = {}) => ({ id, kind: "deposit", stage, txs: [], ...facts }) as Operation;
+  const ops: Operation[] = [
+    dep("a", "done", { amount_usd: "73.18" }),
+    { id: "w", kind: "withdraw", stage: "sent", txs: [] },
+    dep("b", "halted", { hold: "halted", held_id: "u1" }),
+    dep("c", "in_transit", { since_ms: 1 }),
+    dep("d", "refund_move", { refunded: true, since_ms: 1 }),
+  ];
+  assert.deepEqual(recentRows(ops), [
+    { id: "d", word: "refunded" },
+    { id: "c", word: "processing" },
+    { id: "b", word: "held" },
+  ]);
+  assert.deepEqual(recentRows(ops.slice(0, 2)), [{ id: "a", word: "deposited", amount_usd: "73.18" }]);
+  assert.deepEqual(recentRows([dep("r", "done", { refunded: true, amount_usd: "5" })]), [{ id: "r", word: "deposited", amount_usd: "5" }], "a refund moved in is deposited");
+  assert.deepEqual(recentRows([dep("q", "quote_checked"), dep("e", "expired"), dep("s", "short", { since_ms: 1 }), dep("f", "failed", { since_ms: 1 })]).map((r) => r.word), ["processing", "short", "expired"], "four deposits: the newest three");
+  assert.deepEqual(recentRows([dep("q", "quote_checked")]).map((r) => r.word), ["waiting"]);
+  assert.deepEqual(recentRows([]), []);
+  assert.deepEqual(recentRows(undefined), []);
+  for (const k of ["recent", "noActivity"] as const) assert.equal(WORDS[k].draft, false, k);
 });

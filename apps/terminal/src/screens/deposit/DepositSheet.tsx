@@ -6,8 +6,8 @@ import { ROUTES } from "../../routes/routes.ts";
 import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, sheetState, symbolsOf, usd } from "./model.ts";
-import type { Answer, Asset, DryQuote, SheetState } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import type { Answer, Asset, DryQuote, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -94,6 +94,12 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         </div>
       </div>
     );
+    body = (
+      <>
+        {body}
+        <Recent rows={recentRows(state?.ops)} />
+      </>
+    );
     foot = <Action kind="paper" on onClick={onClose} control="deposit-done"><W id="done" /></Action>;
   } else if (s === "S4.17" || s === "refund-move") {
     body = (
@@ -149,7 +155,12 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     body = <Stat tone="warn" label={<W id="expired" />} />;
     foot = <Action kind="buy" on={src.moneyOn} control="deposit-get" onClick={again}><W id="getAddress" /></Action>;
   } else {
-    body = <Form s={s} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />;
+    body = (
+      <>
+        <Form s={s} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />
+        <Recent rows={recentRows(state?.ops)} />
+      </>
+    );
     if (s === "S4.19")
       foot = (
         <Action kind="paper" on={src.moneyOn && src.locked === null} control="deposit-backup" onClick={() => void src.hop("backup.open", {}, { ...view, control: "deposit-backup" })}>
@@ -274,6 +285,41 @@ function Pick({ label, loading, value, rows, control, onPick }: { label: "asset"
       </div>
     </div>
   );
+}
+
+/**
+ * R5's Recent block (app.js:641-642): the account's deposits from state.ops, newest first, each by its stage's word and,
+ * once done, what it credited; No activity over R5's plate when there are none. Under the form and on the done screen.
+ */
+function Recent({ rows }: { rows: RecentRow[] }) {
+  return (
+    <div className="drecent" data-recent={rows.length}>
+      <div className="hd"><span><W id="recent" /></span></div>
+      {rows.length === 0 ? (
+        <div className="empty"><Plate /><span><W id="noActivity" /></span></div>
+      ) : (
+        rows.map((r) => (
+          <div className="it" key={r.id} data-op={r.id}>
+            <span><W id={r.word} /></span>
+            {r.amount_usd !== undefined && <span className="num">{usd(r.amount_usd)}</span>}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/** R5's empty plate (app.js P.plate): paper dots fading to the edges, a few lit, in the text colour. */
+function Plate() {
+  const dots = [];
+  for (let c = 0; c < 52; c++)
+    for (let y = 0; y < 11; y++) {
+      const dx = (c - 26) / 26, dy = (y - 5.5) / 5.5;
+      if (dx * dx * 0.9 + dy * dy * 1.6 > 1) continue;
+      const lit = (c * 7 + y * 13 + 2) % 37 === 0;
+      dots.push(<circle key={`${c}-${y}`} cx={2.5 + c * 5} cy={2.5 + y * 5} r={1.1} fill={lit ? "var(--acc)" : "currentColor"} fillOpacity={lit ? 0.7 : 0.12} />);
+    }
+  return <svg className="plate" width="260" height="56" viewBox="0 0 260 56" aria-hidden="true">{dots}</svg>;
 }
 
 /** The address's QR (qr.ts), drawn in the text colour on the page colour, so it reads in dark and light. */

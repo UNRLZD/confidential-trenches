@@ -13,7 +13,9 @@
 //   - Get address sends deposit.quote with the asset and 15 only, and the sheet draws the quote's own address (S4.13)
 //     under a heading that names the asset once (NEAR, never NEAR NEAR);
 //   - the deposit's stages under that id draw Waiting (S4.14), Processing (S4.15) and Deposited with the credited amount
-//     (S4.16), and Done closes the sheet.
+//     (S4.16), and Done closes the sheet;
+//   - Recent reads the account's deposits from state.ops: none under the form before (No activity), and on the done
+//     screen the one row Deposited $73.18.
 // A screenshot of the quote, the address and the deposited state is kept per width and scheme.
 //   node scripts/live-checks/app-deposit-mount.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served), framed by the stand-in shell
@@ -87,6 +89,8 @@ export function judge(rec) {
     const want = STAGES.map(([, s]) => s);
     say(same(r.stages, want), `${n}: the deposit's stages draw ${JSON.stringify(r.stages ?? [])}, want ${JSON.stringify(want)}`);
     say(r.credited === CREDITED, `${n}: Deposited draws ${r.credited ?? "no amount"}, credited ${CREDITED}`);
+    say(r.recentBefore === 0, `${n}: Recent under the form shows ${r.recentBefore ?? "no block"} row(s), want none (No activity)`);
+    say(same(r.recentDone, ["Deposited", "$73.18"]), `${n}: Recent on the done screen reads ${JSON.stringify(r.recentDone ?? null)}, want the deposit's row`);
     say(r.closed === true, `${n}: Done ${r.closed ? "closes the sheet" : "leaves the sheet open"}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
@@ -140,6 +144,7 @@ async function runOne(browser, w, scheme, shots, route) {
     await page.waitForTimeout(600);
     run.dry = (await asked(page)).filter((m) => m.type === "deposit.dry").map((m) => m.params);
     run.quoteState = await sheetState(f);
+    run.recentBefore = Number(await f.locator("[data-sheet='deposit'] [data-recent]").first().getAttribute("data-recent", { timeout: 1_000 }).catch(() => "NaN"));
     run.youGet = await f.locator("[data-sheet='deposit'] .dget .v .num").first().textContent({ timeout: 1_000 }).catch(() => null);
     await shot(page, "quote");
 
@@ -158,6 +163,7 @@ async function runOne(browser, w, scheme, shots, route) {
       run.stages.push(await sheetState(f));
     }
     run.credited = await f.locator("[data-sheet='deposit'] [data-amount]").first().getAttribute("data-amount", { timeout: 1_000 }).catch(() => null);
+    run.recentDone = await f.locator("[data-sheet='deposit'] .drecent .it").first().locator("span").allTextContents().catch(() => null);
     await shot(page, "deposited");
     await f.locator("[data-control='deposit-done']").filter({ visible: true }).first().click({ timeout: 3_000 }).catch(() => {});
     await page.waitForTimeout(300);
