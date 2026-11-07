@@ -1,11 +1,12 @@
 // node --test scripts/live-checks/wallet-refund-move.test.mjs: the live check replays its recorded answers
 // (wallet-refund-move.answers.json). good: this card's SIGN_HOST build as committed (packages/signpage/index.html and
 // public/app.js), the helper's live refund move quote and intents.near's live reads of 7 Nov 14:4xZ, and /v1/intents as
-// the kit's contract answers an empty body (HTTP 400 bad_shape; the route is not deployed yet): PASS. bad: SIGN_HOST as
-// served on 7 Nov, the same live reads, and /v1/intents as the helper answered on 7 Nov (HTTP 404 not_found): FAIL,
-// each fact named. Planted on the good one: another /app.js, no move in the bundle, a quote the rule refused or did not
-// read, a quote that is not a refund move's, a quote answered 502, the salts or heights apart, a used nonce, a 404 relay:
-// each FAIL. The quote is kept as facts (status, the rule's verdict at read time, depositType, to U), not its signature.
+// the kit's contract answers an empty body (HTTP 400 bad_shape, SIGN_HOST's origin allowed; the route is not deployed
+// yet): PASS. bad: SIGN_HOST as served on 7 Nov, the same live reads, and /v1/intents as the helper answered on 7 Nov
+// 19:18Z (HTTP 404 {error: "not_found"}, no code by the device's rule): FAIL, each fact named. Planted on the good one:
+// another /app.js, no move in the bundle, a quote the rule refused or did not read, a quote that is not a refund move's,
+// a quote answered 502, the salts or heights apart, a used nonce, a 404 relay, a listed code at 200, 399 or 500, a code
+// not listed, an answer SIGN_HOST may not read (no access-control-allow-origin, "*", another origin): each FAIL. The quote is kept as facts (status, the rule's verdict at read time, depositType, to U), not its signature.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -25,7 +26,7 @@ test("recorded bad answer: SIGN_HOST before the card and the helper with no /v1/
   assert.equal(v.ok, false);
   assert.deepEqual(v.lines, [
     `BAD SIGN_HOST's bundle carries no refund move (${INTENTS_URL})`,
-    "BAD the helper carries no id's intent: POST /v1/intents answers 404 \"not_found\"",
+    "BAD the helper carries no id's intent: POST /v1/intents answers 404 null",
   ]);
 });
 
@@ -43,7 +44,16 @@ test("planted on the good answer: each fact taken away FAILs", () => {
     [{ ...g, near: [g.near[0], { ...g.near[1], salt: "00000000" }] }, "BAD intents.near's two RPCs disagree at one block"],
     [{ ...g, near: [g.near[0], { ...g.near[1], height: g.near[1].height + 1 }] }, "BAD intents.near's two RPCs disagree at one block"],
     [{ ...g, near: [g.near[0], { ...g.near[1], used: true }] }, "BAD is_nonce_used does not answer false for a fresh nonce on both RPCs"],
-    [{ ...g, relay: { status: 404, code: "not_found" } }, "BAD the helper carries no id's intent: POST /v1/intents answers 404 \"not_found\""],
+    [{ ...g, relay: { ...g.relay, status: 404, code: null } }, "BAD the helper carries no id's intent: POST /v1/intents answers 404 null"],
+    // the device's own rule: a listed code counts only at a status in 400-499, and only a listed one
+    [{ ...g, relay: { ...g.relay, status: 200 } }, "BAD the helper carries no id's intent: POST /v1/intents answers 200 \"bad_shape\""],
+    [{ ...g, relay: { ...g.relay, status: 500 } }, "BAD the helper carries no id's intent: POST /v1/intents answers 500 \"bad_shape\""],
+    [{ ...g, relay: { ...g.relay, status: 399 } }, "BAD the helper carries no id's intent: POST /v1/intents answers 399 \"bad_shape\""],
+    [{ ...g, relay: { ...g.relay, code: "not_found" } }, "BAD the helper carries no id's intent: POST /v1/intents answers 400 \"not_found\""],
+    // SIGN_HOST reads the answer cross-origin: the helper must name it
+    [{ ...g, relay: { ...g.relay, cors: "*" } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer: access-control-allow-origin \"*\""],
+    [{ ...g, relay: { ...g.relay, cors: null } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer: access-control-allow-origin null"],
+    [{ ...g, relay: { ...g.relay, cors: "https://confidential.unrealized.trade" } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer"],
   ];
   for (const [a, line] of planted) {
     const v = judge(a);
@@ -61,7 +71,7 @@ test("read() asks SIGN_HOST's / and /app.js, the quote for a fresh U by POST, in
     if (url.endsWith("/app.js")) return new Response(`x ${INTENTS_URL}`);
     if (url.startsWith("https://sign.")) return new Response(A.good.index);
     if (url.endsWith("/v0/quote")) return Response.json({ quote: {}, quoteRequest: { recipient: "e1".repeat(32) } }, { status: 201 });
-    if (url.endsWith("/v1/intents")) return Response.json({ error: { code: "bad_shape" } }, { status: 400 });
+    if (url.endsWith("/v1/intents")) return Response.json({ error: { code: "bad_shape" } }, { status: 400, headers: { "access-control-allow-origin": "https://sign.confidential.unrealized.trade" } });
     const h = url.includes("fastnear") ? 101 : 100;
     const value = body.params.method_name === "current_salt" ? "252812b3" : false;
     return Response.json({ result: { block_height: body.params.block_id ?? h, result: [...Buffer.from(JSON.stringify(value))] } });
@@ -71,16 +81,17 @@ test("read() asks SIGN_HOST's / and /app.js, the quote for a fresh U by POST, in
   assert.notEqual(a.quote.verdict, "pass");
   assert.equal(a.quote.toU, false);
   assert.deepEqual(a.near, [{ height: 100, salt: "252812b3", used: false }, { height: 100, salt: "252812b3", used: false }]);
-  assert.deepEqual(a.relay, { status: 400, code: "bad_shape" });
+  assert.deepEqual(a.relay, { status: 400, code: "bad_shape", cors: "https://sign.confidential.unrealized.trade" });
   assert.equal(a.intents_url, true);
   const reads = asked.filter((x) => x[2] !== null).map((x) => JSON.stringify(x.slice(2)));
   assert.deepEqual(reads.slice(0, 2), [JSON.stringify(["current_salt", "final"]), JSON.stringify(["current_salt", "final"])], "each RPC's final first");
   assert.deepEqual(reads.slice(2).sort(), [["current_salt", 100], ["current_salt", 100], ["is_nonce_used", 100], ["is_nonce_used", 100]].map((x) => JSON.stringify(x)).sort(), "then both at the lower height");
 });
 
-test("the relay's code read both ways the helper answers: a route refusal {error: {code}} and the helper's 404 {error: \"not_found\"}", () => {
+test("the relay's code read as the device reads it: only a route refusal {error: {code}}; the helper's 404 {error: \"not_found\"} is no code", () => {
   assert.equal(relayCode({ error: { code: "bad_shape" } }), "bad_shape");
-  assert.equal(relayCode({ error: "not_found" }), "not_found");
+  assert.equal(relayCode({ error: "not_found" }), null);
+  assert.equal(relayCode({ error: { code: 1 } }), null);
   assert.equal(relayCode({ code: "bad_shape" }), null);
   assert.equal(relayCode(null), null);
 });

@@ -54,7 +54,7 @@ function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () =>
   const fetchFn = (async (url: string) => (log.push(url === DEPOSIT_QUOTE_URL ? "quote" : url === RELEASE_INTENTS_URL ? "send" : url), Response.json({}, { status: url === DEPOSIT_QUOTE_URL ? 201 : 200 }))) as typeof fetch;
   const held = o.held ?? [25_000_000n, 25_000_000n];
   const p = runRefundMove(
-    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0] }, { blockTimeNs: T + 5_000_000n, held: held[1] }], salt: "252812b3", priorMs: null },
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0] }, { blockTimeNs: T + 5_000_000n, held: held[1] }], salt: "252812b3", priorMs: null, height: 223_478_949 },
     { check, fetchFn, now: () => NOW, openKey: async (fn) => (log.push("key"), fn(new Uint8Array(32))), record: async () => void log.push("record") },
   );
   return { p, log };
@@ -66,6 +66,7 @@ test("the steps in order: quote, its check, the intent's check, the key opened t
   assert.equal(out.kind, "sent");
   assert.deepEqual(r.log, ["quote", "check INTENTS", "intent null", "key", "sign", "record", "send"]);
   assert.equal(out.kind === "sent" && out.move.deadline_ms, NOW - 2_000 + REFUND_INTENT_WINDOW_MS, "the lower block time + 120 s");
+  assert.equal(out.kind === "sent" && out.move.height, 223_478_949, "the block its reads were made at, kept with the move (L2)");
 });
 
 test("under MIN_DEPOSIT at the quote's floor: nothing signed, recorded or sent", async () => {
@@ -101,7 +102,7 @@ function relayRun(answer: () => Response, o: { probe?: boolean; probeAnswer?: ()
     return (log.push("send"), answer());
   }) as typeof fetch;
   const p = runRefundMove(
-    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n }, { blockTimeNs: T, held: 25_000_000n }], salt: "252812b3", priorMs: null, probe: o.probe },
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n }, { blockTimeNs: T, held: 25_000_000n }], salt: "252812b3", priorMs: null, height: 223_478_949, probe: o.probe },
     { check, fetchFn, now: () => NOW, openKey: async (fn) => fn(new Uint8Array(32)), record: o.record ?? (async () => void log.push("record")) },
   );
   return { p, log };
@@ -138,5 +139,19 @@ test("after a refusal (probe): the route is asked first with an empty body; no a
     const r = relayRun(() => Response.json({}), { probe: true, probeAnswer });
     assert.deepEqual(await r.p, { kind: "refused", why: "relay" });
     assert.deepEqual(r.log, ["probe"]);
+  }
+});
+
+test("pin (delta): the relayer's answer is read up to INTENTS_ANSWER_MAX_BYTES (1024 B): an answer of exactly that many bytes is read, one byte more is no code", async () => {
+  assert.equal(INTENTS_ANSWER_MAX_BYTES, 1_024);
+  const body = (n: number) => {
+    const j = JSON.stringify({ error: { code: "sender_struck" } });
+    return j.slice(0, -1) + " ".repeat(n - j.length) + "}";
+  };
+  assert.equal(body(1_024).length, 1_024);
+  for (const [n, code] of [[1_024, "sender_struck"], [1_025, null]] as const) {
+    const r = relayRun(() => new Response(body(n), { status: 403 }));
+    const out = await r.p;
+    assert.deepEqual(out.kind === "sent" && out.code, code, `${n} B`);
   }
 });

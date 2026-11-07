@@ -226,7 +226,7 @@ const opOf = async (w: WalletStore, id = "dq-1") => (await w.get("ops", id)) as 
 const mover = (send: (u: string, m: MoveRecord, ask: FollowMoveAsk) => Promise<void> | void) => async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
   const t = ask.reads.map((r) => r.blockTimeNs / 1_000_000n);
   const deadline_ms = Number(t[0]! < t[1]! ? t[0]! : t[1]!) + REFUND_INTENT_WINDOW_MS;
-  const m: MoveRecord = { nonce: versionedNonce(ask.salt, deadline_ms), deadline_ms, asset: ask.asset, amount: ask.reads[0].held.toString() };
+  const m: MoveRecord = { nonce: versionedNonce(ask.salt, deadline_ms), deadline_ms, asset: ask.asset, amount: ask.reads[0].held.toString(), height: ask.height };
   await ask.record(m);
   await send(ask.u, m, ask);
   return { kind: "sent", move: m, status: 200, code: null };
@@ -1594,28 +1594,29 @@ test("L2: a move that lands with its nonce pruned before any read in its window 
   assert.equal(op.stage, "in_transit");
 });
 
-/** A refund move the relayer answers `status` / `code` (recorded first, as runRefundMove does); each call logged. */
-const answered = (log: string[], status: number, code: "sender_struck" | null) => async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+/** A refund move the relayer answers `status` / `code` (recorded first, as runRefundMove does); each call logged. A probe
+ *  (the route asked first) passes when the route answers its own refusal: a relayer that carries or strikes has one. */
+const answered = (log: string[], status: number, code: "sender_struck" | "simulation_refused" | null) => async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
   log.push(`move probe=${ask.probe === true}`);
-  if (ask.probe === true && status !== 200) return { kind: "refused", why: "relay" };
+  if (ask.probe === true && status !== 200 && code === null) return { kind: "refused", why: "relay" };
   const r = await mover(() => {})(ask);
   return r.kind === "sent" ? { ...r, status, code } : r;
 };
 
-test("M2: sender_struck from the relayer: nothing more is signed for U, every op of U held sender_struck (the way out)", async () => {
+test("M2: sender_struck from the relayer on a move: nothing more is signed for U this session, and the refunded op whose money it was ends held sender_struck (the way out)", async () => {
   const t = await setup(["REFUNDED"]);
   t.chain.a.held = t.chain.b.held = CREDIT;
   const log: string[] = [];
   t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
   const out = await followDeposit(t.args, { ...t.deps, refundMove: answered(log, 403, "sender_struck"), untilFinal: true, signal: stop(t, 40) }).catch((e) => ({ kind: `threw ${e.message}` }));
   const op = await opOf(t.w);
-  assert.deepEqual(log, ["move probe=false"]);
+  assert.deepEqual(log, ["move probe=true"]);
   assert.equal(op.stage, "held");
   assert.equal(op.follow.why, "sender_struck");
   assert.equal(out.kind, "held");
 });
 
-test("M2: a move the relayer does not carry (404, no route): the next one no sooner than MOVE_RETRY_MIN_MS, doubling to the cap, each asking the route first; the rounds at the slow pace", async () => {
+test("M2 and L5: a relayer with no route (404): each ask, the session's first included, asks the route first and nothing is signed; the next no sooner than MOVE_RETRY_MIN_MS, doubling to the cap; the rounds at the slow pace", async () => {
   const t = await setup(["REFUNDED"]);
   t.chain.a.held = t.chain.b.held = CREDIT;
   const log: string[] = [];
@@ -1629,8 +1630,8 @@ test("M2: a move the relayer does not carry (404, no route): the next one no soo
     await t.deps.sleep!(ms);
   };
   await followDeposit(t.args, { ...t.deps, now: () => clock, sleep, refundMove: async (a) => (at.push(clock - NOW), refundMove(a)), untilFinal: true, signal: stop(t, 120) }).catch(() => {});
-  assert.equal(log[0], "move probe=false", "the first move is sent");
-  assert.ok(log.length >= 3 && log.slice(1).every((l) => l === "move probe=true"), `then only route probes: ${log}`);
+  assert.ok(log.length >= 3 && log.every((l) => l === "move probe=true"), `only route probes: ${log}`);
+  assert.equal((await opOf(t.w)).follow.move, undefined, "no move signed or recorded");
   const gaps = at.slice(1).map((x, k) => x - at[k]!);
   assert.ok(gaps.every((g) => g >= MOVE_RETRY_MIN_MS), `no move sooner than ${MOVE_RETRY_MIN_MS} ms: ${gaps}`);
   assert.ok(gaps.at(-1)! > gaps[0]!, `the wait grows: ${gaps}`);
@@ -1764,4 +1765,200 @@ test("L1: two refunded ops on one U in two assets: when A's move lands, B (its o
   t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
   await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 20) }).catch(() => {});
   assert.ok(sawB !== null && !sawB.startsWith("done"), `B reads ${sawB} while its own refund is still under U`);
+});
+
+// ---------- review wrm-cf8a5524 (delta) ----------
+test("M1 (delta): U's done op gets its final once a held op's move is past its deadline on both RPCs: a struck op's move does not keep U followed", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const start = t.chain.a.timeMs;
+  // A: a done op of the same U (its own SUCCESS), not final yet, its quote's deadline 10 min ahead of the chain
+  await t.w.put("ops", "dq-A", { kind: "deposit", stage: "done", since_ms: NOW, amount_usd: "1", txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: "c".repeat(64), deadline_ms: start + 600_000, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "SUCCESS", delivered: MIN_OUT, notes: [], bound: MIN_OUT } });
+  const log: string[] = [];
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  const sig = stop(t, 60);
+  await followDeposit(t.args, { ...t.deps, refundMove: answered(log, 403, "sender_struck"), untilFinal: true, signal: sig }).catch(() => {});
+  // B's own follow returned held; U's follower runs on for A (adopted) until A's final or the stop at 60 rounds
+  for (let k = 0; k < 5000 && !sig.aborted && (await opOf(t.w, "dq-A")).follow.final !== true; k++) await turn();
+  const a = await opOf(t.w, "dq-A"), b = await opOf(t.w);
+  assert.deepEqual([b.stage, b.follow.why, b.follow.move !== undefined], ["held", "sender_struck", true], "B held with its struck move recorded");
+  assert.equal(a.follow.final, true, "A's deadline past on both RPCs, nothing to bind or move: A is final");
+});
+
+test("pin (delta): after sender_struck nothing more is signed for U this session, though U holds the struck move's money and a done op of U still reads REFUNDED", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const start = t.chain.a.timeMs;
+  // A: done on its money back (moved), REFUNDED its last status, not final: still among U's ops inside intents.near
+  await t.w.put("ops", "dq-A", { kind: "deposit", stage: "done", refunded: true, since_ms: NOW, amount_usd: "1", txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: "c".repeat(64), deadline_ms: start + 600_000, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "REFUNDED", moved: true, notes: [], bound: MIN_OUT } });
+  const log: string[] = [];
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  const sig = stop(t, 60);
+  await followDeposit(t.args, { ...t.deps, refundMove: answered(log, 403, "sender_struck"), untilFinal: true, signal: sig }).catch(() => {});
+  for (let k = 0; k < 5000 && !sig.aborted && (await opOf(t.w, "dq-A")).follow.final !== true; k++) await turn();
+  assert.deepEqual(log, ["move probe=true"], "one move, struck: none after it");
+  assert.equal((await opOf(t.w, "dq-A")).follow.final, true);
+});
+
+test("L4 (delta): sender_struck on a move holds only U's ops whose money waits under U inside intents.near; U's other op, its send in flight, is followed on", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const C = "c".repeat(64);
+  await t.w.put("ops", "dq-C", { kind: "deposit", stage: "waiting", since_ms: NOW, txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: C, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, sent: true, status: "KNOWN_DEPOSIT_TX" } });
+  const pa = perAddress(t.u, { [ADDR]: ["REFUNDED"], [C]: ["KNOWN_DEPOSIT_TX"] });
+  const log: string[] = [];
+  const out = await followDeposit(t.args, { ...t.deps, fetchFn: pa.fetchFn, refundMove: answered(log, 403, "sender_struck"), signal: stop(t, 20) }).catch((e) => ({ kind: `threw ${e.message}` }));
+  assert.equal(out.kind, "held");
+  assert.equal((await opOf(t.w)).follow.why, "sender_struck");
+  const c = await opOf(t.w, "dq-C");
+  assert.equal(c.stage, "waiting", "a send in flight is no refund under U: not held");
+  assert.equal(c.follow.why, undefined);
+});
+
+test("L5 and pin (delta): a session's first move asks the route first; once the relayer carries one (2xx), the next is sent without asking", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const log: string[] = [];
+  // each move carried (200), none lands: past its window a new one is signed
+  t.onTick.fn = () => (t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 60_000);
+  await followDeposit(t.args, { ...t.deps, refundMove: answered(log, 200, null), signal: stop(t, 20) }).catch(() => {});
+  assert.ok(log.length >= 2, `${log}`);
+  assert.equal(log[0], "move probe=true", "the session's first move: the route first");
+  assert.ok(log.slice(1).every((l) => l === "move probe=false"), `after a carried move, no probe: ${log}`);
+});
+
+test("L2 (delta): a read at a block below the move's signing read (one RPC's final steps back, within the spread) is no read: the refund's own arrival is never read as a foreign debit", async () => {
+  const t = await setup(["REFUNDED"]);
+  // the refund lands at height H0: all of CREDIT under U from there on
+  const H0 = t.chain.a.height + 2n;
+  t.chain.heldAt = (_k, at) => (at >= H0 ? CREDIT : 0n);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let sent = false;
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const r = await mover(() => {})(ask);
+    sent = true;
+    // side a's next final steps back below H0 (a load-balanced provider), b ahead, within HEIGHT_SPREAD_MAX
+    t.chain.a.height = H0 - 3n;
+    return r;
+  };
+  const seen: string[] = [];
+  t.onTick.fn = async () => {
+    const op = await opOf(t.w);
+    seen.push(`${op.stage}${op.follow.move?.foreign ? " foreign" : ""}`);
+  };
+  await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 12) }).catch(() => {});
+  assert.equal(sent, true);
+  assert.ok(!seen.some((s) => s.endsWith("foreign")), `no foreign debit: the only change under U was the refund's own arrival (${seen})`);
+});
+
+test("L2 (delta): after that stepped-back read, the move lands and its nonce is pruned before the next read: through, its money bound, never held moved_out", async () => {
+  const t = await setup(["REFUNDED"]);
+  const H0 = t.chain.a.height + 2n;
+  let landed = false;
+  t.chain.heldAt = (_k, at) => (landed ? 0n : at >= H0 ? CREDIT : 0n);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let moved = false;
+  const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => {
+    const r = await mover(() => {})(ask);
+    t.chain.a.height = H0 - 3n;
+    moved = true;
+    return r;
+  };
+  let jumped = false;
+  t.onTick.fn = async () => {
+    const op = await opOf(t.w);
+    if (moved && !jumped && t.chain.a.height >= H0) {
+      // the move lands (U's balance of the asset to 0), 1Click delivers its USDC to U on the token; the tab is shut until
+      // past the move's deadline, and intents.near's cleanup_nonces prunes the used nonce meanwhile
+      jumped = true;
+      landed = true;
+      t.chain.credit(CREDIT);
+      t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 200_000;
+    }
+    void op;
+  };
+  await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 20) }).catch(() => {});
+  const op = await opOf(t.w);
+  assert.notEqual(op.stage, "held", `the move landed and its money was bound: not held (${op.follow.why})`);
+  assert.equal(op.follow.moved, true);
+  assert.ok(t.binds.length >= 1, "U's USDC bound");
+});
+
+test("L2 (delta): after a move over unlanded, a read below the block that found it over (the refund not there yet on that RPC) never holds the op moved_out", async () => {
+  const t = await setup(["REFUNDED"]);
+  const H0 = t.chain.a.height + 2n;
+  t.chain.heldAt = (_k, at) => (at >= H0 ? CREDIT : 0n);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  let stepped = false;
+  t.onTick.fn = async () => {
+    const op = await opOf(t.w);
+    // the move is out: the chain's time past its window, so it reads over unlanded on the next round
+    if (op.follow.move !== undefined) t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 200_000;
+    // once over: side a's final steps back below H0, within the spread
+    if (op.follow.unlanded === true && !stepped) (stepped = true), (t.chain.a.height = H0 - 3n);
+  };
+  await followDeposit(t.args, { ...t.deps, refundMove: mover(() => {}), signal: stop(t, 6) }).catch(() => {});
+  const op = await opOf(t.w);
+  assert.equal(stepped, true);
+  assert.notEqual(op.follow.why, "moved_out", "U still holds the refund at every block past its arrival");
+});
+
+test("M2 (delta): a move the relayer refuses with a code of its own (simulation_refused): it stays out at the slow pace, the next no sooner than MOVE_RETRY_MIN_MS, each asking the route first", async () => {
+  const t = await setup(["REFUNDED"]);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const log: string[] = [];
+  let clock = NOW;
+  const at: number[] = [];
+  const refundMove = answered(log, 400, "simulation_refused");
+  const sleep = async (ms: number) => {
+    clock += ms;
+    t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + ms;
+    await t.deps.sleep!(ms);
+  };
+  let out = 0;
+  t.onTick.fn = async () => void ((await opOf(t.w)).follow.move !== undefined && out++);
+  await followDeposit(t.args, { ...t.deps, now: () => clock, sleep, refundMove: async (a) => (at.push(clock - NOW), refundMove(a)), untilFinal: true, signal: stop(t, 60) }).catch(() => {});
+  assert.ok(log.length >= 2 && log.every((l) => l === "move probe=true"), `${log}`);
+  assert.ok(out > 0, "a refused move is out (recorded) for its window");
+  const gaps = at.slice(1).map((x, k) => x - at[k]!);
+  assert.ok(gaps.every((g) => g >= MOVE_RETRY_MIN_MS), `no move sooner than ${MOVE_RETRY_MIN_MS} ms: ${gaps}`);
+  assert.ok(t.sleeps.every((ms) => ms >= SLOW_MS), `every round at the slow pace, the refused move out included: ${t.sleeps.filter((ms) => ms < SLOW_MS).length} faster`);
+});
+
+test("L2 (delta), after a reload: the move's own block is kept with it, so a first read below it in the new session is no read (never a foreign debit)", async () => {
+  const t = await setup(["REFUNDED"]);
+  const H0 = t.chain.a.height + 2n;
+  t.chain.heldAt = (_k, at) => (at >= H0 ? CREDIT : 0n);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const ac = new AbortController();
+  // the tab closes as the move goes out
+  const refundMove = mover(() => void ac.abort(new Error("reload")));
+  await assert.rejects(followDeposit(t.args, { ...t.deps, refundMove, signal: ac.signal }), /reload/);
+  assert.ok((await opOf(t.w)).follow.move !== undefined);
+  // the new session's first final on side a is from before the refund arrived, within the spread
+  t.chain.a.height = H0 - 3n;
+  const seen: string[] = [];
+  t.onTick.fn = async () => void seen.push(`${(await opOf(t.w)).follow.move?.foreign ? "foreign" : "-"}`);
+  await followDeposit(t.args, { ...t.deps, refundMove: mover(() => {}), signal: stop(t, 4) }).catch(() => {});
+  assert.ok(!seen.includes("foreign"), `${seen}`);
+});
+
+test("L2 (delta), after a reload: the block that found the last move over is kept, so a first read below it in the new session never holds the op moved_out", async () => {
+  const t = await setup(["REFUNDED"]);
+  const H0 = t.chain.a.height + 2n;
+  t.chain.heldAt = (_k, at) => (at >= H0 ? CREDIT : 0n);
+  t.chain.a.held = t.chain.b.held = CREDIT;
+  const ac = new AbortController();
+  t.onTick.fn = async () => {
+    const op = await opOf(t.w);
+    if (op.follow.move !== undefined) t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 200_000;
+    // the move found over: the tab closes
+    if (op.follow.unlanded === true) ac.abort(new Error("reload"));
+  };
+  await assert.rejects(followDeposit(t.args, { ...t.deps, refundMove: mover(() => {}), signal: ac.signal }), /reload/);
+  assert.equal((await opOf(t.w)).follow.unlanded, true);
+  t.chain.a.height = H0 - 3n;
+  t.onTick.fn = () => {};
+  await followDeposit(t.args, { ...t.deps, refundMove: mover(() => {}), signal: stop(t, 2) }).catch(() => {});
+  assert.notEqual((await opOf(t.w)).follow.why, "moved_out");
 });

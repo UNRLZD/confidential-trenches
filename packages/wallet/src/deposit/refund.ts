@@ -89,12 +89,16 @@ export interface RefundRead {
   blockTimeNs: bigint;
   held: bigint;
 }
-/** The move as the op records it before it is sent: its nonce, deadline (unix ms), asset and amount. */
+/** The move as the op records it before it is sent: its nonce, deadline (unix ms), asset, amount and the block its reads
+ *  were made at. */
 export interface MoveRecord {
   nonce: string;
   deadline_ms: number;
   asset: string;
   amount: string;
+  /** The block both RPCs' reads were made at: a later read of the move below it is no read (a provider's final that
+   *  steps back answers from before the refund arrived). */
+  height: number;
   /** A debit of U's balance below the move read in its window with its nonce unused: another intent of U's own. */
   foreign?: true;
 }
@@ -123,6 +127,8 @@ export interface RefundMoveAsk {
   /** The one asset moved (a 1Click id, "nep141:<token>") and the balance both RPCs read at one block. */
   asset: string;
   reads: readonly [RefundRead, RefundRead];
+  /** The block those reads were made at (both RPCs at one height), kept with the move. */
+  height: number;
   /** intents.near's current salt (8 hex), read on both RPCs alike. */
   salt: string;
   /** The deadline (unix ms) of U's earlier move for this money that never landed, or null. */
@@ -220,7 +226,7 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
     const nonce = versionedNonce(ask.salt, deadlineMs);
     const payload = transferPayload({ u: ask.u, deadlineMs, nonce, receiver: r.depositAddress, asset: ask.asset, amount: r.amountIn });
     intent = deps.check.intent(payload, q, ask.reads, ask.priorMs === null ? null : new Date(ask.priorMs).toISOString());
-    move = { nonce, deadline_ms: deadlineMs, asset: ask.asset, amount: r.amountIn.toString() };
+    move = { nonce, deadline_ms: deadlineMs, asset: ask.asset, amount: r.amountIn.toString(), height: ask.height };
   } catch {
     return { kind: "refused", why: "intent" };
   }

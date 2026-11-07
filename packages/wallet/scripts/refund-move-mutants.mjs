@@ -2,7 +2,8 @@
 // refund move at a time (the wallet's follow.ts and refund.ts, SIGN_HOST's deposit-follow.ts), runs the test that holds
 // that rule, expects it to fail, and puts the source back. Each rule is wallet.md §2.4 point 8 and the §2.8 refund move
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
-// Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held.
+// Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held; then the delta review
+// of cf8a5524 (M1, L2, L4, L5 and its three pins).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -28,7 +29,7 @@ const M = [
   ["no new move for what U holds after a move (D1)", FOLLOW,
     [["op.follow.status === \"REFUNDED\" && op.stage !== \"held\" && op.follow.final !== true", "op.follow.status === \"REFUNDED\" && op.stage !== \"held\" && op.follow.final !== true && !op.follow.moved"]], WT, "D1: the move is through"],
   ["final while a move is out", FOLLOW,
-    [["if (deps.untilFinal && idle && !movable && !(await opsOfU()).some(([, op]) => op.follow.move !== undefined))", "if (deps.untilFinal && idle)"]], WT, "D1: the move is through"],
+    [["if (deps.untilFinal && idle && !movable && !moveOut)", "if (deps.untilFinal && idle)"]], WT, "D1: the move is through"],
   ["a refund under MIN_DEPOSIT not held", FOLLOW,
     [["await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });", "void [id, op];"]], WT, "under MIN_DEPOSIT waits"],
   ["dust under MIN_DEPOSIT asked about every round", FOLLOW,
@@ -53,11 +54,11 @@ const M = [
   ["M2: sender_struck not read: U's moves go on", FOLLOW,
     [["if (res.kind === \"sent\" && res.code === \"sender_struck\") {", "if (false) {"]], WT, "M2: sender_struck"],
   ["M2: a refused move asked again at once", FOLLOW,
-    [["else if (res.kind === \"sent\" || (res.kind === \"refused\" && res.why === \"relay\")) backOff();", ""]], WT, "M2: a move the relayer"],
+    [["else if (res.kind === \"sent\" || (res.kind === \"refused\" && res.why === \"relay\")) backOff();", ""]], WT, "M2 and L5: a relayer with no route|M2 \\(delta\\)"],
   ["M2: 1 Hz reads on a move the relayer refused", FOLLOW,
-    [["if (!relayDown) fast = true;", "fast = true;"]], WT, "M2: a move the relayer"],
+    [["if (!relayDown) fast = true;", "fast = true;"]], WT, "M2 \\(delta\\)"],
   ["M2: a new quote and signature with no probe of the route", FOLLOW,
-    [["probe: relayDown,", "probe: false,"]], WT, "M2: a move the relayer"],
+    [["probe: relayDown,", "probe: false,"]], WT, "M2 and L5: a relayer with no route"],
   ["M2: a REFUNDED status read every round", FOLLOW,
     [["if (op.follow.status === \"REFUNDED\") statusAt.set(id, now() + SLOW_MAX_MS);", ""]], WT, "M2: REFUNDED is read again"],
   ["M2: a listed code read on any status", REFUND,
@@ -89,6 +90,29 @@ const M = [
     [["          k.secretKey.fill(0);\n        }\n      } finally {\n        seed.fill(0);", "          k.secretKey.fill(0);\n        }\n      } finally {\n        void 0;"]], WT, "the refund move's key"],
   ["a record failure swallowed: the move sent unrecorded", REFUND,
     [["await deps.record(move);", "await deps.record(move).catch(() => {});"]], WR, "a record that fails"],
+  // the delta review of cf8a5524
+  ["M1 (delta): a held op's move keeps U followed past its deadline", FOLLOW,
+    [["(op.stage !== \"held\" || !(await pastOnBoth(rpcs, m.deadline_ms)))", "true"]], WT, "M1 \\(delta\\)"],
+  ["L2 (delta): a read below the floor accepted", FOLLOW,
+    [["if (r === null || r.height < floor) return null;", "if (r === null) return null;"]], WT, "L2 \\(delta\\)"],
+  ["L2 (delta): the move's own block not kept as a floor", FOLLOW,
+    [["Math.max(op.follow.move?.height ?? 0, op.follow.prior_height ?? 0)", "(op.follow.prior_height ?? 0)"]], WT, "L2 \\(delta\\), after a reload"],
+  ["L2 (delta): the block that found a move over not kept", FOLLOW,
+    [["prior_ms: move.deadline_ms, prior_height: at.height }", "prior_ms: move.deadline_ms }"]], WT, "L2 \\(delta\\), after a reload"],
+  ["L2 (delta): the move recorded without its block", REFUND,
+    [["amount: r.amountIn.toString(), height: ask.height };", "amount: r.amountIn.toString() } as MoveRecord;"]], WR, "the steps in order"],
+  ["L4 (delta): sender_struck holds every op of U", FOLLOW,
+    [["              for (const [id] of open) {\n                const op = (await ops.get(\"ops\", id)) as DepositOp;\n                if (!ENDS.has(op.stage)) await write(id, \"held\", legFacts(op, \"held\"), { why: \"sender_struck\" });\n              }", "              await holdAll(\"sender_struck\");"]], WT, "L4 \\(delta\\)"],
+  ["L5 (delta): a session's first move sent with no probe", FOLLOW,
+    [["let relayDown = true;", "let relayDown = false;"]], WT, "L5 and pin \\(delta\\)"],
+  ["pin (delta): a 2xx leaves the route asked first", FOLLOW,
+    [["              relayDown = false;\n              moveWait = 0;", "              moveWait = 0;"]], WT, "L5 and pin \\(delta\\)"],
+  ["pin (delta): moves signed for U after sender_struck", FOLLOW,
+    [["deps.refundMove !== undefined && !struck;", "deps.refundMove !== undefined;"]], WT, "pin \\(delta\\): after sender_struck"],
+  ["pin (delta): the relayer's answer read past 1024 B", REFUND,
+    [["export const INTENTS_ANSWER_MAX_BYTES = 1_024;", "export const INTENTS_ANSWER_MAX_BYTES = 1_025;"]], WR, "pin \\(delta\\)"],
+  ["pin (delta): the relayer's answer cut short of 1024 B", REFUND,
+    [["export const INTENTS_ANSWER_MAX_BYTES = 1_024;", "export const INTENTS_ANSWER_MAX_BYTES = 1_023;"]], WR, "pin \\(delta\\)"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {

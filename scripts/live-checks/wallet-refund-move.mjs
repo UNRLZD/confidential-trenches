@@ -9,15 +9,17 @@
 //     keys, the deposit path's floors with MIN_DEPOSIT, read through the kit's entry): a live quote moves nothing until something is sent to it;
 //   - intents.near on two RPCs (FastNear and dRPC) at one block: its current_salt agrees (the nonce the device builds
 //     carries it) and is_nonce_used answers false for a fresh nonce of a fresh id (the read the move's end rests on);
-//   - the helper carries an id's intents: POST /v1/intents with an empty body answers one of the route's own refusals
-//     (kit helper/v1.ts HELPER_INTENTS_CODES, bad_shape for this body), never 404.
+//   - the helper carries an id's intents: POST /v1/intents with an empty body answers one of the route's own refusals,
+//     judged by the device's own rule (refund.ts postIntents: {error: {code}} with a code in the kit's
+//     HELPER_INTENTS_CODES, bad_shape for this body, at a status in 400-499), and SIGN_HOST may read it
+//     (access-control-allow-origin is SIGN_HOST: the page reads the answer cross-origin).
 // A page without the move leaves every refunded deposit under U until withdraw.open; a helper with no /v1/intents
 // carries no move; a quote the rule refuses is a refund that never moves.
 // The recorded answers (scripts/live-checks/wallet-refund-move.answers.json): good, this card's committed SIGN_HOST
 // build, the helper's live quote and intents.near's live reads of 7 Nov, and /v1/intents's answer as the kit's contract
-// gives it (bad_shape, HTTP 400: the route is not deployed yet, so that one fact is the contract's, not a recording);
-// bad, SIGN_HOST as served on 7 Nov before the card, the same live reads, and /v1/intents as the helper answered it on
-// 7 Nov (HTTP 404 not_found).
+// gives it (bad_shape, HTTP 400, SIGN_HOST's origin allowed as on every helper answer: the route is not deployed yet, so
+// that one fact is the contract's, not a recording); bad, SIGN_HOST as served on 7 Nov before the card, the same live
+// reads, and /v1/intents as the helper answered it on 7 Nov 19:18Z (HTTP 404 {error: "not_found"}, SIGN_HOST allowed).
 //   node scripts/live-checks/wallet-refund-move.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 // Runs: pending helper-id-intents, it fails on every deploy until the helper serves POST /v1/intents (H4.3), so a list would undo each deploy
@@ -71,7 +73,7 @@ export function quoteFacts(status, request, answer) {
   return { status, verdict: status === 200 || status === 201 ? ruleVerdict(request, answer) : null, depositType: qr.depositType ?? null, toU: qr.recipient === request.recipient && qr.refundTo === request.recipient, depositAddress: answer?.quote?.depositAddress ?? null };
 }
 
-/** The verdict on an answer { index, sha384, intents_url, quote: quoteFacts, near: [{ height, salt, used }, ...], relay: { status, code } }. */
+/** The verdict on an answer { index, sha384, intents_url, quote: quoteFacts, near: [{ height, salt, used }, ...], relay: { status, code, cors } }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -88,7 +90,9 @@ export function judge(a) {
   else if (n[0].salt !== n[1].salt || n[0].height !== n[1].height) bad("intents.near's two RPCs disagree at one block");
   if (n.length === 2 && n.some((s) => s?.used !== false)) bad("is_nonce_used does not answer false for a fresh nonce on both RPCs");
   const r = a?.relay ?? {};
-  if (r.status === 404 || !HELPER_INTENTS_CODES.includes(r.code)) bad(`the helper carries no id's intent: POST /v1/intents answers ${r.status} ${JSON.stringify(r.code)}`);
+  // the device's rule (wallet refund.ts postIntents): a listed code in the object form, at a 4xx status
+  if (!(HELPER_INTENTS_CODES.includes(r.code) && Number.isInteger(r.status) && r.status >= 400 && r.status < 500)) bad(`the helper carries no id's intent: POST /v1/intents answers ${r.status} ${JSON.stringify(r.code)}`);
+  if (r.cors !== SIGN) bad(`SIGN_HOST may not read the helper's /v1/intents answer: access-control-allow-origin ${JSON.stringify(r.cors ?? null)}`);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
@@ -100,8 +104,9 @@ const call = async (fetchFn, url, method, args, block) => {
   return { height: j.result.block_height, value: JSON.parse(Buffer.from(j.result.result).toString()) };
 };
 
-/** The relayer's code: the route's refusals are {error: {code}} (kit helper/v1.ts); the helper's 404 is {error: "not_found"}. */
-export const relayCode = (body) => (typeof body?.error === "string" ? body.error : typeof body?.error?.code === "string" ? body.error.code : null);
+/** The relayer's code as the device reads it (wallet refund.ts postIntents): only the route's {error: {code}}; any other
+ *  shape (the helper's 404 {error: "not_found"} among them) is no code. */
+export const relayCode = (body) => (typeof body?.error === "object" && body.error !== null && typeof body.error.code === "string" ? body.error.code : null);
 
 export async function read(fetchFn = fetch, now = Date.now()) {
   const get = async (path) => {
@@ -130,7 +135,7 @@ export async function read(fetchFn = fetch, now = Date.now()) {
   );
   const rr = await fetchFn(INTENTS_URL, { method: "POST", redirect: "error", headers: { "content-type": "application/json", origin: SIGN }, body: "{}" });
   const relayBody = await rr.json().catch(() => null);
-  return { index, sha384: sha384(js), intents_url: js.includes(INTENTS_URL), quote: quoteFacts(qr.status, request, answer), near, relay: { status: rr.status, code: relayCode(relayBody) } };
+  return { index, sha384: sha384(js), intents_url: js.includes(INTENTS_URL), quote: quoteFacts(qr.status, request, answer), near, relay: { status: rr.status, code: relayCode(relayBody), cors: rr.headers.get("access-control-allow-origin") } };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {

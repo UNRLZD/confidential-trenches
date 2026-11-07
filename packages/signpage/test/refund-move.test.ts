@@ -76,6 +76,7 @@ function harness(o: { held?: bigint; answer?: (req: OneClickRequest) => Answer; 
     reads: [{ blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held }, { blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held }],
     salt: SALT,
     priorMs: null,
+    height: 223_478_949,
     openKey: async (fn) => {
       log.push("key");
       const k = Uint8Array.from(ID_SECRET);
@@ -116,7 +117,7 @@ test("a refund is moved: the quote asked as §2.4 point 8 names it, checked, the
   assert.equal(Date.parse(p.deadline), BLOCK_MS + 120_000);
   const n = base64.decode(p.nonce);
   assert.equal(Buffer.from(n.subarray(0, 9)).toString("hex"), `5628f6c600${SALT}`, "a V1 nonce under the read salt");
-  assert.deepEqual(h.records, [{ nonce: p.nonce, deadline_ms: BLOCK_MS + 120_000, asset: SOL_USDC, amount: AMOUNT.toString() }]);
+  assert.deepEqual(h.records, [{ nonce: p.nonce, deadline_ms: BLOCK_MS + 120_000, asset: SOL_USDC, amount: AMOUNT.toString(), height: 223_478_949 }]);
   assert.ok(h.keys.every((k) => k.every((b) => b === 0)), "U's key zeroed");
 });
 
@@ -221,6 +222,8 @@ test("SIGN_HOST's follow passes the refund move: a REFUNDED op on mainnet with U
       signAnswer(a, mockKey.privateKey);
       return Response.json(a, { status: 201 });
     }
+    // the session's first move asks the route first: an empty body gets the route's own refusal (kit helper/v1.ts)
+    if (url === RELEASE_INTENTS_URL && init?.body === "{}") return Response.json({ error: { code: "bad_shape" } }, { status: 400 });
     if (url === RELEASE_INTENTS_URL) return (posted.push(JSON.parse(String(init?.body))), Response.json({ tx_hash: "1" }));
     return new Response("{}", { status: 404 }); // 1Click's status: no read
   }) as typeof fetch;
@@ -310,11 +313,11 @@ async function relayLoop(intentsAnswer: () => Response, simMinutes: number) {
   return { c, perMin: (n: number) => n / (simMs / 60_000), op };
 }
 
-test("M2: no route on /v1/intents (404): one move signed, then only route probes at a growing wait, no quote and no seed opened; RPC and status reads at the slow pace", async () => {
+test("M2 and L5: no route on /v1/intents (404): the session's first ask asks the route first, so nothing is signed; only route probes at a growing wait, no quote and no seed opened; RPC and status reads at the slow pace", async () => {
   const r = await relayLoop(() => new Response("not found", { status: 404 }), 10);
-  assert.equal(r.c.sends, 1, "one signed move in 10 minutes");
-  assert.equal(r.c.quotes, 1);
-  assert.equal(r.c.seeds, 1);
+  assert.equal(r.c.sends, 0, "no signed move in 10 minutes");
+  assert.equal(r.c.quotes, 0);
+  assert.equal(r.c.seeds, 0);
   assert.ok(r.c.probes >= 1 && r.c.probes <= 3, `route probes at 2, 6, 14 min...: ${r.c.probes}`);
   assert.ok(r.perMin(r.c.rpc) < 100, `RPC calls ${r.perMin(r.c.rpc).toFixed(1)}/min`);
   assert.ok(r.perMin(r.c.statusReads) <= 2, `status reads ${r.perMin(r.c.statusReads).toFixed(1)}/min`);
@@ -324,7 +327,7 @@ test("M2: no route on /v1/intents (404): one move signed, then only route probes
 test("M2: sender_struck (HTTP 403, final for U at the helper): nothing more signed for U, the op held sender_struck for the way out", async () => {
   const r = await relayLoop(() => Response.json({ error: { code: "sender_struck" } }, { status: 403 }), 10);
   assert.equal(r.c.sends, 1);
-  assert.equal(r.c.probes, 0);
+  assert.equal(r.c.probes, 1, "the session's first move asks the route first (L5)");
   assert.equal(r.op.stage, "held");
   assert.equal(r.op.follow.why, "sender_struck");
 });
