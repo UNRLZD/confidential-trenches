@@ -24,9 +24,12 @@ export function intentsReads(rpcs: readonly [Rpc, Rpc], now: () => number = Date
     async simulate(signed: HelperSignedIntent) {
       try {
         const b = await agreedBlock(rpcs, now);
-        // viewAt: both providers ran the view at block b and answered the same bytes; a refusal is an error on either
+        // viewAt: both providers ran the view at block b and answered the same bytes; a refusal is an error on either.
+        // The answer (read on rpc.mainnet.fastnear.com and near.drpc.org for {signed: []} at blocks 223501912-3,
+        // 2026-11-07 18:12Z): {intents_executed, logs, min_deadline, state}, with invariant_violated only when one is
+        // violated. Ours ran when it executed exactly the one intent and violated nothing.
         const out = await viewAt(rpcs, b, INTENTS_CONTRACT, "simulate_intents", { signed: [signed] });
-        return isObj(out) && (out.invariant_violated === null || out.invariant_violated === undefined);
+        return isObj(out) && Array.isArray(out.intents_executed) && out.intents_executed.length === 1 && (out.invariant_violated === null || out.invariant_violated === undefined);
       } catch {
         return false;
       }

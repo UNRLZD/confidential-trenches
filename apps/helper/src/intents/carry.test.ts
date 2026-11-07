@@ -56,7 +56,7 @@ const transfer = (to: string, amount = "2003610") => ({ intent: "transfer", rece
 const withdraw = (to: string, extra: Record<string, unknown> = {}) => ({ intent: "ft_withdraw", token: USDC, receiver_id: to, amount: "2003610", ...extra });
 
 // ---- the two providers ----
-type Chain = { refuseSimulateOn: number | null; storage: Map<string, "null" | "registered">; finalMs: number };
+type Chain = { refuseSimulateOn: number | null; executed?: number; storage: Map<string, "null" | "registered">; finalMs: number };
 const bytes = (v: unknown) => [...Buffer.from(JSON.stringify(v))];
 const SIM_OK = { intents_executed: [{ intent_hash: "x", account_id: "u", nonce: "n" }], logs: [], min_deadline: "2026-11-07T18:02:00Z", invariant_violated: null, state: { fee: 1, current_salt: "5628f6c6" } };
 function providers(chain: Chain): [Rpc, Rpc] {
@@ -71,7 +71,7 @@ function providers(chain: Chain): [Rpc, Rpc] {
         const at = { block_height: 221_603_850, block_hash: HASH, logs: [] };
         if (p.method_name === "simulate_intents") {
           if (chain.refuseSimulateOn === i) throw new Error("Server error: Smart contract panicked: invalid signature");
-          return { ...at, result: bytes(SIM_OK) };
+          return { ...at, result: bytes({ ...SIM_OK, intents_executed: SIM_OK.intents_executed.slice(0, chain.executed ?? 1) }) };
         }
         if (p.method_name === "storage_balance_of") {
           const s = chain.storage.get(`${p.account_id}/${args.account_id}`) ?? "registered";
@@ -412,4 +412,13 @@ test("a registration claimed but never signed (the process stopped between the c
   await t.carry.idle();
   assert.deepEqual(t.r.sent.map((x) => x.action.method), ["storage_deposit", "execute_intents"]);
   t.store.close();
+});
+
+test("a simulation that executed no intent, or violated an invariant on one provider, is simulation_refused", async () => {
+  const s = setup({ chain: { executed: 0 } });
+  const u = hex();
+  seeSigner(s.store, u);
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("alice.near")))), "simulation_refused");
+  assert.equal(s.r.sent.length, 0);
+  s.store.close();
 });
