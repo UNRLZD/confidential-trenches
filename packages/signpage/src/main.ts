@@ -586,9 +586,15 @@ const topLevelOnly = (): void => {
 function pageScope(): bigint | null {
   return vaultScope(PAGE_NETWORK);
 }
+// each pool the network pins is named the same way, under its own scope (card pool-deposit-address): pool.address
+// answers its U_X from that record
+function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
+  return PAGE_POOLS.flatMap((p) => (p.chain === "near" ? [] : [{ chain: p.chain, scope: p.scope }]));
+}
 const namer = depositNamer({
   top: !framed,
   scope: pageScope,
+  pools: pagePoolScopes,
   open,
   startup: () => startup,
   resyncing: () => resyncing,
@@ -604,7 +610,7 @@ async function pageNotes(): Promise<NoteRecord[]> {
 const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => pageNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
-  if (!shell || pageScope() === null || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
+  if (!shell || (pageScope() === null && PAGE_POOLS.length === 0) || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
   void readSeed()
     .then((s) => {
       if (!s) return;
