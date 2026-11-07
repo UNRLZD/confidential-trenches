@@ -196,7 +196,7 @@ export async function readRecipientListed(rpcs: readonly [Rpc, Rpc], b: Block, t
  * relayer-cost-guards, audit V-03: its payout would bounce whole, the fee with it); else check 7b's hold (its reads, or
  * why they could not be read: a failed read holds).
  */
-export async function queueHold(rpcs: readonly [Rpc, Rpc], token: string, fee: string, recipient: string, now: () => number = Date.now, registerDeposit = 0n): Promise<FeeRead | "bad_recipient" | "register_deposit_wrong" | null> {
+export async function queueHold(rpcs: readonly [Rpc, Rpc], token: string, fee: string, recipient: string, now: () => number = Date.now, registerDeposit: bigint): Promise<FeeRead | "bad_recipient" | "register_deposit_wrong" | null> {
   try {
     const b = await agreedBlock(rpcs, now);
     const [f, listed, bal] = await Promise.all([readFeeAccount(rpcs, b, token, fee), readRecipientListed(rpcs, b, token, recipient), viewAt(rpcs, b, token, "storage_balance_of", { account_id: recipient })]);
