@@ -1,0 +1,61 @@
+// node --test scripts/ci/live-serial.test.mjs: a serial group's checks run one after another, each once the helper's budget is
+// idle, every one whatever an earlier one ended with, none twice (scripts/ci/live-serial.mjs, card helper-live-jup-serial).
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { runCheck, serial } from "./live-serial.mjs";
+
+const IDLE = { idle: true, probes: 1, waitedMs: 5, why: "ok" };
+
+test("every member runs in the order given, each after an idle read, and none runs twice", async () => {
+  const events = [];
+  const r = await serial(["a", "b", "c"], {
+    idle: async () => (events.push("idle"), IDLE),
+    run: async (k) => (events.push(`run ${k}`), 0),
+    say: () => {},
+  });
+  assert.deepEqual(events, ["idle", "run a", "idle", "run b", "idle", "run c"], "the gate before each member, never two members at once");
+  assert.deepEqual(r, { ok: true, failed: [], notRun: [] });
+});
+
+test("a failing member does not stop the rest, is not run again, and the group is red", async () => {
+  const ran = [];
+  const out = [];
+  const r = await serial(["a", "b", "c"], { idle: async () => IDLE, run: async (k) => (ran.push(k), k === "b" ? 1 : 0), say: (l) => out.push(l) });
+  assert.deepEqual(ran, ["a", "b", "c"], "b ran once, no retry, and c still ran");
+  assert.deepEqual(r, { ok: false, failed: ["b"], notRun: [] });
+  assert.equal(out.at(-1), "live-serial: FAIL b");
+  const crashed = await serial(["a"], { idle: async () => IDLE, run: async () => 2, say: () => {} });
+  assert.equal(crashed.ok, false, "an error exit (2) is a failure too");
+});
+
+test("a budget that is not idle in time stops the group there: the member is not run, and it and the rest are named", async () => {
+  const ran = [];
+  const out = [];
+  let n = 0;
+  const r = await serial(["a", "b", "c"], {
+    idle: async () => (++n === 2 ? { idle: false, probes: 36, waitedMs: 179_000, why: "the page's Jupiter row was not read for it (src chain)" } : IDLE),
+    run: async (k) => (ran.push(k), 0),
+    say: (l) => out.push(l),
+  });
+  assert.deepEqual(ran, ["a"]);
+  assert.deepEqual(r, { ok: false, failed: ["b"], notRun: ["b", "c"] });
+  assert.ok(out.some((l) => /^BAD the helper's Jupiter budget was not idle in 179000 ms \(36 probes\) before b: /.test(l)));
+  assert.equal(out.at(-1), "live-serial: FAIL b (not run: b, c)");
+});
+
+test("runCheck runs scripts/live-checks/<key>.mjs as the job runs a single check and returns its exit code", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "live-serial-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    writeFileSync(path.join(root, "scripts/live-checks/pass.mjs"), 'console.log("live-check pass: PASS");\n');
+    writeFileSync(path.join(root, "scripts/live-checks/fail.mjs"), 'console.log("live-check fail: FAIL"); process.exit(1);\n');
+    assert.equal(await runCheck("pass", root), 0);
+    assert.equal(await runCheck("fail", root), 1);
+    assert.equal(await runCheck("missing", root), 1, "a check file that is not there is a failure (node's own exit 1)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
