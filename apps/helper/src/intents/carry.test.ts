@@ -58,7 +58,7 @@ const transfer = (to: string, amount = "2003610") => ({ intent: "transfer", rece
 const withdraw = (to: string, extra: Record<string, unknown> = {}) => ({ intent: "ft_withdraw", token: USDC, receiver_id: to, amount: "2003610", ...extra });
 
 // ---- the two providers ----
-type Chain = { refuseSimulateOn: number | null; executed?: number; storage: Map<string, "null" | "registered">; finalMs: number; finalMsOf?: [number, number]; paused?: boolean };
+type Chain = { refuseSimulateOn: number | null; executed?: number; storage: Map<string, "null" | "registered">; finalMs: number; finalMsOf?: [number, number]; paused?: boolean; sims?: number };
 const bytes = (v: unknown) => [...Buffer.from(JSON.stringify(v))];
 const SIM_OK = { intents_executed: [{ intent_hash: "x", account_id: "u", nonce: "n" }], logs: [], min_deadline: "2026-11-07T18:02:00Z", invariant_violated: null, state: { fee: 1, current_salt: "5628f6c6" } };
 function providers(chain: Chain): [Rpc, Rpc] {
@@ -72,6 +72,7 @@ function providers(chain: Chain): [Rpc, Rpc] {
         const args = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
         const at = { block_height: 221_603_850, block_hash: HASH, logs: [] };
         if (p.method_name === "simulate_intents") {
+          chain.sims = (chain.sims ?? 0) + 1;
           if (chain.refuseSimulateOn === i) throw new Error("Server error: Smart contract panicked: invalid signature");
           return { ...at, result: bytes({ ...SIM_OK, intents_executed: SIM_OK.intents_executed.slice(0, chain.executed ?? 1) }) };
         }
@@ -197,6 +198,7 @@ test("RT10 (6) an intent past its deadline: expired", async () => {
   const to = await moveQuote(s.store, { refundTo: u, recipient: u });
   count("expired", await s.carry.carry(signedIntent(u, transfer(to), { deadline: "2026-11-07T17:59:59.000Z" })), "expired");
   assert.equal(s.r.sent.length, 0);
+  assert.equal(s.chain.sims ?? 0, 0, "refused before the simulation: no simulate_intents read");
   s.store.close();
 });
 
@@ -470,6 +472,7 @@ test("H1: a signer's sends 1-4 are carried, landed or not, and its 5th is signer
   const a = await t.carry.carry(signedIntent(u, withdraw("alice.near")));
   assert.deepEqual([a.status, code(a)], [429, "signer_cap"]);
   assert.equal(t.r.sent.length, 0);
+  assert.equal(t.chain.sims ?? 0, 0, "refused before the simulation: no simulate_intents read");
   t.store.close();
 });
 
