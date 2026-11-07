@@ -217,7 +217,8 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       );
       o = a.kind === "guarded" ? { kind: "dropped", tx_hash: "", why: "guarded" } : a;
     } catch {
-      o = { kind: "dropped", tx_hash: "", why: "the send threw" };
+      // a throw after the signing (its bytes written, then maybe broadcast) is read as an unknown outcome, never freed
+      o = sentTx.length > 0 ? { kind: "unknown", tx_hash: sentTx[0]!.tx_hash, why: "the send threw after the signing" } : { kind: "dropped", tx_hash: "", why: "the send threw" };
     }
     const tx = sentTx[0];
     if (tx !== undefined && o.kind === "unknown") o = await settle(tx, o, untilMs);

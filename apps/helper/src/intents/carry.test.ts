@@ -422,3 +422,22 @@ test("a simulation that executed no intent is simulation_refused", async () => {
   assert.equal(s.r.sent.length, 0);
   s.store.close();
 });
+
+test("a storage_deposit whose send throws after it was signed is never freed for a second one: read again until its outcome is known", async () => {
+  const s = setup();
+  const u = hex();
+  seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const send = s.r.send.bind(s.r);
+  s.r.send = (async (action, guard, before, opts) => {
+    await send(action, guard, before, opts);
+    if ((action as { method?: string }).method === "storage_deposit") throw new Error("broadcast threw");
+    return { kind: "unknown", tx_hash: "x", why: "sent" };
+  }) as typeof s.r.send;
+  s.r.resolve = (async () => ({ kind: "final", tx_hash: "x", receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] })) as typeof s.r.resolve;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  await s.carry.idle();
+  assert.deepEqual(s.r.sent.map((x) => x.action.method), ["storage_deposit", "execute_intents"], "one storage_deposit, then the intent");
+  assert.equal(s.store.signer(u).registration?.state, "landed");
+  s.store.close();
+});
