@@ -505,7 +505,7 @@ export const MUTANTS = [
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
   [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
-  [QUOTE, "  if (!failed(await replay({}))) return [];\n", "", R, "HC2 "],
+  [QUOTE, "  if (!asIs && errored.length === 0) return [];\n", "", R, "HC2 "],
   // review of a2d82dc6, F1: the replay runs at the trade's own gas less its authorizations (more gas, or the sender's
   // balance overridden, tells a hook it is replayed), and a sale is evidence only at the gas the device pins
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of a2d82dc6, F1 (buy)"],
@@ -514,14 +514,14 @@ export const MUTANTS = [
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of 72e28658, M3 (buy)"],
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas);\n", R, "review of a2d82dc6, F3"],
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas);\n", R, "review of a2d82dc6, F1 (sell)"],
-  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) } };", R, "review of a2d82dc6, F1 (buy)"],
-  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) } };", R, "review of a2d82dc6, F1 (sell)"],
+  [QUOTE, "    const state: Record<string, Override> = { ...base };", "    const state: Record<string, Override> = { ...base, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) } };", R, "review of a2d82dc6, F1 (buy)"],
+  [QUOTE, "    const state: Record<string, Override> = { ...base };", "    const state: Record<string, Override> = { ...base, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) } };", R, "review of a2d82dc6, F1 (sell)"],
   [QUOTE, "    if (BigInt(sale.gas) !== EVM_POOL_SELL_GAS) return [];\n", "", R, "review of 72e28658, M3 (sell)"],
   [QUOTE, "    if (BigInt(sale.gas) !== EVM_POOL_SELL_GAS) return [];\n", "    if (BigInt(sale.gas) < EVM_POOL_SELL_GAS) return [];\n", R, "review of 72e28658, M3 (sell)"],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
-  [QUOTE, "(r) => r.ok, (r) => !r.ok);\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => r.ok, (r) => !r.ok);\n  } catch (e) {\n", R, "RV8 "],
-  [QUOTE, "(r) => boughtOf(r) === false);\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => boughtOf(r) === false);\n  } catch (e) {\n", R, "HB6 "],
+  [QUOTE, "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));\n  } catch (e) {\n", R, "RV8 "],
+  [QUOTE, "(r) => boughtOf(r) === false, preStateOf(v, trace));\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => boughtOf(r) === false, preStateOf(v, trace));\n  } catch (e) {\n", R, "HB6 "],
   [QUOTE, "(x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data),", "(x, y) => x.ok === y.ok,", R, "RV8 "],
   [QUOTE, "  for (const k of keys) if (fault.has(k.hooks) && !out.includes(", "  for (const k of keys.filter((x, i, a) => a.findIndex((y) => y.hooks === x.hooks) === i)) if (fault.has(k.hooks) && !out.includes(", R, "RV10 "],
   // the sets of hooks (review of c1f486ae, M1; review of 72e28658, H3): where no one hook's no-op rescues the trade, a
@@ -530,7 +530,7 @@ export const MUTANTS = [
   // smaller one that rescued it (an honest hook beside them is never banned)
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1)) {", R, "RVX "],
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "N1D "],
-  [QUOTE, "  const fault = new Set(rescued.flat());", "  const fault = new Set(rescued.slice(0, 1).flat());", R, "review of 72e28658, H3 (buy)"],
+  [QUOTE, "  const fault = new Set(asIs ? rescued.flat() : errored);", "  const fault = new Set(asIs ? rescued.slice(0, 1).flat() : errored);", R, "review of 72e28658, H3 (buy)"],
   [QUOTE, "    if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "N1D "],
   // review of 72e28658, L2: the RV4 mutant ("step 5 always") is not equivalent: a set holding the one hook that rescued
   // the trade, asked anyway, bans an honest capped hook beside it
@@ -580,8 +580,8 @@ export const MUTANTS = [
   [QUOTE, "withdrawn - fee !== quote.amountIn", "withdrawn - fee > quote.amountIn", R, "review of a2d82dc6, L3"],
   // review of da11bbb6, H1: every replay sees the trade's block as the trade saw it: the system calls' storage read at
   // the block on two providers that agree word for word, and its header's base fee and (Base) PREVRANDAO
-  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = {};", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
-  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = {};", R, "review of da11bbb6, H1 (sell) the same hook on a sale, where block.number"],
+  [QUOTE, "  const base: Record<string, Override> = { ...sys };", "  const base: Record<string, Override> = {};", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
+  [QUOTE, "  const base: Record<string, Override> = { ...sys };", "  const base: Record<string, Override> = {};", R, "review of da11bbb6, H1 (sell) the same hook on a sale, where block.number"],
   [QUOTE, "(x, y) => JSON.stringify(x) === JSON.stringify(y),\n      () => refuse(\"rpc_disagree\", `the providers answer the system state", "(x, y) => true,\n      () => refuse(\"rpc_disagree\", `the providers answer the system state", R, "review of da11bbb6, H1 the system slots are read"],
   [QUOTE, "params: [a, s, { blockHash: blk.hash, requireCanonical: true }]", "params: [a, s, { blockHash: blk.parentHash, requireCanonical: true }]", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
   [QUOTE, "params: [a, s, { blockHash: blk.hash, requireCanonical: true }]", "params: [a, s, { blockHash: blk.parentHash, requireCanonical: true }]", R, "review of da11bbb6, H1 the system slots are read"],
@@ -636,8 +636,8 @@ export const MUTANTS = [
   [QUOTE, "  try {\n    p = pre === undefined ? undefined : await pre(sale);\n  } catch {\n    p = undefined;\n  }\n", "  p = pre === undefined ? undefined : await pre(sale);\n", R, "review of 29498693, HIGH"],
   [QUOTE, "new Set(asIs ? rescued.flat() : errored)", "new Set(asIs ? rescued.flat() : hooks)", R, "review of 29498693, MEDIUM"],
   [QUOTE, " && isAddress(f.from) && lower(f.from) === pm", "", R, "review of 29498693, MEDIUM"],
-  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "N1D "],
-  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => boughtOf(r) === true, (r) => !r.ok);", R, "HB1 "],
+  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => r.ok, (r) => boughtOf(r) === false, preStateOf(v, trace));", R, "N1D "],
+  [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === true, (r) => !r.ok, preStateOf(v, trace));", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],
   [QUOTE, " || bMinOut !== quote.minOut) return [];", ") return [];", R, "HB6 "],
   [QUOTE, "    if (data !== \"0x\" + hex(evmPoolRouteDataQuoted(chain, route).data)) return [];\n", "", R, "HB6 "],
