@@ -9,6 +9,7 @@
 //     it FAILs on the code hash and the code's sha256 only (a keyless vault with another code hash);
 //   - vault-mainnet-deploy.answers.json: the deployed vault, recorded by contracts/vault/scripts/mainnet-v1/
 //     3-readback-write.sh after the owner's deploy, with its storage_prepay read back: PASS (skipped until recorded).
+//     Planted from it: a full-access key on FastNEAR, or vault-test's code hash on dRPC: FAIL on that line, no write.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -168,4 +169,23 @@ test("recorded good answer: the deployed vault PASSes on both RPCs, keyless, the
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(bads(r), []);
   assert.equal(r.lines.filter((l) => REGISTERED(ACCOUNT, "\\d+").test(l)).length, 2);
+});
+
+// planted from the recorded good answer: one mismatch each, on one RPC only, FAILs on that line, and no write follows
+test("planted from the recorded good answer: a full-access key on FastNEAR, or another code hash on dRPC, FAILs on that line only", { skip: existsSync(GOOD) ? false : "recorded by 3-readback-write.sh after the owner's deploy" }, async () => {
+  const answers = load("vault-mainnet-deploy.answers.json");
+  const t = answers.find((a) => a.method === "tx").json.result.transaction;
+  const w = { tx: t.hash, precommitment: JSON.parse(Buffer.from(t.actions[0].FunctionCall.args, "base64").toString()).precommitment };
+  const rec = json(deployment());
+  const keyed = answers.map((a) => (a.url === RPCS[0] && a.params?.request_type === "view_access_key_list" ? { ...a, json: { ...a.json, result: { ...a.json.result, keys: [{ public_key: "ed25519:11111111111111111111111111111111", access_key: { nonce: 0, permission: "FullAccess" } }] } } } : a));
+  const k = await run(keyed, { record: rec, write: w });
+  assert.equal(k.ok, false);
+  assert.deepEqual(bads(k).map((l) => l.split(":")[0]), [`BAD ${ACCOUNT} key list is [] on https`, "BAD no storage_prepay"], k.lines.join("\n"));
+  assert.equal(bads(k)[1], "BAD no storage_prepay: a read above failed, so nothing is written to this vault");
+  assert.match(bads(k)[0], new RegExp(`on ${RPCS[0].replaceAll(".", "\\.")}: 1 key\\(s\\) \\(FullAccess\\)`));
+  const other = answers.map((a) => (a.url === RPCS[1] && a.params?.request_type === "view_account" ? { ...a, json: { ...a.json, result: { ...a.json.result, code_hash: testRecord.code_hash } } } : a));
+  const c = await run(other, { record: rec, write: w });
+  assert.equal(c.ok, false);
+  assert.deepEqual(bads(c).map((l) => l.split(" on ")[0]), [`BAD ${ACCOUNT} code hash ${testRecord.code_hash} equals the record's ${rec.code_hash}`, "BAD no storage_prepay: a read above failed, so nothing is written to this vault"], c.lines.join("\n"));
+  assert.ok(bads(c)[0].includes(`on ${RPCS[1]}`));
 });

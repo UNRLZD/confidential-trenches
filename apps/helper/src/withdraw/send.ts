@@ -513,7 +513,7 @@ export const KEYS_MAX = 8;
  * or BIND_VAULT_MAINNET stops the helper at start, so a host's .env cannot point a mainnet sender at a vault the release
  * does not name. The commit that adds mainnet-v1.json changes it here, or its test fails.
  */
-export const MAINNET_VAULT = "vault-test.confidential.unrlzd.near";
+export const MAINNET_VAULT = "vault.confidential.unrlzd.near";
 
 export type WithdrawSender = {
   /** POST /v1/withdraw for a parsed body: the network from its token; a token this relayer does not carry is bad_shape. */

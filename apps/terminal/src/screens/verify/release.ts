@@ -16,8 +16,21 @@ export type VerifyRelease = {
 };
 
 export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
-  // mainnet: until the mainnet vault is deployed and its record written, Verify reads nothing there
-  mainnet: { network: "mainnet", rpcs: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], pins: null },
+  // mainnet: contracts/vault/deployments/mainnet-v1.json (the keyless vault deployed 7 Nov); its asset is Circle's USDC,
+  // whose code is the kit's VAULT_TOKEN_CODE_HASH and whose ft_metadata reads USDC, 6 decimals (rpc.mainnet.fastnear.com
+  // and near.drpc.org, blocks 223495331 and 223495333)
+  mainnet: {
+    network: "mainnet",
+    rpcs: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"],
+    pins: {
+      vault: "vault.confidential.unrlzd.near", // gitleaks:allow (a public account id)
+      asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", // gitleaks:allow (a public account id)
+      release: "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u", // gitleaks:allow (a public code hash)
+      assetRelease: VAULT_TOKEN_CODE_HASH,
+      assetSymbol: "USDC",
+      assetDecimals: 6,
+    },
+  },
   testnet: {
     network: "testnet",
     rpcs: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], // the kit's testnet pair
