@@ -7,7 +7,8 @@
 //   - every entry is "<domain>[ key<n>][ keyless] <state>" with a known state, and no entry holds a URL, a path, a query
 //     or a key;
 //   - each chain's list holds each keyed provider of WANT (the accounts the owner made on 7 Nov: QuickNode and dRPC's
-//     three keys, three accounts, for Solana, Base and Robinhood; FastNear for NEAR), in that order, and no keyed
+//     three keys, three accounts, for Base and Robinhood; Helius and QuickNode for Solana, since dRPC's free plan serves
+//     no Solana; FastNear for NEAR), in that order, and no keyed
 //     provider twice (two keys of one account fail together); a dRPC key is its own provider ("drpc.live key2"), and a
 //     keyless entry (a company's public endpoint under a keyed name, NEAR_RPC_URL=free.rpc.fastnear.com say) is no key;
 //   - every entry of every list "answers" its own chain: a key that is down, held, unread or on another chain is BAD.
@@ -23,9 +24,11 @@ const KEY = "rpc-keyed-lists";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
 export const CHAINS = ["solana", "base", "robinhood", "near"];
-// dRPC's keys are served at lb.drpc.live/<network>/<key> (drpc.org/docs/gettingstarted/firstrequest), so drpc.live
+// dRPC's keys are served at lb.drpc.live/<network>/<key> (drpc.org/docs/gettingstarted/firstrequest), so drpc.live.
+// Its free plan serves no Solana (solana.drpc.org getSlot, 7 Nov 15:57Z: error 35 "chain is not available on free
+// plan"; M359), so Solana's keyed list is its existing Helius key, then QuickNode.
 const DRPC = ["drpc.live key1", "drpc.live key2", "drpc.live key3"];
-export const WANT = { solana: ["quiknode.pro", ...DRPC], base: ["quiknode.pro", ...DRPC], robinhood: ["quiknode.pro", ...DRPC], near: ["fastnear.com"] };
+export const WANT = { solana: ["helius-rpc.com", "quiknode.pro"], base: ["quiknode.pro", ...DRPC], robinhood: ["quiknode.pro", ...DRPC], near: ["fastnear.com"] };
 export const STATES = ["answers", "wrong chain", "held", "down", "unread"];
 const ENTRY = /^([a-z0-9-]+(?:\.[a-z0-9-]+)+(?: key[1-9])?)( keyless)? (answers|wrong chain|held|down|unread)$/;
 /** How long a run that fails only on a URL's state reads the health again, and how often. */

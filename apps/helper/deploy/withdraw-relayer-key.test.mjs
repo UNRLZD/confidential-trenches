@@ -169,7 +169,20 @@ test("a .env whose last line has no newline keeps it whole: the four lines start
   assert.ok(lines[2].startsWith("WITHDRAW_VAULT_MAINNET="));
 });
 
-test("once mainnet-v1.json exists the vault is its account_id (the kit's rule, as send.ts MAINNET_VAULT follows it)", () => {
+// card helper-v1-cutover: on the server the checkout is a git checkout, and the printed step 1 names its commit
+test("in a git checkout, the printed step 1 names the checkout's commit", () => {
+  const s = server();
+  const git = (...a) => spawnSync("git", ["-C", s.dir, "-c", "core.hooksPath=/dev/null", "-c", "user.email=t@example.com", "-c", "user.name=t", ...a], { encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  assert.equal(git("commit", "-q", "--allow-empty", "-m", "t").status, 0);
+  const sha = git("rev-parse", "HEAD").stdout.trim();
+  assert.match(sha, /^[0-9a-f]{40}$/);
+  const r = s.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(`withdraw-relayer-key: 1. apps/helper/deploy/redeploy.sh ${sha}, so the helper starts with the four lines\n`), r.stdout);
+});
+
+test("once mainnet-v1.json exists the vault is its account_id (the helper's pin rule, send.ts MAINNET_VAULT; the kit's, mainnet-v1.json's or null, meets it there)", () => {
   const s = server();
   const v1 = JSON.stringify({ ...JSON.parse(readFileSync(RECORD, "utf8")), account_id: "vault.confidential.unrlzd.near" });
   writeFileSync(path.join(s.dir, "contracts/vault/deployments/mainnet-v1.json"), v1);

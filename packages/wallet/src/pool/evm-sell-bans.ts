@@ -3,9 +3,15 @@
 // and no route through listed pools is within the slippage of it, and names that route's unlisted-hook pools in the
 // quote's `hooked`. A hook can honour the quote and the sim and still revert the real sale. Where the real sale
 // reverts, the caller asks the kit's evmSellRevertedPools(quote, txHash) which pools the device's own reads blame (the
-// sale's replay reverts, the quoter still prices the route at minOut, and the replay with that pool's hook alone made a
-// no-op succeeds, on both providers), bans those here, and passes evmSellBanned's list as the next quote's `banned`.
+// sale's replay at its own gas reverts, the quoter still prices the route at minOut, and the replay with a smallest set
+// of the route's hooks made a no-op succeeds, on both providers), bans those here, and passes evmSellBanned's list as
+// the next quote's `banned`.
 // A revert with no such evidence (a price that moved, providers that disagree) bans nothing.
+// The buy shares these bans (card evm-buy-hook-converge): its quote (evmPoolBuyQuote) takes a route through such a hook
+// on the same terms and names its pools in `hooked`; where the real buy's swap fails (the pool lands it with its
+// Withdrawn, card pool-evm-buy-pays-revert), the caller asks evmBuyRevertedPools(quote,
+// txHash) the same question of the buy, bans its answer here under the same (chain, token), and passes evmSellBanned's
+// list as the next buy quote's `banned` too: a pool is banned for the token whichever trade proved it at fault.
 //
 // A ban expires (review of 919742f5, F2: a permanent ban let one bad read cost a token its honest market on this device
 // for good): the first lasts EVM_SELL_BAN_FIRST_MS, each repeat after it expired lasts twice the one before, at most

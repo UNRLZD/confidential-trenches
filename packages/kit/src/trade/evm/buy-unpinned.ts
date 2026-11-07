@@ -36,7 +36,7 @@ export type EvmPoolVenue = {
   readonly routers: readonly string[];
   /** The pins (M370): the pool every buy and sell of the chain goes through, the buy adapters per venue, and the
    *  delegate W's EIP-7702 authorization names; a chain with none refuses not_deployed. Set from pool-evm-deploy's
-   *  records (card evm-venues-pin): the testnets have theirs, the mainnets none until their deploy. */
+   *  records (card evm-venues-pin; the mainnets' since card pool-evm-deploy-mainnet). */
   readonly pool?: string;
   readonly adapters?: Readonly<{ v3?: string; v4?: string }>;
   readonly sellDelegate?: string;
@@ -48,8 +48,8 @@ export type EvmPoolVenue = {
   /** The network's FeeCollector (contracts/pool-evm/src/FeeCollector.sol, card evm-fee-collector), which every Sell pays
    *  its fee to and whose Paid log proves the fee (card helper-sender-fee-proof); its one immutable, the sink, is the
    *  chain's sellSender. A kit pin, never read from the helper; the helper refuses to start with any other collector
-   *  (evmPoolSendersFromEnv). A chain with none takes no sale: the testnets pin theirs, the mainnets none until their
-   *  collectors deploy. */
+   *  (evmPoolSendersFromEnv). A chain with none takes no sale: every chain pins its own (the mainnets' since card
+   *  pool-evm-deploy-mainnet). */
   readonly feeCollector?: string;
   /** The quoters the device's own quote reads (checks/evm/quote.ts, card evm-pool-buy-quote): Uniswap's QuoterV2 for
    *  v3 and V4Quoter for v4; a chain with none refuses no_quoter. */
@@ -119,6 +119,15 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // scripts/deploy/evm-sender-key.mjs, which printed only this address, 6 Nov; card evm-mainnet-senders): the sink of
       // the FeeCollector the owner's paste deploys (deploy.mjs sinkOf); the helper does not start with any other sell key
       sellSender: "0x2139756ab61ad861b4e25a009f092683e7454ee9",
+      // The pins (card pool-evm-deploy-mainnet): the owner's paste's record, contracts/pool-evm/deployments/base.json
+      // (2026-11-07T12:46:56.950Z, deploy tx of the pool 0x2e0cba4bfa2c24ae138ade564a027c5d83943340153dec0ad2e278c8c89b23c7); live check pool-evm-deploy-mainnet read each one's code the
+      // build's, no owner and no EIP-1967 slot, on base-rpc.publicnode.com and mainnet.base.org (2026-11-07). test/evm-venues-pin.test.ts reads
+      // the record and fails on any pin that differs. Both venues have an adapter here
+      pool: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      adapters: bare({ v3: "0x1e62242773f696271b0cc3029b8672c385b7ce45", v4: "0x9d040a025689a10872f0f2f8b581135dde52ca6f" }),
+      sellDelegate: "0xe3223113781f527188f634615ad9a3ca0aa20a4d",
+      // the FeeCollector every Sell pays, its sink 0x2139756ab61ad861b4e25a009f092683e7454ee9 the sell sender pinned here
+      feeCollector: "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       // Uniswap's QuoterV2 and V4Quoter (contracts/pool-evm/test/BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on
       // mainnet.base.org and base-rpc.publicnode.com, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak
       // 0xceb5b8bc…ee51e, and 5,820 bytes, keccak 0x9a5c0cdd…38bb3
@@ -245,6 +254,15 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // the helper's sell sender (POOL_EVM_SELL_KEY_ROBINHOOD, made as on Base, 6 Nov; card evm-mainnet-senders): the
       // FeeCollector's sink, as on Base
       sellSender: "0x92874bbc2638f644872d911d8b72d734978e24ae",
+      // The pins (card pool-evm-deploy-mainnet): the owner's paste's record, contracts/pool-evm/deployments/robinhood.json
+      // (2026-11-07T13:05:40.460Z, deploy tx of the pool 0xb5b5c6c0403e94daf9cf37e5b61f8d6dc9af41d929a3ecf732898e0d9fa88176); live check pool-evm-deploy-mainnet read each one's code the
+      // build's, no owner and no EIP-1967 slot, on robinhood-rpc.publicnode.com and rpc.mainnet.chain.robinhood.com (2026-11-07). test/evm-venues-pin.test.ts reads
+      // the record and fails on any pin that differs. Both venues have an adapter here (M365 2: the v3 adapter's ROUTER() is the router above)
+      pool: "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      adapters: bare({ v3: "0xb29746cb12c8466089b8355ec88cab31bd04c089", v4: "0x2e31a90e0df8aa634604abbe87cb61ca6aa8d702" }),
+      sellDelegate: "0xf79962b094991354270fe7866f0f590ef0c9b0cf",
+      // the FeeCollector every Sell pays, its sink 0x92874bbc2638f644872d911d8b72d734978e24ae the sell sender pinned here
+      feeCollector: "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       // Uniswap's QuoterV2 and V4Quoter (BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com
       // and robinhood.drpc.org, the same code on both (2026-11-03 17:56Z): 8,273 bytes, keccak 0x3db0868d…96a28, and
       // 6,118 bytes, keccak 0xd707b1da…868f6

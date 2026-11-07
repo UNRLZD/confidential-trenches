@@ -84,10 +84,15 @@ const record = (c, sink = A.good.pins[c]) => ({ chain: c, contracts: { FeeCollec
 test("after the paste: the collector holding the pin passes; another sink in its code or its record, or a kit collector pin off the record, fails", async () => {
   assert.equal(withSink(testnetCode, FC.deployments["base-sepolia"].contracts.FeeCollector.sink), testnetCode, "the sink word sits at offset 64");
   const records = { base: record("base"), robinhood: record("robinhood") };
-  const good = await run({ records, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] });
+  // the kit's collector pins at the constructed records' collector (since card pool-evm-deploy-mainnet the kit pins the
+  // real ones, contracts/pool-evm/deployments/<chain>.json, which these constructed records are not)
+  const at = { base: { feeCollector: COLLECTOR }, robinhood: { feeCollector: COLLECTOR } };
+  const good = await run({ records, extra: at, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] });
   assert.equal(good.ok, true, good.lines.join("\n"));
-  fails(await run({ records, answers: [...A.good.answers, ...codeAnswers(() => testnetCode)] }), /base: FeeCollector 0xc0c0.* is the build's code with the pin/);
+  fails(await run({ records, extra: at, answers: [...A.good.answers, ...codeAnswers(() => testnetCode)] }), /base: FeeCollector 0xc0c0.* is the build's code with the pin/);
   const other = "0x" + "ab".repeat(20);
-  fails(await run({ records: { ...records, robinhood: record("robinhood", other) }, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] }), /robinhood: the record's FeeCollector sink is the pin: 0xabab/);
-  fails(await run({ records, extra: { base: { feeCollector: other } }, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] }), /base: the kit's feeCollector pin is the record's/);
+  fails(await run({ records: { ...records, robinhood: record("robinhood", other) }, extra: at, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] }), /robinhood: the record's FeeCollector sink is the pin: 0xabab/);
+  fails(await run({ records, extra: { ...at, base: { feeCollector: other } }, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] }), /base: the kit's feeCollector pin is the record's/);
+  // the kit as it is against these constructed records: its real collector pins are not theirs
+  fails(await run({ records, answers: [...A.good.answers, ...codeAnswers((c) => withSink(testnetCode, A.good.pins[c]))] }), /base: the kit's feeCollector pin is the record's/);
 });

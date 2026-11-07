@@ -1,7 +1,9 @@
 // node --test scripts/live-checks/rpc-keyed-lists.test.mjs: the live check replays recorded answers
-// (rpc-keyed-lists.answers.json, recorded in-process until the deploy's own run is recorded: the keys are on the helper
-// box only). good: this card's helper with made-up QuickNode, three dRPC keys, FastNear and Helius URLs and a keyless
-// NEAR_RPC_URL at FastNear, every probe answering its chain: PASS. bad_pre_card: the helper before the card with the same URLs set, no rpc in /v1/health: FAIL. Planted
+// (rpc-keyed-lists.answers.json; the keys are on the helper box only). good: this card's helper in-process with made-up
+// QuickNode, three dRPC keys, FastNear and Helius URLs and a keyless NEAR_RPC_URL at FastNear, every probe answering its
+// chain, Solana on Helius and QuickNode (dRPC's free plan serves no Solana): PASS. deploy: the deployed helper after the
+// owner's keys, recorded with --record: PASS. bad_pre_card: the helper before the card with the same URLs set, no rpc in
+// /v1/health: FAIL. Planted
 // from the good one: a company missing, two keys at one company, the order swapped, a key down or on another chain, a
 // URL in an entry, a 503: FAIL.
 import assert from "node:assert/strict";
@@ -30,6 +32,12 @@ test("recorded good answer (every chain's keyed companies in order, each answeri
   assert.ok(r.lines.includes("ok  near: fastnear.com answers"), r.lines.join("\n"));
 });
 
+test("recorded deploy answer (af75100a after the owner's keys: Solana on Helius and QuickNode, Base and Robinhood on QuickNode and dRPC's three keys, NEAR on FastNear): PASS", async () => {
+  const r = judge(await read("https://api.confidential.unrealized.trade", replay(A.deploy)));
+  assert.ok(r.ok, r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  solana: in the order helius-rpc.com, quiknode.pro"), r.lines.join("\n"));
+});
+
 test("recorded bad answer (the helper before the card, no rpc in its health): FAIL", async () => {
   const r = judge(await read(undefined, replay(A.bad_pre_card)));
   assert.equal(r.ok, false);
@@ -43,7 +51,9 @@ test("planted: a company missing, two keys at one company, the order swapped, a 
     ["dRPC's key 3 missing on Base", withRpc({ ...g, base: g.base.slice(0, 3) })],
     ["two keys at one company", withRpc({ ...g, robinhood: ["quiknode.pro answers", "quiknode.pro answers", ...g.robinhood.slice(1)] })],
     ["one dRPC key twice", withRpc({ ...g, base: ["quiknode.pro answers", "drpc.live key1 answers", "drpc.live key1 answers", "drpc.live key3 answers"] })],
-    ["dRPC before QuickNode", withRpc({ ...g, solana: ["helius-rpc.com answers", ...g.solana.slice(2), "quiknode.pro answers"] })],
+    ["dRPC before QuickNode", withRpc({ ...g, base: [...g.base.slice(1, 2), g.base[0], ...g.base.slice(2)] })],
+    ["Helius missing on Solana", withRpc({ ...g, solana: ["quiknode.pro answers"] })],
+    ["QuickNode before Helius on Solana", withRpc({ ...g, solana: ["quiknode.pro answers", "helius-rpc.com answers"] })],
     ["a key down", withRpc({ ...g, base: [...g.base.slice(0, 3), "drpc.live key3 down"] })],
     ["a key on another chain", withRpc({ ...g, robinhood: ["quiknode.pro wrong chain", ...g.robinhood.slice(1)] })],
     ["a key not probed yet", withRpc({ ...g, near: ["fastnear.com unread"] })],

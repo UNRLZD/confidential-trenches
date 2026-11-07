@@ -1,25 +1,47 @@
 // The EVM pool's gas per release, the kit's one definition (M356 (4), M357): G(depth) = base + perLevel x depth, where
 // depth is the pool's tree depth read at the epoch's first block (public, so every device and the helper get the same
-// number). One proof serves either withdraw or buy, so G is the larger method's: buy through the router on one hop.
-// Measured isolated per transaction by card pool-evm-buy (forge, isolate = true; 3 Nov): withdraw 494,356 at depth 2
-// and 1,139,880 at depth 32; buy, mock adapter, 570,422 / 1,215,964; buy, router one hop, 686,812 / 1,332,356; 21,518
-// a level. A multi-hop buy costs more (card evm-adapters measures it per adapter); the fee's x 2 and the pending-block
-// simulation before every send cover the rest.
+// number). One proof serves either withdraw or buy, so G is the larger method's, and since card evm-buy-gas-depth it is
+// the gas limit the helper signs a buy with, not the gas the buy uses: PrivacyPoolSimple.buy needs gasleft() >= 651,000
+// (BUY_SWAP_GAS + BUY_FAIL_GAS + 1,000) before its swap and reverts under it, so eth_estimateGas lands on that floor and
+// a buy's limit is about twice its gas used. The helper signs estimate x 1.2 (apps/helper pool/evm.ts) and caps
+// maxFeePerGas at fee / limit, so a fee priced on G at or over that limit leaves at least 2x the epoch block's base fee
+// per gas: fee_stale (the base fee over fee / limit) fires only once the base fee has doubled.
+// Measured on PrivacyPoolSimple as main 332672aa has it (forge, isolate = true; 7 Nov), at every tree state a pool can
+// hold, by the depth the fee reads (before the buy's insert): every size 1 to 129, then each depth's two heaviest states
+// to 32, all ones (2^D - 1, D hashes) and the crossing (2^D, a new top side node). A real tree of depth D has side nodes
+// 0 to D set and none above. The route is the helper's largest calldata (EVM_BODY_DATA_MAX, 2,404 bytes, its swap data
+// all non-zero) through an adapter that burns 120,000 gas, the heaviest measured swap, with a fee recipient that holds no
+// ETH (a funded one costs 25,000 less). The least gas a buy lands with: 1,117,427 at depth 0 (one leaf: the crossing to
+// depth 1 writes the depth and a new top side node), 1,105,589 at 1, 1,110,751 at 2, then 21,033 a level from depth 3
+// (all ones) to 1,732,470 at 32 (test/evm-pool-fee.test.ts holds all 33). G adds to that least a transaction's 21,000
+// and its calldata at its most, 16 x 2,404 (every byte priced non-zero), 59,464 in all, then covers 1.2 x the estimate a
+// node may return (geth and reth stop their search up to 1.5% over the least: x 1000/985). Forge 1.7.1, which made the
+// table, already counts the calldata in its least (the delta review of f7f4631a, 7 Nov, evidence/forge171-variants.log:
+// the same depth-0 buy with all-zero and all-0xff data read 1,103,751 and 1,117,947, 12 x 1,183 bytes), so G counts
+// calldata twice and sits about 46k gas (3-4%) high: it errs safe and moves no fee at today's base fees. Real sends on
+// anvil 1.8.6 (the same review, evidence/anvil-rv3.log: the least gas a sent buy lands with, 2,404 bytes of calldata,
+// 1,798 non-zero; anvil's eth_estimateGas equals it) put the worst limit the helper signs (that least x 1000/985 x 1.2)
+// about 57.5k under G at every depth 3 to 32 (57,522 at 32, where G is 1.027 x that limit) and 63,717 to 78,139 under at
+// depths 0 to 2; an all-non-zero 2,404 bytes adds at most 7,272. The gas a buy uses is unchanged; withdraw (1,139,880 at
+// depth 32) stays under G.
 
-/** Gas a level of the tree adds to a release (M357: about 21.5k). */
-export const EVM_POOL_GAS_PER_LEVEL = 21_518n;
+/** Gas a level of the tree adds to G: 21,033 a level measured, x 1.2 / 0.985, rounded up. */
+export const EVM_POOL_GAS_PER_LEVEL = 25_624n;
 /**
- * The buy's gas at depth 0: the line through both measured points (686,812 at depth 2, 1,332,356 at depth 32) with the
- * per-level slope above, rounded up so G is at or over every measured point (643,776 from depth 2, 643,780 from 32).
+ * G's line at depth 0: the least line of slope 21,033 at or over every measured least from depth 2, plus 59,464 of
+ * intrinsic gas (1,128,149 + 21,033 x depth, tight at depth 2), x 1.2 / 0.985, rounded up.
  */
-export const EVM_POOL_GAS_BASE = 643_780n;
+export const EVM_POOL_GAS_BASE = 1_374_395n;
+/** The depth G is held at below it: the line at depth 3 covers depths 0 to 2, whose one-leaf and crossing states cost
+ *  more than the line there (1,117,427 at depth 0). */
+const EVM_POOL_GAS_LEAST_DEPTH = 3;
 /** The deepest tree the pool takes (the Privacy Pools v1 state tree's MAX_TREE_DEPTH). */
 export const EVM_POOL_MAX_DEPTH = 32;
 
-/** G(depth): the most gas one release (withdraw or a one-hop buy) uses at this tree depth. */
+/** G(depth): the most gas the helper signs one release (withdraw or buy) for at this tree depth. */
 export function evmPoolGas(depth: number): bigint {
   if (!Number.isSafeInteger(depth) || depth < 0 || depth > EVM_POOL_MAX_DEPTH) throw new Error(`a tree depth of 0 to ${EVM_POOL_MAX_DEPTH}`);
-  return EVM_POOL_GAS_BASE + EVM_POOL_GAS_PER_LEVEL * BigInt(depth);
+  return EVM_POOL_GAS_BASE + EVM_POOL_GAS_PER_LEVEL * BigInt(Math.max(depth, EVM_POOL_GAS_LEAST_DEPTH));
 }
 
 // The EVM relay fee, the kit's one definition (M356 (4); card evm-buy-hookdata-fee, review fold 1 L1): what a sender

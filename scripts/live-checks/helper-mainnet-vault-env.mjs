@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Live check of card helper-mainnet-vault-env: HELPER_HOST carries mainnet withdrawals for the vault of the mainnet
-// deploy record and no other (the kit's rule: contracts/vault/deployments/mainnet-v1.json once it exists, else
-// mainnet-test.json; apps/helper/src/withdraw/send.ts MAINNET_VAULT follows the same), with a relayer account that exists on
+// deploy record and no other (the helper's pin rule, apps/helper/src/withdraw/send.ts MAINNET_VAULT:
+// contracts/vault/deployments/mainnet-v1.json once it exists, else mainnet-test.json; the kit's rule names
+// mainnet-v1.json's vault or null, never mainnet-test.json's), with a relayer account that exists on
 // mainnet. It sends nothing that could be carried and moves no money. With Origin APP_HOST it reads:
 //   - GET /v1/withdraw/fee for mainnet USDC: 200, naming the relayer account and the fee recipient;
 //   - POST /v1/withdraw, the recorded real proof's withdrawal (apps/helper/src/withdraw/fixtures/withdraw-request.json)
@@ -42,7 +43,8 @@ export const RELAYER_FLOOR_YOCTO = 465_200_000_000_000_000_000_002n;
 export const SPREAD = 30;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEPLOYMENTS = path.join(HERE, "../../contracts/vault/deployments");
-/** The kit's rule (packages/wallet/test/deposit-delegate.test.ts): mainnet-v1.json once it exists, else mainnet-test.json. */
+/** The helper's pin rule (apps/helper/src/withdraw/send.ts MAINNET_VAULT, not the kit's, which is mainnet-v1.json or
+ *  null): mainnet-v1.json once it exists, else mainnet-test.json. */
 export const recordFile = (dir = DEPLOYMENTS) => (existsSync(path.join(dir, "mainnet-v1.json")) ? path.join(dir, "mainnet-v1.json") : path.join(dir, "mainnet-test.json"));
 const FIXTURE = path.join(HERE, "../../apps/helper/src/withdraw/fixtures/withdraw-request.json");
 const SHA = /^[0-9a-f]{40}$/;

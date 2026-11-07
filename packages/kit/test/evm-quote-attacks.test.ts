@@ -4,15 +4,16 @@
 // block agreement, the first-hop native rule, the v3 doubled read, the pinned launchpad pools and a lagging node. N1 and N2 are
 // the review of 9a8265b's: N1 on a modelled chain whose PoolManager holds the token's pools (chain() below). Each test states what the device must do.
 import { mock, test } from "node:test";
+import { readFileSync } from "node:fs";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
 import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolSellQuoteRequest, type EvmPoolKey, type EvmRoute, type EvmV4Route } from "../src/index.ts";
-import { EVM_QUOTE_MAX_KEYS, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 // as namespaces: the red run before card evm-route-parity reads them where evmSellRouteOf and evmSellRouteCheck are not
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import * as sellMod from "../src/trade/evm/sell-unpinned.ts";
-import { evmQuotedSell } from "../src/trade/evm/quoted.ts";
+import { evmQuotedBuy, evmQuotedSell } from "../src/trade/evm/quoted.ts";
 const { evmSellRouteOf } = quoteMod as unknown as { evmSellRouteOf: (r: EvmRoute) => import("../src/trade/evm/sell-unpinned.ts").EvmSellRoute };
 const { evmSellRouteCheck } = sellMod as unknown as { evmSellRouteCheck: (chain: "base", token: string, r: unknown) => void };
 // the builder as a namespace: the red run before the fix reads it where evmPoolRouteDataQuoted is not there yet
@@ -275,6 +276,7 @@ test("N2 a caller's fetch makes no device quote: the public entry reads only the
 // `give(amount)` with its hook replaced by the hook that does nothing, and `lie(amount)` with its hook running.
 const PM = "0x498581ff718922c3f8e6a244956af099b2652b2b";
 const RH_PM = "0x8366a39cc670b4001a1121b8f6a443a643e40951"; // Robinhood Chain's PoolManager (the venue list)
+const BS_PM = "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408"; // Base Sepolia's PoolManager (the venue list)
 const CLANKER = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 const UNPINNED = "0x00000000000000000000000000000000000020cc";
 const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toString("hex");
@@ -285,7 +287,15 @@ const kk = (h: string) => Buffer.from(keccak_256(Buffer.from(h, "hex"))).toStrin
 // runs at where it is not the agreed block (a replay's block override, or the real sale's block; card
 // evm-sell-hook-converge); `sale`: the real sale itself, which alone sees what a transaction earlier in its own block did
 // `neutral`: what the pool pays W's own sell with its hook replaced by the no-op hook (by default `give`)
-type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint; block?: number; sale?: true };
+// `over`: the hooks the call replaces with the no-op hook; `dir`: whether the pool is swapped in a buy or a sale
+type SimCtx = { origin: string; sender: string; gas: bigint; gasPrice: bigint; block?: number; sale?: true; over?: Set<string>; dir?: "buy" | "sell"; sees?: Sees };
+// What a call at a block after the quote's sees of its block, each true where it is the trade's block's own (review of
+// da11bbb6, H1): L1Block's sequenceNumber, EIP-2935's hash of the block before, EIP-4788's root at the block's time,
+// BASEFEE and PREVRANDAO. The real trade sees all; a replay sees each only where its overrides set it (sysSees below).
+// `backlog`: on Robinhood (Nitro), ArbOS's gas-pricing backlog as the trade block's start left it, decayed by the time
+// passed (review of ca907a05, HIGH 1); no replay sees it, since it lives in ArbOS's own storage, which the device does
+// not override (card evm-sell-hook-intrablock replays at the trade's true pre-state); on Base there is none to tell.
+type Sees = { seq: boolean; hist: boolean; beacon: boolean; baseFee: boolean; randao: boolean; backlog: boolean };
 // `most`: the most of the currency it was found for the pool gives at any price, which an exact-output quote of more
 // reverts NotEnoughLiquidity on (card rh-cold-quote; none: any amount); `mostOn`: on that provider only; `over`: any
 // exact-output quote of it answers SafeCastOverflow (on provider `over`, or both); `plainOn`: a revert with no data there
@@ -299,9 +309,10 @@ const keyOf = (token: string, other: string, fee: number, tickSpacing: number, h
 };
 // the chain's head in the model: the agreed block, which the scan provider's head must be within maxLag of;
 // `overrides` keeps, for each eth_call with a state override, the addresses it replaces and the hooks of each quote in it;
-// `balances` is each account's ETH at the block (the pinned sell sender holds one ETH), which a state override replaces
+// `balances` is each account's ETH at the block (the pinned sell sender holds one ETH), which a state override replaces;
+// `nitro`: the chain is Robinhood's (Arbitrum Nitro), whose system state a replay sees as sysWord and sysSees hold it
 type Overridden = { replaces: string[]; hooks: string[][] };
-function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: Overridden[], balances: Record<string, bigint> = { [SENDER]: 10n ** 18n }): EvmRpc {
+function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: Overridden[], balances: Record<string, bigint> = { [SENDER]: 10n ** 18n }, nitro = false): EvmRpc {
   const live = pools.filter((p) => p.only === undefined || p.only === who);
   const byPid = new Map(live.map((p) => [pidOf(p.key), p]));
   const slots = new Map<string, bigint>();
@@ -366,7 +377,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
     : d.startsWith("f1c7a58b") || d.startsWith("275aedd2") || d.startsWith("f5d6ded7") ? 0n
     // Multicall3.getEthBalance(address): the account's ETH at the block
     : to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11" && d.startsWith("4d2301cc") ? (balances["0x" + d.slice(32, 72)] ?? 0n)
-    : to.toLowerCase() === PM || to.toLowerCase() === RH_PM
+    : to.toLowerCase() === PM || to.toLowerCase() === RH_PM || to.toLowerCase() === BS_PM
       ? d.startsWith("1e2eaeaf") ? (slots.get(d.slice(8)) ?? 0n) : null
       : d.startsWith("3850c7bd") || d.startsWith("1a686502") ? null // no v3 pool in the model
         : d.startsWith("58733073") ? exactOut(d)
@@ -378,11 +389,26 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       if (c.method === "eth_getTransactionByHash" || c.method === "eth_getTransactionReceipt" || c.method === "eth_getBlockByHash") {
         const s = c.method === "eth_getBlockByHash" ? [...SALES.values()].find((x) => x.blockHash === c.params[0]) : SALES.get(String(c.params[0]));
         if (s === undefined) return { jsonrpc: "2.0", id, result: null };
-        const block = { hash: s.blockHash, number: "0x" + s.block.toString(16), timestamp: "0x" + (BigInt(T) + 2n).toString(16), parentHash: "0x" + "9a".repeat(32) };
+        const block = { hash: s.blockHash, number: "0x" + s.block.toString(16), timestamp: SALE_TIME, parentHash: SALE_PARENT, baseFeePerGas: "0x" + SALE_BASE_FEE.toString(16), mixHash: SALE_MIX };
         if (c.method === "eth_getBlockByHash") return { jsonrpc: "2.0", id, result: block };
-        if (c.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id, result: { transactionHash: s.hash, blockHash: s.blockHash, blockNumber: block.number, status: who === 1 && s.status1 !== undefined ? s.status1 : s.status } };
-        return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x4", from: SENDER, to: s.to ?? SELL_W, input: s.input, gas: "0x" + SALE_GAS.toString(16), value: "0x0", maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240", authorizationList: [{ chainId: "0x2105", address: DELEGATED.base!.sellDelegate, nonce: "0x0", yParity: "0x0", r: "0x1", s: "0x1" }], blockHash: s.blockHash, blockNumber: block.number } };
+        if (c.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id, result: { transactionHash: s.hash, blockHash: s.blockHash, blockNumber: block.number, status: who === 1 && s.status1 !== undefined ? s.status1 : s.status, logs: s.logs ?? [], ...(s.l1Gas !== undefined ? { gasUsedForL1: "0x" + s.l1Gas.toString(16) } : {}) } };
+        // a buy is the helper's type 2 transaction with no authorizations (signEvmTx), a sale W's type 4 with one
+        const fees = { value: "0x0", maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" };
+        if (s.bought !== undefined) return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x2", from: SENDER, to: s.to ?? SALE_POOL, input: s.input, gas: "0x" + (s.gas ?? BUY_GAS).toString(16), ...fees, blockHash: s.blockHash, blockNumber: block.number } };
+        return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x4", from: SENDER, to: s.to ?? SELL_W, input: s.input, gas: "0x" + (s.gas ?? SALE_GAS).toString(16), ...fees, authorizationList: [{ chainId: "0x2105", address: DELEGATED.base!.sellDelegate, nonce: "0x0", yParity: "0x0", r: "0x1", s: "0x1" }], blockHash: s.blockHash, blockNumber: block.number } };
       }
+      // the system slots the device reads at the sale's block (review of da11bbb6, H1), as sysWord holds them
+      if (c.method === "eth_getStorageAt") {
+        const at = (c.params[2] as { blockHash?: string } | undefined)?.blockHash;
+        const s = [...SALES.values()].find((x) => x.blockHash === at);
+        return { jsonrpc: "2.0", id, result: sysWord(String(c.params[0]), BigInt(String(c.params[1])), s?.block ?? HEAD_NO, nitro) };
+      }
+      // a state override's stateDiff: each key and value 0x and 64 hex digits, as geth reads them (common.Hash), or the
+      // call is refused, as base-rpc.publicnode.com and mainnet.base.org (-32602 "Invalid params … odd number of
+      // digits") and rpc.mainnet.chain.robinhood.com (-32602 "cannot unmarshal hex string of odd length into Go struct
+      // field OverrideAccount") refused the key "0x1" (review of ca907a05, LOW 1, 2026-11-07)
+      const diffs = Object.values((c.method === "eth_call" ? c.params[2] : undefined) ?? {}).map((o) => (o as { stateDiff?: Record<string, unknown> }).stateDiff ?? {});
+      if (diffs.some((d) => Object.entries(d).some(([k, v]) => !/^0x[0-9a-fA-F]{64}$/.test(k) || typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(v)))) return { jsonrpc: "2.0", id, error: { code: -32602, message: "invalid argument 2: hex string has length != 64" } };
       const { to, data } = c.params[0] as { to: string; data: string };
       const overridden = new Set(Object.keys((c.params[2] as Record<string, unknown> | undefined) ?? {}).map((x) => x.toLowerCase()));
       if (overridden.size > 0 && overrides !== undefined) {
@@ -398,22 +424,59 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map((d, i) => one(tos[i]!, d, overridden))) };
       }
       // PoolManager.extsload(bytes32[]): each slot's word
-      if ((to.toLowerCase() === PM || to.toLowerCase() === RH_PM) && data.startsWith("0xdbd035ff")) {
+      if ((to.toLowerCase() === PM || to.toLowerCase() === RH_PM || to.toLowerCase() === BS_PM) && data.startsWith("0xdbd035ff")) {
         const n = Number(BigInt("0x" + data.slice(74, 138)));
         const words = Array.from({ length: n }, (_, k) => slots.get(data.slice(138 + 64 * k, 202 + 64 * k)) ?? 0n);
         return { jsonrpc: "2.0", id, result: "0x" + W(32n) + W(BigInt(n)) + words.map(W).join("") };
       }
       const asW = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code;
       const isSim = to.toLowerCase() === SELL_W && asW?.startsWith("0xef0100");
-      const base = isSim ? simCtx(c.params[0] as CallArgs, (c.params[2] ?? {}) as Record<string, { balance?: string }>, balances) : null;
+      // the pool's buy (card evm-buy-hook-converge): the real buy, and its replays at the buy's block
+      const isBuy = to.toLowerCase() === SALE_POOL && data.startsWith("0x" + SEL_BUY_T);
+      const base = isSim || isBuy ? simCtx(c.params[0] as CallArgs, (c.params[2] ?? {}) as Record<string, { balance?: string }>, balances) : null;
       if (typeof base === "string") return { jsonrpc: "2.0", id, error: { code: -32000, message: base } };
       // a block override (a replay of a sale) runs the call at that block; the model's own marker runs the real sale
-      const env = c.params[3] as { number?: string } | undefined;
-      const ctx = base === null ? null : { ...base, ...(env?.number !== undefined ? { block: Number(BigInt(env.number)) } : {}), ...(c.params[4] === SALE_RUN ? { sale: true as const } : {}) };
-      const o = isSim ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>, ctx!, overridden) : one(to, data.slice(2), overridden);
-      // SellDelegate's MinOutNotMet() (0x81efc143) as the revert's data of W's sell, so a replay's two answers can be held equal
-      return o === null || o === RAN_OUT || o === OVERFLOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", ...(isSim ? { data: "0x81efc143" } : {}) } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
+      const env = c.params[3] as { number?: string; baseFeePerGas?: string; prevRandao?: string } | undefined;
+      const ctx = base === null ? null : { ...base, ...(env?.number !== undefined ? { block: Number(BigInt(env.number)), sees: c.params[4] === SALE_RUN ? SEES_ALL : sysSees(Number(BigInt(env.number)), (c.params[2] ?? {}) as Record<string, { stateDiff?: Record<string, string> }>, env, nitro) } : {}), ...(c.params[4] === SALE_RUN ? { sale: true as const } : {}) };
+      const o = isSim ? simSell(data.slice(2), c.params[2] as Record<string, { code: string }>, ctx!, overridden) : isBuy ? buyRun(data.slice(2), ctx!, overridden) : one(to, data.slice(2), overridden);
+      // SellDelegate's and the pool's MinOutNotMet() (0x81efc143) as the revert's data of W's sell or the pool's buy, so a
+      // replay's two answers can be held equal
+      // the pool's buy lands a failed swap (status 1, the chunk back to W) and returns `_bought` (card pool-evm-buy-pays-revert)
+      if (isBuy) return o === SWAP_GAS_TOO_LOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", data: SEL_SWAP_GAS_TOO_LOW } } : { jsonrpc: "2.0", id, result: "0x" + W(o === null ? 0n : 1n) };
+      return o === null || o === RAN_OUT || o === OVERFLOW || o === SWAP_GAS_TOO_LOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", ...(isSim ? { data: "0x81efc143" } : {}) } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
     });
+  // PrivacyPoolSimple.buy (card evm-buy-hook-converge): the Buy at head word 18 through the pinned v4 adapter, its data
+  // abi.encode(currencyIn, PathKey[]), swapped hop by hop from the proof's withdrawn value (head word 11) less the fee
+  // (word 17) at each pool's `exec`, the token checked; null where the swap fails (below minOut), which the pool lands
+  // as a withdraw and answers `_bought` false (card pool-evm-buy-pays-revert). The gas as main's pool spends it
+  // (PrivacyPoolSimple.buy; review of a2d82dc6, L5): past the model's release (BUY_RELEASE_GAS), below BUY_SWAP_GAS +
+  // BUY_FAIL_GAS + 1,000 the buy reverts SwapGasTooLow; the swap's call is given all the gas but BUY_FAIL_GAS, at most
+  // all but one 64th (EIP-150), and each hook sees that gas, never the transaction's
+  function buyRun(d: string, ctx0: SimCtx, overridden: Set<string>): bigint | null | typeof SWAP_GAS_TOO_LOW {
+    const left = ctx0.gas - BUY_RELEASE_GAS;
+    if (left < BUY_SWAP_GAS + BUY_FAIL_GAS + 1000n) return SWAP_GAS_TOO_LOW;
+    const ctx = { ...ctx0, gas: left - BUY_FAIL_GAS < left - left / 64n ? left - BUY_FAIL_GAS : left - left / 64n };
+    const w = (i: number) => BigInt("0x" + d.slice(8 + 64 * i, 72 + 64 * i));
+    const b = Number(w(18)) / 32;
+    const [adapter, minOut, token] = ["0x" + W(w(b)).slice(24), w(b + 2), "0x" + W(w(b + 3)).slice(24)];
+    void adapter; // the model's pool swaps through any adapter: only the evidence's own check refuses another
+    const at = b + Number(w(b + 1)) / 32 + 1; // the data's first word
+    const arr = at + Number(w(at + 1)) / 32;
+    const n = Number(w(arr));
+    let [from, got] = ["0x" + W(w(at)).slice(24), w(11) - w(17)];
+    for (let i = 0; i < n; i++) {
+      const e = arr + 1 + Number(w(arr + 1 + i)) / 32;
+      const [cur, fee, ts, hooks] = ["0x" + W(w(e)).slice(24), Number(w(e + 1)), Number(w(e + 2)), "0x" + W(w(e + 3)).slice(24)];
+      const k = keyOf(cur, from, fee, ts, hooks);
+      const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
+      if (p === undefined) return null;
+      const next = p.key.hooks !== NATIVE && overridden.has(p.key.hooks) ? (p.neutral !== undefined ? p.neutral(got, ctx) : p.give(got)) : p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "buy" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
+      if (next === null) return null;
+      [from, got] = [cur, next];
+    }
+    assert.equal(from, token.toLowerCase(), "the route buys the Buy's token");
+    return got < minOut ? null : got;
+  }
   // W's own sell through SellDelegate (card evm-quote-exec-sim), W's code the delegate's 7702 designator: nonce() is 0;
   // sell(sell, fee, signature) swaps hop by hop from the token at each pool's `exec`, reverts below minOut, and returns
   // what W gained (the sim pool's code returns msg.value)
@@ -444,7 +507,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
       if (p === undefined) return null;
       // a pool whose hook the call replaces with the no-op hook pays as it does with no hook (`neutral`, else `give`)
-      const next = p.key.hooks !== NATIVE && overridden.has(p.key.hooks) ? (p.neutral !== undefined ? p.neutral(got, ctx) : p.give(got)) : p.exec !== undefined ? p.exec(got, ctx) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
+      const next = p.key.hooks !== NATIVE && overridden.has(p.key.hooks) ? (p.neutral !== undefined ? p.neutral(got, ctx) : p.give(got)) : p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "sell" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
       if (next === null) return null;
       [from, got] = [cur, next];
     }
@@ -862,7 +925,7 @@ test("S3c a market whose hook is not pinned is quoted only once it exists, with 
   for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
 });
 
-test("L1 a buy through a pool behind an unpinned hook is refused: its sell could not leave through it (no_exit)", async () => {
+test("L1 a buy through a pool behind an unpinned hook that keeps a tenth is bought at the nine tenths it pays, never at its hookless price (card evm-buy-hook-converge: before it, refused no_exit)", async () => {
   const token = "0x00000000000000000000000000000000000ac1ac";
   // the route's pool keeps a tenth through its hook; a standard pool gives half
   const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => a, lie: (a) => a - a / 10n };
@@ -870,7 +933,14 @@ test("L1 a buy through a pool behind an unpinned hook is refused: its sell could
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED, hookData: "0x" }] };
   // found by the scan and listed by the caller too (card evm-route-parity: before it, this bought at 0.9 x)
   const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route, pools: [hooked.key] }, [chain([hooked, half], 0), chain([hooked, half], 1)], NOW, scanner(5_000_000, [{ key: hooked.key, at: 4_500_000 }])));
-  assert.deepEqual(v, { accepted: false, code: "no_exit" });
+  assert.deepEqual(v, { accepted: true, amountOut: AMOUNT - AMOUNT / 10n, minOut: ((AMOUNT - AMOUNT / 10n) * 9900n) / 10000n, block: 5_000_000n });
+});
+
+test("L1b a buy whose route passes the native asset in its middle is refused before any read: its sell could not leave through it (no_exit)", async () => {
+  const token = "0x00000000000000000000000000000000000ac1ad";
+  const x = xAt(0x1b1);
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: x, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }, { currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }, { currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED, hookData: "0x" }] };
+  assert.deepEqual(await quoteOn([seeded(token)], token, route), { accepted: false, code: "no_exit" });
 });
 
 // a buy from the token's standard 1% native pool, the best route, against pools of other currencies
@@ -1781,7 +1851,12 @@ test("T8b the reads' gate never has more than its limit in flight, however many 
 const SELL_W = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // Hardhat account 0, a published test key
 // `bought` is required (review of edb4dbb, F3): by default the seeded pool's route, the one a server would send, so the
 // sell must still find the token's market from its own set; null leaves it out
-const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues?: builder.EvmPoolVenueList, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
+// The venues a sell reads unless a test names its own: Base with no sell delegate pinned, so a route through an unlisted
+// hook keeps the lower of its two quotes ("keep-min", simRule), the rule these probes were written for; the kit pins
+// Base's delegate since card pool-evm-deploy-mainnet, and DELEGATED below runs the sim
+const { sellDelegate: _keepMin, ...BASE_NO_DELEGATE } = builder.evmPoolVenues().base;
+const KEEP_MIN: builder.EvmPoolVenueList = Object.freeze({ ...builder.evmPoolVenues(), base: Object.freeze(BASE_NO_DELEGATE) });
+const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues: builder.EvmPoolVenueList = KEEP_MIN, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
   evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, boughtBlock: 1n, ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
 const sellVerdict = async (p: ReturnType<typeof sellOn>) => {
   try {
@@ -1863,9 +1938,11 @@ test("P4 a Zora coin's three-hop buy and its sell both build; an unlisted hook, 
     const r = ref as EvmV4Route;
     return { ...r, hops: r.hops.map((h, i) => (i === 1 ? { ...h, ...o } : h)) };
   };
+  // (the sell builder refuses it on any route its quote did not pick; the buy quote reads it as a route through a hook
+  // the venue does not list, card evm-buy-hook-converge, and no such pool holds it)
   for (const o of [{ hooks: UNPINNED }, { fee: 3000 }, { tickSpacing: 60 }]) {
     assert.notEqual(exits(token, hop2(o)), "built", JSON.stringify(o));
-    assert.deepEqual(await quoteOn(pools, token, hop2(o), scanner(5_000_000, logs)), { accepted: false, code: "no_exit" }, JSON.stringify(o));
+    assert.deepEqual(await quoteOn(pools, token, hop2(o), scanner(5_000_000, logs)), { accepted: false, code: "no_quote" }, JSON.stringify(o));
   }
 });
 
@@ -1958,24 +2035,25 @@ test("PC (F5) a `bought` route through an unlisted hook that lies to the quoter 
   const lieRoute: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED, hookData: "0x" }] };
   const viaBought = await sellVerdict(sellOn([honest, liar], token, scanner(5_000_000, logs), lieRoute));
   assert.equal((viaBought as { amountOut?: bigint }).amountOut, AMOUNT, show(viaBought));
-  // the sell builder does not take it, so it is dropped whole: an honest pool behind the same hook at twice the market,
-  // that no scan found, refuses no sell either (another token: the scan of this one is kept in memory)
+  // an honest pool behind the same hook at twice the market, that no scan found, is the sale's route through `bought`
+  // (card evm-buy-hook-converge: a buy may enter through such a pool, so its sale leaves through it, by the sale's take
+  // rule; another token: the scan of this one is kept in memory)
   const t2 = "0x00000000000000000000000000000000000c0c1c";
   const honest2: ModelPool = { key: keyOf(t2, NATIVE, 2500, 50, NATIVE), give: (a) => a };
-  const twice: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a };
+  const twice: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n) };
   const route2: EvmRoute = { ...lieRoute, hops: [{ ...lieRoute.hops[0]!, currency: t2 }] };
   const viaTwice = await sellVerdict(sellOn([honest2, twice], t2, scanner(5_000_000, [{ key: honest2.key, at: 4_500_000 }]), route2));
-  assert.equal((viaTwice as { amountOut?: bigint }).amountOut, AMOUNT, show(viaTwice));
+  viaHook(viaTwice, twice.key, 2n * AMOUNT);
 });
 
-test("PD (F6) with the best route unsellable, minOut is the slippage off the reference, never off a pick below it", async () => {
+test("PD (F6) with the best route unsellable, minOut is the slippage off the pick, never off a reference through a hook the venue does not list (review of 72e28658, M2: that hook places its own quote, so it would choose the pick's slippage)", async () => {
   const token = "0x00000000000000000000000000000000000c0d0d";
   const s = 2000;
   const best: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => a };
   const near: ModelPool = { key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => (a * 8001n) / 10000n };
   const q = await sellVerdict(sellOn([best, near], token, scanner(5_000_000, [{ key: best.key, at: 4_500_000 }]), undefined, s));
   assert.equal(q.accepted, true, show(q));
-  assert.equal((q as { minOut: bigint }).minOut, (AMOUNT * BigInt(10000 - s)) / 10000n, show(q));
+  assert.equal((q as { minOut: bigint }).minOut, (((AMOUNT * 8001n) / 10000n) * BigInt(10000 - s)) / 10000n, show(q));
 });
 
 test("PF (F3) a seeded creator-coin market that fills at a tenth: with `bought` the sell leaves at the market; without it, no sell quote", async () => {
@@ -4675,9 +4753,62 @@ const HEAD_NO = 5_000_000;
 /** True for a call at a block after the quote's: the real sale, and its replay at the sale's block. */
 const later = (ctx: SimCtx) => (ctx.block ?? HEAD_NO) > HEAD_NO;
 const SALE_RUN = "the model's real sale";
+// The sale's block in the model: its time, parent, base fee and mixHash, and its system slots (sysWord): L1Block's
+// sequenceNumber counts from the epoch's first block EPOCH0, EIP-2935 holds the parent's hash at (N-1) % 8191, and
+// EIP-4788 the block's time and root at its time % 8191 and that plus 8191; at any other block (the parent) each is
+// the quote block's (HEAD_NO's), as a replay at the parent sees it unless overridden
+const [SALE_TIME, SALE_PARENT, SALE_BASE_FEE, SALE_MIX, SALE_ROOT] = ["0x" + (BigInt(T) + 2n).toString(16), "0x" + "9a".repeat(32), BASE_FEE + 7n, "0x" + "3c".repeat(32), "0x" + "7b".repeat(32)];
+const EPOCH0 = HEAD_NO - 3;
+const [L1B, HIST, BEACON] = ["0x4200000000000000000000000000000000000015", "0x0000f90827f1c53a10cb7a02335b175320002935", "0x000f3df6d732807ef1319fb7b8bb8522d0beac02"];
+const SYS = [L1B, HIST, BEACON];
+/** The accounts a replay's state override names beside the system accounts every replay on Base carries. */
+const ownOver = (o: unknown) => Object.keys(o as object).filter((k) => !SYS.includes(k.toLowerCase())).length;
+const SEES_ALL: Sees = { seq: true, hist: true, beacon: true, baseFee: true, randao: true, backlog: true };
+// On Robinhood (`nitro`): EIP-2935's history alone, its ring 393,168 (ArbOS's code 0x05ffd0); ArbOS's L1 block number and
+// gas backlog live in ArbOS's own storage, which the device never reads or overrides
+function sysWord(addr: string, slot: bigint, block: number, nitro = false): string {
+  const a = addr.toLowerCase();
+  const sale = block > HEAD_NO;
+  const ts = BigInt(SALE_TIME);
+  if (nitro) return a === HIST && slot === BigInt(block - 1) % 393168n ? (sale ? SALE_PARENT : "0x" + "e1".repeat(32)) : "0x" + W(0n);
+  if (a === L1B && slot === 3n) return "0x" + W(BigInt(block - EPOCH0));
+  if (a === L1B && slot < 9n) return "0x" + W(0x1b00n + slot); // the other fields, the same in both blocks
+  if (a === HIST && slot === BigInt(block - 1) % 8191n) return sale ? SALE_PARENT : "0x" + "e1".repeat(32);
+  if (a === BEACON && slot === ts % 8191n) return "0x" + W(sale ? ts : ts - 16382n);
+  if (a === BEACON && slot === (ts % 8191n) + 8191n) return sale ? SALE_ROOT : "0x" + "e2".repeat(32);
+  return "0x" + W(0n);
+}
+/** What a replay at block `n` sees of it: each system value from the state override where it sets the slot, else the
+ *  parent's (the quote block's), and BASEFEE and PREVRANDAO from the block override, else the parent header's. */
+function sysSees(n: number, o: Record<string, { stateDiff?: Record<string, string> }>, env: { baseFeePerGas?: string; prevRandao?: string }, nitro = false): Sees {
+  const word = (a: string, slot: bigint) => {
+    const d = Object.entries(o).find(([k]) => k.toLowerCase() === a)?.[1]?.stateDiff ?? {};
+    const v = Object.entries(d).find(([k]) => BigInt(k) === slot)?.[1];
+    return v !== undefined ? v.toLowerCase() : sysWord(a, slot, HEAD_NO, nitro);
+  };
+  const ts = BigInt(SALE_TIME);
+  const baseFee = env.baseFeePerGas !== undefined && BigInt(env.baseFeePerGas) === SALE_BASE_FEE;
+  // Robinhood: no L1Block and no EIP-4788; PREVRANDAO answers 1 in every block (Multicall3's getCurrentBlockDifficulty
+  // on rpc.mainnet.chain.robinhood.com and robinhood.drpc.org, 2026-11-07 15:32Z; the header's mixHash is ArbOS's send
+  // count and L1 block number), so a replay that sets it from the header tells; the backlog is always the parent's
+  if (nitro) {
+    const h = BigInt(n - 1) % 393168n;
+    return { seq: true, beacon: true, hist: word(HIST, h) === sysWord(HIST, h, n, true), baseFee, randao: env.prevRandao === undefined, backlog: false };
+  }
+  return {
+    backlog: true,
+    seq: word(L1B, 3n) === sysWord(L1B, 3n, n),
+    hist: word(HIST, BigInt(n - 1) % 8191n) === sysWord(HIST, BigInt(n - 1) % 8191n, n),
+    beacon: word(BEACON, ts % 8191n) === sysWord(BEACON, ts % 8191n, n) && word(BEACON, (ts % 8191n) + 8191n) === SALE_ROOT,
+    baseFee,
+    randao: env.prevRandao === SALE_MIX,
+  };
+}
 const [SALE_POOL, SALE_COLLECTOR] = ["0x00000000000000000000000000000000000b0011", "0x00000000000000000000000000000000000fee11"];
 const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: SALE_POOL, feeCollector: SALE_COLLECTOR }) }) as builder.EvmPoolVenueList;
-type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string };
+// a buy's `bought`: what the pool's call returned (its swap done), with its log, Bought or Withdrawn, in `logs`
+// `gas`: its gas limit, where it is not the model's (SALE_GAS for a sale, BUY_GAS for a buy)
+type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string; bought?: boolean; gas?: bigint; logs?: { address: string; topics: string[] }[]; l1Gas?: bigint };
 const SALES = new Map<string, ModelSale>();
 let saleNo = 0;
 /** The sale of quote `q` as the device builds and W signs it (the signature is the model's: the modelled delegate takes any). */
@@ -4695,7 +4826,7 @@ const saleInput = (q: HookedQuote): string => {
  *  where it reverts), unless `status` says; returns its hash. */
 const land = async (pools: ModelPool[], q: HookedQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}, edit: (input: string) => string = (x) => x): Promise<string> => {
   const input = edit(saleInput(q));
-  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + (SALE_GAS - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
+  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + ((extra.gas ?? SALE_GAS) - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
   const hash = "0x" + (0x5a1e0000 + ++saleNo).toString(16).padStart(64, "0");
   SALES.set(hash, { hash, input, block, blockHash: "0x" + (0xb10c0000 + saleNo).toString(16).padStart(64, "0"), status: run.result !== undefined ? "0x1" : "0x0", ...extra });
   return hash;
@@ -4772,7 +4903,7 @@ test("HC4 an honest pool behind an unlisted hook, the token's best, is sold thro
   const h2: ModelPool = { ...honest, key: keyOf(t2, NATIVE, 3000, 60, UNPINNED) };
   const q = await hcQuote([near, h2], t2, [{ key: near.key, at: 4_500_000 }, { key: h2.key, at: 4_500_001 }]);
   assert.ok(!("code" in q) && q.hooked.length === 0 && q.amountOut === 2n * AMOUNT - (2n * AMOUNT) / 200n, show(q));
-  assert.equal(q.minOut, (2n * AMOUNT * 9900n) / 10000n, "minOut still from the reference");
+  assert.equal(q.minOut, ((2n * AMOUNT - (2n * AMOUNT) / 200n) * 9900n) / 10000n, "minOut from the pick: a reference through an unlisted hook sets none (review of 72e28658, M2)");
 });
 
 test("HC5 a sell quote's banned is a list of at most 4096 pool ids, each 0x and 64 hex digits: anything else is bad_request", async () => {
@@ -4961,8 +5092,9 @@ test("RV8 providers that disagree on the sale or on a replay ban nothing; a sale
   // the second provider answers the replay as the sale ran with another revert, or the no-op replay with a revert
   const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
   const hash = await land(pools, q1);
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0xdeadbeef" } } : undefined))]), []);
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length > 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), []);
+  // (each replay overrides W's code, then the hooks it replaces, never the sender's balance: review of a2d82dc6, F1)
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (ownOver(c.params[2]) === 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0xdeadbeef" } } : undefined))]), []);
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (ownOver(c.params[2]) > 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), []);
   // a sale that landed, or one sent to another account than the quote's W
   assert.deepEqual(await proved(pools, q1, await land(pools, q1, HEAD_NO + 1, { status: "0x1" })), []);
   assert.deepEqual(await proved(pools, q1, await land(pools, q1, HEAD_NO + 1, { to: "0x000000000000000000000000000000000000beef" })), []);
@@ -5065,7 +5197,7 @@ test("RVX two distinct unlisted hooks on one picked route, each reverting the re
   assert.equal(SALES.get(hash)!.status, "0x0");
   // the second provider answers the replay with both hooks a no-op (asW and two hooks: three overrides) with a revert
   const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 3 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (ownOver(c.params[2]) === 3 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
   // the device's loop: one failed try, both pools banned, then the seeded pool
   const r = await hcConverge(pools, token, logs, 4);
   assert.deepEqual({ failed: r.failed, got: r.got, banned: [...r.banned].sort() }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(market.key), hcPid(pool.key)].sort() }, show(r));
@@ -5075,4 +5207,762 @@ test("RVX two distinct unlisted hooks on one picked route, each reverting the re
   const q2 = await hcQuote(deadPools, token, logs);
   assert.ok(!("code" in q2) && q2.hooked.length === 2, show(q2));
   assert.deepEqual(await proved(deadPools, q2, await land(deadPools, q2)), []);
+});
+
+// ------------------------------------------------------------------------------------- card evm-buy-hook-converge
+// The buy takes the sale's take-and-ban design. A pool behind a hook the venue does not list that quotes the quoter
+// high used to set the buy's reference R (at the lower of its quote with the hook replaced and as it is) and refuse every
+// buy below_reference, while a buy through it was refused no_exit: the token could not be bought. Now a route through
+// such a hook is bought where no route through listed pools is within the slippage of it, at the lowest of its quotes;
+// where its real buy reverts, the device's own evidence (evmBuyRevertedPools) names the pools at fault, the caller bans
+// them (the sale's bans), and the next quote leaves them out. A route through listed pools within the slippage of such a
+// reference is bought at the reference's minOut.
+const SEL_BUY_T = Buffer.from(keccak_256(new TextEncoder().encode("buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)"))).toString("hex").slice(0, 8);
+const BUY_ADAPTER = "0x00000000000000000000000000000000000ad4a4";
+// the relayer's fee the model's buys pay out of the withdrawn value (the pool swaps the rest)
+const BUY_FEE = 3n * 10n ** 15n;
+// main's pool's gas (contracts/pool-evm/src/PrivacyPoolSimple.sol BUY_SWAP_GAS, BUY_FAIL_GAS and SwapGasTooLow); the
+// model's intrinsic cost and release before the swap's call (the measured Privacy Pools withdrawal is 611,391, M349);
+// the model's buy gas limit: a limit under the helper's EVM_GAS_MAX of 1,500,000 (apps/helper/src/pool/evm.ts), not the
+// helper's own sizing (its estimate x 1.2 would be at least 1.2 x 1,251,000 = 1,501,200 with this model's release, past
+// that cap; M388 measured 1,082,371 least landing gas at depth 2, about 1.30M after x 1.2). The evidence rule needs only
+// one limit the buy and its replay both run at; the helper's sizing is card evm-buy-gas-depth's
+const [BUY_SWAP_GAS, BUY_FAIL_GAS, BUY_RELEASE_GAS, BUY_GAS] = [500_000n, 150_000n, 600_000n, 1_400_000n];
+const SWAP_GAS_TOO_LOW = Symbol("SwapGasTooLow");
+const SEL_SWAP_GAS_TOO_LOW = "0x" + Buffer.from(keccak_256(new TextEncoder().encode("SwapGasTooLow()"))).toString("hex").slice(0, 8);
+// the pool's events (IPrivacyPool.sol), hashed here: the kit holds them as literals
+const topicOf = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex");
+const TOPIC_WITHDRAWN_T = topicOf("Withdrawn(address,address,uint256,uint256,uint256,uint256)");
+const TOPIC_BOUGHT_T = topicOf("Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)");
+// Base's venue with its pool and v4 adapter pinned, as pool-evm-deploy pins them
+const BUY_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: SALE_POOL, adapters: Object.freeze({ v4: BUY_ADAPTER }) }) }) as builder.EvmPoolVenueList;
+// The chain a buy runs on in the model: its name, its venue list (its pool and v4 adapter pinned the same way) and
+// whether it is Nitro (Robinhood: chain's `nitro`); Base unless a test names another (review of ca907a05, LOW 2)
+type Net = { chain: "base" | "base-sepolia" | "robinhood"; venues: builder.EvmPoolVenueList; nitro: boolean };
+const pinnedOn = (c: "base-sepolia" | "robinhood") => Object.freeze({ ...DELEGATED, [c]: Object.freeze({ ...DELEGATED[c], pool: SALE_POOL, adapters: Object.freeze({ v4: BUY_ADAPTER }) }) }) as builder.EvmPoolVenueList;
+const BASE_NET: Net = { chain: "base", venues: BUY_VENUES, nitro: false };
+const RH_NET: Net = { chain: "robinhood", venues: pinnedOn("robinhood"), nitro: true };
+const BS_NET: Net = { chain: "base-sepolia", venues: pinnedOn("base-sepolia"), nitro: false };
+type BuyVerdict = EvmPoolBuyQuote | { code: string; reference: { amountOut: bigint; route: EvmRoute } | null };
+const hbQuote = async (pools: ModelPool[], token: string, logs: { key: EvmPoolKey; at: number }[], route: EvmRoute, banned?: readonly string[], net: Net = BASE_NET): Promise<BuyVerdict> => {
+  try {
+    return await evmPoolBuyQuoteWith({ chain: net.chain, token, amountIn: AMOUNT, slippageBps: 100, route, ...(banned ? { banned } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, undefined, undefined, undefined, net.nitro), chain(pools, 1, undefined, undefined, undefined, net.nitro)], NOW, scanner(5_000_000, logs));
+  } catch (e) {
+    if (!(e instanceof EvmQuoteError)) throw e;
+    return { code: e.code, reference: e.reference };
+  }
+};
+/** The pool's buy of quote `q` as the helper sends it: PrivacyPoolSimple.buy(withdrawal, proof, fee, Buy, signature),
+ *  the Buy the device's build of the quote (evmQuotedBuy through Base's pinned adapter); the model's withdrawn value is
+ *  the proof's last word (head word 16), the quote's amount. */
+// `fee` sets the proof's withdrawn value to the amount and that fee, the fee word left BUY_FEE; `feeWord` sets the fee
+// word, the withdrawn value left the amount and BUY_FEE (a sender that takes more, so the pool swaps less)
+const buyInput = (q: EvmPoolBuyQuote, edit: Partial<{ adapter: string; data: string; minOut: bigint; token: string; fee: bigint; feeWord: bigint }> = {}, venues = BUY_VENUES): string => {
+  const { fee: _fee, feeWord: _feeWord, ...fields } = edit;
+  void _fee;
+  void _feeWord;
+  const built = { ...evmQuotedBuy(venues, BUY_ADAPTER, q, NOW), ...fields };
+  const data = built.data.slice(2);
+  const padded = data.padEnd(Math.ceil(data.length / 64) * 64, "0");
+  const withdrawal = W(0x40n) + W(0n) + W(0n); // (processooor, bytes data) with no data, the model reads none of it
+  const buyTail = W(BigInt(built.adapter)) + W(0x80n) + W(built.minOut) + W(BigInt(built.token)) + W(BigInt(data.length / 2)) + padded;
+  const head = 20 * 32;
+  // the proof's third public signal (head word 11) is its withdrawn value: the quote's amount and the relayer's fee
+  const proof = Array.from({ length: 16 }, (_, i) => W(i === 10 ? q.amountIn + (edit.fee ?? BUY_FEE) : 0n)).join("");
+  return "0x" + SEL_BUY_T + W(BigInt(head)) + proof + W(edit.feeWord ?? BUY_FEE) + W(BigInt(head + withdrawal.length / 2)) + W(BigInt(head + withdrawal.length / 2 + buyTail.length / 2)) + withdrawal + buyTail + W(65n) + "00".repeat(96);
+};
+/** Lands quote `q`'s buy on the modelled chain of `pools` at `block`, from the pinned sender to the pool, as main's pool
+ *  lands it (card pool-evm-buy-pays-revert): status 1, its swap done (`bought`, the pool's Bought) or undone (the
+ *  pool's Withdrawn, the chunk paid back to W); returns its hash. */
+const landBuy = async (pools: ModelPool[], q: EvmPoolBuyQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}, edit: Parameters<typeof buyInput>[1] = {}, net: Net = BASE_NET): Promise<string> => {
+  const input = buyInput(q, edit, net.venues);
+  const run = (await chain(pools, 0, undefined, undefined, undefined, net.nitro)([{ method: "eth_call", params: [{ from: SENDER, to: SALE_POOL, data: input, gas: "0x" + (extra.gas ?? BUY_GAS).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", {}, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
+  const hash = "0x" + (0x5a1e0000 + ++saleNo).toString(16).padStart(64, "0");
+  const bought = run.result !== undefined && BigInt(run.result) === 1n;
+  const logs = [{ address: SALE_POOL, topics: [bought ? TOPIC_BOUGHT_T : TOPIC_WITHDRAWN_T, "0x" + "00".repeat(32)] }];
+  SALES.set(hash, { hash, input, block, blockHash: "0x" + (0xb10c0000 + saleNo).toString(16).padStart(64, "0"), status: run.result !== undefined ? "0x1" : "0x0", to: SALE_POOL, bought, logs, ...extra });
+  return hash;
+};
+const buyProved = (pools: ModelPool[], q: EvmPoolBuyQuote, hash: string, rpcs?: EvmRpc[], net: Net = BASE_NET) =>
+  evmBuyRevertedPoolsWith(q, hash, rpcs ?? [chain(pools, 0, undefined, undefined, undefined, net.nitro), chain(pools, 1, undefined, undefined, undefined, net.nitro)], net.venues);
+// The device's buy loop: quote the route (a refusal below_reference names the device's own route, quoted next), buy,
+// and where the buy reverts, ban the pools the device's own evidence blames and quote again
+const hbConverge = async (pools: ModelPool[], token: string, logs: { key: EvmPoolKey; at: number }[], route0: EvmRoute, max = 8, block = HEAD_NO + 1, net: Net = BASE_NET) => {
+  const banned: string[] = [];
+  let [failed, route] = [0, route0];
+  for (let i = 0; i < max; i++) {
+    const q = await hbQuote(pools, token, logs, route, banned, net);
+    if ("code" in q) {
+      if (q.code === "below_reference" && q.reference !== null) {
+        route = q.reference.route;
+        continue;
+      }
+      return { failed, code: q.code, banned };
+    }
+    const hash = await landBuy(pools, q, block, {}, {}, net);
+    if (SALES.get(hash)!.bought === true) return { failed, got: q.amountOut, minOut: q.minOut, hooked: q.hooked, banned };
+    failed++;
+    assert.ok(q.hooked.length > 0, "only a route through an unlisted hook can revert in the model");
+    banned.push(...(await buyProved(pools, q, hash, undefined, net)));
+  }
+  return { failed, code: "no_convergence", banned };
+};
+const v4Route = (keys: { currency: string; fee: number; tickSpacing: number; hooks: string }[]): EvmRoute => ({ venue: "uniswap-v4", currencyIn: NATIVE, hops: keys.map((k) => ({ ...k, hookData: "0x" })) });
+// the token's market: a standard hookless pool, so a reference whatever route is quoted (a found pool of the route's own
+// is never its reference)
+const marketRoute = (token: string): EvmRoute => v4Route([{ currency: token, fee: 500, tickSpacing: 10, hooks: NATIVE }]);
+
+test("HB1 a hook that quotes the quoter high and reverts every real buy freezes no buy: one failed try, its pool banned, then the market", async () => {
+  const token = "0x00000000000000000000000000000000000b1b01";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const pools = [market, hostile];
+  // the market's buy is refused below the hostile pool's reference; the hostile route is bought at its price, its pool named
+  const m = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok("code" in m && m.code === "below_reference" && m.reference?.amountOut === 2n * AMOUNT, show(m));
+  const q = await hbQuote(pools, token, logs, m.reference!.route);
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut, hooked: q.hooked }, { out: 2n * AMOUNT, min: (2n * AMOUNT * 9900n) / 10000n, hooked: [hcPid(hostile.key)] });
+  const r = await hbConverge(pools, token, logs, marketRoute(token));
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, show(r));
+  // while banned, the pool sets no reference, and a buy through it is refused with the device's own route
+  const again = await hbQuote(pools, token, logs, m.reference!.route, r.banned);
+  assert.ok("code" in again && again.code === "below_reference" && again.reference?.amountOut === AMOUNT, show(again));
+});
+
+test("HB2 a hook that honours only even blocks (the quote at an even block, the buy lands at an odd one) freezes no buy: one failed try, then the market", async () => {
+  const token = "0x00000000000000000000000000000000000b1b02";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const even: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: (a, ctx) => ((ctx.block ?? HEAD_NO) % 2 === 0 ? 2n * a : null) };
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: even.key, at: 4_500_001 }];
+  const r = await hbConverge([market, even], token, logs, marketRoute(token));
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(even.key)] }, show(r));
+  // landed at an even block, the same buy goes through
+  const t2 = "0x00000000000000000000000000000000000b1b12";
+  const [m2, e2] = [{ ...market, key: keyOf(t2, NATIVE, 500, 10, NATIVE) }, { ...even, key: keyOf(t2, NATIVE, 3000, 60, UNPINNED) }];
+  const r2 = await hbConverge([m2, e2], t2, [{ key: m2.key, at: 4_500_000 }, { key: e2.key, at: 4_500_001 }], marketRoute(t2), 8, HEAD_NO + 2);
+  assert.deepEqual({ failed: r2.failed, got: r2.got, hooked: r2.hooked }, { failed: 0, got: 2n * AMOUNT, hooked: [hcPid(e2.key)] }, show(r2));
+});
+
+test("HB3 hooks that revert every real buy cost at most one failed try per pool: two such pools, two tries, then the market", async () => {
+  const token = "0x00000000000000000000000000000000000b1b03";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const never = (fee: number, k: bigint): ModelPool => ({ key: keyOf(token, NATIVE, fee, 60, UNPINNED), give: (a) => k * a, lie: (a) => k * a, state: pricedAt(k), exec: (a, ctx) => (later(ctx) ? null : k * a) });
+  const [a, b] = [never(3000, 3n), never(3001, 2n)];
+  const r = await hbConverge([market, a, b], token, [{ key: market.key, at: 4_500_000 }, { key: a.key, at: 4_500_001 }, { key: b.key, at: 4_500_002 }], marketRoute(token));
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 2, got: AMOUNT, banned: [hcPid(a.key), hcPid(b.key)] }, show(r));
+});
+
+test("HB4 an honest pool behind an unlisted hook, the token's best, is bought at its own price with no try lost; a listed route within the slippage of it is bought instead, at its own minOut", async () => {
+  const token = "0x00000000000000000000000000000000000b1b04";
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n) };
+  const r = await hbConverge([seeded(token), honest], token, [{ key: honest.key, at: 4_500_001 }], seededRoute(token));
+  assert.deepEqual({ failed: r.failed, got: r.got, hooked: r.hooked }, { failed: 0, got: 2n * AMOUNT, hooked: [hcPid(honest.key)] }, show(r));
+  // another token: a hookless pool half a percent under the honest one
+  const t2 = "0x00000000000000000000000000000000000b1b14";
+  const near: ModelPool = { key: keyOf(t2, NATIVE, 500, 10, NATIVE), give: (a) => 2n * a - (2n * a) / 200n, state: pricedAt(2n) };
+  const h2: ModelPool = { ...honest, key: keyOf(t2, NATIVE, 3000, 60, UNPINNED) };
+  const logs = [{ key: near.key, at: 4_500_000 }, { key: h2.key, at: 4_500_001 }];
+  const hooked = await hbQuote([near, h2], t2, logs, v4Route([{ currency: t2, fee: 3000, tickSpacing: 60, hooks: UNPINNED }]));
+  assert.ok("code" in hooked && hooked.code === "below_reference" && hooked.reference?.amountOut === 2n * AMOUNT - (2n * AMOUNT) / 200n, show(hooked));
+  const q = await hbQuote([near, h2], t2, logs, marketRoute(t2));
+  assert.ok(!("code" in q) && q.hooked.length === 0 && q.amountOut === 2n * AMOUNT - (2n * AMOUNT) / 200n, show(q));
+  assert.equal(q.minOut, ((2n * AMOUNT - (2n * AMOUNT) / 200n) * 9900n) / 10000n, "minOut from the route itself: a reference through an unlisted hook sets none (review of 72e28658, M2)");
+  // more than the slippage under it, the listed route is still refused below the reference
+  const t3 = "0x00000000000000000000000000000000000b1b24";
+  const far: ModelPool = { ...near, key: keyOf(t3, NATIVE, 500, 10, NATIVE), give: (a) => 2n * a - (2n * a) / 50n };
+  const h3: ModelPool = { ...honest, key: keyOf(t3, NATIVE, 3000, 60, UNPINNED) };
+  const f = await hbQuote([far, h3], t3, [{ key: far.key, at: 4_500_000 }, { key: h3.key, at: 4_500_001 }], marketRoute(t3));
+  assert.ok("code" in f && f.code === "below_reference" && f.reference?.amountOut === 2n * AMOUNT, show(f));
+});
+
+test("HB5 a buy quote's banned is a list of at most 4096 pool ids, each 0x and 64 hex digits: anything else is bad_request; a banned pool of the route refuses it with the device's own route", async () => {
+  const token = "0x00000000000000000000000000000000000b1b05";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const logs = [{ key: market.key, at: 4_500_000 }];
+  for (const bad of ["0x" + "ab".repeat(32), ["0x" + "ab".repeat(31)], [1n], Array.from({ length: 4097 }, () => "0x" + "ab".repeat(32))]) {
+    const v = await hbQuote([market, seeded(token)], token, logs, marketRoute(token), bad as readonly string[]);
+    assert.ok("code" in v && v.code === "bad_request", show(bad).slice(0, 80));
+  }
+  const ok = await hbQuote([market, seeded(token)], token, logs, marketRoute(token), ["0x" + "ab".repeat(32)]);
+  assert.ok(!("code" in ok) && ok.amountOut === AMOUNT && ok.hooked.length === 0, show(ok));
+  // the route's own pool banned (an id in capitals bans it too): refused, naming the seeded pool
+  const v = await hbQuote([market, seeded(token)], token, logs, marketRoute(token), ["0x" + hcPid(market.key).slice(2).toUpperCase()]);
+  assert.ok("code" in v && v.code === "below_reference" && v.reference?.amountOut === AMOUNT / 10n, show(v));
+});
+
+test("HB6 the device's quote of a buy through an unlisted hook builds through the pinned adapter at its minOut; the evidence bans nothing for a buy that is not the quote's own, a buy that landed or went elsewhere, or a moved price", async () => {
+  const token = "0x00000000000000000000000000000000000b1b06";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  let moved = false;
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => (moved ? a : 2n * a), state: pricedAt(2n), exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const pools = [market, hostile];
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const route = v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED }]);
+  const q = await hbQuote(pools, token, logs, route);
+  assert.ok(!("code" in q), show(q));
+  const built = evmQuotedBuy(BUY_VENUES, BUY_ADAPTER, q, NOW);
+  assert.deepEqual({ adapter: built.adapter, minOut: built.minOut, data: built.data }, { adapter: BUY_ADAPTER, minOut: q.minOut, data: "0x" + Buffer.from(builder.evmPoolRouteDataQuoted("base", route).data).toString("hex") });
+  // the quote's own buy, reverted: the hostile pool is banned
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q)), [hcPid(hostile.key)]);
+  // one field off: no evidence
+  const other = "0x00000000000000000000000000000000000b1b66";
+  // (a withdrawn value less the fee other than the quote's amount too: review of 72e28658, L3)
+  for (const edit of [{ minOut: q.minOut - 1n }, { token: other }, { adapter: other }, { data: built.data + "00" }, { fee: 2n * BUY_FEE }]) {
+    assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, {}, edit)), [], show(edit));
+  }
+  // a buy whose swap was done (the pool's Bought), one with no Withdrawn, one the pool reverted whole (on main's pool
+  // no swap reverts it: card pool-evm-buy-pays-revert), or one sent to another address, is no evidence
+  const log = (topic: string, address = SALE_POOL) => [{ address, topics: [topic, "0x" + "00".repeat(32)] }];
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { logs: [...log(TOPIC_WITHDRAWN_T), ...log(TOPIC_BOUGHT_T)] })), []);
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { logs: log(TOPIC_WITHDRAWN_T, other) })), []);
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { status: "0x0" })), []);
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { to: other })), []);
+  // providers that disagree on the buy ban nothing
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { status1: "0x0" })), []);
+  // the quoter at the parent block sees the price moved past minOut: nothing is banned
+  const hash = await landBuy(pools, q);
+  moved = true;
+  assert.deepEqual(await buyProved(pools, q, hash), []);
+});
+
+// N1 (review of evm-sell-hook-converge, older than that card): a two-hop route through two unlisted hooks, H1 honest
+// (a visible 5% fee the quoter sees; its no-op pays 2a) and H2 hostile (it shows the quoter, and the sim, 2% more than
+// its pool pays). Read only whole (every hook as it is: 1.9 x 1.02 = 1.938a; every hook a no-op: 2a), the route counted
+// at 1.938a, above the 1.9a it pays with H2 alone a no-op: case B (H2 reverts the real trade) banned both pools, case C
+// (H2 pays its no-op price in the real trade) banned only the honest one. Read with each hook alone a no-op too, it
+// counts at 1.9a: minOut 1.881a; case B bans H2 alone, case C lands.
+const N1_H1 = "0x00000000000000000000000000000000000071cc";
+const N1_H2 = "0x00000000000000000000000000000000000072cc";
+const n1Hostile = (paysInSale: boolean) => (a: bigint, ctx: SimCtx) => (later(ctx) ? (paysInSale ? a : null) : (a * 102n) / 100n);
+
+test("N1B (sell, case B) a hostile hook's extra hides behind an honest hook's fee no more: the route counts at 1.9, and the reverted sale bans the hostile pool alone", async () => {
+  const token = "0x00000000000000000000000000000000000c1f01";
+  const x = xAt(0x7f1);
+  const h1: ModelPool = { key: keyOf(token, x, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedInto1(2n) };
+  const h2: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, N1_H2), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: n1Hostile(false) };
+  const logs = [{ key: h1.key, at: 4_500_000 }, { key: h2.key, at: 4_100_001 }];
+  const pools = [seeded(token), h1, h2];
+  const q = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut }, { out: (19n * AMOUNT) / 10n, min: (19n * AMOUNT * 9900n) / 100000n }, show(q));
+  assert.deepEqual(await proved(pools, q, await land(pools, q)), [hcPid(h2.key)], "the hostile pool alone");
+});
+
+test("N1C (sell, case C) the hostile hook pays its no-op price in the real sale: the sale lands at 1.9, the honest pool never banned", async () => {
+  const token = "0x00000000000000000000000000000000000c1f02";
+  const x = xAt(0x7f2);
+  const h1: ModelPool = { key: keyOf(token, x, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedInto1(2n) };
+  const h2: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, N1_H2), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: n1Hostile(true) };
+  const logs = [{ key: h1.key, at: 4_500_000 }, { key: h2.key, at: 4_100_001 }];
+  const r = await hcConverge([seeded(token), h1, h2], token, logs);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 0, got: (19n * AMOUNT) / 10n, banned: [] }, show(r));
+});
+
+const n1BuyPools = (token: string, x: string, paysInBuy: boolean): ModelPool[] => [
+  seeded(token),
+  { key: keyOf(x, NATIVE, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedAt(2n) },
+  { key: keyOf(token, x, 3000, 60, N1_H2), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: n1Hostile(paysInBuy) },
+];
+const n1BuyRoute = (token: string, x: string) => v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: N1_H1 }, { currency: token, fee: 3000, tickSpacing: 60, hooks: N1_H2 }]);
+
+test("N1B (buy, case B) the same two hooks on a buy: the route counts at 1.9, minOut 1.881, and the reverted buy bans the hostile pool alone", async () => {
+  const [token, x] = ["0x00000000000000000000000000000000000c1f11", xAt(0x7f3)];
+  const pools = n1BuyPools(token, x, false);
+  const logs = [{ key: pools[2]!.key, at: 4_500_000 }, { key: pools[1]!.key, at: 4_100_001 }];
+  const q = await hbQuote(pools, token, logs, n1BuyRoute(token, x));
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut, hooked: q.hooked }, { out: (19n * AMOUNT) / 10n, min: (19n * AMOUNT * 9900n) / 100000n, hooked: [hcPid(pools[1]!.key), hcPid(pools[2]!.key)] }, show(q));
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q)), [hcPid(pools[2]!.key)], "the hostile pool alone");
+});
+
+test("N1C (buy, case C) the hostile hook pays its no-op price in the real buy: the buy lands at 1.9, nothing banned", async () => {
+  const [token, x] = ["0x00000000000000000000000000000000000c1f12", xAt(0x7f4)];
+  const pools = n1BuyPools(token, x, true);
+  const logs = [{ key: pools[2]!.key, at: 4_500_000 }, { key: pools[1]!.key, at: 4_100_001 }];
+  const r = await hbConverge(pools, token, logs, n1BuyRoute(token, x));
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 0, got: (19n * AMOUNT) / 10n, banned: [] }, show(r));
+});
+
+test("N1D a three-hop route through two hooks that each revert the real trade and an honest hook with a visible fee: the two hostile hooks' no-op together is the smallest set that rescues it, so it bans the two hostile pools, never the honest one", async () => {
+  const [token, y, x] = ["0x00000000000000000000000000000000000c1f13", xAt(0x7f5), xAt(0x7f6)];
+  const N1_H3 = "0x00000000000000000000000000000000000073cc";
+  const reverts = (a: bigint, ctx: SimCtx) => (later(ctx) ? null : a);
+  const honest: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, N1_H3), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedAt(2n) };
+  const h1: ModelPool = { key: keyOf(x, y, 3000, 60, N1_H1), give: (a) => a, lie: (a) => a, exec: reverts };
+  const h2: ModelPool = { key: keyOf(token, x, 3000, 60, N1_H2), give: (a) => a, lie: (a) => a, exec: reverts };
+  const pools = [seeded(token), honest, h1, h2];
+  const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: N1_H3 }, { currency: x, fee: 3000, tickSpacing: 60, hooks: N1_H1 }, { currency: token, fee: 3000, tickSpacing: 60, hooks: N1_H2 }]);
+  const q = await hbQuote(pools, token, [], route);
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut }, { out: (19n * AMOUNT) / 10n, min: (19n * AMOUNT * 9900n) / 100000n });
+  const hash = await landBuy(pools, q);
+  assert.equal(SALES.get(hash)!.bought, false);
+  assert.deepEqual([...(await buyProved(pools, q, hash))].sort(), [hcPid(h1.key), hcPid(h2.key)].sort(), "the two hostile pools, never the honest one");
+});
+
+// ------------------------------------------------------------------------------ review of 72e28658 (card evm-buy-hook-converge)
+// The review's probes, each the red run before its fold: H1 the prune's floor, H2 main's pool (a failed swap lands
+// status 1 with the pool's Withdrawn), H3 hooks that cover each other, M1 two liars, M2 a hooked reference that sets the
+// slippage, M3 the replay's gas, L2 the two mutants put back, L3 the buy's withdrawn value. Each hook below is unlisted.
+const RH = (n: number) => "0x" + (0x9b00 + n).toString(16).padStart(40, "0");
+
+test("review of 72e28658, H1 an unlisted hook that quotes the quoter 3x no longer raises the prune's floor: the token's real hookless market (a found pool, past the early reads) is quoted, and the hooked route is refused below it", async () => {
+  const token = "0x00000000000000000000000000000000000d1d02";
+  const real: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  // raw liquidity a/2 (what the no-op read and the real buy see); 3x to the quoter as it is
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(1)), give: (a) => a / 2n, lie: (a) => 3n * a, exec: (a) => a / 2n };
+  const empties = Array.from({ length: 65 }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 40, NATIVE), at: 4_400_000 + i }));
+  const logs = [{ key: real.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }, ...empties];
+  const q = await hbQuote([seeded(token), real, hostile], token, logs, v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: RH(1) }]));
+  assert.ok("code" in q && q.code === "below_reference" && q.reference?.amountOut === AMOUNT, show(q));
+});
+
+test("review of 72e28658, H1b the same through X: the token's real market is its pool with X (X's standard market beside it), and the 3x quote no longer prunes it", async () => {
+  const token = "0x00000000000000000000000000000000000d1d0c";
+  const x = xAt(0x9bb);
+  const xm: ModelPool = { key: keyOf(x, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const tp: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(2)), give: (a) => a / 2n, lie: (a) => 3n * a, exec: (a) => a / 2n };
+  const logs = [{ key: tp.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const q = await hbQuote([seeded(token), xm, tp, hostile], token, logs, v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: RH(2) }]));
+  assert.ok("code" in q && q.code === "below_reference" && q.reference?.amountOut === AMOUNT, show(q));
+});
+
+test("review of 72e28658, H2 on main's pool a failed swap lands status 1 with the pool's Withdrawn and no Bought: the evidence reads it as the failed buy, so HB1's hostile hook costs one failed try, its pool banned, then the market", async () => {
+  const token = "0x00000000000000000000000000000000000d1d03";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(3)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const pools = [market, hostile];
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  assert.ok("code" in q && q.code === "below_reference", show(q));
+  const hq = await hbQuote(pools, token, logs, q.reference!.route);
+  assert.ok(!("code" in hq), show(hq));
+  const hash = await landBuy(pools, hq);
+  assert.deepEqual({ status: SALES.get(hash)!.status, bought: SALES.get(hash)!.bought }, { status: "0x1", bought: false }, "main's pool lands the failed swap");
+  const r = await hbConverge(pools, token, logs, marketRoute(token), 6);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, show(r));
+});
+
+test("review of 72e28658, M1 (buy) an honest hook with a visible 5% fee and two hooks that each show the quoter 2% more than they pay: the route counts at 1.9 (both liars replaced together), and the buy lands with nothing banned", async () => {
+  const [token, y, x] = ["0x00000000000000000000000000000000000d1d04", xAt(0x9b4), xAt(0x9b5)];
+  const pays = (a: bigint, ctx: SimCtx) => (later(ctx) ? a : (a * 102n) / 100n);
+  const honest: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, RH(4)), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedAt(2n) };
+  const l2: ModelPool = { key: keyOf(x, y, 3000, 60, RH(5)), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: pays };
+  const l3: ModelPool = { key: keyOf(token, x, 3000, 60, RH(6)), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: pays };
+  const pools = [seeded(token), honest, l2, l3];
+  const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: RH(4) }, { currency: x, fee: 3000, tickSpacing: 60, hooks: RH(5) }, { currency: token, fee: 3000, tickSpacing: 60, hooks: RH(6) }]);
+  const q = await hbQuote(pools, token, [], route);
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut }, { out: (19n * AMOUNT) / 10n, min: (19n * AMOUNT * 9900n) / 100000n }, show(q));
+  const hash = await landBuy(pools, q);
+  assert.equal(SALES.get(hash)!.bought, true, "the buy lands at 1.9");
+});
+
+test("review of 72e28658, M1 (full set) a route whose read with every unlisted hook replaced answers 0 (its liquidity in a hook alone) is refused no_quote, though a read with only some replaced answers", async () => {
+  const [token, x] = ["0x00000000000000000000000000000000000d1d24", xAt(0x9d4)];
+  const h1: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, RH(22)), give: (a) => a, lie: (a) => a };
+  const h2: ModelPool = { key: keyOf(token, x, 3000, 60, RH(23)), give: () => 0n, lie: (a) => a };
+  const route = v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: RH(22) }, { currency: token, fee: 3000, tickSpacing: 60, hooks: RH(23) }]);
+  const q = await hbQuote([seeded(token), h1, h2], token, [], route);
+  assert.ok("code" in q && q.code === "no_quote", show(q));
+});
+
+test("review of 72e28658, M1 (sell) the same three hooks on a three-hop sale: the route counts at 1.9, and the sale lands", async () => {
+  const token = "0x00000000000000000000000000000000000d1d14";
+  const [x, y] = [xAt(0x9c4), xAt(0x9c5)];
+  const pays = (a: bigint, ctx: SimCtx) => (later(ctx) ? a : (a * 102n) / 100n);
+  // the sale: token -> X (a liar) -> Y (a liar) -> native (an honest 5% fee), 1:1 raw, 2x on the last hop
+  const l3: ModelPool = { key: keyOf(token, x, 3000, 60, RH(14)), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: pays };
+  const l2: ModelPool = { key: keyOf(x, y, 3000, 60, RH(15)), give: (a) => a, lie: (a) => (a * 102n) / 100n, exec: pays };
+  const honest: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, RH(16)), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedInto1(2n) };
+  const pools = [seeded(token), honest, l2, l3];
+  const logs = [{ key: l3.key, at: 4_500_000 }, { key: l2.key, at: 4_100_001 }, { key: honest.key, at: 4_100_002 }];
+  const q = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q) && q.hooked.length === 3, show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut }, { out: (19n * AMOUNT) / 10n, min: (19n * AMOUNT * 9900n) / 100000n }, show(q));
+  assert.equal(SALES.get(await land(pools, q))!.status, "0x1", "the sale lands at 1.9");
+});
+
+// three hooks that each fail the real trade while any other of them is intact
+const covering = (hs: string[], me: string, k: bigint) => (a: bigint, ctx: SimCtx) => (later(ctx) && hs.some((h) => h !== me && !(ctx.over ?? new Set()).has(h)) ? null : k * a);
+
+test("review of 72e28658, H3 (buy) three hooks that cover each other: no single no-op rescues the buy, each pair does, so all three pools are banned and the buy converges on the market in one failed try", async () => {
+  const [token, y, x] = ["0x00000000000000000000000000000000000d1d05", xAt(0x9b6), xAt(0x9b7)];
+  const hs = [RH(7), RH(8), RH(9)];
+  const p1: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, hs[0]!), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: covering(hs, hs[0]!, 2n) };
+  const p2: ModelPool = { key: keyOf(x, y, 3000, 60, hs[1]!), give: (a) => a, lie: (a) => a, exec: covering(hs, hs[1]!, 1n) };
+  const p3: ModelPool = { key: keyOf(token, x, 3000, 60, hs[2]!), give: (a) => a, lie: (a) => a, exec: covering(hs, hs[2]!, 1n) };
+  const pools = [seeded(token), p1, p2, p3];
+  const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: hs[0]! }, { currency: x, fee: 3000, tickSpacing: 60, hooks: hs[1]! }, { currency: token, fee: 3000, tickSpacing: 60, hooks: hs[2]! }]);
+  const r = await hbConverge(pools, token, [], route, 4);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: [...r.banned].sort() }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(p1.key), hcPid(p2.key), hcPid(p3.key)].sort() }, show(r));
+});
+
+test("review of 72e28658, H3 (sell) the same three hooks on a three-hop sale: the evidence bans all three (on c460d167 it did, through every hook together; leave-one-in banned none)", async () => {
+  const token = "0x00000000000000000000000000000000000d1d0d";
+  const [x, y] = [xAt(0x9bc), xAt(0x9bd)];
+  const hs = [RH(40), RH(41), RH(42)];
+  const p3: ModelPool = { key: keyOf(token, x, 3000, 60, hs[2]!), give: (a) => a, lie: (a) => a, exec: covering(hs, hs[2]!, 1n) };
+  const p2: ModelPool = { key: keyOf(x, y, 3000, 60, hs[1]!), give: (a) => a, lie: (a) => a, exec: covering(hs, hs[1]!, 1n) };
+  const p1: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, hs[0]!), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: covering(hs, hs[0]!, 2n) };
+  const pools = [seeded(token), p1, p2, p3];
+  const logs = [{ key: p3.key, at: 4_500_000 }, { key: p2.key, at: 4_100_001 }, { key: p1.key, at: 4_100_002 }];
+  const q = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q) && q.hooked.length === 3, show(q));
+  const hash = await land(pools, q);
+  assert.equal(SALES.get(hash)!.status, "0x0");
+  assert.deepEqual([...(await proved(pools, q, hash))].sort(), [hcPid(p1.key), hcPid(p2.key), hcPid(p3.key)].sort());
+});
+
+test("review of 72e28658, M2 (buy) a hooked reference its hook places at value / (1 - slippage) no longer sets the listed buy's minOut: minOut is the slippage off the listed route, and a 1 bp move still lands", async () => {
+  const token = "0x00000000000000000000000000000000000d1d06";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hz: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(10)), give: (a) => (a * 102n) / 100n, lie: (a) => (a * 10000n) / 9900n, state: pricedAt(2n), exec: () => null };
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hz.key, at: 4_500_001 }];
+  const q = await hbQuote([market, hz], token, logs, marketRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual({ out: q.amountOut, min: q.minOut, hooked: q.hooked }, { out: AMOUNT, min: (AMOUNT * 9900n) / 10000n, hooked: [] }, show(q));
+  const moved = [{ ...market, exec: (a: bigint) => a - a / 10000n }, hz];
+  assert.equal(SALES.get(await landBuy(moved, q))!.bought, true);
+});
+
+test("review of 72e28658, M2 (sell) the same on a sale: a hooked reference at the pick / (1 - slippage), which W's sim honours, no longer sets the listed pick's minOut", async () => {
+  const token = "0x00000000000000000000000000000000000d1d16";
+  const near: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => 2n * a - (2n * a) / 200n, state: pricedInto1(2n) };
+  const placed = (a: bigint) => ((2n * a - (2n * a) / 200n) * 10000n) / 9900n;
+  const hz: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(17)), give: (a) => (21n * a) / 10n, lie: placed, state: pricedInto1(3n), exec: (a, ctx) => (later(ctx) ? null : placed(a)) };
+  const q = await hcQuote([near, hz], token, [{ key: near.key, at: 4_500_000 }, { key: hz.key, at: 4_500_001 }]);
+  assert.ok(!("code" in q) && q.hooked.length === 0, show(q));
+  assert.equal(q.minOut, ((2n * AMOUNT - (2n * AMOUNT) / 200n) * 9900n) / 10000n, show(q));
+});
+
+test("review of 72e28658, M3 (buy) a buy runs at its own gas, which only main's pool bounds: below its floor it reverts SwapGasTooLow and bans nothing; above it, an honest hook a hostile sender gave too little swap gas is banned, a ban that expires (the helper sends a buy only after its eth_call at that gas answers true; review of a2d82dc6, F1)", async () => {
+  const token = "0x00000000000000000000000000000000000d1d0b";
+  // an honest hook whose work needs 600,000 of the swap's gas: the model's buy (BUY_GAS) gives the swap 650,000
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(11)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 600_000n ? null : (a * 95n) / 100n) };
+  const pools = [seeded(token), honest];
+  const q = await hbQuote(pools, token, [{ key: honest.key, at: 4_500_001 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: RH(11) }]));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(SALES.get(await landBuy(pools, q))!.bought, true, "at the helper's gas the buy lands");
+  // below the pool's floor (the release and BUY_SWAP_GAS + BUY_FAIL_GAS + 1,000) the buy reverts: no evidence
+  const low = await landBuy(pools, q, HEAD_NO + 1, { gas: BUY_RELEASE_GAS + BUY_SWAP_GAS + BUY_FAIL_GAS });
+  assert.equal(SALES.get(low)!.status, "0x0", "SwapGasTooLow");
+  assert.deepEqual(await buyProved(pools, q, low), []);
+  // above the floor with too little for the hook: the swap fails, its replay at the same gas fails, the no-op's succeeds
+  const thin = await landBuy(pools, q, HEAD_NO + 1, { gas: 1_300_000n });
+  assert.deepEqual({ status: SALES.get(thin)!.status, bought: SALES.get(thin)!.bought }, { status: "0x1", bought: false });
+  assert.deepEqual(await buyProved(pools, q, thin), [hcPid(honest.key)]);
+});
+
+test("review of 72e28658, M3 (sell) a sale is evidence only at the gas the device pins and its sim ran at (EVM_POOL_SELL_GAS): one sent with less, whose honest hook ran out, bans nothing (review of a2d82dc6, F1)", async () => {
+  const token = "0x00000000000000000000000000000000000d1d1b";
+  // an honest hook whose work needs 900,000: the device's sim at EVM_POOL_SELL_GAS less the authorization passes it
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(18)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx.gas < 900_000n ? null : 2n * a) };
+  const pools = [seeded(token), honest];
+  const q = await hcQuote(pools, token, [{ key: honest.key, at: 4_500_001 }]);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  assert.equal(SALES.get(await land(pools, q))!.status, "0x1", "at the pinned gas the sale lands");
+  const short = await land(pools, q, HEAD_NO + 1, { gas: 800_000n });
+  assert.equal(SALES.get(short)!.status, "0x0");
+  assert.deepEqual(await proved(pools, q, short), []);
+  // more gas than the pin is no sale the device's fee rule sends either
+  const hostile: ModelPool = { ...honest, exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const hp = [seeded(token), hostile];
+  const hq = await hcQuote(hp, token, [{ key: hostile.key, at: 4_500_001 }]);
+  assert.ok(!("code" in hq), show(hq));
+  assert.deepEqual(await proved(hp, hq, await land(hp, hq, HEAD_NO + 1, { gas: 1_200_000n })), []);
+  assert.deepEqual(await proved(hp, hq, await land(hp, hq)), [hcPid(hostile.key)], "control: at the pinned gas");
+});
+
+test("review of 72e28658, L2 (RV4) one hostile hook, one with a visible 5% fee and an honest anti-whale hook on the last hop: the hostile hook alone rescues the buy, so a set holding it is never asked and the capped hook is never banned", async () => {
+  const [t2, y, x] = ["0x00000000000000000000000000000000000d1d09", xAt(0x9b8), xAt(0x9b9)];
+  const CAP = (AMOUNT * 97n) / 100n;
+  const capped = (a: bigint) => (a <= CAP ? a : null);
+  const h1: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, RH(12)), give: (a) => a, lie: (a) => (a * 90n) / 100n, exec: (a, ctx) => (later(ctx) ? null : (a * 90n) / 100n) };
+  // the 5% pool takes its fee with its hook replaced too, so no read of the route trips the honest cap (a read that
+  // does refuses the route: review of a2d82dc6, F2)
+  const fee: ModelPool = { key: keyOf(x, y, 3000, 60, RH(13)), give: (a) => (a * 95n) / 100n, lie: (a) => (a * 95n) / 100n };
+  const hc: ModelPool = { key: keyOf(t2, x, 3000, 60, RH(19)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
+  const pools = [seeded(t2), h1, fee, hc];
+  const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: RH(12) }, { currency: x, fee: 3000, tickSpacing: 60, hooks: RH(13) }, { currency: t2, fee: 3000, tickSpacing: 60, hooks: RH(19) }]);
+  const q = await hbQuote(pools, t2, [], route);
+  assert.ok(!("code" in q), show(q));
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q)), [hcPid(h1.key)]);
+});
+
+test("review of 72e28658, L2 (PC) a sale whose `bought` route passes the native asset in its middle, which the sell builder takes under no hook rule, is not read: the sale leaves through the seeded pool", async () => {
+  const token = "0x00000000000000000000000000000000000d1d0a";
+  const x = xAt(0x9ba);
+  const a: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, NATIVE), give: (v) => v };
+  const t: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(20)), give: (v) => v, lie: (v) => v };
+  const pools = [seeded(token), a, t];
+  const bought = v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: NATIVE }, { currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: RH(20) }]);
+  const sale = await evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought, boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, []), DELEGATED).then((q) => ({ out: q.amountOut }), (e) => ({ code: (e as EvmQuoteError).code }));
+  assert.deepEqual(sale, { out: AMOUNT / 10n });
+});
+
+test("review of 72e28658, the pool's event topics the kit holds as literals are Withdrawn's and Bought's", () => {
+  const src = readFileSync(new URL("../src/checks/evm/quote.ts", import.meta.url), "utf8");
+  assert.ok(src.includes(`const TOPIC_WITHDRAWN = "${TOPIC_WITHDRAWN_T}";`) && src.includes(`const TOPIC_BOUGHT = "${TOPIC_BOUGHT_T}";`));
+});
+
+// ------------------------------------------------------------------------------------- review of a2d82dc6
+// F1 the replay runs at the trade's own gas with no balance override, so a hook keyed on its gas or the sender's balance
+// sees the real trade's; F2 a read with only some unlisted hooks replaced that reverts or answers 0 refuses the route;
+// L3 a sender that takes a bigger fee, so the pool swaps less than the quote's amount, bans nothing.
+const PH = (n: number) => "0x" + (0x7a1e00 + n).toString(16).padStart(40, "0");
+/** Each eth_call `rpc` is asked that carries a block override (a replay), as its gas and its overridden accounts. */
+const replaysOf = (rpc: EvmRpc, seen: { gas: bigint; over: string[] }[]): EvmRpc => async (calls) => {
+  for (const c of calls) if (c.method === "eth_call" && c.params[3] !== undefined && c.params[4] === undefined) seen.push({ gas: BigInt((c.params[0] as { gas: string }).gas), over: Object.keys((c.params[2] ?? {}) as object).map((k) => k.toLowerCase()) });
+  return rpc(calls);
+};
+
+test("review of a2d82dc6, F1 (buy) a hook that fails the real buy at a later block only below 1,000,000 of the swap's gas: the replay runs at the buy's own gas, never the sender's balance overridden, so one failed try bans its pool, then the market", async () => {
+  const token = "0x00000000000000000000000000000000000e1e01";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(1)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 1_000_000n ? null : 2n * a) };
+  const pools = [market, hostile];
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const r = await hbConverge(pools, token, logs, marketRoute(token), 6);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, show(r));
+  // each replay: the buy's own gas (no authorizations), and no account overridden but a no-op's hooks
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  const q2 = "code" in q && q.reference !== null ? await hbQuote(pools, token, logs, q.reference.route) : q;
+  assert.ok(!("code" in q2) && q2.hooked.length === 1, show(q2));
+  const seen: { gas: bigint; over: string[] }[] = [];
+  const hash = await landBuy(pools, q2);
+  assert.deepEqual(await buyProved(pools, q2, hash, [replaysOf(chain(pools, 0), seen), replaysOf(chain(pools, 1), seen)]), [hcPid(hostile.key)]);
+  assert.ok(seen.length >= 4, show(seen));
+  for (const x of seen) {
+    assert.equal(x.gas, BUY_GAS, "the buy's own gas");
+    assert.ok(!x.over.includes(SENDER) && x.over.every((k) => k === PH(1) || SYS.includes(k)), show(x));
+  }
+  // a sender that holds only its own gas at its fees: the replay runs as the buy did
+  const thin = { [SENDER]: BUY_GAS * (BASE_FEE + 1_000_000n) };
+  assert.deepEqual(await buyProved(pools, q2, hash, [chain(pools, 0, undefined, undefined, thin), chain(pools, 1, undefined, undefined, thin)]), [hcPid(hostile.key)]);
+});
+
+test("review of a2d82dc6, F1 (sell) the same hook on a sale, below 2,000,000 of its gas: the replay runs at the sale's own gas less its authorization, only W's code overridden, so one failed try bans its pool", async () => {
+  const token = "0x00000000000000000000000000000000000e1e02";
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(2)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 2_000_000n ? null : 2n * a) };
+  const pools = [seeded(token), hostile];
+  const r = await hcConverge(pools, token, [{ key: hostile.key, at: 4_500_001 }], 6);
+  assert.deepEqual({ failed: r.failed, banned: r.banned }, { failed: 1, banned: [hcPid(hostile.key)] }, show(r));
+  const q = await hcQuote(pools, token, [{ key: hostile.key, at: 4_500_001 }]);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const seen: { gas: bigint; over: string[] }[] = [];
+  assert.deepEqual(await proved(pools, q, await land(pools, q), [replaysOf(chain(pools, 0), seen), replaysOf(chain(pools, 1), seen)]), [hcPid(hostile.key)]);
+  assert.ok(seen.length >= 4, show(seen));
+  for (const x of seen) {
+    assert.equal(x.gas, SALE_GAS - 25_000n, "the sale's own gas less its authorization");
+    assert.ok(!x.over.includes(SENDER) && x.over.every((k) => k === SELL_W || k === PH(2) || SYS.includes(k)), show(x));
+  }
+});
+
+test("review of a2d82dc6, F3 the fold's own M3 (sell) hook (it fails a sale at a later block below 990,000 gas) is a hostile hook keyed on the block: the device's sale loop converges after one failed try, its pool banned", async () => {
+  const token = "0x00000000000000000000000000000000000e1e04";
+  const h: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(5)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 990_000n ? null : 2n * a) };
+  const r = await hcConverge([seeded(token), h], token, [{ key: h.key, at: 4_500_001 }], 6);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(h.key)] }, show(r));
+});
+
+test("review of a2d82dc6, F2 a hostile hook (quotes 95%, pays 90% at a later block) upstream of an honest hook capped at 97%: the read with the hostile hook alone replaced trips the cap, so the route is refused no_quote, never bought, and the honest capped pool is never banned", async () => {
+  const [token, y] = ["0x00000000000000000000000000000000000e1e03", xAt(0xe13)];
+  const CAP = (AMOUNT * 97n) / 100n;
+  const capped = (a: bigint) => (a <= CAP ? a : null);
+  const B: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, PH(3)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (later(ctx) ? (a * 90n) / 100n : (a * 95n) / 100n) };
+  const A: ModelPool = { key: keyOf(token, y, 3000, 60, PH(4)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
+  const pools = [seeded(token), B, A];
+  const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: PH(3) }, { currency: token, fee: 3000, tickSpacing: 60, hooks: PH(4) }]);
+  const q = await hbQuote(pools, token, [], route);
+  assert.equal("code" in q ? q.code : show(q), "no_quote");
+  // the device's loop never buys through it: it stops at that first no_quote, nothing bought, no failed try and nothing banned
+  const r = await hbConverge(pools, token, [], route, 4);
+  assert.deepEqual({ failed: r.failed, code: r.code, banned: r.banned }, { failed: 0, code: "no_quote", banned: [] }, show(r));
+});
+
+test("review of a2d82dc6, F2 (sell) the same two hooks on a sale the scan finds (the hostile hook on the token's pool, the honest cap on X's market): the route counts for nothing, so the sale leaves through the seeded pool with no failed try and nothing banned", async () => {
+  const [token, x] = ["0x00000000000000000000000000000000000e1e06", xAt(0xe16)];
+  const CAP = (AMOUNT * 97n) / 100n;
+  const capped = (a: bigint) => (a <= CAP ? a : null);
+  const B: ModelPool = { key: keyOf(token, x, 3000, 60, PH(7)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (later(ctx) ? (a * 90n) / 100n : (a * 95n) / 100n) };
+  const A: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, PH(8)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
+  const logs = [{ key: B.key, at: 4_500_000 }, { key: A.key, at: 4_100_001 }];
+  const r = await hcConverge([seeded(token), B, A], token, logs, 4);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 0, got: AMOUNT / 10n, banned: [] }, show(r));
+});
+
+test("review of a2d82dc6, L3 a sender that takes a bigger fee than the proof's withdrawn value leaves, so the pool swaps less than the quote's amount and the buy misses minOut, bans nothing (an honest 5% fee hook whose no-op would make up the gap)", async () => {
+  const token = "0x00000000000000000000000000000000000e1e05";
+  const fee: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(6)), give: (a) => a, lie: (a) => (a * 95n) / 100n };
+  const pools = [seeded(token), fee];
+  const q = await hbQuote(pools, token, [{ key: fee.key, at: 4_500_001 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: PH(6) }]));
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const hash = await landBuy(pools, q, HEAD_NO + 1, {}, { feeWord: BUY_FEE + (AMOUNT * 2n) / 100n });
+  assert.equal(SALES.get(hash)!.bought, false, "the pool swaps 98% of the amount: 93.1% out, under minOut");
+  assert.deepEqual(await buyProved(pools, q, hash), []);
+  // control: the quote's own fee lands
+  assert.equal(SALES.get(await landBuy(pools, q))!.bought, true);
+});
+
+// ------------------------------------------------------------------------------------- review of da11bbb6
+// H1 every replay sees the trade's block as the trade saw it: the storage its system calls wrote before its first
+// transaction (L1Block, EIP-2935's history, EIP-4788's roots) read at the block on two providers that agree, passed as
+// stateDiff, and its header's base fee and PREVRANDAO in the block override; a hook keyed on any of them is banned.
+const TELLS = [
+  ["block.number - L1Block.sequenceNumber() marks a real block (the epoch's first)", "seq"],
+  ["EIP-2935's hash of the block before equals blockhash(block.number - 1)", "hist"],
+  ["EIP-4788 answers a root at block.timestamp", "beacon"],
+  ["BASEFEE is the trade block's", "baseFee"],
+  ["PREVRANDAO is the trade block's", "randao"],
+] as const;
+/** A hostile hook that fails the trade only at a later, odd block where it sees `k` as the trade's block's: the helper's
+ *  pending sim and the quote's reads pass, and the buy sent from an even block's sim lands on the odd one and fails. */
+const tellHook = (k: keyof Sees) => (a: bigint, ctx: SimCtx) => (later(ctx) && ctx.sees?.[k] === true && ctx.block! % 2 === 1 ? null : 2n * a);
+TELLS.forEach(([tell, k], i) => {
+  test(`review of da11bbb6, H1 (buy) a hook that fails the real buy only where ${tell} and the block is odd: the replay sees the trade's block, so one failed try bans its pool, then the market`, async () => {
+    const token = "0x" + (0xda11b00 + i).toString(16).padStart(40, "0");
+    const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+    const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0x40 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: tellHook(k) };
+    const r = await hbConverge([market, hostile], token, [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }], marketRoute(token), 6);
+    assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, show(r));
+  });
+  test(`review of da11bbb6, H1 (sell) the same hook on a sale, where ${tell}: one failed try bans its pool`, async () => {
+    const token = "0x" + (0xda11c00 + i).toString(16).padStart(40, "0");
+    const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0x50 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: tellHook(k) };
+    const r = await hcConverge([seeded(token), hostile], token, [{ key: hostile.key, at: 4_500_001 }], 6);
+    assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(hostile.key)] }, show(r));
+  });
+});
+
+test("review of da11bbb6, H1 the system slots are read at the trade's block on two providers that must agree word for word: one provider's L1Block word apart bans nothing", async () => {
+  const token = "0x000000000000000000000000000000000da11d01";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0x60)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: tellHook("seq") };
+  const pools = [market, hostile];
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  const q2 = "code" in q && q.reference !== null ? await hbQuote(pools, token, logs, q.reference.route) : q;
+  assert.ok(!("code" in q2) && q2.hooked.length === 1, show(q2));
+  const hash = await landBuy(pools, q2);
+  // the reads: each at the sale's own block hash, the same slots on both providers
+  const asked: string[] = [];
+  const watch = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    for (const c of calls) if (c.method === "eth_getStorageAt") asked.push(`${String(c.params[0]).toLowerCase()}:${BigInt(String(c.params[1]))}@${(c.params[2] as { blockHash: string }).blockHash}`);
+    return rpc(calls);
+  };
+  assert.deepEqual(await buyProved(pools, q2, hash, [watch(chain(pools, 0)), watch(chain(pools, 1))]), [hcPid(hostile.key)]);
+  const at = SALES.get(hash)!.blockHash;
+  const ts = BigInt(SALE_TIME);
+  const want = [...Array.from({ length: 16 }, (_, s) => `${L1B}:${s}@${at}`), `${BEACON}:${ts % 8191n}@${at}`, `${BEACON}:${(ts % 8191n) + 8191n}@${at}`, `${HIST}:${BigInt(HEAD_NO) % 8191n}@${at}`];
+  assert.deepEqual(asked, [...want, ...want]);
+  // provider 2 answers L1Block's sequenceNumber one apart: the providers disagree, nothing is banned
+  const apart = (rpc: EvmRpc): EvmRpc => async (calls) => (await rpc(calls)).map((a, i) => (calls[i]!.method === "eth_getStorageAt" && String(calls[i]!.params[0]).toLowerCase() === L1B && BigInt(String(calls[i]!.params[1])) === 3n ? { ...(a as object), result: "0x" + W(BigInt(SALE_TIME)) } : a));
+  assert.deepEqual(await buyProved(pools, q2, hash, [chain(pools, 0), apart(chain(pools, 1))]), []);
+});
+
+test("review of da11bbb6, H1 evmSystemSlotsOf: Base's L1Block slots 0-15, EIP-4788's two slots at the block's time and EIP-2935's at N-1 in a ring of 8191; Robinhood's EIP-2935 alone, its ring 393,168", () => {
+  const sixteen = Array.from({ length: 16 }, (_, i) => BigInt(i));
+  const base = [[L1B, sixteen], [BEACON, [1_000_000n % 8191n, (1_000_000n % 8191n) + 8191n]], [HIST, [(54_336_922n - 1n) % 8191n]]];
+  assert.deepEqual(quoteMod.evmSystemSlotsOf("base", 54_336_922n, 1_000_000n), base);
+  assert.deepEqual(quoteMod.evmSystemSlotsOf("base-sepolia", 54_336_922n, 1_000_000n), base);
+  for (const c of ["robinhood", "robinhood-testnet"] as const) assert.deepEqual(quoteMod.evmSystemSlotsOf(c, 108_449_728n, 1_000_000n), [[HIST, [(108_449_728n - 1n) % 393168n]]]);
+});
+
+test("review of da11bbb6, L2 (sell) a proper set's read that answers 0 rather than reverting counts the route for nothing: with no other route the sale is refused no_quote as no route fills, no reference named, never a route valued 0 carried on to its minimum", async () => {
+  const [token, x] = ["0x000000000000000000000000000000000da11e01", xAt(0xda1)];
+  // the honest hook answers 0 (no revert) for the whole amount and twice it, which reach it only where the hostile hook
+  // upstream (it quotes 95%, pays 90% at a later block) is replaced alone; as it is, the route fills at 95%
+  const capped = (a: bigint) => (a === AMOUNT || a === 2n * AMOUNT ? 0n : a);
+  const B: ModelPool = { key: keyOf(token, x, 3000, 60, PH(0x70)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (later(ctx) ? (a * 90n) / 100n : (a * 95n) / 100n) };
+  const A: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, PH(0x71)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
+  const got = await evmPoolSellQuoteWith(req, [chain([B, A], 0), chain([B, A], 1)], NOW, scanner(5_000_000, [{ key: B.key, at: 4_500_000 }, { key: A.key, at: 4_100_001 }]), DELEGATED).then(
+    (q) => ({ out: q.amountOut }),
+    (e) => ({ code: (e as EvmQuoteError).code, message: (e as EvmQuoteError).message, reference: (e as { reference?: unknown }).reference ?? null }),
+  );
+  assert.deepEqual(got, { code: "no_quote", message: "no_quote: no pool the sell can leave through fills it", reference: null });
+});
+
+test("review of da11bbb6, L1 a trade whose receipt names poster gas (Nitro's gasUsedForL1 above 0) bans nothing, buy or sale: whether the replay is charged the same is unread; at 0, as every Robinhood receipt reads today, the same hook is banned", async () => {
+  const token = "0x000000000000000000000000000000000da11f01";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0x80)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: tellHook("seq") };
+  const pools = [market, hostile];
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  const q2 = "code" in q && q.reference !== null ? await hbQuote(pools, token, logs, q.reference.route) : q;
+  assert.ok(!("code" in q2) && q2.hooked.length === 1, show(q2));
+  assert.deepEqual(await buyProved(pools, q2, await landBuy(pools, q2, HEAD_NO + 1, { l1Gas: 0n })), [hcPid(hostile.key)]);
+  assert.deepEqual(await buyProved(pools, q2, await landBuy(pools, q2, HEAD_NO + 1, { l1Gas: 1n })), []);
+  const sToken = "0x000000000000000000000000000000000da11f02";
+  const sh: ModelPool = { key: keyOf(sToken, NATIVE, 3000, 60, PH(0x81)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: tellHook("seq") };
+  const sq = await hcQuote([seeded(sToken), sh], sToken, [{ key: sh.key, at: 4_500_001 }]);
+  assert.ok(!("code" in sq) && sq.hooked.length === 1, show(sq));
+  assert.deepEqual(await proved([seeded(sToken), sh], sq, await land([seeded(sToken), sh], sq, HEAD_NO + 1, { l1Gas: 0n })), [hcPid(sh.key)]);
+  assert.deepEqual(await proved([seeded(sToken), sh], sq, await land([seeded(sToken), sh], sq, HEAD_NO + 1, { l1Gas: 70_000n })), []);
+});
+
+// ------------------------------------------------------------------------------------- review of ca907a05
+// HIGH 1 on Robinhood the replay misses ArbOS's block-start writes: the gas-pricing backlog's decay (about 1 block in 10)
+// and the L1 block number (about 1 in 120), pinned open here until card evm-sell-hook-intrablock replays at the trade's
+// true pre-state; LOW 1 the model refuses a stateDiff key or value that is not 0x and 64 hex digits, as the live
+// providers do; LOW 2 the replay's tells on a Robinhood venue and on base-sepolia.
+// Read at block 108,479,667 on rpc.mainnet.chain.robinhood.com (review of ca907a05, probe-rh-backlog.log): the parent
+// left the backlog at 8,420,860, the block's start decayed it to 28,223 over its time step, and the block's base fee was
+// 20,184,000, the pre-decay price (the floor 20,000,000).
+const [RH_PARENT_BACKLOG, RH_START_BACKLOG] = [8_420_860n, 28_223n];
+/** The backlog a call reads through ArbGasInfo: the block start's where it sees it, else the parent's. */
+const backlogOf = (ctx: SimCtx) => (ctx.sees?.backlog === true ? RH_START_BACKLOG : RH_PARENT_BACKLOG);
+/** A hostile hook that fails the trade only where BASEFEE is the trade block's (its header's 20,184,000, at or above
+ *  20,080,000) and the backlog is below 3,000,000: the price says the backlog was high, the backlog says it decayed. */
+const backlogHook = (a: bigint, ctx: SimCtx) => (later(ctx) && ctx.sees?.baseFee === true && backlogOf(ctx) < 3_000_000n ? null : 2n * a);
+
+test("review of ca907a05, HIGH 1 (buy, Robinhood) a hook that fails the real buy only where BASEFEE is the trade block's pre-decay price and ArbOS's gas backlog is below 3,000,000, as the block start's decay left it: no replay sees the decay, so today nothing is banned and each try costs its gas (open with HC2: card evm-sell-hook-intrablock flips this to banned)", async () => {
+  const token = "0x000000000000000000000000000000000ca90a01";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0x90)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: backlogHook };
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  // (the first quote, of the market, is refused below the hostile pool's reference, whose route each try then takes)
+  const r = await hbConverge([market, hostile], token, logs, marketRoute(token), 3, HEAD_NO + 1, RH_NET);
+  assert.deepEqual({ failed: r.failed, code: r.code, banned: r.banned }, { failed: 2, code: "no_convergence", banned: [] }, show(r));
+  // control: where the replay reads the trade's backlog (on Base there is no ArbOS backlog to tell), the same hook is
+  // banned after one failed try, as a replay at the trade's true pre-state would ban it on Robinhood
+  const t2 = "0x000000000000000000000000000000000ca90a02";
+  const m2: ModelPool = { key: keyOf(t2, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const h2: ModelPool = { ...hostile, key: keyOf(t2, NATIVE, 3000, 60, PH(0x91)) };
+  const b = await hbConverge([m2, h2], t2, [{ key: m2.key, at: 4_500_000 }, { key: h2.key, at: 4_500_001 }], marketRoute(t2), 6);
+  assert.deepEqual({ failed: b.failed, got: b.got, banned: b.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(h2.key)] }, show(b));
+});
+
+test("review of ca907a05, LOW 2 (buy, Robinhood) a hook that fails the real buy only at an odd block where it sees EIP-2935's hash of the block before (the ring of 393,168), BASEFEE or PREVRANDAO as the trade's block's: the replay sees each as the trade did (PREVRANDAO left as Nitro's constant), so one failed try bans its pool, then the market", async () => {
+  for (const [i, k] of (["hist", "baseFee", "randao"] as const).entries()) {
+    const token = "0x" + (0xca90b00 + i).toString(16).padStart(40, "0");
+    const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+    const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xa0 + i)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: tellHook(k) };
+    const r = await hbConverge([market, hostile], token, [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }], marketRoute(token), 6, HEAD_NO + 1, RH_NET);
+    assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, `${k}: ${show(r)}`);
+  }
+});
+
+test("review of ca907a05, LOW 2 (buy, base-sepolia) a hook that fails the real buy only at an odd block where it sees PREVRANDAO or L1Block's sequenceNumber as the trade's block's: the replay sets both on Base Sepolia as on Base, so one failed try bans its pool, then the market", async () => {
+  for (const [i, k] of (["randao", "seq"] as const).entries()) {
+    const token = "0x" + (0xca90c00 + i).toString(16).padStart(40, "0");
+    const hooks = PH(0xb0 + i);
+    const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+    const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, hooks), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: tellHook(k) };
+    // Base Sepolia's venue has no scan: the buy is asked the hostile route, and the market, a standard pool, is its reference
+    const r = await hbConverge([market, hostile], token, [], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks }]), 6, HEAD_NO + 1, BS_NET);
+    assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, `${k}: ${show(r)}`);
+  }
+});
+
+test("review of ca907a05, LOW 1 the model refuses an eth_call whose stateDiff key or value is not 0x and 64 hex digits (-32602), as base-rpc.publicnode.com, mainnet.base.org and rpc.mainnet.chain.robinhood.com refuse the key 0x1; a padded key and value are taken", async () => {
+  const at = (diff: Record<string, string>) => chain([], 0)([{ method: "eth_call", params: [{ to: NATIVE, data: "0xf1c7a58b" }, "latest", { [HIST]: { stateDiff: diff } }] }]).then((a) => (a[0] as { error?: { code: number } }).error?.code ?? "taken");
+  const padded = "0x" + W(1n);
+  assert.equal(await at({ [padded]: padded }), "taken");
+  for (const bad of [{ "0x1": padded }, { [padded]: "0x1" }, { [padded.slice(2)]: padded }, { [padded]: padded + "00" }]) assert.equal(await at(bad), -32602, show(bad));
 });
