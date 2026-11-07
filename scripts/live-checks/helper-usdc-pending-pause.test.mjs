@@ -1,128 +1,124 @@
 // node --test scripts/live-checks/helper-usdc-pending-pause.test.mjs: the live check replays recorded runs
-// (helper-usdc-pending-pause.answers.json). good: a real run on 2026-11-07, mainnet USDC on FastNEAR and dRPC at one
-// final H and the deployed helper: N is the pin on both, no Pause pending: PASS. bad_pending: request 218 stored on both
-// (each provider's real answer for stored request 46) while the helper reports caught up and not halted: FAIL. Made
-// from them: N disagreeing, below the pin or unread, a request answer unread or stored on one provider only: each FAIL;
-// a stored request while the helper holds: PASS; a stored request the archive proves expired (N above it at a block at
-// least 432000 s before H) while the helper frees it: PASS, and not proven (N 218 there, or the block too recent): FAIL.
+// (helper-usdc-pending-pause.answers.json), both recorded by the check's own read(). good: mainnet N 218 with no
+// request in 202-217 and the carry token_not_accepted; testnet N 4 with request 3 stored on both, kind tag 3 (not a
+// Pause) from view_state on both, the carry bad_signature: PASS. bad_pending: the same reads with each request's
+// view_state bytes given tag 6, so testnet request 3 is a Pause while the carry runs its checks: FAIL. Made from them:
+// the kind unread (the archive then cannot prove request 3 expired: N 3 at the old block), N disagreeing or unread, a
+// request answer unread, providers that disagree on the kind, N far above any pin: each judged as the header says.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ARCHIVE, judge, nextOf, read, storedOf, trimBlock } from "./helper-usdc-pending-pause.mjs";
+import { judge, NETS, nextOf, probeDelegate, read, requestKey, storedOf, trimBlock, windowOf } from "./helper-usdc-pending-pause.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-usdc-pending-pause.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const withNext = (run, i, n) => {
-  const r = clone(run);
-  const j = JSON.parse(r.chain[i].next);
-  j.result.result = [...Buffer.from(String(n))];
-  r.chain[i].next = JSON.stringify(j);
-  return r;
-};
-const withHelper = (run, f) => {
-  const r = clone(run);
-  r.helper.body = JSON.stringify(f(JSON.parse(r.helper.body)));
-  return r;
-};
+const net = (run, name) => run.nets.find((x) => x.network === name);
 
-/** A fetch that answers from a recorded run: each provider's block, N and request answers, and the helper's status. */
+/** A fetch that answers every call read() makes from a recorded run: finals, N, request views, view_state, archive, the carry. */
 const replay = (run) => async (url, init) => {
-  if (url.includes("/v1/token-status")) {
-    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
-    return new Response(run.helper.body, { status: run.helper.status, headers: run.helper.headers });
-  }
   const body = JSON.parse(init.body);
-  if (url === ARCHIVE) {
-    const old = JSON.parse(run.archive.old).result.header.height;
-    if (body.method === "block") return new Response(body.params.block_id === run.h ? run.archive.h : body.params.block_id === old ? run.archive.old : "{}");
-    assert.equal(body.params.block_id, old, "N read at the old block");
-    return new Response(run.archive.oldNext);
+  if (url.endsWith("/v1/bind")) {
+    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+    const r = run.nets.find((x) => probeDelegate(NETS[x.network].token) === body.signed_delegate);
+    return new Response(r.carry.body, { status: r.carry.status });
   }
-  const c = run.chain.find((x) => x.rpc === url);
-  if (body.method === "block") return new Response(JSON.stringify({ result: { header: { height: run.h } } }));
-  assert.equal(body.params.block_id, run.h, "every view at H");
-  const args = JSON.parse(Buffer.from(body.params.args_base64, "base64").toString());
+  const [name, n] = Object.entries(NETS).find(([, v]) => v.rpcs.includes(url) || v.archive === url);
+  const r = net(run, name);
+  if (url === n.archive) {
+    if (body.method === "block") {
+      const want = body.params.block_id;
+      for (const b of [r.archive.h, r.archive.old]) if (JSON.parse(b).result.header.height === want) return new Response(b);
+      // the rate's reference block: the recorded H block's time less 100000 blocks of the recorded old block's rate
+      const h = JSON.parse(r.archive.h).result.header;
+      const o = JSON.parse(r.archive.old).result.header;
+      const per = (BigInt(h.timestamp_nanosec) - BigInt(o.timestamp_nanosec)) / BigInt(h.height - o.height);
+      return new Response(JSON.stringify({ result: { header: { height: want, hash: "x", timestamp_nanosec: (BigInt(h.timestamp_nanosec) - per * BigInt(h.height - want)).toString() } } }));
+    }
+    return new Response(r.archive.oldNext);
+  }
+  const c = r.chain.find((x) => x.rpc === url);
+  if (body.method === "block") return new Response(JSON.stringify({ result: { header: { height: r.h } } }));
+  assert.equal(body.params.block_id, r.h, "every read at H");
+  if (body.params.request_type === "view_state") return new Response(c.state.find((x) => requestKey(x.id) === body.params.prefix_base64).body);
   if (body.params.method_name === "get_next_multisig_request_id") return new Response(c.next);
-  return new Response(c.stored.find((x) => x.id === args.request_id).body);
+  const { request_id } = JSON.parse(Buffer.from(body.params.args_base64, "base64").toString());
+  return new Response(c.stored.find((x) => x.id === request_id).body);
 };
 
-test("recorded good run: N 218 on both at H, no new request: no Pause pending, PASS", async () => {
+test("recorded good run: mainnet no request in the window, testnet request 3 a role request: no Pause pending on either, PASS", async () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.pending, false);
-  assert.ok(r.lines.some((l) => l.startsWith("ok  no Pause pending")));
-  const again = judge(await read("https://api.example", replay(A.good)));
-  assert.equal(again.ok, true, "read() over the replay judges the same");
+  assert.deepEqual(r.pending, [false, false]);
+  assert.ok(r.lines.some((l) => /\[testnet\] {3}request 3: kind tag 3 on both, not a Pause/.test(l)));
+  assert.ok(r.lines.includes('ok  [mainnet] POST /v1/bind (a delegate that moves nothing) answers 400 "token_not_accepted"'));
+  assert.equal(judge(await read("https://api.example", replay(A.good))).ok, true, "read() over the replay judges the same");
 });
 
-test("recorded bad run: request 218 stored on both while the helper reports caught up and not halted: FAIL", async () => {
+test("recorded bad run: testnet request 3 a Pause on both while the carry runs its checks: FAIL", async () => {
   const r = judge(A.bad_pending);
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r), ["BAD a new request is stored, so the helper holds: caught_up true, halted false"]);
-  const again = judge(await read("https://api.example", replay(A.bad_pending)));
-  assert.equal(again.ok, false, "read() asks request 218 at H on both and judges the same");
+  assert.deepEqual(bad(r), ['BAD [testnet] a request that may be pending is stored, so the deposit carry sends nothing: "bad_signature"']);
+  assert.equal(judge(await read("https://api.example", replay(A.bad_pending))).ok, false, "read() over the replay judges the same");
 });
 
-test("a stored request while the helper holds (not caught up, or halted): PASS", () => {
-  assert.equal(judge(withHelper(A.bad_pending, (b) => ({ ...b, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null }))).ok, true);
-  assert.equal(judge(withHelper(A.bad_pending, (b) => ({ ...b, halted: true }))).ok, true);
+test("a Pause while the carry sends nothing (token_halted, token_not_accepted, relayer_low): PASS", () => {
+  for (const code of ["token_halted", "token_not_accepted", "relayer_low"]) {
+    const run = clone(A.bad_pending);
+    net(run, "testnet").carry = { status: 503, body: JSON.stringify({ error: { code } }) };
+    assert.equal(judge(run).ok, true, code);
+  }
 });
 
-test("made from the runs: N disagreeing, below the pin, over 16 new ids or unread; a request unread or stored on one only: FAIL", () => {
-  assert.equal(judge(withNext(A.good, 1, 219)).ok, false, "N differs");
-  assert.equal(judge(withNext(withNext(A.good, 0, 217), 1, 217)).ok, false, "below the pin");
-  assert.equal(judge(withNext(withNext(A.good, 0, 235), 1, 235)).ok, false, "over 16 new ids");
+test("the kind unread on a provider, or the two disagreeing: the archive decides, and N 3 at the old block proves nothing: FAIL", () => {
+  for (const what of ["refused", "disagree"]) {
+    const run = clone(A.good);
+    const c = net(run, "testnet").chain[1];
+    c.state[0].body = what === "refused" ? JSON.stringify({ error: { name: "HANDLER_ERROR", cause: { name: "TOO_LARGE_CONTRACT_STATE" } } }) : clone(A.bad_pending).nets[1].chain[1].state[0].body.replace(/"block_height":\d+/, `"block_height":${net(run, "testnet").h}`);
+    const r = judge(run);
+    assert.equal(r.ok, false, what);
+    assert.ok(r.lines.some((l) => l.includes("request 3: not proven expired")), what);
+  }
+});
+
+test("made from the good run: N unread or disagreeing, a request answer unread, the wrong networks: FAIL; N far above any pin: judged on its window", () => {
   const unread = clone(A.good);
-  unread.chain[0].next = "";
+  net(unread, "mainnet").chain[0].next = "";
   assert.equal(judge(unread).ok, false, "N unread");
-  const other = clone(A.bad_pending);
-  other.chain[1].stored[0].body = A.none_answer[1].body.replace("627:87", "647:87");
-  assert.equal(judge(other).ok, false, "another panic");
-  const one = clone(A.bad_pending);
-  one.chain[1].stored[0].body = A.none_answer[1].body;
-  assert.equal(judge(one).ok, false, "stored on A only, the helper caught up");
-  const gone = clone(A.bad_pending);
-  gone.chain[0].stored[0].body = A.none_answer[0].body;
-  gone.chain[1].stored[0].body = A.none_answer[1].body;
-  assert.equal(judge(gone).ok, true, "the request removed or executed on both: no Pause pending");
-  const off = clone(A.good);
-  off.h += 1;
-  assert.equal(judge(off).ok, false, "answers of another block");
-});
-
-test("the recorded answers parse as the watch reads them", () => {
-  for (const c of A.good.chain) assert.equal(nextOf(c.next, A.good.h), 218);
-  for (const c of A.bad_pending.chain) assert.equal(storedOf(c.stored[0].body, A.bad_pending.h), true);
-  for (const x of A.none_answer) assert.equal(storedOf(x.body, A.bad_pending.h), false);
-});
-
-test("a stored request the archive proves expired frees the helper: PASS; N not above it there, or the old block too recent: FAIL", () => {
-  const r = judge(A.bad_pending);
-  assert.ok(r.lines.some((l) => l.includes("request 218: not proven expired")), "the real archive's N at the old block is 218");
-  const proven = clone(A.bad_pending);
-  const j = JSON.parse(proven.archive.oldNext);
+  const differ = clone(A.good);
+  const j = JSON.parse(net(differ, "mainnet").chain[1].next);
   j.result.result = [...Buffer.from("219")];
-  proven.archive.oldNext = JSON.stringify(j);
-  const ok = judge(proven);
-  assert.equal(ok.ok, true, ok.lines.join("\n"));
-  assert.ok(ok.lines.some((l) => /request 218: expired \(N 219 at \d+, \d+ s before H\)/.test(l)));
-  const recent = clone(proven);
-  const o = JSON.parse(recent.archive.old);
-  o.result.header.timestamp_nanosec = (BigInt(JSON.parse(recent.archive.h).result.header.timestamp_nanosec) - 431_999_000_000_000n).toString();
-  recent.archive.old = JSON.stringify(o);
-  assert.equal(judge(recent).ok, false, "less than the validity before H");
-  const noArchive = clone(proven);
-  delete noArchive.archive;
-  assert.equal(judge(noArchive).ok, false, "no archive read: not proven");
+  net(differ, "mainnet").chain[1].next = JSON.stringify(j);
+  assert.equal(judge(differ).ok, false, "N differs");
+  const answer = clone(A.good);
+  net(answer, "mainnet").chain[0].stored[3].body = "";
+  assert.equal(judge(answer).ok, false, "a request answer unread");
+  assert.equal(judge({ nets: [net(A.good, "mainnet")] }).ok, false, "testnet not read");
+  // N 300: the window is 284-299, read from the live N, never a pin
+  assert.deepEqual(windowOf(300), Array.from({ length: 16 }, (_, i) => 284 + i));
+  assert.deepEqual(windowOf(4), [0, 1, 2, 3]);
+  const far = clone(A.good);
+  const m = net(far, "mainnet");
+  for (const c of m.chain) {
+    const k = JSON.parse(c.next);
+    k.result.result = [...Buffer.from("300")];
+    c.next = JSON.stringify(k);
+    c.stored = windowOf(300).map((id, i) => ({ id, body: c.stored[i].body }));
+  }
+  const r = judge(far);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  [mainnet] no Pause pending: no request in 284-299 may be pending"));
 });
 
-test("the recorder keeps only the header fields the check reads: no approval or signature reaches a record", () => {
-  const full = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { author: "v.poolv1.near", chunks: [{ signature: "sig" }], header: { height: 7, hash: "H", timestamp_nanosec: "1", approvals: ["ed25519:x", null], signature: "ed25519:y", prev_hash: "P" } } });
+test("the recorder keeps only the header fields the check reads; the recorded answers parse as the watch reads them", () => {
+  const full = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { author: "v.poolv1.near", header: { height: 7, hash: "H", timestamp_nanosec: "1", approvals: ["ed25519:x", null], signature: "ed25519:y" } } });
   assert.equal(trimBlock(full), JSON.stringify({ result: { header: { height: 7, hash: "H", timestamp_nanosec: "1" } } }));
-  assert.equal(trimBlock("{"), "");
-  for (const b of [A.bad_pending.archive.h, A.bad_pending.archive.old]) assert.deepEqual(Object.keys(JSON.parse(b).result.header), ["height", "hash", "timestamp_nanosec"]);
+  const t = net(A.good, "testnet");
+  for (const b of [t.archive.h, t.archive.old]) assert.deepEqual(Object.keys(JSON.parse(b).result.header), ["height", "hash", "timestamp_nanosec"]);
+  for (const c of net(A.good, "mainnet").chain) assert.equal(nextOf(c.next, net(A.good, "mainnet").h), 218);
+  for (const c of t.chain) assert.equal(storedOf(c.stored.find((x) => x.id === 3).body, t.h), true);
+  assert.equal(requestKey(3), Buffer.from([0x7e, 0x61, 0x6d, 2, 3, 0, 0, 0]).toString("base64"));
 });
