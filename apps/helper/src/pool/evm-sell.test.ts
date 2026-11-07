@@ -2037,15 +2037,30 @@ test("the receipt watch backs off: from the poll interval, doubling, to 15 times
 async function untilHeld(make: (calls: Calls) => [Opts, Opts], label: string) {
   const x: Calls = [];
   const [oa, ob] = make(x);
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => NOW);
+  // card fresh-run-margin: the clock stands at NOW while the sales go, then moves past every watch's bound, as a live
+  // helper's does, so a watch that never gets both receipts ends instead of reading on for the rest of the file
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => clock);
   let sent = 0;
   let last: Awaited<ReturnType<typeof s.sell>> | undefined;
   for (let i = 0; i < 60 && last?.status !== 429; i++) {
     last = await s.sell(freshBody(`W-${label}-${i}`, { sell: { token: `0x${(0xe000 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.77");
-    if (last.status === 200) sent++;
-    await settle(() => false, 4);
+    if (last.status === 200) {
+      sent++;
+      await readBack(x);
+    }
   }
+  clock = PAST_EVERY_WATCH;
   return { sent, last: last! };
+}
+/** Past every bound a watch started at NOW can hold: its send's margin and EVM_LANE_WATCH_MS, a day over. */
+const PAST_EVERY_WATCH = NOW + 86_400_000;
+/** Until the sale just sent has had its first receipt read on both providers and what that read decides has run (its
+ *  `landed`, when both answered): the watch's own first read, never a fixed wait (card fresh-run-margin). */
+async function readBack(x: Calls) {
+  const hash = `0x${hex(keccak_256(unhex(sends(x).at(-1)!)))}`;
+  while (!x.some((c) => c.method === "eth_getTransactionReceipt" && c.params[0] === hash)) await new Promise((ok) => setTimeout(ok, 1));
+  await new Promise((ok) => setImmediate(ok));
 }
 const WORST = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1; // the receipts' cost here too: gas 1,000,000 at 2 x base + tip
 
