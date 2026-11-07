@@ -44,9 +44,11 @@
 //     outcome tells the caller to open the way out (withdraw.open, U's own plain ft_transfer; V 2.12 step 5).
 //   - Never storage_unregister on U, and never DeleteAccount while a call U signed can land (W:471-480, V:682-686):
 //     checkCleanup, which the clean-up signer must call first, reads every call from the note store.
-// A P the pages hold for another deposit (a front-run naming P, W:456-458 and point 9) is still this device's note:
-// its leaf hashes from our P, so the note goes UNSPENT with that leaf and the outcome says front_run; the caller signs
-// the amount again on U's next second-arrival note.
+// A P the pages hold for another deposit (a front-run naming P, W:456-458 and point 9; audit V-01, a stranger who reads
+// the relayer's storage_prepay(P) and deposits first, U's call refunded in full) is still this device's note: its leaf
+// hashes from our P, so the note goes UNSPENT with that leaf and the outcome says front_run; the caller signs the amount
+// again on U's next second-arrival note. Another deposit is told by value as well as depositor (ownRow): the vault takes
+// the depositor from the message, so the stranger may name U.
 // Nothing here logs. No request carries a key, the words or a note's secret: the relayer gets the signed delegate
 // alone (sendDepositDelegate), and each read names U or the vault.
 import { HELPER_RPC_METHODS, type VaultDepositRow, vaultSync, type VaultSyncCursor, vaultSyncStart, VaultSyncStopped } from "@blindfill/kit";
@@ -402,6 +404,28 @@ export async function txCarriesFinal(rpc: BindRpc, hash: string, relayer: string
   }
 }
 
+/** The amount a deposit call signed: its one ft_transfer_call's args.amount, read from the call's own bytes. */
+export function callAmount(call: Pick<CallBytes, "signed_delegate">): bigint {
+  const args: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(base64.decode(innerOf(call as CallBytes).args)));
+  const a = isObj(args) ? args.amount : undefined;
+  if (typeof a !== "string" || !DIGITS.test(a)) throw new DepositBindRefused("note", "the note's call names no amount");
+  return BigInt(a);
+}
+
+/**
+ * Whether a pages row under the note's P is this deposit: U the depositor and the value one of the note's calls signed
+ * (no call written: `amount`, the bind's; none given either, U the depositor alone, as for a note another device on the
+ * seed landed). The vault takes the depositor from the message (contracts/vault/src/deposit.rs:80-93), so a stranger
+ * who takes P after the relayer's prepay (audit V-01) may name U; the value is the stranger's own. Any other row is a
+ * stranger's deposit on our P: the user's note, spendable with our secrets, and never this deposit done.
+ */
+export function ownRow(row: Pick<DepositRow, "depositor" | "value">, u: string, note: Pick<NoteRecord, "calls">, amount?: bigint): boolean {
+  if (row.depositor !== u) return false;
+  const calls = note.calls ?? [];
+  if (calls.length > 0) return calls.some((c) => callAmount(c) === row.value);
+  return amount === undefined || row.value === amount;
+}
+
 const callOf = (c: BindCall): SignedDepositDelegate => ({
   signed_delegate: c.signed_delegate, sender_id: c.sender_id, receiver_id: c.receiver_id, nonce: c.nonce, max_block_height: c.max_block_height, public_key: c.public_key, balance: c.balance,
 });
@@ -536,7 +560,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       if (cur.state === "INCOMING") cur = await step("INCOMING", "UNSPENT", { leaf });
       if (cur.leaf === undefined || cur.leaf.leafIndex !== leaf.leafIndex || cur.leaf.commitment !== leaf.commitment)
         throw new DepositBindRefused("note", `the note is ${cur.state} with another leaf`);
-      return { kind: r.depositor === U && r.value === own.amount ? "deposited" : "front_run", note: cur };
+      return { kind: ownRow(r, U, cur, own.amount) ? "deposited" : "front_run", note: cur };
     };
     // A sign that the device's own reads refuse for now (an RPC behind, USDC not back) waits and reads again.
     const signing = async (f: () => Promise<SignedDepositDelegate>): Promise<SignedDepositDelegate | null> => {

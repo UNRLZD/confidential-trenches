@@ -480,6 +480,26 @@ test("a front-run on P: the note lands with that leaf as front_run, and nothing 
   assert.equal(t.sent.length, 0);
 });
 
+test("audit V-01: a stranger takes P after U's call left, naming U as depositor at another value: front_run, never deposited", async () => {
+  // the relayer's prepay put P on chain; the stranger's 1 USDC naming P and U lands first, U's call is refunded in full
+  for (const [what, depositor, value] of [["U at 1 USDC", "", 1_000_000n], ["U at 1 base unit over", "", AMOUNT + 1n], ["a stranger at the call's amount", "f".repeat(64), AMOUNT]] as const) {
+    resetBindSession();
+    const t = await setup(["tx"], (c) => (s) => {
+      c.finals.add(s.hash);
+      c.a.nonce = c.b.nonce = s.nonce;
+      c.addRow(s.p, { depositor: depositor || c.u, value });
+    });
+    const note = landed(await bindDeposit(SEED, t.args, t.deps), "front_run");
+    assert.equal(note.leaf!.value, value, what);
+    assert.equal(t.chain.balance, 100_000_000n, `${what}: U's USDC refunded whole`);
+    assert.equal(t.sent.length, 1, what);
+  }
+  // U at the call's own amount is one value: deposited
+  resetBindSession();
+  const t = await setup(["tx"], (c) => (s) => (c.finals.add(s.hash), (c.a.nonce = c.b.nonce = s.nonce), c.addRow(s.p, { value: AMOUNT })));
+  landed(await bindDeposit(SEED, t.args, t.deps), "deposited");
+});
+
 test("a check code from the relayer stops the bind with that code; nothing more is sent", async () => {
   const t = await setup(["gas_too_low"]);
   assert.deepEqual(await bindDeposit(SEED, t.args, t.deps), { kind: "refused", code: "gas_too_low" });

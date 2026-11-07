@@ -53,7 +53,7 @@ import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import type { WalletStore } from "../store/index.ts";
 import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
-import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, POLL_MS } from "./bind.ts";
+import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, ownRow, POLL_MS } from "./bind.ts";
 
 /** The helper's 1Click proxy for status (apps/helper/src/proxy/vendors.ts: oneclick, /v0/status read upstream by GET). */
 export const DEPOSIT_STATUS_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/status";
@@ -534,15 +534,16 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     }
     return out;
   };
-  // The pages on both RPCs at the note's leaf: ours (U the depositor), theirs (a front-run on P), mismatch (the pages do
-  // not hold the leaf the store holds), or unsure (one RPC behind).
+  // The pages on both RPCs at the note's leaf: ours (bind.ts ownRow: U the depositor at the value its call signed),
+  // theirs (a front-run on P, which may name U: audit V-01), mismatch (the pages do not hold the leaf the store holds),
+  // or unsure (one RPC behind).
   const pagesOf = async (note: NoteRecord): Promise<{ state: "ours" | "theirs"; value: bigint } | { state: "mismatch" | "unsure" }> => {
     const leaf = note.leaf!;
     const r = await new DepositsWatch(vault, note.precommitment, rpcs, { ...(await store.syncCursor(vault)), deposits: note.searchFrom ?? 0 }).read(signal);
     if (r.state === "unsure") return { state: "unsure" };
     if (r.state === "absent") return { state: "mismatch" };
     if (leaf.leafIndex !== r.row.leafIndex || leaf.value !== r.row.value || leaf.commitment !== noteCommitment(r.row.value, r.row.label, note.precommitment)) return { state: "mismatch" };
-    return { state: r.row.depositor === U ? "ours" : "theirs", value: r.row.value };
+    return { state: ownRow(r.row, U, note) ? "ours" : "theirs", value: r.row.value };
   };
 
   // U not created yet (the bind's not_created wait): the helper creates U on a status read of SUCCESS once the delivery
@@ -610,7 +611,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   };
 
   // ---------- the count: U's money as one sum, never split between its ops ----------
-  // U's landed notes, each read once on both RPCs: ours (U the depositor, its value) or a front-run on P (theirs)
+  // U's landed notes, each read once on both RPCs: ours (U the depositor at its call's value) or a front-run on P (theirs)
   const ours = new Map<string, bigint>();
   const theirs = new Set<string>();
   // what an op needs of U's sum: the checked min_amount_out once its own status read SUCCESS; MIN_DEPOSIT once its
