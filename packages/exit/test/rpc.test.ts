@@ -97,6 +97,22 @@ test("only the release's pair is read: two hosts of one operator, another provid
   await assert.rejects(exitReadPages({ network: "betanet" as "mainnet" }), refused);
 });
 
+test("only the network's own vault is read: any other vault is refused before a read, the network's own is read", async () => {
+  const refused = (e: unknown) => e instanceof ExitRpcRefused && /vault/.test(e.message);
+  let reads = 0;
+  const counted = (rec: typeof A) => {
+    const r = replayRpc(rec);
+    return { ...r, query: (p: Parameters<typeof r.query>[0], s?: AbortSignal) => (reads++, r.query(p, s)) };
+  };
+  for (const vault of ["other.testnet", EXIT_NETWORKS.mainnet.vault, `${EXIT_NETWORKS.testnet.vault}.x`, ""]) {
+    await assert.rejects(exitReadPages({ network: "testnet", vault, rpcs: [counted(A), counted(B)] }), refused, JSON.stringify(vault));
+  }
+  await assert.rejects(exitReadPages({ network: "mainnet", vault: EXIT_NETWORKS.testnet.vault, fetchFn: (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch }), refused);
+  assert.equal(reads, 0, "nothing was read for a vault that is not the network's");
+  const r = await exitReadPages({ network: "testnet", vault: EXIT_NETWORKS.testnet.vault, rpcs: [counted(A), counted(B)] });
+  assert.ok(reads > 0 && r.deposits.length > 0);
+});
+
 test("mainnet: with only the network named, the read asks the v1 record's vault on mainnet's FastNEAR and dRPC", async () => {
   const record = JSON.parse(readFileSync(new URL("contracts/vault/deployments/mainnet-v1.json", ROOT), "utf8"));
   const asked: { url: string; account: unknown }[] = [];

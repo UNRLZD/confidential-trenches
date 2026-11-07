@@ -41,7 +41,7 @@ export const EXIT_NETWORKS: Readonly<Record<NearNetwork, { readonly vault: strin
 /** How long one RPC answer may take before the read stops ("rpc"). */
 export const EXIT_RPC_TIMEOUT_MS = 15_000;
 
-/** A refusal before anything is read: an unknown network, or a pair that is not the release's. */
+/** A refusal before anything is read: an unknown network, a vault or a pair that is not the release's. */
 export class ExitRpcRefused extends Error {
   constructor(detail: string) {
     super(`exit: ${detail}`);
@@ -76,7 +76,7 @@ export function exitRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = 
 
 export type ExitReadArgs = {
   network: NearNetwork;
-  /** The vault to read; the release's on `network` unless given. */
+  /** The vault to read: the release's on `network`, the only one read (any other is refused, ExitRpcRefused). */
   vault?: string;
   /** The two RPCs; the release's pair on `network`, fetched with `fetchFn`, unless given. Either way the pair must be the release's. */
   rpcs?: readonly [VaultSyncRpc, VaultSyncRpc];
@@ -98,6 +98,8 @@ export async function exitReadPages(args: ExitReadArgs): Promise<VaultSyncResult
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
   const net = EXIT_NETWORKS[network];
   const vault = args.vault ?? net.vault;
+  // the release's vault on the network and no other, so a typed or passed name cannot steer the read
+  if (vault !== net.vault) throw new ExitRpcRefused(`the vault on ${network} is ${net.vault}, not ${JSON.stringify(vault)}`);
   const fetchFn = args.fetchFn ?? fetch;
   const rpcs = args.rpcs ?? ([exitRpc(net.rpcs[0], fetchFn), exitRpc(net.rpcs[1], fetchFn)] as const);
   if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
