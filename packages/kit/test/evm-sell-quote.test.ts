@@ -3,7 +3,7 @@
 // and answers each quote from a price model, the factory and getPool reads, and the fee-on-transfer probe run as W's
 // code. Each planted lie is a server's or an RPC's: a quote off on one RPC, a server's route, a fee-on-transfer token,
 // a stale quote, an unlisted hook, a pool that runs out, a hand-made quote.
-import { mock, test } from "node:test";
+import { beforeEach, mock, test } from "node:test";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import assert from "node:assert/strict";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -18,7 +18,7 @@ import { evmQuotedSell } from "../src/trade/evm/quoted.ts";
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import type { EvmRpc } from "../src/checks/evm/quote.ts";
 import * as releasesMod from "../src/trade/evm/sell-releases.ts";
-import { AMOUNT, BOUGHT, NATIVE, TOKEN, TOPIC_BOUGHT, TOPIC_WITHDRAWN, V3_POOL, WALLET, flat, provider, req, sell, sellQuoteWith, verdict, type Model, type Pool, type Seen } from "./evm-sell-quote-fx.ts";
+import { AMOUNT, BOUGHT, NATIVE, TOKEN, TOPIC_BOUGHT, TOPIC_WITHDRAWN, V3_POOL, WALLET, flat, provider, req, sell, sellQuoteWith, verdict, type Model, type Pool, type Release, type Seen } from "./evm-sell-quote-fx.ts";
 
 const keccak = (t: string) => keccak_256(new TextEncoder().encode(t));
 
@@ -366,9 +366,17 @@ test("planted: a sell quote takes the buy's block (boughtBlock): none, 0, a nega
 // reaches W during the sale, so the kit builds no sell for a W while a release that pays W ETH is on its way. The quote
 // reads W's releases itself at its block and carries the verdict; the builder takes no other (src/trade/evm/sell-releases.ts)
 const E01_BASE = () => ({ precommitment: 0x5e11n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n });
-// the fixture's head is block 0x100 (256), its finalized block 0xe0 (224), 900 s before the head
+// the fixture's head is block 0x100 (256), its finalized block 0xe0 (224), 900 s before the head; the buy that paid W
+// the token landed in block 256 (req's boughtBlock) and bought TOKEN
+// the head's time, 2 s before each test's start (a quote refuses a block more than 30 s old, and the file runs longer)
+let E01_HEAD = Math.floor(Date.now() / 1000) - 2;
+let E01_FIN_MS = (BigInt(E01_HEAD) - 900n) * 1000n;
+beforeEach(() => {
+  E01_HEAD = Math.floor(Date.now() / 1000) - 2;
+  E01_FIN_MS = (BigInt(E01_HEAD) - 900n) * 1000n;
+});
 const e01Quote = (m: Partial<Model> = {}, o: Record<string, unknown> = {}, m2: Partial<Model> = m) =>
-  sellQuoteWith(req("base-sepolia", o), [provider({ price: flat, ...m }), provider({ price: flat, ...m2 })], Date.now());
+  sellQuoteWith(req("base-sepolia", o), [provider({ price: flat, headSec: E01_HEAD, ...m }), provider({ price: flat, headSec: E01_HEAD, ...m2 })], Date.now());
 const e01Why = async (m: Partial<Model> = {}, o: Record<string, unknown> = {}, m2: Partial<Model> = m): Promise<string> => {
   const q = await e01Quote(m, o, m2);
   try {
@@ -383,37 +391,50 @@ const e01Why = async (m: Partial<Model> = {}, o: Record<string, unknown> = {}, m
 const E01_OTHER = "0x" + "42".repeat(20);
 const E01_NOTE = "change:5:1";
 
-test("card evm-sell-no-release-in-flight: a Withdrawn to W above the finalized block, on the quote's own read, refuses the sell naming the wait; a Bought does not", async () => {
+test("card evm-sell-no-release-in-flight: a release to W above the finalized block, on the quote's own read, refuses the sell naming the wait, but for the buy that funded it", async () => {
   assert.equal(await e01Why(), "built");
   // pending: a withdraw or a buy's fallback (both Withdrawn) that landed on W in the tail, above the finalized block
   assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] }), /^release_in_flight: 1 release to W not final on two RPCs: a release landed in block 240, above the finalized block: the sell waits until block 240 is final on both RPCs$/);
   assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 225n, nullifier: 7n }] }), /landed in block 225, above the finalized block/);
-  // review of 982a19bd, F2: a Bought to W pays W the bought token, never ETH: W's own buy does not hold its sale
-  assert.equal(await e01Why({ releases: [{ kind: "buy", block: 250n, nullifier: 7n }] }), "built");
+  // review of 982a19bd, F2: the buy that funded this sale (the quote's token, in its boughtBlock) does not hold it
+  assert.equal(await e01Why({ releases: [{ kind: "buy", block: 256n, nullifier: 7n }] }), "built");
+  // review of 181fd050, R2-3: any other Bought to W in the tail does: replayed into its fallback it pays W ETH mid-sell
+  assert.match(await e01Why({ releases: [{ kind: "buy", block: 250n, nullifier: 7n }] }), /^release_in_flight: 1 release to W not final on two RPCs: a release landed in block 250/);
+  assert.match(await e01Why({ releases: [{ kind: "buy", block: 256n, nullifier: 7n, token: E01_OTHER }] }), /landed in block 256/);
+  assert.match(await e01Why({ releases: [{ kind: "buy", block: 256n, nullifier: 7n }, { kind: "buy", block: 256n, nullifier: 8n }] }), /^release_in_flight: 1 release /);
   // final: at the finalized block; and a release in the tail paid to another address
   assert.equal(await e01Why({ releases: [{ kind: "withdraw", block: 224n, nullifier: 7n }] }), "built");
   assert.equal(await e01Why({ releases: [{ kind: "withdraw", block: 240n, nullifier: 7n, to: E01_OTHER }] }), "built");
-  // review of 982a19bd, F3: a Withdrawn to W above the quote's block that either provider already holds is pending
-  assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 300n, nullifier: 7n }] }, {}, {}), /landed in block 300, above the finalized block/);
-  assert.match(await e01Why({}, {}, { releases: [{ kind: "withdraw", block: 300n, nullifier: 7n }] }), /landed in block 300, above the finalized block/);
+  // review of 982a19bd, F3: a Withdrawn to W above the quote's block is pending, given by both providers or by one and
+  // confirmed by the other (which holds its block, though its range to "latest" reached only the agreed block)
+  const w300 = { releases: [{ kind: "withdraw" as const, block: 300n, nullifier: 7n }] };
+  assert.match(await e01Why(w300), /landed in block 300, above the finalized block/);
+  assert.match(await e01Why(w300, {}, { ...w300, seesTo: 256n, holds: () => 300n }), /landed in block 300, above the finalized block/);
+  assert.match(await e01Why({ ...w300, seesTo: 256n, holds: () => 300n }, {}, w300), /landed in block 300, above the finalized block/);
 });
 
 test("card evm-sell-no-release-in-flight: a release the device sent holds the sell until it lands or the finalized block's time passes its deadline; the list only adds waits", async () => {
-  const finMs = (BigInt(Math.floor(Date.now() / 1000) - 2) - 900n) * 1000n;
+  const finMs = E01_FIN_MS;
   const sent = (deadlineMs: bigint) => ({ sent: [{ note: E01_NOTE, nullifier: 7n, deadlineMs }] });
   for (const d of [finMs, finMs + 1n, 10n ** 15n]) {
     assert.match(await e01Why({}, sent(d)), new RegExp(`^release_in_flight: .*${E01_NOTE} was sent and has not landed: the sell waits until it lands in a final block or a final block's time passes its deadline ${d} ms`));
   }
   // its deadline passed by the finalized block's time: it can never land
   assert.equal(await e01Why({}, sent(finMs - 1000n)), "built");
-  // landed in the tail as a Bought: it paid no ETH, and it has landed
-  assert.equal(await e01Why({ releases: [{ kind: "buy", block: 240n, nullifier: 7n }] }, sent(10n ** 15n)), "built");
+  // landed in the tail as the funding buy: it has landed, and holds nothing
+  assert.equal(await e01Why({ releases: [{ kind: "buy", block: 256n, nullifier: 7n }] }, sent(10n ** 15n)), "built");
+  // one the store saw land in a block not yet final (no deadline): pending until the read finds it (review of 181fd050,
+  // info: one above every provider's "latest" dropped out of both), then as the read finds it
+  const seen = { sent: [{ note: E01_NOTE, nullifier: 7n }] };
+  assert.match(await e01Why({}, seen), new RegExp(`^release_in_flight: 1 release to W not final on two RPCs: ${E01_NOTE} landed in a block the providers do not show yet: the sell waits until its block is final on both RPCs$`));
+  assert.equal(await e01Why({ releases: [{ kind: "buy", block: 256n, nullifier: 7n }] }, seen), "built");
+  assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] }, seen), new RegExp(`${E01_NOTE} landed in block 240`));
   // landed in the tail as a Withdrawn: pending, its note named
   assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] }, sent(10n ** 15n)), new RegExp(`^release_in_flight: 1 release to W not final on two RPCs: ${E01_NOTE} landed in block 240`));
   // the device's list cannot clear a Withdrawn the read found: one sent with a deadline long past still waits
   assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] }, sent(0n)), /landed in block 240/);
   // a malformed list is refused before any read
-  for (const bad of [undefined, null, {}, [{ note: "", nullifier: 7n, deadlineMs: 0n }], [{ note: E01_NOTE, nullifier: -1n, deadlineMs: 0n }], [{ note: E01_NOTE, nullifier: 7n }], new Array(kit.EVM_SELL_SENT_MAX + 1).fill({ note: E01_NOTE, nullifier: 7n, deadlineMs: 0n })]) {
+  for (const bad of [undefined, null, {}, [{ note: "", nullifier: 7n, deadlineMs: 0n }], [{ note: E01_NOTE, nullifier: -1n, deadlineMs: 0n }], [{ note: E01_NOTE, nullifier: 7n, deadlineMs: -1n }], new Array(kit.EVM_SELL_SENT_MAX + 1).fill({ note: E01_NOTE, nullifier: 7n, deadlineMs: 0n })]) {
     assert.deepEqual(await verdict(e01Quote({}, { sent: bad })), { accepted: false, code: "bad_request" }, JSON.stringify(bad, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
   }
 });
@@ -431,10 +452,6 @@ test("card evm-sell-no-release-in-flight: W's releases up to the quote's block m
     const v = await verdict(sellQuoteWith(req("base-sepolia"), [lying(f), lying(f)], Date.now()));
     assert.deepEqual(v, { accepted: false, code: "rpc_error" });
   }
-  // a log further above the quote's block than a pair's heads can be apart (base-sepolia's maxLag, 100)
-  const lag = BigInt(evmPoolVenues()["base-sepolia"].maxLag!);
-  assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 256n + lag, nullifier: 7n }] }), /landed in block 356/);
-  assert.deepEqual(await verdict(e01Quote({ releases: [{ kind: "withdraw", block: 257n + lag, nullifier: 7n }] })), { accepted: false, code: "rpc_error" });
   // W's releases are read on the pool's own list where the chain has one (Robinhood's poolProviders), never the quote's
   const quoteOnly = () => provider({ price: flat });
   const poolList = () => provider({ price: flat, releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] });
@@ -459,10 +476,65 @@ test("card evm-sell-no-release-in-flight: W's releases up to the quote's block m
   assert.deepEqual(asked[0], { address: evmPoolVenues()["base-sepolia"].pool!.toLowerCase(), fromBlock: "0xe1", toBlock: "latest", topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], "0x" + "00".repeat(12) + WALLET.slice(2)] });
   // a finalized block more than EVM_SELL_TAIL_MAX below the quote's is refused, never paged without end
   const far = (rpc: EvmRpc): EvmRpc => async (calls) => (await rpc(calls)).map((o, i) => (calls[i]!.method === "eth_getBlockByNumber" && calls[i]!.params[0] === "finalized" ? { ...(o as object), result: { ...(o as { result: object }).result, number: "0x0" } } : o));
-  const head = (rpc: EvmRpc, n: bigint): EvmRpc => async (calls) => (await rpc(calls)).map((o, i) => (calls[i]!.method === "eth_getBlockByNumber" && calls[i]!.params[0] !== "finalized" ? { ...(o as object), result: { ...(o as { result: object }).result, number: "0x" + n.toString(16) } } : o));
+  // every block by number answered as the head, renumbered n
+  const head = (rpc: EvmRpc, n: bigint): EvmRpc => async (calls) => (await rpc(calls.map((c) => (c.method === "eth_getBlockByNumber" && c.params[0] !== "finalized" ? { ...c, params: ["latest", false] } : c)))).map((o, i) => (calls[i]!.method === "eth_getBlockByNumber" && calls[i]!.params[0] !== "finalized" ? { ...(o as object), result: { ...(o as { result: object }).result, number: "0x" + n.toString(16) } } : o));
   const at = (n: bigint) => verdict(sellQuoteWith(req("base-sepolia"), [far(head(provider({ price: flat }), n)), far(head(provider({ price: flat }), n))], Date.now()));
   assert.equal((await at(quoteMod.EVM_SELL_TAIL_MAX)).accepted, true);
   assert.deepEqual(await at(quoteMod.EVM_SELL_TAIL_MAX + 1n), { accepted: false, code: "rpc_error" });
+});
+
+test("card evm-sell-no-release-in-flight: a log above the quote's block that one provider alone gives counts only once a second provider holds its block with it (review of 181fd050, R2-1, R2-2)", { timeout: 40_000 }, async () => {
+  const at = (block: bigint, nullifier = 7n): Release[] => [{ kind: "withdraw", block, nullifier }];
+  const p = (m: Partial<Model>) => provider({ price: flat, headSec: E01_HEAD, ...m });
+  const why = async (list: EvmRpc[]) => {
+    const q = await sellQuoteWith(req("base-sepolia"), list, Date.now());
+    try {
+      kit.evmPoolBuildSell(q, E01_BASE());
+      return "built";
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+  // R2-2: an honest provider ahead of the other sees a Withdrawn to W the other's range has not reached; the other holds
+  // its block with it, so it counts. Where the other reaches the block only after the first ask, the quote waits for it
+  assert.match(await why([p({ releases: at(300n) }), p({ releases: at(300n), seesTo: 256n, holds: () => 300n })]), /landed in block 300/);
+  let asks = 0;
+  assert.match(await why([p({ releases: at(300n) }), p({ releases: at(300n), seesTo: 256n, holds: () => (asks++ > 0 ? 300n : 256n) })]), /landed in block 300/);
+  // R2-1: one lying provider of four with a made-up Withdrawn to W at the quote's block + 1: the others hold that block
+  // without it, so it is dropped, quote after quote
+  const honest = () => p({ holds: () => 257n });
+  const list = [p({ releases: at(257n, 0xdeadn) }), honest(), honest(), honest()];
+  for (let k = 0; k < 3; k++) assert.equal(await why(list), "built", `quote ${k}`);
+  // the same where the block the others hold has another hash than the lie names
+  const otherHash: EvmRpc = async (calls) => (await p({ releases: at(257n, 0xdeadn) })(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { ...(o as object), result: (o as { result: Record<string, unknown>[] }).result.map((l) => ({ ...l, blockHash: "0x" + "ab".repeat(32) })) } : o));
+  assert.equal(await why([otherHash, honest(), honest()]), "built");
+  // a lie further above every other provider's head than maxLag (base-sepolia's 100) is no honest head's: dropped at once
+  const lag = BigInt(evmPoolVenues()["base-sepolia"].maxLag!);
+  assert.equal(await why([p({ releases: at(257n + lag) }), p({}), p({})]), "built");
+  // one within maxLag that no other provider holds within EVM_SELL_CONFIRM_WAIT_MS refuses the quote, never builds it
+  const t0 = performance.now();
+  assert.deepEqual(await verdict(sellQuoteWith(req("base-sepolia"), [p({ releases: at(256n + lag) }), p({})], Date.now())), { accepted: false, code: "rpc_error" });
+  assert.ok(performance.now() - t0 >= quoteMod.EVM_SELL_CONFIRM_WAIT_MS - 100);
+});
+
+test("card evm-sell-no-release-in-flight: a lie above the quote's block waits for as long as the other providers' heads move toward it, so it is dropped even where they reach its block later than EVM_SELL_CONFIRM_WAIT_MS", { timeout: 40_000 }, async () => {
+  // base-sepolia's maxLag of 100 blocks is about 20 s at 200 ms, past a fixed wait of 12 s: a lie at n + maxLag would
+  // refuse every quote and never be held. Here the honest heads move one block per 1.5 s from the first ask for the
+  // lie's block, so they reach 256 + 9 after 13.5 s, and hold it without the lie
+  let from: number | null = null;
+  const now = () => (from === null ? 0x100n : 0x100n + BigInt(Math.floor((performance.now() - from) / 1_500)));
+  const honest = (): EvmRpc => {
+    const inner = provider({ price: flat, headSec: E01_HEAD, holds: now, latest: now });
+    return async (calls) => {
+      if (calls.some((c) => c.method === "eth_getLogs" && (c.params[0] as { blockHash?: string }).blockHash !== undefined)) from ??= performance.now();
+      return inner(calls);
+    };
+  };
+  const t0 = performance.now();
+  const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat, headSec: E01_HEAD, releases: [{ kind: "withdraw", block: 0x100n + 9n, nullifier: 0xdeadn }] }), honest()], Date.now());
+  assert.ok(performance.now() - t0 >= quoteMod.EVM_SELL_CONFIRM_WAIT_MS, "the heads reached the block after the stall window");
+  assert.doesNotThrow(() => kit.evmPoolBuildSell(q, E01_BASE()));
+  assert.deepEqual(q.releases.pending, []);
 });
 
 test("card evm-sell-no-release-in-flight: the builder takes only the quote's own verdict, for its chain, its W and its block (review of 982a19bd, F1 and F1b)", async () => {
@@ -471,7 +543,7 @@ test("card evm-sell-no-release-in-flight: the builder takes only the quote's own
   const q = await e01Quote({ releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] });
   assert.throws(() => kit.evmPoolBuildSell(q, { ...E01_BASE(), releases: { chain: q.chain, w: q.w, block: q.block.number, finalBlock: 0n, pending: [] } } as kit.EvmPoolSellFields), /^EvmPoolSellError: release_in_flight: .*landed in block 240|release_in_flight: 1 release/);
   // F1b: the verdict is bound to the quote it is checked against
-  const v = (o: Partial<{ chain: EvmPoolChain; w: string; block: bigint }> = {}) => releasesMod.evmSellReleasesAt({ chain: "base-sepolia", w: WALLET, block: 256n, fin: { number: 224n, timestamp: 1_000n }, agreed: [], above: [], sent: [], ...o });
+  const v = (o: Partial<{ chain: EvmPoolChain; w: string; block: bigint }> = {}) => releasesMod.evmSellReleasesAt({ chain: "base-sepolia", w: WALLET, block: 256n, fin: { number: 224n, timestamp: 1_000n }, agreed: [], above: [], sent: [], funding: { token: TOKEN, block: 256n }, ...o });
   const ask = { chain: "base-sepolia" as EvmPoolChain, w: WALLET.toUpperCase().replace("0X", "0x"), block: { number: 256n } };
   assert.doesNotThrow(() => releasesMod.evmSellReleasesClear({ ...ask, releases: v() }));
   assert.throws(() => releasesMod.evmSellReleasesClear({ ...ask, releases: v({ block: 255n }) }), /^EvmPoolSellError: release_in_flight: the releases read is at block 255, not the quote's block 256$/);
@@ -483,7 +555,7 @@ test("card evm-sell-no-release-in-flight: the builder takes only the quote's own
   }
   // a verdict cannot be changed after it was made, and a nullifier released twice is no verdict
   assert.throws(() => (v().pending as unknown[]).push({ note: null, landed: 1n }));
-  assert.throws(() => releasesMod.evmSellReleasesAt({ chain: "base-sepolia", w: WALLET, block: 256n, fin: { number: 224n, timestamp: 1_000n }, agreed: [{ kind: "buy", block: 230n, nullifier: 7n }, { kind: "withdraw", block: 231n, nullifier: 7n }], above: [], sent: [] }), /release_in_flight: .*a nullifier released twice/);
+  assert.throws(() => releasesMod.evmSellReleasesAt({ chain: "base-sepolia", w: WALLET, block: 256n, fin: { number: 224n, timestamp: 1_000n }, agreed: [{ kind: "buy", block: 230n, nullifier: 7n, token: null }, { kind: "withdraw", block: 231n, nullifier: 7n, token: null }], above: [], sent: [], funding: { token: TOKEN, block: 256n } }), /release_in_flight: .*a nullifier released twice/);
   // the quote carries the verdict it read, frozen, at its own block
   const ok = await e01Quote();
   assert.equal(ok.releases.block, ok.block.number);

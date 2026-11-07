@@ -2671,7 +2671,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;
   const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
   // W's releases at the agreed block, read beside the rest of the quote and awaited before it is made
-  const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2), block, v.maxLag, sent);
+  const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2), block, v.maxLag, sent, { token: t, block: boughtBlock });
   releasesP.catch(() => {});
   // a route through a pool this device banned is neither simmed, picked nor a reference: routeSet leaves every banned
   // pool out before it picks X's market or the token's pool with X (review of 919742f5, F1); this holds it once more
@@ -2763,7 +2763,8 @@ export const EVM_SELL_TAIL_MAX = 100_000n;
 const hx = (n: bigint) => "0x" + n.toString(16);
 
 /** One getLogs answer's log, checked: the pool's, a Withdrawn or Bought to W, in a block of the read, not removed. */
-function releaseLogOf(l: unknown, who: string, pool: string, wTopic: string): EvmReleaseLog & { key: string } {
+type ReleaseLog = EvmReleaseLog & { key: string; hash: string };
+function releaseLogOf(l: unknown, who: string, pool: string, wTopic: string): ReleaseLog {
   const o = (typeof l === "object" && l !== null ? l : {}) as Record<string, unknown>;
   const { address, topics, data, blockNumber, blockHash, logIndex, removed } = o;
   const q = (x: unknown) => typeof x === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(x);
@@ -2778,16 +2779,75 @@ function releaseLogOf(l: unknown, who: string, pool: string, wTopic: string): Ev
     return refuse("rpc_error", `${who} answered a malformed release log`);
   }
   const block = BigInt(blockNumber as string);
-  return { kind, block, nullifier: BigInt("0x" + data.slice(2 + 64 * 3, 2 + 64 * 4)), key: `${block}:${lower(blockHash)}:${BigInt(logIndex as string)}:${t0}:${lower(data)}` };
+  // a Bought's _token: its sixth data word, an address
+  const token = kind === "buy" ? "0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6) : null;
+  return { kind, block, nullifier: BigInt("0x" + data.slice(2 + 64 * 3, 2 + 64 * 4)), token, hash: lower(blockHash), key: `${block}:${lower(blockHash)}:${BigInt(logIndex as string)}:${t0}:${lower(data)}` };
+}
+
+/** How long a log above the quote's block one provider gave waits for a second provider's head to move toward its
+ *  block, and how often it asks. The wait runs as long as a head keeps moving (a credible log is at most maxLag blocks
+ *  past a head: Base 50, about 10 s at 200 ms; Robinhood 100, about 10.5 s at 105 ms; base-sepolia 100, about 20 s at
+ *  200 ms; read 2026-11-07 20:10Z), so an honest chain always reaches the block; it ends when no head moved for this. */
+export const EVM_SELL_CONFIRM_WAIT_MS = 12_000;
+const EVM_SELL_CONFIRM_EVERY_MS = 500;
+
+/** Whether `e`, a log of W's above the quote's block that only the provider `claimant` of `list` gave, is confirmed: a
+ *  second provider holds its block by number with its hash and gives the log in it (eth_getLogs by blockHash). One that
+ *  holds the block with another hash or without the log, or whose head is more than `maxLag` below the block (no honest
+ *  provider's head is that far ahead of another's), denies it: the claimant is held and the log dropped. Where none
+ *  holds the block yet, they are asked again every EVM_SELL_CONFIRM_EVERY_MS while a head below the block moves; when
+ *  none moved for EVM_SELL_CONFIRM_WAIT_MS the quote is refused (rpc_error, a retry), never built over it (review of
+ *  181fd050, R2-1 and R2-2). A head at or past the block that does not hold it is no move, so the wait is bounded. */
+async function releaseConfirmed(e: ReleaseLog, list: readonly EvmRpc[], claimant: number, pool: string, wTopic: string, maxLag: bigint): Promise<boolean> {
+  const others = list.map((_, k) => k).filter((k) => k !== claimant);
+  // waited for as long as another provider's head moves toward the block: a log is credible only within maxLag of a
+  // head, so an honest chain reaches it, and a provider that then holds the block without it denies it
+  let [best, until] = [-1n, monotonic() + EVM_SELL_CONFIRM_WAIT_MS];
+  for (;;) {
+    let denied = false;
+    for (const k of others) {
+      const who = `provider ${k + 1}`;
+      let got: readonly unknown[];
+      try {
+        got = await ask(list[k]!, [
+          { method: "eth_getBlockByNumber", params: [hx(e.block), false] },
+          { method: "eth_getLogs", params: [{ address: pool, blockHash: e.hash, topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], wTopic] }] },
+          { method: "eth_getBlockByNumber", params: ["latest", false] },
+        ]);
+      } catch {
+        continue;
+      }
+      try {
+        if ((got[0] as { result?: unknown } | null)?.result == null) {
+          const head = header(got[2], who).number;
+          if (e.block > head + maxLag) denied = true;
+          else if (head > best && head < e.block) [best, until] = [head, monotonic() + EVM_SELL_CONFIRM_WAIT_MS];
+          continue;
+        }
+        const h = header(got[0], who);
+        if (h.number !== e.block) continue;
+        const r = (got[1] as { result?: unknown } | null)?.result;
+        if (h.hash === e.hash && Array.isArray(r) && r.some((l) => releaseLogOf(l, who, pool, wTopic).key === e.key)) return true;
+        denied = true;
+      } catch {
+        continue;
+      }
+    }
+    if (denied) {
+      HOLD.get(list[claimant]!)?.();
+      return false;
+    }
+    if (monotonic() >= until) return refuse("rpc_error", `W's release in block ${e.block} is not yet held by a second provider, and no other provider's head moved for ${EVM_SELL_CONFIRM_WAIT_MS / 1000} s`);
+    await new Promise((r) => setTimeout(r, EVM_SELL_CONFIRM_EVERY_MS));
+  }
 }
 
 /** The quote's verdict on W's releases at its agreed block `block` (trade/evm/sell-releases.ts): the finalized block, the
  *  lower of two providers' (its number and its time each the lower), then W's Withdrawn and Bought from the block after
  *  it, on two providers that hold the agreed block by its hash: those up to the agreed block must be the same on both,
- *  and any above it on either counts (a pair's heads are at most `maxLag` apart, so a log further above is no honest
- *  provider's and refuses the answer). Above the agreed block no vote can tell a provider's lie from a head the other
- *  has not reached, so a lie there only holds the sale, never clears one. */
-async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, maxLag: bigint, sent: readonly EvmSellSent[]): Promise<EvmSellReleases> {
+ *  and one above it counts where both gave it or a second provider confirms it (releaseConfirmed). `funding`: the buy
+ *  that paid W the token this sale sells (the quote's token and boughtBlock). */
+async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, maxLag: bigint, sent: readonly EvmSellSent[], funding: { token: string; block: bigint }): Promise<EvmSellReleases> {
   const fins = await agreeing(
     rpcs,
     async (rpc, k) => header((await ask(rpc, [{ method: "eth_getBlockByNumber", params: ["finalized", false] }]))[0], `provider ${k + 1}`),
@@ -2811,7 +2871,7 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
   const wTopic = "0x" + word(BigInt(w));
   const logsOf = async (rpc: EvmRpc, k: number) => {
     const who = `provider ${k + 1}`;
-    const out: (EvmReleaseLog & { key: string })[] = [];
+    const out: ReleaseLog[] = [];
     // two pages a batch, each with the agreed block's header, which must be the quote's (CALLS_PER_BATCH)
     for (let i = 0; i < pages.length; i += CALLS_PER_BATCH - 1) {
       const part = pages.slice(i, i + CALLS_PER_BATCH - 1);
@@ -2827,21 +2887,28 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
         for (const l of r) out.push(releaseLogOf(l, who, pool, wTopic));
       }
     }
-    if (out.some((e) => e.block > n + maxLag)) return refuse("rpc_error", `${who} answered a release of W more than ${maxLag} blocks above the quote's block ${n}`);
     const keys = new Set(out.map((e) => e.key));
     if (keys.size !== out.length) return refuse("rpc_error", `${who} answered a release log twice`);
     return out.filter((e) => e.block > fin.number).sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
   };
   const upTo = (x: readonly { block: bigint; key: string }[]) => x.filter((e) => e.block <= n).map((e) => e.key).join(";");
-  const { a, b } = await agreeing(
+  // the order agreeing indexes, taken as it starts
+  const list = [...rpcs];
+  const { a, b, i, j } = await agreeing(
     rpcs,
     logsOf,
     (x, y) => upTo(x) === upTo(y),
     () => refuse("rpc_disagree", `the providers give W's releases up to block ${n} differently`),
   );
-  const above = new Map([...a, ...b].filter((e) => e.block > n).map((e) => [e.key, e]));
-  const strip = ({ kind, block: at, nullifier }: EvmReleaseLog) => ({ kind, block: at, nullifier });
-  return evmSellReleasesAt({ chain, w, block: n, fin, agreed: a.filter((e) => e.block <= n).map(strip), above: [...above.values()].map(strip), sent });
+  // above the agreed block: a log both gave counts; one only one gave counts once a second provider confirms it
+  const aboveOf = (x: readonly ReleaseLog[]) => new Map(x.filter((e) => e.block > n).map((e) => [e.key, e]));
+  const [inA, inB] = [aboveOf(a), aboveOf(b)];
+  const above: ReleaseLog[] = [];
+  for (const [key, e] of new Map([...inA, ...inB])) {
+    if ((inA.has(key) && inB.has(key)) || (await releaseConfirmed(e, list, inA.has(key) ? i : j, pool, wTopic, maxLag))) above.push(e);
+  }
+  const strip = ({ kind, block: at, nullifier, token }: ReleaseLog): EvmReleaseLog => ({ kind, block: at, nullifier, token });
+  return evmSellReleasesAt({ chain, w, block: n, fin, agreed: a.filter((e) => e.block <= n).map(strip), above: above.map(strip), sent, funding });
 }
 
 // Every quote evmPoolSellQuote returned: the sell builder (trade/evm/sell.ts) builds only from one of these

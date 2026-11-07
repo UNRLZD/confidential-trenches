@@ -722,17 +722,21 @@ export const MUTANTS = [
   [SR, "if (v.block !== quote.block.number) throw", "if (false) throw", S, NR],
   [SR, "if (v.block !== quote.block.number) throw", "if (v.block < quote.block.number) throw", S, NR],
   [SR, "if (v.pending.length > 0) {", "if (false) {", S, NR],
-  // only a Withdrawn is pending, a Bought never (review of 982a19bd, F2), in the agreed tail and above the quote's block
-  // (F3)
-  [SR, 'for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw")', "for (const e of [...r.agreed, ...r.above]) if (true)", S, NR],
-  [SR, 'for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw")', 'for (const e of [...r.agreed]) if (e.kind === "withdraw")', S, NR],
-  [SR, 'for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw")', 'for (const e of [...r.above]) if (e.kind === "withdraw")', S, NR],
+  // every release in the tail is pending, in the agreed range and above the quote's block (F3), but one buy that funded
+  // the sale: its token and its block (review of 982a19bd, F2; of 181fd050, R2-3)
+  [SR, "  for (const e of [...r.agreed, ...r.above]) {\n    if (!funded", "  for (const e of [...r.agreed]) {\n    if (!funded", S, NR],
+  [SR, "  for (const e of [...r.agreed, ...r.above]) {\n    if (!funded", "  for (const e of [...r.above]) {\n    if (!funded", S, NR],
+  [SR, "if (!funded && e.kind === \"buy\"", "if (e.kind === \"buy\"", S, NR],
+  [SR, " && e.token === r.funding.token.toLowerCase() && e.block", " && e.block", S, NR],
+  [SR, " && e.block === r.funding.block) funded = true;", ") funded = true;", S, NR],
+  [SR, "if (!funded && e.kind === \"buy\" && e.token === r.funding.token.toLowerCase() && e.block === r.funding.block) funded = true;", "if (false) funded = true;", S, NR],
   [SR, "noteOf.get(e.nullifier) ?? null", "null", S, NR],
   [SR, "    landed.add(e.nullifier);\n", "", S, NR],
   [SR, "if (landed.has(e.nullifier)) throw", "if (false) throw", S, NR],
-  [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (finalMs <= s.deadlineMs)", S, NR],
-  [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (!landed.has(s.nullifier) && finalMs < s.deadlineMs)", S, NR],
-  [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (!landed.has(s.nullifier))", S, NR],
+  [SR, "if (!landed.has(s.nullifier) && (s.deadlineMs", "if ((s.deadlineMs", S, NR],
+  [SR, "|| finalMs <= s.deadlineMs))", "|| finalMs < s.deadlineMs))", S, NR],
+  [SR, "(s.deadlineMs === undefined || finalMs <= s.deadlineMs)", "true", S, NR],
+  [SR, "(s.deadlineMs === undefined || finalMs", "(finalMs", S, NR],
   [SR, "const finalMs = fin.timestamp * 1000n;", "const finalMs = fin.timestamp;", S, NR],
   // the quote's own read (review of 982a19bd, F1): the device's list, the finalized block, the pages, the agreed block,
   // the agreement up to it, the logs' checks
@@ -744,13 +748,23 @@ export const MUTANTS = [
   [QUOTE, 'toBlock: b === null ? "latest" : hx(b)', "toBlock: b === null ? hx(n) : hx(b)", S, NR],
   [QUOTE, "if (header(got[part.length], who).hash !== block.hash) return refuse(", "if (false) return refuse(", S, NR],
   [QUOTE, "(x, y) => upTo(x) === upTo(y),", "() => true,", S, NR],
-  [QUOTE, "const above = new Map([...a, ...b]", "const above = new Map([...a]", S, NR],
   [QUOTE, 't0 === TOPIC_BOUGHT ? "buy" : null', 't0 === TOPIC_BOUGHT ? "withdraw" : null', S, NR],
   [QUOTE, 'nullifier: BigInt("0x" + data.slice(2 + 64 * 3, 2 + 64 * 4))', 'nullifier: BigInt("0x" + data.slice(2 + 64 * 2, 2 + 64 * 3))', S, NR],
   [QUOTE, "|| removed === true) {", ") {", S, NR],
   [QUOTE, "if (kind === null || lower(topics[1]) !== wTopic) return refuse(", "if (kind === null) return refuse(", S, NR],
   [QUOTE, "if (keys.size !== out.length) return refuse(", "if (false) return refuse(", S, NR],
-  [QUOTE, "if (out.some((e) => e.block > n + maxLag)) return refuse(", "if (false) return refuse(", S, NR],
+  // a log above the quote's block one provider alone gave counts only once a second confirms it (review of 181fd050,
+  // R2-1, R2-2); the funding buy is the quote's token at its boughtBlock (R2-3)
+  [QUOTE, "if ((inA.has(key) && inB.has(key)) || (await releaseConfirmed(", "if (true || (await releaseConfirmed(", S, NR],
+  [QUOTE, "if ((inA.has(key) && inB.has(key)) || (await releaseConfirmed(", "if ((await releaseConfirmed(", S, NR],
+  [QUOTE, "if (e.block > head + maxLag) denied = true;", "if (false) denied = true;", S, NR],
+  [QUOTE, "r.some((l) => releaseLogOf(l, who, pool, wTopic).key === e.key)) return true;", "r.some((l) => releaseLogOf(l, who, pool, wTopic).key === e.key)) return false;", S, NR],
+  [QUOTE, "    if (denied) {\n      HOLD.get(list[claimant]!)?.();\n      return false;", "    if (false) {\n      HOLD.get(list[claimant]!)?.();\n      return false;", S, NR],
+  [QUOTE, "if (monotonic() >= until) return refuse(", "if (false) return refuse(", S, NR],
+  // the wait runs as long as another provider's head moves toward the block (base-sepolia's maxLag is about 20 s)
+  [QUOTE, "else if (head > best && head < e.block) [best, until]", "else if (false) [best, until]", S, NR],
+  [QUOTE, "{ token: t, block: boughtBlock }", "{ token: t, block: 0n }", S, NR],
+  [QUOTE, "data.slice(2 + 64 * 5 + 24, 2 + 64 * 6)", "data.slice(2 + 64 * 4 + 24, 2 + 64 * 5)", S, NR],
   [QUOTE, "poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2)", "rpcs", S, NR],
 ];
 

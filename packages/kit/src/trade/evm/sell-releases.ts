@@ -16,17 +16,23 @@
 // - a Withdrawn to W (a withdraw, or a buy's fallback) in a block above the finalized one (the tail) is pending: a reorg
 //   can put it back in the mempool, where a route can still land it mid-sell. At or below the finalized block it can
 //   never move again;
-// - a Bought to W pays W the bought token and no ETH (PrivacyPoolSimple.sol buy), so it is never pending (review of
-//   982a19bd, F2: W's own buy held its sale until its block was final, ~15 min). Replayed mid-sell, a buy of the token W
-//   sells reverts the sale at the exact-debit check (SellDelegate.sol DebitNotExact, test/Sell.t.sol
-//   test_aBoughtReplayedMidSellRevertsAtTheExactDebit), and a buy of another token meets no minOut. It still counts as
-//   landed, so a release the device sent that landed as a Bought clears;
+// - a Bought to W in the tail is pending too, but for the buy that funded this sale (the quote's token, landed in the
+//   quote's boughtBlock: review of 982a19bd, F2, which held W's own buy until its block was final, ~15 min). A replayed
+//   buy is the same proof and signature, and whether it lands as Bought or as Withdrawn is decided as it runs
+//   (PrivacyPoolSimple.sol buy): a route that moves the buy's pool first fails its swap, and the pool's fallback pays the
+//   chunk to W in ETH mid-sell, E-01 again (review of 181fd050, R2-3; test/Sell.t.sol
+//   test_aBoughtReplayedIntoItsFallbackMidSellMeetsMinOut). The funding buy is the exception because, reorged out, it
+//   leaves W without the token the sale sells, so the sale cannot land at all; replayed whole, it reverts the sale at
+//   the exact-debit check (test_aBoughtReplayedMidSellRevertsAtTheExactDebit). Either kind counts as landed, so a
+//   release the device sent that landed clears its own wait;
 // - a release the device sent that has not landed lands only while the chain's time is at most its deadline
 //   (PrivacyPool.sol _spendChecked: `block.timestamp * 1000 > _deadlineMs` reverts), so it is pending until it lands or
 //   the finalized block's time is past its deadline. The device names these (its store's RESERVED notes that pay W: the
-//   wallet's pool/evm-releases.ts); that list can only add waits, never clear one the read found;
-// - a Withdrawn to W above the quote's agreed block that either provider already holds is pending too (review of
-//   982a19bd, F3: a release outside the read's range passed).
+//   wallet's pool/evm-releases.ts), and the releases its store saw land in a block not yet final, with no deadline
+//   (review of 181fd050, info: one above every provider's "latest" dropped out of both): such a one is pending until
+//   the read finds it. That list can only add waits, never clear one the read found;
+// - a release to W above the quote's agreed block is pending too (review of 982a19bd, F3), once a second provider holds
+//   its block with it (checks/evm/quote.ts: one provider's word alone held every sale, review of 181fd050, R2-1).
 import type { EvmPoolChain } from "./buy-unpinned.ts";
 import { EvmPoolSellError } from "./sell-unpinned.ts";
 
@@ -36,11 +42,11 @@ import { EvmPoolSellError } from "./sell-unpinned.ts";
  *  name). */
 export type EvmReleasePending =
   | { readonly note: string | null; readonly landed: bigint }
-  | { readonly note: string; readonly deadlineMs: bigint };
+  | { readonly note: string; readonly deadlineMs: bigint | null };
 
-/** A release the device sent to W that its store has not seen settled: its note, the note's nullifier hash and the
- *  attempt's deadline (block time, ms). */
-export type EvmSellSent = { readonly note: string; readonly nullifier: bigint; readonly deadlineMs: bigint };
+/** A release the device sent to W that has not landed final as far as its store knows: its note, the note's nullifier
+ *  hash and the attempt's deadline (block time, ms), or no deadline for one the store saw land in a block not yet final. */
+export type EvmSellSent = { readonly note: string; readonly nullifier: bigint; readonly deadlineMs?: bigint };
 
 /** The kit's verdict on W's releases, read by the sell quote at its agreed block `block` with the finalized block
  *  `finalBlock` (the lower of two providers'). The sell builder takes only one the quote read, and only with `pending`
@@ -53,8 +59,9 @@ export type EvmSellReleases = {
   readonly pending: readonly EvmReleasePending[];
 };
 
-/** A pool release event to W: Withdrawn (`withdraw`) or Bought (`buy`), its block and its _spentNullifier. */
-export type EvmReleaseLog = { readonly kind: "withdraw" | "buy"; readonly block: bigint; readonly nullifier: bigint };
+/** A pool release event to W: Withdrawn (`withdraw`) or Bought (`buy`, with its _token), its block and its
+ *  _spentNullifier. */
+export type EvmReleaseLog = { readonly kind: "withdraw" | "buy"; readonly block: bigint; readonly nullifier: bigint; readonly token: string | null };
 
 /** The most releases a device names for one W: a W is one note's (l, j), so a handful at most. */
 export const EVM_SELL_SENT_MAX = 64;
@@ -68,8 +75,8 @@ export function evmSellSentOf(sent: unknown): readonly EvmSellSent[] | null {
   const out: EvmSellSent[] = [];
   for (const s of [...sent] as unknown[]) {
     const { note, nullifier, deadlineMs } = (typeof s === "object" && s !== null ? s : {}) as Record<string, unknown>;
-    if (typeof note !== "string" || note.length === 0 || !isNat(nullifier) || !isNat(deadlineMs)) return null;
-    out.push(Object.freeze({ note, nullifier, deadlineMs }));
+    if (typeof note !== "string" || note.length === 0 || !isNat(nullifier) || (deadlineMs !== undefined && !isNat(deadlineMs))) return null;
+    out.push(Object.freeze(deadlineMs === undefined ? { note, nullifier } : { note, nullifier, deadlineMs }));
   }
   return Object.freeze(out);
 }
@@ -80,20 +87,27 @@ const MADE = new WeakSet<EvmSellReleases>();
 /** The verdict at the quote's read (checks/evm/quote.ts): `agreed`, W's releases in the blocks above `fin` up to `block`
  *  that both providers gave the same; `above`, those above `block` either provider gave; `sent`, the device's. Not in
  *  the index: only the quote makes one. */
-export function evmSellReleasesAt(r: { chain: EvmPoolChain; w: string; block: bigint; fin: { number: bigint; timestamp: bigint }; agreed: readonly EvmReleaseLog[]; above: readonly EvmReleaseLog[]; sent: readonly EvmSellSent[] }): EvmSellReleases {
+export function evmSellReleasesAt(r: { chain: EvmPoolChain; w: string; block: bigint; fin: { number: bigint; timestamp: bigint }; agreed: readonly EvmReleaseLog[]; above: readonly EvmReleaseLog[]; sent: readonly EvmSellSent[]; funding: { token: string; block: bigint } }): EvmSellReleases {
   const { chain, block, fin } = r;
   const finalMs = fin.timestamp * 1000n;
   const noteOf = new Map(r.sent.map((s) => [s.nullifier, s.note]));
   const landed = new Set<bigint>();
   const pending: EvmReleasePending[] = [];
-  for (const e of r.agreed) {
+  for (const e of [...r.agreed, ...r.above]) {
     if (landed.has(e.nullifier)) throw new EvmPoolSellError("release_in_flight", "W's releases cannot be read: a nullifier released twice");
     landed.add(e.nullifier);
   }
-  // a Withdrawn to W in the tail, agreed or above the quote's block: its ETH can still land mid-sell
-  for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw") pending.push(Object.freeze({ note: noteOf.get(e.nullifier) ?? null, landed: e.block }));
-  // sent, not landed in the tail, and the finalized block's time not past its deadline: it can still land
-  for (const s of r.sent) if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs) pending.push(Object.freeze({ note: s.note, deadlineMs: s.deadlineMs }));
+  // a release to W in the tail, agreed or above the quote's block, but for the buy that funded this sale: its ETH can
+  // still land mid-sell
+  // (one buy funds a sale: a second of its shape is held as any other)
+  let funded = false;
+  for (const e of [...r.agreed, ...r.above]) {
+    if (!funded && e.kind === "buy" && e.token === r.funding.token.toLowerCase() && e.block === r.funding.block) funded = true;
+    else pending.push(Object.freeze({ note: noteOf.get(e.nullifier) ?? null, landed: e.block }));
+  }
+  // sent and not landed in the tail: with a deadline, until the finalized block's time passes it; with none (seen landed
+  // in a block not yet final), until the read finds it
+  for (const s of r.sent) if (!landed.has(s.nullifier) && (s.deadlineMs === undefined || finalMs <= s.deadlineMs)) pending.push(Object.freeze({ note: s.note, deadlineMs: s.deadlineMs ?? null }));
   const v: EvmSellReleases = Object.freeze({ chain, w: r.w.toLowerCase(), block, finalBlock: fin.number, pending: Object.freeze(pending) });
   MADE.add(v);
   return v;
@@ -102,7 +116,9 @@ export function evmSellReleasesAt(r: { chain: EvmPoolChain; w: string; block: bi
 const waitOf = (p: EvmReleasePending): string =>
   "landed" in p
     ? `${p.note ?? "a release"} landed in block ${p.landed}, above the finalized block: the sell waits until block ${p.landed} is final on both RPCs`
-    : `${p.note} was sent and has not landed: the sell waits until it lands in a final block or a final block's time passes its deadline ${p.deadlineMs} ms`;
+    : p.deadlineMs === null
+      ? `${p.note} landed in a block the providers do not show yet: the sell waits until its block is final on both RPCs`
+      : `${p.note} was sent and has not landed: the sell waits until it lands in a final block or a final block's time passes its deadline ${p.deadlineMs} ms`;
 
 /** Refuses a sell from `quote` unless its `releases` is a verdict the sell quote read for the quote's chain, W and block,
  *  with nothing pending (release_in_flight, naming the wait). */

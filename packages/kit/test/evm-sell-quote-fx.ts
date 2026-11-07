@@ -80,17 +80,26 @@ export type Model = {
   fin?: bigint;
   /** the pool's Withdrawn and Bought logs (to WALLET unless `to`), answered to an eth_getLogs of its range and topic */
   releases?: Release[];
+  /** the newest block a getLogs range to "latest" reaches (every release by default) */
+  seesTo?: bigint;
+  /** the newest block the provider holds by number (asked each time; the head 0x100 by default): a block above the head
+   *  has the hash releaseLog gives it */
+  holds?: () => bigint;
+  /** the head a "latest" read answers (asked each time; 0x100 by default) */
+  latest?: () => bigint;
 };
-export type Release = { kind: "withdraw" | "buy"; block: bigint; nullifier: bigint; to?: string };
+export type Release = { kind: "withdraw" | "buy"; block: bigint; nullifier: bigint; to?: string; token?: string };
+/** A block's hash in the model: the head's is HASH, any other's its number padded with c */
+export const hashOf = (b: bigint) => (b === 0x100n ? HASH : "0x" + b.toString(16).padStart(64, "c"));
 export const TOPIC_WITHDRAWN = "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a";
 export const TOPIC_BOUGHT = "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d";
 /** A release log as an RPC answers it, from `pool`. */
 export const releaseLog = (pool: string, r: Release, i = 0) => ({
   address: pool,
   topics: [r.kind === "withdraw" ? TOPIC_WITHDRAWN : TOPIC_BOUGHT, "0x" + W(BigInt(r.to ?? WALLET))],
-  data: "0x" + W(0xfeen) + W(10n ** 15n) + W(0n) + W(r.nullifier) + W(7n) + (r.kind === "buy" ? W(BigInt(TOKEN)) + W(5n) : ""),
+  data: "0x" + W(0xfeen) + W(10n ** 15n) + W(0n) + W(r.nullifier) + W(7n) + (r.kind === "buy" ? W(BigInt(r.token ?? TOKEN)) + W(5n) : ""),
   blockNumber: "0x" + r.block.toString(16),
-  blockHash: "0x" + r.block.toString(16).padStart(64, "c"),
+  blockHash: hashOf(r.block),
   logIndex: "0x" + i.toString(16),
   transactionHash: "0x" + "dd".repeat(32),
   removed: false,
@@ -116,14 +125,22 @@ export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmR
         const f = m.fin ?? 0x100n - 0x20n;
         return { jsonrpc: "2.0", id, result: { ...head, number: "0x" + f.toString(16), hash: "0x" + f.toString(16).padStart(64, "f"), timestamp: "0x" + (BigInt(head.timestamp) - 900n).toString(16) } };
       }
-      if (c.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id, result: { ...head } };
+      if (c.method === "eth_getBlockByNumber" && c.params[0] !== "latest" && BigInt(c.params[0] as string) !== 0x100n) {
+        const k = BigInt(c.params[0] as string);
+        return { jsonrpc: "2.0", id, result: k <= (m.holds?.() ?? 0x100n) ? { ...head, number: "0x" + k.toString(16), hash: hashOf(k) } : null };
+      }
+      if (c.method === "eth_getBlockByNumber") {
+        const n = m.latest?.() ?? 0x100n;
+        return { jsonrpc: "2.0", id, result: n === 0x100n ? { ...head } : { ...head, number: "0x" + n.toString(16), hash: hashOf(n) } };
+      }
       if (c.method === "eth_getLogs") {
-        const f = c.params[0] as { address: string; fromBlock: string; toBlock: string; topics: [string[], string] };
-        const lo = BigInt(f.fromBlock);
-        const hi = f.toBlock === "latest" ? 1n << 64n : BigInt(f.toBlock);
+        const f = c.params[0] as { address: string; fromBlock?: string; toBlock?: string; blockHash?: string; topics: [string[], string] };
         assert.deepEqual(f.topics[0], [TOPIC_WITHDRAWN, TOPIC_BOUGHT]);
-        const logs = (m.releases ?? []).map((r, i) => releaseLog(f.address, r, i)).filter((l) => BigInt(l.blockNumber) >= lo && BigInt(l.blockNumber) <= hi && l.topics[1] === f.topics[1].toLowerCase());
-        return { jsonrpc: "2.0", id, result: logs };
+        const all = (m.releases ?? []).map((r, i) => releaseLog(f.address, r, i)).filter((l) => l.topics[1] === f.topics[1].toLowerCase());
+        if (f.blockHash !== undefined) return { jsonrpc: "2.0", id, result: all.filter((l) => l.blockHash === f.blockHash && BigInt(l.blockNumber) <= (m.holds?.() ?? 0x100n)) };
+        const lo = BigInt(f.fromBlock!);
+        const hi = f.toBlock === "latest" ? (m.seesTo ?? 1n << 64n) : BigInt(f.toBlock!);
+        return { jsonrpc: "2.0", id, result: all.filter((l) => BigInt(l.blockNumber) >= lo && BigInt(l.blockNumber) <= hi) };
       }
       assert.equal(c.method, "eth_call");
       const { to, data } = c.params[0] as { to: string; data: string };
