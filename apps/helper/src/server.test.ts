@@ -57,7 +57,7 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
   // solana: this environment sets no SOLANA_RPC_URL, so the RPC slot is the public endpoint (card helper-solana-failover)
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" } });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" }, bind: {} });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -80,12 +80,27 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
     assert.equal(r.status, 200);
     const b = JSON.parse(r.body);
     assert.equal(b.release, 12);
-    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana"]);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana", "bind"]);
     assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }
+});
+
+// card helper-bind-relayer-mainnet: each network POST /v1/bind carries, its gas account and vault (public), so the live
+// check reads the account to fund after deploy/bind-relayer-key.sh; a sender that names none answers {}
+test("GET /v1/health lists each network the bind sender carries with its gas account and vault, within 1 KB", async (t) => {
+  const account = "ab".repeat(32);
+  const carried = { mainnet: { account, vault: "vault.confidential.unrlzd.near" }, testnet: { account: "c".repeat(64), vault: "vault.bf-vt-20261102t071444.testnet" } };
+  const bind: BindSender = { carry: async () => ({ status: 400, body: { error: { code: "bad_shape" as const } } }), warm: () => undefined, stop: () => undefined, carried: () => carried };
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind, 12));
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.body).bind, carried);
+  assert.ok(Buffer.byteLength(r.body) <= 1024, `1 KB limit (H7): ${Buffer.byteLength(r.body)}`);
 });
 
 test("each of the two origins is echoed byte for byte, with Vary: Origin and no credentials; Retry-After is exposed", async () => {

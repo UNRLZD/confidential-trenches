@@ -40,7 +40,14 @@ export type BindSender = {
    * answer, and a failure is logged only.
    */
   delivered?(body: string): void;
+  /**
+   * Each carried network's gas account and vault, public both, for /v1/health (card helper-bind-relayer-mainnet): set
+   * at start from the host's lines, whether or not the account exists or is funded yet.
+   */
+  carried?(): Partial<Record<TokenNetwork, BindCarry>>;
 };
+/** A carried network as /v1/health lists it. */
+export type BindCarry = { account: string; vault: string };
 
 const STATUS: Record<string, number> = HELPER_CODE_STATUS;
 /** A device polls its status: the answers that change nothing are not logged. */
@@ -195,6 +202,7 @@ export function bindSenderFromEnv(
       return carryDeposit(body, deps);
     },
     warm: () => carried.forEach((net) => void warmNet(net)),
+    carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, { account: net.account, vault: net.vault }])),
     delivered(body) {
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
       void onStatusAnswer(body, nets).then(
