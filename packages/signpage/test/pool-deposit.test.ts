@@ -64,6 +64,7 @@ const ENTRY = 72 * PER_BYTE;
 const EMPTY_RENT = 128 * PER_BYTE;
 /** What one rung costs U on the recorded pool (both pages grow by one entry). */
 const COST = MARK_RENT + 2 * ENTRY + FEE;
+const SYSTEM = "11111111111111111111111111111111";
 
 test("the fixture is the devnet pool both RPCs gave, and the testnet pin is its program", () => {
   assert.equal(SOL_POOLS.devnet, undefined, "the test build carries no pin; the testnet build's is checked in pool-testnet.test.ts");
@@ -81,11 +82,17 @@ function chain() {
   let slot = FIX.answers[0]!.slot;
   const sent: string[] = [];
   const statuses = new Map<string, Status>();
+  /** every RPC call, in order, with the RPC it went to (c.rpc()'s count) */
+  const calls: { rpc: number; method: string; params: readonly unknown[] }[] = [];
   const c = {
     accounts,
     sent,
     statuses,
+    calls,
+    rpcs: 0,
     height: 1_000,
+    /** sends that land as a failed tx, their fee paid (an insert overtook the deposit at a page's last slot) */
+    failNext: 0,
     /** whether a sent deposit lands now (false: dropped, unseen) */
     lands: true,
     /** a lying pair: the state leaf written is not the deposit's */
@@ -120,14 +127,26 @@ function chain() {
         }
         throw new Error(why);
       };
-      if (accounts.has(mark)) fail("PrecommitmentAlreadyUsed");
+      // a mark the program made: used; a system account with no data (a stranger's lamports) is taken over (src/state.rs
+      // create_pda: the shortfall to its rent, then allocate and assign); any other account cannot be assigned
+      const held = accounts.get(mark);
+      if (held?.owner === FIX.program) fail("PrecommitmentAlreadyUsed");
+      if (held && (held.owner !== SYSTEM || held.data.length > 0)) fail("AccountAlreadyInUse");
       const u = accounts.get(signer);
       const pool = accounts.get(FIX.pool)!.data;
       const dv = new DataView(pool.buffer, pool.byteOffset);
       const stateSize = Number(dv.getBigUint64(49, true));
       const labelSize = Number(dv.getBigUint64(49 + 1065, true));
-      const left = (u?.lamports ?? 0) - Number(value) - COST;
+      // as the program charges (src/state.rs create_pda, push_entry): the mark's rent and each page's rent at its new
+      // length, less what each already holds, never below 0; and the fee
+      const pageCost = (at: string, size: number) => Math.max(0, (128 + 16 + 72 * ((size % 1024) + 1)) * PER_BYTE - (accounts.get(at)?.lamports ?? 0));
+      const cost = FEE + Math.max(0, MARK_RENT - (held?.lamports ?? 0)) + pageCost(keys[2]!, stateSize) + pageCost(keys[3]!, labelSize);
+      const left = (u?.lamports ?? 0) - Number(value) - cost;
       if (left < 0 || (left > 0 && left < EMPTY_RENT)) fail("InsufficientFundsForRent");
+      if (!dry && c.failNext > 0) {
+        c.failNext--;
+        fail("PageOvertaken");
+      }
       if (dry || !c.lands) return;
       const nonce = dv.getBigUint64(9, true) + 1n;
       if (keys[2] !== page(0, Math.floor(stateSize / 1024)) || keys[3] !== page(1, Math.floor(labelSize / 1024))) throw new Error("page");
@@ -144,7 +163,7 @@ function chain() {
         const data = new Uint8Array(pg.data.length + 72);
         data.set(pg.data);
         data.set(entry, pg.data.length);
-        accounts.set(at, { ...pg, data, lamports: pg.lamports + ENTRY });
+        accounts.set(at, { ...pg, data, lamports: pg.lamports + pageCost(at, tree === 0 ? stateSize : labelSize) });
       }
       dv.setBigUint64(9, nonce, true);
       dv.setBigUint64(49, BigInt(stateSize + 1), true);
@@ -153,7 +172,7 @@ function chain() {
       new DataView(md.buffer).setBigUint64(0, said, true);
       new DataView(md.buffer).setBigUint64(8, nonce, true);
       md[16] = 1;
-      accounts.set(mark, { owner: FIX.program, lamports: MARK_RENT, data: md });
+      accounts.set(mark, { owner: FIX.program, lamports: Math.max(MARK_RENT, held?.lamports ?? 0), data: md });
       u!.lamports = left;
       statuses.set(sig, { err: null, confirmationStatus: "finalized" });
       slot += 40;
@@ -164,7 +183,9 @@ function chain() {
         const a = over.hide?.(address) ? undefined : accounts.get(address);
         return a ? { owner: a.owner, lamports: a.lamports, data: [base64.encode(a.data), "base64"], executable: false, rentEpoch: 0, space: a.data.length } : null;
       };
+      const id = c.rpcs++;
       return async (method: string, params: readonly unknown[]): Promise<unknown> => {
+        calls.push({ rpc: id, method, params });
         const ctx = { context: { slot } };
         switch (method) {
           case "getAccountInfo":
@@ -926,3 +947,125 @@ for (const p of [0, 1] as const) {
     assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
   });
 }
+
+// card pool-deposits, slice 2: the signing page's deposit is the kit's (built, priced and its marks read by
+// packages/kit/src/trade/solana/pool-deposit.ts), read at one commitment, simulated on both RPCs before it is signed,
+// and built again from fresh reads after a send that failed.
+const markOf = (precommitment: bigint) => solanaProgramAddress([enc.encode("pre"), be32(precommitment)], FIX.program);
+const optsOf = (params: readonly unknown[]) => params.find((p): p is Record<string, unknown> => p !== null && typeof p === "object" && !Array.isArray(p));
+/** The deposit's 32 precommitment bytes and the message of a wire tx. */
+const txParts = (wire: Uint8Array) => {
+  const message = wire.subarray(1 + 64 * wire[0]!);
+  const m = solanaDecodeMessage(message);
+  return { signer: m.staticKeys[0]!, precommitment: base58.encode(m.instructions[0]!.data.subarray(9, 41)), message: base64.encode(message) };
+};
+
+test("pool-deposits (a): a stranger's lamports on a page lower the cost as the program charges it: U holding the rung and that lower cost lands at 0", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.accounts.get(page(0, 0))!.lamports += 1_000;
+  c.fund(u.address, Number(RUNG) + COST - 1_000);
+  const got = await runPoolDeposit(host(c, ns), ask(RUNG));
+  assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
+  assert.equal(c.lamports(u.address), 0);
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
+});
+
+test("pool-deposits (b) I-3: a stranger's lamports at an open note's mark address never fail a run: the note goes again once its send expired and lands, the mark's rent lowered by them", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST);
+  c.lands = false; // dropped
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage?: string }).stage, "not_landed");
+  const [open] = await ours(ns);
+  assert.equal(open!.state, "INCOMING");
+  const at = markOf(open!.precommitment);
+  c.fund(at, EMPTY_RENT); // a stranger's system account at the mark's address
+  // its blockhash still valid: read, not failed, left INCOMING
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [] });
+  c.lands = true;
+  c.height += 1_000;
+  // sent again (a settle reads once, never waits), then read landed
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[1] }] });
+  const got = await settlePoolDeposits(host(c, ns));
+  assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
+  assert.equal(c.sent.length, 2);
+  assert.equal(c.accounts.get(at)!.owner, FIX.program, "the deposit took the account over");
+  assert.equal(c.lamports(u.address), EMPTY_RENT, "U paid the mark's rent less the stranger's lamports");
+  // and an ask runs on
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { error?: string }).error, "not_funded");
+});
+
+test("pool-deposits (c): a send that failed on chain is built again at once from fresh reads of the pool, both pages, the mark's address and U on both RPCs: the same note and U, new bytes, never the old tx again", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST + EMPTY_RENT + FEE); // the failed tx's fee too
+  c.failNext = 1;
+  const got = await runPoolDeposit(host(c, ns), ask(RUNG));
+  assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
+  assert.equal(c.lamports(u.address), EMPTY_RENT);
+  const [n, ...rest] = await ours(ns);
+  assert.equal(rest.length, 0, "no deposit at a new index");
+  assert.equal(n!.state, "UNSPENT");
+  assert.deepEqual(n!.sends!.map((s) => [s.signature, s.value]), c.sent.map((s) => [s, RUNG]));
+  assert.equal(c.sent.length, 2);
+  assert.equal(c.statuses.get(c.sent[0]!)!.err !== null, true, "the first send failed on chain");
+  const sends = c.calls.filter((x) => x.method === "sendTransaction").map((x) => base64.decode(x.params[0] as string));
+  const [first, second] = [sends.find((t) => sigOf(t) === c.sent[0])!, sends.find((t) => sigOf(t) === c.sent[1])!];
+  assert.equal(sends.filter((t) => sigOf(t) === c.sent[0]).length, 2, "the failed tx went once, to each RPC, never again");
+  const [p1, p2] = [txParts(first), txParts(second)];
+  assert.deepEqual([p1.signer, p2.signer], [u.address, u.address]);
+  assert.equal(p1.precommitment, p2.precommitment, "the same note");
+  assert.equal(base58.encode(be32(n!.precommitment)), p1.precommitment);
+  assert.notEqual(p1.message, p2.message, "built again, not re-sent");
+  const lastOld = c.calls.findLastIndex((x) => x.method === "sendTransaction" && sigOf(base64.decode(x.params[0] as string)) === c.sent[0]);
+  const firstNew = c.calls.findIndex((x) => x.method === "sendTransaction" && sigOf(base64.decode(x.params[0] as string)) === c.sent[1]);
+  const want = [FIX.pool, page(0, 0), page(1, 0), markOf(n!.precommitment), u.address];
+  const fresh = c.calls.slice(lastOld + 1, firstNew).filter((x) => x.method === "getMultipleAccounts" && want.every((k) => (x.params[0] as string[]).includes(k)));
+  assert.deepEqual([...new Set(fresh.map((x) => x.rpc))].sort(), [0, 1], "read again on both RPCs between the two sends");
+});
+
+test("pool-deposits (d): every send's exact bytes were simulated unsigned on both RPCs at confirmed before they were signed, a send again's too", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  c.lands = false;
+  await runPoolDeposit(host(c, ns), ask(RUNG));
+  c.lands = true;
+  c.height += 1_000;
+  await settlePoolDeposits(host(c, ns)); // sent again
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage?: string }).stage, "filled");
+  assert.equal(c.sent.length, 2);
+  for (const sig of c.sent) {
+    const at = c.calls.findIndex((x) => x.method === "sendTransaction" && sigOf(base64.decode(x.params[0] as string)) === sig);
+    const tx = base64.decode(c.calls[at]!.params[0] as string);
+    const unsigned = tx.slice();
+    unsigned.fill(0, 1, 65);
+    const sims = c.calls.slice(0, at).filter((x) => x.method === "simulateTransaction" && x.params[0] === base64.encode(unsigned));
+    assert.equal(new Set(sims.map((x) => x.rpc)).size, 2, `${sig} simulated on both RPCs`);
+    for (const s of sims) assert.deepEqual([optsOf(s.params)!.sigVerify, optsOf(s.params)!.commitment], [false, "confirmed"]);
+  }
+});
+
+test("pool-deposits (e): one deposit's numbers are of one slot on each RPC: the pool, both pages, the mark's address, U and the Rent sysvar in one read at confirmed, and every read before the send at confirmed", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST);
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage?: string }).stage, "filled");
+  const [n] = await ours(ns);
+  const send = c.calls.findIndex((x) => x.method === "sendTransaction");
+  const before = c.calls.slice(0, send);
+  const want = [FIX.pool, page(0, 0), page(1, 0), markOf(n!.precommitment), u.address, FIX.addresses.rent];
+  const one = before.filter((x) => x.method === "getMultipleAccounts" && want.every((k) => (x.params[0] as string[]).includes(k)));
+  assert.deepEqual([...new Set(one.map((x) => x.rpc))].sort(), [0, 1], "one read per RPC holds them all");
+  assert.equal(before.filter((x) => x.method === "getAccountInfo" && x.params[0] === u.address).length, 0, "U's balance is never read apart from the pages");
+  for (const x of before) {
+    const o = optsOf(x.params);
+    if (o && "commitment" in o) assert.equal(o.commitment, "confirmed", x.method);
+  }
+});
