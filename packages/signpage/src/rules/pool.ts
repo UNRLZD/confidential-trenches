@@ -82,7 +82,9 @@ import {
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
-import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
+import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
+import { EVM_POOL_MIN_DEPOSIT } from "../../../kit/src/trade/evm/pool-fee.ts";
+import { VAULT_FIELD_P } from "../../../kit/src/vault/shapes.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
 export const POOL_KINDS = ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"] as const;
@@ -1026,6 +1028,106 @@ export function signEvmOnwardSend(secretKey: Uint8Array, tx: EvmOnwardSend): Uin
   return cat(Uint8Array.of(2), rlpList([...onwardFields(read), ...sig]));
 }
 const hex = (b: Uint8Array): string => "0x" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+// ---------- EVM: U's same-chain deposit (card pool-deposits, slice 3) ----------
+// The one-time wallet U (derive/keys.ts depositIdEvm) puts one rung into the pinned pool: one EIP-1559 call of
+// deposit(value, precommitment) with msg.value = value, its bytes the wallet's evmSameChainDeposit encoded after its
+// evmNextNote pick (this file holds no encoding of the deposit: the signer guard, test/signer-guard.ts, holds every one
+// to a pick). Each field is held here to that call, to the device's pin and to the device's own two-RPC reads, and the
+// signer signs only the send this check passed, as it read it, with U's key alone.
+
+/** The device's reads for U's deposit, each as its two RPCs answered: U's nonce, base fee, eth_estimateGas of the call
+ *  from U and the L1 fee bound (Base: the kit's evmPoolChainFeeReads; 0 on Robinhood, Nitro's L1 cost is in its gas)
+ *  must agree; U's balance is each RPC's own reading, and the deposit must go on both; the device's priority-fee cap. */
+export type EvmDepositReads = {
+  readonly nonce: readonly [bigint, bigint];
+  readonly balance: readonly [bigint, bigint];
+  readonly estimate: readonly [bigint, bigint];
+  readonly baseFee: readonly [bigint, bigint];
+  readonly l1Fee: readonly [bigint, bigint];
+  readonly priorityCap: bigint;
+};
+/** The device's side of U's deposit: U's address, the note's precommitment, the call the wallet's evmSameChainDeposit
+ *  returned for it (frozen), and the device's pin of the pool (the wallet's EVM_POOLS entry of the page's network). */
+export type EvmDepositContext = { readonly wallet: string; readonly precommitment: bigint; readonly call: { readonly to: string; readonly value: bigint; readonly data: string }; readonly pin: EvmPoolPin };
+/** The most gas U's deposit may take: its two-RPC estimate, never past this. A pool deposit inserts one leaf (Poseidon
+ *  per tree level, the tree at most 32 deep) and the funding tool bounds it at 300,000 (contracts/pool-evm/script/
+ *  testnet-run.mjs GAS.deposit); Nitro adds its L1 cost as gas. The cap keeps two RPCs' estimate from spending U's
+ *  money as gas. */
+export const EVM_DEPOSIT_GAS_MAX = 1_000_000n;
+const DEPOSIT_CHECKED = new WeakMap<object, OnwardRead>();
+const evmWord = (v: bigint): string => v.toString(16).padStart(64, "0");
+const EVM_NETWORK_OF: Readonly<Record<"base" | "robinhood", readonly [string, string]>> = Object.freeze({ base: ["base", "base-sepolia"], robinhood: ["robinhood", "robinhood-testnet"] });
+
+/** U's deposit of one rung into the pinned pool on the ask's chain: each field held to the call, the pin and `reads`. */
+export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDepositContext, reads: EvmDepositReads, testnet = false): PoolDraw {
+  if (ask.kind !== "pool.deposit") return refuse("kind");
+  if (ask.chain === "solana") return refuse("chain");
+  const pin = ctx?.pin;
+  // the pin of the ask's chain on the page's network: no deposit into a pool of another chain or network
+  if (!pin || typeof pin.pool !== "string" || !EVM_ADDRESS.test(pin.pool) || pin.network !== EVM_NETWORK_OF[ask.chain][testnet ? 1 : 0]) return refuse("evm_not_pinned");
+  const chainId = EVM_CHAIN_IDS[pin.network];
+  if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");
+  const t = onwardCopy(tx);
+  const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
+  const nonce = agreed(reads.nonce, uint);
+  const baseFee = agreed(reads.baseFee, uint);
+  const estimate = agreed(reads.estimate, uint);
+  const l1Fee = agreed(reads.l1Fee, uint);
+  if (!Array.isArray(reads.balance) || reads.balance.length !== 2 || !reads.balance.every(uint)) return refuse("reads");
+  if (!uint(reads.priorityCap)) return refuse("reads");
+  // Nitro charges its L1 data as gas, inside the estimate: no L1 fee beside it
+  if (ask.chain === "robinhood" && l1Fee !== 0n) return refuse("l1_fee");
+  // the pinned chain's id: no replay of U's deposit on another chain
+  if (t.chainId !== chainId) return refuse("chain_id");
+  // the pinned pool, and the call the wallet built for it
+  const call = ctx.call;
+  if (call === null || typeof call !== "object" || !Object.isFrozen(call) || typeof call.to !== "string" || typeof call.data !== "string" || typeof call.value !== "bigint") return refuse("call");
+  if (lower(call.to) !== lower(pin.pool) || lower(t.to) !== lower(pin.pool)) return refuse("to");
+  // the rung: the pool's own bounds (PrivacyPool.sol:86-90), never more than asked, msg.value the call's value
+  const value = call.value;
+  if (value < EVM_POOL_MIN_DEPOSIT || value >= (1n << 128n) - 1n || value > ask.amount) return refuse("amount");
+  if (t.value !== value) return refuse("value");
+  // the note's own precommitment, below p, and the call's bytes exactly: selector, value, precommitment, nothing else
+  const pre = ctx.precommitment;
+  if (typeof pre !== "bigint" || pre <= 0n || pre >= VAULT_FIELD_P) return refuse("precommitment");
+  const data = lower(call.data);
+  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(10) !== evmWord(value) + evmWord(pre)) return refuse("data");
+  if (lower(t.data) !== data) return refuse("data");
+  // U's nonce on two RPCs: no replacing a send of U's, no queueing behind one
+  if (t.nonce !== nonce) return refuse("nonce");
+  // no access list: nothing beside the call
+  if (t.accessList.length !== 0) return refuse("access_list");
+  // the two-RPC estimate, no padding past it, and never past the cap
+  if (t.gasLimit !== estimate || t.gasLimit === 0n) return refuse("gas_estimate");
+  if (t.gasLimit > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");
+  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");
+  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
+  // the rung and its fee bound within U's balance on each RPC's reading: neither RPC's word prices it
+  const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
+  if (reads.balance.some((b) => value + feeBound > b)) return refuse("balance");
+  DEPOSIT_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));
+  return { chain: ask.chain, op: "pool.deposit", token: null, amount: value, feeCap: feeBound, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };
+}
+
+/** U's signed deposit, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very send
+ *  checkEvmDeposit passed, while it reads as the check read it, and only with U's own key. */
+export function signEvmDeposit(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
+  const read = typeof tx === "object" && tx !== null ? DEPOSIT_CHECKED.get(tx) : undefined;
+  if (!read) return refuse("unchecked");
+  let now: EvmOnwardSend;
+  try {
+    now = onwardCopy(tx);
+  } catch {
+    return refuse("unchecked");
+  }
+  const fields = ["type", "chainId", "nonce", "maxPriorityFeePerGas", "maxFeePerGas", "gasLimit", "to", "value", "data"] as const;
+  if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");
+  if (lower(hex(keccak_256(secp256k1.getPublicKey(secretKey, false).subarray(1)).subarray(12))) !== read.wallet) return refuse("wallet");
+  const rec = secp256k1.sign(evmOnwardSendDigest(read), secretKey, { prehash: false, lowS: true, format: "recovered" });
+  const sig = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
+  return cat(Uint8Array.of(2), rlpList([...onwardFields(read), ...sig]));
+}
 
 // ---------- the draw ----------
 

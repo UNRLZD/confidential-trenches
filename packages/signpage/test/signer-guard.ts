@@ -68,7 +68,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "signEvmBuy", "evmWithdrawDigest", "signEvmWithdraw", "checkEvmOnwardSend", "evmOnwardSendDigest", "signEvmOnwardSend", "poolUnits", "drawPool", "POOL_KINDS", "POOL_CHAINS",
     "SOLANA_POOL_TAG_DEPOSIT", "SOLANA_POOL_DEPOSIT_LEN", "POOL_MAX_SLIPPAGE_BPS", "SOLANA_POOL_CU_LIMIT_MAX", "SOLANA_POOL_TX_FEE_MAX", "SOLANA_RENT_PER_BYTE_MAX", "SOLANA_POOL_SELL_RESERVE_MAX",
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor",
-    "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX",
+    "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "checkEvmDeposit", "EVM_DEPOSIT_GAS_MAX",
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`
@@ -81,7 +81,7 @@ export const EXEMPT: Readonly<Record<string, Exempt>> = {
   // a sell's signature and W's EIP-7702 authorization (sell-unpinned.ts:434, 463); the Sell digest (:411)
   "packages/kit/src/trade/evm/sell-unpinned.ts": { define: true, curve: ["signDigest", "evmPoolSignSellAuthorizationUnpinned"], sellType: ["sellDigest"] },
   "packages/kit/src/trade/evm/quoted.ts": { define: true },
-  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend"] }, // rules/pool.ts:853, 1020
+  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend", "signEvmDeposit"] }, // rules/pool.ts:853, 1020; signEvmDeposit (card pool-deposits)
   "packages/kit/src/trade/evm/buy-unpinned.ts": { curve: ["evmPoolSignBuyUnpinned"] }, // a buy's signature, buy-unpinned.ts:612
   // a quote's simulation: a sim sell built and its call data encoded, signed by its caller on the note the caller names
   "packages/kit/src/checks/evm/quote.ts": { calls: ["evmPoolBuildSimSellUnpinned", "evmSellCallData"] },

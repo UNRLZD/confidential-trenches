@@ -276,7 +276,7 @@ const SIGNER_LIST = [
   ...["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell"].map((n) => `packages/kit/src/trade/evm/sell.ts#${n}`),
   ...["evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "evmPoolSignSellAuthorizationUnpinned", "evmPoolBuildSimSellUnpinned", "evmPoolSignSimSellUnpinned", "evmSellCallData", "pinnedBuildSell", "pinnedSignSell", "pinnedSignSimSell", "pinnedSignSellAuthorization"].map((n) => `packages/kit/src/trade/evm/sell-unpinned.ts#${n}`),
   "packages/kit/src/trade/evm/quoted.ts#evmQuotedSell",
-  ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
+  ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization", "signEvmDeposit"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
 ];
 const FIXTURE_SIGNERS = ["packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureSignSell", "packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureBuildSell", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts#fastPath", "packages/signpage/test/fixtures/signer-guard/bad/m1-define-leak.ts#leakSign"];
 // carried from precommit-taken-recover: each signer called with no evmNextNote is refused, and with it (by its own
