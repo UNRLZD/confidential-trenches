@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-07T03:23:15.929Z",
+  "cluster": "devnet",
+  "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+  "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+  "U": "9w5eruEmHEvi45bEWCkzciPDCUjcaJCD96pcP21thGQT",
+  "funded": "11473120",
+  "signature": "4CGASPeY2rNou4xhwjSu1PRUQdom7pgAJeBkb1FQ958znkh9zgzbLyFjSgvS1anr54vYHghW1jtuoX4jfMY6EnzQ",
+  "value": "10000000",
+  "nonce": "33",
+  "precommitment": "28b9cd55909a30598226c8431f75d6ace086163d841ca9cff55a5deb20dce9d4",
+  "commitment": "2de84eabfe946c3b2f3f908f5ca2adcb6f7e9c00996df0675afc4f4d888537e4",
+  "leafIndex": "44",
+  "by": "packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts at 61fe4cd0: the kit's builder, cost and mark parse)"
+}
