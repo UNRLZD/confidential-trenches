@@ -57,7 +57,7 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
   // solana: this environment sets no SOLANA_RPC_URL, so the RPC slot is the public endpoint (card helper-solana-failover)
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" } });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" }, rpc: { solana: [], base: [], robinhood: [], near: [] } });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -80,7 +80,7 @@ test("GET /v1/health carries HELPER_RELEASE as a number; none or a value the rel
     assert.equal(r.status, 200);
     const b = JSON.parse(r.body);
     assert.equal(b.release, 12);
-    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana"]);
+    assert.deepEqual(Object.keys(b), ["ok", "commit", "release", "ready", "parts", "solana", "rpc"]);
     assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   } finally {
     helper.closeAllConnections();
@@ -288,8 +288,11 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
-  assert.equal(main.match(/const holds = providerHolds\(\);/g)?.length, 1);
+  // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
+  // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
+  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
+  assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider

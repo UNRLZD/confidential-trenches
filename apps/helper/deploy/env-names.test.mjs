@@ -17,7 +17,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkVendorPlans, createProxy } from "../src/proxy/proxy.ts";
-import { createRpc } from "../src/rpc/rpc.ts";
+import { createRpc, keyedPaces } from "../src/rpc/rpc.ts";
 import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
@@ -68,6 +68,8 @@ export const ENV_READERS = {
   checkVendorPlans: (env) => checkVendorPlans(new Proxy(env, { get: (t, k) => (t[k], "set") })),
   createProxy,
   createRpc,
+  // card rpc-keyed-lists: the helper's one providerHolds takes every keyed URL's company pace
+  keyedPaces,
   tokenWatchesFromEnv,
   feeQuoterFromEnv,
   withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee),
@@ -140,6 +142,9 @@ test("every environment name the helper's code reads when it runs is passed by c
   const passed = passedNames(read("deploy/compose.yaml"), read("Dockerfile"));
   assert.ok(["HELPER_STORE_DIR", "WITHDRAW_RELAYER_TESTNET", "NEAR_TESTNET_RPC_URL_B", "JUPITER_API_KEY", "SOLANA_RPC_URL"].every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
   assert.deepEqual([...atRun].filter((n) => !passed.has(n)).sort(), []);
+  // card rpc-keyed-lists: every chain's keyed list names (rpc.ts RPC_UPSTREAMS keyed), each passed
+  const keyedNames = ["BASE_RPC_URL_QUICKNODE", "ROBINHOOD_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_QUICKNODE", "NEAR_RPC_URL_FASTNEAR", ...["BASE", "ROBINHOOD", "SOLANA"].flatMap((c) => [1, 2, 3].map((n) => `${c}_RPC_URL_DRPC_${n}`))];
+  assert.ok(keyedNames.every((n) => atRun.has(n) && passed.has(n)), `the run read ${[...atRun].join(", ")}`);
   // Base's swap reads (data/evm/swaps.ts) read the host's BASE_RPC_URL themselves, apart from createRpc's read
   assert.ok(namesReadAtRun({ evmSwapsFromEnv: ENV_READERS.evmSwapsFromEnv }).has("BASE_RPC_URL"));
   // Solana's own trade reads (data/solana/trades.ts): the keyed stream and request provider, each optional
