@@ -509,6 +509,7 @@ export const MUTANTS = [
   // review of 72e28658, M3: the replay runs with ample gas (the sender's is not signed), the sender's balance covering it
   [QUOTE, "const gas = own > EVM_REPLAY_GAS ? own : EVM_REPLAY_GAS;", "const gas = own;", R, "review of 72e28658, M3 (buy)"],
   [QUOTE, "const gas = own > EVM_REPLAY_GAS ? own : EVM_REPLAY_GAS;", "const gas = own;", R, "review of 72e28658, M3 (sell)"],
+  [QUOTE, "export const EVM_REPLAY_GAS = 2n * evmPoolGas(EVM_POOL_MAX_DEPTH);", "export const EVM_REPLAY_GAS = 30_000_000n;", R, "review of 72e28658, M3 (buy)"],
   [QUOTE, "params: [call, parent, { ...asW, ...pays, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }, env] }]", R, "HB1 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],

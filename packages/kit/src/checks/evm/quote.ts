@@ -70,7 +70,7 @@ import {
   type EvmV4Hop,
   type EvmV4Route,
 } from "../../trade/evm/buy-unpinned.ts";
-import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
+import { EVM_POOL_MAX_DEPTH, EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
@@ -2778,9 +2778,11 @@ export async function evmSellRevertedPools(quote: EvmPoolSellQuote, txHash: stri
 const SEL_SELL = "0c2cb9ca"; // a literal, never a top-level call (the kit's index reaches the signing page's bundle): SellDelegate.sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)
 /** One provider's answer to a replay: its result, or a revert with its data ("" for none); anything else is a refusal. */
 type Replay = { ok: true; result: string } | { ok: false; data: string };
-/** A replay's gas at least: an honest hook's work fits in it many times over, under every pinned provider's eth_call cap
- *  (publicnode's 50,000,000, and geth's default). */
-export const EVM_REPLAY_GAS = 30_000_000n;
+/** A replay's gas at least: twice the gas of a release at the deepest tree (pool-fee.ts evmPoolGas), the most the fee
+ *  rule pays a sender for (its x 2) and above a sale's EVM_POOL_SELL_GAS. A hook whose work needs more is never carried
+ *  by a send the device's fee pays for, so its trade fails at any honest sender's gas and its no-op's success blames it;
+ *  a hook that fails only below this (an honest hook a sender gave too little) replays done and is never banned. */
+export const EVM_REPLAY_GAS = 2n * evmPoolGas(EVM_POOL_MAX_DEPTH);
 function replayOf(a: unknown, who: string): Replay {
   const hex = (x: unknown): x is string => typeof x === "string" && x.length <= MAX_ANSWER_HEX && /^0x([0-9a-fA-F]{2})*$/.test(x);
   if (typeof a !== "object" || a === null) return refuse("rpc_error", `${who} answered no object`);

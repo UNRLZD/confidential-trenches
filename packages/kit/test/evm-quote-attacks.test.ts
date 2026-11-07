@@ -5533,6 +5533,14 @@ test("review of 72e28658, M3 (buy) a buy sent with too little gas for an honest 
   const hash = await landBuy(pools, q); // the model lands it at SALE_GAS - 25,000
   assert.equal(SALES.get(hash)!.bought, false);
   assert.deepEqual(await buyProved(pools, q, hash), []);
+  // a hook whose work needs more gas than any send the device's fee pays for (EVM_REPLAY_GAS, twice a release at the
+  // deepest tree) fails at every honest sender's gas: its no-op's success blames it
+  const t2 = "0x00000000000000000000000000000000000d1d2b";
+  const greedy: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, RH(21)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 3_000_000n ? null : (a * 95n) / 100n) };
+  const gp = [seeded(t2), greedy];
+  const g = await hbQuote(gp, t2, [{ key: greedy.key, at: 4_500_001 }], v4Route([{ currency: t2, fee: 3000, tickSpacing: 60, hooks: RH(21) }]));
+  assert.ok(!("code" in g), show(g));
+  assert.deepEqual(await buyProved(gp, g, await landBuy(gp, g)), [hcPid(greedy.key)]);
 });
 
 test("review of 72e28658, M3 (sell) the same on a sale: the replay runs with ample gas, the sale is done there, and nothing is banned", async () => {
