@@ -254,9 +254,11 @@ test("planted: the sim signer refuses a live deadline, the real pool, a block pa
   assert.equal(code(() => evmPoolSignSellUnpinned(key, "base-sepolia", s)), "not_built");
   const real = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: { venue: "uniswap-v4", hops: [{ ...hops[0]!, hooks: NATIVE }] }, minOut: 2n, precommitment: 1n, feeCap: 1n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 120), nonce: 3n });
   assert.equal(code(() => evmPoolSignSimSellUnpinned(key, "base-sepolia", real as never, ts, now)), "not_built");
-  // a key not W's; a chain with no pinned sell delegate
+  // a key not W's; a chain with no pinned sell delegate (a list without Base's: the kit pins every chain's since card
+  // pool-evm-deploy-mainnet)
   assert.equal(code(() => evmPoolSignSimSellUnpinned(new Uint8Array(32).fill(7), "base-sepolia", s, ts, now)), "bad_key");
-  assert.equal(code(() => pinnedSignSimSell(evmPoolVenues(), key, "base", s, ts, now)), "not_deployed");
+  const { sellDelegate: _d, ...baseNoDelegate } = evmPoolVenues().base;
+  assert.equal(code(() => pinnedSignSimSell({ ...evmPoolVenues(), base: baseNoDelegate }, key, "base", s, ts, now)), "not_deployed");
 });
 
 // card evm-buy-hookdata-fee: the sender's fee cap was the caller's, bounded only by minOut (review low L3)

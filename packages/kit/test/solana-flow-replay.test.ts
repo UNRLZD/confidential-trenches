@@ -27,6 +27,7 @@ import {
   type SolanaTradeDeps,
   type SolanaTradeRequest,
 } from "../src/index.ts";
+import { SOLANA_BUILD_TIMEOUT_MS } from "../src/trade/solana/build.ts";
 
 type Fixture = {
   requests: { side: "buy" | "sell"; mint: string; slippageBps: number; wallets: string[]; legs: { wallet: string; amount: string; arm: { own: boolean } }[] }[];
@@ -72,6 +73,18 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
     times.push(Date.now());
     if (method === "isBlockhashValid") return { context: { slot: 1 }, value: valid(at, params[0] as string, asks.filter((x) => x.startsWith('["isBlockhashValid"')).length - 1) };
     let list = by.get(k);
+    // The pre-state read carries the wallet's wSOL account after its four (card solana-quote-under-1s), which the
+    // recording predates: it answers as the recorded four-account read (counted and edited as that one) and the wSOL
+    // account from the recording's own reads of it.
+    const keys = method === "getMultipleAccounts" ? (params[0] as string[]) : [];
+    const head = keys.length === 5 ? askOf(method, [keys.slice(0, 4), ...params.slice(1)]) : "";
+    const headList = !list && head ? by.get(head) : undefined;
+    if (headList) {
+      const n = seen.get(head) ?? 0;
+      seen.set(head, n + 1);
+      const four = edit(at, method, n, clone(headList[Math.min(n, headList.length - 1)]), [keys.slice(0, 4), ...params.slice(1)]) as { context: unknown; value: unknown[] };
+      return { ...four, value: [...four.value, clone(known.get(keys[4] as string) ?? null)] };
+    }
     if (!list && method === "getMultipleAccounts") return { context: { slot: 1 }, value: (params[0] as string[]).map((x) => clone(known.get(x) ?? null)) };
     const back = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
     if (!list && back?.length === 2 && back[0] === WSOL_HELD.wallet && back[1] === WSOL_HELD.account) {
@@ -180,12 +193,135 @@ test("a rebuild whose floor is still under minOut is refused, never sent", async
   assert.equal(r.legs[0]?.dry, undefined);
 });
 
-test("a floor that rounds to 0 is refused before any build", async () => {
+// A dropped leg's build is run in two worlds (card solana-quote-under-1s, reviews of b614d3ce and 5e81420d). In the
+// recorded world the build fits once assembled, so a dropped leg whose build went on to a simulation would send one:
+// "nothing simulated" holds there (mutants M1sim and M1simD). In this world every build is over 1,232 bytes once
+// assembled (the recorded route with 40 accounts no table holds), so it can never be simulated, and a dropped leg that
+// asked the next cap would show a second build ask: "no build asked again" holds here (M6). An assembly alone, its next
+// ask refused inside the leg, reaches nothing outside the device (M1).
+function tooLargeWorld() {
+  const extra = Array.from({ length: 40 }, (_, i) => ({ pubkey: base58.encode(new Uint8Array(32).fill(100 + i)), isSigner: false, isWritable: false }));
+  return capWorld((_cap, body) => {
+    const swap = body.swapInstruction as { accounts: unknown[] };
+    swap.accounts = [...swap.accounts, ...extra];
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+}
+test("a floor that rounds to 0 is refused: its build, out with the first reads, is dropped, no build asked again, nothing simulated or signed", async () => {
   const urls: string[] = [];
-  const r = await runSolanaTrade(request(BUY), { ...deps(BUY, { urls }), reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
+  const d0 = deps(BUY, { urls });
+  const r0 = await runSolanaTrade(request(BUY), { ...d0, reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
+  assert.equal(r0.legs[0]?.refused, "the floor rounds to 0");
+  assert.ok(urls.length <= 1, `${urls.length} builds`);
+  for (const p of d0.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.equal(r0.legs[0]?.signature, undefined);
+  const w = tooLargeWorld();
+  const d = deps(BUY);
+  const r = await runSolanaTrade(request(BUY), { ...d, fetch: w.fetch, reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
   assert.equal(r.legs[0]?.minOut, 0n);
   assert.equal(r.legs[0]?.refused, "the floor rounds to 0");
-  assert.equal(urls.length, 0);
+  assert.equal(w.urls.length, 1, `${w.urls.length} builds: the dropped leg asked the next cap`);
+  assert.equal(r.legs[0]?.signature, undefined);
+});
+
+test("card solana-quote-under-1s: every leg's build goes out with the first reads, before the reference answers", async () => {
+  const urls: string[] = [];
+  const d = deps(SELL, { urls });
+  let builtBeforeReference = false;
+  // the reference answers only once a build is out, or after 3 s: a flow that waits for it before building is red
+  const reference: SolanaTradeDeps["reference"] = async (q, p) => {
+    const t = Date.now();
+    while (urls.length < request(SELL).legs.length && Date.now() - t < 3_000) await new Promise((ok) => setTimeout(ok, 5));
+    builtBeforeReference = urls.length === request(SELL).legs.length;
+    return d.reference(q, p);
+  };
+  const r = await runSolanaTrade(request(SELL), { ...d, reference });
+  assert.equal(builtBeforeReference, true, "the builds waited for the reference");
+  for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
+});
+
+test("card solana-quote-under-1s: no reference pool while a build waits out the helper's Retry-After: the trade is refused at once, the wait ended, no build asked again", async () => {
+  const urls: string[] = [];
+  const d = deps(SELL);
+  const fetch = async (url: string) => { urls.push(url); return new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": "30" } }); };
+  // the room's sleep never ends by itself: a refused trade that kept waiting would never answer
+  const run = runSolanaTrade(request(SELL), { ...d, fetch, sleep: () => new Promise<void>(() => {}), reference: async () => null });
+  const r = await Promise.race([run, new Promise<null>((ok) => setTimeout(() => ok(null), 2_000))]);
+  assert.ok(r, "the refused trade waited for the build's room");
+  for (const l of r.legs) assert.equal(l.refused, "no reference pool");
+  assert.equal(urls.length, request(SELL).legs.length, "one build a leg, none asked again");
+});
+
+test("card solana-quote-under-1s: no reference pool refuses every leg; the builds already out are dropped, nothing simulated or signed", async () => {
+  const d0 = deps(SELL);
+  const r0 = await runSolanaTrade(request(SELL), { ...d0, reference: async () => null });
+  for (const l of r0.legs) { assert.equal(l.refused, "no reference pool"); assert.equal(l.signature, undefined); assert.equal(l.verdict, undefined); }
+  for (const p of d0.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  const d = deps(SELL);
+  const w = tooLargeWorld();
+  const r = await runSolanaTrade(request(SELL), { ...d, fetch: w.fetch, reference: async () => null });
+  for (const l of r.legs) { assert.equal(l.refused, "no reference pool"); assert.equal(l.signature, undefined); assert.equal(l.verdict, undefined); }
+  assert.equal(w.urls.length, r.legs.length, `${w.urls.length} builds: a dropped leg asked the next cap`);
+});
+
+// A dropped leg asks no build more and holds none open (card solana-quote-under-1s review): the helper's Jupiter allows
+// 10 calls in 10 s for every device together, and a no-route search goes on to 48 and 60.
+test("card solana-quote-under-1s review: no reference pool while every build answers no route after the gate closed: each leg's one build, none at the next cap", async () => {
+  const urls: string[] = [];
+  let refused = false;
+  const fetch = async (url: string) => {
+    urls.push(url);
+    while (!refused) await new Promise((ok) => setTimeout(ok, 5));
+    await new Promise((ok) => setTimeout(ok, 20));
+    return new Response('{"error":"No routes found"}', { status: 400 });
+  };
+  const r = await runSolanaTrade(request(SELL), { ...deps(SELL), fetch, reference: async () => { refused = true; return null; } });
+  for (const l of r.legs) assert.equal(l.refused, "no reference pool");
+  assert.equal(urls.length, r.legs.length, `${urls.length} builds`);
+});
+test("card solana-quote-under-1s review: no reference pool while every build is in flight: each is aborted and the refusal waits on none", async () => {
+  const aborted: string[] = [];
+  const fetch = (url: string, init: RequestInit) => new Promise<Response>((_ok, no) => {
+    const s = init.signal!;
+    s.addEventListener("abort", () => { aborted.push(url); no(s.reason); });
+  });
+  const run = runSolanaTrade(request(SELL), { ...deps(SELL), fetch, reference: async () => null });
+  // the build's own timeout is 5 s: a refusal that waited on its builds in flight answers after it
+  const r = await Promise.race([run, new Promise<null>((ok) => setTimeout(() => ok(null), 2_000))]);
+  assert.ok(r, "the refused trade waited on its builds in flight");
+  for (const l of r.legs) assert.equal(l.refused, "no reference pool");
+  assert.equal(aborted.length, r.legs.length);
+});
+// The leg's fetch hands the build a signal of its own (the leg's abort joined in), so the build's 5 s timeout
+// (build.ts askOnce) bounds an open leg only through that join (card solana-quote-under-1s, review of 5e81420d, R3).
+// The build's AbortSignal.timeout is mocked, and fired once the build is out: no real 5 s wait.
+test("card solana-quote-under-1s review: an open leg's build that never answers ends at the build's own timeout", async () => {
+  const real = AbortSignal.timeout;
+  const timers: { ms: number; c: AbortController }[] = [];
+  AbortSignal.timeout = (ms: number) => {
+    if (ms !== SOLANA_BUILD_TIMEOUT_MS) return real.call(AbortSignal, ms);
+    const c = new AbortController();
+    timers.push({ ms, c });
+    return c.signal;
+  };
+  try {
+    let asked = 0;
+    const fetch = (_url: string, init: RequestInit) => new Promise<Response>((_ok, no) => {
+      asked++;
+      const s = init.signal!;
+      s.addEventListener("abort", () => no(s.reason));
+      // the build's 5 s, run out once the leg's gate has opened (the reference answers at once)
+      setTimeout(() => { for (const t of timers) t.c.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")); }, 100);
+    });
+    const run = runSolanaTrade(request(BUY), { ...deps(BUY), fetch });
+    const r = await Promise.race([run, new Promise<null>((ok) => setTimeout(() => ok(null), 2_000))]);
+    assert.ok(r, `the open leg's build was never timed out (${asked} asked)`);
+    assert.equal(asked, 1);
+    assert.deepEqual(timers.map((t) => t.ms), [5_000]);
+    assert.match(r.legs[0]?.refused ?? "", /^build upstream: .*the helper did not answer: The operation was aborted due to timeout$/);
+  } finally {
+    AbortSignal.timeout = real;
+  }
 });
 
 test("one wallet a request: every read and simulation of a buy and a three-wallet sell names one of the user's wallets", async () => {
@@ -1101,6 +1237,54 @@ function secondRun(d: ReturnType<typeof deps>, edit: (at: "A" | "B", method: str
   const wrap = (p: (typeof d.providers)[number], at: "A" | "B") => Object.assign(async (method: string, params: readonly unknown[]) => edit(at, method, params, await p(method, params)), { asks: p.asks, times: p.times });
   return [wrap(d.providers[0], "A"), wrap(d.providers[1], "B")] as const;
 }
+test("card solana-quote-under-1s: a wallet whose pre-state read shows its wSOL account has its second simulation sent beside the first, and the leg passes every check", async () => {
+  const d = deps(SELL);
+  const backOf = (params: readonly unknown[]) => (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses ?? [];
+  const beside: boolean[] = [];
+  // the wallet's four-account simulation answers only once its [wallet, wSOL] one is out, or after 3 s
+  const wrap = (p: (typeof d.providers)[number]) => Object.assign(async (method: string, params: readonly unknown[]) => {
+    const back = backOf(params);
+    if (method === "simulateTransaction" && back[0] === WSOL_HELD.wallet && back.length === 4) {
+      const t = Date.now();
+      const out = () => p.asks.some((k) => k.startsWith('["simulateTransaction"') && k.includes(WSOL_HELD.account));
+      while (!out() && Date.now() - t < 3_000) await new Promise((ok) => setTimeout(ok, 5));
+      beside.push(out());
+    }
+    return p(method, params);
+  }, { asks: p.asks, times: p.times });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers: [wrap(d.providers[0]), wrap(d.providers[1])] });
+  // both providers' quote simulations (and the dry send's after them)
+  assert.ok(beside.length >= 2 && beside.every(Boolean), `the second simulation waited for the first: ${beside}`);
+  const leg = r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!;
+  assert.equal(leg.refused, undefined, leg.refused);
+  const second = askOf("simulateTransaction", ["", { accounts: { addresses: [WSOL_HELD.wallet, WSOL_HELD.account], encoding: "base64" } }]);
+  for (const p of d.providers) assert.equal(p.asks.filter((k) => k === second).length, 1, "one second simulation a provider, the one sent beside");
+});
+
+test("card solana-quote-under-1s: the wSOL account read otherwise by the written accounts' read than by the pre-state read: the early simulation is dropped and the second runs after the read", async () => {
+  const d = deps(SELL);
+  let moved = 0;
+  // the written accounts' read (more than 5 keys, the wSOL account among them; the pre-state read and the read again are
+  // 5) answers the wSOL account one lamport up
+  const wrap = (p: (typeof d.providers)[number]) => Object.assign(async (method: string, params: readonly unknown[]) => {
+    const x = await p(method, params);
+    const keys = method === "getMultipleAccounts" ? (params[0] as string[]) : [];
+    const i = keys.indexOf(WSOL_HELD.account);
+    if (i >= 0 && keys.length > 5) {
+      const v = (x as { value: ({ lamports: number } | null)[] }).value[i];
+      if (v) { v.lamports += 1; moved++; }
+    }
+    return x;
+  }, { asks: p.asks, times: p.times });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers: [wrap(d.providers[0]), wrap(d.providers[1])] });
+  assert.ok(moved >= 2, `the written read was edited ${moved} times`);
+  const second = askOf("simulateTransaction", ["", { accounts: { addresses: [WSOL_HELD.wallet, WSOL_HELD.account], encoding: "base64" } }]);
+  for (const p of d.providers) assert.equal(p.asks.filter((k) => k === second).length, 2, "the early one and the one after the read");
+  const leg = r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!;
+  // the read again equals the pre-state, not the written read: the leg is refused as moved, never passed on the early run
+  assert.equal(leg.refused, "the wallet's accounts changed while the trade was checked");
+});
+
 test("card solana-written-accounts-whole: the native sum comes from one simulation: the wallet's lamports read back with its wSOL account, not from the first run", async () => {
   const base = await runSolanaTrade(request(SELL), deps(SELL));
   const outOf = (r: typeof base) => BigInt(/^simulated out (\d+)/.exec(r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!.verdict!.results.find((x) => x.id === "S12")!.detail)![1]!);
@@ -1214,7 +1398,8 @@ test("card solana-written-accounts-whole review: the wallet's lamports read diff
 // Card solana-written-accounts-whole, the independent review of d1806532 (RVW-3): the flow reads the rent of the wallet's
 // account of the token for the size the one rule gives (solanaTokenAccountSize), the size S11 holds the created account
 // to: a Pausable mint's (26) 174 bytes with PausableAccount, where flow.ts's own rule read 170 and S11 refused the buy by
-// the 4 bytes' rent. A mint that rule refuses (S10 refuses it too) is refused before any build.
+// the 4 bytes' rent. A mint that rule refuses (S10 refuses it too) is refused before its build is assembled or any rent
+// is read (the build itself goes out with the first reads: card solana-quote-under-1s).
 function mintWith(type: number, body: Uint8Array, urls: string[]) {
   const token = request(BUY).token;
   const d = deps(BUY, { urls });
@@ -1233,16 +1418,90 @@ function mintWith(type: number, body: Uint8Array, urls: string[]) {
   }, { asks: p.asks, times: p.times });
   return { d: { ...d, providers: [wrap(d.providers[0]), wrap(d.providers[1])] as const }, asked };
 }
-test("card solana-written-accounts-whole review RVW-3: the rent of the account of the token is read for the one rule's size, 174 for a Pausable mint; a mint the rule refuses is refused before any build", async () => {
+test("card solana-written-accounts-whole review RVW-3: the rent of the account of the token is read for the one rule's size, 174 for a Pausable mint; a mint the rule refuses is refused, its build (out with the first reads, card solana-quote-under-1s) dropped, no build asked again, nothing simulated, no rent read", async () => {
   const urls: string[] = [];
   const p = mintWith(26, new Uint8Array(33), urls);
   await runSolanaTrade(request(BUY), p.d);
   assert.deepEqual([...new Set(p.asked)].sort(), [137, 174], `rent asked for ${p.asked.join(", ")}`);
   assert.ok(urls.length > 0, "built");
+  // the recorded world, then the too_large one (tooLargeWorld above)
   const none: string[] = [];
-  const u = mintWith(29, new Uint8Array(4), none);
-  const r = await runSolanaTrade(request(BUY), u.d);
+  const u0 = mintWith(29, new Uint8Array(4), none);
+  const r0 = await runSolanaTrade(request(BUY), u0.d);
+  assert.equal(r0.legs[0]?.refused, "the mint on provider A: Token-2022 extension 29 not known");
+  assert.ok(none.length <= 1, `${none.length} builds`);
+  for (const q of u0.d.providers) assert.ok(!q.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.deepEqual(u0.asked, [], "no rent read");
+  const u = mintWith(29, new Uint8Array(4), []);
+  const w = tooLargeWorld();
+  const r = await runSolanaTrade(request(BUY), { ...u.d, fetch: w.fetch });
   assert.equal(r.legs[0]?.refused, "the mint on provider A: Token-2022 extension 29 not known");
-  assert.deepEqual(none, [], "no build");
+  assert.equal(w.urls.length, 1, `${w.urls.length} builds: the dropped leg asked the next cap`);
   assert.deepEqual(u.asked, [], "no rent read");
+});
+
+// Card solana-quote-under-1s, the independent review of fd926d82 (af47a0f7): the early [wallet, wSOL] simulation counts
+// only when the written accounts' read finds that one account to read back and reads it on each provider as the
+// pre-state read did. M4 (provider B's comparison dropped) and M5 (`mine.length === 1` dropped) each pass the suite
+// without these two tests.
+test("card solana-quote-under-1s review M4: provider B alone reads a deposit into the wSOL account after the pre-state read, and reads it so again: the early simulation is dropped on both providers and the second runs after the read", async () => {
+  const d = deps(SELL);
+  let moved = 0;
+  let pre = 0;
+  // provider B only: the first five-key read of the wallet with its wSOL account is the pre-state read and stays as
+  // recorded; the written accounts' read and the read again after the simulations both read the account one lamport up
+  const providers = secondRun(d, (at, method, params, x) => {
+    const keys = method === "getMultipleAccounts" ? (params[0] as string[]) : [];
+    const i = keys.indexOf(WSOL_HELD.account);
+    if (at !== "B" || i < 0 || !keys.includes(WSOL_HELD.wallet) || (keys.length === 5 && pre++ === 0)) return x;
+    const v = (x as { value: ({ lamports: number } | null)[] }).value[i];
+    if (v) { v.lamports += 1; moved++; }
+    return x;
+  });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers });
+  assert.ok(moved >= 2, `B's reads after the pre-state edited ${moved} times`);
+  const second = askOf("simulateTransaction", ["", { accounts: { addresses: [WSOL_HELD.wallet, WSOL_HELD.account], encoding: "base64" } }]);
+  for (const p of d.providers) assert.equal(p.asks.filter((k) => k === second).length, 2, "the early one and the one after the read");
+  const leg = r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!;
+  assert.notEqual(leg.refused, "the wallet's accounts changed while the trade was checked", "the read again equals the written read");
+});
+
+// X, one more account the read finds as the wallet's token account, is planted after the wSOL account (the recorded
+// sell writes none before it but the wallet's own): the read finds [wSOL, X], and M5 would read the wallet back with
+// wSOL alone and X not at all.
+test("card solana-quote-under-1s review M5: the written accounts' read finds the wallet's wSOL account and another of its token accounts after it in the tx: the early simulation is dropped and the wallet is read back with both, once on each provider", async () => {
+  const req = request(SELL);
+  const d = deps(SELL);
+  const w = WSOL_HELD.wallet;
+  const not = new Set([w, WSOL_HELD.account, solanaAta(w, req.token, SOLANA_TOKEN_2022_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM)]);
+  const fake = (k: string) => { const b = new Uint8Array(165); b.set(base58.decode(k), 0); b.set(base58.decode(w), 32); b[64] = 1; b[108] = 1; return { data: [base64.encode(b), "base64"], executable: false, lamports: 2_039_280, owner: SOLANA_TOKEN_PROGRAM, rentEpoch: 0, space: 165 }; };
+  let x: string | null = null;
+  const groups: Record<"A" | "B", string[][]> = { A: [], B: [] };
+  const wrap = (p: (typeof d.providers)[number], at: "A" | "B") => Object.assign(async (method: string, params: readonly unknown[]) => {
+    const back = simAddresses(method, params);
+    if (back?.[0] === w) groups[at].push(back);
+    if (back?.[0] === w && back.length === 3 && x && back.includes(x)) {
+      // the recorded [wallet, wSOL] read-back, with X read back as the planted account
+      const two = (await p(method, [params[0], { ...(params[1] as object), accounts: { addresses: [w, WSOL_HELD.account], encoding: "base64" } }])) as { value: { accounts: unknown[] } };
+      two.value.accounts = back.map((k) => (k === w ? two.value.accounts[0] : k === x ? fake(k) : two.value.accounts[1]));
+      return two;
+    }
+    const out = await p(method, params);
+    if (method === "getMultipleAccounts") {
+      const keys = params[0] as string[];
+      const iw = keys.indexOf(WSOL_HELD.account);
+      if (!x && keys.length > 5 && keys.includes(w) && iw >= 0) x = keys.slice(iw + 1).find((k) => !not.has(k)) ?? null;
+      if (x) keys.forEach((k, i) => { if (k === x) (out as { value: unknown[] }).value[i] = fake(k); });
+    }
+    return out;
+  }, { asks: p.asks, times: p.times });
+  const r = await runSolanaTrade(req, { ...d, providers: [wrap(d.providers[0], "A"), wrap(d.providers[1], "B")] });
+  assert.ok(x, "no written account after the wSOL account to plant");
+  const leg = r.legs.find((l) => l.wallet === w)!;
+  assert.equal(leg.simulationErrors, undefined, String(leg.simulationErrors));
+  for (const at of ["A", "B"] as const) {
+    const g = groups[at].filter((b) => b.length === 2 || b.length === 3).map((b) => b.join(","));
+    assert.equal(g.filter((b) => b === `${w},${WSOL_HELD.account}`).length, 1, `${at}: the early run alone, dropped`);
+    assert.equal(g.filter((b) => b.split(",").length === 3 && b.includes(WSOL_HELD.account) && b.includes(x!)).length, 1, `${at}: the wallet read back with both, once: ${g.join(" | ")}`);
+  }
 });
