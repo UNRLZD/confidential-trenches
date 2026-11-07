@@ -35,13 +35,15 @@
 //   planned index; short there, it waits (not_landed) only when a U still landing a note holds the rung once that note
 //   lands, else not_funded with `short` naming the ask's own U. `sent` and `progress` are the ask's own sends only.
 // - The end after "sent" (card pool-deposit-sent-end, the Solana kind's rule): the run reads its send's verdict once (a
-//   Deposited is final only ~1,000 s on), so a run that ends with no verdict past a send of its ask hands the kind the
-//   ask's notes still INCOMING (`left`), and the kind reads them, with no lock held and nothing written, every
-//   POOL_DEPOSIT_EVM_FOLLOW_MS until each is decided. Landed: a Deposited naming its precommitment at or below the
-//   round's finalized block, at its value. Dead, never one RPC's word: U's finalized nonce past every send of it on BOTH
-//   RPCs, read before the round that finds no Deposited naming it (final or not); or taken (a final Deposited at another
-//   value). Then filled when every open note landed and the ask was all sent, part_filled when any of it landed, else
-//   not_landed; the money of a dead send stays in U, and the next load or ask builds the note again.
+//   Deposited is final only ~1,000 s on), so a run that ends with no end (filled, or part_filled with no note of the ask
+//   still INCOMING) hands the kind the ask's notes still INCOMING (`left`, kept in memory as each send leaves), and the
+//   kind reads each by its own record, with no lock held and nothing written, every POOL_DEPOSIT_EVM_FOLLOW_MS. Landed:
+//   its record UNSPENT at its value, or a Deposited naming its precommitment at or below the round's finalized block, at
+//   its value. Dead only when taken (a final Deposited at another value: the pool refuses a used precommitment). U's
+//   finalized nonce past every send of it (its highest) on BOTH RPCs, read before a round with no Deposited naming it, is
+//   no end: the pass builds the note again at U's new nonce, so the reads start it (`settle`) and follow the new send.
+//   Then filled when every open note landed and the ask was all sent, part_filled when any of it landed, else
+//   not_landed. Backoff, stop and give-up are the Solana kind's.
 // - Every read names a public account (the pool, U) and no request carries a key, the words or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";

@@ -70,14 +70,19 @@
 //   each one taken); else part_filled or sent. A note sent again by the pass, never the ask's, leaves the ask's own
 //   fault "down".
 // - The end after "sent" (card pool-deposit-sent-end): the kind answers at the ask's first send, so the run's own end
-//   reaches the app as a progress stage, and a run that ends with no verdict (a send still live, a provider down, a
-//   read back that does not check out) hands the kind the ask's notes still open (`left`). The kind then reads them,
-//   with no lock held and nothing written, every POOL_DEPOSIT_FOLLOW_MS until each is decided: landed (its mark at its
-//   value, its leaf checked as a landing is) or dead. Dead is the rebuild's own test, never one RPC's word: every send
-//   past its last valid height at finalized on both RPCs (or finalized with an error on both), the heights read before
-//   a mark read that finds none; or taken (the mark holds another deposit on both, and neither RPC says a send of it
-//   succeeded). Then: filled when every open note landed and every rung was sent, part_filled when any of the ask
-//   landed, else not_landed. The money of a dead send stays in U, and the next ask or load builds the note again.
+//   reaches the app as a progress stage. Filled is the ask's end, and part_filled once no send of the ask is open; a run
+//   that ends otherwise (a send still live, a provider down, a read back that does not check out, a throw past a send)
+//   hands the kind the ask's notes still open (`left`). The kind then reads each note by its own record (a send built
+//   again by any pass is followed as the ask's), with no lock held and nothing written: landed (its record UNSPENT at its
+//   value, or its mark at its value with its leaf checked, as a landing is), or dead only when taken (the record restored
+//   at another value, or the mark holding another deposit on both RPCs with no send of it succeeded on both: it can
+//   never be built again from U's money). Every send dead (past its last valid height at finalized on both RPCs, or
+//   failed on both, with no mark read at or past those heights' slots) is no end: the pass builds the note again from
+//   U's money, so the reads start the pass (`settle`) and follow the new send; never not_landed for it (review 1). Then:
+//   filled when every open note landed and every rung was sent, part_filled when any of the ask landed, else not_landed.
+//   The reads come every POOL_DEPOSIT_FOLLOW_MS while a send may land, back off to POOL_DEPOSIT_FOLLOW_MAX_MS while only
+//   the pass can move it (or a read fails), stop at sign out (`signal`) and give up after POOL_DEPOSIT_FOLLOW_FOR_MS, each
+//   telling nothing: the note stays INCOMING for the load and state-read pass.
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
 //   signatures), one wallet of the user's per request; no request carries a key, the words, or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
