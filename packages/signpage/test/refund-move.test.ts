@@ -227,9 +227,17 @@ test("SIGN_HOST's follow passes the refund move: a REFUNDED op on mainnet with U
     if (url === RELEASE_INTENTS_URL) return (posted.push(JSON.parse(String(init?.body))), Response.json({ tx_hash: "1" }));
     return new Response("{}", { status: 404 }); // 1Click's status: no read
   }) as typeof fetch;
-  const f = depositFollows({ network: () => "mainnet", store: async () => w, seed64: async () => Uint8Array.from(SEED), rpcs: () => [one("a"), one("b")], fetch: fetchFn, sleep: async () => void (await new Promise<void>((ok) => setImmediate(ok))), locks: () => null, now: () => NOW });
+  let rounds = 0;
+  const f = depositFollows({ network: () => "mainnet", store: async () => w, seed64: async () => Uint8Array.from(SEED), rpcs: () => [one("a"), one("b")], fetch: fetchFn, sleep: async () => void (rounds++, await new Promise<void>((ok) => setImmediate(ok))), locks: () => null, now: () => NOW });
   await f.settle();
-  for (let k = 0; k < 200 && posted.length === 0; k++) await new Promise<void>((ok) => setImmediate(ok));
+  // the wait is on the follow's own rounds (each ends in its sleep), never a count of event-loop turns: the quote check
+  // and the signature finish outside those turns, so a loaded runner (CI job 128544083935) outran a 200-turn wait. It
+  // ends at the send, at 50 rounds, or when no round comes in 2000 checks (a follow stopped without sending)
+  for (let still = 0; posted.length === 0 && rounds < 50 && still < 2000; ) {
+    const n = rounds;
+    await new Promise((ok) => setTimeout(ok, 5));
+    still = rounds === n ? still + 1 : 0;
+  }
   f.signedOut();
   await f.idle();
   assert.equal(posted.length >= 1, true, "a signed intent went to /v1/intents");
