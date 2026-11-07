@@ -90,14 +90,26 @@ const pct = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 /** The amount box takes digits and one point with up to two decimals: USD cents, nothing finer. */
 const TYPING = /^\d{0,15}(?:\.\d{0,2})?$/;
 
-/** `footer` draws inside the panel, under the Route & fees line (the token page's safety grid). */
-export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmount = "", footer }: { chain: Chain; token: string; symbol: string; slippageBps?: number; initialAmount?: string; footer?: ReactNode }) {
+/** Which token a trade state trades; null while the page has no token yet (nothing is quoted or bought). */
+export interface TradeAt {
+  chain: Chain;
+  token: string;
+  slippageBps?: number;
+}
+
+/** One trade state: the amount, the running buy's phase and id, its route and toast, the set preview, and the buy. A page
+ *  that draws the box in two places (the token page's desktop column and its phone sheet, card app-phone-trade-sheet)
+ *  holds one of these and draws it in both, so a buy started in one is the buy the other draws, whichever is visible. */
+export function useTrade(at: TradeAt | null, initialAmount = "") {
+  const chain: Chain = at?.chain ?? "solana";
+  const token = at?.token ?? "";
+  const slippageBps = at?.slippageBps ?? 1000;
+  const on = at !== null;
   const src = useTradeSource();
   const { kit, moneyOn, snapshot } = src;
   // signed out as the header reads it (never for a user whose first `state` has not landed): Sign in opens the one sheet
   const account = headerModel(snapshot).kind;
   const signedOut = account === "out";
-  const { setOpen: openSignin } = useSigninSheet();
   const [text, setText] = useState(initialAmount);
   const [phase, setPhase] = useState<Phase>(READY);
   const phaseRef = useRef<Phase>(READY);
@@ -127,7 +139,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
 
   // the set preview for the amount in the box; a change asks again and the last numbers stay, dimmed, until it answers
   useEffect(() => {
-    if (!kit.setPreview || amount === null || amount <= 0n) return;
+    if (!on || !kit.setPreview || amount === null || amount <= 0n) return;
     let live = true;
     kit.setPreview({ chain, token, amount: centsToDecimal(amount), slippage_bps: slippageBps }).then(
       (a) => live && setPreview(a.ok ? { amount, p: a.preview } : null),
@@ -136,7 +148,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     return () => {
       live = false;
     };
-  }, [kit.setPreview, chain, token, amount, slippageBps]);
+  }, [on, kit.setPreview, chain, token, amount, slippageBps]);
 
   // the kit's stages for the running buy
   useEffect(() => {
@@ -170,7 +182,7 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     return () => clearInterval(t);
   }, [phase.k]);
 
-  const ready = moneyOn && kit.request !== null && max !== null && balance !== null;
+  const ready = on && moneyOn && kit.request !== null && max !== null && balance !== null;
 
   function buy(c: Cents) {
     if (!ready || busy(phaseRef.current) || !amountOk(c, max, balance)) return;
@@ -193,6 +205,24 @@ export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmou
     });
   }
 
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, preview };
+}
+
+/** A trade state as useTrade gives it. */
+export type Trade = ReturnType<typeof useTrade>;
+
+/** The box with its own trade state. `footer` draws inside the panel, under the Route & fees line (the token page's
+ *  safety grid). */
+export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmount = "", footer }: { chain: Chain; token: string; symbol: string; slippageBps?: number; initialAmount?: string; footer?: ReactNode }) {
+  const t = useTrade({ chain, token, slippageBps }, initialAmount);
+  return <TradeView t={t} symbol={symbol} footer={footer} />;
+}
+
+/** The box drawn from a trade state; any number of views of one state draw the same trade. */
+export function TradeView({ t, symbol, footer }: { t: Trade; symbol: string; footer?: ReactNode }) {
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, preview } = t;
+  const { kit } = src;
+  const { setOpen: openSignin } = useSigninSheet();
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
   const pending = shown === null && last !== null;
