@@ -1132,3 +1132,81 @@ test("card solana-written-accounts-whole: a wSOL account of the wallet's that pr
   assert.match(leg.refused ?? "", /changed while the trade was checked/);
   for (const l of r.legs) if (l !== leg) assert.equal(l.refused, undefined, l.refused);
 });
+
+// Card solana-written-accounts-whole, the independent review of 0d2d8dc1 (7 Nov).
+const simAddresses = (method: string, params: readonly unknown[]): string[] | undefined =>
+  method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
+// A sell whose simulation leaves a stranger as the delegate of the wallet's account of the token: the flow hands S11 the
+// account as the simulation reads it back (mutant N13 handed it the read before, and the sell passed).
+test("card solana-written-accounts-whole review: a sell whose simulation reads the wallet's account of the token back with a stranger as its delegate is refused", async () => {
+  const req = request(SELL);
+  const d = deps(SELL);
+  const stranger = base58.decode(base58.encode(Uint8Array.from({ length: 32 }, (_, i) => 200 - i)));
+  const providers = secondRun(d, (_at, method, params, x) => {
+    const back = simAddresses(method, params);
+    if (back?.length === 4 && req.legs.some((l) => l.wallet === back[0])) {
+      const acc = (x as { value: { accounts: ({ data: [string, string] } | null)[] } }).value.accounts[1];
+      if (acc) {
+        const b = base64.decode(acc.data[0]);
+        new DataView(b.buffer, b.byteOffset).setUint32(72, 1, true);
+        b.set(stranger, 76);
+        acc.data = [base64.encode(b), "base64"];
+      }
+    }
+    return x;
+  });
+  const r = await runSolanaTrade(req, { ...d, providers });
+  for (const l of r.legs) assert.match(l.refused ?? "", new RegExp(`^checks: .*S11 provider A: the wallet's account of the token \\S+ is left with its delegate`), `${l.wallet}: ${l.refused}`);
+});
+// More than three of the wallet's token accounts written: they are read back with the wallet, three at a time (a provider
+// reads back at most four accounts), and the wallet's lamports must read the same in each of those runs.
+function fourHeld(d: ReturnType<typeof deps>, wallet: string, ata: string, shift = 0) {
+  const fake = (k: string) => { const b = new Uint8Array(165); b.set(base58.decode(k), 0); b.set(base58.decode(wallet), 32); b[64] = 1; b[108] = 1; return { data: [base64.encode(b), "base64"], executable: false, lamports: 2_039_280, owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", rentEpoch: 0, space: 165 }; };
+  let picked: string[] | null = null;
+  const walletBack: Record<string, unknown> = {};
+  const groups: string[][] = [];
+  const wrap = (p: (typeof d.providers)[number], at: "A" | "B") => Object.assign(async (method: string, params: readonly unknown[]) => {
+    const back = simAddresses(method, params);
+    if (back && back[0] === wallet && back.length !== 4 || back && back[0] === wallet && back.length === 4 && picked && back.slice(1).every((k) => picked!.includes(k))) {
+      groups.push(back);
+      const w = clone(walletBack[at]) as { lamports: number };
+      if (shift && back.slice(1).includes(picked![3]!)) w.lamports += shift;
+      p.asks.push(JSON.stringify(["simulateTransaction", { addresses: back }]));
+      return { context: { slot: 1 }, value: { err: null, accounts: [w, ...back.slice(1).map(fake)] } };
+    }
+    const x = await p(method, params);
+    if (back?.length === 4 && back[0] === wallet) walletBack[at] = (x as { value: { accounts: unknown[] } }).value.accounts[0];
+    if (method === "getMultipleAccounts") {
+      const keys = params[0] as string[];
+      if (!picked && keys.length > 5 && keys.includes(wallet)) picked = keys.filter((k) => k !== wallet && k !== ata && k !== WSOL_HELD.account).slice(0, 4);
+      if (picked) keys.forEach((k, i) => { if (picked!.includes(k)) (x as { value: unknown[] }).value[i] = fake(k); });
+    }
+    return x;
+  }, { asks: p.asks, times: p.times });
+  return { providers: [wrap(d.providers[0], "A"), wrap(d.providers[1], "B")] as const, groups, picked: () => picked };
+}
+test("card solana-written-accounts-whole review: four token accounts of the wallet's written are read back three at a time with the wallet, each once on each provider", async () => {
+  const req = request(SELL);
+  const leg = req.legs.find((l) => l.wallet !== WSOL_HELD.wallet)!;
+  const d = deps(SELL);
+  const ata = solanaAta(leg.wallet, req.token, "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+  const f = fourHeld(d, leg.wallet, ata);
+  const r = await runSolanaTrade(req, { ...d, providers: f.providers });
+  const mine = r.legs.find((l) => l.wallet === leg.wallet)!;
+  assert.equal(f.picked()?.length, 4, String(mine.refused));
+  assert.equal(mine.simulationErrors, undefined, String(mine.simulationErrors));
+  for (const g of f.groups) assert.ok(g.length <= 4 && g[0] === leg.wallet, `read back ${g.length}: a provider reads back at most 4`);
+  assert.deepEqual(f.groups.map((g) => g.length).sort(), [2, 2, 4, 4]);
+  assert.deepEqual(f.groups.flatMap((g) => g.slice(1)).sort(), [...f.picked()!, ...f.picked()!].sort());
+});
+test("card solana-written-accounts-whole review: the wallet's lamports read differently in its second read-back run refuse the leg", async () => {
+  const req = request(SELL);
+  const leg = req.legs.find((l) => l.wallet !== WSOL_HELD.wallet)!;
+  const d = deps(SELL);
+  const ata = solanaAta(leg.wallet, req.token, "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+  const f = fourHeld(d, leg.wallet, ata, 1);
+  const r = await runSolanaTrade(req, { ...d, providers: f.providers });
+  const mine = r.legs.find((l) => l.wallet === leg.wallet)!;
+  assert.ok(mine.refused, "refused");
+  assert.match(String(mine.simulationErrors), /A: the wallet's lamports differ between its simulations/);
+});

@@ -322,9 +322,13 @@ const BASE_FIELDS: readonly (readonly [string, number, number])[] = [
   ["mint", 0, 32], ["owner", 32, 64], ["amount", 64, 72], ["delegate", 72, 108], ["state", 108, 109],
   ["is_native", 109, 121], ["delegated_amount", 121, 129], ["close authority", 129, 165],
 ];
-// The base fields that differ between two token accounts' bytes, the amount left out when `amount` is false.
-const baseChanges = (x: Uint8Array, y: Uint8Array, amount: boolean): string[] =>
-  BASE_FIELDS.filter(([f, a, b]) => (amount || f !== "amount") && !eqBytes(x.subarray(a, b), y.subarray(a, b))).map(([f]) => f);
+// The base fields that differ between two token accounts' bytes, the amount left out when `amount` is false, and "size"
+// when their lengths differ: a Token-2022 account's extensions follow the base, and one added after (Reallocate, then a
+// required memo or a CPI guard) grows the account, so a written account of the wallet's keeps its size.
+const baseChanges = (x: Uint8Array, y: Uint8Array, amount: boolean): string[] => [
+  ...BASE_FIELDS.filter(([f, a, b]) => (amount || f !== "amount") && !eqBytes(x.subarray(a, b), y.subarray(a, b))).map(([f]) => f),
+  ...(x.length !== y.length ? ["size"] : []),
+];
 // A wSOL account: SPL Token's is_native COption set (u32 tag at 109).
 const nativeAccount = (a: SolanaHeldRead): boolean => a.owner === SOLANA_TOKEN_PROGRAM && u32(a.data, 109) === 1;
 const JUP_EVENT_AUTHORITY = solanaProgramAddress([new TextEncoder().encode("__event_authority")], SOLANA_JUPITER_PROGRAM);
@@ -789,12 +793,55 @@ function s10(c: Ctx): SolanaQuoteResult {
   return refused.length ? fail("S10", `Token-2022 mint with ${refused.join(", ")}`) : pass("S10", `Token-2022 extensions ${found.join(",") || "none"}`);
 }
 
+/** Token-2022 mint extensions (spl-token-2022 ExtensionType) that add nothing to a new token account. */
+const T22_MINT_ONLY = new Set([3, 4, 6, 10, 12, 16, 18, 19, 20, 21, 22, 23, 24, 25]);
+/** Mint extensions that a new token account carries one of (get_required_init_account_extensions): TransferFeeConfig
+ * -> TransferFeeAmount (8 bytes), NonTransferable -> NonTransferableAccount (0), TransferHook -> TransferHookAccount
+ * (1), Pausable -> PausableAccount (0). */
+const T22_ACCOUNT_EXT = new Map([[1, 8], [9, 0], [14, 1], [26, 0]]);
+
+/** The largest new token account W can get for a mint the venue reader admits (solanaTokenAccountSize): a Token-2022
+ * account with its type byte, ImmutableOwner, and each of the four extensions a mint can ask of it once (Token-2022
+ * holds one extension of each type): 195 bytes. */
+export const SOLANA_TOKEN_ACCOUNT_MAX_SIZE = 165 + 1 + 4 + [...T22_ACCOUNT_EXT.values()].reduce((s, x) => s + 4 + x, 0);
+/** The size of W's new associated token account for `mint` (S11 holds the wallet's account of the token the tx creates
+ * to it; the pool buy prices its rent by it): 165 for Token; for Token-2022 165, the account type byte
+ * and a 4-byte TLV head per extension: ImmutableOwner (the associated token program always adds it) and the one each
+ * mint extension asks. A mint extension this list does not know is refused. */
+export function solanaTokenAccountSize(mint: { owner: string; data: Uint8Array }): number {
+  if (mint.owner === SOLANA_TOKEN_PROGRAM) {
+    if (mint.data.length !== 82) throw new Error("not a Token mint");
+    return 165;
+  }
+  if (mint.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`mint owned by ${mint.owner}`);
+  const d = mint.data;
+  let size = 165 + 1 + 4; // account type, ImmutableOwner
+  if (d.length === 82) return size;
+  if (d.length < 166 || d[165] !== 1) throw new Error("not a Token-2022 mint");
+  const seen = new Set<number>(); // Token-2022 holds at most one extension of each type: a mint listing one twice is forged
+  for (let at = 166; at < d.length; ) {
+    if (at + 4 > d.length) throw new Error("a Token-2022 extension runs past the mint");
+    const type = d[at]! | (d[at + 1]! << 8);
+    const len = d[at + 2]! | (d[at + 3]! << 8);
+    if (type === 0) break; // Uninitialized: the rest is padding
+    if (seen.has(type)) throw new Error(`a Token-2022 mint lists extension ${type} twice`);
+    seen.add(type);
+    at += 4 + len;
+    if (at > d.length) throw new Error("a Token-2022 extension runs past the mint");
+    const extra = T22_ACCOUNT_EXT.get(type);
+    if (extra !== undefined) size += 4 + extra;
+    else if (!T22_MINT_ONLY.has(type)) throw new Error(`a Token-2022 mint extension ${type} not known here`);
+  }
+  return size;
+}
+
 // The wallet's token accounts the tx names writable, each with its read before. Its account of the token (S11's
 // tokenAccount) is `own`, its read before kept only when both providers read it as the wallet's, the same (else null: the
-// tx creates it, or a provider has not seen it yet). Every other one both providers must read as the wallet's, the
-// same in every byte of its base and its lamports and program; or why not.
-type WalletAccount = { key: string; pre: SolanaHeldRead | null; own: boolean };
-const sameHeld = (a: SolanaHeldRead, b: SolanaHeldRead): boolean => a.owner === b.owner && a.lamports === b.lamports && eqBytes(a.data.subarray(0, 165), b.data.subarray(0, 165));
+// tx creates it, or a provider has not seen it yet), and `disputed` when one provider reads it as the wallet's and the
+// other not, or both but not the same. Every other one both providers must read as the wallet's, the same in every byte
+// (its base and its extensions) and its lamports and program; or why not.
+type WalletAccount = { key: string; pre: SolanaHeldRead | null; own: boolean; disputed: boolean };
+const sameHeld = (a: SolanaHeldRead, b: SolanaHeldRead): boolean => a.owner === b.owner && a.lamports === b.lamports && eqBytes(a.data, b.data);
 function walletAccountsOf(c: Ctx): WalletAccount[] | string {
   const w = c.req.wallet;
   if (!isToken(c.tokenProgram)) return `token program ${c.tokenProgram} unknown`;
@@ -807,10 +854,14 @@ function walletAccountsOf(c: Ctx): WalletAccount[] | string {
     const pair = Object.hasOwn(wr, k) ? wr[k] : undefined;
     if (!pair) { wrong.push(`${k}, which the tx writes, is not read`); continue; }
     const [a, b] = pair;
-    if (k === own) { out.push({ key: k, pre: walletToken(a, w) && walletToken(b, w) && sameHeld(a, b) ? a : null, own: true }); continue; }
+    if (k === own) {
+      const agreed = walletToken(a, w) && walletToken(b, w) && sameHeld(a, b);
+      out.push({ key: k, pre: agreed ? a : null, own: true, disputed: !agreed && (walletToken(a, w) || walletToken(b, w)) });
+      continue;
+    }
     if (!walletToken(a, w) && !walletToken(b, w)) continue;
     if (!walletToken(a, w) || !walletToken(b, w) || !sameHeld(a, b)) { wrong.push(`the providers disagree on the wallet's account ${k}`); continue; }
-    out.push({ key: k, pre: a, own: false });
+    out.push({ key: k, pre: a, own: false, disputed: false });
   }
   return wrong.length ? wrong.join("; ") : out;
 }
@@ -824,11 +875,22 @@ function cleanBase(mint: string, wallet: string): Uint8Array {
   return d;
 }
 // One simulation's native out: the wallet's lamports and those of each wSOL account of its in `mine`, before less after
-// (one closed counts 0 after); and each account in `mine` the simulation changes beyond what a trade may. A wSOL account
-// may change only its amount and lamports, or close; any other account of the wallet's nothing, not its lamports; the
-// account of the token only its amount and lamports (S11 bounds both), or close, and its base after is the one before or,
-// when the tx creates it, a clean one of the token (cleanBase). So no route leaves a delegate, a close authority, another
-// owner or a frozen state on any account of the wallet's.
+// (one closed counts 0 after), and those of the account of the token when the tx closes it (its rent is the wallet's: a
+// route that sends it elsewhere takes it from the native sum, as a closed wSOL account's); and each account in `mine` the
+// simulation changes beyond what a trade may. A wSOL account may change only its amount and lamports, or close; any
+// other account of the wallet's nothing, not its lamports; the account of the token only its amount and lamports (S11
+// bounds both), or close, and its base and size after are the ones before or, when the tx creates it, a clean base of
+// the token at the size the associated token program gives it (solanaTokenAccountSize). So no route leaves a delegate, a
+// close authority, another owner, a frozen state or an added extension on any account of the wallet's.
+// The size of the wallet's account of the token when the tx creates it, from provider A's mint (S10 holds B's to it); -1
+// (no account matches) when the mint is not read or has an extension the size rule does not know.
+const newSize = (c: Ctx): number => {
+  try {
+    return c.reads.mint[0] ? solanaTokenAccountSize(c.reads.mint[0]) : -1;
+  } catch {
+    return -1;
+  }
+};
 function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: Ctx): { out: bigint; wrong: string[] } {
   const wallet = c.req.wallet;
   let pre = sim.walletLamports.pre;
@@ -843,8 +905,12 @@ function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: C
     // back as the system program's, 0 lamports, no data), so nothing on it outlives the tx.
     const closed = after === null || after.lamports === 0n;
     if (m.own) {
-      if (closed) continue;
-      const left = !still ? ["owner"] : still.owner !== c.tokenProgram ? ["program"] : m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] : baseChanges(cleanBase(c.req.token, wallet), still.data, false);
+      if (closed) {
+        if (m.pre) pre += m.pre.lamports;
+        else if (m.disputed) wrong.push(`the providers disagree on the wallet's account of the token ${m.key}, which the tx closes`);
+        continue;
+      }
+      const left = !still ? ["owner"] : still.owner !== c.tokenProgram ? ["program"] : m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] : [...baseChanges(cleanBase(c.req.token, wallet), still.data.subarray(0, 165), false), ...(still.data.length !== newSize(c) ? ["size"] : [])];
       if (left.length) wrong.push(`the wallet's account of the token ${m.key} is left with its ${left.join(", ")} changed`);
       continue;
     }
