@@ -16,6 +16,7 @@ import {
   solanaPumpVolumeAccumulator,
   solanaVolumeAccumulator,
   type SolanaAccountRead,
+  type SolanaHeldRead,
   type SolanaQuoteCheckId,
   type SolanaQuoteReads,
   type SolanaQuoteRequest,
@@ -106,6 +107,7 @@ function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQu
     tokenAccountLamports: { pre: 0n, post: 1_513_840n }, // the landed buy: ECDKZF… 0 -> 1,513,840 (meta)
     pumpVolumeAccumulator: { pre: 0n, post: 1_346_200n },
     pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
+    walletAccounts: {},
   };
   return {
     m: msgOf(BUY),
@@ -115,6 +117,7 @@ function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQu
       mint: [read(F.mintReads[0]), read(F.mintReads[1])],
       rent: { tokenAccount: [BigInt(RENT_A[170]), BigInt(RENT_B[170])], pumpVolumeAccumulator: [BigInt(RENT_A[137]), BigInt(RENT_B[137])] },
       simulations: [sim, structuredClone(sim)],
+      writable: {},
       reference: { expectedOut: 51_111_993_061n, slippageBps: 950 },
     },
   };
@@ -138,6 +141,7 @@ function sellCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQ
     tokenAccountLamports: { pre: 1_513_840n, post: 1_513_840n },
     pumpVolumeAccumulator: { pre: 1_346_200n, post: 1_346_200n },
     pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
+    walletAccounts: {},
   };
   const b = buyCase();
   return {
@@ -146,7 +150,21 @@ function sellCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQ
     reads: { ...b.reads, simulations: [sim, structuredClone(sim)], reference: { expectedOut: 9_656_210n, slippageBps: 950 } },
   };
 }
-const run = (c: { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQuoteReads }, bytes?: Uint8Array) => checkSolanaQuote(bytes ?? encode(c.m), c.req, c.reads);
+// The device's reads of the accounts a tx writes: the case's own, and every other one as no account (none of them is
+// the wallet's token account before these trades: the buy creates the token account and the wSOL account it closes).
+function writes(bytes: Uint8Array, reads: SolanaQuoteReads): SolanaQuoteReads {
+  let keys: string[] = [];
+  try {
+    const m = solanaDecodeTransaction(bytes).message;
+    const tables = Object.fromEntries(m.lookups.map((l) => [l.table, solanaDecodeLookupTable((reads.tables[l.table] as readonly [SolanaAccountRead, SolanaAccountRead])[0].data)]));
+    keys = solanaResolveKeys(m, tables).filter((k) => k.writable).map((k) => k.key);
+  } catch { /* a case that breaks the bytes or a table: the check refuses it before any account matters */ }
+  return { ...reads, writable: { ...Object.fromEntries(keys.map((k) => [k, [null, null]])), ...reads.writable } };
+}
+const run = (c: { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQuoteReads }, bytes?: Uint8Array) => {
+  const b = bytes ?? encode(c.m);
+  return checkSolanaQuote(b, c.req, writes(b, c.reads));
+};
 const failed = (v: ReturnType<typeof checkSolanaQuote>): string[] => v.results.filter((r) => !r.ok).map((r) => r.id);
 function refusedBy(id: SolanaQuoteCheckId, v: ReturnType<typeof checkSolanaQuote>): void {
   assert.equal(v.ok, false, `expected a refusal by ${id}`);
@@ -162,14 +180,14 @@ test("encoder round-trips the real bytes", () => {
 });
 
 test("the real buy passes every check", () => {
-  const v = checkSolanaQuote(Uint8Array.from(Buffer.from(BUY.tx, "base64")), buyCase().req, buyCase().reads);
+  const v = run(buyCase(), Uint8Array.from(Buffer.from(BUY.tx, "base64")));
   assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));
   assert.equal(v.results.length, 13);
 });
 
 test("the trade's map of the user's wallets: the real buy passes with it, and it holds every account S11 looks for", () => {
   const links = new SolanaWalletLinks([W, OTHER]);
-  const v = checkSolanaQuote(Uint8Array.from(Buffer.from(BUY.tx, "base64")), { ...buyCase().req, links }, buyCase().reads);
+  const v = run({ ...buyCase(), req: { ...buyCase().req, links } }, Uint8Array.from(Buffer.from(BUY.tx, "base64")));
   assert.equal(v.ok, true, v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join(" | "));
   const WSOL = "So11111111111111111111111111111111111111112";
   const sva = solanaVolumeAccumulator(OTHER, SOLANA_PUMP_AMM_PROGRAM);
@@ -294,7 +312,7 @@ test("the paper's sell shape passes every check", () => {
 
 test("the real sell as built is refused: a top-level pump call (S3) and a close of an account it did not create (S13)", () => {
   const c = sellCase();
-  const v = checkSolanaQuote(Uint8Array.from(Buffer.from(SELL.tx, "base64")), c.req, c.reads);
+  const v = run(c, Uint8Array.from(Buffer.from(SELL.tx, "base64")));
   refusedBy("S3", v);
   refusedBy("S13", v);
 });
@@ -799,4 +817,119 @@ test("sweep: 844 key swaps, 90 moves and 110 duplicates; every one that passes i
   assert.deepEqual(unnamed, []);
   const counts = ACCEPTED_VARIANTS.map(([re, why]) => `${r.passed.filter((p) => re.test(p)).length} ${why}`);
   assert.equal(r.passed.length, 80, counts.join("; "));
+});
+
+// The legs and the wallet's other accounts (card solana-legs-checked). route_v2 names 10 accounts, then the legs, which go
+// into Jupiter's closed program with the wallet's signature; the solana-checks-shared-route Opus review (2 Nov 06:50Z)
+// found S6 read none of them and S11 read only the wallet's lamports and its account of the token. Each case rewrites the
+// real buy or sell so a writable leg is a token account of the wallet's the device reads as such.
+const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+// A token account of `owner`'s as a provider answers it: the 165-byte base (mint, owner, amount, state, is_native).
+function held(owner: string, mint: string, program: string, amount: bigint, lamports = 2_039_280n, native = false): SolanaHeldRead {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(mint), 0);
+  d.set(base58.decode(owner), 32);
+  setU64(d, 64, amount);
+  d[108] = 1;
+  if (native) { setU32(d, 109, 1); setU64(d, 113, 2_039_280n); }
+  return { owner: program, lamports, data: d };
+}
+// A new writable, unsigned static key, put where the header keeps them (before the read-only unsigned ones); every
+// index at or past it moves up one. Returns its index.
+function addWritableKey(m: SolanaMessage, key: string): number {
+  const at = m.staticKeys.length - m.readonlyUnsigned;
+  for (const ix of m.instructions) {
+    if (ix.programIndex >= at) ix.programIndex++;
+    for (let j = 0; j < ix.accounts.length; j++) if ((ix.accounts[j] as number) >= at) ix.accounts[j] = (ix.accounts[j] as number) + 1;
+  }
+  m.staticKeys.splice(at, 0, key);
+  return at;
+}
+// The real trade with its first writable leg past route_v2's 10 accounts (neither its source nor its destination)
+// rewritten to `key`.
+function legTo(c: ReturnType<typeof buyCase>, key: string): void {
+  const j = progAt(c.m, JUP)[0] as number;
+  const at = addWritableKey(c.m, key);
+  const ix = c.m.instructions[j]!;
+  const keys = solanaResolveKeys(c.m, Object.fromEntries(c.m.lookups.map((l) => [l.table, solanaDecodeLookupTable(c.reads.tables[l.table]![0]!.data)])));
+  const pinned = [ix.accounts[1], ix.accounts[2]];
+  const leg = ix.accounts.findIndex((a, k) => k >= 10 && keys[a]!.writable && !pinned.includes(a) && a !== at);
+  assert.ok(leg >= 10, "a writable leg");
+  ix.accounts[leg] = at;
+}
+const s6 = (v: ReturnType<typeof checkSolanaQuote>) => v.results.find((r) => r.id === "S6")!;
+const s11 = (v: ReturnType<typeof checkSolanaQuote>) => v.results.find((r) => r.id === "S11")!;
+
+for (const [side, make] of [["buy", buyCase], ["sell", sellCase]] as const) {
+  test(`S6 legs, route_v2 ${side}: a leg rewritten to a token account of the wallet's is refused (an associated one, a non-associated Token-2022 one read so by provider B alone)`, () => {
+    assert.equal(s6(run(make())).ok, true, "the unchanged trade passes S6");
+    const ata = solanaAta(W, USDC, TOKEN);
+    const odd = randomKey();
+    for (const [key, pair] of [[ata, [held(W, USDC, TOKEN, 7n), held(W, USDC, TOKEN, 7n)]], [odd, [null, held(W, USDC, T22, 7n)]]] as const) {
+      const c = make();
+      legTo(c, key);
+      c.reads.writable = { [key]: pair };
+      const got = s6(run(c));
+      assert.equal(got.ok, false, `S6 passed: ${got.detail}`);
+      assert.ok(got.detail.includes(`leg account ${key} is a token account of the wallet's`), got.detail);
+    }
+  });
+}
+
+test("S11: a writable token account of the wallet's is held to its read before: moved or not read back is refused, unmoved passes", () => {
+  const ata = solanaAta(W, USDC, TOKEN);
+  const before = held(W, USDC, TOKEN, 7_000_000n);
+  const at = (after: SolanaHeldRead | null | undefined) => {
+    const c = buyCase();
+    legTo(c, ata);
+    c.reads.writable = { [ata]: [before, before] };
+    for (const s of c.reads.simulations) (s as SolanaSimulation).walletAccounts = after === undefined ? {} : { [ata]: after };
+    return s11(run(c));
+  };
+  assert.equal(at(held(W, USDC, TOKEN, 7_000_000n)).ok, true, "unmoved");
+  const drained = at(held(W, USDC, TOKEN, 0n));
+  assert.equal(drained.ok, false);
+  assert.match(drained.detail, new RegExp(`provider A: the wallet's account ${ata} moves: 7000000 -> 0`));
+  assert.match(at(null).detail, new RegExp(`the wallet's account ${ata} moves: 7000000 -> not the wallet's`));
+  assert.match(at(held(randomKey(), USDC, TOKEN, 7_000_000n)).detail, /moves: 7000000 -> not the wallet's/);
+  assert.match(at(undefined).detail, new RegExp(`the wallet's account ${ata} is not read back`));
+  // the providers disagree on it: refused before any simulation
+  const c = buyCase();
+  legTo(c, ata);
+  c.reads.writable = { [ata]: [before, held(W, USDC, TOKEN, 6_999_999n)] };
+  assert.match(s11(run(c)).detail, new RegExp(`the providers disagree on the wallet's account ${ata}`));
+});
+
+// A wSOL account the wallet already holds, which the trade writes (the buy's source, the sell's destination): its
+// lamports count with the wallet's, so what it held is never read as the trade's.
+const WSOL_ATA = solanaAta(W, "So11111111111111111111111111111111111111112", TOKEN);
+const X = 50_000_000n; // the wSOL it held, 0.05 SOL
+const wsolHeld = held(W, "So11111111111111111111111111111111111111112", TOKEN, X, X + 2_039_280n, true);
+test("S11 wSOL: the buy's wSOL account held 0.05 SOL; closed back into the wallet passes, closed anywhere else is refused", () => {
+  const ok = buyCase();
+  ok.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  for (const s of ok.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { [WSOL_ATA]: null }; x.walletLamports.post += X + 2_039_280n; }
+  assert.equal(s11(run(ok)).ok, true, s11(run(ok)).detail);
+  const gone = buyCase();
+  gone.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  for (const s of gone.reads.simulations) (s as SolanaSimulation).walletAccounts = { [WSOL_ATA]: null };
+  const v = s11(run(gone));
+  assert.equal(v.ok, false);
+  assert.match(v.detail, /provider A: native out \d+ > \d+/);
+});
+test("S11 wSOL: a sell whose own out is under minOut is refused though the wallet's wSOL account it closes held 0.05 SOL", () => {
+  const c = sellCase();
+  // the wallet's lamports after: its own native in (before fees and tips) one lamport under minOut, plus the 0.05 SOL
+  // and the rent the close of its wSOL account returned
+  const base = run(c).results.find((r) => r.id === "S11")!.detail.match(/fees (\d+), tips (\d+)/)!;
+  const ft = BigInt(base[1]!) + BigInt(base[2]!);
+  for (const s of c.reads.simulations) {
+    const x = s as SolanaSimulation;
+    x.walletLamports.post = x.walletLamports.pre + c.req.minOut - 1n - ft + X + 2_039_280n;
+    x.walletAccounts = { [WSOL_ATA]: null };
+  }
+  c.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  const v = s11(run(c));
+  assert.equal(v.ok, false, v.detail);
+  assert.match(v.detail, new RegExp(`provider A: native in ${c.req.minOut - 1n} < minOut ${c.req.minOut}`));
 });

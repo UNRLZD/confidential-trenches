@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { noneWritten } from "./solana-writes.ts";
 import { base58, base64 } from "@scure/base";
 import {
   SOLANA_JUPITER_BUILD_PROXY_PATH,
@@ -70,6 +71,7 @@ const verdict = (wire: Uint8Array, req: SolanaBuildRequest, tables: readonly str
     mint: [read(G.reads.accounts[G.mint]![0]), read(G.reads.accounts[G.mint]![1])],
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
     simulations: [null, null],
+    writable: noneWritten(wire, tablesOf(G.reads.accounts, tables)),
     reference: null,
   });
 const frameOk = (v: ReturnType<typeof verdict>) => v.results.filter((r) => FRAME.includes(r.id) && !r.ok).map((r) => `${r.id} ${r.detail}`);
@@ -380,6 +382,7 @@ const assembleRun = (r: Run, side: "buy" | "sell", build = parseSolanaJupiterBui
     mint: [read(r.accounts[r.mint]![0]), read(r.accounts[r.mint]![1])],
     rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
     simulations: [null, null],
+    writable: noneWritten(tx.wire, tables),
     reference: null,
   });
   return { req, build, tables, tx, v };

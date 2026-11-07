@@ -36,6 +36,8 @@ type Fixture = {
 };
 const fx = JSON.parse(readFileSync(new URL("./fixtures/solana-flow-replay.json", import.meta.url), "utf8")) as Fixture;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+/** The one wSOL account a recorded sell wallet holds (see replay below), and its lamports in the recording. */
+const WSOL_HELD = { wallet: "9UnZnrFJ1CXCmCorgGU9NvYkX5np1h4v4ympx3Nrdw3v", account: "FVee2JCpMd9k17iP1LLCSP28wwLt5N172pULCqUo8qQi", lamports: 28_772_578_629 };
 const askOf = (method: string, params: readonly unknown[]): string =>
   JSON.stringify(method === "simulateTransaction" ? [method, (params[1] as { accounts?: unknown })?.accounts] : [method, params]);
 
@@ -46,6 +48,18 @@ type Valid = (at: "A" | "B", hash: string, n: number) => boolean;
 function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid = () => true): SolanaRpc & { asks: string[]; times: number[] } {
   const by = new Map<string, unknown[]>();
   for (const r of fx.rpc) if (r.at === at) by.set(r.ask, [...(by.get(r.ask) ?? []), r.answer]);
+  // The recording predates the read of every account a leg's tx writes (card solana-legs-checked). An ask for accounts
+  // the recording never asked together answers each from the recording's own reads of it on this provider, and as no
+  // account where it holds none. One sell wallet, 9UnZ…dw3v, also holds a wSOL account (FVee…8qQi, 28,771,090,189
+  // wrapped, read by its teardown), which its sell writes: the flow reads it back in a second simulation, which the
+  // recording predates too. That sell's own instructions close the account into the wallet (S13 holds a create closed
+  // once, after the route, to the wallet), so a clean run of it leaves no account there: the replay answers that.
+  const known = new Map<string, unknown>();
+  for (const r of fx.rpc) {
+    if (r.at !== at || !r.ask.startsWith('["getMultipleAccounts"')) continue;
+    const keys = (JSON.parse(r.ask) as [string, [string[]]])[1][0];
+    keys.forEach((k, i) => known.set(k, (r.answer as { value: unknown[] }).value[i] ?? null));
+  }
   const seen = new Map<string, number>();
   const asks: string[] = [];
   const times: number[] = [];
@@ -55,6 +69,9 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
     times.push(Date.now());
     if (method === "isBlockhashValid") return { context: { slot: 1 }, value: valid(at, params[0] as string, asks.filter((x) => x.startsWith('["isBlockhashValid"')).length - 1) };
     const list = by.get(k);
+    if (!list && method === "getMultipleAccounts") return { context: { slot: 1 }, value: (params[0] as string[]).map((x) => clone(known.get(x) ?? null)) };
+    const back = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
+    if (!list && back?.length === 1 && back[0] === WSOL_HELD.account) return { context: { slot: 1 }, value: { err: null, accounts: [null] } };
     if (!list) throw new Error(`not recorded on ${at}: ${k.slice(0, 160)}`);
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
@@ -624,7 +641,8 @@ test("builds that took 25 s: every leg's pre-state and simulation read again, a 
   for (const i of [0, 1] as const) {
     const p = d.providers[i];
     assert.equal(p.asks.filter((k) => k.startsWith('["isBlockhashValid"')).length, 1, "the fresh hash asked once on each provider");
-    assert.equal(sims(p.asks), sims(d0.providers[i].asks) + req.legs.length, "one more simulation a leg: the renewal's");
+    // one more a leg, the renewal's, and the renewal's read-back of the one wSOL account a leg writes (WSOL_HELD)
+    assert.equal(sims(p.asks), sims(d0.providers[i].asks) + req.legs.length + 1, "one more simulation a leg: the renewal's");
   }
   // the floors are the trade's own: S12 still names each leg's reference E, the check on the fresh bytes passed
   const ref = fx.references[SELL]!.answer!;
@@ -695,8 +713,10 @@ function renewalPays(k: number): Edit {
       const w = sim[0]!;
       const pre = (fx.rpc.find((q) => q.at === at && q.ask.startsWith('["getMultipleAccounts"') && q.ask.includes(w))!.answer as { value: ({ lamports: number } | null)[] }).value[0]!.lamports;
       const acc = (y as { value: { accounts: ({ lamports: number } | null)[] } }).value.accounts[0]!;
-      if (n === 0) gains.set(`${at}${w}`, acc.lamports - pre);
-      else acc.lamports = pre + Math.floor((gains.get(`${at}${w}`) ?? 0) * k);
+      // the sell's own proceeds, scaled: not the wSOL a wallet already held, which its sell's close returns whole
+      const held = w === WSOL_HELD.wallet ? WSOL_HELD.lamports : 0;
+      if (n === 0) gains.set(`${at}${w}`, acc.lamports - pre - held);
+      else acc.lamports = pre + held + Math.floor((gains.get(`${at}${w}`) ?? 0) * k);
     }
     return y;
   };
