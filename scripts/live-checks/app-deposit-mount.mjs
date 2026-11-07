@@ -23,7 +23,6 @@
 //     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
-// Runs: pending app-deposit-mount, it fails on today's deployed app (the header's Deposit opens nothing) until this card deploys
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -261,12 +260,7 @@ async function runOne(browser, w, scheme, shots, route) {
 /** Every width and scheme in Chromium. `route` answers the hosts' names (see main). */
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route, source }) {
   mkdirSync(shots, { recursive: true });
-  // the screen's pixel ratio is 2, as the phone runs ask for: on a Linux host at 1 the terminal's frame (another site,
-  // so its own process) kept a ratio of 1 under the phone's 2, and taps into it landed at half the point (Linux
-  // Chrome 156: a tap at 195,796 reached the frame at 98,398, the amount field), as Playwright 1.63's click on Linux
-  // Chrome 157 at 390 did on CI (run 42338709153, job 128301399307: the amount field "intercepts pointer events"
-  // while the browser's own hit test returned the button). The Mac's screen is already 2, and never failed.
-  const browser = await launchBrowser("chromium", { args: ["--force-device-scale-factor=2"] });
+  const browser = await launchBrowser("chromium"); // a phone context runs at its own screen ratio (browsers.mjs scaleByContext)
   try {
     const runs = [];
     for (const w of WIDTHS) for (const s of SCHEMES) runs.push(await runOne(browser, w, s, shots, route));
