@@ -14,7 +14,7 @@ import { base58 } from "../bind/checks.ts";
 import { encodeAction, encodeTransaction, RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, type CheckedWithdraw, type WithdrawConfig } from "./checks.ts";
-import { TESTNET_TOKEN } from "./fee.ts";
+import { FeeReadRefused, REGISTER_DEPOSIT_MAX, TESTNET_TOKEN } from "./fee.ts";
 import { createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex } from "./index.ts";
 import {
   A_STORE_YOCTO,
@@ -72,6 +72,8 @@ type Chain = {
   spendStatus: string;
   /** The spends row's refund_value (the vault's on_payout: the withdrawn amount when the payout bounced), "0" unless set. */
   spendRefund?: string;
+  /** Per provider, the spends row's status and refund_value in place of spendStatus and spendRefund (two providers apart). */
+  spendOn?: [{ status?: string; refund?: string }?, { status?: string; refund?: string }?];
   spendIndex: number;
   /** The nullifier the spends row at spendIndex names (NF unless a test plants another). */
   spendNf?: bigint;
@@ -151,7 +153,7 @@ function provider(c: Chain, i: 0 | 1): Rpc {
       else if (p.method_name === "is_blocklisted" && args.account_id === W.recipient) v = c.recipientListed[i];
       else if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
-      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus, refund_value: c.spendRefund ?? "0" }] : [];
+      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendOn?.[i]?.status ?? c.spendStatus, refund_value: c.spendOn?.[i]?.refund ?? c.spendRefund ?? "0" }] : [];
       else if (p.method_name === "is_known_state_root") v = c.stateKnown;
       else if (p.method_name === "is_known_label_root") v = c.labelKnown;
       else if (p.method_name === "totals") v = { deposited: c.totals[0].toString(), spent: c.totals[1].toString(), returned: c.totals[2].toString() };
@@ -232,7 +234,7 @@ function setup(c = chain(), opts: { status?: () => TokenStatus; release?: number
 const code = (a: Awaited<ReturnType<typeof carryWithdraw>>) => ("error" in a.body ? a.body.error.code : "ok");
 
 /** What readChecks returns, for the checks on what was read. */
-const reads = (over: Partial<ChainReads> = {}): ChainReads => ({ registered: true, registerMin: MIN, finalMs: 0n, stateKnown: true, labelKnown: true, totals: { deposited: 10n ** 12n, spent: 0n, returned: 0n }, feeAccount: { registered: true, blocklisted: false }, recipientListed: false, ...over });
+const reads = (over: Partial<ChainReads> = {}): ChainReads => ({ registerMin: MIN, finalMs: 0n, stateKnown: true, labelKnown: true, totals: { deposited: 10n ** 12n, spent: 0n, returned: 0n }, feeAccount: { registered: true, blocklisted: false }, recipientListed: false, ...over });
 
 // ---- The send ----
 
@@ -492,6 +494,34 @@ test("onLanded hears a withdrawal's signed recipient only once its spends row re
   assert.equal(recipientOfSigned(Buffer.from("not a transaction").toString("base64")), null);
 });
 
+test("onLanded fires only when both providers read the payout delivered: one in_flight and one settled with no refund, one refund_pending, or a refund on one side only fire nothing; delivered on both fires once (helper-id-intents review L1)", async () => {
+  type Side = { status?: string; refund?: string };
+  const run = async (a: Side, b: Side) => {
+    const s = setup();
+    const heard: string[] = [];
+    s.deps.onLanded = (to) => void heard.push(to);
+    assert.equal(code(await carryWithdraw(req(), s.deps)), "ok");
+    const tx = s.relayer.sent[0]!.tx;
+    s.outcomes.set(tx.tx_hash, final(tx.tx_hash, true, DEADLINE - 1n));
+    await outcomeRound(s.deps);
+    s.c.spendOn = [a, b];
+    await outcomeRound(s.deps);
+    await outcomeRound(s.deps);
+    return heard;
+  };
+  for (const [a, b, why] of [
+    [{ status: "in_flight" }, { status: "settled", refund: "0" }, "one in_flight, the other settled with refund_value 0"],
+    [{ status: "settled", refund: "0" }, { status: "in_flight" }, "the same, the other way round"],
+    [{ status: "paid" }, { status: "refund_pending", refund: "1000000" }, "one paid, the other refund_pending"],
+    [{ status: "refund_pending", refund: "1000000" }, { status: "paid" }, "the same, the other way round"],
+    [{ status: "settled", refund: "0" }, { status: "settled", refund: "1000000" }, "settled on both, a refund on one side only"],
+    [{ status: "settled", refund: "1000000" }, { status: "settled", refund: "0" }, "the same, the other way round"],
+  ] as [Side, Side, string][])
+    assert.deepEqual(await run(a, b), [], why);
+  assert.deepEqual(await run({ status: "paid" }, { status: "paid" }), [W.recipient], "paid on both: heard once");
+  assert.deepEqual(await run({ status: "settled", refund: "0" }, { status: "settled", refund: "0" }), [W.recipient], "settled with no refund on both: heard once");
+});
+
 // ---- Check 7b: the fee account (card vault-review-fixes-1, review F-1) ----
 
 // The vault pays the relay fee in the recipient's own payout receipt (review A-01): a fee account the token refuses fails
@@ -558,7 +588,7 @@ test("readChecks reads check 7b's two views of fee_recipient (not the recipient'
   const v = await checkWithdraw(req(), CFG, s.deps.reads);
   assert.ok(v.ok);
   const r = await readChecks(s.deps.rpcs, CFG.vault, CFG.token, v.withdraw, s.deps.now);
-  assert.equal(r.registered, false);
+  assert.equal("registered" in r, false, "the recipient's registration decides nothing since V-03: it is not read");
   assert.deepEqual(r.feeAccount, { registered: true, blocklisted: true });
   assert.equal(feeAccountReady(r.feeAccount), false);
   assert.equal(feeAccountReady({ registered: true, blocklisted: false }), true);
@@ -625,44 +655,27 @@ test("check 7b's hold at check 7 stands on its own: a fee account unregistered a
 
 // ---- Check 7 ----
 
-test("check 7: an unregistered recipient takes exactly the token's minimum; a registered one 0, else register_deposit_wrong", async () => {
-  // through the route: the fixture's register_deposit is the minimum
-  const reg = setup(chain({ registered: [true, true] }));
-  const a = await carryWithdraw(req(), reg.deps);
-  assert.equal(a.status, 400);
-  assert.equal(code(a), "register_deposit_wrong");
-  assert.equal(reg.relayer.sent.length, 0);
-  const moved = setup(chain({ min: MIN + 1n }));
-  assert.equal(code(await carryWithdraw(req(), moved.deps)), "register_deposit_wrong");
-  // on what was read
-  const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
-  const r = reads();
-  assert.equal(checks7to9(w, CFG.vault, r), null);
-  assert.equal(checks7to9({ ...w, register_deposit: 1n }, CFG.vault, r), "register_deposit_wrong");
-  assert.equal(checks7to9(w, CFG.vault, { ...r, registered: false }), "register_deposit_wrong");
-  assert.equal(checks7to9({ ...w, register_deposit: MIN }, CFG.vault, { ...r, registered: false }), null);
-});
-
-test("check 7's exception: a stored withdrawal's minimum stands for a recipient registered since; a fresh request's does not", () => {
-  const w = { register_deposit: MIN, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
-  const r = reads();
-  assert.equal(checks7to9(w, CFG.vault, r), "register_deposit_wrong");
-  assert.equal(checks7to9(w, CFG.vault, r, { stored: true }), null);
-  assert.equal(checks7to9({ ...w, register_deposit: MIN - 1n }, CFG.vault, r, { stored: true }), "register_deposit_wrong");
-});
-
-test("check 7's reads: the two providers disagree on the registration, or one is down: 503 upstream, nothing sent", async () => {
-  const split = setup(chain({ registered: [true, false] }));
-  const a = await carryWithdraw(req(), split.deps);
-  assert.equal(a.status, 503);
-  assert.equal(code(a), "upstream");
-  assert.equal(split.relayer.sent.length, 0);
+test("check 7 (card relayer-cost-guards, audit V-03): register_deposit is exactly the token's minimum, registered recipient or not; 0 or any other value is register_deposit_wrong", async () => {
+  // through the route: the fixture's register_deposit is the minimum, carried whether the recipient reads registered or not
+  for (const registered of [[false, false], [true, true], [true, false]] as [boolean, boolean][]) {
+    const x = setup(chain({ registered }));
+    assert.equal(code(await carryWithdraw(req(), x.deps)), "ok", JSON.stringify(registered));
+    assert.equal(x.relayer.sent.length, 1);
+  }
+  // a minimum off the pin is refused at the read (503 upstream, the cap test and review F1), so check 7 only ever
+  // compares against the pin itself
+  // on what was read: the reviewer's R2, a register_deposit of 0 to a registered recipient is not carried, since the
+  // recipient can storage_unregister after any read and only the minimum in the payout's own receipt stops the bounce
+  const w = { register_deposit: 0n, recipient: "griefer.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
+  assert.equal(checks7to9(w, CFG.vault, reads({ finalMs: 0n })), "register_deposit_wrong");
+  for (const rd of [1n, MIN - 1n, MIN + 1n, 2n * MIN]) assert.equal(checks7to9({ ...w, register_deposit: rd }, CFG.vault, reads()), "register_deposit_wrong", String(rd));
+  assert.equal(checks7to9({ ...w, register_deposit: MIN }, CFG.vault, reads()), null);
 });
 
 // ---- Check 8 ----
 
 test("check 8: recipient or fee_recipient the vault or intents.near is bad_recipient", () => {
-  const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
+  const w = { register_deposit: MIN, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
   const r = reads();
   assert.equal(checks7to9({ ...w, recipient: CFG.vault }, CFG.vault, r), "bad_recipient");
   assert.equal(checks7to9({ ...w, recipient: INTENTS }, CFG.vault, r), "bad_recipient");
@@ -696,7 +709,7 @@ test("check 9 pins the time: header.timestamp_nanosec (a decimal string) / 10^6 
 });
 
 test("check 9's margin: 30 s for a send, 120 s for a request that funds A", () => {
-  const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: 1_000_000 } as CheckedWithdraw;
+  const w = { register_deposit: MIN, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: 1_000_000 } as CheckedWithdraw;
   const r = (finalMs: bigint) => reads({ finalMs });
   assert.equal(checks7to9(w, CFG.vault, r(1_000_000n - SEND_MARGIN_MS)), null);
   assert.equal(checks7to9(w, CFG.vault, r(1_000_000n - SEND_MARGIN_MS + 1n)), "deadline_too_close");
@@ -1016,15 +1029,6 @@ test("check 9's time: two finals more than 30 blocks apart are refused; 30 apart
   assert.equal(await newestFinalMs([provider(chain(), 0), provider(chain({ height1: 1030 }), 1)]), chain().ms);
 });
 
-test("storage_balance_of answered as anything but null or a balance is 503 upstream, nothing signed", async () => {
-  for (const bad of [{ total: "x" }, { available: "0" }, 5, true, []]) {
-    const x = setup(chain({ balanceAnswer: bad }));
-    const a = await carryWithdraw(req(), x.deps);
-    assert.deepEqual([a.status, code(a)], [503, "upstream"], JSON.stringify(bad));
-    assert.equal(x.relayer.sent.length, 0);
-  }
-});
-
 test("the rounds resend: an open send's stored bytes and our own open settle's go out again each round (resend true)", async () => {
   const { deps, relayer, outcomes, c } = setup();
   const tx = ((await carryWithdraw(req(), deps)).body as { tx_hash: string }).tx_hash;
@@ -1089,4 +1093,66 @@ test("a start that fails after the stores open closes them: the next try starts"
   const second = await sender.carry(body);
   assert.notEqual(code(second), "upstream", `the second start takes the stores' locks again: ${JSON.stringify(second.body)}`);
   sender.stop();
+});
+
+// ---- The relayer's cost guards (card relayer-cost-guards, audit V-03) ----
+
+test("V-03 register_deposit pin: a token minimum above the pinned REGISTER_DEPOSIT_MAX is not taken by POST's check 7 (503 upstream, nothing sent)", async () => {
+  assert.equal(MIN, REGISTER_DEPOSIT_MAX, "the fixture's register_deposit is the pinned minimum");
+  const v = await checkWithdraw(req(), CFG, { feeMin: async () => BigInt(W.relay_fee) });
+  assert.ok(v.ok);
+  const high = chain({ min: REGISTER_DEPOSIT_MAX + 1n });
+  await assert.rejects(readChecks([provider(high, 0), provider(high, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(high.ms)), FeeReadRefused);
+  const at = chain({ min: REGISTER_DEPOSIT_MAX });
+  assert.equal((await readChecks([provider(at, 0), provider(at, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(at.ms))).registerMin, REGISTER_DEPOSIT_MAX);
+  const { deps, relayer } = setup(chain({ min: REGISTER_DEPOSIT_MAX + 1n }));
+  const a = await carryWithdraw(req(), deps);
+  assert.deepEqual([a.status, code(a), relayer.sent.length], [503, "upstream", 0]);
+});
+
+test("V-03, review F1: a token minimum other than the pin, 0 or under it, is not taken either, so a register_deposit of 0 is never carried", async () => {
+  const v = await checkWithdraw(req(), CFG, { feeMin: async () => BigInt(W.relay_fee) });
+  assert.ok(v.ok);
+  for (const min of [0n, 1n, REGISTER_DEPOSIT_MAX - 1n]) {
+    const c = chain({ min });
+    await assert.rejects(readChecks([provider(c, 0), provider(c, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(c.ms)), FeeReadRefused, String(min));
+  }
+  // both RPCs read the minimum as 0: check 7 has no minimum to hold a register_deposit of 0 to (checks7to9 with 0 and a
+  // registerMin of 0 would pass), so the read itself refuses: 503 upstream, nothing signed or sent
+  const { deps, relayer } = setup(chain({ min: 0n }));
+  const a = await carryWithdraw(req(), deps);
+  assert.deepEqual([a.status, code(a), relayer.sent.length], [503, "upstream", 0]);
+});
+
+test("V-03, the reviewer's R1: no send of ours can bounce on an unregistered recipient: every carried withdraw attaches the minimum for the payout's storage_deposit", async () => {
+  // five of a griefer's notes to one recipient that reads registered, then unregisters: each send attaches the
+  // minimum, so the vault's payout receipt registers it again before ft_transfer (vault promise.rs:85-91)
+  const { deps, relayer, c } = setup(chain({ registered: [true, true] }));
+  const one = await carryWithdraw(req(), deps);
+  assert.equal(code(one), "ok");
+  c.registered = [false, false];
+  for (const { action } of relayer.sent) {
+    assert.equal(action.kind, "call");
+    if (action.kind !== "call") continue;
+    const args = JSON.parse(action.args) as { withdrawal: { register_deposit: string } };
+    assert.equal(BigInt(args.withdrawal.register_deposit), REGISTER_DEPOSIT_MAX);
+    assert.equal(action.deposit, vaultWithdrawYocto(REGISTER_DEPOSIT_MAX, BigInt(W.relay_fee), true));
+  }
+});
+
+test("the queue's hold names the read that failed: a recipient blocklist read that fails logs the recipient, not the fee account", async () => {
+  const lines: string[] = [];
+  const { deps, relayer, c } = setup();
+  deps.log = (l) => lines.push(l);
+  // the reads pass; then, in the queue, the recipient's is_blocklisted answers no boolean on one provider
+  const send = relayer.send.bind(relayer);
+  relayer.send = (async (action: RelayerAction, guard: () => Promise<string | null>, before: (tx: TxRef) => void) => {
+    c.recipientListed = [false, "x"];
+    return send(action, guard as never, before);
+  }) as typeof relayer.send;
+  const a = await carryWithdraw(req(), deps);
+  assert.deepEqual([a.status, code(a), relayer.sent.length], [503, "relayer_low", 0]);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, new RegExp(`^withdraw 503 relayer_low: recipient not read \\(${W.recipient} on `));
+  assert.doesNotMatch(lines[0]!, /fee account/);
 });

@@ -28,6 +28,13 @@
 //   paid can show it done with another op's money of U, or keep a paid op of U from done until U's sum covers both
 //   (review r3 D2, D2b). The per-U sum bounds it: no op shows done past what U bound into the vault, and nothing is
 //   stranded, every credit to U is bound as U's notes either way.
+// - A landed note's calls (audit V-01: a stranger's row took P while U's call on it was out): nothing new is signed for
+//   U, and no op is final, until U's key nonce reads past them on both RPCs (with the release relayer named, and a tx
+//   hash heard, its tx read FINAL on both: the nonce moves a height before the token debits U) or their window and
+//   LAPSE_MARGIN are past; a taken note whose call ran keeps the poll's pace until U's refund is bound on a later note,
+//   and no op is final until REFUND_FINAL_BLOCKS past any landed call's run (a row naming U at the call's amount counts
+//   as U's). A relayer that reads U's USDC short of a call the device signed from its own reads on both RPCs
+//   (amount_above_balance: the ran call's debit before its refund) is settled by the chain (bind.ts SETTLE).
 // - held: the relayer struck U or refused the call, the bind refused (USDC's code hash moved, a note with another leaf,
 //   the seed not U's), or the pages do not hold a note's leaf. halted while the bind waits on a halt, cleared by the next
 //   bind phase that waits on none.
@@ -88,10 +95,10 @@
 import { DEPOSIT_REFUNDED_STAGES, type DepositFacts, type DepositStage, HELPER_FETCH_INIT, HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
-import type { NoteRecord, NoteStore } from "../notes/store.ts";
+import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import type { WalletStore } from "../store/index.ts";
 import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
-import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, POLL_MS } from "./bind.ts";
+import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, findDeadCall, LAPSE_MARGIN, ownRow, POLL_MS, readU, RELEASE_RELAYER } from "./bind.ts";
 import { depositId } from "../derive/keys.ts";
 import type { MoveRecord, RefundMoveAsk, RefundMoveResult, RefundRead } from "./refund.ts";
 
@@ -453,6 +460,24 @@ const FOLLOW_KEYS = ["network", "s", "i", "u", "address", "deadline_ms", "origin
 const ENDS: ReadonlySet<DepositStage> = new Set(["done", "held"]);
 // The bind's waits on a halt (bind.ts onWait): USDC halted on U's read, the relayer's token_halted or relayer_low.
 const HALTS = new Set(["halted", "token_halted", "relayer_low"]);
+/**
+ * How long past a landed note's call (the height U's key nonce was first read past it) no op of U is final: a refund of
+ * that call to U (a stranger's row at its amount naming U, audit V-01) lands 3 heights after the nonce moves (testnet tx
+ * 2Q4pYKQ9RRwHWofzuKmwvJBn3dxfVMxsH6Dx32pWneMV: the tx at 275892006, ft_resolve_transfer at 275892009), so 60 heights
+ * is about 20 times that: 36.3 s at mainnet's pace (FastNEAR and dRPC, 7 Nov 20:12Z: 100,000 heights in 57,907 s).
+ * NEAR gives no bound in heights on a congested shard; past it a late refund waits in U, bound by the next follow.
+ * It only holds final, which waits for the quote's deadline anyway; nothing is signed later for it.
+ */
+export const REFUND_FINAL_BLOCKS = 60n;
+/**
+ * Heights from U's nonce moving past a call to every receipt of it done, with no release relayer named to read its tx
+ * FINAL: 3 (testnet tx 2Q4pYKQ9RRwHWofzuKmwvJBn3dxfVMxsH6Dx32pWneMV: the tx at 275892006, ft_transfer_call 275892007,
+ * ft_on_transfer 275892008, ft_resolve_transfer 275892009; a relayed Delegate uses U's nonce at its own receipt's
+ * height, the token's call the next receipt, so the same offsets), about 2 s at mainnet's 600 ms. The count starts at
+ * the first final height the nonce reads past at, at or after the call's own height. A refund slower than that (a
+ * congested shard) is a balance read short at the relayer, settled by the chain (bind.ts SETTLE).
+ */
+export const REFUND_HEIGHTS = 3n;
 /** The rounds' pace with nothing in flight: from 15 s, doubling, to 60 s. */
 export const SLOW_MS = 15_000;
 export const SLOW_MAX_MS = 60_000;
@@ -646,15 +671,16 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     }
     return out;
   };
-  // The pages on both RPCs at the note's leaf: ours (U the depositor), theirs (a front-run on P), mismatch (the pages do
-  // not hold the leaf the store holds), or unsure (one RPC behind).
+  // The pages on both RPCs at the note's leaf: ours (bind.ts ownRow: U the depositor at the value its call signed),
+  // theirs (a front-run on P, which may name U: audit V-01), mismatch (the pages do not hold the leaf the store holds),
+  // or unsure (one RPC behind).
   const pagesOf = async (note: NoteRecord): Promise<{ state: "ours" | "theirs"; value: bigint } | { state: "mismatch" | "unsure" }> => {
     const leaf = note.leaf!;
     const r = await new DepositsWatch(vault, note.precommitment, rpcs, { ...(await store.syncCursor(vault)), deposits: note.searchFrom ?? 0 }).read(signal);
     if (r.state === "unsure") return { state: "unsure" };
     if (r.state === "absent") return { state: "mismatch" };
     if (leaf.leafIndex !== r.row.leafIndex || leaf.value !== r.row.value || leaf.commitment !== noteCommitment(r.row.value, r.row.label, note.precommitment)) return { state: "mismatch" };
-    return { state: r.row.depositor === U ? "ours" : "theirs", value: r.row.value };
+    return { state: ownRow(r.row, U, note) ? "ours" : "theirs", value: r.row.value };
   };
 
   // U not created yet (the bind's not_created wait): the helper creates U on a status read of SUCCESS once the delivery
@@ -751,7 +777,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   };
 
   // ---------- the count: U's money as one sum, never split between its ops ----------
-  // U's landed notes, each read once on both RPCs: ours (U the depositor, its value) or a front-run on P (theirs)
+  // U's landed notes, each read once on both RPCs: ours (U the depositor at its call's value) or a front-run on P (theirs)
   const ours = new Map<string, bigint>();
   const theirs = new Set<string>();
   // what an op needs of U's sum: the checked min_amount_out once its own status read SUCCESS; MIN_DEPOSIT once its
@@ -802,6 +828,66 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     return { held: false, unsure, free: total > need };
   };
 
+  // ---------- a landed note's calls, still out ----------
+  // A note's leaf ends its bind, but not its calls: when a stranger took P (audit V-01) the leaf is the stranger's row,
+  // and U's own call on P may still be at the relayer or in its receipts, its USDC refunded only once they run. And a row
+  // naming U at the call's amount (ownRow cannot tell it from U's own) leaves the same. So for every landed note with a
+  // call, its calls count as out until U's key nonce reads at or past them on both RPCs (each ran, or can never run: the
+  // next call is signed past that nonce), or until both final heights are past their max_block_height + LAPSE_MARGIN
+  // with the nonce still below (none ran). Until then nothing new is signed for U (a call
+  // at the same nonce would be refused and never signed again) and no op is final: U's USDC is not yet what it will be.
+  // A taken note (theirs) whose call ran owes U a refund of that call: until a later note of U has landed (the refund
+  // bound), the rounds keep the poll's pace and no op is final, however slow the refund's receipts are.
+  const seenAt = new Map<string, bigint>(); // note id -> the lower final height U's nonce was first read past its calls at
+  const settled = new Set<string>();
+  const ran = new Set<string>(); // settled notes whose every call U's key nonce passed
+  // A row naming U at the call's own amount counts as U's (ownRow), so a refund to U cannot be ruled out for any landed
+  // note whose call ran: no op is final until REFUND_FINAL_BLOCKS past the height its run was first read at.
+  // With the release relayer named, a call whose nonce U's key passed counts as done only once the note's last call (its
+  // highest nonce: an earlier one may have run and failed, and the bind signed the next on the same P) reads FINAL on
+  // both RPCs by a hash heard (findDeadCall, the bind's afterRefusal rule): the Delegate uses the nonce a height before
+  // the token debits U, so U's USDC read in between is not yet what the call leaves. No hash heard: its window and
+  // LAPSE_MARGIN, as for a call that never ran. With none named no tx can be read: REFUND_HEIGHTS past the lower final
+  // height U's nonce was first read past the note's calls at, the refund's own distance on NEAR.
+  const relayer = deps.relayerAccount === undefined ? RELEASE_RELAYER[network] : deps.relayerAccount;
+  const passedAt = new Map<string, bigint>(); // note id -> the lower final height U's nonce was first read past its calls at
+  const ranFinal = async (id: string, calls: readonly BindCall[], low: bigint): Promise<boolean> => {
+    if (relayer === null) {
+      if (!passedAt.has(id)) passedAt.set(id, low);
+      return low >= passedAt.get(id)! + REFUND_HEIGHTS;
+    }
+    const top = calls.reduce((m, c) => (c.nonce > m ? c.nonce : m), 0n);
+    return (await findDeadCall(calls, top, rpcs, relayer)) !== null;
+  };
+  const callsOut = async (): Promise<{ out: boolean; due: boolean; late: boolean }> => {
+    const mine = await notesOfU();
+    const landed = mine.filter(({ note }) => note.leaf !== undefined && (note.calls?.length ?? 0) > 0);
+    // a taken note whose call ran, no later note of U landed: its refund is not bound yet
+    const owed = () => mine.some(({ n, note }) => theirs.has(note.id) && ran.has(note.id) && !mine.some((x) => x.n > n && x.note.leaf !== undefined));
+    let out = false;
+    let late = false;
+    if (landed.length > 0) {
+      const u = await readU(U, rpcs);
+      // no read (an RPC down, a 429): nothing signed, nothing final, and the pace only from what is already known
+      if (u === null) return { out: true, due: owed(), late: true };
+      const low = u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
+      for (const { note } of landed) if (ran.has(note.id) && low < seenAt.get(note.id)! + REFUND_FINAL_BLOCKS) late = true;
+      for (const { note } of landed.filter(({ note }) => !settled.has(note.id))) {
+        const live = note.calls!.filter((c) => c.nonce > u.nonce);
+        const window = (live.length === 0 ? note.calls! : live).reduce((m, c) => (c.max_block_height > m ? c.max_block_height : m), 0n) + LAPSE_MARGIN;
+        if (live.length === 0 && (low > window || (await ranFinal(note.id, note.calls!, low)))) {
+          seenAt.set(note.id, low);
+          settled.add(note.id);
+          ran.add(note.id);
+          late = true;
+        } else if (low <= window) out = true;
+        else settled.add(note.id);
+      }
+    }
+    const due = owed();
+    return { out, due: out || due, late: out || due || late };
+  };
+
   // ---------- one round ----------
   const statusAt = new Map<string, number>();
   const backoff = new Map<string, number>();
@@ -844,7 +930,11 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     // it), at the amount that call was signed from: each bind phase ends at its first wait (bindPhase onWait)
     const out = (await notesOfU()).find(({ note }) => note.leaf === undefined && note.state === "INCOMING" && (note.calls?.length ?? 0) > 0)?.note;
     const amount = out !== undefined ? out.calls!.at(-1)!.balance : c;
-    if (amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {
+    // a landed note's call still out: nothing new is signed for U, and the rounds keep the poll's pace (finality only)
+    const calls = out === undefined ? await callsOut() : { out: false, due: false, late: false };
+    const outLanded = calls.out;
+    if (calls.due) fast = true;
+    if (!outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {
       const r = await bindPhase(amount);
       if (r === "held") return false;
       fast = true;
@@ -854,9 +944,10 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     if (counted.unsure) fast = true;
     // a done op is followed until its quote's deadline is past on both RPCs: a send to it after that cannot come. It is
     // marked final only on a round with nothing left to bind: U's USDC read on both RPCs under MIN_DEPOSIT, no note with
-    // its call out, every landed note read on both (a credit or a call still out is bound first)
-    // (and, after the refund moves below, no move out and nothing under U inside intents.near a move could take)
-    const idle = out === undefined && c !== null && c < VAULT_CONSTANTS.MIN_DEPOSIT && !counted.unsure;
+    // its call out, no landed note's call still out (callsOut: a refund may be on its way to U), every landed note read
+    // on both (a credit or a call still out is bound first) (and, after the refund moves below, no move out and nothing
+    // under U inside intents.near a move could take)
+    const idle = out === undefined && !calls.late && c !== null && c < VAULT_CONSTANTS.MIN_DEPOSIT && !counted.unsure;
     let movable = false;
     // what U holds inside intents.near, for the ops whose own status read REFUNDED: their origin assets and NEAR USDC
     // (1Click refunds there, refundType INTENTS). refunded is a stage, no end: U's USDC is still bound each round
