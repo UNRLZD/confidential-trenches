@@ -18,7 +18,8 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { EVM_DEPOSIT_GAS_MAX } from "../src/rules/pool.ts";
-import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_AFTER_MS } from "../src/pool-deposit-evm.ts";
+import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_BLOCKS } from "../src/pool-deposit-evm.ts";
+import { mock } from "node:test";
 import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -89,6 +90,8 @@ function chain() {
     down: null as string | null,
     /** tx hashes each RPC knows; U's pending nonce on each, when it is past "latest" */
     known: [new Set<string>(), new Set<string>()],
+    /** each RPC's latest head when it is past `block` (the agreed block is the lower of the two) */
+    head: [null, null] as (bigint | null)[],
     pending: [null, null] as (bigint | null)[],
   };
   const deposit = (pre: bigint, value: bigint) => {
@@ -111,7 +114,7 @@ function chain() {
       if (k === 1 && c.down === method) throw new SolanaRpcTransportError("http_5xx", "HTTP 503", 4, "rpc1.example");
       switch (method) {
         case "eth_getBlockByNumber":
-          return { number: q(c.block), hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(off(c.baseFee, c.off.baseFee)) };
+          return { number: q(p[0] === "latest" ? (c.head[k] ?? c.block) : BigInt(p[0] as string)), hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(off(c.baseFee, c.off.baseFee)) };
         case "eth_getTransactionCount":
           return q(p[1] === "finalized" ? c.finNonce[k]! : p[1] === "pending" ? (c.pending[k] ?? c.nonce) : off(c.nonce, c.off.nonce));
         case "eth_getTransactionByHash":
@@ -172,14 +175,14 @@ test("a funded U deposits its rung: INCOMING with { hash, nonce, value } before 
     void ns.get(planned.id).then((n) => atSend.push(n));
     ch.land(raw);
   };
-  const h = hostOf(ch, ns, { now: () => 1_800_000_000_000n });
+  const h = hostOf(ch, ns);
   const a = await runPoolDepositEvm(h, ASK);
   assert.equal(ch.c.sent.length, 1);
   const s = sentOf(ch.c.sent[0]!);
   assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: s.hash }] });
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(atSend[0]!.state, "INCOMING", "INCOMING before the tx left");
-  assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG, sentMs: 1_800_000_000_000n }]);
+  assert.deepEqual(atSend[0]!.evmSends, [{ hash: s.hash, nonce: 0n, value: RUNG, sentBlock: 100n }]);
   assert.equal(s.pre, planned.precommitment, "the planned note's precommitment");
   const n = await ns.get(planned.id);
   assert.equal(n!.state, "UNSPENT");
@@ -332,49 +335,66 @@ test("not_funded names the ask's first rung and the fee bound less U's lower bal
   assert.ok(first > EVM_POOL_MIN_DEPOSIT, "the ask's rung, not the pool's least deposit");
 });
 
-/** A run whose send reached neither RPC (neither knows its hash, U's nonce not moved), at the device's clock T0. */
+/** A run whose send reached neither RPC (neither knows its hash, U's nonce not moved), sent at block 100. */
 async function unsent() {
   const f = await funded(RUNG + FEE);
-  const T0 = 1_800_000_000_000n;
-  const a = await runPoolDepositEvm(hostOf(f.ch, f.ns, { now: () => T0 }), ASK);
+  const a = await runPoolDepositEvm(hostOf(f.ch, f.ns), ASK);
   assert.equal("stage" in a && a.stage, "sent");
-  assert.equal((await f.ns.get(f.planned.id))!.evmSends![0]!.sentMs, T0, "sentMs written with the send");
-  return { ...f, T0, first: sentOf(f.ch.c.sent[0]!) };
+  assert.equal((await f.ns.get(f.planned.id))!.evmSends![0]!.sentBlock, 100n, "sentBlock: the head both RPCs agreed on");
+  return { ...f, N: EVM_DEPOSIT_RESEND_BLOCKS[PIN.network], first: sentOf(f.ch.c.sent[0]!) };
 }
+const HOURS = 5 * 3_600_000;
 
-test("a send that reached neither RPC is built again at the SAME nonce (same note, value, fresh fees); the two sends land as one deposit and one UNSPENT note", async () => {
-  const { ch, ns, planned, T0, first } = await unsent();
+test("the resend bound in blocks: Base 3 (2 s blocks), Robinhood 15 (0.25 s), one block interval and the client's 3.5 s deadline rounded up", () => {
+  assert.deepEqual({ ...EVM_DEPOSIT_RESEND_BLOCKS }, { base: 3n, "base-sepolia": 3n, robinhood: 15n, "robinhood-testnet": 15n });
+});
+
+test("a send that reached neither RPC is built again at the SAME nonce (same note, value, fresh fees) once both heads passed sentBlock + N; the two sends land as one deposit and one UNSPENT note", async () => {
+  const { ch, ns, planned, N, first } = await unsent();
   ch.c.onSend = (raw) => ch.land(raw);
   ch.c.baseFee += 1n; // fresh fee reads: the base fee moved
-  const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + EVM_DEPOSIT_RESEND_AFTER_MS }), ASK);
+  ch.c.block = 100n + N;
+  const clock = mock.method(Date, "now", () => Date.prototype.valueOf.call(new Date(0)) - HOURS); // a device clock hours behind
+  try {
+    const r = await runPoolDepositEvm(hostOf(ch, ns), ASK);
+    assert.equal("stage" in r && r.stage, "filled");
+  } finally {
+    clock.mock.restore();
+  }
   assert.equal(ch.c.sent.length, 2, "built again");
   const second = sentOf(ch.c.sent[1]!);
   assert.deepEqual([second.nonce, second.pre, second.value], [first.nonce, first.pre, first.value], "the same nonce, note and value");
   assert.notEqual(second.hash, first.hash);
   const n = (await ns.get(planned.id))!;
-  assert.deepEqual(n.evmSends!.map((x) => [x.hash, x.nonce]), [[first.hash, 0n], [second.hash, 0n]], "every hash kept");
+  assert.deepEqual(n.evmSends!.map((x) => [x.hash, x.nonce, x.sentBlock]), [[first.hash, 0n, 100n], [second.hash, 0n, 100n + N]], "every hash kept");
   assert.equal(n.state, "UNSPENT");
   assert.equal(ch.c.events.filter((e) => e.precommitment === planned.precommitment).length, 1, "one deposit");
   assert.equal((await ours(ns)).filter((x) => x.state === "UNSPENT").length, 1, "one note");
-  assert.equal("stage" in r && r.stage, "filled");
 });
 
-test("the same-nonce rebuild is refused when either RPC knows a hash, when either RPC's pending nonce is past the send's, and before EVM_DEPOSIT_RESEND_AFTER_MS", async () => {
-  for (const [what, set] of [
-    ["RPC 1 knows the hash", (c: ReturnType<typeof chain>["c"], h: string) => void c.known[1]!.add(h)],
-    ["RPC 0 knows the hash", (c: ReturnType<typeof chain>["c"], h: string) => void c.known[0]!.add(h)],
-    ["RPC 0's pending nonce past it", (c: ReturnType<typeof chain>["c"]) => void (c.pending[0] = 1n)],
-    ["RPC 1's pending nonce past it", (c: ReturnType<typeof chain>["c"]) => void (c.pending[1] = 1n)],
-  ] as const) {
-    const { ch, ns, planned, T0, first } = await unsent();
-    set(ch.c, first.hash);
-    const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + EVM_DEPOSIT_RESEND_AFTER_MS }), ASK);
+test("the same-nonce rebuild is refused when either RPC knows a hash, when either RPC's pending nonce is past the send's, and while either head is short of sentBlock + N, whatever the device's clock says", async () => {
+  type C = ReturnType<typeof chain>["c"];
+  const cases: [string, (c: C, h: string, N: bigint) => void][] = [
+    ["RPC 1 knows the hash", (c, h, N) => ((c.block = 100n + N), void c.known[1]!.add(h))],
+    ["RPC 0 knows the hash", (c, h, N) => ((c.block = 100n + N), void c.known[0]!.add(h))],
+    ["RPC 0's pending nonce past it", (c, _h, N) => ((c.block = 100n + N), void (c.pending[0] = 1n))],
+    ["RPC 1's pending nonce past it", (c, _h, N) => ((c.block = 100n + N), void (c.pending[1] = 1n))],
+    ["RPC 0's head short", (c, _h, N) => void (c.head = [100n + N - 1n, 100n + N + 50n])],
+    ["RPC 1's head short", (c, _h, N) => void (c.head = [100n + N + 50n, 100n + N - 1n])],
+  ];
+  for (const [what, set] of cases) {
+    const { ch, ns, planned, N, first } = await unsent();
+    set(ch.c, first.hash, N);
+    // a device clock hours ahead changes nothing
+    const clock = mock.method(Date, "now", () => Date.prototype.valueOf.call(new Date(0)) + HOURS * 1_000);
+    let r;
+    try {
+      r = await runPoolDepositEvm(hostOf(ch, ns), ASK);
+    } finally {
+      clock.mock.restore();
+    }
     assert.deepEqual(r, { stage: "not_landed", txs: [] }, what);
     assert.equal(ch.c.sent.length, 1, `${what}: not built again`);
     assert.equal((await ns.get(planned.id))!.state, "INCOMING", what);
   }
-  const { ch, ns, T0 } = await unsent();
-  const r = await runPoolDepositEvm(hostOf(ch, ns, { now: () => T0 + EVM_DEPOSIT_RESEND_AFTER_MS - 1n }), ASK);
-  assert.deepEqual(r, { stage: "not_landed", txs: [] }, "too soon");
-  assert.equal(ch.c.sent.length, 1, "too soon: not built again");
 });

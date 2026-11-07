@@ -33,7 +33,7 @@ import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { EvmPoolSend, NoteRecord, NoteState, NoteStore } from "../../wallet/src/notes/store.ts";
-import { evmAgreedBlock, EvmLagError, evmPoolScopeOf, evmRetryLag, EvmUnansweredError, EVM_CHAIN_IDS, EVM_LADDER, EVM_READ_TRY_MS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { evmAgreedBlock, EvmLagError, evmPoolScopeOf, evmRetryLag, EvmUnansweredError, EVM_CHAIN_IDS, EVM_LADDER, EVM_READ_TRY_MS, type EvmNetwork, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
@@ -66,8 +66,6 @@ export type PoolDepositEvmHost = {
   priorityCap?: bigint;
   reads?: number;
   wait?(ms: number): Promise<void>;
-  /** The device's clock, ms (Date.now otherwise): each send's sentMs. */
-  now?(): bigint;
   end?(): void;
 };
 
@@ -81,14 +79,19 @@ export const POOL_DEPOSIT_EVM_WAIT_MS = 2_000;
 /** A run builds one note's send again at most this many times (each only once the last is dead on both RPCs, or
  *  reached neither). */
 export const POOL_DEPOSIT_EVM_REBUILDS = 3;
+/** Each network's block interval, ms: Base and Base Sepolia (OP Stack) 2 s; Robinhood Chain and its testnet (Arbitrum
+ *  Nitro) about 0.25 s. */
+const EVM_BLOCK_MS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 2_000n, "base-sepolia": 2_000n, robinhood: 250n, "robinhood-testnet": 250n });
 /**
- * How old a send must be, on the device's clock, before one that reached neither RPC is built again at its nonce: one
- * block interval of the slowest pinned chain (Base, 2 s; Robinhood's are shorter) plus the RPC propagation bound, the
- * page client's own deadline for one call with its retry (EVM_READ_TRY_MS), so a send still on its way is never taken
- * for lost. Time, not blocks: the bound is a time on every chain alike (blocks would need each chain's interval), and
- * the clock only paces a rebuild, never makes one unsafe: at the same nonce at most one of the sends can land.
+ * How many blocks past a send's sentBlock BOTH RPCs' latest heads must be before a send that reached neither RPC is
+ * built again at its nonce: one block interval plus the RPC propagation bound, the page client's deadline for one call
+ * with its retry (EVM_READ_TRY_MS, 3.5 s), in the chain's own blocks, rounded up: Base (2 s blocks) ceil(5.5 s / 2 s) =
+ * 3, Robinhood (0.25 s) ceil(3.75 s / 0.25 s) = 15. So a send still on its way is never taken for lost, and the bound is
+ * read from the chain, never the device's clock (at the same nonce at most one of the sends can land in any case).
  */
-export const EVM_DEPOSIT_RESEND_AFTER_MS = 2_000n + EVM_READ_TRY_MS;
+export const EVM_DEPOSIT_RESEND_BLOCKS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze(
+  Object.fromEntries(Object.entries(EVM_BLOCK_MS).map(([n, ms]) => [n, (ms + EVM_READ_TRY_MS + ms - 1n) / ms])) as Record<EvmNetwork, bigint>,
+);
 /** Notes one run may settle or try (landed, taken, or deposited): a front-runner who takes every send ends the run. */
 const STEPS_MAX = 16;
 const LANDED: readonly NoteState[] = ["UNSPENT", "HELD", "RESERVED", "SPENT", "TAKEN"];
@@ -129,7 +132,7 @@ const sameRef = (a: NoteRef, b: NoteRef): boolean => JSON.stringify(a, (_, v) =>
 type Run = { h: PoolDepositEvmHost; store: NoteStore; seed: Uint8Array; scope: bigint; chainId: bigint; keys: Uint8Array[]; ask: PoolAsk };
 
 /** U's reads at one block both RPCs hold: the block, U's nonce (agreed) and its balance (each RPC's). */
-async function accountReads(r: Run, u: string): Promise<{ tag: string; baseFee: bigint; nonce: bigint; balance: [bigint, bigint] }> {
+async function accountReads(r: Run, u: string): Promise<{ block: bigint; tag: string; baseFee: bigint; nonce: bigint; balance: [bigint, bigint] }> {
   const sleep = (ms: number) => (r.h.wait ?? ((x: number) => new Promise<void>((ok) => setTimeout(ok, x))))(ms);
   // the newest block both hold (a lag read again), then its base fee as each RPC answers it: the two the same
   const blk = await evmRetryLag(() => evmAgreedBlock(r.h.rpcs, "latest", undefined, sleep), sleep);
@@ -142,7 +145,7 @@ async function accountReads(r: Run, u: string): Promise<{ tag: string; baseFee: 
   const nonce = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [u, tag]), `rpc ${k} nonce`));
   if (nonce[0] !== nonce[1]) apart("U's nonce");
   const balance = await both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getBalance", [u, tag]), `rpc ${k} balance`));
-  return { tag, baseFee: fees[0], nonce: nonce[0], balance };
+  return { block: blk.number, tag, baseFee: fees[0], nonce: nonce[0], balance };
 }
 
 /** The L1 fee bound for `gas` on the pin's network: the kit's chain fee reads on both RPCs (agreed), 0 on Nitro. */
@@ -236,7 +239,7 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   const sim = await Promise.allSettled(r.h.rpcs.map((rpc) => rpc("eth_call", [{ from: u, to: call.to, value: qty(call.value), data: call.data, gas: qty(estimate[0]) }, acct.tag])));
   if (sim.some((s) => s.status === "rejected")) return { kind: "sim_failed" };
   const raw = signEvmDeposit(id.secretKey, tx);
-  const send: EvmPoolSend = { hash: hex(keccak_256(raw)), nonce: acct.nonce, value: call.value, sentMs: r.h.now?.() ?? BigInt(Date.now()) };
+  const send: EvmPoolSend = { hash: hex(keccak_256(raw)), nonce: acct.nonce, value: call.value, sentBlock: acct.block };
   // the state and its send, written before the signed tx leaves the device
   let note: NoteRecord;
   if (again !== null && (again.evmSends ?? []).some((x) => x.hash === send.hash)) {
@@ -284,8 +287,11 @@ async function verdictOf(r: Run, n: NoteRecord): Promise<Verdict> {
   if (fin[0] > last.nonce && fin[1] > last.nonce) return { kind: "dead" };
   // reached neither RPC: old enough, no RPC knows any of the note's hashes, and U's latest and pending nonces both still
   // the send's on both. Anything else is pending
-  const at = r.h.now?.() ?? BigInt(Date.now());
-  if (last.sentMs === undefined || at - last.sentMs < EVM_DEPOSIT_RESEND_AFTER_MS) return { kind: "pending" };
+  // old enough: both RPCs' latest heads at least sentBlock + the network's EVM_DEPOSIT_RESEND_BLOCKS
+  if (last.sentBlock === undefined) return { kind: "pending" };
+  const heads = await both(r.h.rpcs, async (rpc, k) => quantity(((await rpc("eth_getBlockByNumber", ["latest", false])) as { number?: unknown } | null)?.number, `rpc ${k} head`));
+  const after = last.sentBlock + EVM_DEPOSIT_RESEND_BLOCKS[r.h.pin.network];
+  if (heads[0] < after || heads[1] < after) return { kind: "pending" };
   const hashes = n.evmSends!.map((x) => x.hash);
   const known = await both(r.h.rpcs, async (rpc) => (await Promise.all(hashes.map((x) => rpc("eth_getTransactionByHash", [x])))).some((t) => t !== null));
   if (known[0] || known[1]) return { kind: "pending" };
