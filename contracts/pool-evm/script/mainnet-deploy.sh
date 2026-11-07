@@ -12,9 +12,13 @@
 # 1. deploy.mjs --mainnet. Before any key or transaction it refuses: an RPC that does not answer the chain's id (the
 #    chain's own public RPC and PublicNode's, pool-evm-deploy.mjs MAINNETS), a return address with code or with no ETH
 #    on either RPC, a build whose runtime is not pool-evm-deploy.build.json's or whose init code is not deploy.mjs
-#    MAINNET_INIT's, a chain whose record (contracts/pool-evm/deployments/<chain>.json) exists, a checkout whose
-#    packages/kit/src/trade/evm/buy-unpinned.ts differs from origin/main's (the kit's sell sender pin is main's), and a
-#    pin with code on either RPC. Then it prints the run key's address and the need with its parts, and waits. Send
+#    MAINNET_INIT's, a chain whose record (contracts/pool-evm/deployments/<chain>.json) exists, a checkout whose files
+#    differ from origin/main's (fetched first; the deployments folder aside) or that holds a file git does not track in
+#    the deploy's paths, so the code run and the kit's sell sender pin are main's, and a pin with code on either RPC.
+#    Before forge builds, forge-std (contracts/pool-evm/lib/forge-std, a submodule pinned by commit, which a clone made
+#    without --recurse-submodules leaves empty) is set up at its pin by
+#    `git submodule update --init contracts/pool-evm/lib/forge-std`, run for you; at another commit it is refused,
+#    naming that line. Then it prints the run key's address and the need with its parts, and waits. Send
 #    exactly that much ETH to the printed address from the address you passed, in one transfer (the line says "send
 #    exactly ... from" it): more than asked, or a second transfer, can hide one still to land. It deploys the
 #    withdrawal verifier, the pool, the v4 adapter, the v3 adapter, the sell delegate and, last, the fee collector, its
