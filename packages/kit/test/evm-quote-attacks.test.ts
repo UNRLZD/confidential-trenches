@@ -4744,6 +4744,9 @@ const SALE_RUN = "the model's real sale";
 const [SALE_TIME, SALE_PARENT, SALE_BASE_FEE, SALE_MIX, SALE_ROOT] = ["0x" + (BigInt(T) + 2n).toString(16), "0x" + "9a".repeat(32), BASE_FEE + 7n, "0x" + "3c".repeat(32), "0x" + "7b".repeat(32)];
 const EPOCH0 = HEAD_NO - 3;
 const [L1B, HIST, BEACON] = ["0x4200000000000000000000000000000000000015", "0x0000f90827f1c53a10cb7a02335b175320002935", "0x000f3df6d732807ef1319fb7b8bb8522d0beac02"];
+const SYS = [L1B, HIST, BEACON];
+/** The accounts a replay's state override names beside the system accounts every replay on Base carries. */
+const ownOver = (o: unknown) => Object.keys(o as object).filter((k) => !SYS.includes(k.toLowerCase())).length;
 const SEES_ALL: Sees = { seq: true, hist: true, beacon: true, baseFee: true, randao: true };
 function sysWord(addr: string, slot: bigint, block: number): string {
   const a = addr.toLowerCase();
@@ -5062,8 +5065,8 @@ test("RV8 providers that disagree on the sale or on a replay ban nothing; a sale
   const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
   const hash = await land(pools, q1);
   // (each replay overrides W's code, then the hooks it replaces, never the sender's balance: review of a2d82dc6, F1)
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0xdeadbeef" } } : undefined))]), []);
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length > 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), []);
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (ownOver(c.params[2]) === 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0xdeadbeef" } } : undefined))]), []);
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (ownOver(c.params[2]) > 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), []);
   // a sale that landed, or one sent to another account than the quote's W
   assert.deepEqual(await proved(pools, q1, await land(pools, q1, HEAD_NO + 1, { status: "0x1" })), []);
   assert.deepEqual(await proved(pools, q1, await land(pools, q1, HEAD_NO + 1, { to: "0x000000000000000000000000000000000000beef" })), []);
@@ -5166,7 +5169,7 @@ test("RVX two distinct unlisted hooks on one picked route, each reverting the re
   assert.equal(SALES.get(hash)!.status, "0x0");
   // the second provider answers the replay with both hooks a no-op (asW and two hooks: three overrides) with a revert
   const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 3 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (ownOver(c.params[2]) === 3 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
   // the device's loop: one failed try, both pools banned, then the seeded pool
   const r = await hcConverge(pools, token, logs, 4);
   assert.deepEqual({ failed: r.failed, got: r.got, banned: [...r.banned].sort() }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(market.key), hcPid(pool.key)].sort() }, show(r));
@@ -5773,7 +5776,6 @@ test("review of a2d82dc6, L3 a sender that takes a bigger fee than the proof's w
 // H1 every replay sees the trade's block as the trade saw it: the storage its system calls wrote before its first
 // transaction (L1Block, EIP-2935's history, EIP-4788's roots) read at the block on two providers that agree, passed as
 // stateDiff, and its header's base fee and PREVRANDAO in the block override; a hook keyed on any of them is banned.
-const SYS = [L1B, HIST, BEACON];
 const TELLS = [
   ["block.number - L1Block.sequenceNumber() marks a real block (the epoch's first)", "seq"],
   ["EIP-2935's hash of the block before equals blockhash(block.number - 1)", "hist"],
