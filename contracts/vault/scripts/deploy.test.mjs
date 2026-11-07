@@ -484,12 +484,14 @@ test("a deploy record names exactly one source: source_commit or non_reproducibl
   assert.match(recordSourceProblems({ ...rec, source_commit: "main" }).join(";"), /source_commit "main" is not a 40-hex commit/);
   assert.match(recordSourceProblems({ ...rec, code_hash: "x" }).join(";"), /code_hash x is not the base58/);
   const records = vaultRecords();
-  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", "testnet-skeleton.json", "testnet-v1.json", "testnet-v3.json", "testnet-v4.json"]);
+  // mainnet-v1.json is the record the mainnet deploy writes (card vault-mainnet-deploy), there once the vault exists
+  const v1 = existsSync(path.join(HERE, "..", "deployments", "mainnet-v1.json")) ? ["mainnet-v1.json"] : [];
+  assert.deepEqual(records.map((r) => r.name), ["mainnet-test.json", ...v1, "mainnet-v1.pin.json", "testnet-skeleton.json", "testnet-v1.json", "testnet-v3.json", "testnet-v4.json"]);
   for (const { name, record } of records) {
     assert.deepEqual(recordSourceProblems(record), [], name);
-    // testnet-v3 (card vault-review-fixes-3) is the first reproducible deploy and testnet-v4 (card vault-final-sha) the
-    // vault's final commit: each names its commit; the earlier are marked
-    if (name === "testnet-v3.json" || name === "testnet-v4.json") assert.match(record.source_commit, /^[0-9a-f]{40}$/, name);
+    // testnet-v3 (card vault-review-fixes-3) is the first reproducible deploy, testnet-v4 (card vault-final-sha) the
+    // vault's final commit and mainnet-v1 its mainnet build of that commit: each names its commit; the earlier are marked
+    if (["testnet-v3.json", "testnet-v4.json", "mainnet-v1.pin.json", "mainnet-v1.json"].includes(name)) assert.match(record.source_commit, /^[0-9a-f]{40}$/, name);
     else assert.ok(Object.hasOwn(record, "non_reproducible"), `${name} is not marked`);
   }
 });
@@ -949,13 +951,36 @@ test("mainnet MED-1: a record pinning a changed wasm for the real vault is refus
   neverSent(r);
 });
 
-test("mainnet MED-1: MAINNET_PINS names the test vault's pin, the one mainnet-test.json holds", async () => {
+test("mainnet MED-1: MAINNET_PINS names each mainnet vault's pin, the one its pre-deploy record holds", async () => {
   const { MAINNET_PINS, pinProblems } = await import(SCRIPT);
   const rec = JSON.parse(readFileSync(path.join(HERE, "..", "deployments", "mainnet-test.json"), "utf8"));
-  assert.deepEqual(MAINNET_PINS, { [rec.account_id]: rec.wasm_sha256 });
+  const v1 = JSON.parse(readFileSync(path.join(HERE, "..", "deployments", "mainnet-v1.pin.json"), "utf8"));
+  assert.deepEqual(MAINNET_PINS, { [rec.account_id]: rec.wasm_sha256, [v1.account_id]: v1.wasm_sha256 });
   // another vault has no pin at all
   const w = mainnetWasm();
-  assert.match(pinProblems(w, { ...rec, account_id: "vault.confidential.unrlzd.near" }, "vault.confidential.unrlzd.near").join(";"), /MAINNET_PINS holds no pin for vault\.confidential\.unrlzd\.near/);
+  assert.match(pinProblems(w, { ...rec, account_id: "vault-2.confidential.unrlzd.near" }, "vault-2.confidential.unrlzd.near").join(";"), /MAINNET_PINS holds no pin for vault-2\.confidential\.unrlzd\.near/);
+});
+
+// card vault-mainnet-deploy: the release vault's pre-deploy record pins the mainnet build of the vault's final source
+// commit (testnet-v4.json's source_commit), for vault.confidential.unrlzd.near (M304 D-13), and every check the deploy
+// runs on the record alone passes; the wasm itself is checked by the owner's paste (2-deploy.sh) and deploy.mjs
+test("mainnet-v1.pin.json: the mainnet vault's pre-deploy record pins the mainnet build of the final commit, and MAINNET_PINS holds the same pin", async () => {
+  const { MAINNET_PINS, recordSourceProblems } = await import(SCRIPT);
+  const dir = path.join(HERE, "..", "deployments");
+  const v1 = JSON.parse(readFileSync(path.join(dir, "mainnet-v1.pin.json"), "utf8"));
+  const v4 = JSON.parse(readFileSync(path.join(dir, "testnet-v4.json"), "utf8"));
+  assert.equal(v1.account_id, "vault.confidential.unrlzd.near");
+  assert.equal(v1.parent, "confidential.unrlzd.near");
+  assert.equal(v1.network, "mainnet");
+  assert.equal(v1.source_commit, v4.source_commit);
+  assert.equal(v1.wasm_sha256, "a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc");
+  assert.equal(MAINNET_PINS[v1.account_id], v1.wasm_sha256);
+  assert.ok(v1.wasm_builds_sha256.length >= 2 && v1.wasm_builds_sha256.every((b) => b === v1.wasm_sha256));
+  assert.deepEqual(recordSourceProblems(v1), []);
+  assert.equal(v1.asset, "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1");
+  assert.match(v1.version, /^blindfill-vault \S+ mainnet$/);
+  assert.deepEqual(v1.artifact, { run: 42355216946, name: "vault-mainnet-wasm", workflow: ".github/workflows/vault-build.yml", event: "workflow_dispatch" });
+  assert.equal(Object.hasOwn(v1, "tx_hash"), false, "the pre-deploy record names no deploy");
 });
 
 test("mainnet (d): a batch that would leave a key on the vault (an AddKey, or any action past the four) is refused", async () => {
@@ -999,4 +1024,161 @@ test("vault-build.yml's paths hold contracts/vault/ and every repository file de
   assert.deepEqual(outside, ["scripts/ci/near-rpc-operators.mjs", "scripts/ci/rpc-wait.mjs", "scripts/live-checks/vault-skeleton.mjs", "scripts/live-checks/vault-testnet-t01.mjs", "scripts/net-window.mjs"]);
   const yml = readFileSync(path.join(root, ".github/workflows/vault-build.yml"), "utf8");
   for (const f of ["contracts/vault/**", ...outside, "scripts/ci/retry.sh", "scripts/ci/fetch.sh"]) assert.ok(yml.includes(`      - "${f}"\n`), `vault-build.yml's paths miss ${f}`);
+});
+
+// ---- review M1 (card vault-mainnet-deploy): a mainnet deploy whose batch landed is finished by --resume-tx ----
+// A chain kept in <dir>/chain.json across runs: the batch send_tx makes the vault (code hash of the wasm, no key) and
+// either answers its outcome or, with `batch: "timeout"`, a timeout after it landed (case A); the registration send_tx
+// registers the vault or, with `register: "fail"`, fails (case B). `tx` answers the landed batch as nearcore shows it
+// (the DeployContract code as the base64 of its sha256), or with `badTx` one that is not the reviewed batch.
+function mainnetChain(dir, w, { pins, batch = "ok", register = "ok", badTx = null } = {}) {
+  const f = path.join(dir, `chain-net-${Math.random().toString(36).slice(2)}.mjs`);
+  const state = path.join(dir, "chain.json");
+  if (!existsSync(state)) writeFileSync(state, JSON.stringify({ deployed: false, registered: false, sends: 0 }));
+  const sha = sha256hex(w);
+  const transfer = String(BigInt(w.length + 100) * 10n ** 19n + 10n ** 22n);
+  const config = Buffer.from(JSON.stringify({ asset: MAINNET_USDC, version: "blindfill-vault 0.1.0 mainnet", scope: "1", deposit_storage_bytes: 756 })).toString("base64");
+  const actions = ["CreateAccount", { Transfer: { deposit: transfer } }, { DeployContract: { code: Buffer.from(sha, "hex").toString("base64") } }, { FunctionCall: { args: "e30=", deposit: "0", gas: 100000000000000, method_name: "config" } }];
+  const txActions = badTx === "addkey" ? [...actions, { AddKey: { public_key: "ed25519:11111111111111111111111111111111", access_key: { nonce: 0, permission: "FullAccess" } } }] : actions;
+  const receiver = badTx === "receiver" ? `other.${MAINNET_PARENT}` : MAINNET_VAULT;
+  const hook = pins
+    ? `import { registerHooks } from "node:module";\nregisterHooks({ load(url, context, next) { const r = next(url, context); if (url.endsWith("/contracts/vault/scripts/deploy.mjs")) { const src = String(r.source); const out = src.replace(/^export const MAINNET_PINS = \\{.*\\};$/m, ${JSON.stringify(`export const MAINNET_PINS = ${JSON.stringify(pins)};`)}); if (out === src) throw new Error("no MAINNET_PINS line"); r.source = out; } return r; } });\n`
+    : "";
+  writeFileSync(
+    f,
+    hook +
+      `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";\nimport { createHash } from "node:crypto";\nimport { b58encode } from ${JSON.stringify(pathToFileURL(path.join(HERE, "near-tx.mjs")).href)};\n` +
+      `const S = ${JSON.stringify(state)}; const st = () => JSON.parse(readFileSync(S, "utf8")); const put = (s) => writeFileSync(S, JSON.stringify(s));\n` +
+      `const ok = (result) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", result }) });\n` +
+      `const err = (cause) => ({ ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: "deploy", error: { name: "HANDLER_ERROR", cause: { name: cause } } }) });\n` +
+      `const bytes = (o) => [...Buffer.from(JSON.stringify(o))];\n` +
+      `const outcome = (s) => ({ transaction_outcome: { outcome: { status: { SuccessReceiptId: "x" } } }, receipts_outcome: [{ outcome: { executor_id: ${JSON.stringify(MAINNET_VAULT)}, status: { SuccessValue: "" }, gas_burnt: 23 } }], status: { SuccessValue: s }, final_execution_status: "FINAL" });\n` +
+      `globalThis.fetch = async (url, init) => { const { method, params } = JSON.parse(init.body); const s = st();\n` +
+      `  appendFileSync(${JSON.stringify(path.join(dir, "methods.log"))}, method + " " + (params?.request_type ?? params?.method_name ?? "") + " " + url + "\\n");\n` +
+      `  if (method === "status") return ok({ chain_id: "mainnet" });\n` +
+      `  if (method === "block") return ok({ header: { hash: "11111111111111111111111111111111" } });\n` +
+      `  if (method === "query" && params.request_type === "view_access_key") return ok({ permission: "FullAccess", nonce: 7 });\n` +
+      `  if (method === "query" && params.request_type === "view_account" && params.account_id === ${JSON.stringify(MAINNET_PARENT)}) return ok({ amount: "10000000000000000000000000", locked: "0" });\n` +
+      `  if (method === "query" && params.request_type === "view_account" && params.account_id === ${JSON.stringify(MAINNET_VAULT)}) return s.deployed ? ok({ code_hash: ${JSON.stringify(b58encode(Buffer.from(sha, "hex")))}, block_hash: "11111111111111111111111111111111" }) : err("UNKNOWN_ACCOUNT");\n` +
+      `  if (method === "query" && params.request_type === "view_access_key_list") return ok({ keys: [] });\n` +
+      `  if (method === "query" && params.method_name === "storage_balance_bounds") return ok({ result: bytes({ min: "1250000000000000000000", max: "1250000000000000000000" }) });\n` +
+      `  if (method === "query" && params.method_name === "storage_balance_of") return ok({ result: bytes(s.registered ? { total: "1250000000000000000000", available: "0" } : null) });\n` +
+      `  if (method === "send_tx") { s.sends++; const t = Buffer.from(params.signed_tx_base64, "base64"); const hash = b58encode(createHash("sha256").update(t.subarray(0, t.length - 65)).digest());\n` +
+      `    if (!s.deployed) { s.deployed = true; s.batch = hash; put(s); return ${JSON.stringify(batch)} === "timeout" ? err("TIMEOUT_ERROR") : ok(outcome(${JSON.stringify(config)})); }\n` +
+      `    if (${JSON.stringify(register)} === "fail") { put(s); return err("TIMEOUT_ERROR"); }\n` +
+      `    s.registered = true; put(s); return ok(outcome("")); }\n` +
+      `  if (method === "tx") { if (!s.deployed || params.tx_hash !== s.batch) return err("UNKNOWN_TRANSACTION");\n` +
+      `    return ok({ ...outcome(${JSON.stringify(config)}), transaction: { hash: params.tx_hash, signer_id: ${JSON.stringify(MAINNET_PARENT)}, receiver_id: ${JSON.stringify(receiver)}, actions: ${JSON.stringify(txActions)} } }); }\n` +
+      "  throw new Error(`network blocked by the test: ${method} ${url}`); };\n",
+  );
+  return f;
+}
+const runChain = (dir, args, w, o) => spawnSync(process.execPath, ["--import", pathToFileURL(mainnetChain(dir, w, o)).href, SCRIPT, ...args], { encoding: "utf8", timeout: 30_000, env: gitEnv(dir) });
+const sends = (dir) => JSON.parse(readFileSync(path.join(dir, "chain.json"), "utf8")).sends;
+const resumeOf = (out) => /--resume-tx ([1-9A-HJ-NP-Za-km-z]{43,44})\s*$/m.exec(out)?.[1];
+
+test("mainnet M1 case A: the batch lands but send_tx times out: no record at --out, the resume line is printed, and --resume-tx finishes it", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const w = mainnetWasm();
+  const f = mainnetFiles(dir, w);
+  const pins = { [MAINNET_VAULT]: sha256hex(w) };
+  const args = mainnetArgs(dir, k.file, f);
+  const out = path.join(dir, "out.json");
+  // review L6: the pre-deploy record's note on itself is dropped from the final record, its other sources kept
+  writeFileSync(f.record, JSON.stringify({ ...JSON.parse(readFileSync(f.record, "utf8")), sources: { pre_deploy: "the record a paste passes", parent: "M200" } }));
+  const a = runChain(dir, args, w, { pins, batch: "timeout" });
+  assert.equal(a.status, 1, a.stdout + a.stderr);
+  const hash = resumeOf(a.stdout + a.stderr);
+  assert.ok(hash, `no resume line:\n${a.stdout}${a.stderr}`);
+  assert.match(a.stdout, new RegExp(`sending tx ${hash}:`));
+  assert.ok((a.stdout + a.stderr).includes(`node contracts/vault/scripts/deploy.mjs ${args.join(" ")} --resume-tx ${hash}`), a.stderr);
+  assert.equal(existsSync(out), false, "a record at --out names a vault that was never read back");
+  const b = runChain(dir, [...args, "--resume-tx", hash], w, { pins });
+  assert.equal(b.status, 0, b.stdout + b.stderr);
+  const rec = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(rec.tx_hash, hash);
+  assert.match(rec.registration_tx, /^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
+  assert.equal(rec.code_hash, b58encode(Buffer.from(sha256hex(w), "hex")));
+  assert.equal(Object.hasOwn(rec, "stage"), false);
+  assert.deepEqual(rec.sources, { parent: "M200" });
+  assert.equal(sends(dir), 2, "one batch and one registration, never a second batch");
+  assert.equal(existsSync(path.join(dir, "out.partial.json")), false);
+});
+
+test("mainnet M1 case B: the batch lands and the registration fails: only a partial record (never --out), and --resume-tx registers and writes the record", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const w = mainnetWasm();
+  const f = mainnetFiles(dir, w);
+  const pins = { [MAINNET_VAULT]: sha256hex(w) };
+  const args = mainnetArgs(dir, k.file, f);
+  const out = path.join(dir, "out.json");
+  const a = runChain(dir, args, w, { pins, register: "fail" });
+  assert.equal(a.status, 1, a.stdout + a.stderr);
+  const hash = resumeOf(a.stdout + a.stderr);
+  assert.ok(hash, `no resume line:\n${a.stdout}${a.stderr}`);
+  assert.equal(existsSync(out), false, "the kit and the helper would read an unregistered vault as finished");
+  const partial = JSON.parse(readFileSync(path.join(dir, "out.partial.json"), "utf8"));
+  assert.equal(partial.tx_hash, hash);
+  assert.match(partial.stage, /not registered/);
+  assert.match(partial.stage, /--resume-tx/);
+  const b = runChain(dir, [...args, "--resume-tx", hash], w, { pins });
+  assert.equal(b.status, 0, b.stdout + b.stderr);
+  const rec = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(rec.tx_hash, hash);
+  assert.match(rec.registration_tx, /^[1-9A-HJ-NP-Za-km-z]{43,44}$/);
+  assert.equal(existsSync(path.join(dir, "out.partial.json")), false);
+  assert.equal(sends(dir), 3, "the batch, the failed registration, the registration: never a second batch");
+});
+
+test("mainnet M1: --resume-tx on a vault already registered sends nothing and writes the record; a second resume over a written record is refused", () => {
+  const dir = fresh();
+  const k = keyFile(dir, MAINNET_PARENT);
+  const w = mainnetWasm();
+  const f = mainnetFiles(dir, w);
+  const pins = { [MAINNET_VAULT]: sha256hex(w) };
+  const args = mainnetArgs(dir, k.file, f);
+  const hash = "8".repeat(44);
+  writeFileSync(path.join(dir, "chain.json"), JSON.stringify({ deployed: true, registered: true, sends: 0, batch: hash }));
+  const b = runChain(dir, [...args, "--resume-tx", hash], w, { pins });
+  assert.equal(b.status, 0, b.stdout + b.stderr);
+  assert.equal(sends(dir), 0);
+  const rec = JSON.parse(readFileSync(path.join(dir, "out.json"), "utf8"));
+  assert.equal(rec.registration_tx, null);
+  assert.match(rec.registration_note, /already registered/);
+  const again = runChain(dir, [...args, "--resume-tx", hash], w, { pins });
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /already exists: nothing to resume/);
+});
+
+for (const badTx of ["addkey", "receiver"]) {
+  test(`mainnet M1: --resume-tx on a tx that is not the reviewed batch (${badTx}) is refused, nothing sent or written`, () => {
+    const dir = fresh();
+    const k = keyFile(dir, MAINNET_PARENT);
+    const w = mainnetWasm();
+    const f = mainnetFiles(dir, w);
+    const pins = { [MAINNET_VAULT]: sha256hex(w) };
+    const hash = "9".repeat(44);
+    writeFileSync(path.join(dir, "chain.json"), JSON.stringify({ deployed: true, registered: false, sends: 0, batch: hash }));
+    const r = runChain(dir, [...mainnetArgs(dir, k.file, f), "--resume-tx", hash], w, { pins, badTx });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /not the reviewed batch: nothing was sent/);
+    assert.equal(sends(dir), 0);
+    assert.equal(existsSync(path.join(dir, "out.json")), false);
+  });
+}
+
+test("mainnet M1: --resume-tx is mainnet only and wants a base58 tx hash", () => {
+  const dir = fresh();
+  const k = keyFile(dir, PARENT);
+  for (const [args, re] of [
+    [["--network", "testnet", "--parent", PARENT, "--key-file", k.file, "--resume-tx", "8".repeat(44)], /--resume-tx is for --network mainnet only/],
+    [["--network", "mainnet", "--parent", PARENT, "--key-file", k.file, "--resume-tx", "0x12"], /--resume-tx: want a base58 tx hash/],
+  ]) {
+    const r = run(dir, args);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, re);
+    neverSent(r);
+  }
 });

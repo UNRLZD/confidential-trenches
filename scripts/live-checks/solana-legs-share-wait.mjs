@@ -39,7 +39,7 @@ import {
   solanaDecodeTransaction,
   solanaJsonRpc,
 } from "../../packages/kit/src/index.ts";
-import { BASE, BUY_LAMPORTS, JUDGED, RPCS, SLIPPAGE_BPS, base58, mintLine } from "./solana-jupiter-build.mjs";
+import { BASE, BUY_LAMPORTS, JUDGED, RPCS, SLIPPAGE_BPS, base58, mintLine, noneWritten } from "./solana-jupiter-build.mjs";
 
 const KEY = "solana-legs-share-wait";
 export const LEGS = 6;
@@ -126,6 +126,7 @@ export async function judge(r) {
       mint: [accRead(ma), accRead(mb)],
       rent: { tokenAccount: [0n, 0n], pumpVolumeAccumulator: [0n, 0n] },
       simulations: [null, null],
+      writable: noneWritten(tx.wire, pairs),
       reference: null,
     });
     const off = v.results.filter((x) => JUDGED.includes(x.id) && !x.ok).map((x) => `${x.id} ${x.detail}`);

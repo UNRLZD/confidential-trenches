@@ -12,7 +12,47 @@ const MEASURED: [string, number, bigint][] = [
 test("G(32) for a buy is at least 1,332,356, and G covers every measured release", () => {
   assert.ok(evmPoolGas(32) >= 1_332_356n, `G(32) ${evmPoolGas(32)}`);
   for (const [what, d, gas] of MEASURED) assert.ok(evmPoolGas(d) >= gas, `${what} at depth ${d}: G ${evmPoolGas(d)} < ${gas}`);
-  assert.equal(evmPoolGas(3) - evmPoolGas(2), EVM_POOL_GAS_PER_LEVEL);
+  assert.equal(evmPoolGas(4) - evmPoolGas(3), EVM_POOL_GAS_PER_LEVEL);
+});
+
+// Card evm-buy-gas-depth: the pool's swap floor (PrivacyPoolSimple.buy, gasleft() >= 651,000 before the swap) makes
+// eth_estimateGas land on it. The least gas a buy lands with at the heaviest tree state of each depth 0 to 32 (the depth
+// before the buy's insert: depth 0 is one leaf, its crossing to depth 1 the costliest small state), measured on main
+// 332672aa's pool (forge, isolate = true, 7 Nov; every size 1 to 129, then all ones and the crossing at each depth to 32):
+// a 2,404-byte calldata route (EVM_BODY_DATA_MAX, swap data all non-zero) through an adapter burning 120,000 gas, the fee
+// recipient a new account. The limit adds a transaction's 21,000 and its calldata at its most, 16 x 2,404; forge 1.7.1's
+// least already holds the calldata, so this counts it twice and errs safe (src/trade/evm/pool-fee.ts).
+const LEAST_BY_DEPTH = [
+  1_117_427, 1_105_589, 1_110_751, 1_122_523, 1_143_556, 1_164_588, 1_185_620, 1_206_652, 1_227_685, 1_248_717,
+  1_269_749, 1_290_782, 1_311_814, 1_332_846, 1_353_879, 1_374_911, 1_395_944, 1_416_977, 1_438_009, 1_459_042,
+  1_480_075, 1_501_107, 1_522_140, 1_543_173, 1_564_206, 1_585_239, 1_606_272, 1_627_305, 1_648_338, 1_669_371,
+  1_690_404, 1_711_437, 1_732_470,
+].map(BigInt);
+const INTRINSIC_MAX = 21_000n + 16n * 2_404n;
+/** The gas limit the helper signs (apps/helper pool/evm.ts: estimate x 1.2) for the most a node estimates (geth and reth
+ *  stop up to 1.5% over the least) at depth d. */
+const helperLimit = (d: number) => ((((LEAST_BY_DEPTH[d]! + INTRINSIC_MAX) * 1000n + 984n) / 985n) * 12n) / 10n;
+
+test("evm-buy-gas-depth: G at every depth 0 to 32 is at or over the buy's gas limit the helper signs there", () => {
+  assert.equal(LEAST_BY_DEPTH.length, 33);
+  for (let d = 0; d <= 32; d++) assert.ok(evmPoolGas(d) >= helperLimit(d), `depth ${d}: G ${evmPoolGas(d)} < the limit ${helperLimit(d)}`);
+  // review of deed320f: one leaf (depth 0) crossing to depth 1 is the costliest small state
+  assert.equal(helperLimit(0), 1_433_776n);
+  // the depth-32 limit, the helper's buy gas cap (EVM_BUY_GAS_MAX = G(32)) holds it
+  assert.equal(helperLimit(32), 2_183_067n);
+  assert.ok(evmPoolGas(32) >= helperLimit(32));
+});
+
+test("evm-buy-gas-depth: the fee per gas of the buy's limit is at least 2x the epoch's base fee at every depth, so a 7% rise is not fee_stale", () => {
+  const fee = pf.evmPoolFee as (a: { gas: bigint; gasPrice: bigint; chainFee: bigint }) => bigint;
+  for (const base of [1_000_000_000n, 5_000_000n, 100_000n]) {
+    for (let d = 0; d <= 32; d++) {
+      const f = fee({ gas: evmPoolGas(d), gasPrice: base, chainFee: 0n });
+      const perGas = f / helperLimit(d); // the helper's maxFeePerGas cap
+      assert.ok(perGas >= 2n * base, `depth ${d}, base ${base}: fee / limit ${perGas} under 2x`);
+      assert.ok(perGas >= (base * 107n) / 100n, `depth ${d}: a 7% rise is fee_stale`);
+    }
+  }
 });
 
 test("a depth outside 0 to 32 is refused", () => {

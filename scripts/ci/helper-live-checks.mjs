@@ -41,6 +41,7 @@ export const LIVE_CHECKS = [
   "helper-robinhood-capacity",
   "helper-robinhood-search-ahead",
   "evm-buy-hookdata-fee",
+  "evm-buy-gas-depth",
   "helper-evm-abi-tie",
   "helper-tape-4337-trader",
   "helper-live-bars-no-503",
@@ -57,6 +58,7 @@ export const LIVE_CHECKS = [
   "helper-usdc-pending-pause",
   "helper-rpc-sell-methods",
   "robinhood-listed-tape-opens",
+  "rpc-keyed-lists",
   "helper-mainnet-vault-env",
 ];
 
