@@ -15,12 +15,26 @@
 //     fixed labels' own lines, which fail until their records are deleted (the switch's last DNS step);
 //   - APP_HOST, ct-app.unrealized.trade, answers by a CNAME to the terminal's Pages project
 //     (confidential-trenches-app.pages.dev), and HELPER_HOST, ct-api.unrealized.trade, answers the helper server's
-//     primary IP (apps/helper/deploy/create-server.mjs PRIMARY_IP): siblings, which cannot claim SIGN_HOST.
+//     primary IP (apps/helper/deploy/create-server.mjs PRIMARY_IP): siblings, which cannot claim SIGN_HOST. No line
+//     prints an address: an A answer is shown as a count.
+// And it reads the hosts over HTTPS:
+//   - the signing page's origin: SIGN_HOST's / is the signing page, its index pinning /app.js by sha384 and SIGN_HOST
+//     serving that very /app.js;
+//   - the rp.id: the one bare host name that bundle holds is SIGN_HOST (packages/wallet/src/signin/passkey.ts passes it
+//     as rp.id to create and get, and runs only where the page's hostname is SIGN_HOST), and every origin it names is
+//     SIGN_HOST's, APP_HOST's or HELPER_HOST's (the ceremony itself is wallet-passkey-prf's, after every sign deploy);
+//   - both CSPs: SIGN_HOST's frame-ancestors 'none' and frame-src APP_HOST alone (the shell frames the terminal),
+//     APP_HOST's frame-ancestors SIGN_HOST alone and frame-src 'none'; each connect-src names HELPER_HOST (and
+//     APP_HOST's SIGN_HOST and wss HELPER_HOST), and no source in either names a child of SIGN_HOST;
+//   - /.well-known/webauthn on SIGN_HOST is refused: 404, or Pages' fallback page (byte for byte SIGN_HOST's /), never
+//     a file that could let another origin use SIGN_HOST's passkeys;
+//   - the helper at HELPER_HOST echoes each of SIGN_HOST's and APP_HOST's origins (its CORS, the kit's HELPER_CORS);
+//   - the two retired children, sign. and api., give no answer at all.
 // The tree holds no child either: scripts/ci/host-children.mjs, in test:gates.
 //   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer the run read to <file>, so the check's test can replay it.
 import "../net-window.mjs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 
 const KEY = "hosts-main-on-top";
@@ -33,8 +47,14 @@ export const SIGN_TARGET = "confidential-trenches-sign.pages.dev";
 export const APP_TARGET = "confidential-trenches-app.pages.dev";
 // ct-helper's primary IPv4 (apps/helper/deploy/create-server.mjs PRIMARY_IP; the check's test holds them equal)
 export const HELPER_IP = "91.99.5.177";
+export const SIGN_ORIGIN = `https://${SIGN_HOST}`;
+export const APP_ORIGIN = `https://${APP_HOST}`;
+export const HELPER_ORIGIN = `https://${HELPER_HOST}`;
+export const WEBAUTHN = "/.well-known/webauthn";
 /** The child labels read, a random one last (a wildcard answers it). */
 export const LABELS = ["api", "app", "sign"];
+/** The children the switch retired: the old helper's and signing page's names, each read over HTTPS for no answer. */
+export const RETIRED = ["api", "sign"].map((l) => `${l}.${SIGN_HOST}`);
 export const RESOLVERS = [
   { name: "cloudflare", url: (n) => `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(n)}&type=A`, headers: { accept: "application/dns-json" } },
   { name: "google", url: (n) => `https://dns.google/resolve?name=${encodeURIComponent(n)}&type=A`, headers: {} },
@@ -139,8 +159,58 @@ export function ctNames(rec, name) {
   return { names: [...all].filter((n) => n.endsWith(`.${SIGN_HOST}`)).sort() };
 }
 
+const sha = (alg, text, enc) => createHash(alg).update(text).digest(enc);
+// a host name in a bundle: in an https or wss origin, or bare in a string (the quote before it)
+const HOSTS_IN = /(?:https?|wss):\/\/[a-z0-9*.-]*unrealized\.trade(?![a-z0-9-])|(?<=["'\x60])[a-z0-9*.-]*unrealized\.trade(?![a-z0-9-])/gi;
+/** Every unrealized.trade origin and bare host name in a text, lowercased, sorted, once each. */
+export const hostsIn = (text) => [...new Set((String(text).match(HOSTS_IN) ?? []).map((h) => h.toLowerCase()))].sort();
+
+/** One HTTPS read: { url, status, csp, acao, body } or { url, error }. */
+async function get(fetchFn, url, headers = {}) {
+  try {
+    const res = await fetchFn(url, { headers, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    return { url, status: res.status, csp: res.headers.get("content-security-policy"), acao: res.headers.get("access-control-allow-origin"), body: await res.text() };
+  } catch (e) {
+    return { url, error: String(e?.cause?.code ?? e?.name ?? e?.message) };
+  }
+}
+const kept = ({ body, ...r }) => r;
+
+/** The hosts over HTTPS. Small bodies are kept whole; of the bundle and the webauthn path, what is judged. */
+export async function readHttp(fetchFn = fetch) {
+  const index = await get(fetchFn, `${SIGN_ORIGIN}/`);
+  const bundle = await get(fetchFn, `${SIGN_ORIGIN}/app.js`);
+  const webauthn = await get(fetchFn, `${SIGN_ORIGIN}${WEBAUTHN}`);
+  const app = await get(fetchFn, `${APP_ORIGIN}/`);
+  const helperSign = await get(fetchFn, `${HELPER_ORIGIN}/v1/health`, { origin: SIGN_ORIGIN });
+  const helperApp = await get(fetchFn, `${HELPER_ORIGIN}/v1/health`, { origin: APP_ORIGIN });
+  const retired = [];
+  for (const n of RETIRED) retired.push(kept(await get(fetchFn, `https://${n}/`)));
+  const digest = (r) => (r.error ? kept(r) : { ...kept(r), sha256: sha("sha256", r.body, "hex") });
+  return {
+    sign_index: index.error ? index : { ...index, sha256: sha("sha256", index.body, "hex") },
+    sign_bundle: bundle.error ? bundle : { ...kept(bundle), sha384: `sha384-${sha("sha384", bundle.body, "base64")}`, hosts: hostsIn(bundle.body) },
+    webauthn: digest(webauthn),
+    app_index: kept(app),
+    helper_sign: kept(helperSign),
+    helper_app: kept(helperApp),
+    retired,
+  };
+}
+
+/** A CSP's directives: { name: [sources] }. */
+export function directives(csp) {
+  const out = {};
+  for (const d of String(csp ?? "").split(";")) {
+    const [name, ...src] = d.trim().split(/\s+/);
+    if (name) out[name.toLowerCase()] = src;
+  }
+  return out;
+}
+const CHILD = new RegExp(`[a-z0-9*-]\\.${SIGN_HOST.replaceAll(".", "\\.")}(?![a-z0-9-])`, "i");
+
 // fetchFn(url, init) as fetch; the CT logs first, then the names read, each from every resolver: the fixed ones and
-// every child the logs name
+// every child the logs name; then the hosts over HTTPS
 export async function read({ fetchFn = fetch, label = `x${randomBytes(8).toString("hex")}` } = {}) {
   const ct = [];
   for (const src of CT_SOURCES) ct.push(await readCt(src, fetchFn));
@@ -158,7 +228,7 @@ export async function read({ fetchFn = fetch, label = `x${randomBytes(8).toStrin
       }
     }
   }
-  return { label, ct, answers };
+  return { label, ct, answers, http: await readHttp(fetchFn) };
 }
 
 export function judge(rec) {
@@ -178,7 +248,7 @@ export function judge(rec) {
     });
     return got;
   };
-  const say = (g) => (g.error ? `${g.resolver} unread (${g.error})` : `${g.resolver} status ${g.status}${g.cnames.length ? ` CNAME ${g.cnames.join(" > ")}` : ""}${g.as.length ? ` A ${g.as.join(", ")}` : ""}`);
+  const say = (g) => (g.error ? `${g.resolver} unread (${g.error})` : `${g.resolver} status ${g.status}${g.cnames.length ? ` CNAME ${g.cnames.join(" > ")}` : ""}${g.as.length ? ` A x${g.as.length}` : ""}`);
 
   const sign = of(SIGN_HOST);
   add(sign.every((g) => !g.error && g.status === NOERROR && g.cnames[0] === SIGN_TARGET && g.as.length > 0), `${SIGN_HOST} is the signing page's project ${SIGN_TARGET}: ${sign.map(say).join("; ")}`);
@@ -208,8 +278,42 @@ export function judge(rec) {
   const app = of(APP_HOST);
   add(app.every((g) => !g.error && g.status === NOERROR && g.cnames[0] === APP_TARGET && g.as.length > 0), `${APP_HOST} is the terminal's project ${APP_TARGET}: ${app.map(say).join("; ")}`);
   const helper = of(HELPER_HOST);
-  add(helper.every((g) => !g.error && g.status === NOERROR && g.cnames.length === 0 && g.as.length === 1 && g.as[0] === HELPER_IP), `${HELPER_HOST} is ct-helper's ${HELPER_IP}: ${helper.map(say).join("; ")}`);
+  add(helper.every((g) => !g.error && g.status === NOERROR && g.cnames.length === 0 && g.as.length === 1 && g.as[0] === HELPER_IP), `${HELPER_HOST} is ct-helper's primary IP: ${helper.map(say).join("; ")}`);
+  judgeHttp(rec.http, add);
   return { ok, lines };
+}
+
+/** The HTTPS lines: the signing page's origin, the rp.id, both CSPs, the webauthn path, the helper's CORS, the
+ *  retired children. */
+function judgeHttp(h, add) {
+  if (!h) return add(false, "the hosts over HTTPS: not read");
+  const st = (r) => (!r ? "not read" : r.error ? `unread (${r.error})` : `HTTP ${r.status}`);
+  const idx = h.sign_index;
+  const b = h.sign_bundle;
+  const pin = idx && !idx.error ? /<script type="module" src="\/app\.js" integrity="(sha384-[A-Za-z0-9+/=]+)"><\/script>/.exec(idx.body ?? "")?.[1] : undefined;
+  add(idx?.status === 200 && !!pin && b?.status === 200 && b.sha384 === pin, `${SIGN_ORIGIN}/ is the signing page: / ${st(idx)}${pin ? ` pins /app.js ${pin.slice(0, 19)}...` : " pins no /app.js"}, /app.js ${st(b)}${b?.sha384 ? ` ${b.sha384 === pin ? "is" : "is not"} that file` : ""}`);
+  const hosts = b?.hosts ?? [];
+  const bareHosts = hosts.filter((x) => !x.includes("://"));
+  const origins = hosts.filter((x) => x.includes("://"));
+  const known = [SIGN_ORIGIN, APP_ORIGIN, HELPER_ORIGIN, `wss://${HELPER_HOST}`];
+  add(b?.status === 200 && bareHosts.length === 1 && bareHosts[0] === SIGN_HOST && origins.every((o) => known.includes(o)), `rp.id: the signing page's bundle holds the one bare host ${bareHosts.join(", ") || "none"} (want ${SIGN_HOST}) and the origins ${origins.join(", ") || "none"}`);
+  const sd = directives(idx?.csp);
+  const named = (d) => Object.values(d).flat().filter((x) => CHILD.test(x));
+  add(idx?.status === 200 && sd["frame-ancestors"]?.join(" ") === "'none'" && sd["frame-src"]?.join(" ") === APP_ORIGIN && (sd["connect-src"] ?? []).includes(HELPER_ORIGIN) && !named(sd).length, `${SIGN_HOST}'s CSP: frame-ancestors ${sd["frame-ancestors"]?.join(" ") ?? "none"} (want 'none'), frame-src ${sd["frame-src"]?.join(" ") ?? "none"} (want ${APP_ORIGIN}), connect-src ${(sd["connect-src"] ?? []).includes(HELPER_ORIGIN) ? "names" : "does not name"} ${HELPER_ORIGIN}${named(sd).length ? `, names a child: ${named(sd).join(", ")}` : ""}`);
+  const a = h.app_index;
+  const ad = directives(a?.csp);
+  const ac = ad["connect-src"] ?? [];
+  const wants = [HELPER_ORIGIN, `wss://${HELPER_HOST}`, SIGN_ORIGIN];
+  add(a?.status === 200 && ad["frame-ancestors"]?.join(" ") === SIGN_ORIGIN && ad["frame-src"]?.join(" ") === "'none'" && wants.every((w) => ac.includes(w)) && !named(ad).length, `${APP_HOST}'s CSP (${st(a)}): frame-ancestors ${ad["frame-ancestors"]?.join(" ") ?? "none"} (want ${SIGN_ORIGIN}), frame-src ${ad["frame-src"]?.join(" ") ?? "none"} (want 'none'), connect-src ${wants.filter((w) => !ac.includes(w)).length ? `lacks ${wants.filter((w) => !ac.includes(w)).join(", ")}` : `names ${wants.join(", ")}`}${named(ad).length ? `, names a child: ${named(ad).join(", ")}` : ""}`);
+  const w = h.webauthn;
+  add(w?.status === 404 || (w?.status === 200 && !!idx?.sha256 && w.sha256 === idx.sha256), `${SIGN_HOST}${WEBAUTHN} is refused: ${st(w)}${w?.status === 200 ? (w.sha256 === idx?.sha256 ? ", Pages' fallback page (/ byte for byte)" : ", a file that is not /") : ""}`);
+  for (const [r, origin] of [[h.helper_sign, SIGN_ORIGIN], [h.helper_app, APP_ORIGIN]]) {
+    add(r?.status === 200 && r.acao === origin, `${HELPER_ORIGIN}/v1/health with Origin ${origin}: ${st(r)}, access-control-allow-origin ${r?.acao ?? "none"}`);
+  }
+  for (const n of RETIRED) {
+    const r = (h.retired ?? []).find((x) => x.url === `https://${n}/`);
+    add(!!r?.error, `https://${n}/ gives no answer: ${r ? (r.error ? `none (${r.error})` : `HTTP ${r.status}`) : "not read"}`);
+  }
 }
 
 if (import.meta.main) {

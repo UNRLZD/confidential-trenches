@@ -1,18 +1,22 @@
 // node --test scripts/live-checks/hosts-main-on-top.test.mjs: the live check's verdict replays recorded runs
 // (hosts-main-on-top.answers.json):
-//   bad:  the real run on 2026-11-07 from the Mac, before the owner's DNS clicks: SIGN_HOST still the terminal's
-//         project, api. and sign. answering, ct-app and ct-api not made yet: FAIL on exactly those lines; its CT reads
-//         as they came (crt.sh's list without its canary, certspotter's api., ctwatch-test. and sign.);
-//   good: that run's own answers, each moved to the name it answers once the clicks are done: PASS.
+//   bad:  the real run on 2026-11-07 23:5xZ from the Mac, before the cutover: SIGN_HOST still the terminal's project
+//         and serving the terminal, api. and sign. answering, the helper with no certificate for ct-api yet: FAIL on
+//         exactly those lines; its CT reads as they came (crt.sh's list without its canary, certspotter's api.,
+//         ctwatch-test. and sign.);
+//   good: DNS and CT from the 2026-11-06 run's own answers, each moved to the name it answers once the clicks are done;
+//         HTTPS from release-92's own list and build (the answers' about says each part): PASS.
 // Planted on the good answer: a wildcard, a child with a record of another type, a resolver that disagrees or does not
 // answer, SIGN_HOST on the terminal's project, the helper on another address, a child in the CT logs that answers or
-// was not read, no CT source whole: each FAILs; one CT source whole is enough.
+// was not read, no CT source whole: each FAILs; one CT source whole is enough. And over HTTPS: SIGN_HOST serving
+// another page or another bundle, a bundle with a second bare host or a child's origin, each CSP directive wrong or
+// naming a child, a webauthn file, the helper's CORS missing an origin, a retired child that answers: each FAILs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_TARGET, CT_PAGES_MAX, ctNames, HELPER_HOST, HELPER_IP, judge, read, SIGN_HOST, SIGN_TARGET } from "./hosts-main-on-top.mjs";
+import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctNames, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "hosts-main-on-top.answers.json"), "utf8"));
@@ -40,7 +44,7 @@ test("the pins equal the deploy scripts' projects and the helper's primary IP", 
 test("recorded good answer: SIGN_HOST on the signing page's project, no child, no wildcard, the siblings in place: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.filter((l) => !l.startsWith("--")).length, 9);
+  assert.equal(r.lines.filter((l) => !l.startsWith("--")).length, 18);
   assert.ok(r.lines.includes(`ok  the CT logs are read: certspotter`), r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith("--  crt.sh: unread (the list does not name sign.")), "crt.sh's list without its canary is said so");
   assert.ok(r.lines.some((l) => l.startsWith(`ok  ctwatch-test.${SIGN_HOST}, in the CT logs: NXDOMAIN on both`)), r.lines.join("\n"));
@@ -57,10 +61,78 @@ test("recorded bad answer, today's DNS: SIGN_HOST is the terminal's, api. and si
       `BAD ${SIGN_HOST} is the signing page's project ${SIGN_TARGET}`,
       `BAD api.${SIGN_HOST}, api.`,
       `BAD sign.${SIGN_HOST}, sign.`,
-      `BAD ct-app.unrealized.trade is the terminal's project ${APP_TARGET}`,
-      `BAD ${HELPER_HOST} is ct-helper's ${HELPER_IP}`,
+      "BAD https",
+      "BAD rp.id",
+      `BAD ${SIGN_HOST}'s CSP`,
+      "BAD ct-app.unrealized.trade's CSP (HTTP 200)",
+      "BAD https",
+      "BAD https",
+      "BAD https",
+      "BAD https",
     ],
   );
+  const lines = bad(r).join("\n");
+  assert.match(lines, /BAD https:\/\/confidential\.unrealized\.trade\/ is the signing page: \/ HTTP 200 pins no \/app\.js/);
+  assert.match(lines, /BAD https:\/\/ct-api\.unrealized\.trade\/v1\/health with Origin https:\/\/confidential\.unrealized\.trade: unread \(ERR_SSL/);
+  assert.match(lines, /BAD https:\/\/sign\.confidential\.unrealized\.trade\/ gives no answer: HTTP 200/);
+  assert.match(lines, /BAD https:\/\/api\.confidential\.unrealized\.trade\/ gives no answer: HTTP 404/);
+});
+
+test("no line prints the helper's address", () => {
+  for (const k of ["good", "bad"]) for (const l of judge(ANSWERS[k]).lines) assert.ok(!l.includes(HELPER_IP), `${k}: ${l}`);
+});
+
+/** The good answer with its HTTPS part changed by `edit`. */
+function http(edit) {
+  const rec = clone(ANSWERS.good);
+  edit(rec.http);
+  return rec;
+}
+const csp = (r, from, to) => {
+  assert.ok(r.csp.includes(from), from);
+  r.csp = r.csp.replace(from, to);
+};
+
+test("planted HTTPS cases: each fails on its own line, and only there", () => {
+  const CHILD = ["x", SIGN_HOST].join(".");
+  const cases = [
+    ["SIGN_HOST serves another page", (h) => (h.sign_index.body = "<!doctype html><script type=module src=/assets/x.js></script>"), "BAD https"],
+    ["SIGN_HOST's /app.js is not the one its index pins", (h) => (h.sign_bundle.sha384 = "sha384-other"), "BAD https"],
+    ["/app.js not served", (h) => (h.sign_bundle = { url: h.sign_bundle.url, error: "ETIMEDOUT" }), ["BAD https", "BAD rp.id"]],
+    ["the bundle holds a second bare host", (h) => h.sign_bundle.hosts.push("ct-app.unrealized.trade"), "BAD rp.id"],
+    ["the bundle names a child's origin", (h) => h.sign_bundle.hosts.push(`https://${CHILD}`), "BAD rp.id"],
+    ["the bundle's bare host is a parent", (h) => (h.sign_bundle.hosts = h.sign_bundle.hosts.map((x) => (x === SIGN_HOST ? "unrealized.trade" : x))), "BAD rp.id"],
+    ["SIGN_HOST may be framed", (h) => csp(h.sign_index, "frame-ancestors 'none'", `frame-ancestors ${APP_ORIGIN}`), `BAD ${SIGN_HOST}'s CSP`],
+    ["SIGN_HOST frames more than APP_HOST", (h) => csp(h.sign_index, `frame-src ${APP_ORIGIN}`, `frame-src ${APP_ORIGIN} https://${CHILD}`), `BAD ${SIGN_HOST}'s CSP`],
+    ["SIGN_HOST's connect-src lacks the helper", (h) => csp(h.sign_index, `connect-src 'self' https://${HELPER_HOST}`, "connect-src 'self'"), `BAD ${SIGN_HOST}'s CSP`],
+    ["SIGN_HOST's connect-src names a child", (h) => csp(h.sign_index, "connect-src 'self'", `connect-src 'self' https://${CHILD}`), `BAD ${SIGN_HOST}'s CSP`],
+    ["APP_HOST may be framed by another", (h) => csp(h.app_index, `frame-ancestors ${SIGN_ORIGIN}`, `frame-ancestors ${SIGN_ORIGIN} https://${CHILD}`), "BAD ct-app.unrealized.trade's CSP (HTTP 200)"],
+    ["APP_HOST frames a page", (h) => csp(h.app_index, "frame-src 'none'", `frame-src ${SIGN_ORIGIN}`), "BAD ct-app.unrealized.trade's CSP (HTTP 200)"],
+    ["APP_HOST's connect-src lacks the helper's socket", (h) => csp(h.app_index, ` wss://${HELPER_HOST}`, ""), "BAD ct-app.unrealized.trade's CSP (HTTP 200)"],
+    ["APP_HOST's connect-src lacks SIGN_HOST", (h) => csp(h.app_index, ` ${SIGN_ORIGIN} `, " "), "BAD ct-app.unrealized.trade's CSP (HTTP 200)"],
+    ["a webauthn file on SIGN_HOST", (h) => (h.webauthn.sha256 = "0".repeat(64)), `BAD ${SIGN_HOST}${WEBAUTHN} is refused`],
+    ["webauthn unread", (h) => (h.webauthn = { url: h.webauthn.url, error: "ETIMEDOUT" }), `BAD ${SIGN_HOST}${WEBAUTHN} is refused`],
+    ["the helper does not echo SIGN_HOST", (h) => (h.helper_sign.acao = null), "BAD https"],
+    ["the helper echoes the wrong origin for APP_HOST", (h) => (h.helper_app.acao = SIGN_ORIGIN), "BAD https"],
+    ["a retired child answers", (h) => (h.retired[1] = { url: h.retired[1].url, status: 200 }), "BAD https"],
+    ["a retired child not read", (h) => h.retired.pop(), "BAD https"],
+  ];
+  for (const [what, edit, want] of cases) {
+    const r = judge(http(edit));
+    assert.equal(r.ok, false, what);
+    assert.deepEqual(bad(r).map((l) => l.split(":")[0].replace(/^(BAD https).*/, "$1")), [want].flat(), `${what}: ${bad(r).join("\n")}`);
+  }
+  // a 404 for the webauthn path passes, as Pages' fallback page does
+  assert.equal(judge(http((h) => (h.webauthn = { url: h.webauthn.url, status: 404, sha256: "1".repeat(64) }))).ok, true);
+  // a record with no HTTPS part fails
+  const none = clone(ANSWERS.good);
+  delete none.http;
+  assert.deepEqual(bad(judge(none)), ["BAD the hosts over HTTPS: not read"]);
+});
+
+test("hostsIn reads origins and bare host names out of a bundle", () => {
+  const text = `a="https://ct-api.unrealized.trade/v1",b=\x60confidential.unrealized.trade\x60,c='wss://ct-api.unrealized.trade'`;
+  assert.deepEqual(hostsIn(text), ["confidential.unrealized.trade", "https://ct-api.unrealized.trade", "wss://ct-api.unrealized.trade"]);
 });
 
 test("planted: each broken name fails on its own line", () => {
@@ -152,11 +224,21 @@ test("read asks the CT logs first (certspotter page by page), then both resolver
     `https://api.certspotter.com/v1/issuances?domain=${SIGN_HOST}&include_subdomains=true&expand=dns_names`,
     `https://api.certspotter.com/v1/issuances?domain=${SIGN_HOST}&include_subdomains=true&expand=dns_names&after=5`,
   ]);
-  const dns = asked.slice(3);
+  const dns = asked.slice(3, 19);
   const names = dns.map((u) => new URL(u).searchParams.get("name"));
   assert.deepEqual([...new Set(names)], [SIGN_HOST, `api.${SIGN_HOST}`, `app.${SIGN_HOST}`, `sign.${SIGN_HOST}`, `xrand.${SIGN_HOST}`, "ct-app.unrealized.trade", HELPER_HOST, WWW]);
   assert.equal(dns.length, 16);
   assert.deepEqual([...new Set(dns.map((u) => new URL(u).host))], ["cloudflare-dns.com", "dns.google"]);
   assert.equal(rec.answers.length, 16);
   assert.deepEqual(rec.ct.map((c) => [c.source, c.pages.length]), [["crt.sh", 1], ["certspotter", 2]]);
+  assert.deepEqual(asked.slice(19), [
+    `${SIGN_ORIGIN}/`,
+    `${SIGN_ORIGIN}/app.js`,
+    `${SIGN_ORIGIN}${WEBAUTHN}`,
+    `${APP_ORIGIN}/`,
+    `https://${HELPER_HOST}/v1/health`,
+    `https://${HELPER_HOST}/v1/health`,
+    `https://${["api", SIGN_HOST].join(".")}/`,
+    `https://${["sign", SIGN_HOST].join(".")}/`,
+  ]);
 });

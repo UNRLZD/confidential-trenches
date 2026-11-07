@@ -62,6 +62,7 @@ export const CHILD_RUNS = [
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",

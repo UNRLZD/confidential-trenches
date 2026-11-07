@@ -1,5 +1,5 @@
 {
- "about": "bad: the real run at 2026-11-06T23:53:05.307Z from the Mac, before the owner's DNS clicks: SIGN_HOST still the terminal's project, api. and sign. answering, ct-app and ct-api not yet made: FAIL; its CT reads as they came: crt.sh answered a list without its canary (unread), certspotter named api., ctwatch-test. and sign. (ctwatch-test. NXDOMAIN on both). good: constructed from that run's own answers, each moved to the name it answers once the clicks are done (sign.'s CNAME answer to SIGN_HOST, the random label's NXDOMAIN to api. and sign., SIGN_HOST's old CNAME answer to ct-app, api.'s A answer to ct-api), its CT reads unchanged (the logs keep the old names): PASS. Re-record good with --record after the clicks.",
+ "about": "bad: the real run at 2026-11-07T23:47:55.367Z from the Mac, before the cutover (scripts/deploy/hosts-cutover.sh in the research repo): SIGN_HOST still the terminal's project and serving the terminal (its CSP names the old children), api. and sign. answering in DNS and over HTTPS, ct-app on the terminal's project with the terminal's old build, ct-api's record made but its helper holding no certificate for it yet (TLS alert): FAIL; its CT reads as they came. good: its DNS and CT part constructed from the 2026-11-06T23:53Z run's own answers, each moved to the name it answers once the clicks are done (sign.'s CNAME answer to SIGN_HOST, the random label's NXDOMAIN to api. and sign., SIGN_HOST's old CNAME answer to ct-app, api.'s A answer to ct-api), its CT reads unchanged; its HTTPS part constructed from release-92 (packages/signpage/releases/release-92.json): SIGN_HOST's / as index.html with its listed CSP, /app.js's listed sha384 and the host names in public/app.js, /.well-known/webauthn as Pages' fallback page (as the live run shows Pages answers it today), APP_HOST's / with its listed CSP, the helper's CORS echo as the kit's HELPER_CORS lists both origins, and no answer on the retired children: PASS. Re-record good with --record after the cutover.",
  "good": {
   "at": "2026-11-06T23:53:05.307Z",
   "label": "x526ac9220da59ef7",
@@ -143,11 +143,69 @@
     "status": 200,
     "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ctwatch-test.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1701,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
    }
-  ]
+  ],
+  "http": {
+   "sign_index": {
+    "url": "https://confidential.unrealized.trade/",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+    "acao": null,
+    "body": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qYieAGF1HW+nyfqfgxcWMwv7TVI7V5k7pFbl65WgtOCUfmVZkYfuzfernWhATJBi\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha256": "5c92022cb433f500b0cd2f87b1aca4c2ca682edb187e7aeefd340fbf9049ac24"
+   },
+   "sign_bundle": {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+    "acao": null,
+    "sha384": "sha384-qYieAGF1HW+nyfqfgxcWMwv7TVI7V5k7pFbl65WgtOCUfmVZkYfuzfernWhATJBi",
+    "hosts": [
+     "confidential.unrealized.trade",
+     "https://confidential.unrealized.trade",
+     "https://ct-api.unrealized.trade",
+     "https://ct-app.unrealized.trade"
+    ]
+   },
+   "webauthn": {
+    "url": "https://confidential.unrealized.trade/.well-known/webauthn",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+    "acao": null,
+    "sha256": "5c92022cb433f500b0cd2f87b1aca4c2ca682edb187e7aeefd340fbf9049ac24"
+   },
+   "app_index": {
+    "url": "https://ct-app.unrealized.trade/",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+    "acao": null
+   },
+   "helper_sign": {
+    "url": "https://ct-api.unrealized.trade/v1/health",
+    "status": 200,
+    "csp": null,
+    "acao": "https://confidential.unrealized.trade"
+   },
+   "helper_app": {
+    "url": "https://ct-api.unrealized.trade/v1/health",
+    "status": 200,
+    "csp": null,
+    "acao": "https://ct-app.unrealized.trade"
+   },
+   "retired": [
+    {
+     "url": "https://api.confidential.unrealized.trade/",
+     "error": "ENOTFOUND"
+    },
+    {
+     "url": "https://sign.confidential.unrealized.trade/",
+     "error": "ENOTFOUND"
+    }
+   ]
+  }
  },
  "bad": {
-  "at": "2026-11-06T23:53:05.307Z",
-  "label": "x526ac9220da59ef7",
+  "at": "2026-11-07T23:47:55.367Z",
+  "label": "x102c44a5e5434c54",
   "ct": [
    {
     "source": "crt.sh",
@@ -188,7 +246,7 @@
     "name": "confidential.unrealized.trade",
     "url": "https://dns.google/resolve?name=confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}],\"Comment\":\"Response from 172.64.32.57.\"}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"confidential.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}],\"Comment\":\"Response from 108.162.192.57.\"}"
    },
    {
     "resolver": "cloudflare",
@@ -202,92 +260,145 @@
     "name": "api.confidential.unrealized.trade",
     "url": "https://dns.google/resolve?name=api.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1,\"TTL\":828,\"data\":\"91.99.5.177\"}]}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"api.confidential.unrealized.trade.\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
    },
    {
     "resolver": "cloudflare",
     "name": "app.confidential.unrealized.trade",
     "url": "https://cloudflare-dns.com/dns-query?name=app.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1794034458 43200 3600 604800 3601\"}]}"
    },
    {
     "resolver": "google",
     "name": "app.confidential.unrealized.trade",
     "url": "https://dns.google/resolve?name=app.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"app.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1794034458 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
    },
    {
     "resolver": "cloudflare",
     "name": "sign.confidential.unrealized.trade",
     "url": "https://cloudflare-dns.com/dns-query?name=sign.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"}]}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"sign.confidential.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"},{\"name\":\"confidential-trenches-sign.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"}]}"
    },
    {
     "resolver": "google",
     "name": "sign.confidential.unrealized.trade",
     "url": "https://dns.google/resolve?name=sign.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":5,\"TTL\":827,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"}],\"Comment\":\"Response from 108.162.192.57.\"}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"sign.confidential.unrealized.trade.\",\"type\":5,\"TTL\":1263,\"data\":\"confidential-trenches-sign.pages.dev.\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.243\"},{\"name\":\"confidential-trenches-sign.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.13\"}],\"Comment\":\"Response from 108.162.192.57.\"}"
    },
    {
     "resolver": "cloudflare",
-    "name": "x526ac9220da59ef7.confidential.unrealized.trade",
-    "url": "https://cloudflare-dns.com/dns-query?name=x526ac9220da59ef7.confidential.unrealized.trade&type=A",
+    "name": "x102c44a5e5434c54.confidential.unrealized.trade",
+    "url": "https://cloudflare-dns.com/dns-query?name=x102c44a5e5434c54.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"x526ac9220da59ef7.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"x102c44a5e5434c54.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1794034458 43200 3600 604800 3601\"}]}"
    },
    {
     "resolver": "google",
-    "name": "x526ac9220da59ef7.confidential.unrealized.trade",
-    "url": "https://dns.google/resolve?name=x526ac9220da59ef7.confidential.unrealized.trade&type=A",
+    "name": "x102c44a5e5434c54.confidential.unrealized.trade",
+    "url": "https://dns.google/resolve?name=x102c44a5e5434c54.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"x526ac9220da59ef7.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1702,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"x102c44a5e5434c54.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1794034458 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
    },
    {
     "resolver": "cloudflare",
     "name": "ct-app.unrealized.trade",
     "url": "https://cloudflare-dns.com/dns-query?name=ct-app.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"ct-app.unrealized.trade\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"},{\"name\":\"confidential-trenches-app.pages.dev\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"}]}"
    },
    {
     "resolver": "google",
     "name": "ct-app.unrealized.trade",
     "url": "https://dns.google/resolve?name=ct-app.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":764,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":false,\"CD\":false,\"Question\":[{\"name\":\"ct-app.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"ct-app.unrealized.trade.\",\"type\":5,\"TTL\":1799,\"data\":\"confidential-trenches-app.pages.dev.\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.47.14\"},{\"name\":\"confidential-trenches-app.pages.dev.\",\"type\":1,\"TTL\":300,\"data\":\"172.66.44.242\"}],\"Comment\":\"Response from 172.64.32.57.\"}"
    },
    {
     "resolver": "cloudflare",
     "name": "ct-api.unrealized.trade",
     "url": "https://cloudflare-dns.com/dns-query?name=ct-api.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade\",\"type\":1}],\"Answer\":[{\"name\":\"ct-api.unrealized.trade\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}]}"
    },
    {
     "resolver": "google",
     "name": "ct-api.unrealized.trade",
     "url": "https://dns.google/resolve?name=ct-api.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1800,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}],\"Comment\":\"Response from 156.154.132.200.\"}"
+    "body": "{\"Status\":0,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ct-api.unrealized.trade.\",\"type\":1}],\"Answer\":[{\"name\":\"ct-api.unrealized.trade.\",\"type\":1,\"TTL\":1799,\"data\":\"91.99.5.177\"}],\"Comment\":\"Response from 156.154.133.200.\"}"
    },
    {
     "resolver": "cloudflare",
     "name": "ctwatch-test.confidential.unrealized.trade",
     "url": "https://cloudflare-dns.com/dns-query?name=ctwatch-test.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ctwatch-test.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ctwatch-test.confidential.unrealized.trade\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade\",\"type\":6,\"TTL\":3601,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1794034458 43200 3600 604800 3601\"}]}"
    },
    {
     "resolver": "google",
     "name": "ctwatch-test.confidential.unrealized.trade",
     "url": "https://dns.google/resolve?name=ctwatch-test.confidential.unrealized.trade&type=A",
     "status": 200,
-    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ctwatch-test.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1701,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1793682510 43200 3600 604800 3601\"}]}"
+    "body": "{\"Status\":3,\"TC\":false,\"RD\":true,\"RA\":true,\"AD\":true,\"CD\":false,\"Question\":[{\"name\":\"ctwatch-test.confidential.unrealized.trade.\",\"type\":1}],\"Authority\":[{\"name\":\"unrealized.trade.\",\"type\":6,\"TTL\":1799,\"data\":\"dns1.registrar-servers.com. hostmaster.registrar-servers.com. 1794034458 43200 3600 604800 3601\"}]}"
    }
-  ]
+  ],
+  "http": {
+   "sign_index": {
+    "url": "https://confidential.unrealized.trade/",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+    "acao": "*",
+    "body": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-CHTK1nRs.js\" integrity=\"sha384-C0EIKExWAtRbWPaKR5nV8eAEdVfNW5WLvLwD0VU62rH9mLSSoP1OFBlzuGHLtsqK\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-Dxalcrg2.css\" integrity=\"sha384-kt3yWFjUv2IwbmjndrWKeRM5hrUGT6yMlQ9fzAr1psw2GncWFtfEvIFqJ9Dh0SqP\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <!-- The boot frame (BAR-03): the shell's header, the screen's frame and the phone's tab bar, drawn by this file and\n         shell.css before the script runs, so a new frame of the app (the first load, and the return from SIGN_HOST's\n         screens, where the shell makes a new one) has content from its first paint. No words: the faces load later.\n         Hidden by shell.css the moment the app draws into #root, in the same frame; hidden too until shell.css applies\n         (the hidden attribute, which shell.css overrides), so an unstyled first layout draws nothing that moves. -->\n    <div id=\"boot\" aria-hidden=\"true\" hidden>\n      <div class=\"boot-tb\">\n        <span class=\"ctlogo\">\n          <span class=\"dots\">\n            <picture><source media=\"(min-resolution: 1.5dppx)\" srcset=\"/assets/ct-stack-2x-cool-CyRdqxKi.svg\" /><img src=\"/assets/ct-stack-1x-cool-BSLhwoVz.svg\" alt=\"\" /></picture>\n            <picture><source media=\"(min-resolution: 1.5dppx)\" srcset=\"/assets/ct-stack-2x-DCJZ3gWM.svg\" /><img src=\"/assets/ct-stack-1x-z6B8R7os.svg\" alt=\"\" /></picture>\n          </span>\n        </span>\n      </div>\n      <div class=\"boot-screen\"><div class=\"boot-panel\"></div></div>\n      <div class=\"boot-ft\"></div>\n      <div class=\"phh\">\n        <span class=\"hit44\">\n          <span class=\"ctlogo ph\">\n            <span class=\"dots\"><img src=\"/assets/ct-stack-phone-2x-cool-BFOZvkte.svg\" alt=\"\" /><img src=\"/assets/ct-stack-phone-2x-7fLYhN9M.svg\" alt=\"\" /></span>\n          </span>\n        </span>\n      </div>\n      <div class=\"tabbar\">\n          <span class=\"tb4\"><span class=\"pl\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 17l5.5-5.5 4 4L21 7\" /><path d=\"M15 7h6v6\" /></svg></span></span>\n          <span class=\"tb4\"><span class=\"pl\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0\" /><path d=\"M15.5 8.5l-2.2 4.8-4.8 2.2 2.2-4.8z\" /></svg></span></span>\n          <span class=\"tb4\"><span class=\"pl\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3a9 9 0 1 0 9 9h-9z\" /><path d=\"M15 3.5a9 9 0 0 1 5.5 5.5H15z\" /></svg></span></span>\n          <span class=\"tb4\"><span class=\"pl\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 12a4 4 0 1 0 0-8a4 4 0 1 0 0 8\" /><path d=\"M4.5 20c1.4-3.3 4.2-5 7.5-5s6.1 1.7 7.5 5\" /></svg></span></span>\n      </div>\n    </div>\n  </body>\n</html>\n",
+    "sha256": "7d4702f5227845a993dc3f16acda477a0594d9e2fa51c6edf0d657a1c7c390f7"
+   },
+   "sign_bundle": {
+    "url": "https://confidential.unrealized.trade/app.js",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+    "acao": "*",
+    "sha384": "sha384-sl19hd8xY3WBYlQCJ5SAwRA6Clsgri3+REGdwuAR0wGR+a2iXpi4e0tcV70VMsJ2",
+    "hosts": []
+   },
+   "webauthn": {
+    "url": "https://confidential.unrealized.trade/.well-known/webauthn",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+    "acao": "*",
+    "sha256": "7d4702f5227845a993dc3f16acda477a0594d9e2fa51c6edf0d657a1c7c390f7"
+   },
+   "app_index": {
+    "url": "https://ct-app.unrealized.trade/",
+    "status": 200,
+    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+    "acao": "*"
+   },
+   "helper_sign": {
+    "url": "https://ct-api.unrealized.trade/v1/health",
+    "error": "ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR"
+   },
+   "helper_app": {
+    "url": "https://ct-api.unrealized.trade/v1/health",
+    "error": "ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR"
+   },
+   "retired": [
+    {
+     "url": "https://api.confidential.unrealized.trade/",
+     "status": 404,
+     "csp": null,
+     "acao": null
+    },
+    {
+     "url": "https://sign.confidential.unrealized.trade/",
+     "status": 200,
+     "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "acao": "*"
+    }
+   ]
+  }
  }
 }
