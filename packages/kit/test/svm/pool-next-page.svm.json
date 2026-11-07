@@ -1,0 +1,45 @@
+{
+ "program": "8s4z4iWeA2CKXfm9iNGdBSFxUoenDpBFn4kpi3P9xoxC",
+ "so_sha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162",
+ "filled": {
+  "stateSize": 1023,
+  "labelSize": 1023
+ },
+ "price": "4020920",
+ "exact": "2016440",
+ "opened": "4020920",
+ "steps": [
+  {
+   "tx": "B (kit, 8 accounts) at 1023/1023, lands first",
+   "landed": true,
+   "sizes": {
+    "stateSize": 1024,
+    "labelSize": 1024
+   },
+   "u_left": "2004480"
+  },
+  {
+   "tx": "A6 (6 accounts) at 1023/1023, overtaken",
+   "landed": false,
+   "err": "TransactionErrorInstructionError { index: 0, error: InstructionErrorCustom { code: 22 } }",
+   "logs": [
+    "Program 8s4z4iWeA2CKXfm9iNGdBSFxUoenDpBFn4kpi3P9xoxC consumed 13800 of 200000 compute units",
+    "Program 8s4z4iWeA2CKXfm9iNGdBSFxUoenDpBFn4kpi3P9xoxC failed: custom program error: 0x16"
+   ]
+  },
+  {
+   "tx": "A (kit, 8 accounts) at 1023/1023, overtaken",
+   "landed": true,
+   "sizes": {
+    "stateSize": 1025,
+    "labelSize": 1025
+   },
+   "page1": [
+    true,
+    true
+   ],
+   "u_left": "0"
+  }
+ ],
+ "ok": true
+}

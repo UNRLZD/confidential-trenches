@@ -20,12 +20,22 @@
 //   minimum at its new length (16 + 72 x (slot + 1)) less what the page holds, never below 0; plus the fee. Lamports a
 //   stranger sends to a page or a mark's address lower that cost, so it is priced from both accounts' balances, read on
 //   two RPCs (solanaPoolDepositCost), never from a page's expected size. An entry the next page takes opens it (16 + 72
-//   bytes, 731,520 lamports more a tree at mainnet rent), which that price does not hold yet.
+//   bytes, 731,520 lamports more a tree at mainnet rent): a tree within SOLANA_POOL_NEXT_PAGE_WINDOW entries of its
+//   page's end is priced at that opening, so U holds it; what the deposit does not spend stays in U for its next deposit.
 import { solanaProgramAddress } from "../../checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 import { VAULT_FIELD_P } from "../../vault/shapes.ts";
 import { solanaCompileV0, type SolanaApiInstruction } from "./build.ts";
 import { solanaPoolAccount, solanaPoolNextPage, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
+
+/**
+ * How near its page's end (entries from the size read to the page's last slot, inclusive: 1 at slot 1,023) a tree's
+ * size must be for a deposit to be priced at the next page's opening: within it, inserts that land between the read and
+ * the deposit can carry its entry onto the next page (src/state.rs page_for). Outside it the price is exact, and a
+ * deposit that more inserts than this overtake fails on chain as before, losing only its fee. Whatever a deposit priced
+ * this way does not spend stays in U for its next deposit (M350 (4), packages/wallet/src/pool/same-chain.ts).
+ */
+export const SOLANA_POOL_NEXT_PAGE_WINDOW = 64;
 
 /** The deposit's tag and data length (contracts/pool-solana/src/lib.rs:84, deposit.rs:69). */
 export const SOLANA_POOL_TAG_DEPOSIT = 1;
@@ -149,12 +159,18 @@ export function solanaPoolDepositTx(program: string, depositor: string, note: So
  * push_entry): the fee, max(0, rent(17) - the mark address's lamports), and for each tree max(0, rent(16 + 72 x (slot +
  * 1)) - its page's lamports), slot = size mod 1024 (a page not made yet holds what strangers sent it, often 0). `rent`
  * is the Rent sysvar read on two RPCs (readSolanaRent); the balances are the lower of two RPCs'. An entry the next page
- * takes (inserts that landed first carried it there) opens that page instead, 731,520 lamports more a tree at mainnet
- * rent; this price does not hold that (card pool-senders-next-page, open).
+ * takes (inserts that landed first carried it there) opens that page instead, rent(16 + 72): 731,520 lamports more a
+ * tree at mainnet rent. A tree whose size sits within SOLANA_POOL_NEXT_PAGE_WINDOW entries of its page's end is priced
+ * at that opening when it is more (the next page priced as holding nothing), so the deposit lands either way.
  */
 export function solanaPoolDepositCost(fee: bigint, rent: SolanaRent, sizes: { stateSize: number; labelSize: number }, have: { mark: bigint; statePage: bigint; labelPage: bigint }): bigint {
   for (const x of [fee, have.mark, have.statePage, have.labelPage]) if (typeof x !== "bigint" || x < 0n) refuse("the fee and the balances are bigints at or above 0");
   const short = (need: bigint, held: bigint): bigint => (need > held ? need - held : 0n);
-  const page = (s: number, held: bigint): bigint => short(solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER + SOLANA_POOL_PAGE_ENTRY * ((s % SOLANA_POOL_PAGE_ENTRIES) + 1)), held);
+  const open = solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER + SOLANA_POOL_PAGE_ENTRY);
+  const page = (s: number, held: bigint): bigint => {
+    const here = short(solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER + SOLANA_POOL_PAGE_ENTRY * ((s % SOLANA_POOL_PAGE_ENTRIES) + 1)), held);
+    const near = SOLANA_POOL_PAGE_ENTRIES - (s % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
+    return near && open > here ? open : here;
+  };
   return fee + short(solanaRentMin(rent, SOLANA_POOL_PRE_MARK_LEN), have.mark) + page(size(sizes.stateSize, "stateSize"), have.statePage) + page(size(sizes.labelSize, "labelSize"), have.labelPage);
 }

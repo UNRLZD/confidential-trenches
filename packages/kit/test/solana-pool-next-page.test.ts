@@ -7,8 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { base58 } from "@scure/base";
 import * as kit from "../src/index.ts";
-import { buildSolanaPoolBuy, checkSolanaPoolBuy, solanaDecodeMessage, solanaPoolDepositIx, solanaPoolPage, type SolanaPoolBuyVenue } from "../src/index.ts";
-import { BLOCKHASH, FEE_PAYER, PROGRAM, W, cfg, release, setup } from "./solana-pool-buy-fx.ts";
+import { SOLANA_POOL_NEXT_PAGE_WINDOW, buildSolanaPoolBuy, checkSolanaPoolBuy, solanaDecodeMessage, solanaPoolDepositCost, solanaPoolDepositIx, solanaPoolPage, solanaRentMin, type SolanaPoolBuyVenue } from "../src/index.ts";
+import { BLOCKHASH, FEE_PAYER, PROGRAM, W, cfg, release, rent, setup } from "./solana-pool-buy-fx.ts";
 
 const DEPOSITOR = "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T";
 const note = { value: 10_000_000n, precommitment: 12345n };
@@ -23,6 +23,33 @@ test("tag 1 names each tree's next page as accounts 6 and 7, writable, the page 
     assert.equal(ix.accounts[2]!.key, solanaPoolPage(PROGRAM, 0, s));
     assert.notEqual(ix.accounts[6]!.key, ix.accounts[2]!.key);
   }
+});
+
+test("a deposit within 64 entries of a page's end is priced at the next page's opening (M350 (4): the rest stays in U); 65 out is exact", () => {
+  assert.equal(SOLANA_POOL_NEXT_PAGE_WINDOW, 64);
+  const open = solanaRentMin(rent, 16 + 72);
+  const mark = solanaRentMin(rent, 17);
+  // `out` entries from the size to its page's last slot (1 at slot 1,023); each page holds its entries' rent so far
+  const priced = (out: number, page = 0) => {
+    const size = page * 1024 + 1024 - out;
+    const held = solanaRentMin(rent, 16 + 72 * (size % 1024));
+    return solanaPoolDepositCost(5_000n, rent, { stateSize: size, labelSize: 6 }, { mark: 0n, statePage: held, labelPage: solanaRentMin(rent, 16 + 72 * 6) });
+  };
+  const label = 72n * rent.lamportsPerByte * rent.factor; // the label tree far from its end: one entry, exact
+  const entry = label;
+  for (const page of [0, 3]) {
+    assert.equal(priced(65, page), 5_000n + mark + entry + label, `65 out, page ${page}: exact`);
+    assert.equal(priced(64, page), 5_000n + mark + open + label, `64 out, page ${page}: the next page's opening`);
+    assert.equal(priced(63, page), 5_000n + mark + open + label, `63 out, page ${page}`);
+    assert.equal(priced(1, page), 5_000n + mark + open + label, `the last slot, page ${page}`);
+  }
+  // both trees near the end: twice 731,520 more than exact at mainnet rent (5,080 a byte)
+  const m = { lamportsPerByte: 5_080n, factor: 1n } as const;
+  const both = (s: number) => solanaPoolDepositCost(0n, m, { stateSize: s, labelSize: s }, { mark: solanaRentMin(m, 17), statePage: solanaRentMin(m, 16 + 72 * (s % 1024)), labelPage: solanaRentMin(m, 16 + 72 * (s % 1024)) });
+  assert.equal(both(1000) - both(959), 2n * 731_520n);
+  assert.equal(both(959), 2n * 365_760n);
+  // a new page nobody funded costs its opening anyway, in or out of the window
+  assert.equal(solanaPoolDepositCost(0n, rent, { stateSize: 1024, labelSize: 1024 }, { mark: 0n, statePage: 0n, labelPage: 0n }), mark + 2n * open);
 });
 
 test("tag 2 names the next state page as its ninth account, writable, after the release's eight", () => {
