@@ -431,6 +431,15 @@ test("card evm-sell-no-release-in-flight: W's releases up to the quote's block m
     const v = await verdict(sellQuoteWith(req("base-sepolia"), [lying(f), lying(f)], Date.now()));
     assert.deepEqual(v, { accepted: false, code: "rpc_error" });
   }
+  // a log further above the quote's block than a pair's heads can be apart (base-sepolia's maxLag, 100)
+  const lag = BigInt(evmPoolVenues()["base-sepolia"].maxLag!);
+  assert.match(await e01Why({ releases: [{ kind: "withdraw", block: 256n + lag, nullifier: 7n }] }), /landed in block 356/);
+  assert.deepEqual(await verdict(e01Quote({ releases: [{ kind: "withdraw", block: 257n + lag, nullifier: 7n }] })), { accepted: false, code: "rpc_error" });
+  // W's releases are read on the pool's own list where the chain has one (Robinhood's poolProviders), never the quote's
+  const quoteOnly = () => provider({ price: flat });
+  const poolList = () => provider({ price: flat, releases: [{ kind: "withdraw", block: 240n, nullifier: 7n }] });
+  const onPool = await sellQuoteWith(req("base-sepolia"), [quoteOnly(), quoteOnly()], Date.now(), undefined, undefined, undefined, [poolList(), poolList()]);
+  assert.throws(() => kit.evmPoolBuildSell(onPool, E01_BASE()), /landed in block 240/);
   // a log twice
   const twice = (): EvmRpc => async (calls) => (await provider({ price: flat, releases: [{ kind: "buy", block: 240n, nullifier: 7n }] })(calls)).map((o, i) => (calls[i]!.method === "eth_getLogs" ? { ...(o as object), result: [...(o as { result: unknown[] }).result, ...(o as { result: unknown[] }).result] } : o));
   assert.deepEqual(await verdict(sellQuoteWith(req("base-sepolia"), [twice(), twice()], Date.now())), { accepted: false, code: "rpc_error" });

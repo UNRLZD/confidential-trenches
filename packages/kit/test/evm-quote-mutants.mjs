@@ -750,6 +750,8 @@ export const MUTANTS = [
   [QUOTE, "|| removed === true) {", ") {", S, NR],
   [QUOTE, "if (kind === null || lower(topics[1]) !== wTopic) return refuse(", "if (kind === null) return refuse(", S, NR],
   [QUOTE, "if (keys.size !== out.length) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "if (out.some((e) => e.block > n + maxLag)) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2)", "rpcs", S, NR],
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;

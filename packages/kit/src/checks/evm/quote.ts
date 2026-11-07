@@ -2671,7 +2671,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;
   const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
   // W's releases at the agreed block, read beside the rest of the quote and awaited before it is made
-  const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs, block, sent);
+  const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2), block, v.maxLag, sent);
   releasesP.catch(() => {});
   // a route through a pool this device banned is neither simmed, picked nor a reference: routeSet leaves every banned
   // pool out before it picks X's market or the token's pool with X (review of 919742f5, F1); this holds it once more
@@ -2784,8 +2784,10 @@ function releaseLogOf(l: unknown, who: string, pool: string, wTopic: string): Ev
 /** The quote's verdict on W's releases at its agreed block `block` (trade/evm/sell-releases.ts): the finalized block, the
  *  lower of two providers' (its number and its time each the lower), then W's Withdrawn and Bought from the block after
  *  it, on two providers that hold the agreed block by its hash: those up to the agreed block must be the same on both,
- *  and any above it on either counts. */
-async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, sent: readonly EvmSellSent[]): Promise<EvmSellReleases> {
+ *  and any above it on either counts (a pair's heads are at most `maxLag` apart, so a log further above is no honest
+ *  provider's and refuses the answer). Above the agreed block no vote can tell a provider's lie from a head the other
+ *  has not reached, so a lie there only holds the sale, never clears one. */
+async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, maxLag: bigint, sent: readonly EvmSellSent[]): Promise<EvmSellReleases> {
   const fins = await agreeing(
     rpcs,
     async (rpc, k) => header((await ask(rpc, [{ method: "eth_getBlockByNumber", params: ["finalized", false] }]))[0], `provider ${k + 1}`),
@@ -2825,6 +2827,7 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
         for (const l of r) out.push(releaseLogOf(l, who, pool, wTopic));
       }
     }
+    if (out.some((e) => e.block > n + maxLag)) return refuse("rpc_error", `${who} answered a release of W more than ${maxLag} blocks above the quote's block ${n}`);
     const keys = new Set(out.map((e) => e.key));
     if (keys.size !== out.length) return refuse("rpc_error", `${who} answered a release log twice`);
     return out.filter((e) => e.block > fin.number).sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
