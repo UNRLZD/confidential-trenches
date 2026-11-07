@@ -89,6 +89,7 @@ export const CHANGED = [
   "scripts/live-checks/oneclick-partner-fee-live.mjs",
   "scripts/live-checks/pool-answer-unknown.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
+  "scripts/live-checks/pool-deposits.mjs",
   "scripts/live-checks/pool-evm-deploy-mainnet.mjs",
   "scripts/live-checks/pool-evm-deploy.mjs",
   "scripts/live-checks/pool-evm-deploy-resume-safe.mjs",
