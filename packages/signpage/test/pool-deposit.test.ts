@@ -182,13 +182,14 @@ function chain() {
       slot += 40;
       c.height += 40;
     },
-    rpc(over: { hide?: (address: string) => boolean; hideStatus?: boolean; blockhashUnknown?: boolean; simFails?: boolean; saysFailed?: boolean; mapAccount?: (address: string, a: Acc) => Acc } = {}) {
+    rpc(over: { hide?: (address: string) => boolean; hideStatus?: boolean; blockhashUnknown?: boolean; simFails?: boolean; simFailsOnce?: boolean; saysFailed?: boolean; mapAccount?: (address: string, a: Acc) => Acc } = {}) {
       const answer = (address: string) => {
         const held = over.hide?.(address) ? undefined : accounts.get(address);
         const a = held && over.mapAccount ? over.mapAccount(address, held) : held;
         return a ? { owner: a.owner, lamports: a.lamports, data: [base64.encode(a.data), "base64"], executable: false, rentEpoch: 0, space: a.data.length } : null;
       };
       const id = c.rpcs++;
+      let simFailed = false;
       return async (method: string, params: readonly unknown[]): Promise<unknown> => {
         calls.push({ rpc: id, method, params });
         const ctx = { context: { slot } };
@@ -212,6 +213,7 @@ function chain() {
           case "simulateTransaction": {
             try {
               if (over.simFails) throw new Error("simulation");
+              if (over.simFailsOnce && !simFailed) throw new Error((simFailed = true) && "simulation");
               c.apply(base64.decode(params[0] as string), true);
               return { ...ctx, value: { err: null, logs: [] } };
             } catch (e) {
@@ -350,6 +352,28 @@ test("H1: a simulation either RPC fails is not_funded before anything is written
   assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ simFails: true })] }), ask(RUNG)), { error: "not_funded" });
   assert.equal(c.sent.length, 0);
   assert.deepEqual((await ours(ns)).map((n) => n.state), ["PLANNED"]);
+});
+
+test("slice-2 review Low 4: the top-up named leaves U an empty account's rent as margin, so a stranger's lamport sent after it never stalls the deposit", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG));
+  const short: [string, bigint][] = [];
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { short: (a, l) => short.push([a, l]) }), ask(RUNG)), { error: "not_funded" });
+  assert.deepEqual(short, [[u.address, BigInt(COST + EMPTY_RENT)]], "the costs and the rent as margin, never the exact need");
+  // the user sends the top-up named, and a stranger 1 lamport: the deposit goes, U keeps the margin and the lamport
+  c.fund(u.address, Number(RUNG) + COST + EMPTY_RENT + 1);
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage: string }).stage, "filled");
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
+});
+
+test("pool-answer-unknown's ask path: a simulation that fails once with no mark (the pool moved between the read and the simulation) is read and simulated again, and the deposit goes", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  assert.equal(((await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ simFailsOnce: true })] }), ask(RUNG))) as { stage: string }).stage, "filled");
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
 });
 
 test("L6: a blockhash the other RPC does not know is refused before anything is written", async () => {
@@ -782,7 +806,7 @@ test("N3 (probe E): a send again U cannot pay leaves its note INCOMING, names th
   };
   const short: [string, bigint][] = [];
   assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [f, c.rpc()], short: (a, l) => short.push([a, l]) }), ask(RUNG)), { error: "not_funded" });
-  assert.deepEqual(short, [[u.address, BigInt(FEE)]]);
+  assert.deepEqual(short, [[u.address, BigInt(FEE + EMPTY_RENT)]], "the fee and an empty account's rent as margin (Low 4)");
   // another U, funded: its ask runs; the stuck note waits for its top-up
   assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { error: "not_funded" });
   const next = (await ours(ns)).find((n) => n.ref.kind === "deposit" && n.state === "PLANNED")!;
@@ -852,7 +876,7 @@ test("R3: an ask whose U is unfunded behind a pending earlier note answers not_f
   assert.deepEqual(await runPoolDeposit(host(c, ns, { short: (a, l) => short.push([a, l]) }), ask(RUNG)), { error: "not_funded" });
   const next = (await ours(ns)).find((n) => n.ref.kind === "deposit" && n.state === "PLANNED")!;
   assert.notEqual((next.ref as { i: number }).i, u.i);
-  assert.deepEqual(short, [[U((next.ref as { i: number }).i), RUNG + BigInt(COST)]], "the top-up names the ask's own U and what it lacks");
+  assert.deepEqual(short, [[U((next.ref as { i: number }).i), RUNG + BigInt(COST + EMPTY_RENT)]], "the top-up names the ask's own U and what it lacks, with the rent as margin (Low 4)");
   assert.equal(c.sent.length, 1, "nothing sent");
 });
 
@@ -1125,7 +1149,7 @@ const remap = (rpc: SolanaRpc, method: string, f: (params: readonly unknown[], a
 type SolanaRpc = PoolDepositHost["rpcs"][0];
 const shortsOf = (short: [string, bigint][]) => (a: string, l: bigint) => void short.push([a, l]);
 
-test("review R2 (F1): an RPC that says U holds more than it does never prices the deposit: each RPC's reading must go, so the true one names the exact top-up", async () => {
+test("review R2 (F1): an RPC that says U holds more than it does never prices the deposit: each RPC's reading must go, so the true one names the top-up (with an empty account's rent as margin, Low 4)", async () => {
   for (const liar of [0, 1] as const) {
     const c = chain();
     const ns = await notes();
@@ -1136,7 +1160,7 @@ test("review R2 (F1): an RPC that says U holds more than it does never prices th
     const rpcs = liar === 0 ? ([c.rpc({ mapAccount: more }), c.rpc()] as const) : ([c.rpc(), c.rpc({ mapAccount: more })] as const);
     const got = await runPoolDeposit(host(c, ns, { rpcs, short: shortsOf(short) }), ask(RUNG));
     assert.deepEqual(got, { error: "not_funded" }, `liar ${liar}`);
-    assert.deepEqual(short, [[u.address, 1_000n]], `liar ${liar}`);
+    assert.deepEqual(short, [[u.address, 1_000n + BigInt(EMPTY_RENT)]], `liar ${liar}`);
     assert.equal(c.sent.length, 0);
   }
 });
