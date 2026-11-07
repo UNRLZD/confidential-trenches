@@ -669,39 +669,57 @@ test("review L3: a keyed URL that echoes its key in an answer is down for the re
   }
 });
 
-test("review L4: a walk ends inside the server's 15 s request timeout however slow its providers: no send starts past WALK_MS, and each send's timeout ends by it", async () => {
+/** Runs `f` with each AbortSignal.timeout's ms recorded (the last one is the send in flight's timeout). */
+async function timeouts<T>(f: (last: () => number) => Promise<T>): Promise<T> {
+  const orig = AbortSignal.timeout;
+  const seen: number[] = [];
+  AbortSignal.timeout = ((ms: number) => (seen.push(ms), orig.call(AbortSignal, ms))) as typeof AbortSignal.timeout;
+  try {
+    return await f(() => seen.at(-1) ?? Infinity);
+  } finally {
+    AbortSignal.timeout = orig;
+  }
+}
+/** A provider that never answers: each send takes its whole timeout on the fake clock and half a ms more (a timer fires
+ *  late), then aborts, so the walk's time left is never a whole number of ms. */
+const hangs = (c: ReturnType<typeof clock>, last: () => number, asked: string[]) => async (url: string): Promise<Response> => {
+  asked.push(url);
+  c.t.v += last() + 0.5;
+  throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+};
+
+test("review L4: a walk ends inside the server's 15 s request timeout however its providers hang: each send's timeout ends by the read's WALK_MS, and none starts past it", async () => {
   const { WALK_MS } = rpcModule as unknown as { WALK_MS?: number };
   assert.ok(typeof WALK_MS === "number" && WALK_MS < 15_000, "rpc.ts WALK_MS, under the server's requestTimeout");
-  // NEAR's list (FastNear, NEAR_RPC_URL, NEAR_RPC_URL_B, the public one): each answers 503 after 6 s
+  // NEAR's list: FastNear, NEAR_RPC_URL, NEAR_RPC_URL_B, then the public one, every one hanging
   const env = Object.fromEntries(LISTS.near.map(([n, u]) => [n, u as string]));
   const c = clock();
   c.t.v += 0.37; // the monotonic clock's fractional ms: each send's timeout is still a whole number of ms
   const begun = c.t.v;
   const asked: string[] = [];
-  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
-    asked.push(url);
-    assert.ok(init.signal instanceof AbortSignal, "every send has a timeout");
-    c.t.v += 6_000.21;
-    return new Response("slow and down", { status: 503 });
-  };
-  const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
-  const a = await r.handle("near", "application/json", JSON.stringify(READ.near), "198.51.100.6");
+  const a = await timeouts((last) => {
+    const r = createRpc(env, { fetch: hangs(c, last, asked) as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
+    return r.handle("near", "application/json", JSON.stringify(READ.near), "198.51.100.6");
+  });
   assert.equal(a.status, 503, a.body);
-  assert.ok(c.t.v - begun <= WALK_MS + 6_000, `the walk ran ${c.t.v - begun} ms`);
-  assert.equal(asked.length, Math.ceil(WALK_MS / 6_000), `${asked.length} sends`);
+  assert.ok(asked.length >= 2, `${asked.length} sends: the first keeps its whole timeout, the next the walk's rest`);
+  assert.ok(c.t.v - begun <= WALK_MS + 1, `the walk ran ${Math.round(c.t.v - begun)} ms against WALK_MS ${WALK_MS}`);
 });
 
-test("review L4: Solana's first key slow then failing leaves its spares only the rest of the request's WALK_MS, not a second full walk", async () => {
+test("review L4: Solana's first key hanging leaves its spares and the public endpoint only the rest of the read's WALK_MS, not a walk of their own", async () => {
   const { WALK_MS } = rpcModule as unknown as { WALK_MS?: number };
   assert.ok(typeof WALK_MS === "number");
   const env: Record<string, string> = { ...Object.fromEntries(LISTS.solana.map(([n, u]) => [n, u as string])), ...Object.fromEntries(DRPC_MORE.solana) };
   const c = clock();
   const begun = c.t.v;
-  const fetch = async (): Promise<Response> => ((c.t.v += 4_000), new Response("slow and down", { status: 503 }));
-  const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
-  const a = await r.handle("solana", "application/json", JSON.stringify(READ.solana), "198.51.100.7");
+  const asked: string[] = [];
+  const a = await timeouts((last) => {
+    const r = createRpc(env, { fetch: hangs(c, last, asked) as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), now: c.now, sleep: c.sleep, log: () => undefined });
+    return r.handle("solana", "application/json", JSON.stringify(READ.solana), "198.51.100.7");
+  });
   assert.equal(a.status, 503, a.body);
-  assert.ok(c.t.v - begun <= WALK_MS + 4_000, `the read ran ${c.t.v - begun} ms against WALK_MS ${WALK_MS}`);
+  assert.ok(c.t.v - begun <= WALK_MS + 1, `the read ran ${Math.round(c.t.v - begun)} ms against WALK_MS ${WALK_MS}`);
+  assert.ok(!asked.includes("https://api.mainnet-beta.solana.com"), "the public endpoint was sent the read past the walk's time");
 });
 
 test("review L2: every dRPC URL the helper paces (the three keys and its keyless robinhood.drpc.org, one IP) fits dRPC's free floor of 50,400 CU a minute in the worst minute", () => {
