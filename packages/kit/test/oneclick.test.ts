@@ -15,6 +15,8 @@
 //   8. F and S in the pair floor: `* (10_000n - fs), pIn.d` -> `* 10_000n, pIn.d`
 //   9. decimals: `if (!ok) fail("request", \`${name}` -> `if (false) fail("request", \`${name}`
 //  10. route fee: `return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path]` -> `return ONECLICK_PAIR_FEE_BPS[path]`
+//  11. own-key path: `!Object.hasOwn(ONECLICK_FEE_BPS, path) || !Object.hasOwn(ONECLICK_PAIR_FEE_BPS, path)` -> `false`
+//  12. path type: `typeof path !== "string" || ` -> `` (a toString that answers "partner" twice, then "nopath")
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
@@ -363,4 +365,31 @@ test("a request that is not EXACT_INPUT, or has no dry flag, is refused", () => 
 test("hostile answers that are not objects are refused, never thrown as TypeErrors", () => {
   for (const a of [null, undefined, 1, "x", [], {}, { quote: {} }, { quoteRequest: {} }])
     assert.throws(() => checkOneClickQuote(DRY_REQ, a, DRY_OPTS), OneClickQuoteError);
+});
+
+test("a path outside keyless and partner names no fee, even when a polluted Object.prototype has one (card oneclick-fee-path-own-key)", () => {
+  const P = Object.prototype as Record<string, unknown>;
+  const nopath = { ...DRY_OPTS, path: "nopath" as OneClickCheckOptions["path"] };
+  try {
+    P.nopath = 1; // the keyless fee the real dry answer carries, so the prototype read alone would pass it
+    refused("request", () => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), nopath));
+    refused("request", () => checkOneClickQuote(fx.same.request, clone(fx.same.answer), { ...nopath, now: at(fx.same.answer) }));
+    refused("request", () => oneClickFeeBps(nopath.path, ONECLICK_USDC_ASSETS[1]!, ONECLICK_USDC_ASSETS[0]!));
+    refused("request", () => oneClickFeeBps(nopath.path, "nep141:wrap.near", ONECLICK_USDC_ASSETS[0]!));
+    for (const path of ["toString", "__proto__", "constructor", "hasOwnProperty"])
+      refused("request", () => oneClickFeeBps(path as OneClickCheckOptions["path"], ONECLICK_USDC_ASSETS[1]!, ONECLICK_USDC_ASSETS[0]!));
+    // a path that is not a string: an object whose toString answers "partner" to both own-key checks and "nopath" to the
+    // read gets the polluted fee unless the type is checked first (review m2); a null-prototype object has no toString,
+    // so it must be refused as a quote check, never thrown as a TypeError by the message
+    let n = 0;
+    const toggling = { toString: () => (++n <= 2 ? "partner" : "nopath") };
+    P.nopath = 7;
+    refused("request", () => oneClickFeeBps(toggling as unknown as OneClickCheckOptions["path"], "nep141:wrap.near", ONECLICK_USDC_ASSETS[0]!));
+    refused("request", () => checkOneClickQuote(DRY_REQ, clone(fx.dry.answer), { ...DRY_OPTS, path: { toString: () => "keyless" } as unknown as OneClickCheckOptions["path"] }));
+    for (const path of [Object.create(null), null, undefined, 1, Symbol("partner")])
+      refused("request", () => oneClickFeeBps(path as OneClickCheckOptions["path"], ONECLICK_USDC_ASSETS[1]!, ONECLICK_USDC_ASSETS[0]!));
+  } finally {
+    delete P.nopath;
+  }
+  assert.equal(Object.hasOwn(Object.prototype, "nopath"), false);
 });

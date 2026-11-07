@@ -14,7 +14,9 @@
 // - A pool deposit or sell encoded: a string built of literals that holds deposit(uint256,uint256), its selector
 //   e2bbb158, the EIP-712 Sell type or its hash (the kit's and the helper's), the selector or a hash as a number or as
 //   an array of byte literals, functionName "deposit" (viem), the ABI entry { type: "function", name: "deposit" }, or an
-//   ethers-style encoder called on "deposit". It needs a pick, as a call does.
+//   ethers-style encoder called on "deposit". It needs a pick, as a call does. One literal is a check, never an
+//   encoding: the selector "0xe2bbb158" alone as one side of a === or !== (a rule comparing a call's first four bytes);
+//   a comparison gives a boolean, never bytes, and the same literal anywhere else (held, joined, handed on) needs a pick.
 // - A module that exports a signer, seen by its symbol or by its type (a namespace import, an import()'s value): only
 //   `ns.x`, `ns["x"]` or `{ x, y: z } = ns` of it is read; any other use, a computed key or a `...rest` refuses. An
 //   import() of such a module, an import() the program cannot bind to a module, and import.meta.glob refuse.
@@ -68,7 +70,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "signEvmBuy", "evmWithdrawDigest", "signEvmWithdraw", "checkEvmOnwardSend", "evmOnwardSendDigest", "signEvmOnwardSend", "poolUnits", "drawPool", "POOL_KINDS", "POOL_CHAINS",
     "SOLANA_POOL_TAG_DEPOSIT", "SOLANA_POOL_DEPOSIT_LEN", "POOL_MAX_SLIPPAGE_BPS", "SOLANA_POOL_CU_LIMIT_MAX", "SOLANA_POOL_TX_FEE_MAX", "SOLANA_RENT_PER_BYTE_MAX", "SOLANA_POOL_SELL_RESERVE_MAX",
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor",
-    "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX",
+    "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "checkEvmDeposit", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`
@@ -81,7 +83,7 @@ export const EXEMPT: Readonly<Record<string, Exempt>> = {
   // a sell's signature and W's EIP-7702 authorization (sell-unpinned.ts:434, 463); the Sell digest (:411)
   "packages/kit/src/trade/evm/sell-unpinned.ts": { define: true, curve: ["signDigest", "evmPoolSignSellAuthorizationUnpinned"], sellType: ["sellDigest"] },
   "packages/kit/src/trade/evm/quoted.ts": { define: true },
-  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend"] }, // rules/pool.ts:853, 1020
+  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend", "signEvmDeposit"] }, // rules/pool.ts:853, 1020; signEvmDeposit (card pool-deposits)
   "packages/kit/src/trade/evm/buy-unpinned.ts": { curve: ["evmPoolSignBuyUnpinned"] }, // a buy's signature, buy-unpinned.ts:612
   // a quote's simulation: a sim sell built and its call data encoded, signed by its caller on the note the caller names
   "packages/kit/src/checks/evm/quote.ts": { calls: ["evmPoolBuildSimSellUnpinned", "evmSellCallData"] },
@@ -684,7 +686,13 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
         if (s !== null && top) {
           const t = norm(s);
           const e = encoding(t);
-          if (e) needsPick(n, `encodes ${e}: ${JSON.stringify(s)}`);
+          // the literal alone on one side of a === or !== whose other side is a call's result (data.slice(0, 10)): never
+          // a name or a property, which the compare narrows to the selector and which could then be joined into calldata
+          const cmp = n.parent !== undefined && ts.isBinaryExpression(n.parent) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(n.parent.operatorToken.kind) ? n.parent : null;
+          const other = cmp === null ? null : strip(cmp.left === n ? cmp.right : cmp.left);
+          const compared = ts.isStringLiteralLike(n) && t === `0x${DEPOSIT_SELECTOR}` && other !== null && ts.isCallExpression(other);
+          if (e && compared) at(n, "compares a call's selector to the deposit's (a check: a boolean, no bytes)", true);
+          else if (e) needsPick(n, `encodes ${e}: ${JSON.stringify(s)}`);
           if (t.includes(SELL_TYPE)) {
             const fn = topName(n) ?? "";
             if (ex.sellType?.includes(fn)) at(n, `holds the EIP-712 Sell type in ${fn} (exempt)`, true);

@@ -616,3 +616,18 @@ test("staleness: poolUsdGoodUntilS counts the bound from the earlier of the feed
   assert.equal(poolUsdGoodUntilS("solana", 1_060, 1_000), 1_000 + max, "published 60 s after the read (the clock behind)");
   assert.equal(poolUsdGoodUntilS("base", 1_000, 1_000), 1_000 + POOL_USD_FEEDS.base.maxAgeS);
 });
+
+test("poolUsdGoodUntilS reads POOL_USD_FEEDS only by an own key: a chain outside it is refused, even when a polluted Object.prototype names a feed (card oneclick-fee-path-own-key)", async () => {
+  const { poolUsdGoodUntilS } = await import("../src/index.ts");
+  const P = Object.prototype as Record<string, unknown>;
+  const good = (chain: unknown) => poolUsdGoodUntilS(chain as "solana", 1_000, 1_000);
+  try {
+    P.polluted = { maxAgeS: 1e12 }; // a bound of 31,000 years: a stale price would read fresh
+    for (const chain of ["polluted", "near", "toString", "__proto__", "constructor", "nope"]) assert.throws(() => good(chain), /no USD price for chain/, chain);
+    assert.throws(() => good(Object.create(null)), /no USD price for chain/);
+    assert.throws(() => good(undefined), /no USD price for chain/);
+  } finally {
+    delete P.polluted;
+  }
+  assert.equal(good("solana"), 1_000 + POOL_USD_FEEDS.solana.maxAgeS);
+});
