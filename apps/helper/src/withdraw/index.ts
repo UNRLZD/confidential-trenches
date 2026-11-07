@@ -28,10 +28,10 @@
 // (withdraw/send.ts); this file holds the rules they write through.
 import * as nodeFs from "node:fs";
 import { VAULT_FIELD_P } from "@blindfill/kit";
-import type { RelayerStore, TxRef } from "../bind/send.ts";
+import { MAX_FAILED_SENDS, type RelayerStore, type TxRef } from "../bind/send.ts";
 import { listAt, pagesAt, type Rpc } from "../near/pages.ts";
 import { openDurableDir, type DurableDir, type StoreFs } from "../store/durable.ts";
-import { decimal } from "./checks.ts";
+import { decimal, isAccountId } from "./checks.ts";
 
 // ---- Values ----
 
@@ -52,6 +52,14 @@ export const MAX_FINAL_GAP = 10n;
 export const MAX_FINAL_AGE_MS = 30_000n;
 const POLL_MS = 100;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Bounced payouts per recipient before the recipient is struck (card relayer-cost-guards, audit V-03): R3's count
+ * (bind/send.ts MAX_FAILED_SENDS), so a recipient costs the relayer at most three bounces, about 3 x 0.011 N, the
+ * order of R3's per-(U, P) worst (PER_P_WORST_YOCTO, 0.030 N). An honest device never meets it: every withdrawal pays a
+ * one-use arming account A_{l,j}, and a bounce's refund note has a new label, so its next withdrawal pays another A.
+ */
+export const WITHDRAW_BOUNCES_MAX = MAX_FAILED_SENDS;
 
 /** The codes checks 5 and 6 answer on the nullifier (each is in the kit's HELPER_WITHDRAW_CODES). */
 export type NullifierCode = "spent" | "index_behind" | "in_flight" | "withdraw_failed";
@@ -82,6 +90,12 @@ export type WithdrawSend = TxRef & {
    * transaction, and done once it read succeeded or the vault's spends row reads settled. Absent until one is signed.
    */
   settle?: SettleRecord | null;
+  /**
+   * The recipient a succeeded send's payout bounced to, as the vault's spends row names it (its refund_value above 0:
+   * refund_pending, or settled as a refund note). Written once, before any settle is signed; it counts toward the
+   * recipient's strike (WITHDRAW_BOUNCES_MAX). Absent for a payout that was paid or is not read yet.
+   */
+  bounced?: string;
 };
 
 /**
@@ -128,6 +142,10 @@ export type WithdrawSendStore = {
   setSettle(nf: bigint, settle: SettleRecord | null): void;
   /** The nullifiers whose send succeeded and whose spend is not settled yet: the settle rounds' work. */
   toSettle(): bigint[];
+  /** Records that a succeeded send's payout bounced to `recipient` (once per nullifier; durable before it returns). */
+  bounce(nf: bigint, recipient: string): void;
+  /** How many of our sends bounced to `recipient`: at WITHDRAW_BOUNCES_MAX it is refused (recipient_refused). */
+  bounces(recipient: string): number;
   close(): void;
 };
 
@@ -180,7 +198,8 @@ function parseSend(text: string, key: string): WithdrawSend | null {
     typeof x.deadline_ms === "number" && Number.isSafeInteger(x.deadline_ms) && x.deadline_ms >= 0 &&
     typeof x.release === "number" && Number.isSafeInteger(x.release) && x.release >= 1 &&
     ((x.outcome === "failed" && typeof x.error === "string") || ((x.outcome === "open" || x.outcome === "succeeded") && x.error === null)) &&
-    (x.settle === undefined || x.settle === null || (x.outcome === "succeeded" && settleOk(x.settle)));
+    (x.settle === undefined || x.settle === null || (x.outcome === "succeeded" && settleOk(x.settle))) &&
+    (x.bounced === undefined || (x.outcome === "succeeded" && isAccountId(x.bounced)));
   return ok ? (x as WithdrawSend) : null;
 }
 
@@ -206,10 +225,13 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
   // open rows: read once as the lock is taken (a restart), then kept by every write (one process holds the store)
   const openRows = new Set<string>();
   const settleRows = new Set<string>();
+  const bounced = new Map<string, number>(); // recipient -> bounced sends, kept by every bounce() write
+  const count = (to: string) => bounced.set(to, (bounced.get(to) ?? 0) + 1);
   for (const f of d.names()) {
     const m = NAME.exec(f);
     if (m === null) continue;
     const rec = parseSend(d.text(f) ?? "", m[1]!);
+    if (rec?.bounced !== undefined) count(rec.bounced);
     if (rec === null || rec.outcome === "open") openRows.add(m[1]!);
     else if (rec.outcome === "succeeded" && rec.settle?.done !== true && !((rec.settle?.failed?.release ?? 0) >= release)) settleRows.add(m[1]!);
   }
@@ -274,6 +296,17 @@ function sendStoreOn(d: DurableDir, { release, keys }: SendStoreOptions): Withdr
       if (settle?.done === true || settle?.failed !== undefined) settleRows.delete(held.nullifier);
     },
     toSettle: () => [...settleRows].map((k) => BigInt(`0x${k}`)),
+    bounce(nf, recipient) {
+      d.held();
+      const held = read(nf);
+      if (held === null || held === "unreadable" || held.outcome !== "succeeded") throw new Error("bounce: no succeeded send record");
+      if (held.bounced !== undefined) return; // counted once per nullifier
+      const v = JSON.stringify({ ...held, bounced: recipient });
+      if (parseSend(v, held.nullifier) === null) throw new Error("bounce: not a NEAR account id");
+      d.replace(name(nf), v);
+      count(recipient);
+    },
+    bounces: (recipient) => bounced.get(recipient) ?? 0,
     close: d.close,
   };
 }

@@ -14,8 +14,8 @@ import { base58 } from "../bind/checks.ts";
 import { RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, type CheckedWithdraw, type WithdrawConfig } from "./checks.ts";
-import { TESTNET_TOKEN } from "./fee.ts";
-import { createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex } from "./index.ts";
+import { FeeReadRefused, REGISTER_DEPOSIT_MAX, TESTNET_TOKEN } from "./fee.ts";
+import { createWithdrawSendStore, nullifierKey, TREE_CAPACITY, WITHDRAW_BOUNCES_MAX, type LeavesIndex, type SpendsIndex } from "./index.ts";
 import {
   A_STORE_YOCTO,
   FEE_ACCOUNT_NOT_READY,
@@ -37,6 +37,7 @@ import {
   newestFinalMs,
   outcomeOf,
   outcomeRound,
+  queueHold,
   readChecks,
   withdrawSenderFromEnv,
   type ChainReads,
@@ -148,7 +149,7 @@ function provider(c: Chain, i: 0 | 1): Rpc {
       else if (p.method_name === "is_blocklisted" && args.account_id === W.recipient) v = c.recipientListed[i];
       else if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
-      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus }] : [];
+      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus, recipient: W.recipient, refund_value: c.spendStatus === "refund_pending" ? W.relay_fee : "0" }] : [];
       else if (p.method_name === "is_known_state_root") v = c.stateKnown;
       else if (p.method_name === "is_known_label_root") v = c.labelKnown;
       else if (p.method_name === "totals") v = { deposited: c.totals[0].toString(), spent: c.totals[1].toString(), returned: c.totals[2].toString() };
@@ -597,7 +598,8 @@ test("check 7: an unregistered recipient takes exactly the token's minimum; a re
   assert.equal(a.status, 400);
   assert.equal(code(a), "register_deposit_wrong");
   assert.equal(reg.relayer.sent.length, 0);
-  const moved = setup(chain({ min: MIN + 1n }));
+  // a minimum that moved under the pin (above it the read itself refuses: the V-03 cap test below)
+  const moved = setup(chain({ min: MIN - 1n }));
   assert.equal(code(await carryWithdraw(req(), moved.deps)), "register_deposit_wrong");
   // on what was read
   const w = { register_deposit: 0n, recipient: "a.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
@@ -1054,4 +1056,88 @@ test("a start that fails after the stores open closes them: the next try starts"
   const second = await sender.carry(body);
   assert.notEqual(code(second), "upstream", `the second start takes the stores' locks again: ${JSON.stringify(second.body)}`);
   sender.stop();
+});
+
+// ---- The relayer's cost guards (card relayer-cost-guards, audit V-03) ----
+
+/** One send of ours for note `nf`, claimed and read succeeded, as the outcome rounds leave it. */
+function landed(store: ReturnType<typeof setup>["store"], key: string, nf: bigint) {
+  const n = counters.get(key) ?? 1n;
+  counters.set(key, n + 1n);
+  const tx: TxRef = { tx_hash: base58(createHash("sha256").update(`${key} ${n}`).digest()), nonce: n.toString(), height: "999", block_hash: hashOf(999), signed_tx: Buffer.from(`${key} ${n}`).toString("base64") };
+  assert.equal(store.claim({ ...tx, nullifier: nullifierKey(nf), key, deadline_ms: W.deadline_ms }).ok, true);
+  store.settle(nf, tx.tx_hash, { kind: "succeeded" });
+}
+
+test("V-03 strike: once WITHDRAW_BOUNCES_MAX of our sends' payouts bounced to one recipient, its next withdrawal is recipient_refused with nothing read or sent", async () => {
+  assert.equal(WITHDRAW_BOUNCES_MAX, 3, "R3's count (bind/send.ts MAX_FAILED_SENDS)");
+  const { c, deps, relayer, store } = setup();
+  for (let i = 1; i <= WITHDRAW_BOUNCES_MAX; i++) {
+    const nf = NF + BigInt(i);
+    landed(store, relayer.key, nf);
+    // the settle round reads the spend's row: its payout bounced (refund_pending) to the fixture's recipient
+    Object.assign(c, { spendNf: nf, spendStatus: "refund_pending" });
+    await outcomeRound(deps);
+  }
+  Object.assign(c, { spendNf: undefined, spendStatus: "in_flight" });
+  const sent = relayer.sent.length;
+  const a = await carryWithdraw(req(), deps);
+  assert.equal(code(a), "recipient_refused");
+  assert.equal(a.status, 400);
+  assert.equal(relayer.sent.length, sent, "nothing sent");
+  assert.equal(store.get(NF), null, "no record claimed");
+});
+
+test("V-03 strike: two bounces still carry; a payout paid never counts; one settled by another caller counts by its refund_value", async () => {
+  const { c, deps, relayer, store } = setup();
+  for (const [i, status] of [[1, "refund_pending"], [2, "paid"], [3, "refund_pending"]] as const) {
+    const nf = NF + BigInt(i);
+    landed(store, relayer.key, nf);
+    Object.assign(c, { spendNf: nf, spendStatus: status });
+    await outcomeRound(deps);
+  }
+  assert.equal(store.bounces(W.recipient), 2);
+  Object.assign(c, { spendNf: undefined, spendStatus: "in_flight" });
+  assert.equal(code(await carryWithdraw(req(), deps)), "ok");
+});
+
+test("V-03 strike: a bounce is written into the send record, counted once per note, and read back after a restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wsend-"));
+  const key = "relay.test.near/ed25519:bounce";
+  const store = createWithdrawSendStore(dir, { release: 1, keys: nonceStore });
+  landed(store, key, NF + 7n);
+  assert.throws(() => store.bounce(NF + 8n, W.recipient), /no succeeded send record/);
+  assert.throws(() => store.bounce(NF + 7n, "Not An Account"), /not a NEAR account id/);
+  store.bounce(NF + 7n, W.recipient);
+  store.bounce(NF + 7n, W.recipient);
+  assert.equal(store.bounces(W.recipient), 1);
+  store.close();
+  const again = createWithdrawSendStore(dir, { release: 2, keys: nonceStore });
+  assert.equal(again.bounces(W.recipient), 1);
+  assert.equal(again.bounces("other.near"), 0);
+  again.close();
+});
+
+test("V-03 register_deposit cap: a token minimum above the pinned REGISTER_DEPOSIT_MAX is not taken by POST's check 7 (503 upstream, nothing sent)", async () => {
+  const v = await checkWithdraw(req(), CFG, { feeMin: async () => BigInt(W.relay_fee) });
+  assert.ok(v.ok);
+  const high = chain({ min: REGISTER_DEPOSIT_MAX + 1n });
+  await assert.rejects(readChecks([provider(high, 0), provider(high, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(high.ms)), FeeReadRefused);
+  const at = chain({ min: REGISTER_DEPOSIT_MAX });
+  assert.equal((await readChecks([provider(at, 0), provider(at, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(at.ms))).registerMin, REGISTER_DEPOSIT_MAX);
+  const { deps, relayer } = setup(chain({ min: REGISTER_DEPOSIT_MAX + 1n }));
+  const a = await carryWithdraw(req(), deps);
+  assert.deepEqual([a.status, code(a), relayer.sent.length], [503, "upstream", 0]);
+});
+
+test("V-03 stale registration: in the queue, right before signing, a register_deposit of 0 whose recipient unregistered since check 7 is register_deposit_wrong", async () => {
+  const q = (c: Chain, rd: bigint) => queueHold([provider(c, 0), provider(c, 1)], CFG.token, CFG.feeRecipient, W.recipient, () => Number(c.ms), rd);
+  assert.equal(await q(chain({ registered: [false, false] }), 0n), "register_deposit_wrong");
+  assert.equal(await q(chain({ registered: [true, true] }), 0n), null);
+  // the minimum attached registers it again in the payout's own receipt: no bounce either way
+  assert.equal(await q(chain({ registered: [false, false] }), MIN), null);
+  assert.equal(await q(chain({ registered: [true, true] }), MIN), null);
+  // the providers disagree, or one answers another shape: held as check 7b's failed read holds
+  assert.ok((await q(chain({ registered: [true, false] }), 0n)) !== null);
+  assert.ok((await q(chain({ registered: [true, true], balanceAnswer: { total: "x" } }), 0n)) !== null);
 });

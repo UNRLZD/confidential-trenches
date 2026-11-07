@@ -26,6 +26,7 @@ import {
   feeQuoterFromEnv,
   HEIGHT_SPREAD_MAX,
   pxOf,
+  REGISTER_DEPOSIT_MAX,
   TESTNET_TOKEN,
   withdrawFeeMin,
   type FeeQuoter,
@@ -511,3 +512,20 @@ function tempDir(t: TestContext): string {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
+// ---- The register_deposit cap (card relayer-cost-guards, audit V-03) ----
+
+test("V-03: REGISTER_DEPOSIT_MAX is the token's minimum as recorded on two providers of each network, and a quote is not given above it", async () => {
+  const rec = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/usdc-storage-bounds.json"), "utf8")) as { reads: { network: string; rpc: string; answer: { min: string } }[] };
+  for (const network of ["mainnet", "testnet"]) {
+    const rows = rec.reads.filter((r) => r.network === network);
+    assert.equal(new Set(rows.map((r) => new URL(r.rpc).hostname.split(".").slice(-2).join("."))).size, 2, `${network}: two operators`);
+    for (const r of rows) assert.equal(BigInt(r.answer.min), REGISTER_DEPOSIT_MAX, `${network} ${r.rpc}`);
+  }
+  const bounds = (min: bigint): World => ({
+    ...base(),
+    plant: (_who, _m, p, r) => (p.method_name === "storage_balance_bounds" ? { ...r, result: [...Buffer.from(JSON.stringify({ min: min.toString(), max: min.toString() }))] } : r),
+  });
+  await assert.rejects(quoterOn(() => bounds(REGISTER_DEPOSIT_MAX + 1n)).quote(USDC), (e: Error) => e instanceof FeeReadRefused && /above the pinned/.test(e.message));
+  assert.ok(await quoterOn(() => bounds(REGISTER_DEPOSIT_MAX)).quote(USDC));
+});
