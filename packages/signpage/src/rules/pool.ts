@@ -1057,9 +1057,12 @@ export const EVM_DEPOSIT_GAS_MAX = 1_000_000n;
 /** Gas one tree level may add to an insert: the kit's EVM_POOL_GAS_PER_LEVEL (G(depth)'s slope, 25,624 since card
  *  evm-buy-gas-depth; held equal by test/rules-pool-deposit-evm.test.ts). A level whose index bit is set hashes (one
  *  PoseidonT3) where a clear bit only stores: on the Base Sepolia pool one such level measured 15,868 more
- *  (eth_simulateV1, 2026-11-07, our deposit after 0 to 36 others in its block). The tightest depth is 0 (forge on main's
- *  pool, card evm-buy-gas-depth, 7 Nov): a deposit read on two empty trees that lands behind one other writes both
- *  trees' first depth and top side node and needs 50,296 gas over its estimate, over 2 x 21,518 and under 2 x 25,624. */
+ *  (eth_simulateV1, 2026-11-07, our deposit after 0 to 36 others in its block). The tightest depth is 0: on the empty
+ *  Base and Robinhood mainnet pools (eth_estimateGas with state overrides putting k deposits ahead, two RPCs on each
+ *  chain agreeing, 7 Nov) the first deposit estimates 297,325 and one landing a deposit later 330,785, a need of 33,460
+ *  that 2 x 25,624 covers with 17,788 to spare (main's 2 x 21,518 also did, with 9,576). The forge harness's 50,296 is an
+ *  upper bound (the fixture's label nonce 3, not an empty pool's 0). The value is the kit's, and at an empty pool it lets
+ *  up to 10 deposits land ahead (k = 11 needs 54,132) where 21,518 let 6 (k = 7 needs 43,727). */
 export const EVM_DEPOSIT_GAS_PER_LEVEL = 25_624n;
 /** The deepest tree the pool takes (State.sol MAX_TREE_DEPTH). */
 const EVM_DEPOSIT_MAX_DEPTH = 32n;
