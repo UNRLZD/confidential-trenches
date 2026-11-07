@@ -62,6 +62,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-v4-hook-liquidity.mjs",
   "scripts/live-checks/helper-tape-4337-trader.mjs",
   "scripts/live-checks/helper-rpc-proxy.mjs",
+  "scripts/live-checks/helper-rpc-sell-methods.mjs",
   "scripts/live-checks/helper-solana-failover.mjs",
   "scripts/live-checks/helper-token-page-cold.mjs",
   "scripts/live-checks/helper-token-watch.mjs",
