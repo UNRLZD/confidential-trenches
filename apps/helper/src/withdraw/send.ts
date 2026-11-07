@@ -200,7 +200,7 @@ export async function queueHold(rpcs: readonly [Rpc, Rpc], token: string, fee: s
   try {
     const b = await agreedBlock(rpcs, now);
     const [f, listed, bal] = await Promise.all([readFeeAccount(rpcs, b, token, fee), readRecipientListed(rpcs, b, token, recipient), viewAt(rpcs, b, token, "storage_balance_of", { account_id: recipient })]);
-    if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of: neither null nor a balance");
+    if (bal !== null && !(isObj(bal) && decimal(bal.total, U128) !== null)) throw new FeeReadRefused("storage_balance_of(recipient): neither null nor a balance");
     if (listed) return "bad_recipient";
     if (registerDeposit === 0n && bal === null) return "register_deposit_wrong";
     return feeAccountReady(f) ? null : f;
