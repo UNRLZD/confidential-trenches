@@ -1,6 +1,7 @@
 // node --test scripts/live-checks/helper-mainnet-vault-env.test.mjs: the live check replays recorded runs
-// (helper-mainnet-vault-env.answers.json). good: apps/helper at this card's branch run with node src/server.ts, mainnet
-// carried for the record's vault, with a stand-in relayer account that exists on mainnet: PASS. bad_deployed: the
+// (helper-mainnet-vault-env.answers.json). good: apps/helper at card/vault-mainnet-record run with node src/server.ts,
+// mainnet carried for the v1 record's vault, with a throwaway implicit relayer holding its own key: PASS. bad_vault_test:
+// the earlier good, made for vault-test before the v1 record: FAIL against today's record. bad_deployed: the
 // deployed helper before this card (main 358d8f4), mainnet not carried: FAIL. bad_other_vault: main before this card
 // run the same way with WITHDRAW_VAULT_MAINNET naming another account, which it took (no pin): every probe 503, FAIL. Made from the good run: an
 // implicit relayer without its own key, a relayer under the floor, absent, read on one operator or at two blocks, the
@@ -42,6 +43,13 @@ test("recorded bad runs: the deployed helper not carrying mainnet, and a helper 
   const o = judge(A.bad_other_vault);
   assert.equal(o.ok, false);
   assert.ok(bad(o).includes("BAD the record's vault: 503 upstream (want 400 bad_fee_recipient)"), bad(o).join("\n"));
+});
+
+test("recorded bad run: the good run made for vault-test before the v1 record FAILs against today's record", () => {
+  assert.equal(judge(A.bad_vault_test).ok, true, "it passed for the record it was made with");
+  const v = judge(A.bad_vault_test, loadRecord());
+  assert.equal(v.ok, false);
+  assert.deepEqual(bad(v), [`BAD the deploy record's vault: ${loadRecord().account_id} (scope ${loadRecord().scope.slice(0, 12)}...)`]);
 });
 
 test("made from the good run: each break of the relayer account or the answers FAILs", () => {
