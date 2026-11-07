@@ -1,9 +1,9 @@
 {
- "note": "Recorded in-process on 2026-11-07, not from the deploy: the keys exist only on the helper box. good: this card's helper (server.ts handler) with made-up QuickNode, dRPC, FastNear and Helius URLs, each probe answered its own chain. bad_pre_card: origin/main 2b88074e's helper with the same URLs set: no rpc in /v1/health. The good answer is re-recorded from the deploy with --record after the owner's set-rpc-keys.sh run.",
+ "note": "Recorded in-process on 2026-11-07, not from the deploy: the keys exist only on the helper box. good: this card's helper (createRpc's probe and health(), server.ts /v1/health's two calls) with made-up Helius, QuickNode, three dRPC keys (lb.drpc.live) and FastNear URLs and NEAR_RPC_URL=free.rpc.fastnear.com (keyless), each probe answered its own chain. bad_pre_card: origin/main 2b88074e's helper with the same URLs set: no rpc in /v1/health. The good answer is re-recorded from the deploy with --record after the owner's set-rpc-keys.sh run.",
  "good": {
   "base": "in-process",
   "status": 200,
-  "body": "{\"ok\":true,\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\",\"drpc.org answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.org answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.org answers\"],\"near\":[\"fastnear.com answers\"]}}"
+  "body": "{\"ok\":true,\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"fastnear.com keyless answers\"]}}"
  },
  "bad_pre_card": {
   "base": "in-process",

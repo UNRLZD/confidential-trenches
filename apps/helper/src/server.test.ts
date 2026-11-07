@@ -291,7 +291,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health
   assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
-  assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_PROBE_MS\)\.unref\(\);/);
+  assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider

@@ -143,7 +143,7 @@ test("every environment name the helper's code reads when it runs is passed by c
   assert.ok(["HELPER_STORE_DIR", "WITHDRAW_RELAYER_TESTNET", "NEAR_TESTNET_RPC_URL_B", "JUPITER_API_KEY", "SOLANA_RPC_URL"].every((n) => atRun.has(n)), `the run read ${[...atRun].join(", ")}`);
   assert.deepEqual([...atRun].filter((n) => !passed.has(n)).sort(), []);
   // card rpc-keyed-lists: every chain's keyed list names (rpc.ts RPC_UPSTREAMS keyed), each passed
-  const keyedNames = ["BASE_RPC_URL_QUICKNODE", "BASE_RPC_URL_DRPC", "ROBINHOOD_RPC_URL_QUICKNODE", "ROBINHOOD_RPC_URL_DRPC", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC", "NEAR_RPC_URL_FASTNEAR"];
+  const keyedNames = ["BASE_RPC_URL_QUICKNODE", "ROBINHOOD_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_QUICKNODE", "NEAR_RPC_URL_FASTNEAR", ...["BASE", "ROBINHOOD", "SOLANA"].flatMap((c) => [1, 2, 3].map((n) => `${c}_RPC_URL_DRPC_${n}`))];
   assert.ok(keyedNames.every((n) => atRun.has(n) && passed.has(n)), `the run read ${[...atRun].join(", ")}`);
   // Base's swap reads (data/evm/swaps.ts) read the host's BASE_RPC_URL themselves, apart from createRpc's read
   assert.ok(namesReadAtRun({ evmSwapsFromEnv: ENV_READERS.evmSwapsFromEnv }).has("BASE_RPC_URL"));

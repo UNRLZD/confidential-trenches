@@ -146,8 +146,10 @@ export type ProviderHolds = {
 /** A provider's pace: `perS` units a second, at most `burst` at once; a unit is a post (one HTTP request, a batch or
  *  not) or a call (each request in a batch); `inflight`, the posts it takes at once; `group`, the one bucket every URL of
  *  that company draws from, where its limit is the account's across chains (card rpc-keyed-lists: one key per company,
- *  so its Base, Robinhood and Solana endpoints share it); `batch`, the most requests one post may carry. */
-export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number };
+ *  so its Base, Robinhood and Solana endpoints share it); `batch`, the most requests one post may carry; `day`, the
+ *  units the group (else the URL) may spend in one UTC day, and `cost`, the units one call spends (1 when unset): its
+ *  plan's month, credit- or compute-metered, as a daily budget (KEYED_DAY). */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number; day?: number; cost?: number };
 /**
  * Each paced provider, set under the point where it refuses (reads cited):
  *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
@@ -198,27 +200,55 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://mainnet.base.org": { perS: 10, burst: 20, unit: "call" },
 };
 /**
- * The keyed providers' paces (card rpc-keyed-lists), one company each, every URL of a company in its one bucket (`group`):
- * each limit is the account's, across its chains. Set from each company's first-party page at its smallest plan, so a
- * larger plan only leaves room unused, never makes the provider refuse us:
+ * The keyed providers' paces (card rpc-keyed-lists), one account each (rpc.ts keyedAccountOf sets `group`: each QuickNode
+ * endpoint and each dRPC key its own account, the owner 7 Nov 09:16Z and 09:27Z): each limit is the account's. Set from each company's first-party page at its smallest plan. A
+ * larger plan leaves rate room unused; its month is still capped by KEYED_DAY, since a paid plan bills use past its
+ * quota as overage (quicknode.com/pricing: "additional usage is billed at the overage rate"), never refuses it:
  *   - QuickNode: "Free trial 15" requests per second, Build 50, Accelerate 125 (quicknode.com/pricing, read 2026-11-07
  *     07:27Z). Paced at 7 calls a second, 7 at once: at most 14 in any second.
  *   - dRPC: a keyed free account "120,000 CUs per minute per IP ... approximately 100 eth_call requests per second", at
  *     least "50,400 CUs per minute, which is equivalent to 40 eth_call requests", "Batch requests are limited to 3
  *     items", and Pay as You Go "100 RPS" (drpc.org/docs/howitworks/ratelimiting and /docs/pricing/requests, read
- *     2026-11-07 07:29Z). Paced at 15 calls a second, 15 at once (at most 30 in any second, under the free floor's 40),
- *     3 a post.
+ *     2026-11-07 07:29Z). The limit is per IP, and the owner's three keys (three accounts, rpc.ts keyedAccountOf) all
+ *     send from the helper's one: each key paced at 13 calls a second, 13 at once, 3 a post, so the three together
+ *     average 39 a second, 46,800 CU a minute at 20 a call (KEYED_COST), under the free floor's 50,400.
  *   - FastNear: the paid plans name requests a month only, "Dev Plan $69 /month 10M RPC requests/month", Pro 36M,
  *     Business 100M, and no rate (fastnear.com, read 2026-11-07 07:29Z; docs.fastnear.com/auth names none). Paced at
- *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s): Dev's month at that pace
- *     all month long would be 13M, so the pace, not the quota, is the bound at the helper's NEAR reads.
+ *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s). That pace all month long
+ *     would be 13M requests, over Dev's 10M: the month is bounded by KEYED_DAY, not by the pace.
  */
 export const KEYED_PACE = {
   quicknode: { perS: 7, burst: 7, unit: "call", group: "quicknode" },
-  drpc: { perS: 15, burst: 15, unit: "call", group: "drpc", batch: 3 },
+  drpc: { perS: 13, burst: 13, unit: "call", group: "drpc", batch: 3 },
   fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
 } as const satisfies Readonly<Record<string, Pace>>;
 export type KeyedProvider = keyof typeof KEYED_PACE;
+/**
+ * Each keyed account's daily budget (card rpc-keyed-lists, review M2), in its company's unit, from its plan's month
+ * over 31 days (dRPC's 30-day period over 30) so no month passes the plan: past it that company is sent nothing more that UTC day (limits.ts take) and
+ * reads go to the spares, never to overage. RPC_DAY_<COMPANY> (keyedDayEnv) names another plan's, in the same unit.
+ *   - QuickNode, credits: the free trial "10M API credits", "1 month free" (quicknode.com/pricing, read 2026-11-07
+ *     09:15Z): 10,000,000 / 31 = 322,580 a day per endpoint, each its own account (the owner, 09:27Z).
+ *   - dRPC, compute units: the free plan "210 million Compute Units (CU) per 30-day period"
+ *     (drpc.org/docs/howitworks/ratelimiting, read 09:15Z): 210,000,000 / 30 = 7,000,000 a day per key, each key its own
+ *     account (rpc.ts keyedAccountOf), every chain's URL of that key drawing on it.
+ *   - FastNear, requests: the smallest paid plan, Dev's "10M RPC requests/month" (fastnear.com, read 07:29Z):
+ *     10,000,000 / 31 = 322,580 a day.
+ */
+export const KEYED_DAY: Readonly<Record<KeyedProvider, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580 };
+/** The units one call spends at each company, by chain family: QuickNode's "All methods" 20 credits on Base (and every
+ *  EVM chain listed) and 30 on Solana (quicknode.com/api-credits, read 2026-11-07 09:15Z); dRPC's 20 CU for every
+ *  method it lists but eth_chainId (0), eth_call, eth_getLogs, getSignaturesForAddress and getTransaction included, none
+ *  above 20 (drpc.org/docs/pricing/compute-units, read 09:16Z); FastNear's one request a call. */
+export const KEYED_COST: Readonly<Record<KeyedProvider, Readonly<Record<"evm" | "solana" | "near", number>>>> = {
+  quicknode: { evm: 20, solana: 30, near: 20 },
+  drpc: { evm: 20, solana: 20, near: 20 },
+  fastnear: { evm: 1, solana: 1, near: 1 },
+};
+/** The environment name of a company's daily budget (KEYED_DAY), a non-secret whole number of its units. */
+export const keyedDayEnv = (p: KeyedProvider): string => `RPC_DAY_${p.toUpperCase()}`;
+/** A UTC day, the daily budget's window. */
+const DAY_MS = 86_400_000;
 /** Providers that refuse every `eth_getLogs` and answer the other reads: no path sends them one (rpc.ts callEvm, the
  *  swap reads), so a log read never holds the provider for the reads it does answer. mainnet.base.org answered every
  *  eth_getLogs, of 1 to 1,000 blocks, from the helper box and from the Mac, -32011 "request limit reached" (HTTP 429;
@@ -254,6 +284,12 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
   const callerWaits = new Map<string, number>();
   /** The providers a pool sender reads, whose SENDER_ROOM callers leave (fold A). */
   const reserved = new Set<string>();
+  /** Per group (else URL) with a daily budget: the UTC day and the units spent in it (Pace day, cost). */
+  const spent = new Map<string, { day: number; units: number }>();
+  const usedToday = (k: string, t: number): number => {
+    const s = spent.get(k);
+    return s !== undefined && s.day === Math.floor(t / DAY_MS) ? s.units : 0;
+  };
   // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
   const fill = (url: string, p: Pace) => {
     const t = now();
@@ -271,6 +307,13 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const b = fill(url, p);
       const t = now();
       const k = p.group ?? url;
+      // the day's budget (review M2): a draw it cannot fit waits for the next UTC day, so every path asks another
+      // provider; a pool sender's few reads are never refused by it (pool/evm.ts pacedEvmRpc waits out what take names)
+      const need = Math.max(calls, 1) * (p.cost ?? 1);
+      if (p.day !== undefined && !sender && usedToday(k, t) + need > p.day) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
+      const spend = () => {
+        if (p.day !== undefined) spent.set(k, { day: Math.floor(t / DAY_MS), units: usedToday(k, t) + need });
+      };
       const waiting = (callerWaits.get(k) ?? 0) - t;
       if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
       const floor = background ? p.burst * CALLER_ROOM : sender || !reserved.has(url) ? 0 : p.burst * SENDER_ROOM;
@@ -280,6 +323,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const keep = (ms: number) => callerWaits.set(k, Math.max(callerWaits.get(k) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
         b.tokens -= units;
+        spend();
         if (!background) keep(CALLER_HOLD_MS);
         return 0;
       }
@@ -292,7 +336,10 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     },
     room(url) {
       const p = pace[url];
-      return p === undefined ? 1 : fill(url, p).tokens / p.burst;
+      if (p === undefined) return 1;
+      // a day's budget with no call's room left: none (the swap reads rank it last)
+      if (p.day !== undefined && p.day - usedToday(p.group ?? url, now()) < (p.cost ?? 1)) return 0;
+      return fill(url, p).tokens / p.burst;
     },
     paceOf(url) {
       return pace[url];

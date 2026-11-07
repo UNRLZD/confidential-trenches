@@ -33,7 +33,7 @@ import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
-import { createRpc, KEYED_PROBE_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
+import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
@@ -894,9 +894,10 @@ if (import.meta.main) {
     // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
     // (rpc.ts callEvm): a user's call never pays for the helper's background load
     const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
-    // card rpc-keyed-lists: every keyed URL's identity read, now and every KEYED_PROBE_MS, for /v1/health
+    // card rpc-keyed-lists: every keyed URL's identity read, now and then each once it is KEYED_PROBE_MS old (one that
+    // did not answer its chain, KEYED_RETRY_MS), for /v1/health
     void rpc.probe().catch(() => undefined);
-    setInterval(() => void rpc.probe().catch(() => undefined), KEYED_PROBE_MS).unref();
+    setInterval(() => void rpc.probe().catch(() => undefined), KEYED_RETRY_MS).unref();
     const lists = createSolanaLists(proxy, rpc);
     // the senders' handover (sendersFromEnv): `peer` when the helper this one replaces still runs
     const senders = sendersFromEnv(process.env);
