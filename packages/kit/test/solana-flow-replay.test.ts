@@ -1093,3 +1093,41 @@ test("card solana-written-accounts-whole: the wallet's held wSOL account read ag
     else assert.equal(l.refused, undefined, l.refused);
   }
 });
+
+// The second simulation (the wallet with its written accounts) on a provider whose answer `edit` changes, every other
+// call as recorded.
+function secondRun(d: ReturnType<typeof deps>, edit: (at: "A" | "B", method: string, params: readonly unknown[], x: unknown) => unknown) {
+  const wrap = (p: (typeof d.providers)[number], at: "A" | "B") => Object.assign(async (method: string, params: readonly unknown[]) => edit(at, method, params, await p(method, params)), { asks: p.asks, times: p.times });
+  return [wrap(d.providers[0], "A"), wrap(d.providers[1], "B")] as const;
+}
+test("card solana-written-accounts-whole: the native sum comes from one simulation: the wallet's lamports read back with its wSOL account, not from the first run", async () => {
+  const base = await runSolanaTrade(request(SELL), deps(SELL));
+  const outOf = (r: typeof base) => BigInt(/^simulated out (\d+)/.exec(r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!.verdict!.results.find((x) => x.id === "S12")!.detail)![1]!);
+  const d = deps(SELL);
+  // the second run lands where the sell pays 1,000 lamports less: the simulated out is that run's
+  const providers = secondRun(d, (_at, method, params, x) => {
+    const back = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
+    if (back?.length === 2 && back[1] === WSOL_HELD.account) (x as { value: { accounts: { lamports: number }[] } }).value.accounts[0]!.lamports -= 1_000;
+    return x;
+  });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers });
+  assert.equal(outOf(r), outOf(base) - 1_000n);
+});
+test("card solana-written-accounts-whole: a wSOL account of the wallet's that provider B alone reads is read back on both providers and read again on both, and the leg is refused", async () => {
+  const d = deps(SELL);
+  // provider A's read of the accounts the sell writes (more than the wallet's four) answers no account at the wSOL one
+  const providers = secondRun(d, (at, method, params, x) => {
+    const keys = method === "getMultipleAccounts" ? (params[0] as string[]) : [];
+    const i = keys.indexOf(WSOL_HELD.account);
+    if (at === "A" && keys.length > 5 && i >= 0 && keys.includes(WSOL_HELD.wallet)) (x as { value: unknown[] }).value[i] = null;
+    return x;
+  });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers });
+  const back = JSON.stringify(["simulateTransaction", { addresses: [WSOL_HELD.wallet, WSOL_HELD.account], encoding: "base64" }]);
+  for (const p of d.providers) assert.ok(p.asks.includes(back), "read back on each provider");
+  const leg = r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!;
+  // A's read again after the simulations finds the account A first read as none: refused before the checks (which
+  // would refuse the providers' disagreement on it)
+  assert.match(leg.refused ?? "", /changed while the trade was checked/);
+  for (const l of r.legs) if (l !== leg) assert.equal(l.refused, undefined, l.refused);
+});
