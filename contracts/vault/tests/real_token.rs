@@ -13,12 +13,18 @@
 //!    (`ft_transfer_call` with an empty message credits the sender): its `mt_balance_of` and both USDC balances move by
 //!    exactly the amount.
 //!
+//! 4. `usdc_registration_again_is_refunded` (card relayer-cost-guards, audit V-03): the vault's payout receipt starts
+//!    with `storage_deposit(recipient, registration_only)` at the token's minimum whether the recipient is registered
+//!    or not, so the real USDC must take that call for an account already registered without failing, and send the
+//!    whole deposit back to the caller: the payer's second registration of the same account costs it gas only, and
+//!    the account's storage balance is unchanged.
+//!
 //! Each prints its gas table.
 #![cfg(feature = "sandbox")]
 
 mod harness;
 
-use harness::{check_pin, pin, wasm_from_env, Harness, TokenKind, INTENTS, ONE_YOCTO, R, TOKEN, USDC_HALTED};
+use harness::{check_pin, pin, wasm_from_env, Harness, TokenKind, INTENTS, ONE_YOCTO, R, TOKEN, TOKEN_STORAGE, USDC_HALTED};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json};
 use near_workspaces::types::Gas;
@@ -99,6 +105,34 @@ async fn usdc_halt_can_be_driven() -> R<()> {
     assert_eq!((usdc_balance(&h, a.id()).await?, usdc_balance(&h, b.id()).await?), (HELD - 2 * AMOUNT, 2 * AMOUNT));
     assert_eq!(supply(&h).await?, total);
     println!("4. unhalted: nothing moved while halted; the same transfer lands: a {} b {}", HELD - 2 * AMOUNT, 2 * AMOUNT);
+    println!("{}", h.gas_table());
+    Ok(())
+}
+
+#[tokio::test]
+async fn usdc_registration_again_is_refunded() -> R<()> {
+    let h = Harness::with_vault_and(TokenKind::Usdc).await?;
+    let (p, b) = (h.account("p", 10).await?, h.account("b", 10).await?);
+    let min = TOKEN_STORAGE.as_yoctonear();
+    let bounds = h.view(&h.token, "storage_balance_bounds", json!({})).await?;
+    assert_eq!(bounds["min"].as_str(), Some(min.to_string().as_str()), "the pinned USDC's minimum: {bounds}");
+    let settled = || tokio::time::sleep(std::time::Duration::from_secs(2));
+    // the first registration keeps the minimum; the second (b already registered) must land and keep nothing
+    let p0 = h.near_balance(p.id()).await?;
+    let _ = h.storage_deposit(&p, b.id()).await?;
+    settled().await;
+    let p1 = h.near_balance(p.id()).await?;
+    let first = h.view(&h.token, "storage_balance_of", json!({"account_id": b.id()})).await?;
+    let again = h.storage_deposit(&p, b.id()).await?;
+    settled().await;
+    let p2 = h.near_balance(p.id()).await?;
+    let second = h.view(&h.token, "storage_balance_of", json!({"account_id": b.id()})).await?;
+    let (kept1, kept2) = (p0 - p1, p1 - p2);
+    println!("registration: p paid {kept1} the first time, {kept2} again (b registered); storage {first} then {second}; tx {}", again.tx_hash);
+    assert!(kept1 >= min, "the first registration kept less than the minimum: {kept1}");
+    assert!(kept2 < min / 2, "a registration of a registered account kept the deposit: p paid {kept2} of {min}");
+    assert_eq!(first, second, "a second registration changed b's storage balance");
+    assert_eq!(first["total"].as_str(), Some(min.to_string().as_str()), "{first}");
     println!("{}", h.gas_table());
     Ok(())
 }
