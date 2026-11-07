@@ -1797,6 +1797,10 @@ async function routeSet(a: {
   bought?: EvmRoute | undefined;
   /** pool ids the set leaves out */
   seen: readonly string[];
+  /** a sell's banned pools (card evm-sell-hook-converge), PoolIds 0x and 64 lower-case hex digits: never a pool of any
+   *  route, a market of X or Y, nor a pool of X with Y, so no pick among X's markets or the token's pools with X falls
+   *  on one and shadows the rest (review of 919742f5, F1) */
+  banned?: ReadonlySet<string>;
   /** the caller's list of pools (never trusted) */
   hints: unknown;
   /** quote each route backwards, from the token */
@@ -1818,6 +1822,8 @@ async function routeSet(a: {
   floor?: (out: (i: number) => bigint | null) => bigint;
 }): Promise<{ block: Block; out: (i: number) => bigint | null; fills: (c: { at: number; twice: number }, v3?: boolean) => boolean; filled: Filled[] }> {
   const { chain, v, token, amountIn, rpcs, scan, reads } = a;
+  // a banned pool is no pool at all to this set (review of 919742f5, F1)
+  const isBanned = (k: EvmPoolKey) => a.banned !== undefined && a.banned.has("0x" + poolId(k));
   // a route's read at an amount: the buy's forwards, the sell's backwards from `from` (the token, or for part of a
   // route, the currency it starts that part from)
   const readOf = (r: EvmRoute, amount: bigint, found: boolean, from = token) =>
@@ -1827,7 +1833,10 @@ async function routeSet(a: {
   const v3 = v.v3 !== undefined && (!a.sell || evmPoolVenues()[chain].routers.length > 0);
   const v4 = v.v4 !== undefined && (!a.sell || v.poolManager !== undefined);
   const candidates: { route: EvmRoute; at: number; twice: number }[] = [];
-  const candidate = (r: EvmRoute) => candidates.push({ route: r, at: at(r, amountIn), twice: at(r, 2n * amountIn) });
+  const candidate = (r: EvmRoute) => {
+    if (r.venue === "uniswap-v4" && hopKeys(r).some(isBanned)) return;
+    candidates.push({ route: r, at: at(r, amountIn), twice: at(r, 2n * amountIn) });
+  };
   if (v3) for (const fee of V3_FEES) candidate(v3Direct(v.weth, token, fee));
   if (v4) for (const key of V4_KEYS) candidate(v4Direct(NATIVE, token, key));
   // every route, whatever its shape and venue, is also held to each standard two-hop through each listed middle, on
@@ -2012,7 +2021,7 @@ async function routeSet(a: {
   // a sell's `bought` route: read in the first round under the same rule as a route the device made (each hook not
   // pinned replaced, and the lower of that and its quote as it is), never cut (review of edb4dbb, F5)
   const bought: Quote | null =
-    a.bought === undefined ? null
+    a.bought === undefined || (a.bought.venue === "uniswap-v4" && hopKeys(a.bought).some(isBanned)) ? null
     : a.bought.venue === "uniswap-v4" ? quoteAt(reads, a.bought, hopKeys(a.bought), token, amountIn)
     : { route: a.bought, at: at(a.bought, amountIn), twice: at(a.bought, 2n * amountIn) };
   const found: Found[] = [];
@@ -2027,7 +2036,7 @@ async function routeSet(a: {
     const fromScan = scanned?.pools.get(lower(token)) ?? [];
     const keys = [...fromScan, ...hints].flatMap((k) => {
       const id = poolId(k);
-      if (seen.has(id) || droppable(k)) return [];
+      if (seen.has(id) || droppable(k) || isBanned(k)) return [];
       seen.add(id);
       return [{ k, id, other: k.currency0 === lower(token) ? k.currency1 : k.currency0 }];
     });
@@ -2201,7 +2210,7 @@ async function routeSet(a: {
   const marketsOf = (c: string, scannedKeys: readonly EvmPoolKey[], into: Read[]): Found[] => {
     const ks = new Map<string, EvmPoolKey>();
     const add = (k: EvmPoolKey | null) => {
-      if (k !== null && !droppable(k) && !ks.has(poolId(k))) ks.set(poolId(k), k);
+      if (k !== null && !droppable(k) && !isBanned(k) && !ks.has(poolId(k))) ks.set(poolId(k), k);
     };
     for (const [fee, tickSpacing] of V4_KEYS) add(keyOf({ currency0: NATIVE, currency1: c, fee, tickSpacing, hooks: NATIVE }, c));
     for (const h of v.hookedPools) {
@@ -2302,7 +2311,7 @@ async function routeSet(a: {
     for (const x of further) {
       const ks = (sc?.pools.get(x) ?? [])
         .map((k) => ({ k, id: poolId(k), other: k.currency0 === x ? k.currency1 : k.currency0 }))
-        .filter((e) => !startsBuy(e.other) && e.other !== lower(token) && !droppable(e.k))
+        .filter((e) => !startsBuy(e.other) && e.other !== lower(token) && !droppable(e.k) && !isBanned(e.k))
         .sort(byId);
       if (ks.length > keysLeft) return refuse("too_many_pools", `the pools of ${x} pass the ${EVM_QUOTE_MAX_KEYS} pools a quote reads`);
       keysLeft -= ks.length;
@@ -2534,8 +2543,9 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const reads: Read[] = [];
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought) ? bought : undefined;
-  const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
-  // a route through a pool this device banned is neither simmed, picked nor a reference
+  const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
+  // a route through a pool this device banned is neither simmed, picked nor a reference: routeSet leaves every banned
+  // pool out before it picks X's market or the token's pool with X (review of 919742f5, F1); this holds it once more
   const filled = found.filter((r) => !(r.route.venue === "uniswap-v4" && hopKeys(r.route).some((k) => banned.has("0x" + poolId(k)))));
   // a route through a hook the venue does not list, priced above the best route the sell builder takes, counts only
   // where W's own sell through it executes at that price (card evm-quote-exec-sim; review of edb4dbb, F4)

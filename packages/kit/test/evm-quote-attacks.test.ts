@@ -4771,3 +4771,101 @@ test("HC6 the device's quote of a sale through an unlisted hook builds, and the 
     Date.now = realNow;
   }
 });
+
+// ------------------------------------------------------------------ independent review of evm-sell-hook-converge (RV)
+// The ban filter runs on routeSet's finished routes, but routeSet keeps ONE market per other currency X (bestMarket) and
+// builds every route through X from it. A hostile unlisted-hook market of X that outbids X's honest market shadows it;
+// once the hostile market is banned, every route through X is dropped and the honest market is never read again.
+const rvSell = (sell: unknown) => (sell as { route?: { hops?: { hooks: string; currency: string }[] } }).route;
+test("RV1 a banned hostile market of X shadows X's honest market: after the one failed try the sale is not routed through the honest market", async () => {
+  const token = "0x00000000000000000000000000000000000c1d01";
+  const x = xAt(0x7d1);
+  // the token's real liquidity: its hookless pool with X, and X's honest market with the native asset (found by X's scan)
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const honest = marketOf(x);
+  // the attacker's market of X behind an unlisted hook: twice the honest price on the quoter and in W's sim, reverts the sale
+  const hostile: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx === SALE_CTX ? null : 2n * a) };
+  const logs = [{ key: pool.key, at: 4_500_000 }, { key: honest.key, at: 4_100_000 }, { key: hostile.key, at: 4_100_001 }];
+  const pools = [seeded(token), pool, honest, hostile];
+  // without the hostile market the sale leaves through X's honest market at the full amount
+  // (another token and another X: the scan of X's markets is kept in memory per X)
+  const t0 = "0x00000000000000000000000000000000000c1d00";
+  const x0 = xAt(0x7d0);
+  const p0: ModelPool = { key: keyOf(t0, x0, 3000, 60, NATIVE), give: (a) => a };
+  const honest0 = marketOf(x0);
+  const clean = await hcQuote([seeded(t0), p0, honest0], t0, [{ key: p0.key, at: 4_500_000 }, { key: honest0.key, at: 4_100_000 }]);
+  assert.ok(!("code" in clean) && clean.amountOut === AMOUNT, show(clean));
+  // the first quote takes the hostile route (the reference), names the hostile pool; its real sale reverts
+  const q1 = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q1), show(q1));
+  assert.equal(q1.amountOut, 2n * AMOUNT);
+  assert.deepEqual(q1.hooked, [hcPid(hostile.key)]);
+  // the card's goal: the next quote, with the hostile pool banned, leaves through the rest: X's honest market, at AMOUNT
+  const q2 = await hcQuote(pools, token, logs, q1.hooked);
+  assert.deepEqual("code" in q2 ? q2 : { amountOut: q2.amountOut, minOut: q2.minOut, hops: rvSell(q2)?.hops?.length }, { amountOut: AMOUNT, minOut: (AMOUNT * 9900n) / 10000n, hops: 2 }, show(q2));
+});
+
+test("RV2 the same shadow with no seeded pool: after the one failed try the token cannot be sold at all", async () => {
+  const token = "0x00000000000000000000000000000000000c1d02";
+  const x = xAt(0x7d2);
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const honest = marketOf(x);
+  const hostile: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx === SALE_CTX ? null : 2n * a) };
+  const logs = [{ key: pool.key, at: 4_500_000 }, { key: honest.key, at: 4_100_000 }, { key: hostile.key, at: 4_100_001 }];
+  const pools = [pool, honest, hostile];
+  const q1 = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q1) && q1.hooked.length === 1, show(q1));
+  const q2 = await hcQuote(pools, token, logs, q1.hooked);
+  assert.ok(!("code" in q2) && q2.amountOut === AMOUNT, `expected the honest market at ${AMOUNT}, got ${show(q2)}`);
+});
+
+test("RV3 (control) with `bought` the honest route through X's market, the banned hostile market costs one try and the sale leaves through the honest market", async () => {
+  const token = "0x00000000000000000000000000000000000c1d03";
+  const x = xAt(0x7d3);
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a };
+  const honest = marketOf(x);
+  const hostile: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx === SALE_CTX ? null : 2n * a) };
+  const logs = [{ key: pool.key, at: 4_500_000 }, { key: honest.key, at: 4_100_000 }, { key: hostile.key, at: 4_100_001 }];
+  const pools = [seeded(token), pool, honest, hostile];
+  const bought: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: x, fee: 2500, tickSpacing: 50, hooks: NATIVE, hookData: "0x" }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+  const q = (banned?: string[]) => evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought, boughtBlock: 1n, signSim, ...(banned ? { banned } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), DELEGATED);
+  const q1 = await q();
+  assert.deepEqual(q1.hooked, [hcPid(hostile.key)]);
+  const q2 = await q([...q1.hooked]);
+  assert.equal(q2.amountOut, AMOUNT, show(q2));
+});
+
+test("RV4 an honest pool behind an unlisted hook that shares the reverted route with the attacker's market is banned with it, for good: the token's real pool is gone from every later quote", async () => {
+  const token = "0x00000000000000000000000000000000000c1d04";
+  const x = xAt(0x7d4);
+  const HONEST_HOOK = "0x00000000000000000000000000000000000030cc";
+  // the token's only real pool: with X, behind an honest hook no venue lists (a launchpad not on the list)
+  const pool: ModelPool = { key: keyOf(token, x, 3000, 60, HONEST_HOOK), give: (a) => a, lie: (a) => a };
+  const honest = marketOf(x);
+  const hostile: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx === SALE_CTX ? null : 2n * a) };
+  const logs = [{ key: pool.key, at: 4_500_000 }, { key: honest.key, at: 4_100_000 }, { key: hostile.key, at: 4_100_001 }];
+  const pools = [seeded(token), pool, honest, hostile];
+  const q1 = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q1), show(q1));
+  // both pools of the reverted route are named, the honest one with the attacker's
+  assert.deepEqual([...q1.hooked].sort(), [hcPid(hostile.key), hcPid(pool.key)].sort());
+  const q2 = await hcQuote(pools, token, logs, q1.hooked);
+  // the card's goal: the sale through the honest pool and X's honest market, at AMOUNT
+  assert.ok(!("code" in q2) && q2.amountOut === AMOUNT, `expected ${AMOUNT} through the honest pool, got ${show("code" in q2 ? q2 : { amountOut: q2.amountOut, minOut: q2.minOut, hooked: q2.hooked })}`);
+});
+
+test("RV5 no attacker: the token's only real pool, behind an honest unlisted hook, misses minOut once as its price moves 2% before the sale lands; the loop bans it for good and the next quote signs at the seeded pool's tenth", async () => {
+  const token = "0x00000000000000000000000000000000000c1d05";
+  // the price falls 2% between the quote's block and the sale's (the slippage is 1%), and is back by the next quote
+  let moved = true;
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx === SALE_CTX && moved ? (2n * a * 98n) / 100n : 2n * a) };
+  const logs = [{ key: honest.key, at: 4_500_001 }];
+  const pools = [seeded(token), honest];
+  const q1 = await hcQuote(pools, token, logs);
+  assert.ok(!("code" in q1) && q1.amountOut === 2n * AMOUNT && q1.hooked.length === 1, show(q1));
+  // the card's loop (hcConverge): the sale reverts (below minOut), so the caller bans the quote's hooked pools
+  assert.equal(hcSale(honest, q1), null, "the sale misses minOut and reverts");
+  moved = false;
+  const q2 = await hcQuote(pools, token, logs, q1.hooked);
+  assert.ok(!("code" in q2) && q2.amountOut === 2n * AMOUNT, `expected the honest pool at ${2n * AMOUNT} once its price is back, got ${show("code" in q2 ? q2 : { amountOut: q2.amountOut, minOut: q2.minOut, hooked: q2.hooked })}`);
+});
