@@ -399,10 +399,13 @@ async function prepareLeg(
   const breq: SolanaBuildRequest = { side: req.side, wallet: w, token: req.token, amount: leg.amount, slippageBps: req.slippageBps };
   const room = ctx.room;
   // past the helper's share or room, a build waits the Retry-After inside the trade's bound (SolanaBuildRoom); a leg
-  // refused at the first reads waits no more (its bound ends there)
+  // refused at the first reads waits no more: a wait under way ends there, and none starts (its bound ends there)
   const roomWait = room.wait;
   let closed = false;
-  const wait = { ...roomWait, get until() { return closed ? -Infinity : roomWait.until; } };
+  let close = () => {};
+  const closing = new Promise<never>((_ok, no) => { close = () => no(new LegGateClosed()); });
+  closing.catch(() => undefined);
+  const wait = { ...roomWait, get until() { return closed ? -Infinity : roomWait.until; }, sleep: (ms: number) => Promise.race([(roomWait.sleep ?? ((d: number) => new Promise<void>((ok) => setTimeout(ok, d))))(ms), closing]) };
   const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}), wait };
   const tb0 = now();
   // A build's tables, read on both providers (assembly uses provider A's, S2 holds B's to the same bytes), and the
@@ -437,6 +440,7 @@ async function prepareLeg(
   const mintA = gate?.mint[0];
   const drop = async (why?: string): Promise<null> => {
     closed = true;
+    close();
     if (why) rec.refused = why;
     await search.catch(() => undefined);
     return null;

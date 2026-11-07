@@ -219,6 +219,18 @@ test("card solana-quote-under-1s: every leg's build goes out with the first read
   for (const l of r.legs) assert.equal(l.refused, undefined, l.refused);
 });
 
+test("card solana-quote-under-1s: no reference pool while a build waits out the helper's Retry-After: the trade is refused at once, the wait ended, no build asked again", async () => {
+  const urls: string[] = [];
+  const d = deps(SELL);
+  const fetch = async (url: string) => { urls.push(url); return new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": "30" } }); };
+  // the room's sleep never ends by itself: a refused trade that kept waiting would never answer
+  const run = runSolanaTrade(request(SELL), { ...d, fetch, sleep: () => new Promise<void>(() => {}), reference: async () => null });
+  const r = await Promise.race([run, new Promise<null>((ok) => setTimeout(() => ok(null), 2_000))]);
+  assert.ok(r, "the refused trade waited for the build's room");
+  for (const l of r.legs) assert.equal(l.refused, "no reference pool");
+  assert.equal(urls.length, request(SELL).legs.length, "one build a leg, none asked again");
+});
+
 test("card solana-quote-under-1s: no reference pool refuses every leg; the builds already out are dropped, nothing simulated or signed", async () => {
   const d = deps(SELL);
   const r = await runSolanaTrade(request(SELL), { ...d, reference: async () => null });
