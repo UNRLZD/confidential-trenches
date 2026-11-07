@@ -184,6 +184,26 @@ export function noteToWithdraw<N extends { id: string; ref: { kind: string; i?: 
   return notes.find((n) => n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.label === dep.leaf!.label && n.leaf.value > 0n) ?? null;
 }
 
+/** `fn` asked up to `tries` times (a provider a block behind the other, a dropped answer); null when every try failed. */
+export async function retried<T>(fn: () => Promise<T>, tries: number, wait: () => Promise<void> = () => sleep(3000)): Promise<T | null> {
+  for (let t = 0; t < tries; t++) {
+    try {
+      return await fn();
+    } catch {
+      if (t + 1 < tries) await wait();
+    }
+  }
+  return null;
+}
+
+/** send_tx's error, as text, when the RPC refused the tx; null for a result, no answer or a timeout (the read-back decides). */
+export function sendAnswerError(j: any): string | null {
+  if (j === null || typeof j !== "object" || j.error === undefined) return null;
+  const cause = String(j.error?.cause?.name ?? j.error?.name ?? "error");
+  if (cause === "TIMEOUT_ERROR") return null;
+  return `${cause}: ${JSON.stringify(j.error?.data ?? j.error?.cause?.info ?? j.error?.message ?? "").slice(0, 300)}`;
+}
+
 /** A run's fingerprint of its seed, kept in its run step: a step of another seed is never used. */
 export const fingerprintOf = (seed: Buffer): string => createHash("sha256").update(seed).update("vault-mainnet-money/fingerprint").digest("hex");
 
@@ -492,15 +512,17 @@ async function go(argv: string[], create: boolean) {
 
   // the notes from the chain, in a store of the run's lane: the run's deposit note, if it landed, comes back UNSPENT
   // (or SPENT once withdrawn), and the deposit index i is the next the store plans when it did not
-  const { w, ns } = await storeOfLane(i % LANES);
+  let { w, ns } = await storeOfLane(i % LANES);
   const restored = await restoreNotes({ seed64, vault, token, rpcs });
   await writeRestored(ns, restored);
   const mine = (await ns.list()).find((n: any) => n.ref.kind === "deposit" && n.ref.i === i);
-  const balances = async (extra: Record<string, string> = {}) => {
+  // the balances kept beside each leg: asked again while the two operators are a block apart, never a stop (a leg that
+  // landed goes on with "unread" balances)
+  const balances = async (extra: Record<string, string> = {}): Promise<Record<string, unknown>> => (await retried(async () => {
     const out: Record<string, unknown> = { at: new Date().toISOString(), vault_usdc: await view2(rpcs, token, "ft_balance_of", { account_id: vault }), totals: await view2(rpcs, vault, "totals", {}) };
     for (const [k, id] of Object.entries(extra)) out[`${k}_usdc`] = await view2(rpcs, token, "ft_balance_of", { account_id: id });
     return out;
-  };
+  }, 5)) ?? { at: new Date().toISOString(), unread: true };
   // every tx hash a relayer answers, kept the moment it is heard: a stop after it loses none of the record's txs
   const heard: { bind: string[]; withdraw: string[] } = st.read("heard") ?? { bind: [], withdraw: [] };
   const watch = async (url: unknown, init?: RequestInit): Promise<Response> => {
@@ -523,6 +545,7 @@ async function go(argv: string[], create: boolean) {
     if (note.ref.i !== i || String(note.precommitment) !== run.precommitment) throw new Error(`planned index ${note.ref.i}, not the run's ${i}: nothing signed`);
     log(`waiting for U ${U} to exist and hold at least ${minDeposit} USDC (paste 2, then USDC from any wallet or exchange); no time limit, Ctrl-C and resume at any time`);
     let amount = 0n;
+    let landed: any = undefined;
     for (let t = 0; ; t++) {
       const acct = await accountOn(rpcs, U).catch(() => null);
       const usdc = acct === null || acct.some((x) => x === "absent") ? null : await view2(rpcs, token, "ft_balance_of", { account_id: U }).catch(() => null);
@@ -530,9 +553,24 @@ async function go(argv: string[], create: boolean) {
         amount = BigInt(usdc);
         break;
       }
+      // U's call may have landed after the restore above (a stop while it was carried): its P in the deposits pages
+      // ends the wait, and the note is restored into a fresh store of the lane, so nothing is signed twice
+      const rows = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["deposits"] }).then((x: any) => x.deposits, () => []);
+      if (rows.some((r: any) => r.precommitment === BigInt(run.precommitment) && r.depositor === U)) {
+        ns.close();
+        w.close();
+        ({ w, ns } = await storeOfLane(i % LANES));
+        await writeRestored(ns, await restoreNotes({ seed64, vault, token, rpcs }));
+        landed = (await ns.list()).find((n: any) => n.ref.kind === "deposit" && n.ref.i === i && n.leaf !== undefined);
+        if (landed !== undefined) break;
+      }
       if (t % 30 === 0) log(`U ${acct === null ? "not read" : acct.some((x) => x === "absent") ? "does not exist yet" : `holds ${usdc ?? "?"} USDC`}`);
       await sleep(POLL_MS);
     }
+    if (landed !== undefined) {
+      note = landed;
+      log(`the deposit of P by U is in the vault's pages (leaf ${landed.leaf.leafIndex}): nothing signed again`);
+    } else {
     // the fee held again on what is at U, right before U signs: a note the fee would leave unwithdrawable is not made
     await feeOf(amount);
     const before = await balances({ U });
@@ -550,7 +588,9 @@ async function go(argv: string[], create: boolean) {
     log(`deposited ${amount}: leaf ${leaf.leafIndex}; relayer txs ${txs.join(", ") || "none heard"}`);
     const left = BigInt(await view2(rpcs, token, "ft_balance_of", { account_id: U }).catch(() => "0"));
     if (left > 0n) log(`U still holds ${left} USDC that was not deposited: sweep-u sends it to ${to} (the run goes on)`);
-  } else if (st.read("deposit") === undefined) {
+    }
+  }
+  if (st.read("deposit") === undefined && note.leaf !== undefined) {
     // landed in an earlier attempt whose step file was not written: the record takes the leaf from the chain
     st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
   }
@@ -608,7 +648,7 @@ async function opened_mainnet_pair() {
 // ---- open-u: the payer opens U, signed here ----
 
 /** Signs and sends one transaction on the pair's first RPC, then reads it back FINAL on both; { hash } or throws. */
-async function sendTx(o: Opened, signer: string, key: any, receiver: string, actions: unknown[], keep: (hash: string) => void) {
+async function sendTx(o: Opened, signer: string, key: any, receiver: string, actions: unknown[], keep: (hash: string, error?: string) => void) {
   const { encodeTx } = await import("./testnet-usdc.mjs");
   const { b58decode, b58encode } = await import("./near-tx.mjs");
   const pk = `ed25519:${b58encode(key.pub)}`;
@@ -619,7 +659,14 @@ async function sendTx(o: Opened, signer: string, key: any, receiver: string, act
   const signed = Buffer.concat([tx, Buffer.from([0]), sign(null, h, key.privateKey)]);
   const hash = b58encode(h);
   keep(hash); // the hash is kept before it is sent: a stop after the send loses no tx of the record
-  await fetch(o.urls[0], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: CARD, method: "send_tx", params: { signed_tx_base64: signed.toString("base64"), wait_until: "FINAL" } }), signal: AbortSignal.timeout(60_000) }).catch(() => null);
+  const answer = await fetch(o.urls[0], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: CARD, method: "send_tx", params: { signed_tx_base64: signed.toString("base64"), wait_until: "FINAL" } }), signal: AbortSignal.timeout(60_000) })
+    .then((r) => r.json(), () => null)
+    .catch(() => null);
+  const err = sendAnswerError(answer);
+  if (err !== null) {
+    keep(hash, err); // the RPC's refusal kept beside the hash, and reported now rather than after the read-back's minute
+    throw new Error(`${hash} (${signer}) refused by ${o.urls[0]}: ${err}`);
+  }
   await readBackBoth(o.urls, hash, signer);
   return hash;
 }
@@ -702,8 +749,10 @@ async function openU(argv: string[]) {
   const key = loadKey(v["--key-file"], payer, repoRoots());
   const kept = st.read("open-u") ?? { txs: [] as { hash: string; signer: string; what: string }[] };
   // each hash is kept before its tx is sent (sendTx), so a stop between the send and the read-back loses none
-  const keep = (what: string) => (hash: string) => {
-    kept.txs.push({ hash, signer: payer, what });
+  const keep = (what: string) => (hash: string, error?: string) => {
+    const at = kept.txs.find((t: { hash: string }) => t.hash === hash);
+    if (at === undefined) kept.txs.push({ hash, signer: payer, what, ...(error ? { error } : {}) });
+    else if (error) at.error = error;
     st.write("open-u", kept);
   };
   const done = (hash: string, what: string) => log(`${what}: ${hash} read back FINAL on both RPCs, every receipt a success`);
@@ -743,8 +792,10 @@ async function sweepU(argv: string[]) {
   const key = uSigner(seed64, o.scope, run.i, U);
   seed64.fill(0);
   const kept = st.read("sweep") ?? { txs: [] as { hash: string; signer: string; amount: string; to: string }[] };
-  const hash = await sendTx(o, U, key, o.token, [act.call("ft_transfer", { receiver_id: to, amount: String(balance) }, 30n * TGAS, 1n)], (h) => {
-    kept.txs.push({ hash: h, signer: U, amount: String(balance), to });
+  const hash = await sendTx(o, U, key, o.token, [act.call("ft_transfer", { receiver_id: to, amount: String(balance) }, 30n * TGAS, 1n)], (h, error) => {
+    const at = kept.txs.find((t: { hash: string }) => t.hash === h);
+    if (at === undefined) kept.txs.push({ hash: h, signer: U, amount: String(balance), to, ...(error ? { error } : {}) });
+    else if (error) (at as any).error = error;
     st.write("sweep", kept);
   });
   log(`ft_transfer of ${balance} from U ${U} to ${to}: ${hash} read back FINAL on both RPCs, every receipt a success`);

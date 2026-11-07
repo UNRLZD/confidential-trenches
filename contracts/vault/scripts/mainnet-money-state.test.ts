@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { feeProblems, fingerprintOf, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { feeProblems, fingerprintOf, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
@@ -286,6 +286,27 @@ test("L3: the fee is held to the withdrawal's own bound before any deposit: 2 * 
   for (const relayFee of [500_000n, 700_000n, 999_999n]) assert.match(feeProblems({ relayFee, feeMax, note: 1_000_000n }).join(), /half the note/, String(relayFee));
   // checked again on the amount at U right before its deposit is signed
   assert.match(SRC, /await feeOf\(amount\);[\s\S]{0,800}bindDeposit\(seed64/);
+});
+
+test("L4: a read that fails or disagrees for a block is asked again, and after a landing never stops the run", async () => {
+  let n = 0;
+  assert.equal(await retried(async () => (++n < 3 ? Promise.reject(new Error("disagree")) : "ok"), 3, async () => {}), "ok");
+  assert.equal(n, 3);
+  assert.equal(await retried(async () => Promise.reject(new Error("down")), 3, async () => {}), null);
+  assert.match(SRC, /const balances = async[^\n]*retried\(/);
+});
+
+test("L4: a deposit that lands while the run waits ends the wait (P in the deposits pages): no second bind", () => {
+  assert.match(SRC, /r\.precommitment === BigInt\(run\.precommitment\) && r\.depositor === U/);
+  assert.match(SRC, /if \(landed !== undefined\)[\s\S]{0,200}else \{[\s\S]{0,1500}bindDeposit\(seed64/);
+});
+
+test("L4: a send's error is read from send_tx's answer, kept in the step file and reported at once", () => {
+  assert.equal(sendAnswerError({ jsonrpc: "2.0", result: { status: {} } }), null);
+  assert.equal(sendAnswerError(null), null, "no answer: the read-back decides");
+  assert.match(String(sendAnswerError({ jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "INVALID_TRANSACTION" }, data: { TxExecutionError: { InvalidTxError: "InvalidNonce" } } } })), /INVALID_TRANSACTION[^]*InvalidNonce/);
+  assert.equal(sendAnswerError({ jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } }), null, "a timeout is no answer");
+  assert.match(SRC, /keep\(hash, err\)/);
 });
 
 test("the usage line names every command", () => {
