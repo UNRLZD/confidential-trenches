@@ -9,9 +9,10 @@
 //   - the vault's key list is [] and its code hash is the record's (no key added, no other code since the deploy);
 //   - the deposits pages hold the run's precommitment once: depositor U, the note's value (at least the vault's
 //     MIN_DEPOSIT), the label and the leaf index; the leaf at that index is the run's note commitment;
-//   - the spends pages hold the note's nullifier hash once: recipient the named account, withdrawn + fee = the note (no
-//     change), payer the release's withdrawal relayer, paid or settled with nothing refunded; the leaf at
-//     new_leaf_index is the run's change commitment (a zero note), once;
+//   - the spends pages hold the note's nullifier hash once: recipient the named account, withdrawn = the whole note (no
+//     change; the account got withdrawn - fee, contracts/vault/src/payout.rs row 13), fee within the vault's backstop
+//     (fee * 10,000 <= withdrawn * MAX_RELAY_FEE_BPS), payer the release's withdrawal relayer, paid or settled with
+//     nothing refunded; the leaf at new_leaf_index is the run's change commitment (a zero note), once;
 //   - the vault holds at least what its totals owe (deposited - spent + returned, I1: equal once nothing is in flight).
 // The named account's and the fee recipient's balances are the record's (the .md, read in the run), not held here: both
 // accounts have keys, so their owners may move what they hold; the spend row is the chain's lasting word on the payout.
@@ -38,6 +39,8 @@ export const CODE_HASH = record.code_hash;
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 /** The vault's smallest deposit (contracts/vault/src/constants.rs MIN_DEPOSIT): the run deposits what lands at U, at least this. */
 export const MIN_DEPOSIT = 1_000_000n;
+/** The vault's fee backstop (constants.rs MAX_RELAY_FEE_BPS): relay_fee * 10,000 <= withdrawn * 5,000. */
+export const MAX_RELAY_FEE_BPS = 5_000n;
 const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
 const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -80,14 +83,14 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS, sleep = pause }
   };
   for (const p of operatorProblems(rpcs, "mainnet")) say(false, p);
   rpcs = rpcs.slice(0, 2);
-  const { U, to, R } = run.accounts ?? {};
+  const { U, to, R, F } = run.accounts ?? {};
   const d = run.deposit ?? {};
   const w = run.withdraw ?? {};
   const value = BigInt(d.value ?? -1);
   const withdrawn = BigInt(w.withdrawn ?? -1);
   const fee = BigInt(w.relay_fee ?? -1);
   say(run.network === "mainnet" && run.vault === VAULT && run.asset === TOKEN, `the run record names the mainnet vault ${VAULT} on ${TOKEN}: ${run.vault} on ${run.asset}`);
-  say(/^[0-9a-f]{64}$/.test(U ?? "") && ACCOUNT_ID.test(to ?? "") && ![VAULT, TOKEN, "intents.near"].includes(to) && value >= MIN_DEPOSIT && fee >= 0n && withdrawn > 0n && withdrawn + fee === value, `the record: U NEAR-implicit, the named account ${to} not the vault, the token or intents.near, the note ${value} at least ${MIN_DEPOSIT} = withdrawn ${withdrawn} + fee ${fee}`);
+  say(/^[0-9a-f]{64}$/.test(U ?? "") && ACCOUNT_ID.test(to ?? "") && ![VAULT, TOKEN, "intents.near", U, F, R].includes(to) && value >= MIN_DEPOSIT && withdrawn === value && fee >= 0n && fee < withdrawn && fee * 10_000n <= withdrawn * MAX_RELAY_FEE_BPS, `the record: U NEAR-implicit, the named account ${to} not the vault, the token, intents.near, U, the fee recipient or the relayer, the note ${value} at least ${MIN_DEPOSIT} withdrawn whole (${withdrawn}), the fee ${fee} within the vault's backstop`);
   for (const url of rpcs) {
     const at = `on ${url}`;
     try {

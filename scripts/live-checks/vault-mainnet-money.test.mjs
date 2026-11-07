@@ -82,14 +82,50 @@ test("four rate limits in a row exit 2, not 1, with no FAIL line", async () => {
   assert.ok(!out.some((l) => /FAIL|BAD/.test(l)), out.join("\n"));
 });
 
-test("a run record that leaves change, pays the vault or deposits under the vault's minimum fails on the record line", async () => {
-  for (const run of [
-    { ...planted, withdraw: { ...planted.withdraw, withdrawn: "4000000" } },
-    { ...planted, accounts: { ...planted.accounts, to: planted.vault } },
-    { ...planted, accounts: { ...planted.accounts, to: undefined, A: "0".repeat(63) + "1" } },
-    { ...planted, deposit: { ...planted.deposit, value: "900000" }, withdraw: { ...planted.withdraw, withdrawn: "600000" } },
-  ]) {
-    const r = await check({ run, fetchFn: replay(bad()) });
-    assert.ok(bads(r).some((l) => /the record: U NEAR-implicit, the named account/.test(l)), bads(r).join("\n"));
+// The recorded pre-run reads with the run's rows added (derived, as the cases above: never an answers file): the
+// deposits, spends and leaves pages answer the planted run's deposit row, spend row and both leaves.
+function withRun(run, spend = {}) {
+  const rows = {
+    deposits: [{ index: 0, precommitment: run.deposit.precommitment, depositor: run.accounts.U, value: run.deposit.value, label: run.deposit.label, leaf_index: Number(run.deposit.leaf_index) }],
+    spends: [{ index: 0, nullifier_hash: run.withdraw.nullifier_hash, recipient: run.accounts.to, withdrawn: run.withdraw.withdrawn, fee: run.withdraw.relay_fee, payer: run.accounts.R, status: "paid", refund_value: "0", new_leaf_index: Number(run.withdraw.change_leaf_index), ...spend }],
+    leaves: [run.deposit.commitment, run.withdraw.change_commitment],
+  };
+  return bad().map((a) => (a.params.request_type === "call_function" && rows[a.params.method_name] ? { ...a, json: { ...a.json, result: { ...a.json.result, result: [...Buffer.from(JSON.stringify(rows[a.params.method_name]))] } } } : a));
+}
+const NO_CHANGE = { ...planted, deposit: { ...planted.deposit, commitment: "11" }, withdraw: { ...planted.withdraw, change_commitment: "22" } };
+
+test("a no-change run passes: withdrawn is the whole note, the named account got withdrawn - fee (payout.rs row 13)", async () => {
+  assert.equal(planted.withdraw.withdrawn, planted.deposit.value);
+  const r = await check({ run: NO_CHANGE, fetchFn: replay(withRun(NO_CHANGE)) });
+  assert.deepEqual(bads(r), []);
+  assert.equal(r.ok, true);
+  for (const status of ["settled"]) assert.equal((await check({ run: NO_CHANGE, fetchFn: replay(withRun(NO_CHANGE, { status })) })).ok, true);
+  for (const spend of [{ status: "refund_pending" }, { status: "settled", refund_value: "1" }, { recipient: "other.near" }]) assert.equal((await check({ run: NO_CHANGE, fetchFn: replay(withRun(NO_CHANGE, spend)) })).ok, false, JSON.stringify(spend));
+});
+
+test("a run that leaves change (change = fee), a fee above the vault's backstop, or a note under the minimum fails on the record line", async () => {
+  const cases = [
+    { ...NO_CHANGE, withdraw: { ...NO_CHANGE.withdraw, withdrawn: "4700000" } }, // change = fee: the old rule passed it
+    { ...NO_CHANGE, withdraw: { ...NO_CHANGE.withdraw, withdrawn: "4000000" } },
+    { ...NO_CHANGE, withdraw: { ...NO_CHANGE.withdraw, relay_fee: "2500001" } }, // fee * 10,000 > withdrawn * MAX_RELAY_FEE_BPS
+    { ...NO_CHANGE, deposit: { ...NO_CHANGE.deposit, value: "900000" }, withdraw: { ...NO_CHANGE.withdraw, withdrawn: "900000" } },
+  ];
+  for (const run of cases) {
+    const r = await check({ run, fetchFn: replay(withRun(run)) });
+    assert.ok(bads(r).some((l) => /the record: U NEAR-implicit, the named account/.test(l)), `${JSON.stringify(run.withdraw)}: ${bads(r).join("\n")}`);
   }
+  // the fee at the backstop passes
+  const edge = { ...NO_CHANGE, withdraw: { ...NO_CHANGE.withdraw, relay_fee: "2500000" } };
+  assert.equal((await check({ run: edge, fetchFn: replay(withRun(edge)) })).ok, true);
+});
+
+test("a run record that pays the vault, the token, intents.near, U, the fee recipient or the relayer fails on the record line", async () => {
+  const { U, F, R } = planted.accounts;
+  for (const to of [planted.vault, planted.asset, "intents.near", U, F, R, undefined]) {
+    const run = { ...NO_CHANGE, accounts: { ...NO_CHANGE.accounts, to } };
+    const r = await check({ run, fetchFn: replay(withRun(run)) });
+    assert.ok(bads(r).some((l) => /the record: U NEAR-implicit, the named account/.test(l)), `${to}: ${bads(r).join("\n")}`);
+  }
+  const arming = { ...NO_CHANGE, accounts: { ...NO_CHANGE.accounts, to: undefined, A: "0".repeat(63) + "1" } };
+  assert.equal((await check({ run: arming, fetchFn: replay(withRun(arming)) })).ok, false);
 });

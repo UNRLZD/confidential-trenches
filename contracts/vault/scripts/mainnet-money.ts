@@ -128,9 +128,10 @@ const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z
  * view_account on each: the amounts may differ by a block, existence may not). An implicit id that does not exist yet
  * is refused too: nobody may have its key, and the owner names an account they hold.
  */
-export function recipientProblems(to: unknown, a: { vault: string; token: string; reads: readonly (null | { amount: string } | "absent")[] }): string[] {
+export function recipientProblems(to: unknown, a: { vault: string; token: string; others?: readonly string[]; reads: readonly (null | { amount: string } | "absent")[] }): string[] {
   if (typeof to !== "string" || !ACCOUNT_ID.test(to)) return [`--to ${String(to)}: not a NEAR account id`];
   if (to === a.vault || to === INTENTS || to === a.token) return [`--to ${to}: the vault, intents.near or the token`];
+  if ((a.others ?? []).includes(to)) return [`--to ${to}: U, the fee recipient or the relayer, an account of the run's own`];
   if (a.reads.length !== 2 || a.reads.some((r) => r === null)) return [`--to ${to}: not read on two operators`];
   if (a.reads.some((r) => r === "absent")) return [`--to ${to}: no such account on ${a.reads.every((r) => r === "absent") ? "either RPC" : "one RPC"}; name an existing account you hold`];
   return [];
@@ -288,9 +289,9 @@ async function opened(network: Network, bindRelayer?: string) {
 
 type Opened = Awaited<ReturnType<typeof opened>>;
 
-async function checkRecipient(o: Opened, to: unknown): Promise<string> {
+async function checkRecipient(o: Opened, to: unknown, others: string[] = []): Promise<string> {
   const reads = typeof to === "string" && ACCOUNT_ID.test(to) ? await accountOn(o.rpcs, to).catch(() => [null, null]) : [null, null];
-  const p = recipientProblems(to, { vault: o.vault, token: o.token, reads });
+  const p = recipientProblems(to, { vault: o.vault, token: o.token, others: [o.relayers.withdraw.relayer_account, o.relayers.withdraw.fee_recipient, ...others], reads });
   if (p.length) throw new Error(`refused, nothing sent: ${p.join("; ")}`);
   return to as string;
 }
@@ -437,6 +438,7 @@ async function go(argv: string[], create: boolean) {
   }
   if (run.to !== to) throw new Error(`refused, nothing sent: this run pays ${run.to}; paste the same line with ${run.to}`);
   const { i, U } = run as { i: number; U: string };
+  await checkRecipient(o, v["--to"], [U]);
   log(`U is ${U} (U_{s,i}, i ${i}); the withdrawal goes to ${to}`);
 
   // the notes from the chain, in a store of the run's lane: the run's deposit note, if it landed, comes back UNSPENT

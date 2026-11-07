@@ -34,6 +34,15 @@ test("F1: the named account must exist on both RPCs; the vault, intents.near, th
   for (const to of [undefined, "", "Owner.near", "a", "x".repeat(65), "owner..near"]) assert.match(recipientProblems(to, { vault: VAULT, token: TOKEN, reads: [ok, ok] }).join(), /not a NEAR account id/);
 });
 
+test("H1: the named account may not be U, the fee recipient or the relayer: the payout would go to the run's own accounts", () => {
+  const ok = { amount: "1" };
+  const others = ["a".repeat(64), "f.near", "r.near"];
+  for (const to of others) assert.match(recipientProblems(to, { vault: VAULT, token: TOKEN, others, reads: [ok, ok] }).join(), /U, the fee recipient or the relayer/, to);
+  assert.deepEqual(recipientProblems("owner.near", { vault: VAULT, token: TOKEN, others, reads: [ok, ok] }), []);
+  assert.match(SRC, /recipientProblems\(to, \{ vault: o\.vault, token: o\.token, others: \[o\.relayers\.withdraw\.relayer_account, o\.relayers\.withdraw\.fee_recipient, \.\.\.others\]/);
+  assert.match(SRC, /checkRecipient\(o, v\["--to"\], \[U\]\)/);
+});
+
 test("F1, F7: a request that pays anyone but the named account, funds a recipient or leaves change is refused before it is sent", () => {
   const req = { recipient: "owner.near", changeValue: 0n, body: { fund_recipient: false } };
   assert.deepEqual(requestProblems(req, "owner.near"), []);
