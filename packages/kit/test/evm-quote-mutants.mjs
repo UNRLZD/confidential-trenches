@@ -760,15 +760,18 @@ export const MUTANTS = [
   [QUOTE, "for (const x of at) if (keys.has(x.key)) confirmed.add(x.key);", "for (const x of at) if (false) confirmed.add(x.key);", S, NR],
   // review of 9c2a87d5, I-1: m1, the claimant asked to confirm its own log, and m3, a denial that holds no one
   [QUOTE, "const others = list.map((_, k) => k).filter((k) => k !== claimant);", "const others = list.map((_, k) => k).filter(() => true);", S, NR],
-  [QUOTE, "    if (answered > 0 && behind === 0) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (answered > 0 && behind === 0) {\n", S, NR],
-  // R3-1: a low head within maxLag, a block of another hash, an error to the logs by hash; a denial only where no
-  // provider is behind
-  [QUOTE, "if (e.block > head + maxLag) continue;", "if (false) continue;", S, NR],
-  [QUOTE, "behind++;\n          if (head > best", "\n          if (head > best", S, NR],
-  [QUOTE, "if (h.hash !== e.hash) answered++;", "if (h.hash !== e.hash) {}", S, NR],
+  [QUOTE, "    if (deny >= need) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (deny >= need) {\n", S, NR],
+  // R3-1: a low head within maxLag, a block of another hash, an error to the logs by hash; R4-1: a denial only by more
+  // than half of the whole list
+  [QUOTE, "if (e.block > head + maxLag) deny++;", "if (false) deny++;", S, NR],
+  [QUOTE, "if (h.hash !== e.hash) deny++;", "if (h.hash !== e.hash) {}", S, NR],
+  [QUOTE, "if (!at.every((x) => keys.has(x.key))) deny++;", "if (false) deny++;", S, NR],
   [QUOTE, "else if (Array.isArray(r)) {\n          const keys = new Set(r.map(", "else {\n          const keys = new Set((Array.isArray(r) ? r : []).map(", S, NR],
-  [QUOTE, "if (answered > 0 && behind === 0) {", "if (answered > 0) {", S, NR],
-  [QUOTE, "if (monotonic() >= until) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "if (deny >= need) {", "if (deny >= need - 1) {", S, NR],
+  [QUOTE, "confirmed.has(x.key));\n  const need = Math.floor(list.length / 2) + 1;", "confirmed.has(x.key));\n  const need = 1;", S, NR],
+  // R4-4: the stall refuses and holds the claimant
+  [QUOTE, "    if (monotonic() >= until) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (monotonic() >= until) {\n", S, NR],
+  [QUOTE, "    if (monotonic() >= until) {", "    if (false) {", S, NR],
   // the wait runs as long as another provider's head moves toward the block (base-sepolia's maxLag is about 20 s)
   [QUOTE, "if (head > best && head < e.block) [best, until]", "if (false) [best, until]", S, NR],
   // R3-2: by EVM_SELL_CONFIRM_BY_MS after the quote's block, a refusal that holds the claimant

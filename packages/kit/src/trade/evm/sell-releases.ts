@@ -34,9 +34,10 @@
 //   the read finds it. That list can only add waits, never clear one the read found;
 // - a release to W above the quote's agreed block is pending too (review of 982a19bd, F3), once a second provider holds
 //   its block with it (checks/evm/quote.ts releasesConfirmed: one provider's word alone held every sale, review of
-//   181fd050, R2-1). It is dropped only where every other provider that answers holds its block without it or is more
-//   than maxLag below it; a low head or an error is no answer, and the quote waits or is refused, never built over it
-//   (review of 9c2a87d5, R3-1).
+//   181fd050, R2-1). It is dropped only where more than half of the whole provider list holds its block without it or
+//   is more than maxLag below it (review of e21c5611, R4-1: on a list of two, one answer never decides); a low head, an
+//   error or a head past the block without it is no answer, and the quote waits or is refused with the claimant held,
+//   never built over it (review of 9c2a87d5, R3-1; of e21c5611, R4-4).
 import type { EvmPoolChain } from "./buy-unpinned.ts";
 import { EvmPoolSellError } from "./sell-unpinned.ts";
 

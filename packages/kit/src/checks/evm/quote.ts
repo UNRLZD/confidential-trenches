@@ -2802,24 +2802,26 @@ export const EVM_SELL_ABOVE_MAX = 64;
 /** Which of `at`, the logs of W's in one block above the quote's block that only the provider `claimant` of `list` gave
  *  (one number and hash), are confirmed: a second provider holds the block by number with that hash and gives the log in
  *  it (eth_getLogs by blockHash). Every other provider is asked each round, and its answer is one of:
- *  - none: an error, a header of another number, or an error to the logs by hash (review of 9c2a87d5, R3-1c);
+ *  - none: an error, a header of another number, an error to the logs by hash (review of 9c2a87d5, R3-1c), or a head
+ *    at or past the block that does not hold it (review of e21c5611, R4-4);
  *  - behind: its head is below the block and within maxLag of it (R3-1a: a low head is no denial);
  *  - far: its head is more than maxLag below the block (no honest provider's head is that far ahead of another's);
  *  - reached: it holds the block, and the logs it gives there (none where the hash is another).
- *  A log any provider gives is confirmed. The rest are denied only once every other provider that answers has reached
- *  the block or is far, none behind (R3-1b: a provider without the log while others catch up is no denial): `denied`,
- *  and the claimant is held. Otherwise they are asked again every EVM_SELL_CONFIRM_EVERY_MS while a head below the block
- *  moves; when none moved for EVM_SELL_CONFIRM_WAIT_MS the quote is refused (rpc_error), and at `byMs` on `clock` the
- *  quote is refused and the claimant held, never built over the log (R3-2). A head at or past the block that does not
- *  hold it is no move, so the wait is bounded. */
+ *  A log any provider gives is confirmed. The rest are denied only once more than half of the whole list, as agreeing's
+ *  vote counts it, has reached the block without them or is far (R3-1b; review of e21c5611, R4-1: on a list of two, one
+ *  answer never decides): `denied`, and the claimant is held. Otherwise they are asked again every
+ *  EVM_SELL_CONFIRM_EVERY_MS while a head below the block moves; when none moved for EVM_SELL_CONFIRM_WAIT_MS, or at
+ *  `byMs` on `clock` (R3-2), the quote is refused (rpc_error) and the claimant held (R4-4), never built over the log. A
+ *  head at or past the block is no move, so the wait is bounded. */
 async function releasesConfirmed(at: readonly ReleaseLog[], list: readonly EvmRpc[], claimant: number, pool: string, wTopic: string, maxLag: bigint, clock: () => number, byMs: number): Promise<{ confirmed: ReleaseLog[]; denied: boolean }> {
   const e = at[0]!;
   const others = list.map((_, k) => k).filter((k) => k !== claimant);
   const confirmed = new Set<string>();
   const ok = () => at.filter((x) => confirmed.has(x.key));
+  const need = Math.floor(list.length / 2) + 1;
   let [best, until] = [-1n, monotonic() + EVM_SELL_CONFIRM_WAIT_MS];
   for (;;) {
-    let [answered, behind] = [0, 0];
+    let deny = 0;
     for (const k of others) {
       const who = `provider ${k + 1}`;
       try {
@@ -2830,31 +2832,32 @@ async function releasesConfirmed(at: readonly ReleaseLog[], list: readonly EvmRp
         ]);
         if ((got[0] as { result?: unknown } | null)?.result == null) {
           const head = header(got[2], who).number;
-          answered++;
-          if (e.block > head + maxLag) continue;
-          behind++;
-          if (head > best && head < e.block) [best, until] = [head, monotonic() + EVM_SELL_CONFIRM_WAIT_MS];
+          if (e.block > head + maxLag) deny++;
+          else if (head > best && head < e.block) [best, until] = [head, monotonic() + EVM_SELL_CONFIRM_WAIT_MS];
           continue;
         }
         const h = header(got[0], who);
         if (h.number !== e.block) continue;
         const r = (got[1] as { result?: unknown } | null)?.result;
-        if (h.hash !== e.hash) answered++;
+        if (h.hash !== e.hash) deny++;
         else if (Array.isArray(r)) {
           const keys = new Set(r.map((l) => releaseLogOf(l, who, pool, wTopic).key));
-          answered++;
           for (const x of at) if (keys.has(x.key)) confirmed.add(x.key);
+          if (!at.every((x) => keys.has(x.key))) deny++;
         }
       } catch {
         continue;
       }
     }
     if (confirmed.size === at.length) return { confirmed: ok(), denied: false };
-    if (answered > 0 && behind === 0) {
+    if (deny >= need) {
       HOLD.get(list[claimant]!)?.();
       return { confirmed: ok(), denied: true };
     }
-    if (monotonic() >= until) return refuse("rpc_error", `W's release in block ${e.block} is not yet held by a second provider, and no other provider's head moved for ${EVM_SELL_CONFIRM_WAIT_MS / 1000} s`);
+    if (monotonic() >= until) {
+      HOLD.get(list[claimant]!)?.();
+      return refuse("rpc_error", `W's release in block ${e.block} is not yet held by a second provider, and no other provider's head moved for ${EVM_SELL_CONFIRM_WAIT_MS / 1000} s`);
+    }
     if (clock() >= byMs) {
       HOLD.get(list[claimant]!)?.();
       return refuse("rpc_error", `W's release in block ${e.block} is not held by a second provider ${EVM_SELL_CONFIRM_BY_MS / 1000} s after the quote's block`);
