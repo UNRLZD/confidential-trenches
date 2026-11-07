@@ -22,7 +22,6 @@ import { EVM_READ_TRY_MS } from "../../wallet/src/pool/evm.ts";
 import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
 import { mock } from "node:test";
 import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
-import { POOL_DEPOSIT_FOLLOW_FOR_MS } from "../src/pool-deposit.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -654,31 +653,37 @@ test("pool-deposit-sent-end fold review 1 (EVM): an ask whose two notes both lan
   assert.equal(await f.parked(), false, "an ask that ended is not followed");
 });
 
-test("pool-deposit-sent-end review 4 (EVM): the end's reads back off (10 s doubling to 60 s) while every send is dead with no Deposited, give up at POOL_DEPOSIT_FOLLOW_FOR_MS telling nothing, and stop at once when the page leaves the deposit", async () => {
+test("pool-deposit-sent-end review 4 (EVM): the end's reads back off (10 s doubling to 60 s) while every send is dead with no Deposited, go on past an hour (fold review 5: no give-up) so the pass's send that lands then is told filled, and stop at once when the page leaves the deposit", async () => {
   const { ch, ns } = await funded(RUNG + FEE);
   const waits: number[] = [];
   const stop = new AbortController();
   let ended = false;
+  let topped = false;
   const stages: string[] = [];
-  // at the run's end: dead on both, no Deposited; no pass runs, so it stays so
+  // at the run's end: dead on both, no Deposited; no pass runs until past an hour of the end's reads
   let cut = false;
   const dead = () => ((ch.c.finNonce = [1n, 1n]), (ch.c.nonce = 1n), (ended = true));
   const kind = poolDepositEvmKind(() => ({ ...hostOf(ch, ns), wait: async (ms: number) => {
       if (cut) throw new Error("cut");
-      if (ended) waits.push(ms);
+      if (!ended) return;
+      waits.push(ms);
+      if (!topped && waits.reduce((a, b) => a + b, 0) > 3_600_000) {
+        topped = true;
+        assert.deepEqual(stages, [], "nothing told for an hour of dead sends");
+        // the page's pass, then: the note built again at U's new nonce, and it lands and is final
+        await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), null);
+        ch.land(ch.c.sent.at(-1)!);
+      }
     }, end: () => void dead() }));
   const r = kind(ASK, { id: "e3", sha: "00", progress: (s) => void stages.push(String(s)) }) as { after: Promise<void> };
   await r.after;
-  // until the reads stop (a follow that never gives up is cut at 10 s, and fails below)
-  for (let k = -1, t0 = Date.now(); k !== waits.length && Date.now() - t0 < 10_000; ) {
-    k = waits.length;
-    await new Promise((ok) => setTimeout(ok, 100));
-  }
+  // until the app is told (a follow that gives up never tells: cut at 10 s, and fails below)
+  for (const t0 = Date.now(); stages.length === 0 && Date.now() - t0 < 10_000; ) await new Promise((ok) => setTimeout(ok, 20));
   cut = true;
-  assert.deepEqual(stages, []);
+  assert.equal(topped, true, `the reads went on past an hour: ${waits.reduce((a, b) => a + b, 0)} ms`);
   assert.deepEqual(waits.slice(0, 5), [10_000, 20_000, 40_000, 60_000, 60_000]);
-  const total = waits.reduce((a, b) => a + b, 0);
-  assert.ok(total <= POOL_DEPOSIT_FOLLOW_FOR_MS && total > POOL_DEPOSIT_FOLLOW_FOR_MS - 60_000, `gives up at its bound: ${total}`);
+  assert.deepEqual(stages, ["filled"], "the late landing told");
+  assert.equal(ch.c.sent.length, 2);
   // a sign out stops a follow at once
   const { ch: ch2, ns: ns2 } = await funded(RUNG + FEE);
   const f = followedEvm(ch2, ns2, { signal: stop.signal });

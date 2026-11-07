@@ -26,7 +26,7 @@ import { solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { POOL_DEPOSIT_FOLLOW_FOR_MS, POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
+import { POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { pairDown } from "./outage.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -1764,7 +1764,7 @@ test("pool-deposit-sent-end review 1 (repro R): every send of the ask past its l
   assert.equal(c.sent.length, 2);
 });
 
-test("pool-deposit-sent-end review 1: a note the pass cannot build again (U short of its send again) is no end either: nothing told, the reads back off to POOL_DEPOSIT_FOLLOW_MAX_MS, and give up after POOL_DEPOSIT_FOLLOW_FOR_MS telling nothing; a top-up then lands it with the app never told not_landed", async () => {
+test("pool-deposit-sent-end review 1: a note the pass cannot build again (U short of its send again) is no end either: nothing told, the reads back off to POOL_DEPOSIT_FOLLOW_MAX_MS and go on past an hour (fold review 5: no give-up); a top-up after the hour lands it and the app is told filled, never not_landed", async () => {
   const c = chain();
   const ns = await notes();
   const u = await plannedU(ns);
@@ -1774,6 +1774,7 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
   let ended = false;
   let open!: () => void;
   let cut = false;
+  let topped = false;
   const gate = new Promise<void>((r) => (open = r));
   const stages: string[] = [];
   const shorts: bigint[] = [];
@@ -1785,6 +1786,15 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
       await gate;
       if (cut) throw new Error("cut");
       waits.push(ms);
+      // the top-up comes past an hour of the end's reads
+      if (!topped && waits.reduce((a, b) => a + b, 0) > 3_600_000) {
+        topped = true;
+        assert.deepEqual(stages, [], "nothing told while U is short: the note may still land once U is topped up");
+        assert.ok(shorts.length > 0, "the pass was started and named the top-up");
+        assert.equal(c.sent.length, 1, "nothing sent while U is short");
+        c.fund(u.address, 50_000_000);
+        c.lands = true;
+      }
     },
     // the page's pass, one at a time (pool-testnet.ts settleSolana), as the kick starts it
     settle: () => void (passing ??= settlePoolDeposits(host(c, ns, { short: (_, l) => void shorts.push(l) })).finally(() => (passing = null))),
@@ -1799,24 +1809,14 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
   const r = kind(ask(RUNG), { id: "e2", sha: "00", progress: (s) => void stages.push(String(s)) }) as { after: Promise<void> };
   await r.after;
   open();
-  // until the reads stop (a follow that never gives up is cut at 10 s, and fails below)
-  for (let n = -1, t0 = Date.now(); n !== waits.length && Date.now() - t0 < 10_000; ) {
-    n = waits.length;
-    await new Promise((ok) => setTimeout(ok, 100));
-  }
+  // until the app is told (a follow that gives up never tells: cut at 10 s, and fails below)
+  for (const t0 = Date.now(); stages.length === 0 && Date.now() - t0 < 10_000; ) await new Promise((ok) => setTimeout(ok, 20));
   cut = true;
   await passing;
-  assert.deepEqual(stages, [], "nothing told: the note may still land once U is topped up");
-  assert.ok(shorts.length > 0, "the pass was started and named the top-up");
+  assert.equal(topped, true, `the reads went on past an hour: ${waits.reduce((a, b) => a + b, 0)} ms`);
   assert.deepEqual(waits.slice(0, 7), [2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000], "doubling from 2 s to 60 s, every send dead from the first read");
-  const total = waits.reduce((a, b) => a + b, 0);
-  assert.ok(total <= POOL_DEPOSIT_FOLLOW_FOR_MS && total > POOL_DEPOSIT_FOLLOW_FOR_MS - 60_000, `gives up at its bound: ${total}`);
-  assert.equal(c.sent.length, 1, "nothing sent while U is short");
-  c.fund(u.address, 50_000_000);
-  c.lands = true;
-  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "not_landed", "built again and sent: pending");
-  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "filled");
-  assert.deepEqual(stages, [], "and the app was never told not_landed for a note that landed");
+  assert.deepEqual(stages, ["filled"], "the top-up's landing told, never not_landed");
+  assert.equal(c.sent.length, 2, "built again once, from U's topped-up money");
 });
 
 test("pool-deposit-sent-end fold review 6: the end's reads read each note's record read only (records), never opening the note store, whose open and list settle under the notes lock and may write", async () => {

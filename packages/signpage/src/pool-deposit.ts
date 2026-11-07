@@ -81,8 +81,9 @@
 //   U's money, so the reads start the pass (`settle`) and follow the new send; never not_landed for it (review 1). Then:
 //   filled when every open note landed and every rung was sent, part_filled when any of the ask landed, else not_landed.
 //   The reads come every POOL_DEPOSIT_FOLLOW_MS while a send may land, back off to POOL_DEPOSIT_FOLLOW_MAX_MS while only
-//   the pass can move it (or a read fails), stop at sign out (`signal`) and give up after POOL_DEPOSIT_FOLLOW_FOR_MS, each
-//   telling nothing: the note stays INCOMING for the load and state-read pass.
+//   the pass can move it (or a read fails), and stop only at sign out (`signal`), telling nothing: a deposit that waits an
+//   hour on a top-up or a provider is still told when it lands, while the page lives (fold review 5; a reload drops the
+//   id's listener, and the note stays INCOMING for the load and state-read pass).
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
 //   signatures), one wallet of the user's per request; no request carries a key, the words, or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
@@ -163,9 +164,6 @@ export const POOL_DEPOSIT_FOLLOW_MS = 2_000;
 /** The end's reads back off, doubling from POOL_DEPOSIT_FOLLOW_MS to this, while nothing can move without the pass
  *  (every send of each open note dead with no mark, or U short of its send again) or a read fails (a provider down). */
 export const POOL_DEPOSIT_FOLLOW_MAX_MS = 60_000;
-/** The end's reads give up, telling nothing, after waiting this long in all: the note stays INCOMING and the load and
- *  state-read pass settle it (a deposit that cannot land in an hour waits on a top-up or a provider). */
-export const POOL_DEPOSIT_FOLLOW_FOR_MS = 3_600_000;
 
 // "taken": the run's last taken note (a front-runner took as many as the ask has rungs, and one more), a verdict of its
 // own, never read as a send that may land
@@ -384,14 +382,13 @@ async function noteEnd(h: PoolDepositHost, sync: ReturnType<typeof solanaTreeSyn
  *  fails or does not check out is read again), with no lock held and nothing written. Every POOL_DEPOSIT_FOLLOW_MS
  *  while a send may land; doubling to POOL_DEPOSIT_FOLLOW_MAX_MS while nothing can move without the pass (every send
  *  dead with no mark: the pass is started, `settle`) or a read fails. Null, telling nothing, once the page leaves the
- *  deposit (`signal`) or past POOL_DEPOSIT_FOLLOW_FOR_MS of waits: the note stays INCOMING for the pass. */
+ *  deposit (`signal`), never on a clock: a top-up that comes hours on is still told (fold review 5). */
 export async function followPoolDeposit(h: PoolDepositHost, left: PoolDepositLeft): Promise<"filled" | "part_filled" | "not_landed" | null> {
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const sync = solanaTreeSync(h.rpcs, h.pin.program);
   const { scope } = solanaPoolOf(h.pin.program);
   const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
   let gap = POOL_DEPOSIT_FOLLOW_MS;
-  let spent = 0;
   for (;;) {
     if (h.signal?.aborted) return null;
     // quiet: no open note has a send that may land, so the next read can wait longer
@@ -407,9 +404,7 @@ export async function followPoolDeposit(h: PoolDepositHost, left: PoolDepositLef
     if (ends.every((e) => e !== null)) break;
     if (kick) h.settle?.();
     if (!quiet) gap = POOL_DEPOSIT_FOLLOW_MS;
-    if (spent + gap > POOL_DEPOSIT_FOLLOW_FOR_MS) return null;
     await wait(gap);
-    spent += gap;
     if (quiet) gap = Math.min(gap * 2, POOL_DEPOSIT_FOLLOW_MAX_MS);
   }
   if (h.signal?.aborted) return null;

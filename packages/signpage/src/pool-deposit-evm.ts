@@ -43,7 +43,7 @@
 //   finalized nonce past every send of it (its highest) on BOTH RPCs, read before a round with no Deposited naming it, is
 //   no end: the pass builds the note again at U's new nonce, so the reads start it (`settle`) and follow the new send.
 //   Then filled when every open note landed and the ask was all sent, part_filled when any of it landed, else
-//   not_landed. Backoff, stop and give-up are the Solana kind's.
+//   not_landed. Backoff and stop are the Solana kind's: no give-up on a clock, only the sign out.
 // - Every read names a public account (the pool, U) and no request carries a key, the words or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -59,7 +59,7 @@ import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
-import { POOL_DEPOSIT_FOLLOW_FOR_MS, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, type PoolDepositAnswer } from "./pool-deposit.ts";
+import { POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The pool's events up to the newest block both RPCs agree on, with the round's finalized block (evmTreeSync's
@@ -428,13 +428,12 @@ async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][
 /** The end of an ask whose run ended with no verdict: its open notes read until each is landed or dead (a read that
  *  fails is read again), with no lock held and nothing written: every POOL_DEPOSIT_EVM_FOLLOW_MS while a send may land,
  *  doubling to POOL_DEPOSIT_FOLLOW_MAX_MS while nothing can move without the pass (every send dead: the pass is
- *  started, `settle`) or a read fails. Null, telling nothing, once the page leaves the deposit (`signal`) or past
- *  POOL_DEPOSIT_FOLLOW_FOR_MS of waits: the note stays INCOMING for the pass. */
+ *  started, `settle`) or a read fails. Null, telling nothing, once the page leaves the deposit (`signal`), never on a
+ *  clock (fold review 5). */
 export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepositEvmLeft): Promise<"filled" | "part_filled" | "not_landed" | null> {
   const wait = h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
   let gap = POOL_DEPOSIT_EVM_FOLLOW_MS;
-  let spent = 0;
   for (;;) {
     if (h.signal?.aborted) return null;
     let quiet = true;
@@ -449,9 +448,7 @@ export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepo
     if (ends.every((e) => e !== null)) break;
     if (kick) h.settle?.();
     if (!quiet) gap = POOL_DEPOSIT_EVM_FOLLOW_MS;
-    if (spent + gap > POOL_DEPOSIT_FOLLOW_FOR_MS) return null;
     await wait(gap);
-    spent += gap;
     if (quiet) gap = Math.min(gap * 2, POOL_DEPOSIT_FOLLOW_MAX_MS);
   }
   if (h.signal?.aborted) return null;
