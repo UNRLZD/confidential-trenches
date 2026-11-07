@@ -10,16 +10,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { type DepositRecord, openWalletStore, WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
+import type { DepositRecord, WalletStore } from "@blindfill/wallet/store";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
-import { depositAccount, NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import type { FollowRpc } from "../../wallet/src/deposit/follow.ts";
-import * as d from "../../wallet/src/derive/index.ts";
 import type { KindContext } from "../src/api.ts";
-import { depositFollows, FOLLOW_ENDS, FOLLOW_LOCK } from "../src/deposit-follow.ts";
-import { type DepositPublic, depositQuoteHost } from "../src/deposit-wire.ts";
+import type { DepositPublic } from "../src/deposit-wire.ts";
 import { ADDRESS as MOCK_ADDRESS, h1c, NOW as MOCK_NOW, SOL_USDC, U as MOCK_U } from "./oneclick-mock.ts";
+// after the mock, so the check loads the mock's keys (a static import would load the kit's first)
+const { openWalletStore, WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
+const { SIGNPAGE_RESULT_SCHEMAS } = await import("../../kit/src/signpage/schema.ts");
+const { depositAccount, NEAR_NETWORKS } = await import("../../wallet/src/deposit/account.ts");
+const d = await import("../../wallet/src/derive/index.ts");
+const { depositFollows, FOLLOW_ENDS, FOLLOW_LOCK } = await import("../src/deposit-follow.ts");
+const { depositQuoteHost } = await import("../src/deposit-wire.ts");
 
 const SAVED: DepositPublic = { status: { source: "code", code_saved: true }, deposit: { v: 1, scope: "7", index: 3, id: MOCK_U } };
 

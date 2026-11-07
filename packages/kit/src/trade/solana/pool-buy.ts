@@ -73,6 +73,7 @@ import {
   type SolanaReference,
 } from "./pool.ts";
 import { solanaSameProvider, type SolanaRpc } from "./send.ts";
+import { deepFreeze } from "../../freeze.ts";
 
 export const SOLANA_POOL_TAG_RELEASE = 2;
 export const SOLANA_POOL_TAG_RELEASE_AND_BUY = 3;
@@ -85,6 +86,7 @@ export const SOLANA_POOL_PAGE_ENTRIES = 1024;
 export const SOLANA_POOL_MAX_DEPTH = 32;
 /** A release and a buy: the release's Groth16 check is ~111k CU (research S1), a pump buy ~58k, ATA and wrap a few k. */
 export const SOLANA_POOL_BUY_CU = { "pump-curve": 300_000, pumpswap: 400_000 } as const;
+deepFreeze(SOLANA_POOL_BUY_CU);
 /** Tag 3's inner instructions: at most this many (TAG3.md). */
 export const SOLANA_POOL_TAG3_MAX_INNER = 8;
 
@@ -556,6 +558,7 @@ const randomIndex = (n: number): number => {
  * LiteSVM for a fresh W, 2026-11-02 22:50Z (W ended with exactly what solanaPoolBuyFunds says it keeps). */
 const TOKEN_ACCOUNT_SIZE = 165;
 export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 137 } as const;
+deepFreeze(SOLANA_POOL_VOLUME_ACCOUNT_SIZE);
 
 /** A per-venue constant of `kind`: an own key only, so a kind outside the two venues names none, even when a polluted
  *  page's Object.prototype has one (the review of evm-pool-sell-tx 8d8675d). */
@@ -591,6 +594,7 @@ const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE } as 
  * account at 165 B owned by the Token program, W paying the fee and both rents; the same sell without them is refused.
  */
 export const SOLANA_POOL_AMM_CASHBACK_SIZES = [SOLANA_POOL_VOLUME_ACCOUNT_SIZE.pumpswap, TOKEN_ACCOUNT_SIZE] as const;
+deepFreeze(SOLANA_POOL_AMM_CASHBACK_SIZES);
 /** What W needs up front for a sell on `venue`. `has`: which of W's PumpSwap cashback accounts already exist (its
  *  volume account, that account's wrapped-SOL account); each one missing is counted on its own as made by the sell. */
 export type SolanaPoolAmmCashbackHeld = { ammVolume: boolean; ammVolumeAta: boolean };

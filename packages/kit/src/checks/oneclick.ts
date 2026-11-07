@@ -9,13 +9,12 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58 } from "@scure/base";
+import { ONECLICK_SIGNING_KEYS } from "./oneclick-keys.ts";
 
-// The 1Click signing key set. The key is published only as an SDK constant (D3): every release of
-// @defuse-protocol/one-click-sdk-typescript that carries one (0.1.23 to 0.1.26, the latest; npm tarballs read
-// 2026-11-01T00:58Z and 01:40Z; 0.1.18-0.1.22 carry none) names this one key (0.1.26 dist/index.mjs:1593). A new
-// release's key joins this list when read (D-R6; wallet.md's deposit quote row at research faacb62), never from a quote
-// or a server.
-export const ONECLICK_SIGNING_KEYS: readonly string[] = ["ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc"];
+// Every pin below is frozen, each nested array and object too (card kit-oneclick-pins-frozen): nothing running beside
+// the check, on SIGN_HOST or in a test, can add a signing key or a USDC asset or change a fee the device checks against.
+// A test trusts its own key only by loading oneclick-keys.ts through a module hook, never by writing into a pin.
+export { ONECLICK_SIGNING_KEYS };
 
 // 1Click's own fee entry, unsigned (D4), so it is compared exactly and a changed collector fails closed (D-R7). Its fee
 // follows the route, not the key (card oneclick-partner-fee-live). 1Click's fee table (docs.near-intents.org
@@ -34,18 +33,18 @@ const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881
 /** 1Click's fee on a stablecoin route, one between two of ONECLICK_USDC_ASSETS, per path (it was one fee per path before
  *  card oneclick-partner-fee-live); the deposit's routes are all here. A stablecoin or same-asset route outside that list
  *  is held to ONECLICK_PAIR_FEE_BPS, so it must join the list before it ships, or its 1 bp quotes are refused. */
-export const ONECLICK_FEE_BPS = { keyless: 1, partner: 1 } as const;
+export const ONECLICK_FEE_BPS = Object.freeze({ keyless: 1, partner: 1 } as const);
 /** The fee on any other pair, per path. */
-export const ONECLICK_PAIR_FEE_BPS = { keyless: 20, partner: 20 } as const;
+export const ONECLICK_PAIR_FEE_BPS = Object.freeze({ keyless: 20, partner: 20 } as const);
 export type OneClickPath = keyof typeof ONECLICK_FEE_BPS;
 
 // The release's USDC assets on 1Click (GET /v0/tokens, read 2026-11-01T01:40Z: symbol USDC on near, sol and base, 6
 // decimals each; 1Click lists none on hood). Pricing "usdc" is taken only when both assets are in this list.
-export const ONECLICK_USDC_ASSETS: readonly string[] = [
+export const ONECLICK_USDC_ASSETS: readonly string[] = Object.freeze([
   "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
   "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
   "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
-];
+]);
 
 // S, the spread cap on every floor: 15 bps, twice the widest gap read (D52).
 export const ONECLICK_SPREAD_CAP_BPS = 15;
@@ -165,8 +164,11 @@ function signedMessage(qr: Record<string, unknown>, q: Record<string, unknown>, 
   return new TextEncoder().encode(base58.encode(sha256(new TextEncoder().encode(json))));
 }
 
+// A key is taken only as "ed25519:" and its base58, the one form the pinned set and SIGN_HOST's deploy gate name (review
+// low 1): a bare base58 key, wherever it came from, verifies nothing.
 function keyBytes(k: string): Uint8Array {
-  return base58.decode(k.startsWith("ed25519:") ? k.slice(8) : k);
+  if (typeof k !== "string" || !k.startsWith("ed25519:")) throw new Error("a 1Click key is ed25519:<base58>");
+  return base58.decode(k.slice(8));
 }
 
 function verifiesUnder(keys: readonly string[], answer: Record<string, unknown>): boolean {

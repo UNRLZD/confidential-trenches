@@ -1,24 +1,30 @@
 // The deposit sheet's reads before any address (card kit-deposit-assets-dry; src/rules/deposit-dry.ts, src/deposit-wire.ts
 // depositReadHosts): deposit.assets and deposit.dry through the frame's API over the real wallet store (fake-indexeddb,
 // src/state.ts frameState, as the frame runs), and below_min in deposit.quote and deposit.dry, before any request and
-// off a verified answer. 1Click is a mock that answers dry quotes in its own shape, signed with a throwaway key the
-// importing test process adds to the kit's pinned set (./oneclick-mock.ts), and the token list as 1Click lists it.
+// off a verified answer. 1Click is a mock that answers dry quotes in its own shape, signed with a throwaway key this
+// test process alone trusts (./oneclick-mock.ts, through a load hook: the kit's pins are frozen), and the token list as
+// 1Click lists it.
 //   node --test test/deposit-dry.test.ts      (from packages/signpage)
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
-import { openWalletStoreReader, type DepositRecord } from "@blindfill/wallet/store";
-import { ONECLICK_USDC_ASSETS, ONECLICK_VAULT_MIN_OUT, oneClickFloors, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
-import { DEPOSIT_DRY_PLACEHOLDER, DEPOSIT_REFUSALS, SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
-import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import * as KIT from "../../kit/src/index.ts";
-import { APP_ORIGIN, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
-import { depositQuoteHost, depositReadHosts, type DepositPublic } from "../src/deposit-wire.ts";
-import { DEPOSIT_TOKENS_MAX, DEPOSIT_TOKENS_URL, belowDepositBound, depositMinimum, signedWithdrawFee } from "../src/rules/deposit-dry.ts";
-import { depositQuoteKind } from "../src/rules/deposit-quote.ts";
-import { frameState } from "../src/state.ts";
+import type { DepositRecord } from "@blindfill/wallet/store";
+import type { OneClickRequest } from "../../kit/src/checks/oneclick.ts";
+import type { IncomingMessage } from "../src/api.ts";
+import type { DepositPublic } from "../src/deposit-wire.ts";
 import { COLLECTOR, NEAR_USDC, NOW, SOL_USDC, U, mockKey, signAnswer, type Answer } from "./oneclick-mock.ts";
+// after the mock, so the check loads the mock's keys (a static import would load the kit's first)
+const { openWalletStoreReader } = await import("@blindfill/wallet/store");
+const { ONECLICK_USDC_ASSETS, ONECLICK_VAULT_MIN_OUT, oneClickFloors } = await import("../../kit/src/checks/oneclick.ts");
+const { DEPOSIT_DRY_PLACEHOLDER, DEPOSIT_REFUSALS, SIGNPAGE_KIT_VERSION } = await import("../../kit/src/signpage/messages.ts");
+const { SIGNPAGE_RESULT_SCHEMAS } = await import("../../kit/src/signpage/schema.ts");
+const KIT = await import("../../kit/src/index.ts");
+const { APP_ORIGIN, signedOutState, startApi } = await import("../src/api.ts");
+const { depositQuoteHost, depositReadHosts } = await import("../src/deposit-wire.ts");
+const { DEPOSIT_TOKENS_MAX, DEPOSIT_TOKENS_URL, belowDepositBound, depositMinimum, signedWithdrawFee } = await import("../src/rules/deposit-dry.ts");
+const { depositQuoteKind } = await import("../src/rules/deposit-quote.ts");
+const { frameState } = await import("../src/state.ts");
 
 const BASE_USDC = ONECLICK_USDC_ASSETS[2]!;
 const W = 5_538n; // 1Click's withdraw fee into a fresh NEAR id (wallet.md D52)
@@ -465,4 +471,31 @@ test("review 6: the bound before any request is USDC's alone: an asset the devic
 test("review 6: the live deposit.quote takes 1Click's 1 bp entry between two USDC assets and refuses the other-pair 20", async () => {
   assert.equal((await quotePage(liveFetch([], undefined, 15, 201, 1))("25")).ok, true);
   assert.deepEqual((await quotePage(liveFetch([], undefined, 15, 201, 20))("25")).error, { code: "quote_check_failed" });
+});
+
+// Card kit-oneclick-pins-frozen: the deposit's own pins beside the kit's (the asset rows the sheet offers, the statuses
+// that count as an answer) are frozen at every level, as every object export of the deposit rules and the wallet's quote
+// request is, so nothing running beside them on SIGN_HOST can add an asset or an answered status.
+test("every object export of the deposit rules and the quote request is frozen at every level; a write into a row or the status list throws", async () => {
+  const walk = (v: unknown, at: string, out: string[]): string[] => {
+    if (v === null || typeof v !== "object") return out;
+    if (v instanceof Map || v instanceof Set || ArrayBuffer.isView(v)) return [...out, `${at}: a ${v.constructor.name} stays writable when frozen`];
+    if (!Object.isFrozen(v)) out.push(at);
+    for (const k of Reflect.ownKeys(v)) walk((v as Record<PropertyKey, unknown>)[k], `${at}.${String(k)}`, out);
+    return out;
+  };
+  for (const mod of ["../src/rules/deposit-dry.ts", "../src/rules/deposit-quote.ts", "../../wallet/src/deposit/quote.ts"]) {
+    const ns = (await import(mod)) as Record<string, unknown>;
+    assert.deepEqual(Object.entries(ns).flatMap(([k, v]) => walk(v, k, [])), [], mod);
+  }
+  const { DEPOSIT_ASSET_CHAINS, DEPOSIT_ANSWERED } = await import("../src/rules/deposit-dry.ts");
+  const rows = DEPOSIT_ASSET_CHAINS as { id: string; chain: string; blockchain: string }[];
+  assert.throws(() => rows.push({ id: "nep141:attacker.near", chain: "near", blockchain: "near" }), TypeError);
+  assert.throws(() => { rows[0]!.id = "nep141:attacker.near"; }, TypeError);
+  assert.throws(() => (DEPOSIT_ANSWERED as number[]).push(500), TypeError);
+  assert.deepEqual(rows.map((r) => r.id), [...ONECLICK_USDC_ASSETS]);
+  assert.deepEqual([...DEPOSIT_ANSWERED], [200, 201]);
+  // planted: a row left writable, or a Set, is named by the walk
+  assert.deepEqual(walk(Object.freeze([{ id: "x" }]), "ROWS", []), ["ROWS.0"]);
+  assert.deepEqual(walk(new Set([200]), "ANSWERED", []), ["ANSWERED: a Set stays writable when frozen"]);
 });

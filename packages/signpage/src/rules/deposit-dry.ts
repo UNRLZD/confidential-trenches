@@ -40,9 +40,9 @@ export const DEPOSIT_PROBE_AMOUNT = 10_000_000n;
  * blockchain near, sol and base): ONECLICK_USDC_ASSETS in its order, with the chain the sheet names.
  */
 export const DEPOSIT_ASSET_CHAINS: readonly { id: string; chain: Chain; blockchain: string }[] = Object.freeze([
-  { id: ONECLICK_USDC_ASSETS[0]!, chain: "near", blockchain: "near" },
-  { id: ONECLICK_USDC_ASSETS[1]!, chain: "solana", blockchain: "sol" },
-  { id: ONECLICK_USDC_ASSETS[2]!, chain: "base", blockchain: "base" },
+  Object.freeze({ id: ONECLICK_USDC_ASSETS[0]!, chain: "near", blockchain: "near" }),
+  Object.freeze({ id: ONECLICK_USDC_ASSETS[1]!, chain: "solana", blockchain: "sol" }),
+  Object.freeze({ id: ONECLICK_USDC_ASSETS[2]!, chain: "base", blockchain: "base" }),
 ]);
 
 export interface DepositReadContext {
@@ -147,11 +147,12 @@ function decimal(v: bigint, decimals: number): string {
   return f ? `${i}.${f}` : i;
 }
 
-/** 1Click's answered statuses: 200, and 201, which its quote answers with (wallet.md D52; the helper's proxy, 6 Nov 14:02Z). */
-export const DEPOSIT_ANSWERED: ReadonlySet<number> = new Set([200, 201]);
+/** 1Click's answered statuses: 200, and 201, which its quote answers with (wallet.md D52; the helper's proxy, 6 Nov 14:02Z).
+ *  A frozen list, not a Set, which stays writable when frozen (card kit-oneclick-pins-frozen). */
+export const DEPOSIT_ANSWERED: readonly number[] = Object.freeze([200, 201]);
 /** The helper's HTTP status as a refusal, or null on an answer. */
 const statusCode = (status: number): DepositRefusal | null =>
-  DEPOSIT_ANSWERED.has(status) ? null : status === 429 ? "busy" : status === 503 ? "down" : "not_available";
+  DEPOSIT_ANSWERED.includes(status) ? null : status === 429 ? "busy" : status === 503 ? "down" : "not_available";
 
 /**
  * The withdraw fee a checked dry answer may stand for, bounded by its signed amounts: a dry answer's withdrawFee is not
