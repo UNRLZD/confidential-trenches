@@ -622,7 +622,9 @@ export const MUTANTS = [
   [QUOTE, "(r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === false, undefined);", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
   [QUOTE, "    if (!arbos) out[lower(a)] = one;", "    out[lower(a)] = one;", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
   [QUOTE, "  if (!asIs && errored.length === 0) return [];\n", "  if (!asIs) return [];\n", R, "review of ca907a05, HIGH 1 (buy, Robinhood)"],
-  [QUOTE, "hooks.filter((hk) => tr.errored.includes(lower(hk)))", "(tr.errored.length > 0 ? hooks : [])", R, "card evm-sell-hook-intrablock, the as-is leg"],
+  // (the trace names only the route's hooks now, review of f0f983d2 item 2, so the off-route frame of the as-is leg's
+  // test no longer tells this one: an honest hook beside the errored one does)
+  [QUOTE, "hooks.filter((hk) => tr.errored.includes(lower(hk)))", "(tr.errored.length > 0 ? hooks : [])", R, "review of 29498693, MEDIUM"],
   [QUOTE, '    (x, y) => JSON.stringify(x) === JSON.stringify(y),\n    () => refuse("rpc_disagree", `the trace providers', '    (x, y) => true,\n    () => refuse("rpc_disagree", `the trace providers', R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, ' || typeof root.input !== "string" || lower(root.input) !== sale.input', "", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "  if (accounts.filter(([a]) => lower(a) !== EVM_ARBOS_STATE).length > b.accounts) return null;\n", "", R, "card evm-sell-hook-intrablock, a trace that"],
