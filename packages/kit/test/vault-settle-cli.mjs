@@ -6,8 +6,8 @@
 //   stdout: { outcomes: [...], notes: [...the store after the run], sent: [tx hashes] }
 import { createHash, createPrivateKey, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { b58decode, b58encode } from "../../../contracts/vault/scripts/near-tx.mjs";
-import { act, encodeTx } from "../../../contracts/vault/scripts/testnet-usdc.mjs";
+// near-tx.mjs only (it imports nothing): the sandbox suite runs this file, so it reaches no script outside the vault's
+import { b58decode, b58encode, functionCallTx } from "../../../contracts/vault/scripts/near-tx.mjs";
 import { vaultSettleOwn } from "../src/index.ts";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
@@ -26,7 +26,7 @@ async function send(c) {
   const url = input.rpc[0];
   const ak = await post(url, "query", { request_type: "view_access_key", account_id: signer, public_key: `ed25519:${b58encode(pub)}`, finality: "final" });
   const block = await post(url, "block", { finality: "final" });
-  const tx = encodeTx({ signer, publicKey: pub, nonce: BigInt(ak.result.nonce) + 1n, receiver: c.receiverId, blockHash: b58decode(block.result.header.hash), actions: [act.call(c.methodName, JSON.parse(c.args), c.gas, c.deposit)] });
+  const tx = functionCallTx({ signer, publicKey: pub, nonce: BigInt(ak.result.nonce) + 1n, receiver: c.receiverId, blockHash: b58decode(block.result.header.hash), method: c.methodName, args: c.args, gas: c.gas, deposit: c.deposit });
   const h = createHash("sha256").update(tx).digest();
   const signed = Buffer.concat([tx, Buffer.from([0]), sign(null, h, privateKey)]);
   const r = await post(url, "send_tx", { signed_tx_base64: signed.toString("base64"), wait_until: "FINAL" });
