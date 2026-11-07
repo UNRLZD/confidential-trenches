@@ -116,6 +116,8 @@ async function terminal(page) {
 }
 
 const asked = (page) => page.evaluate(() => window.__ctShellAsked ?? []);
+/** A request's own fields: the message less its v, id and type (the kit's requests carry their params flat). */
+const fieldsOf = ({ v: _v, id: _id, type: _t, ...fields }) => fields;
 const sheetState = (f) => f.locator("[data-sheet='deposit']").first().getAttribute("data-state", { timeout: 2_000 }).catch(() => null);
 const waitState = (f, s) => f.waitForSelector(`[data-sheet='deposit'][data-state='${s}']`, { timeout: 5_000 }).catch(() => null);
 
@@ -142,7 +144,7 @@ async function runOne(browser, w, scheme, shots, route) {
     await f.locator("[data-field='amount']").filter({ visible: true }).first().pressSequentially(AMOUNT, { delay: 60, timeout: 3_000 }).catch(() => {});
     await f.waitForSelector("[data-sheet='deposit'][data-state='S4.3'] .dget .v .num", { timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(600);
-    run.dry = (await asked(page)).filter((m) => m.type === "deposit.dry").map((m) => m.params);
+    run.dry = (await asked(page)).filter((m) => m.type === "deposit.dry").map(fieldsOf);
     run.quoteState = await sheetState(f);
     run.recentBefore = Number(await f.locator("[data-sheet='deposit'] [data-recent]").first().getAttribute("data-recent", { timeout: 1_000 }).catch(() => "NaN"));
     run.youGet = await f.locator("[data-sheet='deposit'] .dget .v .num").first().textContent({ timeout: 1_000 }).catch(() => null);
@@ -150,7 +152,7 @@ async function runOne(browser, w, scheme, shots, route) {
 
     await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).catch(() => {});
     await waitState(f, "S4.13");
-    run.quote = (await asked(page)).filter((m) => m.type === "deposit.quote").map((m) => m.params)[0] ?? null;
+    run.quote = (await asked(page)).filter((m) => m.type === "deposit.quote").map(fieldsOf)[0] ?? null;
     run.addressState = await sheetState(f);
     run.address = await f.locator("[data-sheet='deposit'] [data-address]").first().getAttribute("data-address", { timeout: 1_000 }).catch(() => null);
     run.heading = await f.locator("[data-sheet='deposit'] .addrb .ca > span").allTextContents().catch(() => null);
