@@ -20,6 +20,7 @@
 // 7 Nov (HTTP 404 not_found).
 //   node scripts/live-checks/wallet-refund-move.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
+// Runs: pending helper-id-intents, it fails on every deploy until the helper serves POST /v1/intents (H4.3), so a list would undo each deploy
 import "../net-window.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
