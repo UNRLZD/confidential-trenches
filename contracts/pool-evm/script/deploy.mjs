@@ -255,13 +255,14 @@ export function initProblems(name, code) {
  * Why `chainName`'s pool counts as deployed beyond this checkout, or null: origin/main holds its record (fetched first),
  * or the kit pins a pool for it. A paste in another clone of the repository is refused as one in this folder is.
  */
-export async function deployedElsewhere(chainName, { git = repoGit } = {}) {
+// The kit's EVM pool pins, read through the kit's public entry (a test passes its own).
+const kitVenues = async () => (await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href)).evmPoolVenues();
+export async function deployedElsewhere(chainName, { git = repoGit, venues = kitVenues } = {}) {
   const file = path.relative(REPO, deploymentFile(chainName));
   // main's record unread is its own refusal, never "deployed already"
   fetchMain(git, "main's record");
   if (git("cat-file", "-e", `origin/main:${file}`).status === 0) return `origin/main holds ${file}`;
-  const { evmPoolVenues } = await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href);
-  const pool = evmPoolVenues()[chainName]?.pool;
+  const pool = (await venues())[chainName]?.pool;
   return pool ? `the kit pins the ${chainName} pool ${pool}` : null;
 }
 /** A record's journal: the record's path with .journal.json */

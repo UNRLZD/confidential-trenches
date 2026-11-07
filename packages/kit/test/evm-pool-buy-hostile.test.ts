@@ -28,8 +28,13 @@ const code = (f: () => unknown): string => {
 };
 
 const ZERO = "0x0000000000000000000000000000000000000000";
-const B = evmPoolVenues().base;
-const R = evmPoolVenues().robinhood;
+/** A venue with its pins taken out (card pool-evm-deploy-mainnet pins the mainnets): the lists below pin what they name. */
+const unpinned = (v: EvmPoolVenue): EvmPoolVenue => {
+  const { pool: _p, adapters: _a, sellDelegate: _s, feeCollector: _f, ...rest } = v;
+  return Object.freeze(rest);
+};
+const B = unpinned(evmPoolVenues().base);
+const R = unpinned(evmPoolVenues().robinhood);
 const USDC = B.middles[0]!;
 const USDG = R.middles[0]!;
 const X = "0xF111111111111111111111111111111111111111";
@@ -290,15 +295,19 @@ const PINNED = Object.freeze({
   robinhood: pin(R, { pool: POOL, adapters: Object.freeze({ v3: A_V3 }) }),
 });
 
-test("M370 today no pool or adapter is pinned: the pinned builder and signer the kit's refuse not_deployed", () => {
+test("M370 a list with no pool or adapter pinned: the pinned builder and signer the kit's refuse not_deployed", () => {
+  const none = Object.freeze({ base: B, robinhood: R });
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
-    const v = evmPoolVenues()[chain];
+    const v = none[chain as "base"];
     assert.equal(v.pool, undefined);
     assert.equal(v.adapters, undefined);
-    assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
-    assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, ADAPTER, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+    assert.equal(code(() => pinnedBuild(none, chain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
+    assert.equal(code(() => pinnedBuild(none, chain, ADAPTER, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
     const built = evmPoolBuild(chain, ADAPTER, v4(ZERO, hop(X)), 1n, X);
-    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, POOL, built, PROOF)), "not_deployed", chain);
+    assert.equal(code(() => pinnedSignBuy(none, W_KEY, chain, POOL, built, PROOF)), "not_deployed", chain);
+    // the kit's own list pins this chain (card pool-evm-deploy-mainnet): an adapter or pool not its pin is not_pinned
+    assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, ADAPTER, v4(ZERO, hop(X)), 1n, X)), "not_pinned", chain);
+    assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, POOL, built, PROOF)), "not_pinned", chain);
     // the kit's signer takes only a buy evmPoolBuildQuoted returned
     assert.equal(code(() => kit.evmPoolSignBuy(W_KEY, chain, POOL, built, PROOF)), "not_built", chain);
   }
@@ -370,7 +379,7 @@ function polluted(f: () => void): void {
   }
 }
 
-test("M370 a polluted Object.prototype names no adapter and no pool: every buy builder and signer still refuses not_deployed", () => {
+test("M370 a polluted Object.prototype names no adapter and no pool: every buy builder and signer still refuses (not_deployed where none is pinned, not_pinned beside the kit's own pins)", () => {
   assert.equal(Object.getPrototypeOf(evmPoolVenues()), null, "the venue list has no prototype");
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) assert.equal(Object.getPrototypeOf(evmPoolVenues()[chain]), null, chain);
   const noPins = Object.freeze({ base: pin(B, {}), robinhood: pin(R, {}) }); // an ordinary list
@@ -378,10 +387,10 @@ test("M370 a polluted Object.prototype names no adapter and no pool: every buy b
   polluted(() => {
     for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
       const v = evmPoolVenues()[chain];
-      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
-      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_pinned", chain);
+      assert.equal(code(() => pinnedBuild(evmPoolVenues(), chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_pinned", chain);
       const built = evmPoolBuild(chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X);
-      assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);
+      assert.equal(code(() => pinnedSignBuy(evmPoolVenues(), W_KEY, chain, BAD_PIN, built, PROOF)), "not_pinned", chain);
       assert.equal(code(() => pinnedBuild(noPins, chain, BAD_PIN, v4(ZERO, hop(X)), 1n, X)), "not_deployed", chain);
       assert.equal(code(() => pinnedBuild(noPins, chain, BAD_PIN, v3([v.weth, X]), 1n, X)), "not_deployed", chain);
       assert.equal(code(() => pinnedSignBuy(noPins, W_KEY, chain, BAD_PIN, built, PROOF)), "not_deployed", chain);

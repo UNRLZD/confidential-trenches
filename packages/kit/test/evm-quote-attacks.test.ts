@@ -1851,7 +1851,12 @@ test("T8b the reads' gate never has more than its limit in flight, however many 
 const SELL_W = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // Hardhat account 0, a published test key
 // `bought` is required (review of edb4dbb, F3): by default the seeded pool's route, the one a server would send, so the
 // sell must still find the token's market from its own set; null leaves it out
-const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues?: builder.EvmPoolVenueList, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
+// The venues a sell reads unless a test names its own: Base with no sell delegate pinned, so a route through an unlisted
+// hook keeps the lower of its two quotes ("keep-min", simRule), the rule these probes were written for; the kit pins
+// Base's delegate since card pool-evm-deploy-mainnet, and DELEGATED below runs the sim
+const { sellDelegate: _keepMin, ...BASE_NO_DELEGATE } = builder.evmPoolVenues().base;
+const KEEP_MIN: builder.EvmPoolVenueList = Object.freeze({ ...builder.evmPoolVenues(), base: Object.freeze(BASE_NO_DELEGATE) });
+const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues: builder.EvmPoolVenueList = KEEP_MIN, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
   evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, boughtBlock: 1n, ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
 const sellVerdict = async (p: ReturnType<typeof sellOn>) => {
   try {
