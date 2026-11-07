@@ -16,7 +16,8 @@ import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src
 import { evmPoolScopeOf, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
-import { runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
+import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
+import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 const ENTROPY = () => new Uint8Array(16);
@@ -261,4 +262,16 @@ test("one index across asks until money reaches it: planDeposit hands the same P
   assert.equal(shorts[0]![0], shorts[1]![0], "the same U named for the top-up");
   assert.equal(shorts[0]![0], uOf(deps[0]!));
   assert.equal(ch.c.sent.length, 0);
+});
+
+test("a take of U's deposit note in a block not final yet: nothing signed, the run's wait rejects with EvmNotFinalError (pool-kinds answers busy)", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  ch.deposit(planned.precommitment, EVM_POOL_MIN_DEPOSIT);
+  ch.c.events[0]!.block = ch.c.fin + 1n; // above the round's finalized block
+  await assert.rejects(runPoolDepositEvm(hostOf(ch, ns), ASK), (e: unknown) => e instanceof EvmNotFinalError);
+  const kind = poolDepositEvmKind(() => hostOf(ch, ns));
+  const run = kind(ASK, null) as { after: Promise<void>; answer(): unknown };
+  await assert.rejects(run.after, (e: unknown) => e instanceof EvmNotFinalError);
+  assert.equal(ch.c.sent.length, 0, "nothing sent");
+  assert.equal((await ns.get(planned.id))!.state, "PLANNED");
 });

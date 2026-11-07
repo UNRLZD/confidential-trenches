@@ -332,6 +332,8 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
     // a send may have left: never failed while it may land
     if (sentTxs.length > 0) return { stage: "sent", txs: sentTxs };
     if (landedTxs.length > 0) return { stage: "part_filled", txs: landedTxs };
+    // a take not final yet before the note to sign: "not now" (pool-kinds.ts answers it busy), nothing signed
+    if (e instanceof EvmNotFinalError) throw e;
     return { error: e instanceof Error && e.name === "PoolRuleRefused" ? "not_allowed" : "down" };
   } finally {
     seed.fill(0);
@@ -347,7 +349,8 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
     if ((ask !== null && (ask.kind !== "pool.deposit" || ask.chain === "solana")) || !locks) return { error: "not_allowed" };
     let answer: HostAnswer<"pool.deposit"> | HostRefusal | null = null;
     let give!: () => void;
-    const answered = new Promise<void>((ok) => (give = ok));
+    let fail!: (e: unknown) => void;
+    const answered = new Promise<void>((ok, no) => ((give = ok), (fail = no)));
     const chain = ask?.chain ?? "base";
     const run = locks
       .request(WALLET_SEED_LOCK, { mode: "shared" }, () =>
@@ -369,10 +372,12 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
           }
         }),
       )
-      .catch(() => {
+      .then(give, (e: unknown) => {
+        // evmNextNote's wait for finality reaches pool-kinds as the run's wait rejecting with it (busy)
+        if (e instanceof EvmNotFinalError && !answer) return fail(e);
         if (!answer) answer = { error: "failed" };
-      })
-      .finally(give);
+        give();
+      });
     void run;
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
