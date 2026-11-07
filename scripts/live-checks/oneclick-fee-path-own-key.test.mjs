@@ -4,7 +4,8 @@
 // served on 7 Nov 02:15Z (release-68), both read through the prototype chain: FAIL. Planted on good: another /app.js, no
 // pin, a table missing or never read, a read without its own-key check, its typeof or the refusal: each FAIL. Planted
 // bundles (the review of e93dea74): an unguarded arrow after the guarded function, a read by a member key, and the guard
-// without its typeof: each FAIL. facts() reads a minified bundle of either shape. And the check's tables are the kit's exports, so neither can change alone.
+// without its typeof; (the delta review of c88a3eeb) an unguarded method body in a class or an object literal, and a
+// typeof chained with the wrong operator: each FAIL. facts() reads a minified bundle of either shape. And the check's tables are the kit's exports, so neither can change alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -64,6 +65,18 @@ test("facts reads a minified bundle: either table's literal in any spacing or qu
   // the guard without its typeof: a typeof elsewhere in the function, as in the refusal's message, is not the guard's
   assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&", "")).ok, false);
   assert.deepEqual(facts(index, tables + guarded.replace("typeof e==`string`&&", "")).reads.map((r) => [r.owns, r.typed]), [[true, false], [true, false]]);
+  // planted (the delta review of c88a3eeb): an unguarded method body after the guarded function, in a class or an object
+  // literal: a method head is a function start, so the guard above it is not its own
+  for (const m of [`class Zq{m(e,t){return t?a[e]:b[e]}}`, `var Zo={m(e,t){return t?a[e]:b[e]}};`, `var Zo={x:1,get m(){return a[e]}};`, `class Zq{static async m(e){return a[e]}}`]) {
+    assert.equal(verdict(`${tables}${guarded}${m}`).ok, false, m);
+  }
+  // control blocks are not function starts: an if or a for in the guarded function keeps its guard
+  assert.equal(verdict(`${tables}function f(e,t){if(typeof e!=="string"||!Object.hasOwn(a,e)||!Object.hasOwn(b,e))W("${REFUSAL}");if(t){return a[e]}for(;;){return b[e]}}`).ok, true);
+  // unpaired operators: == must chain with &&, != with || and a negation; either other pairing guards nothing
+  assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&", "typeof e==`string`||")).ok, false);
+  assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&Object.hasOwn(", "typeof e!=`string`&&Object.hasOwn(")).ok, false);
+  assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&Object.hasOwn(", "typeof e!=`string`||Object.hasOwn(")).ok, false);
+  assert.equal(verdict(tables + guarded.replace("typeof e==`string`&&", "`string`===typeof e&&")).ok, true);
   // the source's own form passes: typeof path !== "string" || !Object.hasOwn(...)
   assert.equal(verdict(`${tables}function f(e,t){if(typeof e!=="string"||!Object.hasOwn(a,e)||!Object.hasOwn(b,e))W("${REFUSAL}");return t?a[e]:b[e]}`).ok, true);
   // the check in another function, or on another key, or on the other table, guards nothing (an optional-chain read too)

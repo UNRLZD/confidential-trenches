@@ -6,9 +6,10 @@
 //   - the bundle holds each fee table, ONECLICK_FEE_BPS {keyless: 1, partner: 1} and ONECLICK_PAIR_FEE_BPS {keyless: 20,
 //     partner: 20}, assigned to a name;
 //   - every read of either table by a key that is not a literal, `T[k]` for any expression k (a name or a member such
-//     as n.path), sits in a function (its nearest start, `function` or `=>`) that before the read checks
-//     typeof k == "string" chained straight into an own-key check, and Object.hasOwn(T, k) for that table and that key,
-//     and holds the refusal "no such 1Click path". A read through the prototype chain, as SIGN_HOST served before this card (release-68), lets a polluted
+//     as n.path), sits in a function (its nearest start: `function`, `=>` or a method head) that before the read checks
+//     typeof k == "string" chained straight into an own-key check with its operators paired (== with &&, != with ||
+//     and a negation), and Object.hasOwn(T, k) for that table and that key, and holds the refusal "no such 1Click
+//     path". A read through the prototype chain, as SIGN_HOST served before this card (release-68), lets a polluted
 //     Object.prototype.nopath = 1 name a fee for a path that does not exist, and a real dry quote on it passed the
 //     device's check; without the typeof, a key object whose toString answers "partner" to the checks and "nopath" to
 //     the read does the same.
@@ -60,8 +61,16 @@ function bracketed(js, open) {
 }
 /** A key that is a literal: a number, or a string with no ${} in it. */
 const LITERAL = /^\s*(?:\d+|"[^"\\]*"|'[^'\\]*'|`[^`$\\]*`)\s*$/;
-/** The nearest function start before `at`: a `function` keyword or an arrow. */
-const fnStart = (js, at) => Math.max(js.lastIndexOf("function", at), js.lastIndexOf("=>", at));
+/** A method head, in a class body or an object literal: after `{`, `}`, `,` or `;`, any of static, async, get, set or
+ *  `*`, then a name that is not a control keyword, its parameters and its body's `{`. An if, for, while, switch, catch
+ *  or with block is not a function start, so a guard above it in the same function still counts. */
+const METHOD = /(?:^|[{},;])\s*(?:(?:static|async|get|set)\s+|\*\s*)*(?!(?:if|for|while|switch|catch|with|function|return)\b)[A-Za-z_$][\w$]*\s*\([^()]*\)\s*\{/g;
+/** The nearest function start before `at`: a `function` keyword, an arrow or a method head. */
+function fnStart(js, at) {
+  let method = -1;
+  for (const m of js.slice(0, at).matchAll(METHOD)) method = m.index;
+  return Math.max(js.lastIndexOf("function", at), js.lastIndexOf("=>", at), method);
+}
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, per table the names it is assigned to, and
  *  every read of one of those names by a key that is not a literal, with whether its function, before the read, checks
@@ -80,10 +89,11 @@ export function facts(index, js) {
         const start = fnStart(js, m.index);
         const body = js.slice(start < 0 ? 0 : start, m.index);
         const owns = key !== null && new RegExp(`Object\\.hasOwn\\(\\s*${esc(name)}\\s*,\\s*${k}\\s*\\)`).test(body);
-        // the type check is the guard's own first term, chained straight into an own-key check (`typeof k == "string" &&
-        // Object.hasOwn(` or `typeof k != "string" || !Object.hasOwn(`), not a typeof elsewhere, as in the message
-        const typeofK = `(?:typeof\\s*\\(?\\s*${k}\\s*\\)?\\s*[!=]==?\\s*[\x60'"]string[\x60'"]|[\x60'"]string[\x60'"]\\s*[!=]==?\\s*typeof\\s*\\(?\\s*${k}\\s*\\)?)`;
-        const typed = key !== null && new RegExp(`${typeofK}\\s*(?:&&|\\|\\|)\\s*!?\\s*Object\\.hasOwn\\(`).test(body);
+        // the type check is the guard's own first term, chained straight into an own-key check, its operators paired:
+        // `typeof k == "string" && Object.hasOwn(` or `typeof k != "string" || !Object.hasOwn(` (either side of the
+        // comparison), never a typeof elsewhere, as in the message, and never == with || or != with &&
+        const cmp = (op) => `(?:typeof\\s*\\(?\\s*${k}\\s*\\)?\\s*${op}\\s*[\x60'"]string[\x60'"]|[\x60'"]string[\x60'"]\\s*${op}\\s*typeof\\s*\\(?\\s*${k}\\s*\\)?)`;
+        const typed = key !== null && new RegExp(`${cmp("===?")}\\s*&&\\s*Object\\.hasOwn\\(|${cmp("!==?")}\\s*\\|\\|\\s*!\\s*Object\\.hasOwn\\(`).test(body);
         reads.push({ table, name, key: key ?? "?", owns, typed, refuses: body.includes(REFUSAL) });
       }
     }
