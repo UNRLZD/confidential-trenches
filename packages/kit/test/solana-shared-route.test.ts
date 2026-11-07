@@ -307,7 +307,7 @@ for (const r of MINT_REFUSALS) {
 }
 
 // The legs (card solana-legs-checked): every account shared_accounts_route_v2 names past its 12 goes into Jupiter's closed
-// program with the wallet's signature. Found by the solana-checks-shared-route Opus review (2 Nov 06:50Z): S6 read none of
+// program with the wallet's signature. Found by the solana-checks-shared-route review (2 Nov 06:50Z): S6 read none of
 // them, so a build could name another token account of the wallet's as a leg and Jupiter could move it. Each case below
 // rewrites one writable leg of a recorded build to a token account of the wallet's, read so by the device, and is refused.
 // A token account of `owner`'s as a provider answers it: the 165-byte base (mint, owner, amount, state initialized).

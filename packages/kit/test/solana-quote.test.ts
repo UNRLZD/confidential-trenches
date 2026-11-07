@@ -820,7 +820,7 @@ test("sweep: 844 key swaps, 90 moves and 110 duplicates; every one that passes i
 });
 
 // The legs and the wallet's other accounts (card solana-legs-checked). route_v2 names 10 accounts, then the legs, which go
-// into Jupiter's closed program with the wallet's signature; the solana-checks-shared-route Opus review (2 Nov 06:50Z)
+// into Jupiter's closed program with the wallet's signature; the solana-checks-shared-route review (2 Nov 06:50Z)
 // found S6 read none of them and S11 read only the wallet's lamports and its account of the token. Each case rewrites the
 // real buy or sell so a writable leg is a token account of the wallet's the device reads as such.
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
