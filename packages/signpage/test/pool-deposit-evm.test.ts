@@ -633,12 +633,24 @@ test("pool-deposit-sent-end review 3 (EVM): an ask whose first note landed and w
   await f.r.after;
   await f.runEnd;
   assert.equal(ch.c.sent.length, 2, "both notes sent");
-  assert.deepEqual(f.stages, ["filled", "sent"], "the first note's landing and the second's send: never part_filled while the second may land");
+  assert.deepEqual(f.stages, ["sent"], "the second note's send only: the first note's landing is no end (fold review 1), and never part_filled while the second may land");
   assert.equal(await f.parked(), true, "the open note is read on");
   ch.land(ch.c.sent[1]!);
   f.go();
-  assert.equal(await f.staged(3), true);
-  assert.deepEqual(f.stages, ["filled", "sent", "filled"]);
+  assert.equal(await f.staged(2), true);
+  assert.deepEqual(f.stages, ["sent", "filled"]);
+});
+
+test("pool-deposit-sent-end fold review 1 (EVM): an ask whose two notes both land in the run tells the app filled once, after its answer, at the run's end (never at the first note)", async () => {
+  const { ch, ns } = await funded(3n * RUNG + 2n * FEE);
+  ch.c.onSend = (raw) => void ch.land(raw); // each note lands at once
+  const f = followedEvm(ch, ns, {}, { ...ASK, amount: 3n * RUNG });
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(ch.c.sent.length, 2, "both notes sent");
+  assert.deepEqual(f.r.answer(), { result: { stage: "sent", txs: [{ chain: "base", hash: sentOf(ch.c.sent[0]!).hash }] } });
+  assert.deepEqual(f.stages, ["sent", "filled"], "the second send, then the ask's one end");
+  assert.equal(await f.parked(), false, "an ask that ended is not followed");
 });
 
 test("pool-deposit-sent-end review 4 (EVM): the end's reads back off (10 s doubling to 60 s) while every send is dead with no Deposited, give up at POOL_DEPOSIT_FOLLOW_FOR_MS telling nothing, and stop at once when the page leaves the deposit", async () => {

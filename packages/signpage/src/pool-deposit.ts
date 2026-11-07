@@ -113,7 +113,8 @@ export type PoolDepositHost = {
   seed64(): Promise<Uint8Array>;
   /** A note landed: the proof queue's pass, which makes the next buy's proof ahead. */
   landed?(note: NoteRecord): void;
-  /** A deposit tx was sent (its signature), and each rung's stage as it comes: "sent", "filled" (landed). */
+  /** A deposit tx of the ask was sent (its signature), and "sent" for each one. A rung's landing posts no stage: the
+   *  ask's one end (filled, part_filled) goes from the kind, as its answer or after it. */
   sent?(signature: string): void;
   progress?(stage: TradeStage): void;
   /** U cannot pay a note's send: the lamports it is short (a top-up to its address lets the note go). */
@@ -578,8 +579,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
           const sig = own ? await landedSend(h, sends) : null;
           if (sig !== null) landedTxs.push({ chain: "solana", hash: sig });
           if (own) landed++;
+          // no stage per rung: "filled" ends the trade in the app, so the ask's one end goes from the kind (review 1)
           h.landed?.(done);
-          if (own) h.progress?.("filled");
           return "landed";
         }
         // no mark on either RPC: built again at its own value only once no send of it can land, on both RPCs (past its
@@ -788,7 +789,8 @@ type Locks = Pick<LockManager, "request">;
 
 /** The pool flow's pool.deposit on Solana, run holding the seed lock shared (a sign out, in any tab, waits for it) and
  *  POOL_DEPOSIT_LOCK. Answered at its first send (stage "sent" with that tx), or at its end when nothing was sent; each
- *  rung's landing then goes to the app as a `progress` event ("filled"), and a run that ends short as its stage; a run
+ *  later send goes as a `progress` event ("sent"), and the run's end (filled, or part_filled with no send open) as one
+ *  more, once: a rung's landing is no end stage, since the app ends the trade at its first end (review 1); a run
  *  that ends with no verdict past a send of its ask has its open notes read on (followPoolDeposit), and their end goes
  *  as one more `progress` event (card pool-deposit-sent-end). */
 export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
@@ -824,8 +826,8 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
           } finally {
             try {
               const l = left as PoolDepositLeft | null;
-              // filled is the ask's end, and part_filled with no send of the ask still open (each rung's "filled" already
-              // went as progress); anything else past a send of the ask (part_filled while a send may still land: review
+              // filled is the ask's end, and part_filled with no send of the ask still open, each told once, here or
+              // as the answer (a rung's landing is no stage: review 1); anything else past a send of the ask (part_filled while a send may still land: review
               // 3; not_landed while a send may land; sent; a fault) is no end: its open notes are read on, and the end goes
               // as progress once each is landed or dead (none open: each send was taken)
               const ended = a !== null && "stage" in a && (a.stage === "filled" || (a.stage === "part_filled" && (l === null || l.notes.length === 0)));
@@ -835,9 +837,8 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
                   answer = { result: { stage: "sent", txs: l.notes.flatMap((n) => n.sends.map((x) => ({ chain: "solana" as const, hash: x.signature }))) } };
                   follow = { h, left: l };
                 } else if (a !== null) answer = "error" in a ? { error: a.error } : { result: a };
-              } else if (ended) {
-                if (a !== null && "stage" in a && a.stage === "part_filled") ctx?.progress(a.stage);
-              } else if (l !== null) follow = { h, left: l };
+              } else if (ended) ctx?.progress((a as { stage: TradeStage }).stage);
+              else if (l !== null) follow = { h, left: l };
             } finally {
               h.end?.();
             }

@@ -563,7 +563,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
           landed++;
           if (end.hash !== undefined) landedTxs.push({ chain, hash: end.hash });
           if (end.filled) left -= left < end.note.leaf!.value ? left : end.note.leaf!.value;
-          h.progress?.("filled");
+          // no stage per note: "filled" ends the trade in the app, so the ask's one end goes from the kind (review 1)
           continue;
         }
         // still landing (the next load settles it), or its send again U cannot pay: the ask ends here with its sends

@@ -314,7 +314,7 @@ test("a deposit for the pinned pool: U's tx lands, its note is stored UNSPENT wi
   assert.deepEqual(n!.sends!.map((s) => [s.signature, s.value]), [[c.sent[0], RUNG]], "its send was written with INCOMING");
   assert.equal(c.lamports(u.address), 0);
   assert.deepEqual(h.landedNotes.map((x) => x.id), [n!.id], "one proof started, for the landed note");
-  assert.deepEqual(h.stages, ["sent", "filled"]);
+  assert.deepEqual(h.stages, ["sent"], "the run posts no end stage itself: the kind tells the ask's one end (fold review 1)");
   assert.ok(h.seeds.every((s) => s.every((b) => b === 0)), "the seed is zeroed");
 });
 
@@ -685,7 +685,7 @@ test("M4: the U a move used stays the source while it covers a rung and its cost
   assert.equal(c.statuses.size, 3);
 });
 
-test("M5: the kind answers at the first send, then posts each rung's landing as progress", async () => {
+test("M5: the kind answers at the first send, then posts each later send, and the ask's end once (fold review 1: a rung's landing is no end stage)", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, 100_000_000);
@@ -698,7 +698,7 @@ test("M5: the kind answers at the first send, then posts each rung's landing as 
   await r.after;
   assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] } });
   await done;
-  assert.deepEqual(stages, ["filled", "sent", "filled"]);
+  assert.deepEqual(stages, ["sent", "filled"]);
   assert.equal(poolDepositKind(() => host(c, ns), null)(ask(RUNG), null).hasOwnProperty("error"), true, "no Web Locks: refused");
 });
 
@@ -1612,6 +1612,25 @@ test("review L2: a rung landed with no tx named, then U short for the next rung:
   const got = await runPoolDeposit(host(c, ns, { rpcs: unnamed(c), short: shortsOf(short), landed: () => void (c.accounts.get(u.address)!.lamports = 0) }), ask(3n * RUNG));
   assert.equal(c.sent.length, 1);
   assert.deepEqual(got, { stage: "part_filled", txs: [] });
+});
+
+test("pool-deposit-sent-end fold review 1: a two-rung ask whose first rung lands and whose second U cannot pay tells the app part_filled once, never filled at the first rung", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 100_000_000);
+  const stages: string[] = [];
+  let ended!: () => void;
+  const done = new Promise<void>((r) => (ended = r));
+  // rung 1 lands, then U is drained: rung 2 is short
+  const kind = poolDepositKind(() => ({ ...host(c, ns, { landed: () => void (c.accounts.get(u.address)!.lamports = 0) }), end: ended }));
+  const r = kind(ask(3n * RUNG), { id: "f1", sha: "00", progress: (s) => void stages.push(String(s)) });
+  assert.ok("running" in r);
+  await r.after;
+  await done;
+  assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] } });
+  assert.equal(c.sent.length, 1);
+  assert.deepEqual(stages, ["part_filled"], "one end, the real one: no filled for rung 1");
 });
 
 test("review L3: a rung landed with no tx named, then the kit refuses the next rung's pool read: part_filled with the landed rung, never failed", async () => {
