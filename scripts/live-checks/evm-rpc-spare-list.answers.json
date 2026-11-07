@@ -768,5 +768,589 @@
     }
    }
   }
+ },
+ "badSpare": {
+  "recorded": "2026-11-06T22:47:37.423Z",
+  "base": "https://api.confidential.unrealized.trade",
+  "scans": {
+   "base": [
+    "https://base-rpc.publicnode.com",
+    "https://base.gateway.tenderly.co",
+    "https://base.api.pocket.network",
+    "https://rpc.sentio.xyz/base"
+   ],
+   "robinhood": [
+    "https://rpc.mainnet.chain.robinhood.com",
+    "https://robinhood.daybreak-rpc.network",
+    "https://robinhood.api.pocket.network"
+   ]
+  },
+  "preflight": {
+   "https://base.api.pocket.network": {
+    "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   },
+   "https://rpc.sentio.xyz/base": {
+    "status": 200,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   },
+   "https://robinhood.api.pocket.network": {
+    "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   }
+  },
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 6989
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2990,
+      "heldAsked": 19,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 1974,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 1985,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 2344,
+      "heldAsked": 11,
+      "thirdLogs": 1
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 15248
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider limited its rate past the quote's bound of 60000 ms",
+      "ms": 39672,
+      "heldAsked": 5298,
+      "thirdLogs": 400
+     },
+     {
+      "mode": "refused",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60168,
+      "heldAsked": 10,
+      "thirdLogs": 6
+     },
+     {
+      "mode": "503",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider limited its rate past the quote's bound of 60000 ms",
+      "ms": 32250,
+      "heldAsked": 4889,
+      "thirdLogs": 400
+     },
+     {
+      "mode": "503",
+      "code": "rpc_error",
+      "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms",
+      "ms": 60838,
+      "heldAsked": 12,
+      "thirdLogs": 6
+     }
+    ]
+   }
+  },
+  "helper": {
+   "base": {
+    "list": [
+     "https://mainnet.base.org",
+     "https://base-rpc.publicnode.com",
+     "https://base.gateway.tenderly.co",
+     "https://base.public.blockpi.network/v1/rpc/public",
+     "https://base-pokt.nodies.app"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 89,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 90,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 89,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     },
+     {
+      "mode": "history",
+      "status": 200,
+      "results": 89,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     }
+    ]
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood.daybreak-rpc.network",
+     "https://rpc-robinhood.blockmachine.io",
+     "https://robinhood.api.pocket.network",
+     "https://robinhood.drpc.org",
+     "https://api.blockvectra.com/v1/robinhood_mainnet/public"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 111,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 119,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 114,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "history",
+      "status": 200,
+      "results": 115,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     }
+    ]
+   }
+  },
+  "addressless": {
+   "base": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://base.gateway.tenderly.co"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+    }
+   },
+   "robinhood": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://rpc.mainnet.chain.robinhood.com"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+    }
+   }
+  },
+  "history": {
+   "base": {
+    "status": 200,
+    "results": 72,
+    "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+   },
+   "robinhood": {
+    "status": 200,
+    "results": 90,
+    "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+   }
+  },
+  "makers": {
+   "base": {
+    "list": [
+     "https://base-mainnet.public.blastapi.io",
+     "https://base-rpc.publicnode.com",
+     "https://base.drpc.org",
+     "https://base.gateway.tenderly.co",
+     "https://base.api.pocket.network",
+     "https://rpc.sentio.xyz/base",
+     "https://base.public.blockpi.network/v1/rpc/public"
+    ],
+    "spares": {
+     "https://base.drpc.org": {
+      "chainId": 8453,
+      "results": 72
+     },
+     "https://base.gateway.tenderly.co": {
+      "chainId": 8453,
+      "results": 71
+     },
+     "https://base.api.pocket.network": {
+      "chainId": 8453,
+      "results": 70
+     },
+     "https://rpc.sentio.xyz/base": {
+      "chainId": 8453,
+      "results": 71
+     },
+     "https://base.public.blockpi.network/v1/rpc/public": {
+      "idError": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <!",
+      "results": null,
+      "error": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <!"
+     }
+    }
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood-rpc.publicnode.com",
+     "https://robinhood.drpc.org",
+     "https://robinhood.api.pocket.network",
+     "https://4663.rpc.thirdweb.com"
+    ],
+    "spares": {
+     "https://robinhood.drpc.org": {
+      "chainId": 4663,
+      "results": 91
+     },
+     "https://robinhood.api.pocket.network": {
+      "chainId": 4663,
+      "results": 81
+     },
+     "https://4663.rpc.thirdweb.com": {
+      "chainId": 4663,
+      "results": 92
+     }
+    }
+   }
+  }
+ },
+ "goodSpare": {
+  "recorded": "2026-11-06T23:05:54.986Z",
+  "base": "https://api.confidential.unrealized.trade",
+  "scans": {
+   "base": [
+    "https://base-rpc.publicnode.com",
+    "https://base.gateway.tenderly.co",
+    "https://base.api.pocket.network",
+    "https://rpc.sentio.xyz/base"
+   ],
+   "robinhood": [
+    "https://rpc.mainnet.chain.robinhood.com",
+    "https://robinhood.daybreak-rpc.network",
+    "https://robinhood.api.pocket.network"
+   ]
+  },
+  "preflight": {
+   "https://base.api.pocket.network": {
+    "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   },
+   "https://rpc.sentio.xyz/base": {
+    "status": 200,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   },
+   "https://robinhood.api.pocket.network": {
+    "status": 204,
+    "allow": "https://confidential.unrealized.trade",
+    "headers": "content-type",
+    "post": "https://confidential.unrealized.trade"
+   }
+  },
+  "cases": {
+   "base-hook": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 7865
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2905,
+      "heldAsked": 19,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 1893,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 2019,
+      "heldAsked": 4,
+      "thirdLogs": 1
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 1858,
+      "heldAsked": 10,
+      "thirdLogs": 1
+     }
+    ]
+   },
+   "robinhood-torch": {
+    "first": [
+     {
+      "code": "ok",
+      "ms": 14533
+     }
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 2305,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     },
+     {
+      "mode": "refused",
+      "code": "ok",
+      "ms": 973,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 1232,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     },
+     {
+      "mode": "503",
+      "code": "ok",
+      "ms": 1006,
+      "heldAsked": 10,
+      "thirdLogs": 4
+     }
+    ]
+   }
+  },
+  "helper": {
+   "base": {
+    "list": [
+     "https://mainnet.base.org",
+     "https://base-rpc.publicnode.com",
+     "https://base.gateway.tenderly.co",
+     "https://rpc.sentio.xyz/base",
+     "https://base-pokt.nodies.app"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 104,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 101,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 104,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     },
+     {
+      "mode": "history",
+      "status": 200,
+      "results": 107,
+      "answeredBy": "https://base.gateway.tenderly.co",
+      "heldAsked": 1
+     }
+    ]
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood.daybreak-rpc.network",
+     "https://rpc-robinhood.blockmachine.io",
+     "https://robinhood.api.pocket.network",
+     "https://robinhood.drpc.org",
+     "https://api.blockvectra.com/v1/robinhood_mainnet/public"
+    ],
+    "held": [
+     {
+      "mode": "refused",
+      "status": 200,
+      "results": 80,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "503",
+      "status": 200,
+      "results": 85,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "limit",
+      "status": 200,
+      "results": 85,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     },
+     {
+      "mode": "history",
+      "status": 200,
+      "results": 85,
+      "answeredBy": "https://rpc-robinhood.blockmachine.io",
+      "heldAsked": 2
+     }
+    ]
+   }
+  },
+  "addressless": {
+   "base": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://base.gateway.tenderly.co"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+    }
+   },
+   "robinhood": {
+    "checkout": {
+     "status": 200,
+     "results": 0,
+     "answeredBy": "https://rpc.mainnet.chain.robinhood.com"
+    },
+    "deployed": {
+     "status": 200,
+     "results": 0,
+     "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+    }
+   }
+  },
+  "history": {
+   "base": {
+    "status": 200,
+    "results": 78,
+    "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+   },
+   "robinhood": {
+    "status": 200,
+    "results": 180,
+    "commit": "6adacd7344170c40bf8584c9187a587521b9ffd7"
+   }
+  },
+  "makers": {
+   "base": {
+    "list": [
+     "https://base-mainnet.public.blastapi.io",
+     "https://base-rpc.publicnode.com",
+     "https://base.drpc.org",
+     "https://base.gateway.tenderly.co",
+     "https://base.api.pocket.network",
+     "https://rpc.sentio.xyz/base"
+    ],
+    "spares": {
+     "https://base.drpc.org": {
+      "chainId": 8453,
+      "results": 74
+     },
+     "https://base.gateway.tenderly.co": {
+      "chainId": 8453,
+      "results": 71
+     },
+     "https://base.api.pocket.network": {
+      "chainId": 8453,
+      "results": 70
+     },
+     "https://rpc.sentio.xyz/base": {
+      "chainId": 8453,
+      "results": 64
+     }
+    }
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood-rpc.publicnode.com",
+     "https://robinhood.drpc.org",
+     "https://robinhood.api.pocket.network",
+     "https://4663.rpc.thirdweb.com"
+    ],
+    "spares": {
+     "https://robinhood.drpc.org": {
+      "chainId": 4663,
+      "results": 183
+     },
+     "https://robinhood.api.pocket.network": {
+      "chainId": 4663,
+      "results": 128
+     },
+     "https://4663.rpc.thirdweb.com": {
+      "chainId": 4663,
+      "results": 123
+     }
+    }
+   }
+  }
  }
 }

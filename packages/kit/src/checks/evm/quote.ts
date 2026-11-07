@@ -896,7 +896,8 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // answered and the quote takes one round of reads. A kept read is only asked earlier: it counts only where the quote,
 // run as it always runs at its own block, asks it again, so every check reads the new block (a pool that vanished is
 // not held, one seeded since is found by the scan and read in a round of its own).
-const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[] }>();
+// `xs`: the currencies X the token's last quote kept past its X prune (card evm-spare-list-green)
+const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[] }>();
 /** The block time a token's kept reads are asked for (card evm-quote-warm-round: 60 s). */
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
@@ -2137,14 +2138,19 @@ async function routeSet(a: {
   // no such bound and is kept, as in "The prune". A sell has no Q and drops nothing. TORCH on Robinhood has 100 pools
   // with other currencies, 99 of them seeded currencies whose only pool is that one; 89 could not give Q for 0.001 ETH
   // (rpc.mainnet.chain.robinhood.com, 2026-11-06 01:5xZ), and the scans of their markets held its cold quote to the
-  // bound (58 s, rpc_error). Only an X this device has never scanned is asked: a scanned one reads only new blocks, so
-  // the read would add a round to a warm quote for no scan it saves
-  const cold = (x: string) => !SCANS.has(`${chain}:markets:${x}`);
-  if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(cold)) {
+  // bound (58 s, rpc_error). An X the token's last quote kept past this prune is not asked again (its scans read only
+  // new blocks, so the read would add a round to a warm quote for no scan it saves; keeping one only adds routes); any
+  // other X is, the ones this device scanned for another reason too (card evm-spare-list-green: TORCH's first quote
+  // pruned USDG and then scanned its markets one level further; the second, which asked only an X whose markets were
+  // never scanned, kept USDG, scanned all its pools over the whole depth and refused too_many_pools, every TORCH quote
+  // after the first, 2026-11-06 22:3xZ)
+  const keptBefore = new Set(plan?.xs ?? []);
+  const unsure = (x: string) => !keptBefore.has(x);
+  if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(unsure)) {
     const asks: [Found, number][] = [];
     const pr: Read[] = [];
     for (const [x, fs] of xPools) {
-      if (!cold(x)) continue;
+      if (!unsure(x)) continue;
       for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push([f, put(pr, { ...exactOutRead(v.v4!, f.key, lower(token), floor), ...noop([f.key]) })]);
     }
     await round(pr);
@@ -2357,7 +2363,7 @@ async function routeSet(a: {
   PLANS.delete(planKey);
   // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
   // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
-  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked });
+  PLANS.set(planKey, { ts: block.timestamp, reads: reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))), scans: asked, xs: [...xPools.keys()] });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled };
 }

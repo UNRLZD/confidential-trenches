@@ -84,3 +84,25 @@ test("card base-rpc-list-fix: Base's list of three, or a fourth whose POST names
   blind.preflight[blind.scans.base[3]] = { ...blind.preflight[blind.scans.base[3]], post: null };
   assert.equal(check(blind).ok, false);
 });
+
+// Card evm-spare-list-green: `badSpare` is a real run at 6adacd73 (main, this Mac, 2026-11-06 22:5xZ, against the deployed
+// helper at 6adacd73), the same FAIL lines as host=helper live run 42302023037: each held Robinhood quote ends rpc_error
+// (the warm quote kept USDG, which the warm-up's prune dropped, and scanned all its pools over the whole depth: about
+// 5,000 requests of 2,000 blocks on Pocket, which answers about 400 and then 429 with Retry-After 59), and BlockPI's
+// Base maker spare answers Cloudflare's 521 page. `goodSpare` is a real run on this card's branch (aa8728ba, this Mac, 23:05-23:07Z,
+// against the same deployed helper; nothing it reads needs the branch's helper deployed): every held Robinhood quote ends ok with
+// Pocket asked for logs, and the Base maker list of six answers on every spare.
+test("card evm-spare-list-green: the bad answer at 6adacd73 fails: each held Robinhood quote ends rpc_error, and BlockPI's maker spare answers a Cloudflare page", () => {
+  const r = check(A.badSpare);
+  assert.equal(r.ok, false);
+  for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^FAIL robinhood-torch, first two ${m}: ends rpc_error: rpc_error: the scan provider (limited its rate past|did not answer within) the quote's bound of 60000 ms`));
+  has(r.lines, /^FAIL helper base maker spare base\.public\.blockpi\.network: chain id <!DOCTYPE html>/);
+});
+
+test("card evm-spare-list-green: the good answer on this card's branch passes: every held Robinhood quote ok on Pocket, and no Base maker spare down", () => {
+  const r = check(A.goodSpare);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS robinhood-torch, first two ${m}: ends ok in \\d+ ms`));
+  has(r.lines, /^PASS helper base maker list of 6, each on its own host: .*rpc\.sentio\.xyz \(5 at least\)$/);
+  assert.ok(!r.lines.some((l) => /blockpi/.test(l)), "no line names BlockPI");
+});
