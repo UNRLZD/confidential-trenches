@@ -1366,3 +1366,19 @@ test("F5: the pool's own balance past 2^53 lamports is never parsed (it is never
   const got = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc({ mapAccount: rich }), c.rpc({ mapAccount: rich })] }), ask(RUNG));
   assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
 });
+
+test("F6: a send built again whose simulation fails on an RPC (the pool moving under the read, a node behind) is never stuck: page load answers not_landed with no top-up, and a later load sends it again and it lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  c.lands = false; // dropped, unseen
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  c.height += 1_000; // its blockhash expired on both: built again at the next load
+  const short: [string, bigint][] = [];
+  assert.deepEqual(await settlePoolDeposits(host(c, ns, { rpcs: [c.rpc(), c.rpc({ simFails: true })], short: shortsOf(short) })), { stage: "not_landed", txs: [] });
+  assert.deepEqual(short, [], "no top-up named: U is not short");
+  assert.equal(c.sent.length, 1, "nothing signed on a failed simulation");
+  c.lands = true;
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[1] }] });
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] });
+});

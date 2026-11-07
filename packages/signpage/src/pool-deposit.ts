@@ -12,9 +12,10 @@
 //   solanaPoolPreMarkOf (a stranger's system account at a mark's address is no mark: the deposit takes it over).
 // - One deposit's numbers are of one slot on each RPC: the pool, the two pages it writes, the mark's address, U and the
 //   Rent sysvar in one getMultipleAccounts at confirmed per RPC (the pool the same bytes on both, the pages the ones its
-//   sizes name, else read again); every other read of a build at confirmed too. The lower of the two RPCs' balances
-//   prices it. U after the deposit holds 0 or at least the rent of an empty account (the runtime refuses less). Short of
-//   that: not_funded, nothing written.
+//   sizes name, else read again at the higher slot either answered, minContextSlot); every other read of a build at
+//   confirmed too. The deposit must go on each RPC's reading: U after it holds 0 or at least the rent of an empty
+//   account (the runtime refuses less) on both, so neither RPC's word prices it. Short of that: not_funded, nothing
+//   written, `short` naming the least top-up that makes both go.
 // - Before anything is written: the blockhash is read on one RPC and must be valid on the other; the tx is checked by
 //   the rule (rules/pool.ts checkSolanaDeposit: one tag 1 into the pinned pool, by U, of the rung, with the note's own
 //   precommitment) and its unsigned bytes simulated on both RPCs (sigVerify off, so neither can send it), which must
@@ -45,7 +46,12 @@
 //   value, the same note and U, from fresh reads (above), never the old bytes (heights and statuses first, so a send
 //   that finalizes between the reads is read landed, never sent again). Anything else is pending: read again, then
 //   not_landed with the note left INCOMING, never
-//   stored as money. Signature statuses only name the tx that landed, in the answer. A send's last valid height is the
+//   stored as money. A mark one RPC holds and the other not yet is a deposit that may have landed: read again, never
+//   built again. A send built again whose simulation fails is read again too, never stuck. A run builds one note again
+//   on a failure on both RPCs at most POOL_DEPOSIT_REBUILDS times; past that only expiry makes its last send dead.
+// - After U's send, a read back that does not check out (the RPCs disagree on the mark, a mark of nonce 0, a label
+//   leaf not its nonce's, the commitment not once in the state tree) answers "sent" with the send, never failed: the
+//   note stays INCOMING and settles at the next load (card pool-answer-unknown). Signature statuses only name the tx that landed, in the answer. A send's last valid height is the
 //   lower of the blockhash's on one RPC and the other RPC's height + 151, so no one RPC sets it.
 // - An INCOMING note of the pool's scope (a run a reload cut short) is read once at the start of every run, as its own
 //   move, never waited on: settled, taken, sent again, or left INCOMING with its U not a source this run (a resend U
