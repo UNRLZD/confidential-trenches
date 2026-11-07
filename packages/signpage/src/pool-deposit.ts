@@ -64,8 +64,9 @@
 //   `short` naming the ask's own U.
 // - Each note that lands starts the proof queue's pass (`landed`), so the next buy's proof is made ahead; `sent` and
 //   `progress` tell the app of the ask's own sends and landed rungs, never an earlier note's.
-// - From the ask's own first signature on, a provider fault is never "down" (a tx may land); a note sent again by the
-//   pass, never the ask's, leaves the ask's own fault "down".
+// - A provider fault is "down" only while nothing of the ask landed and no send of it may still land (none signed, or
+//   each one taken); else part_filled or sent. A note sent again by the pass, never the ask's, leaves the ask's own
+//   fault "down".
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
 //   signatures), one wallet of the user's per request; no request carries a key, the words, or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
@@ -299,7 +300,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     // a note's deposit of `value` by U: built, checked by the rule, simulated unsigned on both RPCs, then signed; its cost
     type Built = { tx: string; send: PoolSend };
     type Unbuilt = { short: bigint } | { simulation: "failed" };
-    // `own`: the ask's own note (or, with no ask, a note it settles): only its signature makes a later fault never "down"
+    // `own`: the ask's own note (or, with no ask, a note it settles): only its sends are told to the app and answered
     const build = async (u: { address: string; secretKey: Uint8Array }, precommitment: bigint, value: bigint, own: boolean): Promise<Built | Unbuilt> => {
       const st = await depositState(h, pool, sizes, solanaPoolPreMark(h.pin.program, precommitment), u.address, wait);
       sizes = st.sizes;
