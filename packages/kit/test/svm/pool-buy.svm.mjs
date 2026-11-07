@@ -3,7 +3,8 @@
 //
 // Run (keyless mainnet reads only, nothing is sent to any cluster):
 //   LITESVM_DIR=<a folder with `npm i --no-package-lock litesvm@1.5.0`> \
-//   POOL_SO=<blindfill_pool_solana.so of contracts/pool-solana at this tree (tag 3), cargo-build-sbf> \
+//   POOL_SO=<blindfill_pool_solana.so of contracts/pool-solana at this tree (tag 3), cargo-build-sbf: the pinned code
+//            (contracts/pool-solana/scripts/pin.mjs), or the run stops before it reads anything> \
 //   POOL_FIXTURE=<contracts/pool-solana/fixtures/release-spends.json> \
 //   node packages/kit/test/svm/pool-buy.svm.mjs pump-curve|pumpswap <mint> [--record <file>]
 //
@@ -19,11 +20,17 @@ import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { pinRefusal, readPin } from "../../../../contracts/pool-solana/scripts/pin.mjs";
 
 const [venueKind, mint] = process.argv.slice(2);
 const recordAt = process.argv.indexOf("--record");
 if (!["pump-curve", "pumpswap"].includes(venueKind) || !mint) throw new Error("usage: pool-buy.svm.mjs pump-curve|pumpswap <mint>");
 const need = (k) => process.env[k] ?? (() => { throw new Error(`${k} is not set`); })();
+// the pool program LiteSVM runs is the pinned code, the bytes the deploy ships (card vault-sandbox-shipped-bytes)
+const POOL_SO = need("POOL_SO");
+const poolRefusal = pinRefusal(createHash("sha256").update(readFileSync(POOL_SO)).digest("hex"), readPin());
+if (poolRefusal) throw new Error(`POOL_SO ${POOL_SO}: ${poolRefusal}`);
+console.log(`POOL_SO ${POOL_SO}: the pinned pool code (contracts/pool-review-2.md)`);
 const req = createRequire(pathToFileURL(need("LITESVM_DIR") + "/package.json"));
 const { LiteSVM, FailedTransactionMetadata } = await import(pathToFileURL(req.resolve("litesvm")).href);
 const kitSol = await import(pathToFileURL(req.resolve("@solana/kit")).href);
@@ -151,7 +158,7 @@ const { Rent } = await import(pathToFileURL(req.resolve("litesvm")).href);
 svm.setRent(new Rent(rent.lamportsPerByte, Number(rent.factor), 50));
 if (svm.minimumBalanceForRentExemption(165n) !== kit.solanaRentMin(rent, 165)) throw new Error("LiteSVM's rent is not mainnet's");
 const addr = kitSol.address;
-svm.addProgramFromFile(addr(PROGRAM), need("POOL_SO"));
+svm.addProgramFromFile(addr(PROGRAM), POOL_SO);
 for (const [p, elf] of code) svm.addProgram(addr(p), elf);
 for (const [k, v] of accounts) {
   if (!v || programs.includes(k) || v.executable) continue;
