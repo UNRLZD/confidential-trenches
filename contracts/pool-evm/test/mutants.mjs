@@ -144,7 +144,8 @@ export const MUTANTS = [
   [PP, "abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue())", "abi.encode(WITHDRAW_TYPEHASH, _proof.newCommitmentHash(), _proof.context(), _proof.withdrawnValue())", "test_aWithdrawsSignatureIsRefusedAsABuy"],
   [PP, "_v := byte(0, mload(add(_signature, 0x60)))", "_v := 27", "test_signaturesWithVOf27And28BothLand"],
   [PP, "_r := mload(add(_signature, 0x20))\n      _s := mload(add(_signature, 0x40))", "_s := mload(add(_signature, 0x20))\n      _r := mload(add(_signature, 0x40))", "test_buyLandsAndWHoldsMinOut"],
-  [SIMPLE, "_release(_withdrawal, _proof, _fee, _data, _buyDigest(_buy, _proof), _signature)", "_release(_withdrawal, _proof, _fee, _data, _typedDigest(keccak256(abi.encode(WITHDRAW_TYPEHASH, _proof.existingNullifierHash(), _proof.context(), _proof.withdrawnValue()))), _signature)", "test_aWithdrawsSignatureIsRefusedAsABuy"],
+  // buy taking the withdraw digest, made inside _buyDigest: inlined into buy it no longer compiles (stack too deep)
+  [SIMPLE, "          BUY_TYPEHASH,\n          _buy.adapter,\n          keccak256(_buy.data),\n          _buy.minOut,\n          _buy.token,\n", "          WITHDRAW_TYPEHASH,\n", "test_aWithdrawsSignatureIsRefusedAsABuy"],
   [PP, "if (_encoded.length != 192) revert InvalidRelayData();", "if (_encoded.length < 192) revert InvalidRelayData();", "test_trailingRelayDataIsRefused"],
   [SIMPLE, "if (_out < _buy.minOut) revert MinOutNotMet();", "if (_out + 1 < _buy.minOut) revert MinOutNotMet();", "test_minOutNotMetPaysOut"],
   [SIMPLE, "(_buy, _data.recipient, _withdrawn - _fee)", "(_buy, _data.recipient, _withdrawn - _fee - 1)", "test_buyLandsAndWHoldsMinOut"],
@@ -158,7 +159,8 @@ export const MUTANTS = [
   [SIMPLE, "if (gasleft() < BUY_SWAP_GAS + BUY_FAIL_GAS + 1000) revert SwapGasTooLow();", "", "test_aSwapThatBurnsAllItsGasPaysOut"],
   [SIMPLE, "if (gasleft() < BUY_SWAP_GAS + BUY_FAIL_GAS + 1000) revert SwapGasTooLow();", "", "test_theSwapGetsAtLeastBuySwapGas"],
   [SIMPLE, "call(sub(gas(), BUY_FAIL_GAS), address()", "call(gas(), address()", "test_aSwapThatBurnsAllItsGasPaysOut"],
-  [SIMPLE, "BUY_FAIL_GAS = 150_000;", "BUY_FAIL_GAS = 40_000;", "test_aSwapThatBurnsAllItsGasPaysOut"],
+  // 40,000 still lands a gas-burning swap (buySwap hands back the 1/64 it kept), so the reserve's twice margin kills it
+  [SIMPLE, "BUY_FAIL_GAS = 150_000;", "BUY_FAIL_GAS = 40_000;", "test_gasTheFailurePathUsesOfItsReserve"],
   [SIMPLE, "      _push(_data.recipient, _withdrawn - _fee);\n", "", "test_anAdapterThatRevertsPaysOut"],
   [SIMPLE, "        _out := mload(0)\n", "", "test_boughtIsByteEqual"],
   // the sell delegate (card pool-evm-sell): each check of a sell, W's signature and each field it binds, the nonce at
