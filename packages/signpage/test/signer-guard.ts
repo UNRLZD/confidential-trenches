@@ -686,7 +686,11 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
         if (s !== null && top) {
           const t = norm(s);
           const e = encoding(t);
-          const compared = ts.isStringLiteralLike(n) && t === `0x${DEPOSIT_SELECTOR}` && n.parent !== undefined && ts.isBinaryExpression(n.parent) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(n.parent.operatorToken.kind);
+          // the literal alone on one side of a === or !== whose other side is a call's result (data.slice(0, 10)): never
+          // a name or a property, which the compare narrows to the selector and which could then be joined into calldata
+          const cmp = n.parent !== undefined && ts.isBinaryExpression(n.parent) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(n.parent.operatorToken.kind) ? n.parent : null;
+          const other = cmp === null ? null : strip(cmp.left === n ? cmp.right : cmp.left);
+          const compared = ts.isStringLiteralLike(n) && t === `0x${DEPOSIT_SELECTOR}` && other !== null && ts.isCallExpression(other);
           if (e && compared) at(n, "compares a call's selector to the deposit's (a check: a boolean, no bytes)", true);
           else if (e) needsPick(n, `encodes ${e}: ${JSON.stringify(s)}`);
           if (t.includes(SELL_TYPE)) {

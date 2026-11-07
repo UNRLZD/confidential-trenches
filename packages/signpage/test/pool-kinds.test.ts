@@ -403,6 +403,7 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
     "b31-helper-signer.ts": r("imports the helper \\(a server file\\) on the device"), // M1
     "b40-selector-held.ts": r(`encodes the deposit: "0xe2bbb158"${no}`), // the selector held, then compared: still an encoding
     "b41-selector-joined.ts": r(`encodes the deposit: "0xe2bbb158"${no}`), // joined to arguments inside a ===
+    "b42-selector-narrowed.ts": r(`encodes the deposit: "0xe2bbb158"${no}`), // compared to a name the compare narrows, then joined (review L1)
     // the re-review of c00a169d: each passes at c00a169d, and is refused here (k4, k6 and p9 were refused there too)
     "p1-point-ecdsa.ts": r("uses @noble/curves: \\.Fn of its WeierstrassPointCons", "uses @noble/curves: \\.multiply of its WeierstrassPoint", "uses @noble/curves: \\.BASE of its WeierstrassPointCons", "uses @noble/curves: \\.multiply of its WeierstrassPoint"), // H1b
     "p2-dynimport-pinned.ts": r("imports at run time a module that exports @scure/bip32", "uses whole, or by a computed key, a module that exports @scure/bip32", "imports at run time a module that exports @noble/curves", "uses whole, or by a computed key, a module that exports @noble/curves"), // H1
