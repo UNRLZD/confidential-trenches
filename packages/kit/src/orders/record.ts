@@ -8,7 +8,8 @@ import { deepFreeze } from "../freeze.ts";
 /** The chains a fresh wallet trades on. */
 export type Chain = "solana" | "base" | "robinhood" | "near";
 
-export const CHAINS = deepFreeze(["solana", "base", "robinhood", "near"] as const satisfies readonly Chain[]);
+export const CHAINS = ["solana", "base", "robinhood", "near"] as const satisfies readonly Chain[];
+deepFreeze(CHAINS);
 
 /** What fires an order. */
 export interface OrderTrigger {
@@ -70,7 +71,7 @@ export interface OrderRecord<C extends Chain = Chain> {
  * The record's fields, exactly: a receiver refuses a record with any other field. On the wire, POST /v1/orders adds
  * only token_hash (helper/v1.ts HELPER_ORDER_FIELDS).
  */
-export const ORDER_RECORD_FIELDS = deepFreeze([
+export const ORDER_RECORD_FIELDS = [
   "v",
   "order_id",
   "group_id",
@@ -83,7 +84,8 @@ export const ORDER_RECORD_FIELDS = deepFreeze([
   "nonce_ref",
   "variants",
   "expires_at",
-] as const satisfies readonly (keyof OrderRecord)[]);
+] as const satisfies readonly (keyof OrderRecord)[];
+deepFreeze(ORDER_RECORD_FIELDS);
 
 /** At most this many signed variants per order. */
 export const ORDER_VARIANTS_MAX = 3;

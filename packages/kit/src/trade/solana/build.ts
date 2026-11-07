@@ -75,7 +75,8 @@ export const SOLANA_JUPITER_MAX_ACCOUNTS = 40;
  * 48 fit 32 (6 with no route). The live check's ExxzYBTt…pump buy fits at 40 (1,010 bytes); its 1,276-byte answer at 48
  * is a cap the search asks only after no route at 40, and then steps down from.
  */
-export const SOLANA_JUPITER_CAP_UP: Readonly<Record<number, number>> = deepFreeze({ 40: 48, 48: 60 });
+export const SOLANA_JUPITER_CAP_UP: Readonly<Record<number, number>> = { 40: 48, 48: 60 };
+deepFreeze(SOLANA_JUPITER_CAP_UP);
 /** The cap after 40 when 40's route is over 1,232 bytes; any other cap steps down by SOLANA_JUPITER_CAP_DOWN. */
 export const SOLANA_JUPITER_CAP_BELOW_FIRST = 32;
 export const SOLANA_JUPITER_CAP_DOWN = 4;

@@ -26,7 +26,8 @@ export const HELPER_SOURCE_HEADER = "X-Helper-Source";
 export const HELPER_FETCHED_AT_HEADER = "X-Fetched-At";
 
 /** The kit's fetch settings for every helper call. */
-export const HELPER_FETCH_INIT = deepFreeze({ credentials: "omit", referrerPolicy: "no-referrer" } as const);
+export const HELPER_FETCH_INIT = { credentials: "omit", referrerPolicy: "no-referrer" } as const;
+deepFreeze(HELPER_FETCH_INIT);
 
 /**
  * Cross-origin reads (H7 "Cross-origin reads", 7.1 row "every path, and the push socket"). Access-Control-Allow-Origin
@@ -39,7 +40,7 @@ export const HELPER_FETCH_INIT = deepFreeze({ credentials: "omit", referrerPolic
  * as any other.
  * `origins` are this release's APP_HOST and SIGN_HOST; a helper run by someone else lists its own two.
  */
-export const HELPER_CORS = deepFreeze({
+export const HELPER_CORS = {
   origins: ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"],
   allowMethods: ["GET", "POST", "PUT", "DELETE"],
   allowHeaders: ["content-type"],
@@ -48,7 +49,8 @@ export const HELPER_CORS = deepFreeze({
   maxAgeSeconds: 600,
   vary: "Origin",
   allowCredentialsHeader: "absent",
-} as const);
+} as const;
+deepFreeze(HELPER_CORS);
 
 /** Standard base64 of bytes the device signed; a helper carries them byte for byte. */
 export type HelperBase64 = string;
@@ -64,11 +66,13 @@ export type HelperEd25519Signature = `ed25519:${string}`;
 export type HelperTxHash = string;
 
 /** The parts of /v1/health, one per value of H7's Part column (7.1 row "GET /v1/health parts"). */
-export const HELPER_PARTS = deepFreeze(["proxy", "relay", "intents", "delegate", "orders", "log"] as const);
+export const HELPER_PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"] as const;
+deepFreeze(HELPER_PARTS);
 export type HelperPart = (typeof HELPER_PARTS)[number];
 
 /** Codes any path can answer: a vendor or RPC down (H2.3), a body over its limit, a full bucket (H2.2), no such thing. */
-export const HELPER_COMMON_CODES = deepFreeze(["upstream", "too_large", "rate_limited", "not_found"] as const);
+export const HELPER_COMMON_CODES = ["upstream", "too_large", "rate_limited", "not_found"] as const;
+deepFreeze(HELPER_COMMON_CODES);
 export type HelperCommonCode = (typeof HELPER_COMMON_CODES)[number];
 
 export interface HelperError<C extends string> {
@@ -77,7 +81,7 @@ export interface HelperError<C extends string> {
 export type HelperAnswer<T, C extends string> = T | HelperError<C>;
 
 /** The HTTP status of each code that does not answer 400. */
-export const HELPER_CODE_STATUS = deepFreeze({
+export const HELPER_CODE_STATUS = {
   not_found: 404,
   token_not_watched: 404,
   too_large: 413,
@@ -92,13 +96,14 @@ export const HELPER_CODE_STATUS = deepFreeze({
   token_halted: 503,
   index_behind: 503,
   relayer_low: 503,
-} as const);
+} as const;
+deepFreeze(HELPER_CODE_STATUS);
 
 // ---------------------------------------------------------------------------------------------------------------
 // The paths (H7's table and 7.1's new rows), with their part and body limit in bytes
 // ---------------------------------------------------------------------------------------------------------------
 
-export const HELPER_V1_PATHS = deepFreeze([
+export const HELPER_V1_PATHS = [
   { method: "GET", path: "/v1/health", part: "all", limitBytes: 1024 },
   { method: "POST", path: "/v1/proxy/{vendor}/{path}", part: "proxy", limitBytes: 65536 },
   { method: "POST", path: "/v1/rpc/{chain}", part: "proxy", limitBytes: 262144 },
@@ -125,7 +130,8 @@ export const HELPER_V1_PATHS = deepFreeze([
   { method: "PUT", path: "/v1/orders/{order_id}", part: "orders", limitBytes: 32768 },
   { method: "DELETE", path: "/v1/orders/{order_id}", part: "orders", limitBytes: 1024 },
   { method: "POST", path: "/v1/log", part: "log", limitBytes: 4096 },
-] as const);
+] as const;
+deepFreeze(HELPER_V1_PATHS);
 export type HelperV1Path = (typeof HELPER_V1_PATHS)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -147,7 +153,8 @@ export interface HelperHealthAnswer {
 // ---------------------------------------------------------------------------------------------------------------
 
 /** Each vendor has a fixed base URL and a path allowlist on the helper; the proxy is never an open proxy. */
-export const HELPER_PROXY_VENDORS = deepFreeze(["jupiter", "relay", "lifi", "oneclick"] as const);
+export const HELPER_PROXY_VENDORS = ["jupiter", "relay", "lifi", "oneclick"] as const;
+deepFreeze(HELPER_PROXY_VENDORS);
 export type HelperProxyVendor = (typeof HELPER_PROXY_VENDORS)[number];
 
 /**
@@ -166,7 +173,7 @@ export type HelperProxyCode = "path_not_allowed";
 // ---------------------------------------------------------------------------------------------------------------
 
 /** The method allowlist per chain (H7 with 7.1's second-provider reads). Base and Robinhood are EVM. */
-export const HELPER_RPC_METHODS = deepFreeze({
+export const HELPER_RPC_METHODS = {
   solana: [
     "getAccountInfo",
     "getMultipleAccounts",
@@ -227,7 +234,8 @@ export const HELPER_RPC_METHODS = deepFreeze({
     "eth_getTransactionByHash",
   ],
   near: ["query", "block", "gas_price", "tx", "send_tx", "EXPERIMENTAL_tx_status", "EXPERIMENTAL_protocol_config"],
-} as const satisfies Record<Chain, readonly string[]>);
+} as const satisfies Record<Chain, readonly string[]>;
+deepFreeze(HELPER_RPC_METHODS);
 
 export const HELPER_RPC_BATCH_MAX = 10;
 
@@ -261,7 +269,8 @@ export type HelperMarketAnswer = unknown;
  * X-Content-Type-Options: nosniff, Content-Security-Policy: default-src 'none'; sandbox, and
  * Cache-Control: public, max-age=86400; 404 when no logo passed the checks (SVG is refused), and the app shows its own.
  */
-export const HELPER_LOGO_TYPES = deepFreeze(["image/png", "image/jpeg", "image/webp", "image/gif"] as const);
+export const HELPER_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+deepFreeze(HELPER_LOGO_TYPES);
 export type HelperLogoType = (typeof HELPER_LOGO_TYPES)[number];
 export const HELPER_LOGO_MAX_BYTES = 262144;
 
@@ -313,7 +322,8 @@ export interface HelperWithdrawFeeAnswer {
  * written in the release (HelperReleaseRelayer; wallet.md:899), and refuses a fee answer whose relayer_account or
  * fee_recipient differs from the release's, byte for byte.
  */
-export const HELPER_FEE_ANSWER_DISPLAY_ONLY = deepFreeze(["relayer_account", "fee_recipient"] as const);
+export const HELPER_FEE_ANSWER_DISPLAY_ONLY = ["relayer_account", "fee_recipient"] as const;
+deepFreeze(HELPER_FEE_ANSWER_DISPLAY_ONLY);
 
 /** The release's own relayer, written in the release and never read from a helper: what the device checks against. */
 export interface HelperReleaseRelayer {
@@ -331,7 +341,8 @@ export interface HelperReleaseRelayer {
  * time in ms, and salt 16 fresh random bytes as exactly 32 lowercase hex characters with no 0x.
  */
 /** The withdrawal's salt: 16 fresh random bytes as exactly 32 lowercase hex characters, no 0x (vault.md:360). */
-export const HELPER_SALT_PATTERN = deepFreeze(/^[0-9a-f]{32}$/);
+export const HELPER_SALT_PATTERN = /^[0-9a-f]{32}$/;
+deepFreeze(HELPER_SALT_PATTERN);
 
 export interface HelperWithdrawal {
   recipient: HelperNearAccount;
@@ -369,7 +380,7 @@ export interface HelperWithdrawAnswer {
 }
 
 /** In H3.4's order. */
-export const HELPER_WITHDRAW_CODES = deepFreeze([
+export const HELPER_WITHDRAW_CODES = [
   "bad_shape",
   "bad_proof",
   "bad_fee_recipient",
@@ -387,7 +398,8 @@ export const HELPER_WITHDRAW_CODES = deepFreeze([
   "token_halted",
   "fund_recipient_wrong",
   "relayer_low",
-] as const);
+] as const;
+deepFreeze(HELPER_WITHDRAW_CODES);
 export type HelperWithdrawCode = (typeof HELPER_WITHDRAW_CODES)[number];
 
 /** The device re-reads the transaction on its own RPC; this is a hint. */
@@ -500,7 +512,7 @@ export const HELPER_BIND_ANSWER_MS = 45_000;
  * hold the previous P) and resign_needed (the device signs again). sender_struck is final for that id.
  * amount_above_cap: the amount is over HELPER_BIND_DEPOSIT_CAP.
  */
-export const HELPER_BIND_DEPOSIT_CODES = deepFreeze([
+export const HELPER_BIND_DEPOSIT_CODES = [
   "bad_shape",
   "bad_signature",
   "no_account",
@@ -526,10 +538,11 @@ export const HELPER_BIND_DEPOSIT_CODES = deepFreeze([
   "in_flight",
   "token_halted",
   "relayer_low",
-] as const);
+] as const;
+deepFreeze(HELPER_BIND_DEPOSIT_CODES);
 
 /** A clean-up delegate's codes: checks 1-4, then its own, in order. */
-export const HELPER_BIND_CLEANUP_CODES = deepFreeze([
+export const HELPER_BIND_CLEANUP_CODES = [
   "bad_shape",
   "bad_signature",
   "no_account",
@@ -541,7 +554,8 @@ export const HELPER_BIND_CLEANUP_CODES = deepFreeze([
   "bad_shape",
   "not_deposited",
   "not_settled",
-] as const);
+] as const;
+deepFreeze(HELPER_BIND_CLEANUP_CODES);
 
 /**
  * An onward delegate's and a plain move's codes, in H3.7 item 2's order. not_helper_quote is onward only;
@@ -549,7 +563,7 @@ export const HELPER_BIND_CLEANUP_CODES = deepFreeze([
  * not_paid (the device sends the same signed bytes again while max_block_height is ahead, never a new nonce) and
  * in_flight. sender_struck is final for that sender here: its money leaves by its own self-submitted ft_transfer.
  */
-export const HELPER_BIND_ONWARD_CODES = deepFreeze([
+export const HELPER_BIND_ONWARD_CODES = [
   "bad_shape",
   "bad_signature",
   "no_account",
@@ -572,7 +586,8 @@ export const HELPER_BIND_ONWARD_CODES = deepFreeze([
   "token_halted",
   "relayer_low",
   "registration_failed",
-] as const);
+] as const;
+deepFreeze(HELPER_BIND_ONWARD_CODES);
 
 export type HelperBindCode =
   | (typeof HELPER_BIND_DEPOSIT_CODES)[number]
@@ -649,7 +664,7 @@ export interface HelperIntentsAnswer {
  * registration_failed comes at the send and counts toward the signer's three. Never token_halted: neither kind is held
  * on a halt. sender_struck is final for that signer here: its money leaves by its own self-submitted ft_withdraw.
  */
-export const HELPER_INTENTS_CODES = deepFreeze([
+export const HELPER_INTENTS_CODES = [
   "id_not_ours",
   "receiver_is_vault",
   "bad_shape",
@@ -661,7 +676,8 @@ export const HELPER_INTENTS_CODES = deepFreeze([
   "receiver_not_registered",
   "relayer_low",
   "registration_failed",
-] as const);
+] as const;
+deepFreeze(HELPER_INTENTS_CODES);
 export type HelperIntentsCode = (typeof HELPER_INTENTS_CODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -677,7 +693,8 @@ export type HelperIntentsCode = (typeof HELPER_INTENTS_CODES)[number];
 export type HelperOrder = OrderRecord & { token_hash: string };
 
 /** token_hash: SHA-256 of the order's token, 64 lowercase hex characters (markets.md:2071). */
-export const HELPER_TOKEN_HASH_PATTERN = deepFreeze(/^[0-9a-f]{64}$/);
+export const HELPER_TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/;
+deepFreeze(HELPER_TOKEN_HASH_PATTERN);
 
 /**
  * An order's fields on the wire, exactly: the order record's own and token_hash, nothing else. The order sender
@@ -691,7 +708,7 @@ export interface HelperOrdersRequest {
   orders: [HelperOrder] | [HelperOrder, HelperOrder];
 }
 
-export const HELPER_ORDER_CODES = deepFreeze([
+export const HELPER_ORDER_CODES = [
   "bad_bytes",
   "bad_signature",
   "nonce_mismatch",
@@ -699,7 +716,8 @@ export const HELPER_ORDER_CODES = deepFreeze([
   "no_balance",
   "expired",
   "duplicate",
-] as const);
+] as const;
+deepFreeze(HELPER_ORDER_CODES);
 export type HelperOrderCode = (typeof HELPER_ORDER_CODES)[number];
 
 export interface HelperOrdersAnswer {

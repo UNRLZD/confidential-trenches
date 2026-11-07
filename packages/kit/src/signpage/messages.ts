@@ -16,7 +16,7 @@ import { deepFreeze } from "../freeze.ts";
  * kit-deposit-assets-dry), were added after kit-v1 without changing any other kind. A page of an earlier release
  * refuses a kind it does not have "not_allowed".
  */
-export const SIGNPAGE_KINDS = deepFreeze([
+export const SIGNPAGE_KINDS = [
   "deposit.quote",
   "deposit.confirm",
   "arm",
@@ -40,19 +40,22 @@ export const SIGNPAGE_KINDS = deepFreeze([
   "pool.withdraw",
   "deposit.assets",
   "deposit.dry",
-] as const);
+] as const;
+deepFreeze(SIGNPAGE_KINDS);
 
 export type SignpageKind = (typeof SIGNPAGE_KINDS)[number];
 
 /** The kinds that open a SIGN_HOST top-level screen: the app posts one, then moves the same tab to SIGN_HOST. */
-export const OPEN_KINDS = deepFreeze(["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"] as const satisfies readonly SignpageKind[]);
+export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"] as const satisfies readonly SignpageKind[];
+deepFreeze(OPEN_KINDS);
 
 /** The chains a pool runs on: NEAR's money is the vault's, never a pool's. */
 export type PoolChain = "solana" | "base" | "robinhood";
 export const POOL_CHAINS: readonly PoolChain[] = Object.freeze(["solana", "base", "robinhood"] as const);
 
 /** The events, page to app. */
-export const SIGNPAGE_EVENTS = deepFreeze(["ready", "state", "progress"] as const);
+export const SIGNPAGE_EVENTS = ["ready", "state", "progress"] as const;
+deepFreeze(SIGNPAGE_EVENTS);
 
 export type SignpageEventType = (typeof SIGNPAGE_EVENTS)[number];
 

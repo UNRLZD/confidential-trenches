@@ -75,7 +75,8 @@ const BACKOFF_MAX_MS = 8_000;
 export type SolanaRpcLimit = { readonly windowMs: number; readonly total: number; readonly perMethod: number };
 /** A keyless provider's limit: Solana's public RPC allows 100 requests per 10 s per IP, and 40 per 10 s for one method
  * (solana.com/docs/references/clusters.md, read 2026-10-25); PublicNode publishes no number and is held to the same. */
-export const SOLANA_KEYLESS_RPC_LIMIT: SolanaRpcLimit = deepFreeze({ windowMs: 10_000, total: 100, perMethod: 40 });
+export const SOLANA_KEYLESS_RPC_LIMIT: SolanaRpcLimit = { windowMs: 10_000, total: 100, perMethod: 40 };
+deepFreeze(SOLANA_KEYLESS_RPC_LIMIT);
 /** A keyed provider named by its requests a second: that many in any second, of all methods. */
 export const solanaRpsLimit = (rps: number): SolanaRpcLimit => ({ windowMs: 1_000, total: rps, perMethod: rps });
 

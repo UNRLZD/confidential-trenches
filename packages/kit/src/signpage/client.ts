@@ -61,7 +61,7 @@ const RETRY_FIRST_MS = 1_000;
 const LOAD_GRACE_MS = 1_000;
 
 /** How long the client waits for each kind's answer (app.md §2.1 item 3's table); null: no timeout. */
-export const SIGNPAGE_TIMEOUT_MS = deepFreeze({
+export const SIGNPAGE_TIMEOUT_MS = {
   "deposit.quote": 15_000,
   "deposit.confirm": 15_000,
   arm: 5_000,
@@ -90,13 +90,14 @@ export const SIGNPAGE_TIMEOUT_MS = deepFreeze({
   // deposit.quote does (deposit.assets asks the token list, then one dry quote per asset at once)
   "deposit.assets": 15_000,
   "deposit.dry": 15_000,
-} as const satisfies Record<SignpageKind, number | null>);
+} as const satisfies Record<SignpageKind, number | null>;
+deepFreeze(SIGNPAGE_TIMEOUT_MS);
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */
 const REASK_STATE: ReadonlySet<SignpageKind> = new Set(["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return", "pool.deposit", "pool.buy", "pool.sell"]);
 
 /** The hidden iframe's attributes (app.md §2.1 item 2; AX-06, app.md:1386). */
-export const SIGNPAGE_IFRAME_ATTRIBUTES = deepFreeze({
+export const SIGNPAGE_IFRAME_ATTRIBUTES = {
   sandbox: "allow-scripts allow-same-origin",
   allow: "",
   referrerpolicy: "no-referrer",
@@ -104,10 +105,12 @@ export const SIGNPAGE_IFRAME_ATTRIBUTES = deepFreeze({
   tabindex: "-1",
   width: "0",
   height: "0",
-} as const);
+} as const;
+deepFreeze(SIGNPAGE_IFRAME_ATTRIBUTES);
 
 /** The codes the client itself answers with, never the page. */
-export const SIGNPAGE_CLIENT_CODES = deepFreeze({ timeout: "client_timeout", down: "signpage_down" } as const);
+export const SIGNPAGE_CLIENT_CODES = { timeout: "client_timeout", down: "signpage_down" } as const;
+deepFreeze(SIGNPAGE_CLIENT_CODES);
 
 /** "update": the page speaks an `api` this client does not (CH-146); money stays off until a reload. */
 export type SignpageClientStatus = "connecting" | "ready" | "down" | "update";
@@ -205,8 +208,10 @@ interface Pending {
   timer: Timer | null;
 }
 
-const DOWN = { ok: false, error: { code: SIGNPAGE_CLIENT_CODES.down } } as const;
-const TIMEOUT = { ok: false, error: { code: SIGNPAGE_CLIENT_CODES.timeout } } as const;
+/** A fresh outcome each call (card kit-oneclick-pins-frozen review): one shared object handed to every caller would let
+ *  one caller's write change the answer another caller reads. */
+const DOWN = () => ({ ok: false, error: { code: SIGNPAGE_CLIENT_CODES.down } }) as const;
+const TIMEOUT = () => ({ ok: false, error: { code: SIGNPAGE_CLIENT_CODES.timeout } }) as const;
 
 export function createSignpageClient(opts: SignpageClientOptions): SignpageClient {
   const origin = signpageOrigin(opts.url);
@@ -271,7 +276,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
 
   /** Every posted request ends as client_timeout: the page may have it, so it is never reported unsent. */
   const endPosted = () => {
-    for (const id of [...pending.keys()]) settle(id, TIMEOUT);
+    for (const id of [...pending.keys()]) settle(id, TIMEOUT());
   };
 
   /** The frame is gone or unusable: the state it sent is no longer fresh. */
@@ -369,14 +374,14 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   /** Posts a built request to the current frame and waits for its answer, its timeout or the frame's end. */
   const post = <K extends SignpageKind>(msg: SignpageRequest<K>, timeoutMs: number | null, onTimeout: () => void): Promise<SignpageOutcome<K>> => {
     const win = peer();
-    if (destroyed || !win) return Promise.resolve(DOWN);
+    if (destroyed || !win) return Promise.resolve(DOWN());
     return new Promise<SignpageOutcome<K>>((resolve) => {
       const timer =
         timeoutMs === null
           ? null
           : setTimeout(() => {
               if (!pending.has(msg.id)) return;
-              settle(msg.id, TIMEOUT);
+              settle(msg.id, TIMEOUT());
               onTimeout();
             }, timeoutMs);
       pending.set(msg.id, { kind: msg.type, resolve: resolve as (o: SignpageOutcome) => void, timer });
@@ -493,7 +498,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
         if (snap.status === "connecting" && !destroyed) await new Promise<void>((r) => waiters.push(r));
         // parent mode's update state: the shell still answers `reload` (it reloads the top window, shell and app)
         const reloadInUpdate = shell !== null && kind === "reload" && snap.status === "update";
-        if (destroyed || (snap.status !== "ready" && !reloadInUpdate)) return DOWN;
+        if (destroyed || (snap.status !== "ready" && !reloadInUpdate)) return DOWN();
         return post(msg, SIGNPAGE_TIMEOUT_MS[kind], () => onTimeout(kind));
       })();
       return { id, outcome };

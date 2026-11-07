@@ -49,7 +49,8 @@ export interface VaultSyncRpc {
 export const VAULT_SYNC_LAG_MAX = 120;
 
 /** The lists the vault pages (2.5.6). */
-export const VAULT_SYNC_LISTS = deepFreeze(["deposits", "spends", "leaves", "labels"] as const);
+export const VAULT_SYNC_LISTS = ["deposits", "spends", "leaves", "labels"] as const;
+deepFreeze(VAULT_SYNC_LISTS);
 export type VaultSyncList = (typeof VAULT_SYNC_LISTS)[number];
 
 /**

@@ -3,10 +3,26 @@
 // the deposit preconditions, the withdrawal request and the bytes its `context` hashes, the callback, settle and
 // ragequit, the proof format, the encodings, the events and the constants. The setup files' pins are not here: the
 // kit's one list of them is ZK_SETUP_FILES (zk/setup-files.ts).
-// This file has only erasable TypeScript and one import, the kit's deepFreeze (src/freeze.ts, itself import-free), so it
-// runs as is in a browser, in Node and in the live check.
+// This file has no imports and only erasable TypeScript, so it runs as is in a browser, in Node and in the live check.
 // The hash is passed in (any keccak256, such as @noble/hashes' keccak_256): the shapes fix bytes, not a library.
-import { deepFreeze } from "../freeze.ts";
+// Each constant is frozen at every level in place, on the line after it (card kit-oneclick-pins-frozen), so its literal
+// stays as the vault's tests read it as text (contracts/vault: src/withdraw.rs, tests/events.rs, tests/s12.rs,
+// tests/harness/mod.rs); the freeze is this file's own deepFreeze, the kit's src/freeze.ts written again, since
+// scripts/live-checks/kit-freeze-vault.mjs loads this file alone.
+
+/** `v` with every object and array in it frozen, itself included (the kit's src/freeze.ts, here so this file has no
+ *  imports); returned as it came. */
+function deepFreeze<T>(v: T): T {
+  const seen = new WeakSet<object>();
+  const walk = (x: unknown): void => {
+    if (x === null || typeof x !== "object" || seen.has(x)) return;
+    seen.add(x);
+    for (const k of Reflect.ownKeys(x)) walk((x as Record<PropertyKey, unknown>)[k]);
+    Object.freeze(x);
+  };
+  walk(v);
+  return v;
+}
 
 // ---- Fields ----
 
@@ -17,7 +33,7 @@ export const VAULT_FIELD_Q = 218882428718392752222464057452572750886963111572978
 
 // ---- Constants (the paper's 2.2: compiled into the vault, which has no setter, so none can change) ----
 
-export const VAULT_CONSTANTS = deepFreeze({
+export const VAULT_CONSTANTS = {
   /** Circle's native USDC on NEAR mainnet. A testnet vault names the testnet token, read before its deploy. */
   TOKEN: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", // gitleaks:allow (a public account id)
   MAX_TREE_DEPTH: 32,
@@ -36,7 +52,8 @@ export const VAULT_CONSTANTS = deepFreeze({
   DEPOSIT_STORAGE_BYTES: 756,
   /** What a refund note writes when no tree grows a level; reserved by every withdrawal and ragequit. */
   REFUND_RESERVE_BYTES: 389,
-} as const);
+} as const;
+deepFreeze(VAULT_CONSTANTS);
 
 /** near-sdk's storage_byte_cost(), yocto per byte. The vault never relies on it: NEAR refuses unpaid storage. */
 export const VAULT_STORAGE_BYTE_COST = 10_000_000_000_000_000_000n;
@@ -58,17 +75,19 @@ export type VaultNote = VaultNoteSecrets & {
   nullifierHash: bigint;
 };
 /** Each hash's inputs, in order. Poseidon is circomlib's on BN254 (t = 2, 3, 4). */
-export const VAULT_NOTE_HASHES = deepFreeze({
+export const VAULT_NOTE_HASHES = {
   precommitment: ["nullifier", "secret"],
   commitment: ["value", "label", "precommitment"],
   nullifierHash: ["nullifier"],
-} as const);
+} as const;
+deepFreeze(VAULT_NOTE_HASHES);
 // A refund note is a note on the spend's refund_precommitment, with value and label written by settle (2.5.5).
 
 // ---- The deposit message and its one carrier (2.5.1) ----
 
 /** The one deposit message, the same for every path: these two fields, both required, nothing else. */
-export const VAULT_DEPOSIT_MESSAGE_FIELDS = deepFreeze(["precommitment", "depositor"] as const);
+export const VAULT_DEPOSIT_MESSAGE_FIELDS = ["precommitment", "depositor"] as const;
+deepFreeze(VAULT_DEPOSIT_MESSAGE_FIELDS);
 export const VAULT_DEPOSIT_MESSAGE_MAX_BYTES = 1_024;
 /**
  * precommitment: one canonical decimal in 1..p-1 (0 is refused: no (nullifier, secret) hashes to it, so its note could
@@ -95,7 +114,7 @@ export function vaultDepositMessage(precommitment: bigint, depositor: string): s
  * relayer, which pays the gas and cannot change the call. The relayer sends it only once its storage_prepay landed.
  * Two receiver_ids: the DelegateAction's is TOKEN (below); the call's own `receiver_id` argument is the vault.
  */
-export const VAULT_DEPOSIT_CARRIER = deepFreeze({
+export const VAULT_DEPOSIT_CARRIER = {
   signed_as: "NEP-366 DelegateAction",
   sent_by: "relayer",
   /** the DelegateAction's receiver: the token contract */
@@ -106,17 +125,19 @@ export const VAULT_DEPOSIT_CARRIER = deepFreeze({
   deposit_yocto: 1n,
   gas_tgas: 180,
   signed_by_kit: true,
-} as const);
+} as const;
+deepFreeze(VAULT_DEPOSIT_CARRIER);
 
 /** Who moves money into the vault, each by VAULT_DEPOSIT_CARRIER from its own NEAR-implicit account (64 hex). */
-export const VAULT_DEPOSIT_SIGNERS = deepFreeze({
+export const VAULT_DEPOSIT_SIGNERS = {
   /** the deposit's one-time id U_{s,i} */
   U: VAULT_DEPOSIT_CARRIER,
   /** a return id R_{c,l,j}: 1Click delivers to its own NEAR account on the token */
   R: VAULT_DEPOSIT_CARRIER,
   /** a refund id V_{l,j}, the same way */
   V: VAULT_DEPOSIT_CARRIER,
-} as const);
+} as const;
+deepFreeze(VAULT_DEPOSIT_SIGNERS);
 
 /**
  * The vault takes the same message from intents.near's ft_withdraw too (any sender may deposit), but the kit never
@@ -127,25 +148,28 @@ export const VAULT_DEPOSIT_SIGNERS = deepFreeze({
  * (VT-S13, contracts/vault/tests/s13.rs: ft_on_transfer at depth 32, 94.027 Tgas; (94.027 x 1.059 + 30) x 1.2, rounded
  * up).
  */
-export const VAULT_ALSO_ACCEPTS = deepFreeze([{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false, min_gas_tgas: 156 }] as const);
+export const VAULT_ALSO_ACCEPTS = [{ sender: "intents.near", method: "ft_withdraw", signed_by_kit: false, min_gas_tgas: 156 }] as const;
+deepFreeze(VAULT_ALSO_ACCEPTS);
 
 // ---- Deposit preconditions (2.5.1, 2.8) ----
 
 /** storage_prepay(precommitment), #[payable], by anyone (the relayer), before the deposit. No reclaim. */
-export const VAULT_STORAGE_PREPAY = deepFreeze({
+export const VAULT_STORAGE_PREPAY = {
   method: "storage_prepay",
   args: ["precommitment"],
   min_bytes: 756,
   /** what the kit prepays whenever a tree may grow a level */
   bytes_when_a_tree_may_grow: 904,
-} as const);
+} as const;
+deepFreeze(VAULT_STORAGE_PREPAY);
 
 /** Each must hold before a deposit is signed or sent; else it waits. */
-export const VAULT_DEPOSIT_PRECONDITIONS = deepFreeze([
+export const VAULT_DEPOSIT_PRECONDITIONS = [
   "storage_prepay(precommitment) has landed with at least min_bytes × VAULT_STORAGE_BYTE_COST attached",
   "TOKEN.storage_balance_of(vault) is not null (the vault is registered on the token)",
   "TOKEN is not halted, and its code hash equals VAULT_TOKEN_CODE_HASH",
-] as const);
+] as const;
+deepFreeze(VAULT_DEPOSIT_PRECONDITIONS);
 
 /** The NEAR a storage_prepay attaches. */
 export function vaultPrepayYocto(aTreeMayGrow: boolean): bigint {
@@ -171,7 +195,7 @@ export type VaultWithdrawal = {
 };
 
 /** The Borsh bytes `context` hashes, in this order, with no padding, then scope as 32 big-endian bytes. */
-export const VAULT_CONTEXT_FIELDS = deepFreeze([
+export const VAULT_CONTEXT_FIELDS = [
   ["processor", "account"],
   ["recipient", "account"],
   ["register_deposit", "u128"],
@@ -180,7 +204,8 @@ export const VAULT_CONTEXT_FIELDS = deepFreeze([
   ["refund_precommitment", "u256be"],
   ["deadline_ms", "u64"],
   ["salt", "bytes16"],
-] as const);
+] as const;
+deepFreeze(VAULT_CONTEXT_FIELDS);
 // account: a 4-byte little-endian length, then the id's bytes. u128: 16 bytes LE. u256be: 32 raw big-endian bytes
 // (a fixed array, no length). u64: 8 bytes LE. bytes16: 16 raw bytes (a fixed array, no length). 100 bytes plus the
 // three ids, then 32 bytes of scope.
@@ -213,13 +238,14 @@ export function vaultContextInput(processor: string, w: VaultWithdrawal): VaultC
 }
 
 /** withdraw's attached NEAR: (710 + 389 (+ 148 when a tree may grow)) × 1e19 + register_deposit + 1 yocto per ft_transfer. */
-export const VAULT_WITHDRAW = deepFreeze({
+export const VAULT_WITHDRAW = {
   method: "withdraw",
   args: ["withdrawal", "proof", "public_signals"],
   storage_bytes: 710,
   tree_growth_bytes: 148,
   gas_tgas: 300,
-} as const);
+} as const;
+deepFreeze(VAULT_WITHDRAW);
 
 export function vaultWithdrawYocto(registerDeposit: bigint, relayFee: bigint, aTreeMayGrow: boolean): bigint {
   const bytes = VAULT_WITHDRAW.storage_bytes + VAULT_CONSTANTS.REFUND_RESERVE_BYTES + (aTreeMayGrow ? VAULT_WITHDRAW.tree_growth_bytes : 0);
@@ -273,7 +299,7 @@ export function vaultWithdrawalProblems(w: VaultWithdrawal, withdrawn: bigint, v
 // ---- The callback, settle and ragequit (2.5.3-2.5.5) ----
 
 /** on_payout(spend_index, to_recipient, fee): #[private], only the vault's own promise calls it. */
-export const VAULT_ON_PAYOUT = deepFreeze({
+export const VAULT_ON_PAYOUT = {
   method: "on_payout",
   args: ["spend_index", "to_recipient", "fee"],
   private: true,
@@ -283,23 +309,26 @@ export const VAULT_ON_PAYOUT = deepFreeze({
    * refunds the whole withdrawn value and pays no fee)
    */
   results: ["payout"],
-} as const);
+} as const;
+deepFreeze(VAULT_ON_PAYOUT);
 export type VaultOnPayoutArgs = { spend_index: number; to_recipient: string; fee: string };
 
 /** settle(nullifier_hash), #[payable], by anyone once the payout's callback has run. */
-export const VAULT_SETTLE = deepFreeze({ method: "settle", args: ["nullifier_hash"], caller: "anyone" } as const);
+export const VAULT_SETTLE = { method: "settle", args: ["nullifier_hash"], caller: "anyone" } as const;
+deepFreeze(VAULT_SETTLE);
 export type VaultSettleArgs = { nullifier_hash: string };
 /** A spend's status, as the spends view pages it. settle takes refund_pending or paid. */
 export type VaultSpendStatus = "in_flight" | "paid" | "refund_pending" | "settled";
 
 /** ragequit(proof, public_signals, register_deposit, refund_precommitment), #[payable], from the depositor account. */
-export const VAULT_RAGEQUIT = deepFreeze({
+export const VAULT_RAGEQUIT = {
   method: "ragequit",
   args: ["proof", "public_signals", "register_deposit", "refund_precommitment"],
   caller: "the deposit's depositor",
   /** spent 81 + spends 394 (2.3); with the refund reserve, as withdraw's storage rule */
   storage_bytes: 475,
-} as const);
+} as const;
+deepFreeze(VAULT_RAGEQUIT);
 export type VaultRagequitArgs = {
   proof: VaultProof;
   public_signals: VaultRagequitSignals;
@@ -326,7 +355,7 @@ export type VaultSnarkjsProof = {
 export type VaultProof = { a: [string, string]; b: [[string, string], [string, string]]; c: [string, string] };
 
 /** snarkjs's public signals, in snarkjs order. */
-export const VAULT_WITHDRAW_SIGNALS = deepFreeze([
+export const VAULT_WITHDRAW_SIGNALS = [
   "newCommitmentHash",
   "existingNullifierHash",
   "withdrawnValue",
@@ -335,8 +364,10 @@ export const VAULT_WITHDRAW_SIGNALS = deepFreeze([
   "ASPRoot",
   "ASPTreeDepth",
   "context",
-] as const);
-export const VAULT_RAGEQUIT_SIGNALS = deepFreeze(["commitment", "nullifierHash", "value", "label"] as const);
+] as const;
+deepFreeze(VAULT_WITHDRAW_SIGNALS);
+export const VAULT_RAGEQUIT_SIGNALS = ["commitment", "nullifierHash", "value", "label"] as const;
+deepFreeze(VAULT_RAGEQUIT_SIGNALS);
 export type VaultWithdrawSignals = [string, string, string, string, string, string, string, string];
 export type VaultRagequitSignals = [string, string, string, string];
 
@@ -370,7 +401,7 @@ export const VAULT_EVENT_VERSION = "1.0.0";
  * logs.
  */
 export const VAULT_EVENT_DATA = "array";
-export const VAULT_EVENTS = deepFreeze({
+export const VAULT_EVENTS = {
   leaf_inserted: ["tree", "index", "leaf", "root"],
   deposited: ["depositor", "commitment", "label", "value", "precommitment"],
   storage_prepaid: ["precommitment", "payer", "amount"],
@@ -379,7 +410,8 @@ export const VAULT_EVENTS = deepFreeze({
   ragequit: ["ragequitter", "commitment", "label", "value"],
   payout: ["nullifier_hash", "delivered", "returned"],
   refund_inserted: ["nullifier_hash", "commitment", "label", "value"],
-} as const);
+} as const;
+deepFreeze(VAULT_EVENTS);
 export type VaultEventName = keyof typeof VAULT_EVENTS;
 export type VaultEvent = {
   standard: typeof VAULT_EVENT_STANDARD;
