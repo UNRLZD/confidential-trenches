@@ -119,11 +119,12 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's thirty-four checks (signpage-shell runs four ways, signpage-withdraw-handoff and wallet-deposit-follow the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's thirty-five checks (signpage-shell runs four ways, wallet-deposit-follow and kit-oneclick-pins-frozen the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 34);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 35);
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-frame-version" && !e.chrome && e.args === ""), "kit-frame-version runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-assets-dry" && e.chrome && e.args === ""), "kit-deposit-assets-dry runs after every sign deploy, in Chrome");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-calls" && !e.chrome && e.args === ""), "kit-deposit-calls runs after every sign deploy");
@@ -162,7 +163,7 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   const na = existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"];
   assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
   assert.ok(!plan.include.some((e) => SKIPPED[e.key]), "a skipped check is never in the matrix");
-  for (const key of ["solana-jupiter-build", "wallet-per-buy"]) assert.ok(plan.include.some((e) => e.key === key && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
+  for (const key of ["solana-jupiter-build", "wallet-per-buy", "helper-usdc-pending-pause"]) assert.ok(plan.include.some((e) => e.key === key && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
 });
 
 test("a job gets Chrome when its check reaches the launcher, and Firefox or WebKit only where its arguments name them", async () => {

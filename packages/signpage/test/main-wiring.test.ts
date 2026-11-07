@@ -24,9 +24,11 @@ import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
-import { SOL_USDC } from "./oneclick-mock.ts";
+import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 
 const SCOPE = 4242n;
+// Solana's USDC: this test's helper answers 503, so no 1Click answer is checked and no mock key is needed
+const SOL_USDC = ONECLICK_USDC_ASSETS[1]!;
 const ANCHOR = "export function vaultScope(network: NearNetwork): bigint | null {";
 const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");';
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from

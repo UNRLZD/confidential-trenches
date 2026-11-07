@@ -8,6 +8,7 @@
 // repeated id with its first answer, never a second run, so a timeout and a retry can never buy twice.
 
 import type { Chain, OrderTrigger } from "../orders/record.ts";
+import { deepFreeze } from "../freeze.ts";
 
 /**
  * The twenty-three request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
@@ -40,11 +41,13 @@ export const SIGNPAGE_KINDS = [
   "deposit.assets",
   "deposit.dry",
 ] as const;
+deepFreeze(SIGNPAGE_KINDS);
 
 export type SignpageKind = (typeof SIGNPAGE_KINDS)[number];
 
 /** The kinds that open a SIGN_HOST top-level screen: the app posts one, then moves the same tab to SIGN_HOST. */
 export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"] as const satisfies readonly SignpageKind[];
+deepFreeze(OPEN_KINDS);
 
 /** The chains a pool runs on: NEAR's money is the vault's, never a pool's. */
 export type PoolChain = "solana" | "base" | "robinhood";
@@ -52,6 +55,7 @@ export const POOL_CHAINS: readonly PoolChain[] = Object.freeze(["solana", "base"
 
 /** The events, page to app. */
 export const SIGNPAGE_EVENTS = ["ready", "state", "progress"] as const;
+deepFreeze(SIGNPAGE_EVENTS);
 
 export type SignpageEventType = (typeof SIGNPAGE_EVENTS)[number];
 

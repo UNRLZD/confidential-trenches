@@ -1171,6 +1171,28 @@ test("destroy: the listener and the iframe go, and nothing is sent after", async
   assert.equal(h.sent().length, 0);
 });
 
+// card kit-oneclick-pins-frozen (review): a down or timed-out answer is the caller's own object; red before, when every
+// caller got the module's one DOWN or TIMEOUT object and a write by one changed what the next one read
+test("one caller's write into a down or timed-out answer never reaches another caller's answer", async () => {
+  const poison = (o) => { o.ok = true; o.result = { forged: 1 }; delete o.error; };
+  const a = await readyClient();
+  const b = await readyClient();
+  a.c.destroy();
+  b.c.destroy();
+  const first = await a.c.request("state", {}).outcome;
+  poison(first);
+  assert.deepEqual(await b.c.request("state", {}).outcome, DOWN, "another client's down answer");
+  assert.deepEqual(await a.c.request("state", {}).outcome, DOWN, "the same client's next down answer");
+  const t = await readyClient();
+  const buy = await open(t.h, t.c, "buy");
+  const restore = await open(t.h, t.c, "restore");
+  t.c.retry();
+  await flush();
+  const timedOut = await buy.p;
+  poison(timedOut);
+  assert.deepEqual(await restore.p, TIMEOUT, "another request's timeout answer");
+});
+
 // card signpage-shell: the shell's two kinds, nav (where the app is) and reload (the top window)
 test("nav takes APP_HOST's own path and query only, at most 2,048 bytes; reload takes nothing", async () => {
   assert.ok(SIGNPAGE_KINDS.includes("nav") && SIGNPAGE_KINDS.includes("reload"));
