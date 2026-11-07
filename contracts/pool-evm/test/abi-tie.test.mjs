@@ -151,9 +151,13 @@ const read = (f) => readFileSync(path.join(REPO, f), "utf8");
  */
 const MONEY_PATHS = {
   "apps/helper/src/pool/evm.ts": [
+    "Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)",
+    "Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)",
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
     "Paid(address,uint256)",
     "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
+    "Withdraw(uint256 nullifier,uint256 context,uint256 value)",
+    "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
     "currentTreeDepth()",
     "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",
     "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)",
@@ -229,6 +233,12 @@ test("planted: a changed withdraw, sell, event, view, error, EIP-712 type or dom
     ["contracts/pool-evm/script/testnet-run-lib.mjs", '"FeeOverCap()"', '"FeeOverCap(uint256)"'],
     // the fee collector's Paid, the helper's proof a sale's fee was paid
     ["apps/helper/src/pool/evm.ts", '"Paid(address,uint256)"', '"Paid(address,uint128)"'],
+    // the helper's own release strings (card helper-evm-sender-2): W's Buy and Withdraw it checks, the buy it reads, the
+    // Bought log that releases a buy's held gas
+    ["apps/helper/src/pool/evm.ts", 'address token,uint256 nullifier,uint256 context,uint256 value)"));', 'address token,uint256 nullifier,uint256 context)"));'],
+    ["apps/helper/src/pool/evm.ts", '"Withdraw(uint256 nullifier,uint256 context,uint256 value)"', '"Withdraw(uint256 nullifier,uint256 value,uint256 context)"'],
+    ["apps/helper/src/pool/evm.ts", '(address,bytes,uint256,address),bytes)"', '(address,bytes,uint256),bytes)"'],
+    ["apps/helper/src/pool/evm.ts", '"Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)"', '"Bought(address,uint256,uint256,uint256,uint256,address,uint256)"'],
     // the same withdraw written other ways: a template, a concatenation, a space, a keyword, the old selector as hex
     ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', "`withdraw(${W},(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)`"],
     ["apps/helper/src/pool/evm.ts", '"withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)"', '"withdraw((address,bytes)," + PROOF + ",uint256,bytes)"'],
