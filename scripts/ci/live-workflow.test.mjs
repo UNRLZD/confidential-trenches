@@ -119,14 +119,15 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's thirty-seven checks (signpage-shell runs four ways, pool-deposits and page-evm-rpc-csp the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's thirty-eight checks (signpage-shell runs four ways, pool-answer-unknown and page-evm-rpc-csp the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 37);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 38);
   assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposits" && !e.chrome && e.args === ""), "pool-deposits runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-answer-unknown" && !e.chrome && e.args === ""), "pool-answer-unknown runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-frame-version" && !e.chrome && e.args === ""), "kit-frame-version runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-assets-dry" && e.chrome && e.args === ""), "kit-deposit-assets-dry runs after every sign deploy, in Chrome");
   assert.ok(sign.include.some((e) => e.key === "kit-deposit-calls" && !e.chrome && e.args === ""), "kit-deposit-calls runs after every sign deploy");

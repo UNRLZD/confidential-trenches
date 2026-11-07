@@ -62,4 +62,17 @@ test("the facts read from a bundle", () => {
   assert.equal(facts("", js.replace(/throw Error\([^)]*\);/, "")).references, 1);
   assert.equal(facts("", js.replace("if(c.length)return{stage:`sent`,txs:c};", "")).sent, false);
   assert.equal(facts("", js.replace("g&&!_?`down`:oT(f)", "oT(f)")).trade, 1);
+  // card pool-answer-unknown's forms: the sends of notes still open (a call), and down only in place of the kit's failed
+  const next = js.replace("if(c.length)return{stage:`sent`,txs:c};", "if(u().length)return{stage:`sent`,txs:u()};").replace("g&&!_?`down`:oT(f)", "g&&!_&&w===`failed`?`down`:w");
+  assert.deepEqual([facts("", next).sent, facts("", next).trade], [true, 2]);
+  assert.equal(facts("", next.replace("if(u().length)return{stage:`sent`,txs:u()};", "")).sent, false);
+  assert.equal(facts("", next.replace("g&&!_&&w===`failed`?`down`:w", "w")).trade, 1);
+  // and what landed as a count (a rung with no tx named still counts)
+  const counted = next.replace("if(s.length)return{stage:`part_filled`,txs:s};", "if(c)return{stage:`part_filled`,txs:s};");
+  assert.equal(facts("", counted).sent, true);
+  assert.equal(facts("", counted.replace("if(u().length)return{stage:`sent`,txs:u()};", "")).sent, false);
+  // never the list as its own condition (always true: part_filled with nothing landed), nor another list's length
+  // (card pool-answer-unknown, delta review r2)
+  assert.equal(facts("", counted.replace("if(c)return{stage:`part_filled`,txs:s};", "if(s)return{stage:`part_filled`,txs:s};")).sent, false);
+  assert.equal(facts("", counted.replace("if(c)return{stage:`part_filled`,txs:s};", "if(c.length)return{stage:`part_filled`,txs:s};")).sent, false);
 });

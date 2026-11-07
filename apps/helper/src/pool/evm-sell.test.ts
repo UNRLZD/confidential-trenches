@@ -813,7 +813,6 @@ test("bad_route: a sale to any target but the PoolManager or a listed router, or
   const cases: [string, Partial<Sell>][] = [
     ["any target, any token (0x…dead, 0x…deadbeef)", { target: "0x000000000000000000000000000000000000dead", token: "0x00000000000000000000000000000000deadbeef", data: `0x${"ff".repeat(32)}` }],
     ["the PoolManager with data that is no path", { data: `0x${"ff".repeat(32)}` }],
-    ["an unlisted hook", { data: v4Path(NATIVE, "0x00000000000000000000000000000000000000cc") }],
     ["a path that ends at another token", { data: v4Path("0x0000000000000000000000000000000000007071") }],
     ["a listed router with v4 data", { target: V.routers[0]!.toLowerCase() }],
   ];
@@ -823,6 +822,14 @@ test("bad_route: a sale to any target but the PoolManager or a listed router, or
     assert.deepEqual([a.status, code(a)], [422, "bad_route"], `${name}: ${JSON.stringify(a.body)}`);
     assert.equal(calls.length, 0, `${name}: nothing read`);
   }
+  // a hook no venue lists passes the route check (card evm-sell-hook-converge: the device's quote routes a sale through
+  // such a pool where it sets the reference, which no sender can tell from the Sell): the same sale 59 s from its
+  // deadline stops at the deadline check, nothing read
+  const calls: Calls = [];
+  const near = NOW_S + 59n;
+  const a = await senderOf(calls, {}, calls).sell(body({ sell: { data: v4Path(NATIVE, "0x00000000000000000000000000000000000000cc"), deadline: near } }));
+  assert.deepEqual([a.status, code(a)], [422, "deadline_near"], JSON.stringify(a.body));
+  assert.equal(calls.length, 0, "nothing read");
 });
 
 test("unpaid sell gas: reverting sales are held against the client, the token, W and the sender's budget; past a cap 429 rate_limited with the wait", async () => {

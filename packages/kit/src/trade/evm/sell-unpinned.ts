@@ -19,9 +19,12 @@
 //     venue lists (evmPoolVenues().hookedPools) with that launchpad's own fee and tick spacing, on any hop, as the buy
 //     takes a pinned hook (card evm-route-parity); every hop's hook data empty (the device's own, never a route's). A hook is part of
 //     the price, so an unlisted hook, or a listed one with another fee or tick spacing, is refused rather than bounded
-//     by minOut alone; the kit's index builds a sell only from the device's own quote (checks/evm/quote.ts
-//     evmPoolSellQuote, card evm-sell-device-quote). A key that names no initialized pool reverts the whole sell in the
-//     PoolManager (PoolNotInitialized), so W keeps its token;
+//     by minOut alone, except on a route the device's own quote picked (checks/evm/quote.ts evmPoolSellQuote, card
+//     evm-sell-hook-converge: a route through an unlisted hook that sets the reference, at the reference's minOut, so
+//     such a pool can never freeze a sale; one whose real sale reverts the device bans). The kit's index builds a sell
+//     only from the device's own quote (card evm-sell-device-quote), and the sender's read-back (evmSellRouteOf) takes
+//     any hook, since it cannot tell which route the device's quote picked. A key that names no initialized pool
+//     reverts the whole sell in the PoolManager (PoolNotInitialized), so W keeps its token;
 // - the deadline is unix seconds, at least EVM_POOL_SELL_DEADLINE_MIN_S and at most EVM_POOL_SELL_DEADLINE_MAX_S past
 //   now;
 // - the fee cap is above 0 and under minOut, so the deposit always holds something (and, in the kit's index, at most
@@ -182,14 +185,14 @@ const copyList = (a: unknown): unknown[] => {
 
 /** The target's call data for a checked route: SwapRouter02's exactInput (v3) or SellDelegate's PathKey[] (v4). The
  *  route is read once, into a copy; the target must be the venue's for the route's kind. */
-function swapData(chain: EvmPoolChain, token: string, route: unknown, target: string, w: string, amount: bigint, minOut: bigint): string {
+function swapData(chain: EvmPoolChain, token: string, route: unknown, target: string, w: string, amount: bigint, minOut: bigint, anyHook = false): string {
   const venue = venueOf(chain);
   if (typeof route !== "object" || route === null) return refuse("bad_route", "a route is an object");
   const kind = (route as Record<string, unknown>).venue;
   const pm = Object.hasOwn(venue, "poolManager") && isAddress(venue.poolManager) ? lower(venue.poolManager) : undefined;
   if (kind === "uniswap-v4") {
     if (pm === undefined || lower(target) !== pm) return refuse("bad_target", `a v4 sell goes only to ${chain}'s pinned PoolManager, not ${target}`);
-    return v4Data(chain, token, (route as Record<string, unknown>).hops);
+    return v4Data(chain, token, (route as Record<string, unknown>).hops, anyHook);
   }
   if (kind !== "uniswap-v3") return refuse("bad_route", "a sell runs on Uniswap v3's SwapRouter02 or v4's PoolManager");
   if (!venue.routers.some((r) => lower(r) === lower(target))) return refuse("bad_target", `a v3 sell goes only to a listed router, not ${target}`);
@@ -277,10 +280,12 @@ export function evmHookListed(chain: EvmPoolChain, hooks: string, fee: number, t
 }
 
 /** Refuses (throws EvmPoolSellError) a sell route the builder would not take for `token` on `chain`, checked as the
- *  builder checks it; the device's quote (checks/evm/quote.ts) picks only among the routes this takes. */
-export function evmSellRouteCheck(chain: EvmPoolChain, token: string, route: EvmSellRoute): void {
+ *  builder checks it; the device's quote (checks/evm/quote.ts) picks among the routes this takes, and with `anyHook`
+ *  (a v4 hop's hook not only a listed launchpad's) only where such a route sets the reference (card
+ *  evm-sell-hook-converge). */
+export function evmSellRouteCheck(chain: EvmPoolChain, token: string, route: EvmSellRoute, anyHook = false): void {
   if (typeof route !== "object" || route === null) return refuse("bad_route", "a sell route is an object");
-  if (route.venue === "uniswap-v4") v4Data(chain, token, route.hops);
+  if (route.venue === "uniswap-v4") v4Data(chain, token, route.hops, anyHook);
   else if (route.venue === "uniswap-v3") v3Data(chain, token, route, token, 1n, 1n);
   else refuse("bad_route", "a sell runs on Uniswap v3's SwapRouter02 or v4's PoolManager");
 }
@@ -294,7 +299,10 @@ export type EvmSignedSellCall = { w: string; token: string; amount: bigint; minO
  *  bad_target), then encoded again with the builder's own encoder (swapData: the same checks and the same bytes) and
  *  held byte-equal to the data signed, then checked once more by evmSellRouteCheck. So a sender carries a sale only
  *  through the PoolManager or a listed router, along a route the device's builder takes, paying W, for the amount and
- *  minOut signed (card helper-evm-sender: the helper's sell sender pays the gas of every call W signs). */
+ *  minOut signed (card helper-evm-sender: the helper's sell sender pays the gas of every call W signs). A v4 hop's hook
+ *  may be any (card evm-sell-hook-converge): the device's quote picks a route through an unlisted hook where it sets
+ *  the reference, which no sender can tell from the Sell; a hook that makes the sale revert costs the sender that
+ *  sale's gas, as a minOut the swap misses does, within the helper's unpaid-gas caps. */
 export function evmSellRouteOf(chain: EvmPoolChain, sell: EvmSignedSellCall): EvmSellRoute {
   if (typeof sell !== "object" || sell === null) return refuse("bad_route", "a signed sell is an object");
   const { w, token, amount, minOut, target, data } = sell;
@@ -342,13 +350,13 @@ export function evmSellRouteOf(chain: EvmPoolChain, sell: EvmSignedSellCall): Ev
     return refuse("bad_target", `a sell goes only to ${chain}'s pinned PoolManager or a listed router, not ${target}`);
   }
   // the builder's own bytes for that route, W, the amount and minOut: anything else signed is refused
-  if (swapData(chain, token, route, target, w, amount, minOut) !== lower(data)) return refuse("bad_route", "the data is not the bytes the sell builder makes for its route");
-  evmSellRouteCheck(chain, token, route);
+  if (swapData(chain, token, route, target, w, amount, minOut, true) !== lower(data)) return refuse("bad_route", "the data is not the bytes the sell builder makes for its route");
+  evmSellRouteCheck(chain, token, route, true);
   return route;
 }
 
 /** The sell W asked for on `chain`, after every check (see the header); refused with its own code otherwise. */
-export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUnpinnedRequest): EvmPoolSell {
+export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUnpinnedRequest, anyHook = false): EvmPoolSell {
   if (typeof req !== "object" || req === null) return refuse("bad_route", "a sell request is an object");
   const { w, token, amount, target, route, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce } = req;
   const venue = venueOf(chain);
@@ -368,7 +376,7 @@ export function evmPoolBuildSellUnpinned(chain: EvmPoolChain, req: EvmPoolSellUn
   if (typeof deadline !== "bigint" || deadline < BigInt(t + EVM_POOL_SELL_DEADLINE_MIN_S) || deadline > BigInt(t + EVM_POOL_SELL_DEADLINE_MAX_S)) {
     return refuse("bad_deadline", `the deadline is ${EVM_POOL_SELL_DEADLINE_MIN_S} to ${EVM_POOL_SELL_DEADLINE_MAX_S} seconds past now (${t})`);
   }
-  const data = swapData(chain, token, route, target, w, amount, minOut);
+  const data = swapData(chain, token, route, target, w, amount, minOut, anyHook);
   const built: EvmPoolSell = Object.freeze({ chain, w, token, amount, target, data, minOut, pool, precommitment, feeCap, feeRecipient, deadline, nonce });
   BUILT.add(built);
   return built;
@@ -567,14 +575,14 @@ function pinsOf(venues: EvmPoolVenueList, chain: EvmPoolChain): ReturnType<typeo
 }
 
 /** evmPoolBuildSellUnpinned into the chain's pinned pool, its fee paid to the chain's pinned FeeCollector only. */
-export function pinnedBuildSell(venues: EvmPoolVenueList, chain: EvmPoolChain, req: EvmPoolSellRequest): EvmPoolSell {
+export function pinnedBuildSell(venues: EvmPoolVenueList, chain: EvmPoolChain, req: EvmPoolSellRequest, anyHook = false): EvmPoolSell {
   const { pool, feeCollector } = pinsOf(venues, chain);
   if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);
   // the helper sends only a Sell that pays the network's FeeCollector, whose Paid log proves the fee (card
   // evm-testnet-delegate-review3): a chain that pins none takes no sale
   if (feeCollector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector yet`);
   // a request that is not an object copies to { pool } alone, which the unpinned builder refuses (bad_route)
-  const built = evmPoolBuildSellUnpinned(chain, { ...req, pool });
+  const built = evmPoolBuildSellUnpinned(chain, { ...req, pool }, anyHook);
   // the recipient the built Sell pays, read once by the builder's checks (an address, not zero, W or the pool)
   if (lower(built.feeRecipient) !== lower(feeCollector)) return refuse("not_pinned", `the sell's fee recipient is not ${chain}'s pinned FeeCollector`);
   return built;
