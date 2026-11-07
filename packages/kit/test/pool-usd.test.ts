@@ -652,3 +652,34 @@ test("card solana-release-reads-paced: with a provider's pace full the price rea
   assert.equal(sent.length, 1, "one read on A, once its turn came");
   assert.ok(sent[0]! - full >= 5_500, `the read on A went out once the pace let it: ${Math.round(sent[0]! - full)} ms`);
 });
+
+// Card solana-release-reads-paced: a try that waits for its turn in its provider's queue sends nothing once the read
+// has ended (the other provider refused) or once the read's bound has passed while it waited. Real timers (the queue
+// runs on them); the read's clock (Date) alone is moved, by node:test's mock, past the 12 s bound.
+const waiting = (url: string) => {
+  const sent: string[] = [];
+  const rpc = Object.assign(async (method: string) => { sent.push(method); return GOOD(); }, { url });
+  const limit = { windowMs: 400, total: 1, perMethod: 1 };
+  return { rpc: solanaPacedRpc(rpc, limit), sent, fill: () => solanaPacedRpc(Object.assign(async () => null, { url }), limit)("getSlot", []) };
+};
+test("retry: a try waiting for its turn sends nothing once the read has ended", async () => {
+  const a = waiting("https://pace-usd-stop-a.example/");
+  await a.fill();
+  const refuse = Object.assign(async () => { throw new Error("HTTP 403"); }, { url: "https://pace-usd-stop-b.example/" });
+  await assert.rejects(poolUsdPrice({ chain: "solana", rpcs: [a.rpc, refuse], nowMs: NOW }), /HTTP 403/);
+  await new Promise((r) => setTimeout(r, 600));
+  assert.deepEqual(a.sent, [], "a: its turn came after the read ended, and nothing was sent");
+});
+test("retry: a try whose turn comes past the read's bound sends nothing and fails the read as no answer", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const a = waiting("https://pace-usd-late-a.example/");
+  await a.fill();
+  const b = Object.assign(async () => GOOD(), { url: "https://pace-usd-late-b.example/" });
+  const read = poolUsdPrice({ chain: "solana", rpcs: [a.rpc, b], nowMs: NOW });
+  read.catch(() => undefined); // awaited below
+  // b answered at once; a waits for its turn (real time) while the read's clock passes its bound
+  await new Promise((r) => setImmediate(r));
+  t.mock.timers.tick(POOL_USD_READ_DEADLINE_MS + 1_000);
+  await assert.rejects(read, /rpc 0 getMultipleAccounts: no turn inside the read's bound/);
+  assert.deepEqual(a.sent, [], "a: its turn came past the bound, and nothing was sent");
+});

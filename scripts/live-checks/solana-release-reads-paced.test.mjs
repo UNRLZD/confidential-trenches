@@ -46,7 +46,7 @@ test("the facts read from a bundle", () => {
     "function Cm(e,t=rm){let n=sm.get(e)??e,r=mm(n,t),i=(n,i)=>{if(cm===r)return e(n,i);let a=hm(e,t,n);return a.wait?a.wait.then(()=>a.run(i)):a.run(i)},a=n.url===void 0?i:Object.assign(i,{url:n.url});return sm.set(a,n),a}" +
     "function wm(e,t,n){let r=Sm(e,(r,i)=>{let a,o;try{o=typeof t==`function`?t():t,a=Promise.resolve(e(r,i))}catch(e){return Promise.reject(e)}return Em(a,o,n)}),i=sm.get(e)??e,a=(i.url===void 0?om.get(i):am.get(fm(i.url)))?.limits.values().next().value;return a?Cm(r,a):r}" +
     "Ly=e=>e instanceof Fy||e instanceof jm&&e.fault===`timeout`;async function zy(e,t,n,r,i){for(let a=1;;a++){if(i.stopped)return X(`${r}: not asked again, the read has ended`);" +
-    "let o=wm(e,()=>{if(i.stopped)return X(`${r}: not asked again, the read has ended`);let e=i.end-Date.now();if(e<=0)throw new Fy(`${r}: no turn inside the read's bound`);return Math.min(My,e)},e=>new Fy(`${r}: no answer in ${e} ms`));try{return await Promise.resolve().then(()=>o(t,n))}catch(e){}}}" +
+    "let o=wm(e,()=>{if(i.stopped)throw Error(`${r}: not asked again, the read ended before its turn`);let e=i.end-Date.now();if(e<=0)throw new Fy(`${r}: no turn inside the read's bound`);return Math.min(My,e)},e=>new Fy(`${r}: no answer in ${e} ms`));try{return await Promise.resolve().then(()=>o(t,n))}catch(e){}}}" +
     "t Promise.all(e.map(async e=>{try{let r=wm(e,n),i=(e,t)=>Promise.resolve().then(()=>r(e,t)),a=Xm(await i(`getLatestBlockhash`,[{commitment:`finalized`}]));" +
     "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>p_(e,t.length),()=>null)));" +
     "let t=(await Promise.resolve().then(()=>wm(e,Wv)(`getAccountInfo`,[dv,{encoding:`base64`,commitment:`confirmed`}])))?.value;" +
@@ -92,6 +92,7 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("if(e<=0)throw new Fy(`${r}: no turn inside the read's bound`);return Math.min(My,e)", "return Math.max(1,Math.min(My,e))").price, false);
   assert.equal(planted("e=>new Fy(`${r}: no answer in ${e} ms`)", "e=>Error(`${r}: no answer in ${e} ms`)").price, false);
   assert.equal(planted("Ly=e=>e instanceof Fy||", "Ly=e=>").price, false);
+  assert.equal(planted("{if(i.stopped)throw Error(`${r}: not asked again, the read ended before its turn`);let e=", "{let e=").price, false, "a turn after the read ended still sent");
   // the paced wrapper calling past its own slot (no guard): no paced wrapper found, every fact FAILs
   const unguarded = planted("{if(cm===r)return e(n,i);let a", "{let a");
   assert.deepEqual([unguarded.release, unguarded.pair, unguarded.timed, unguarded.price], [false, false, false, false]);

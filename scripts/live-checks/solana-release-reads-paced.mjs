@@ -64,8 +64,8 @@ export function facts(index, js) {
     // the tx-end reads (send.ts readSolanaTxEnd)
     new RegExp(`let (${N})=${esc(t)}\\(${N},${N}\\),${N}=\\((${N}),(${N})\\)=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>\\1\\(\\2,\\3\\)\\)`).test(js);
   // the price read (kit price/pool-usd.ts call): each try through the timed read, its bound taken at its turn and none
-  // sent once the read's bound has ended, its timeout the read's own NoAnswer, which its slow() asks again
-  const priceAt = t ? new RegExp(`let (${N})=${esc(t)}\\(${N},\\(\\)=>\\{if\\(${N}\\.stopped\\)return ${N}\\(${Q}\\$\\{${N}\\}: not asked again, the read has ended${Q}\\);let (${N})=${N}\\.end-Date\\.now\\(\\);if\\(\\2<=0\\)throw new (${N})\\(${Q}\\$\\{${N}\\}: no turn inside the read's bound${Q}\\);return Math\\.min\\(${N},\\2\\)\\},(${N})=>new \\3\\(${Q}\\$\\{${N}\\}: no answer in \\$\\{\\4\\} ms${Q}\\)\\);try\\{return await Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>\\1\\(${N},${N}\\)\\)\\}`).exec(js) : null;
+  // sent once the read has ended or its bound has passed, its timeout the read's own NoAnswer, which its slow() asks again
+  const priceAt = t ? new RegExp(`let (${N})=${esc(t)}\\(${N},\\(\\)=>\\{if\\(${N}\\.stopped\\)throw Error\\(${Q}\\$\\{${N}\\}: not asked again, the read ended before its turn${Q}\\);let (${N})=${N}\\.end-Date\\.now\\(\\);if\\(\\2<=0\\)throw new (${N})\\(${Q}\\$\\{${N}\\}: no turn inside the read's bound${Q}\\);return Math\\.min\\(${N},\\2\\)\\},(${N})=>new \\3\\(${Q}\\$\\{${N}\\}: no answer in \\$\\{\\4\\} ms${Q}\\)\\);try\\{return await Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>\\1\\(${N},${N}\\)\\)\\}`).exec(js) : null;
   const price = !!priceAt && new RegExp(`=(${N})=>\\1 instanceof ${esc(priceAt[3])}\\|\\|`).test(js);
   return { index, sha384: sha384(js), release, pair, timed, price };
 }
