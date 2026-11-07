@@ -918,8 +918,9 @@ test("the host's configuration: nothing set carries nothing (bad_shape); a netwo
   assert.equal(code(await withdrawSenderFromEnv(good, quoter, {}).carry({ ...req(), token: VAULT_CONSTANTS.TOKEN })), "bad_shape");
 });
 
-// The pin follows the kit's rule (packages/wallet/test/deposit-delegate.test.ts): mainnet-v1.json's account_id once the
-// mainnet deploy writes that file, else mainnet-test.json's; one case for each, the other skipped.
+// The helper's pin: mainnet-v1.json's account_id once the mainnet deploy writes that file, else mainnet-test.json's; one
+// case for each, the other skipped. The kit's rule is narrower (packages/wallet/test/deposit-delegate.test.ts):
+// mainnet-v1.json's vault or null, never mainnet-test.json's; both meet once mainnet-v1.json exists.
 const DEPLOYMENTS = join(import.meta.dirname, "../../../../contracts/vault/deployments");
 const recordOf = (name: string) => JSON.parse(readFileSync(join(DEPLOYMENTS, `${name}.json`), "utf8")) as { network: string; account_id: string };
 const HAS_V1 = existsSync(join(DEPLOYMENTS, "mainnet-v1.json"));

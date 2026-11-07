@@ -15,7 +15,7 @@ import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import * as kit from "../src/index.ts";
-import { EVM_POOL_SELL_DEADLINE_MAX_S, EVM_POOL_SELL_DEADLINE_MIN_S, EvmPoolSellError, evmPoolVenues, type EvmPoolChain, type EvmV3Route } from "../src/index.ts";
+import { EVM_POOL_SELL_DEADLINE_MAX_S, EVM_POOL_SELL_DEADLINE_MIN_S, EvmPoolSellError, evmPoolVenues, type EvmPoolChain, type EvmPoolVenue, type EvmV3Route } from "../src/index.ts";
 // the checks, the encoding and the digests, through the unpinned builders (no pool or delegate is pinned yet); the
 // pinned functions the index exports are tested below with a pinned venue list of the test's own
 import {
@@ -64,8 +64,13 @@ const OTHER_KEY = hardhatAccount(1);
 const W = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const ACCOUNT_1 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
-const B = evmPoolVenues().base;
-const R = evmPoolVenues().robinhood;
+/** A venue with its pins taken out (card pool-evm-deploy-mainnet pins the mainnets): the lists below pin what they name. */
+const unpinned = (v: EvmPoolVenue): EvmPoolVenue => {
+  const { pool: _p, adapters: _a, sellDelegate: _s, feeCollector: _f, ...rest } = v;
+  return Object.freeze(rest);
+};
+const B = unpinned(evmPoolVenues().base);
+const R = unpinned(evmPoolVenues().robinhood);
 const USDC = B.middles[0]!;
 const USDG = R.middles[0]!;
 const X = "0xF111111111111111111111111111111111111111";
@@ -450,17 +455,22 @@ const PINNED = Object.freeze({
 });
 const { pool: _pool, ...pinnedReq } = req({ feeRecipient: PIN_COLLECTOR });
 
-test("M370 today no pool or sell delegate is pinned: the pinned builder and signer under the kit's evmPoolBuildSell and evmPoolSignSell, and evmPoolSignSellAuthorization, refuse not_deployed", () => {
+test("M370 a list with no pool or sell delegate pinned: the pinned builder and signer under the kit's evmPoolBuildSell and evmPoolSignSell, and the authorization, refuse not_deployed", () => {
+  const none = Object.freeze({ base: B, robinhood: R });
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
-    const v = evmPoolVenues()[chain];
+    const v = none[chain as "base"];
     assert.equal(v.pool, undefined);
     assert.equal(v.sellDelegate, undefined);
     const r = { ...pinnedReq, target: v.routers[0]!, route: v3([X, v.weth]) };
-    assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, r)), "not_deployed", chain);
-    assert.equal(code(() => pinnedSignSell(evmPoolVenues(), W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_deployed", chain);
+    assert.equal(code(() => pinnedBuildSell(none, chain, r)), "not_deployed", chain);
+    assert.equal(code(() => pinnedSignSell(none, W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_deployed", chain);
+    assert.equal(code(() => pinnedSignSellAuthorization(none, W_KEY, chain, 0n)), "not_deployed", chain);
     // the kit's signer signs only a sell its quoted builder returned
     assert.equal(code(() => kit.evmPoolSignSell(W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_built", chain);
-    assert.equal(code(() => kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n)), "not_deployed", chain);
+    // the kit's own list pins this chain (card pool-evm-deploy-mainnet): the pool it names is not its pin, and W's
+    // authorization names its delegate
+    assert.equal(code(() => pinnedSignSell(evmPoolVenues(), W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: PIN_POOL }))), "not_pinned", chain);
+    assert.equal(kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n).address, evmPoolVenues()[chain].sellDelegate, chain);
   }
 });
 
@@ -506,7 +516,7 @@ function polluted(f: () => void): void {
   }
 }
 
-test("M370 a polluted Object.prototype names no pool and no delegate: every sell builder and signer still refuses not_deployed", () => {
+test("M370 a polluted Object.prototype names no pool and no delegate: every sell builder and signer still refuses (not_deployed where none is pinned, not_pinned beside the kit's own pins)", () => {
   assert.equal(Object.getPrototypeOf(evmPoolVenues()), null, "the venue list has no prototype");
   for (const chain of ["base", "robinhood"] as EvmPoolChain[]) assert.equal(Object.getPrototypeOf(evmPoolVenues()[chain]), null, chain);
   const noPins = Object.freeze({ base: Object.freeze({ ...B }), robinhood: Object.freeze({ ...R }) }); // an ordinary list
@@ -514,9 +524,10 @@ test("M370 a polluted Object.prototype names no pool and no delegate: every sell
     for (const chain of ["base", "robinhood"] as EvmPoolChain[]) {
       const v = evmPoolVenues()[chain];
       const r = { ...pinnedReq, target: v.routers[0]!, route: v3([X, v.weth]) };
-      assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, r)), "not_deployed", chain);
-      assert.equal(code(() => pinnedSignSell(evmPoolVenues(), W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
-      assert.equal(code(() => kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n)), "not_deployed", chain);
+      // the kit's own pins (card pool-evm-deploy-mainnet): the polluted pool and delegate are never read in their place
+      assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, r)), "not_pinned", chain);
+      assert.equal(code(() => pinnedSignSell(evmPoolVenues(), W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_pinned", chain);
+      assert.equal(kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n).address, v.sellDelegate, chain);
       assert.equal(code(() => pinnedBuildSell(noPins, chain, r)), "not_deployed", chain);
       assert.equal(code(() => pinnedSignSell(noPins, W_KEY, chain, evmPoolBuildSell(chain, { ...r, pool: EVIL }))), "not_deployed", chain);
       assert.equal(code(() => pinnedSignSellAuthorization(noPins, W_KEY, chain, 0n)), "not_deployed", chain);
@@ -571,16 +582,16 @@ test("card evm-testnet-delegate-review3: a pinned sell pays its fee only to the 
   } finally {
     delete P.feeCollector;
   }
-  // the kit's own testnet pins: a v4 sell pays the chain's collector, never another address; the mainnets pin none
+  // the kit's own pins: a v4 sell pays the chain's collector, never another address, on the testnets and (card
+  // pool-evm-deploy-mainnet) the mainnets
   const ZERO = "0x0000000000000000000000000000000000000000";
-  for (const chain of ["base-sepolia", "robinhood-testnet"] as EvmPoolChain[]) {
+  for (const chain of ["base-sepolia", "robinhood-testnet", "base", "robinhood"] as EvmPoolChain[]) {
     const v = evmPoolVenues()[chain];
     const r = { ...pinnedReq, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
     assert.ok(v.feeCollector, chain);
     assert.equal(pinnedBuildSell(evmPoolVenues(), chain, { ...r, feeRecipient: v.feeCollector! }).feeRecipient, v.feeCollector, chain);
     assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), chain, { ...r, feeRecipient: FEE_TO })), "not_pinned", chain);
   }
-  for (const chain of ["base", "robinhood"] as EvmPoolChain[]) assert.equal(evmPoolVenues()[chain].feeCollector, undefined, chain);
 });
 
 // A v4 sell (card evm-sell-v4-kit): SellDelegate's data, abi.encode(PathKey[]), against cast (evm-pool-sell-v4.cast.json),

@@ -1797,8 +1797,8 @@ type Venue = ReturnType<typeof venue>;
  *  chain pins a sell delegate and the helper's sell sender it counts only once an eth_call of the exact trade from W
  *  executes it at that price, sent as the sale is sent (simmedSells: from the sender, with the sale's gas and fees, so a
  *  hook cannot tell the sim from the sale by tx.gasprice, tx.origin, msg.sender or its gas; review of the exec sim,
- *  HIGH 1) ("sim"); where it pins either not (mainnet until pool-evm-deploy; every chain until the helper's sender is
- *  pinned) it keeps the lower of its quote with the hook replaced and as it is ("keep-min"), which refuses rather than
+ *  HIGH 1) ("sim"); where it pins either not (none of the four since card pool-evm-deploy-mainnet pinned the mainnets'
+ *  delegates) it keeps the lower of its quote with the hook replaced and as it is ("keep-min"), which refuses rather than
  *  signs at a seeded price. The freeze a hook that lets only the quoter trade can put on a token's trades (probe PE)
  *  therefore lasts on such a chain until both are pinned. A requested buy through such a hook counts at the lowest of
  *  its quote and its quotes with such hooks replaced, and is taken only where no route through listed pools is within

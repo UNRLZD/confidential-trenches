@@ -1,10 +1,10 @@
-// Replays pool-evm-deploy-mainnet.answers.json through the card's live check. Until the owner's paste has run it is a
-// REHEARSAL recording (its notes say so): the check on anvil forks of Base and Robinhood mainnet
-// (contracts/pool-evm/script/mainnet-rehearsal.sh), each fork's record and the kit's venue given that record's
-// contracts as its pins. The good answer passes; the same recording fails with the kit as it is (no mainnet pin yet),
-// with one byte of a contract's code flipped on one RPC, and with a record missing or a dry run's; a dry run's record
-// read on the mainnet RPCs fails. The recording holds each set's FeeCollector, its sink the kit's mainnet sell sender pin
-// (card evm-mainnet-senders, re-recorded with the kit's pins); a sink pin off it or none fails.
+// Replays pool-evm-deploy-mainnet.answers.json through the card's live check: a MAINNET recording (its notes say so), the
+// check on Base and Robinhood mainnet after the owner's pastes, its records contracts/pool-evm/deployments/<chain>.json
+// as committed and the kit's venues as they are (evmPoolVenues(), the mainnet pins of card pool-evm-deploy-mainnet).
+// The good answer passes; the same recording fails with the kit before those pins (be1cfaef: the records in, no mainnet
+// pin), with one byte of a contract's code flipped on one RPC, and with a record missing or a dry run's; a dry run's
+// record read on the mainnet RPCs fails. Each set's FeeCollector has its sink the kit's mainnet sell sender pin (card
+// evm-mainnet-senders); a sink pin off it or none fails.
 //   node --test scripts/live-checks/pool-evm-deploy-mainnet.test.mjs
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,7 +29,9 @@ function replay(answers) {
     return { ok: a.status === 200, status: a.status, json: async () => a.json };
   };
 }
-const pinned = Object.fromEntries(Object.keys(A.pins).map((c) => [c, { ...evmPoolVenues()[c], ...A.pins[c] }]));
+const pinned = evmPoolVenues();
+/** a dry run's copy of a real record (the rehearsal's shape), which a mainnet's check refuses */
+const dry = (d) => ({ ...d, dryRun: true });
 const run = ({ answers = A.good, venues = pinned, read = (c) => A.records[c] ?? null } = {}) =>
   checkMainnets({ read, venues, rpcsOf: (c) => A.rpcs[c], fetchFn: replay(answers), sleep: async () => {} });
 const fails = (r, re) => {
@@ -40,7 +42,10 @@ const fails = (r, re) => {
 test("the recording covers both mainnets and says what it is", () => {
   assert.deepEqual(Object.keys(A.records), Object.keys(MAINNETS));
   for (const c of Object.keys(MAINNETS)) assert.deepEqual(Object.keys(A.records[c].contracts), MAINNETS[c].contracts, `${c}: the recording and its constructed collector name the mainnet set`);
-  assert.match(A.notes[0], /^A REHEARSAL recording: .*anvil forks of Base and Robinhood mainnet/);
+  assert.match(A.notes[0], /^A MAINNET recording: .*on Base and Robinhood mainnet/);
+  // the recording's records are the committed ones, the real runs the money gate reads
+  for (const c of Object.keys(MAINNETS)) assert.deepEqual(A.records[c], recordOf(c), c);
+  assert.deepEqual(A.rpcs, Object.fromEntries(Object.keys(MAINNETS).map((c) => [c, MAINNETS[c].rpcs])));
 });
 
 test("the good answer passes: on both mainnets the record's check and the kit's pins pass on both RPCs", async () => {
@@ -52,8 +57,13 @@ test("the good answer passes: on both mainnets the record's check and the kit's 
   }
 });
 
-test("the kit as it is, with no mainnet pin yet, fails on each pin", async () => {
-  const r = await run({ venues: evmPoolVenues() });
+test("the kit before card pool-evm-deploy-mainnet (be1cfaef: no mainnet pin) fails on each pin", async () => {
+  const before = Object.fromEntries(Object.keys(MAINNETS).map((c) => {
+    const { pool, adapters, sellDelegate, feeCollector, ...v } = evmPoolVenues()[c];
+    assert.ok(pool && adapters && sellDelegate && feeCollector, c);
+    return [c, v];
+  }));
+  const r = await run({ venues: before });
   for (const c of Object.keys(MAINNETS)) fails(r, new RegExp(`${c}: kit pin FAIL the pool pin \\(none\\) is the record's PrivacyPoolSimple ${A.records[c].contracts.PrivacyPoolSimple.address}`));
 });
 
@@ -72,15 +82,15 @@ test("one byte of the pool's code flipped on one RPC fails", async () => {
   fails(await run({ answers }), /base: (deploy|kit pin) FAIL .*PrivacyPoolSimple|base: kit pin FAIL the pool .*same code on both RPCs/);
 });
 
-test("a missing record fails (today's mainnet), and a dry run's record is refused as a mainnet record", async () => {
+test("a missing record fails (mainnet before the paste), and a dry run's record is refused as a mainnet record", async () => {
   fails(await run({ read: (c) => (c === "base" ? null : A.records[c]) }), /base: FAIL no record: the owner's paste has not run: sh contracts\/pool-evm\/script\/mainnet-deploy\.sh base <address>/);
   const f = path.join(mkdtempSync(path.join(tmpdir(), "pedm-")), "robinhood.json");
-  writeFileSync(f, JSON.stringify(A.records.robinhood));
+  writeFileSync(f, JSON.stringify(dry(A.records.robinhood)));
   fails(await run({ read: (c) => (c === "robinhood" ? recordOf(c, f) : A.records[c]) }), /robinhood: FAIL .*robinhood\.json is not robinhood's real run/);
 });
 
 test("a dry run's record read on the mainnet RPCs fails: a fork's record is read on loopback only", async () => {
-  const r = await pinCheck({ chain: "base", venue: pinned.base, deployment: A.records.base, rpcs: MAINNETS.base.rpcs, fetchFn: async () => { throw new Error("offline"); }, sleep: async () => {} });
+  const r = await pinCheck({ chain: "base", venue: pinned.base, deployment: dry(A.records.base), rpcs: MAINNETS.base.rpcs, fetchFn: async () => { throw new Error("offline"); }, sleep: async () => {} });
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("FAIL a dry-run record read on a non-loopback RPC"), r.lines.join("\n"));
 });
@@ -99,14 +109,14 @@ test("no payer is exempt: a recorded transaction sent by anyone but the run key 
 });
 
 test("the mainnets' run record (--write-record's, the money gate's) has Money path: yes and one Tx line per transaction of each record; a dry run's is refused", () => {
-  const real = Object.fromEntries(Object.entries(A.records).map(([c, d]) => [c, { ...d, dryRun: false }]));
+  const real = A.records;
   const text = mainnetRunRecord(real);
   const lines = text.split("\n");
   assert.equal(lines[0], "CARD pool-evm-deploy-mainnet / live: PASS");
   assert.equal(lines[1], "Money path: yes");
   const tx = lines.filter((l) => l.startsWith("Tx: "));
   assert.deepEqual(tx, Object.keys(MAINNETS).flatMap((c) => real[c].txs.map((t) => `Tx: ${c} ${t.hash}`)));
-  assert.throws(() => mainnetRunRecord(A.records), /a dry run/);
+  assert.throws(() => mainnetRunRecord(Object.fromEntries(Object.entries(A.records).map(([c, d]) => [c, dry(d)]))), /a dry run/);
 });
 
 test("a 61 s throttle (every answer HTTP 429, as Robinhood's RPC gives) is waited out by the check the paste runs: the good answer still passes", async () => {
