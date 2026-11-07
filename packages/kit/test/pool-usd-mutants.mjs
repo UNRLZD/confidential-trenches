@@ -8,7 +8,7 @@
 // test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
 // test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, S11's hold on the wallet's token accounts
 // and the flow's rent read by that size (test/solana-quote.test.ts "S11 review", test/solana-flow-replay.test.ts, card
-// solana-written-accounts-whole): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// solana-written-accounts-whole), and the guard on the flow's early [wallet, wSOL] simulation (card solana-quote-under-1s): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -114,6 +114,12 @@ export const MUTANTS = [
   [S6, "if (typeof size === \"string\") return fail(\"S11\"", "if (false) return fail(\"S11\"", RVW1, S10_TEST],
   [S6, "while (d.length - at >= 2) {", "while (d.length - at >= 4) {", "S11 review RVW-2", S10_TEST],
   [FLOW, "size = solanaTokenAccountSize(mintA);", "size = 170;", "card solana-written-accounts-whole review RVW-3", FLOW_TEST],
+  // the early [wallet, wSOL] simulation (card solana-quote-under-1s, review of fd926d82): used only when the written
+  // accounts' read finds that one account to read back, read on provider B as well as on A as the pre-state read gave it.
+  // Dropping `mine[0] === wsol` alone (M5b) changes nothing: the read equal to the hint, the wallet's token account,
+  // puts wSOL in `mine`, so a `mine` of one is [wSOL].
+  [FLOW, "&& sameAccounts([hint[0]], [read[0][wi] ?? null]) && sameAccounts([hint[1]], [read[1][wi] ?? null]);", "&& sameAccounts([hint[0]], [read[0][wi] ?? null]);", "card solana-quote-under-1s review M4", FLOW_TEST],
+  [FLOW, "&& mine.length === 1 && mine[0] === wsol &&", "&& mine[0] === wsol &&", "card solana-quote-under-1s review M5", FLOW_TEST],
   // the same review's survivors of the last one, each now killed by its own test: the program compared after the tx on
   // each of the three kinds (N5a), the providers' agreement on the program (N5b), an agreed account of the token kept as
   // read (N15); and no baseline from provider A alone (N4b, PROBE-5 in RVW-7's shape)

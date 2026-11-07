@@ -1345,3 +1345,69 @@ test("card solana-written-accounts-whole review RVW-3: the rent of the account o
   assert.ok(none.length <= 1, `${none.length} builds`);
   assert.deepEqual(u.asked, [], "no rent read");
 });
+
+// Card solana-quote-under-1s, the independent review of fd926d82 (af47a0f7): the early [wallet, wSOL] simulation counts
+// only when the written accounts' read finds that one account to read back and reads it on each provider as the
+// pre-state read did. M4 (provider B's comparison dropped) and M5 (`mine.length === 1` dropped) each pass the suite
+// without these two tests.
+test("card solana-quote-under-1s review M4: provider B alone reads a deposit into the wSOL account after the pre-state read, and reads it so again: the early simulation is dropped on both providers and the second runs after the read", async () => {
+  const d = deps(SELL);
+  let moved = 0;
+  let pre = 0;
+  // provider B only: the first five-key read of the wallet with its wSOL account is the pre-state read and stays as
+  // recorded; the written accounts' read and the read again after the simulations both read the account one lamport up
+  const providers = secondRun(d, (at, method, params, x) => {
+    const keys = method === "getMultipleAccounts" ? (params[0] as string[]) : [];
+    const i = keys.indexOf(WSOL_HELD.account);
+    if (at !== "B" || i < 0 || !keys.includes(WSOL_HELD.wallet) || (keys.length === 5 && pre++ === 0)) return x;
+    const v = (x as { value: ({ lamports: number } | null)[] }).value[i];
+    if (v) { v.lamports += 1; moved++; }
+    return x;
+  });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers });
+  assert.ok(moved >= 2, `B's reads after the pre-state edited ${moved} times`);
+  const second = askOf("simulateTransaction", ["", { accounts: { addresses: [WSOL_HELD.wallet, WSOL_HELD.account], encoding: "base64" } }]);
+  for (const p of d.providers) assert.equal(p.asks.filter((k) => k === second).length, 2, "the early one and the one after the read");
+  const leg = r.legs.find((l) => l.wallet === WSOL_HELD.wallet)!;
+  assert.notEqual(leg.refused, "the wallet's accounts changed while the trade was checked", "the read again equals the written read");
+});
+
+// X, one more account the read finds as the wallet's token account, is planted after the wSOL account (the recorded
+// sell writes none before it but the wallet's own): the read finds [wSOL, X], and M5 would read the wallet back with
+// wSOL alone and X not at all.
+test("card solana-quote-under-1s review M5: the written accounts' read finds the wallet's wSOL account and another of its token accounts after it in the tx: the early simulation is dropped and the wallet is read back with both, once on each provider", async () => {
+  const req = request(SELL);
+  const d = deps(SELL);
+  const w = WSOL_HELD.wallet;
+  const not = new Set([w, WSOL_HELD.account, solanaAta(w, req.token, SOLANA_TOKEN_2022_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM)]);
+  const fake = (k: string) => { const b = new Uint8Array(165); b.set(base58.decode(k), 0); b.set(base58.decode(w), 32); b[64] = 1; b[108] = 1; return { data: [base64.encode(b), "base64"], executable: false, lamports: 2_039_280, owner: SOLANA_TOKEN_PROGRAM, rentEpoch: 0, space: 165 }; };
+  let x: string | null = null;
+  const groups: Record<"A" | "B", string[][]> = { A: [], B: [] };
+  const wrap = (p: (typeof d.providers)[number], at: "A" | "B") => Object.assign(async (method: string, params: readonly unknown[]) => {
+    const back = simAddresses(method, params);
+    if (back?.[0] === w) groups[at].push(back);
+    if (back?.[0] === w && back.length === 3 && x && back.includes(x)) {
+      // the recorded [wallet, wSOL] read-back, with X read back as the planted account
+      const two = (await p(method, [params[0], { ...(params[1] as object), accounts: { addresses: [w, WSOL_HELD.account], encoding: "base64" } }])) as { value: { accounts: unknown[] } };
+      two.value.accounts = back.map((k) => (k === w ? two.value.accounts[0] : k === x ? fake(k) : two.value.accounts[1]));
+      return two;
+    }
+    const out = await p(method, params);
+    if (method === "getMultipleAccounts") {
+      const keys = params[0] as string[];
+      const iw = keys.indexOf(WSOL_HELD.account);
+      if (!x && keys.length > 5 && keys.includes(w) && iw >= 0) x = keys.slice(iw + 1).find((k) => !not.has(k)) ?? null;
+      if (x) keys.forEach((k, i) => { if (k === x) (out as { value: unknown[] }).value[i] = fake(k); });
+    }
+    return out;
+  }, { asks: p.asks, times: p.times });
+  const r = await runSolanaTrade(req, { ...d, providers: [wrap(d.providers[0], "A"), wrap(d.providers[1], "B")] });
+  assert.ok(x, "no written account after the wSOL account to plant");
+  const leg = r.legs.find((l) => l.wallet === w)!;
+  assert.equal(leg.simulationErrors, undefined, String(leg.simulationErrors));
+  for (const at of ["A", "B"] as const) {
+    const g = groups[at].filter((b) => b.length === 2 || b.length === 3).map((b) => b.join(","));
+    assert.equal(g.filter((b) => b === `${w},${WSOL_HELD.account}`).length, 1, `${at}: the early run alone, dropped`);
+    assert.equal(g.filter((b) => b.split(",").length === 3 && b.includes(WSOL_HELD.account) && b.includes(x!)).length, 1, `${at}: the wallet read back with both, once: ${g.join(" | ")}`);
+  }
+});
