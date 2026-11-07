@@ -71,4 +71,8 @@ test("the facts read from a bundle", () => {
   const counted = next.replace("if(s.length)return{stage:`part_filled`,txs:s};", "if(c)return{stage:`part_filled`,txs:s};");
   assert.equal(facts("", counted).sent, true);
   assert.equal(facts("", counted.replace("if(u().length)return{stage:`sent`,txs:u()};", "")).sent, false);
+  // never the list as its own condition (always true: part_filled with nothing landed), nor another list's length
+  // (card pool-answer-unknown, delta review r2)
+  assert.equal(facts("", counted.replace("if(c)return{stage:`part_filled`,txs:s};", "if(s)return{stage:`part_filled`,txs:s};")).sent, false);
+  assert.equal(facts("", counted.replace("if(c)return{stage:`part_filled`,txs:s};", "if(c.length)return{stage:`part_filled`,txs:s};")).sent, false);
 });
