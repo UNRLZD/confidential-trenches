@@ -479,7 +479,10 @@ export const MUTANTS = [
   [QUOTE, "if (under(pick) && reference !== null && evmSellExits(chain, t, reference.route, true)) pick =", "if (false) pick =", R, "HC1 "],
   [QUOTE, "evmSellExits(chain, t, reference.route, true)) pick =", "evmSellExits(chain, t, reference.route)) pick =", R, "HC1 "],
   [QUOTE, "if (under(pick) && reference !== null && evmSellExits", "if (reference !== null && evmSellExits", R, "HC4 "],
-  [QUOTE, "const filled = found.filter((r) => !(r.route.venue === \"uniswap-v4\" && hopKeys(r.route).some((k) => banned.has(\"0x\" + poolId(k)))));", "const filled = found;", R, "HC1 "],
+  // the ban acts inside routeSet, before any pick (review of 919742f5, F1); the filter on its finished routes only holds it
+  // once more, so dropping that alone is equivalent (the review's M1) and the mutant drops the ban where it acts
+  [QUOTE, "const isBanned = (k: EvmPoolKey) => a.banned !== undefined && a.banned.has(\"0x\" + poolId(k));", "const isBanned = (_k: EvmPoolKey) => false;", R, "RV1 "],
+  [QUOTE, "const isBanned = (k: EvmPoolKey) => a.banned !== undefined && a.banned.has(\"0x\" + poolId(k));", "const isBanned = (_k: EvmPoolKey) => false;", R, "RV4 "],
   [QUOTE, "if (!Array.isArray(b) || b.length > EVM_SELL_BANNED_MAX) return refuse(", "if (!Array.isArray(b)) return refuse(", R, "HC5 "],
   [QUOTE, "if (typeof x !== \"string\" || !/^0x[0-9a-fA-F]{64}$/.test(x)) return refuse(", "if (typeof x !== \"string\") return refuse(", R, "HC5 "],
   [QUOTE, "    out.add(x.toLowerCase());", "    out.add(x);", R, "HC5 "],
