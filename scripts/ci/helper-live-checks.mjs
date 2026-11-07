@@ -53,6 +53,7 @@ export const LIVE_CHECKS = [
   "evm-testnet-delegate-review3",
   "robinhood-mainnet-rpcs",
   "helper-usdc-pending-pause",
+  "helper-rpc-sell-methods",
 ];
 
 // `{commit}` is the deployed commit

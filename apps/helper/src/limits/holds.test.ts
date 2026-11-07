@@ -76,16 +76,19 @@ test("card helper-robinhood-capacity: one rule for a refusal: -32005 or a rate o
 
   // rpc.ts holds the chain for a limit message as for -32005 (before the card: -32005 only); the second read, inside
   // the 1 s hold, is sent only once it is over (a short hold is waited out: rpc.ts holdOver, HOLD_WAIT_MS)
-  const holds = providerHolds();
+  // on this test's clock (card helper-pace-test-clock): the hold, its wait and the sends' times, never the wall clock,
+  // which steps on the box (rpc.ts createPacer's note)
+  let clock = 1_000_000;
+  const holds = providerHolds(() => clock);
   const sent: number[] = [];
   const limitAnswer = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "request limit reached" } };
-  const rpc = createRpc({}, { holds, fetch: (async () => (sent.push(Date.now()), Response.json(limitAnswer))) as never });
+  const rpc = createRpc({}, { holds, now: () => clock, sleep: async (ms: number) => void (clock += ms), fetch: (async () => (sent.push(clock), Response.json(limitAnswer))) as never });
   const body = blockNumber;
   assert.equal((await rpc.handle("robinhood", "application/json", body, "198.51.100.3")).status, 429);
   assert.ok(holds.heldFor(CHAIN_RPC) >= 1);
   assert.equal((await rpc.handle("robinhood", "application/json", body, "198.51.100.4")).status, 429);
   assert.equal(sent.length, 2);
-  assert.ok(sent[1]! - sent[0]! >= 950, `the second read went to a provider that asked us to wait (${sent[1]! - sent[0]!} ms after)`);
+  assert.ok(sent[1]! - sent[0]! >= 1_000, `the second read went to a provider that asked us to wait (${sent[1]! - sent[0]!} ms after)`);
 
   // a block range limit is passed through and holds nothing
   const rangeAnswer = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "block range limit exceeded" } };
