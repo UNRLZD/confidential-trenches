@@ -12,7 +12,8 @@ import { deepFreeze } from "../../freeze.ts";
 
 /** host -> operator, named by its own domain, the form a host the map leaves out gets, so the two never split one
  *  operator in two. */
-export const EVM_RPC_OPERATORS: Readonly<Record<string, string>> = deepFreeze({
+// pure: an app that never asks for an operator (the signing page) bundles none of the map
+export const EVM_RPC_OPERATORS: Readonly<Record<string, string>> = /* @__PURE__ */ deepFreeze({
   // the money gate's (scripts/ci/rpc-operators.mjs), Base, Robinhood and their test networks
   "mainnet.base.org": "base.org",
   "base.drpc.org": "drpc.org",
