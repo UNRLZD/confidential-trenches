@@ -505,9 +505,11 @@ export const SEND_ENV = {
 /** A network's relayer keys: at most this many lanes (four full-access keys on the server, M:1044-1047). */
 export const KEYS_MAX = 8;
 /**
- * The one vault mainnet withdrawals and deposits are carried for, by the kit's rule (packages/wallet/test/
- * deposit-delegate.test.ts): the account_id of contracts/vault/deployments/mainnet-v1.json once the mainnet deploy writes
- * it, else mainnet-test.json's (card vault-mainnet-test); send.test.ts holds each case. Any other WITHDRAW_VAULT_MAINNET
+ * The one vault mainnet withdrawals and deposits are carried for: the account_id of
+ * contracts/vault/deployments/mainnet-v1.json once the mainnet deploy writes it, else mainnet-test.json's (card
+ * vault-mainnet-test); send.test.ts holds each case. This is the helper's rule, not the kit's: the kit names
+ * mainnet-v1.json's vault or none (null), never mainnet-test.json's (packages/wallet/test/deposit-delegate.test.ts), so
+ * the test vault is carried by the helper alone, for the test runs. Any other WITHDRAW_VAULT_MAINNET
  * or BIND_VAULT_MAINNET stops the helper at start, so a host's .env cannot point a mainnet sender at a vault the release
  * does not name. The commit that adds mainnet-v1.json changes it here, or its test fails.
  */

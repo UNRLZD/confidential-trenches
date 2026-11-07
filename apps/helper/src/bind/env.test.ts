@@ -37,7 +37,8 @@ test("the names: per network a vault, a gas account and its one key, then the ma
 });
 
 test("mainnet deposits are carried only for the vault of the mainnet deploy record: bind set alone with any other vault stops the helper at start", () => {
-  // MAINNET_VAULT is the record's by the kit's rule (withdraw/send.test.ts holds it to mainnet-v1.json or mainnet-test.json)
+  // MAINNET_VAULT is the record's by the helper's pin rule (withdraw/send.test.ts holds it to mainnet-v1.json, else
+  // mainnet-test.json; the kit names mainnet-v1.json's or null)
   const record = { account_id: MAINNET_VAULT };
   // bind alone: no WITHDRAW_VAULT_MAINNET, so the same-vault rule has nothing to compare with
   const env = { BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "bpin-")) };

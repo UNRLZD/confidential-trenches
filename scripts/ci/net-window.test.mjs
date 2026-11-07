@@ -50,6 +50,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-testnet-delegate-review3.mjs",
   "scripts/live-checks/evm-venues-pin.mjs",
   "scripts/live-checks/helper-abuse-limits.mjs",
+  "scripts/live-checks/helper-bind-relayer-mainnet.mjs",
   "scripts/live-checks/helper-create-u.mjs",
   "scripts/live-checks/helper-evm-abi-tie.mjs",
   "scripts/live-checks/helper-evm-sender.mjs",
