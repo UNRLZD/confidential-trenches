@@ -239,3 +239,89 @@ test("SIGN_HOST's follow passes the refund move: a REFUNDED op on mainnet with U
   assert.equal(op.follow.move.nonce, p.nonce, "recorded in the op");
   assert.equal(op.stage, "refund_move");
 });
+
+// ---------- review wrm-58c238ab M2: SIGN_HOST's real wiring when POST /v1/intents does not carry the move ----------
+// A simulated clock: each sleep(ms) moves the follow's clock by ms and the chain by ms/1000 blocks of 1 s. Counts the
+// live 1Click quotes, the seed openings, the signed sends, the route probes, the RPC calls and the status reads.
+async function relayLoop(intentsAnswer: () => Response, simMinutes: number) {
+  const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16))); // the first published BIP-39 vector (all-zero entropy)
+  const u = depositAccount(SEED, 7n, 3).account;
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  after(() => w.close());
+  await w.put("ops", "dq-r", { kind: "deposit", stage: "refunded", held_id: u, since_ms: NOW, txs: [], created_ms: NOW, follow: { network: "mainnet", s: "7", i: 3, u, address: "f".repeat(64), deadline_ms: NOW + 72 * 3_600_000, origin: SOL_USDC, min_out: "24705126", sent: true, status: "REFUNDED" } });
+  const H0 = 200_000_000;
+  const T0 = NOW - 2_000;
+  let h = H0;
+  const c = { rpc: 0, quotes: 0, sends: 0, probes: 0, seeds: 0, statusReads: 0 };
+  const timeAt = (x: number) => T0 + (x - H0) * 1_000;
+  const view = (method: string, args: { account_id?: string; token_id?: string }): unknown =>
+    method === "mt_balance_of" ? (args.account_id === u && args.token_id === SOL_USDC ? AMOUNT.toString() : "0") : method === "current_salt" ? SALT : method === "is_nonce_used" ? false : "0";
+  const one = (name: string): FollowRpc => ({
+    name,
+    tx: async () => ({}),
+    block: async (p: Record<string, unknown>) => {
+      c.rpc++;
+      const at = "block_id" in p ? (p.block_id as number) : h;
+      return { result: { header: { height: at, timestamp_nanosec: (BigInt(timeAt(at)) * 1_000_000n).toString() } } };
+    },
+    query: async (p: Record<string, unknown>) => {
+      c.rpc++;
+      const at = (p.block_id as number | undefined) ?? h;
+      const args = JSON.parse(Buffer.from((p.args_base64 as string | undefined) ?? "e30=", "base64").toString());
+      return { result: { block_height: at, block_hash: "h", logs: [], result: [...Buffer.from(JSON.stringify(view(p.method_name as string, args)))] } };
+    },
+  }) as FollowRpc;
+  let simMs = 0;
+  const fetchFn = (async (url: string, init?: RequestInit) => {
+    if (url === DEPOSIT_QUOTE_URL) {
+      c.quotes++;
+      const a = liveAnswer(JSON.parse(String(init?.body)), NOW + simMs - 500);
+      a.quote.depositAddress = DEPOSIT;
+      signAnswer(a, mockKey.privateKey);
+      return Response.json(a, { status: 201 });
+    }
+    if (url === RELEASE_INTENTS_URL) return init?.body === "{}" ? (c.probes++, intentsAnswer()) : (c.sends++, intentsAnswer());
+    c.statusReads++;
+    return new Response("{}", { status: 404 }); // 1Click's status: no read
+  }) as typeof fetch;
+  let stopped = false;
+  const f = depositFollows({
+    network: () => "mainnet",
+    store: async () => w,
+    seed64: async () => (c.seeds++, Uint8Array.from(SEED)),
+    rpcs: () => [one("a"), one("b")],
+    fetch: fetchFn,
+    sleep: async (ms: number) => {
+      simMs += ms;
+      h += Math.max(1, Math.round(ms / 1000));
+      if (simMs >= simMinutes * 60_000 && !stopped) (stopped = true), f.signedOut();
+      await new Promise<void>((ok) => setImmediate(ok));
+    },
+    locks: () => null,
+    now: () => NOW + simMs,
+  });
+  await f.settle();
+  for (let k = 0; k < 2_000_000 && !stopped; k++) await new Promise<void>((ok) => setImmediate(ok));
+  await f.idle();
+  const op = (await w.get("ops", "dq-r")) as { stage: string; follow: { why?: string } };
+  return { c, perMin: (n: number) => n / (simMs / 60_000), op };
+}
+
+test("M2: no route on /v1/intents (404): one move signed, then only route probes at a growing wait, no quote and no seed opened; RPC and status reads at the slow pace", async () => {
+  const r = await relayLoop(() => new Response("not found", { status: 404 }), 10);
+  assert.equal(r.c.sends, 1, "one signed move in 10 minutes");
+  assert.equal(r.c.quotes, 1);
+  assert.equal(r.c.seeds, 1);
+  assert.ok(r.c.probes >= 1 && r.c.probes <= 3, `route probes at 2, 6, 14 min...: ${r.c.probes}`);
+  assert.ok(r.perMin(r.c.rpc) < 100, `RPC calls ${r.perMin(r.c.rpc).toFixed(1)}/min`);
+  assert.ok(r.perMin(r.c.statusReads) <= 2, `status reads ${r.perMin(r.c.statusReads).toFixed(1)}/min`);
+  assert.notEqual(r.op.stage, "held", "the refund still waits to move, not parked");
+});
+
+test("M2: sender_struck (HTTP 403, final for U at the helper): nothing more signed for U, the op held sender_struck for the way out", async () => {
+  const r = await relayLoop(() => Response.json({ error: { code: "sender_struck" } }, { status: 403 }), 10);
+  assert.equal(r.c.sends, 1);
+  assert.equal(r.c.probes, 0);
+  assert.equal(r.op.stage, "held");
+  assert.equal(r.op.follow.why, "sender_struck");
+});

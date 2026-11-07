@@ -2,6 +2,7 @@
 // refund move at a time (the wallet's follow.ts and refund.ts, SIGN_HOST's deposit-follow.ts), runs the test that holds
 // that rule, expects it to fail, and puts the source back. Each rule is wallet.md §2.4 point 8 and the §2.8 refund move
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
+// The last 11 are review wrm-58c238ab's M1, M2, L1 and L2 as folded.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -15,9 +16,9 @@ const ST = ["signpage", "test/refund-move.test.ts"];
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
   ["through only on a used nonce (a pruned nonce never through)", FOLLOW,
-    [["at !== null && (at.used === true || at.held < BigInt(move.amount))", "at !== null && at.used === true"]], WT, "prunes"],
+    [["} else if (at !== null && at.used === false && short && move.foreign !== true) {", "} else if (false) {"]], WT, "prunes"],
   ["through only once the balance drops (D1: a second refund holds it open)", FOLLOW,
-    [["at !== null && (at.used === true || at.held < BigInt(move.amount))", "at !== null && at.held < BigInt(move.amount)"]], WT, "D1: the move is through"],
+    [["if (at !== null && at.used === true) {", "if (at !== null && at.used === true && short) {"]], WT, "D1: the move is through"],
   ["a new move before the old one's deadline", FOLLOW,
     [["at !== null && at.used === false && at.timeMs > move.deadline_ms", "at !== null && at.used === false"]], WT, "C4"],
   ["the move's state read at each RPC's own final (finding 5)", FOLLOW,
@@ -35,7 +36,7 @@ const M = [
   ["a lifted op not adopted (r4)", FOLLOW,
     [["if (op.stage === \"done\" && op.follow.final !== true) adopt(id);", "void [id, op, adopt];"]], WT, "r4"],
   ["the move recorded after it is sent", REFUND,
-    [["  await deps.record(move);\n  // 4.", "  // 4."], ["  return { kind: \"sent\", move, status };", "  await deps.record(move);\n  return { kind: \"sent\", move, status };"]], WR, "the steps in order"],
+    [["  await deps.record(move);\n  // 4.", "  // 4."], ["  return { kind: \"sent\", move, status, code };", "  await deps.record(move);\n  return { kind: \"sent\", move, status, code };"]], WR, "the steps in order"],
   ["the intent's window past the rule's 120 s", REFUND,
     [["export const REFUND_INTENT_WINDOW_MS = 120_000;", "export const REFUND_INTENT_WINDOW_MS = 300_000;"]], ST, "a refund is moved"],
   ["SIGN_HOST's follow without the refund move", HOST,
@@ -46,6 +47,29 @@ const M = [
     [["            if (shortOnlyOfMinimum(e, request, answer, check)) throw new RefundMoveUnderMin();\n", ""]], ST, "short only of MIN_DEPOSIT"],
   ["SIGN_HOST quotes an asset it does not price", HOST,
     [["    if (!ONECLICK_USDC_ASSETS.includes(ask.asset)) return { kind: \"refused\", why: \"asset\" };\n", ""]], ST, "not USDC"],
+  // review wrm-58c238ab: M1, M2, L1, L2
+  ["M1: a NEAR USDC balance under MIN_DEPOSIT holds every open op", FOLLOW,
+    [["if (op.follow.origin === f.asset) await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });", "if (f.asset === usdcId || op.follow.origin === f.asset) await write(id, \"held\", legFacts(op, \"held\"), { why: \"under_min\" });"]], WT, "M1: "],
+  ["M2: sender_struck not read: U's moves go on", FOLLOW,
+    [["if (res.kind === \"sent\" && res.code === \"sender_struck\") {", "if (false) {"]], WT, "M2: sender_struck"],
+  ["M2: a refused move asked again at once", FOLLOW,
+    [["else if (res.kind === \"sent\" || (res.kind === \"refused\" && res.why === \"relay\")) backOff();", ""]], WT, "M2: a move the relayer"],
+  ["M2: 1 Hz reads on a move the relayer refused", FOLLOW,
+    [["if (!relayDown) fast = true;", "fast = true;"]], WT, "M2: a move the relayer"],
+  ["M2: a new quote and signature with no probe of the route", FOLLOW,
+    [["probe: relayDown,", "probe: false,"]], WT, "M2: a move the relayer"],
+  ["M2: a REFUNDED status read every round", FOLLOW,
+    [["if (op.follow.status === \"REFUNDED\") statusAt.set(id, now() + SLOW_MAX_MS);", ""]], ST, "M2: no route"],
+  ["M2: a listed code read on any status", REFUND,
+    [[" && res.status >= 400 && res.status < 500) code", ") code"]], WR, "the relayer's answer"],
+  ["M2: a route with no answer of its own still quoted and signed", REFUND,
+    [["if (p.code === null) return { kind: \"refused\", why: \"relay\" };", ""]], WR, "after a refusal"],
+  ["L1: one move's debit marks every op moved", FOLLOW,
+    [["const its = asset === null || op.follow.origin === asset;", "const its = true;"]], WT, "L1: "],
+  ["L2: a foreign debit in the move's window not remembered", FOLLOW,
+    [["if (move.foreign !== true) await mark(null, { move: { ...move, foreign: true } });", ""]], WT, "L2: a withdraw.open from U while"],
+  ["L2: an op whose money left U by another intent never ends", FOLLOW,
+    [["await write(id, \"held\", legFacts(op, \"held\"), { why: \"moved_out\" });", "void [id, op];"]], WT, "takes it all"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {

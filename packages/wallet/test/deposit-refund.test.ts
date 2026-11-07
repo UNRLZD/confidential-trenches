@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { base64 } from "@scure/base";
 import { DEPOSIT_QUOTE_URL } from "../src/deposit/quote.ts";
-import { NONCE_V1_PREFIX, RELEASE_INTENTS_URL, REFUND_INTENT_WINDOW_MS, type RefundMoveCheck, RefundMoveUnderMin, refundMoveRequest, runRefundMove, transferPayload, versionedNonce } from "../src/deposit/refund.ts";
+import { INTENTS_ANSWER_MAX_BYTES, NONCE_V1_PREFIX, RELEASE_INTENTS_URL, REFUND_INTENT_WINDOW_MS, type RefundMoveCheck, RefundMoveUnderMin, refundMoveRequest, runRefundMove, transferPayload, versionedNonce } from "../src/deposit/refund.ts";
 
 const U = "5d".repeat(32);
 const ASSET = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";
@@ -54,7 +54,7 @@ function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () =>
   const fetchFn = (async (url: string) => (log.push(url === DEPOSIT_QUOTE_URL ? "quote" : url === RELEASE_INTENTS_URL ? "send" : url), Response.json({}, { status: url === DEPOSIT_QUOTE_URL ? 201 : 200 }))) as typeof fetch;
   const held = o.held ?? [25_000_000n, 25_000_000n];
   const p = runRefundMove(
-    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0] }, { blockTimeNs: T + 5n, held: held[1] }], salt: "252812b3", priorMs: null },
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0] }, { blockTimeNs: T + 5_000_000n, held: held[1] }], salt: "252812b3", priorMs: null },
     { check, fetchFn, now: () => NOW, openKey: async (fn) => (log.push("key"), fn(new Uint8Array(32))), record: async () => void log.push("record") },
   );
   return { p, log };
@@ -83,5 +83,54 @@ test("a quote off the request, an intent the rule refuses, or reads that disagre
     const r = run(o);
     assert.equal((await r.p).kind, "refused", what);
     assert.deepEqual(r.log, log, what);
+  }
+});
+
+/** A run whose relayer answers `answer` to the move and `probe` to an empty body; the URLs asked logged in order. */
+function relayRun(answer: () => Response, o: { probe?: boolean; probeAnswer?: () => Response } = {}) {
+  const log: string[] = [];
+  const check: RefundMoveCheck<{ q: true }, { i: true }> = {
+    quote: () => ({ q: true }),
+    read: () => ({ depositAddress: "ab".repeat(32), amountIn: 25_000_000n, deadlineMs: NOW + 72 * 3_600_000 }),
+    intent: () => ({ i: true }),
+    sign: () => (log.push("sign"), { standard: "raw_ed25519", payload: "{}", public_key: "ed25519:1", signature: "ed25519:1" }),
+  };
+  const fetchFn = (async (url: string, init?: RequestInit) => {
+    if (url === DEPOSIT_QUOTE_URL) return (log.push("quote"), Response.json({}, { status: 201 }));
+    if (init?.body === "{}") return (log.push("probe"), (o.probeAnswer ?? (() => Response.json({ error: { code: "bad_shape" } }, { status: 400 })))());
+    return (log.push("send"), answer());
+  }) as typeof fetch;
+  const p = runRefundMove(
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n }, { blockTimeNs: T, held: 25_000_000n }], salt: "252812b3", priorMs: null, probe: o.probe },
+    { check, fetchFn, now: () => NOW, openKey: async (fn) => fn(new Uint8Array(32)), record: async () => void log.push("record") },
+  );
+  return { p, log };
+}
+
+test("the relayer's answer: its listed code with a 4xx status is read (sender_struck), anything else is no code", async () => {
+  for (const [what, answer, status, code] of [
+    ["struck", () => Response.json({ error: { code: "sender_struck" } }, { status: 403 }), 403, "sender_struck"],
+    ["carried", () => Response.json({ tx_hash: "1".repeat(44) }, { status: 200 }), 200, null],
+    ["no route", () => new Response("not found", { status: 404 }), 404, null],
+    ["a code not listed", () => Response.json({ error: { code: "nope" } }, { status: 400 }), 400, null],
+    ["a listed code on a 200", () => Response.json({ error: { code: "sender_struck" } }, { status: 200 }), 200, null],
+    ["an answer over the cap", () => new Response(JSON.stringify({ error: { code: "sender_struck" }, pad: "x".repeat(INTENTS_ANSWER_MAX_BYTES) }), { status: 403 }), 403, null],
+  ] as const) {
+    const r = relayRun(answer);
+    const out = await r.p;
+    assert.equal(out.kind, "sent", what);
+    assert.deepEqual(out.kind === "sent" && [out.status, out.code], [status, code], what);
+    assert.deepEqual(r.log, ["quote", "sign", "record", "send"], what);
+  }
+});
+
+test("after a refusal (probe): the route is asked first with an empty body; no answer of its own (404, 5xx, none) asks no quote and opens no key", async () => {
+  const ok = relayRun(() => Response.json({ tx_hash: "1".repeat(44) }), { probe: true });
+  assert.equal((await ok.p).kind, "sent");
+  assert.deepEqual(ok.log, ["probe", "quote", "sign", "record", "send"]);
+  for (const probeAnswer of [() => new Response("not found", { status: 404 }), () => new Response("", { status: 502 }), () => Response.json({ error: "not_found" }, { status: 404 })]) {
+    const r = relayRun(() => Response.json({}), { probe: true, probeAnswer });
+    assert.deepEqual(await r.p, { kind: "refused", why: "relay" });
+    assert.deepEqual(r.log, ["probe"]);
   }
 });

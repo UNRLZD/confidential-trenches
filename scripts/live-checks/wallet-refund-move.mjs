@@ -100,6 +100,9 @@ const call = async (fetchFn, url, method, args, block) => {
   return { height: j.result.block_height, value: JSON.parse(Buffer.from(j.result.result).toString()) };
 };
 
+/** The relayer's code: the route's refusals are {error: {code}} (kit helper/v1.ts); the helper's 404 is {error: "not_found"}. */
+export const relayCode = (body) => (typeof body?.error === "string" ? body.error : typeof body?.error?.code === "string" ? body.error.code : null);
+
 export async function read(fetchFn = fetch, now = Date.now()) {
   const get = async (path) => {
     const r = await fetchFn(`${SIGN}${path}`, { redirect: "error" });
@@ -127,7 +130,7 @@ export async function read(fetchFn = fetch, now = Date.now()) {
   );
   const rr = await fetchFn(INTENTS_URL, { method: "POST", redirect: "error", headers: { "content-type": "application/json", origin: SIGN }, body: "{}" });
   const relayBody = await rr.json().catch(() => null);
-  return { index, sha384: sha384(js), intents_url: js.includes(INTENTS_URL), quote: quoteFacts(qr.status, request, answer), near, relay: { status: rr.status, code: relayBody?.error ?? relayBody?.code ?? null } };
+  return { index, sha384: sha384(js), intents_url: js.includes(INTENTS_URL), quote: quoteFacts(qr.status, request, answer), near, relay: { status: rr.status, code: relayCode(relayBody) } };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {

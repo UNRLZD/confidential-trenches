@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { INTENTS_URL, judge, read } from "./wallet-refund-move.mjs";
+import { INTENTS_URL, judge, read, relayCode } from "./wallet-refund-move.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-refund-move.answers.json", import.meta.url), "utf8"));
 
@@ -61,7 +61,7 @@ test("read() asks SIGN_HOST's / and /app.js, the quote for a fresh U by POST, in
     if (url.endsWith("/app.js")) return new Response(`x ${INTENTS_URL}`);
     if (url.startsWith("https://sign.")) return new Response(A.good.index);
     if (url.endsWith("/v0/quote")) return Response.json({ quote: {}, quoteRequest: { recipient: "e1".repeat(32) } }, { status: 201 });
-    if (url.endsWith("/v1/intents")) return Response.json({ error: "bad_shape" }, { status: 400 });
+    if (url.endsWith("/v1/intents")) return Response.json({ error: { code: "bad_shape" } }, { status: 400 });
     const h = url.includes("fastnear") ? 101 : 100;
     const value = body.params.method_name === "current_salt" ? "252812b3" : false;
     return Response.json({ result: { block_height: body.params.block_id ?? h, result: [...Buffer.from(JSON.stringify(value))] } });
@@ -76,4 +76,11 @@ test("read() asks SIGN_HOST's / and /app.js, the quote for a fresh U by POST, in
   const reads = asked.filter((x) => x[2] !== null).map((x) => JSON.stringify(x.slice(2)));
   assert.deepEqual(reads.slice(0, 2), [JSON.stringify(["current_salt", "final"]), JSON.stringify(["current_salt", "final"])], "each RPC's final first");
   assert.deepEqual(reads.slice(2).sort(), [["current_salt", 100], ["current_salt", 100], ["is_nonce_used", 100], ["is_nonce_used", 100]].map((x) => JSON.stringify(x)).sort(), "then both at the lower height");
+});
+
+test("the relay's code read both ways the helper answers: a route refusal {error: {code}} and the helper's 404 {error: \"not_found\"}", () => {
+  assert.equal(relayCode({ error: { code: "bad_shape" } }), "bad_shape");
+  assert.equal(relayCode({ error: "not_found" }), "not_found");
+  assert.equal(relayCode({ code: "bad_shape" }), null);
+  assert.equal(relayCode(null), null);
 });

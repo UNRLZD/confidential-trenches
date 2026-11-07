@@ -260,7 +260,7 @@ export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "s
 }
 
 /** The body's bytes, refused once they pass `max` (a declared or a streamed length), without reading the rest. */
-async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+export async function readCapped(res: Response, max: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") ?? "0");
   if (declared > max) throw new Error(`relayer: an answer over ${max} B`);
   if (res.body === null) return new Uint8Array(0);
