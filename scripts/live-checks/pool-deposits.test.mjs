@@ -3,10 +3,13 @@
 // read on two devnet RPCs, and SIGN_HOST's /app.js with no testnet pin: PASS. bad: the same reads with another
 // precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: the deposit tx failed, the
 // mark's value another, a state leaf another, U not emptied (the cost priced above what the program took): FAIL.
+// Slice 3 (the EVM same-chain deposit): good.evm is the release-77 build's index.html and app.js, which pin each other
+// and carry the EVM deposit's marks: PASS; bad.evm is SIGN_HOST's release-72 page, which carries none: FAIL. Planted on
+// the good one: an index.html that pins another bundle, and a bundle with one mark gone: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { RUN, check } from "./pool-deposits.mjs";
+import { EVM_MARKS, RUN, check } from "./pool-deposits.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-deposits.answers.json", import.meta.url), "utf8"));
 const R = JSON.parse(readFileSync(RUN, "utf8"));
@@ -24,7 +27,7 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign });
+const run = (rec, plant, sign = rec.sign, evm = rec.evm) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign, evm });
 const bad = (r, start) => {
   assert.equal(r.ok, false);
   assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${start}`)), r.lines.join("\n"));
@@ -37,12 +40,27 @@ test("recorded good answer: the slice 2 deposit, its mark and both leaves on two
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(new Set(A.good.answers.map((a) => a.url)).size, 2, "two RPCs");
   for (const s of ["deposit ", "mark ", "label page ", "state page ", "U "]) assert.equal(r.lines.filter((l) => l.startsWith(`ok   ${s}`)).length, 2, s);
+  assert.equal(r.lines.filter((l) => l.startsWith("ok   EVM: ")).length, 1 + Object.keys(EVM_MARKS).length, "the pin and every EVM mark");
 });
 
 test("recorded bad answer: another precommitment in the run's place: FAIL", async () => {
   const r = await run(A.bad);
   bad(r, "the precommitment read is the run's");
   bad(r, "mark ");
+  for (const k of Object.keys(EVM_MARKS)) bad(r, `EVM: SIGN_HOST's bundle carries the EVM deposit's ${k}`);
+});
+
+test("recorded bad EVM answer alone: SIGN_HOST's release-72 page, before the EVM deposit, with the good Solana reads: FAIL", async () => {
+  const r = await run(A.good, undefined, A.good.sign, A.bad.evm);
+  assert.equal(r.ok, false);
+  assert.ok(!r.lines.some((l) => l.startsWith("BAD ") && !l.startsWith("BAD  EVM: ")), r.lines.join("\n"));
+  bad(r, "EVM: SIGN_HOST's bundle carries the EVM deposit's U^evm derivation");
+});
+
+test("planted on the good EVM answer: an index.html that pins another bundle, or a bundle with one mark gone: FAIL", async () => {
+  bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: A.bad.evm.pin }), "EVM: SIGN_HOST's served /app.js is the one index.html pins");
+  bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: null }), "EVM: SIGN_HOST's served /app.js is the one index.html pins");
+  for (const k of Object.keys(EVM_MARKS)) bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, marks: { ...A.good.evm.marks, [k]: false } }), `EVM: SIGN_HOST's bundle carries the EVM deposit's ${k}`);
 });
 
 test("planted on the good answer: the deposit failed, the mark another value, a state leaf another, U not emptied: FAIL", async () => {

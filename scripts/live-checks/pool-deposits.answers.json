@@ -1,5 +1,5 @@
 {
- "note": "Recorded 2026-11-07 on Solana devnet (card pool-deposits, slice 2): good, the live check on the run's deposit 4CGASPeY2... (PASS); bad, the same reads with another precommitment (last byte +1) in the run's place, whose mark does not exist (FAIL).",
+ "note": "Recorded 2026-11-07 on Solana devnet (card pool-deposits, slice 2): good, the live check on the run's deposit 4CGASPeY2... (PASS); bad, the same reads with another precommitment (last byte +1) in the run's place, whose mark does not exist (FAIL). Slice 3: good.evm is evmFacts() of the release-77 build, which SIGN_HOST serves once deployed; bad.evm is SIGN_HOST's release-72 page, with no EVM deposit.",
  "good": {
   "precommitment": "28b9cd55909a30598226c8431f75d6ace086163d841ca9cff55a5deb20dce9d4",
   "rpcs": [
@@ -559,7 +559,18 @@
      "id": 1
     }
    }
-  ]
+  ],
+  "evm": {
+   "from": "packages/signpage/index.html and public/app.js of the release-77 build (build-app at e6125947)",
+   "pin": "sha384-tJH7CPZP6IuM/+BL/NWPhev+YU6CguiskvVfcfe6ASafTUf57LbbrTKc2zV+d9Pf",
+   "sha384": "sha384-tJH7CPZP6IuM/+BL/NWPhev+YU6CguiskvVfcfe6ASafTUf57LbbrTKc2zV+d9Pf",
+   "marks": {
+    "U^evm derivation": true,
+    "deposit rule": true,
+    "send record": true,
+    "rebuild gate": true
+   }
+  }
  },
  "bad": {
   "precommitment": "28b9cd55909a30598226c8431f75d6ace086163d841ca9cff55a5deb20dce9d5",
@@ -1100,6 +1111,17 @@
      "id": 1
     }
    }
-  ]
+  ],
+  "evm": {
+   "from": "SIGN_HOST / and /app.js as served at 2026-11-07T05:27:07Z (release-72, before the EVM deposit)",
+   "pin": "sha384-0CQ8rX2GOvumi0+n49ONQD6vXpc4ZOD5Cm8DFvxoXlrWnV0em2pMirxR13Ar/AVg",
+   "sha384": "sha384-0CQ8rX2GOvumi0+n49ONQD6vXpc4ZOD5Cm8DFvxoXlrWnV0em2pMirxR13Ar/AVg",
+   "marks": {
+    "U^evm derivation": false,
+    "deposit rule": false,
+    "send record": false,
+    "rebuild gate": false
+   }
+  }
  }
 }
