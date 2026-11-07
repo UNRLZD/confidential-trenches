@@ -28,7 +28,7 @@
 //!   VT-S16 (d)'s named result, the relayer's code-hash watch holding every call once the hash is not the pin (7.3), is
 //!   the helper's: apps/helper/src/token-status/status.test.ts l.91-104 (a changed hash is shown as read and held),
 //!   apps/helper/src/bind/send.test.ts l.483-488 (a deposit call held as `token_halted` on a code hash not the pin,
-//!   nothing sent) and apps/helper/src/withdraw/send.test.ts l.673 (check 10: a withdrawal held while the watch reads
+//!   nothing sent) and apps/helper/src/withdraw/send.test.ts l.659 (check 10: a withdrawal held while the watch reads
 //!   the token halted). This test shows the on-chain hash those watches read moving off the pin.
 //! - (b) `vt_s16_b_halt_between_move_and_resolve`: a halting account acting inside the receipt chain. USDC's second
 //!   pauser holds USDC and sends one transaction to the token holding [ft_transfer_call(vault), execute_multisig_request

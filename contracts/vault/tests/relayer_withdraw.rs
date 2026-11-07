@@ -6,13 +6,16 @@
 //!
 //! The world is settle.rs's: the six notes of tests/fixtures/withdraw-spends.json deposited through `ft_on_transfer`,
 //! the relayer `relayer.test.near` (the proofs' fee_recipient) with a full-access key, alice. The proofs are that
-//! fixture's real withdraw proofs. The relayer is driven only through its CLI, `node apps/helper/test/withdraw-send/carry.ts`,
+//! fixture's real withdraw proofs, and from step 2 on fixtures/withdraw-spends-relayer.json's `_min` twins of the same
+//! notes, to alice with register_deposit the token's minimum: the helper carries no other register_deposit, registered
+//! recipient or not (card relayer-cost-guards, audit V-03). The relayer is driven only through its CLI, `node apps/helper/test/withdraw-send/carry.ts`,
 //! one new process per run (a restart on the same stores); check 10's watch is the CLI's stand-in and fee_min is 0
 //! (the sandbox has no price pool). Every outcome is read on chain through the harness's RPC, never taken from the
 //! CLI's answer alone.
 //!
 //! 1. Check 7: short_registration (fresh.test.near, unregistered, register_deposit 1) and same_call (alice, not yet
 //!    registered, register_deposit 0): 400 register_deposit_wrong each; the relayer's key nonce unmoved.
+//!    Every step from here sends the `_min` twins.
 //! 2. alice registered. Check 10: the watch halted: 503 token_halted; nonce unmoved, no record.
 //! 3. Check 7b (card vault-review-fixes-1, review F-1): the relayer's fee account not registered on the token, then
 //!    registered (by alice) but blocklisted: same_call is 503 relayer_low each time, its log line naming the fee
@@ -42,6 +45,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 const DEPOSITS: &str = include_str!("fixtures/withdraw-spends.json");
+/// The `_min` spends: the same notes to alice with register_deposit the token's minimum, the only one the helper carries
+const RELAYER: &str = include_str!("fixtures/withdraw-spends-relayer.json");
 const PREPAY_BYTES: u128 = 904;
 
 fn json_of(s: &str) -> Value {
@@ -49,8 +54,7 @@ fn json_of(s: &str) -> Value {
 }
 
 fn spend(name: &str) -> Value {
-    let f = json_of(DEPOSITS);
-    f["spends"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap().clone()
+    [DEPOSITS, RELAYER].iter().find_map(|f| json_of(f)["spends"].as_array().unwrap().iter().find(|s| s["name"] == name).cloned()).unwrap()
 }
 
 /// The /v1/withdraw body for the fixture's spend `name`: a plain send to a named account (fund_recipient false), or,
@@ -219,13 +223,13 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
 
     // 2. check 10
     let _ = w.h.storage_deposit(&w.alice, w.alice.id()).await?;
-    let v = w.carry(&["halted"], &["same_call"], 0).await?;
+    let v = w.carry(&["halted"], &["same_call_min"], 0).await?;
     assert_eq!(code(&v, 0), (503, "token_halted".into()));
-    assert!(row(&v, "same_call").is_null(), "no record for a halted request");
+    assert!(row(&v, "same_call_min").is_null(), "no record for a halted request");
     assert_eq!(w.key_nonce().await?, n0, "a halted request signs nothing");
 
     // 2b. fund_recipient true to a named account (not an implicit A with its own id key): recipient_refused, nothing signed
-    let v = w.carry(&["ok"], &["fund:same_call"], 0).await?;
+    let v = w.carry(&["ok"], &["fund:same_call_min"], 0).await?;
     assert_eq!(code(&v, 0), (400, "recipient_refused".into()), "{}", v["answers"]);
     assert_eq!(w.key_nonce().await?, n0, "a refused fund_recipient request signs nothing");
 
@@ -234,37 +238,37 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     // nothing while it is unregistered or blocklisted: 503 relayer_low, its log naming the fee account.
     let fee_hold = |v: &Value, why: &str| -> R<()> {
         assert_eq!(code(v, 0), (503, "relayer_low".into()), "{why}: {}", v["answers"]);
-        assert!(row(v, "same_call").is_null(), "{why}: no record for a held request");
+        assert!(row(v, "same_call_min").is_null(), "{why}: no record for a held request");
         let logs = v["logs"].as_array().ok_or("no logs")?;
         assert!(logs.iter().any(|l| l.as_str().is_some_and(|l| l.starts_with("withdraw 503 relayer_low: relayer fee account not ready (relayer.test.near") && l.ends_with(why))), "{why}: {logs:?}");
         Ok(())
     };
-    let v = w.carry(&["ok"], &["same_call"], 0).await?;
+    let v = w.carry(&["ok"], &["same_call_min"], 0).await?;
     fee_hold(&v, "registered false, blocklisted false)")?;
     assert_eq!(w.key_nonce().await?, n0, "an unregistered fee account signs nothing");
     // registered by alice, so the relayer's key signs nothing in this step and its nonce stays the helper's own
     let _ = w.h.storage_deposit(&w.alice, w.relayer.id()).await?;
     w.h.mock_fail("is_blocklisted", Some(w.relayer.id()), true).await?;
     assert_eq!(w.h.view(&w.h.token, "is_blocklisted", json!({"account_id": w.relayer.id()})).await?, json!(true));
-    let v = w.carry(&["ok"], &["same_call"], 0).await?;
+    let v = w.carry(&["ok"], &["same_call_min"], 0).await?;
     fee_hold(&v, "registered true, blocklisted true)")?;
     assert_eq!(w.key_nonce().await?, n0, "a blocklisted fee account signs nothing");
     w.h.mock_fail("is_blocklisted", Some(w.relayer.id()), false).await?;
 
     // 3b. the fee account ready: same_call carried and paid in one receipt, alice the withdrawal less the fee
     let (alice0, fee0) = (w.h.token_balance(w.alice.id()).await?, w.h.token_balance(w.relayer.id()).await?);
-    let v = w.carry(&["ok"], &["same_call"], 60).await?;
+    let v = w.carry(&["ok"], &["same_call_min"], 60).await?;
     assert_eq!(code(&v, 0), (200, "ok".into()), "{}", v["answers"]);
     assert_eq!(v["answers"][0]["body"]["state"], "submitted");
     let tx = v["answers"][0]["body"]["tx_hash"].as_str().ok_or("no tx_hash")?.to_string();
-    let r = row(&v, "same_call");
+    let r = row(&v, "same_call_min");
     assert_eq!(r["outcome"], "succeeded", "{r}");
     assert_eq!(r["tx_hash"], tx.as_str());
     assert_eq!(r["settle"]["done"], true, "{r}");
     assert_eq!(w.vault_receipts(&tx, "withdraw").await?, vec![true], "the withdraw ran on the vault");
     let settle_tx = r["settle"]["tx"]["tx_hash"].as_str().ok_or("no settle tx")?.to_string();
     assert_eq!(w.vault_receipts(&settle_tx, "settle").await?, vec![true], "the settle ran on the vault");
-    let s = w.spend_row("same_call").await?;
+    let s = w.spend_row("same_call_min").await?;
     assert_eq!((s["status"].as_str(), s["payer"].as_str(), s["recipient"].as_str()), (Some("settled"), Some("relayer.test.near"), Some("alice.test.near")), "{s}");
     assert_eq!(s["refund_value"], "0", "paid whole: {s}");
     let (withdrawn, fee): (u128, u128) = (s["withdrawn"].as_str().ok_or("withdrawn")?.parse()?, s["fee"].as_str().ok_or("fee")?.parse()?);
@@ -274,20 +278,20 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
 
     // 4. a restart: the same note again
     let n1 = w.key_nonce().await?;
-    let v = w.carry(&["ok"], &["same_call"], 0).await?;
+    let v = w.carry(&["ok"], &["same_call_min"], 0).await?;
     assert_eq!(code(&v, 0), (400, "spent".into()));
     assert_eq!(w.key_nonce().await?, n1, "spent signs nothing");
 
     // 5. one nullifier, two proofs at once: one send (the relayer registered at step 3)
     let spends0 = w.spends().await?;
-    let v = w.carry(&["ok"], &["same_nullifier_a", "same_nullifier_b"], 60).await?;
+    let v = w.carry(&["ok"], &["same_nullifier_a_min", "same_nullifier_b_min"], 60).await?;
     let mut codes = vec![code(&v, 0).1, code(&v, 1).1];
     codes.sort();
     assert_eq!(codes, vec!["in_flight".to_string(), "ok".to_string()], "{}", v["answers"]);
     assert_eq!(w.spends().await?, spends0 + 1, "one spend on chain");
-    let s = w.spend_row("same_nullifier_a").await?;
+    let s = w.spend_row("same_nullifier_a_min").await?;
     assert_eq!(s["status"], "settled", "{s}");
-    assert_eq!(row(&v, "same_nullifier_a")["settle"]["done"], true);
+    assert_eq!(row(&v, "same_nullifier_a_min")["settle"]["done"], true);
 
     // 6. a new recipient: register_deposit the token's minimum
     let fee0 = w.h.token_balance(w.relayer.id()).await?;
@@ -301,18 +305,18 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     // note's attachment
     w.h.mock_fail("ft_transfer", Some(w.alice.id()), true).await?;
     let alice0 = w.h.token_balance(w.alice.id()).await?;
-    let v = w.carry(&["ok"], &["one_block_a"], 60).await?;
+    let v = w.carry(&["ok"], &["one_block_a_min"], 60).await?;
     assert_eq!(code(&v, 0), (200, "ok".into()), "{}", v["answers"]);
     let tx = v["answers"][0]["body"]["tx_hash"].as_str().ok_or("no tx_hash")?.to_string();
     assert_eq!(w.vault_receipts(&tx, "withdraw").await?, vec![true], "the withdraw ran on the vault");
-    let r = row(&v, "one_block_a");
+    let r = row(&v, "one_block_a_min");
     assert_eq!((r["outcome"].as_str(), r["settle"]["done"].as_bool()), (Some("succeeded"), Some(true)), "{r}");
     let settle_tx = r["settle"]["tx"]["tx_hash"].as_str().ok_or("no settle tx")?.to_string();
     assert_eq!(w.vault_receipts(&settle_tx, "settle").await?, vec![true], "the settle ran on the vault");
     let st = w.h.rpc("tx", json!({"tx_hash": settle_tx, "sender_account_id": w.relayer.id(), "wait_until": "FINAL"})).await?;
     let action = &st["result"]["transaction"]["actions"][0]["FunctionCall"];
     assert_eq!((action["method_name"].as_str(), action["deposit"].as_str()), (Some("settle"), Some("1480000000000000000000")), "the settle attaches 148 B x 1e19: {st}");
-    let s = w.spend_row("one_block_a").await?;
+    let s = w.spend_row("one_block_a_min").await?;
     assert_eq!((s["status"].as_str(), s["recipient"].as_str()), (Some("settled"), Some("alice.test.near")), "{s}");
     assert_eq!(s["refund_value"], s["withdrawn"], "the whole withdrawal came back into the refund note: {s}");
     assert_eq!(s["withdrawn"], "4000000", "{s}");
