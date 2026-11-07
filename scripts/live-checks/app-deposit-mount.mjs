@@ -177,7 +177,7 @@ async function runOne(browser, w, scheme, shots, route) {
       await new Promise((done) => { const step = () => (performance.now() - t0 < 500 ? (n++, requestAnimationFrame(step)) : done()); requestAnimationFrame(step); });
       return { frames: [...new Set(frames)], framesIn500ms: n, active: document.activeElement?.tagName.toLowerCase() ?? null };
     }).catch((e) => ({ frames: `unread: ${String(e?.message ?? e).split("\n")[0]}` })));
-    run.tapGet.error = await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).then(() => null, (e) => String(e?.message ?? e).split("\n").filter((l) => l.trim()).slice(0, 6).join(" | "));
+    run.tapGet.error = await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).then(() => null, (e) => [...new Set(String(e?.message ?? e).split("\n").map((l) => l.trim()).filter(Boolean))].slice(0, 40).join(" | "));
     await waitState(f, "S4.13");
     run.quote = (await asked(page)).filter((m) => m.type === "deposit.quote").map(fieldsOf)[0] ?? null;
     run.addressState = await sheetState(f);
