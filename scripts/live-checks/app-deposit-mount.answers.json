@@ -1,0 +1,480 @@
+{
+ "good": {
+  "check": "app-deposit-mount",
+  "at": "2026-11-07T05:15:20.385Z",
+  "source": "harness, terminal build of card/app-deposit-mount (after f7b59875, the launcher's phone screen ratio), the stand-in shell signed in, Linux",
+  "browser": "156.0.8078.79",
+  "runs": [
+   {
+    "width": "phone",
+    "scheme": "dark",
+    "framed": true,
+    "opened": 1,
+    "assetsAsked": true,
+    "dry": [
+     {
+      "origin_asset": "nep141:wrap.near",
+      "amount": "15"
+     }
+    ],
+    "quoteState": "S4.3",
+    "recentBefore": 0,
+    "youGet": "$73.18",
+    "clear": {
+     "ok": true,
+     "first": "the button",
+     "under": [],
+     "button": [
+      16,
+      768,
+      358,
+      56
+     ],
+     "body": [
+      0,
+      170,
+      390,
+      590
+     ],
+     "foot": [
+      0,
+      760,
+      390,
+      76
+     ],
+     "sheet": [
+      0,
+      101,
+      390,
+      743
+     ],
+     "input": [
+      31,
+      373,
+      276,
+      53
+     ],
+     "scrolled": []
+    },
+    "tapGet": {
+     "box": [
+      16,
+      768,
+      358,
+      56
+     ],
+     "view": [
+      390,
+      844
+     ],
+     "disabled": false,
+     "hit": "the button",
+     "frames": [
+      "16.00,768.00,358.00,56.00 doc 390x844/390x844 vv 390x844"
+     ],
+     "framesIn500ms": 30,
+     "active": "input",
+     "topBefore": {
+      "scroll": [
+       0,
+       0
+      ],
+      "dpr": 2,
+      "vv": [
+       0,
+       0,
+       0,
+       390,
+       844,
+       1
+      ]
+     },
+     "error": null,
+     "presses": [
+      "pointerdown 195,796 button.dbtn.buy vv 0,0,1 dpr 2",
+      "touchstart 195,796 button.dbtn.buy vv 0,0,1 dpr 2",
+      "mousedown 195,796 button.dbtn.buy vv 0,0,1 dpr 2"
+     ]
+    },
+    "quote": {
+     "origin_asset": "nep141:wrap.near",
+     "amount": "15"
+    },
+    "addressState": "S4.13",
+    "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+    "heading": [
+     "NEAR"
+    ],
+    "stages": [
+     "S4.14",
+     "S4.15",
+     "S4.16"
+    ],
+    "credited": "73.18",
+    "recentDone": [
+     "Deposited",
+     "$73.18"
+    ],
+    "closed": true
+   },
+   {
+    "width": "phone",
+    "scheme": "light",
+    "framed": true,
+    "opened": 1,
+    "assetsAsked": true,
+    "dry": [
+     {
+      "origin_asset": "nep141:wrap.near",
+      "amount": "15"
+     }
+    ],
+    "quoteState": "S4.3",
+    "recentBefore": 0,
+    "youGet": "$73.18",
+    "clear": {
+     "ok": true,
+     "first": "the button",
+     "under": [],
+     "button": [
+      16,
+      768,
+      358,
+      56
+     ],
+     "body": [
+      0,
+      170,
+      390,
+      590
+     ],
+     "foot": [
+      0,
+      760,
+      390,
+      76
+     ],
+     "sheet": [
+      0,
+      101,
+      390,
+      743
+     ],
+     "input": [
+      31,
+      373,
+      276,
+      53
+     ],
+     "scrolled": []
+    },
+    "tapGet": {
+     "box": [
+      16,
+      768,
+      358,
+      56
+     ],
+     "view": [
+      390,
+      844
+     ],
+     "disabled": false,
+     "hit": "the button",
+     "frames": [
+      "16.00,768.00,358.00,56.00 doc 390x844/390x844 vv 390x844"
+     ],
+     "framesIn500ms": 29,
+     "active": "input",
+     "topBefore": {
+      "scroll": [
+       0,
+       0
+      ],
+      "dpr": 2,
+      "vv": [
+       0,
+       0,
+       0,
+       390,
+       844,
+       1
+      ]
+     },
+     "error": null,
+     "presses": [
+      "pointerdown 195,796 button.dbtn.buy vv 0,0,1 dpr 2",
+      "touchstart 195,796 button.dbtn.buy vv 0,0,1 dpr 2",
+      "mousedown 195,796 button.dbtn.buy vv 0,0,1 dpr 2"
+     ]
+    },
+    "quote": {
+     "origin_asset": "nep141:wrap.near",
+     "amount": "15"
+    },
+    "addressState": "S4.13",
+    "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+    "heading": [
+     "NEAR"
+    ],
+    "stages": [
+     "S4.14",
+     "S4.15",
+     "S4.16"
+    ],
+    "credited": "73.18",
+    "recentDone": [
+     "Deposited",
+     "$73.18"
+    ],
+    "closed": true
+   },
+   {
+    "width": "desktop",
+    "scheme": "dark",
+    "framed": true,
+    "opened": 1,
+    "assetsAsked": true,
+    "dry": [
+     {
+      "origin_asset": "nep141:wrap.near",
+      "amount": "15"
+     }
+    ],
+    "quoteState": "S4.3",
+    "recentBefore": 0,
+    "youGet": "$73.18",
+    "clear": {
+     "ok": true,
+     "first": "the button",
+     "under": [],
+     "button": [
+      1123,
+      849,
+      305,
+      39
+     ],
+     "body": [
+      1111,
+      42,
+      329,
+      797
+     ],
+     "foot": [
+      1111,
+      839,
+      329,
+      61
+     ],
+     "sheet": [
+      1110,
+      0,
+      330,
+      900
+     ],
+     "input": [
+      1135,
+      200,
+      243,
+      30
+     ],
+     "scrolled": []
+    },
+    "tapGet": {
+     "box": [
+      1123,
+      849,
+      305,
+      39
+     ],
+     "view": [
+      1440,
+      900
+     ],
+     "disabled": false,
+     "hit": "the button",
+     "frames": [
+      "1123.00,849.25,305.00,39.00 doc 1440x900/1440x900 vv 1440x900"
+     ],
+     "framesIn500ms": 29,
+     "active": "input",
+     "topBefore": {
+      "scroll": [
+       0,
+       0
+      ],
+      "dpr": 1,
+      "vv": [
+       0,
+       0,
+       0,
+       1440,
+       900,
+       1
+      ]
+     },
+     "error": null
+    },
+    "quote": {
+     "origin_asset": "nep141:wrap.near",
+     "amount": "15"
+    },
+    "addressState": "S4.13",
+    "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+    "heading": [
+     "NEAR"
+    ],
+    "stages": [
+     "S4.14",
+     "S4.15",
+     "S4.16"
+    ],
+    "credited": "73.18",
+    "recentDone": [
+     "Deposited",
+     "$73.18"
+    ],
+    "closed": true
+   },
+   {
+    "width": "desktop",
+    "scheme": "light",
+    "framed": true,
+    "opened": 1,
+    "assetsAsked": true,
+    "dry": [
+     {
+      "origin_asset": "nep141:wrap.near",
+      "amount": "15"
+     }
+    ],
+    "quoteState": "S4.3",
+    "recentBefore": 0,
+    "youGet": "$73.18",
+    "clear": {
+     "ok": true,
+     "first": "the button",
+     "under": [],
+     "button": [
+      1123,
+      849,
+      305,
+      39
+     ],
+     "body": [
+      1111,
+      42,
+      329,
+      797
+     ],
+     "foot": [
+      1111,
+      839,
+      329,
+      61
+     ],
+     "sheet": [
+      1110,
+      0,
+      330,
+      900
+     ],
+     "input": [
+      1135,
+      200,
+      243,
+      30
+     ],
+     "scrolled": []
+    },
+    "tapGet": {
+     "box": [
+      1123,
+      849,
+      305,
+      39
+     ],
+     "view": [
+      1440,
+      900
+     ],
+     "disabled": false,
+     "hit": "the button",
+     "frames": [
+      "1123.00,849.25,305.00,39.00 doc 1440x900/1440x900 vv 1440x900"
+     ],
+     "framesIn500ms": 29,
+     "active": "input",
+     "topBefore": {
+      "scroll": [
+       0,
+       0
+      ],
+      "dpr": 1,
+      "vv": [
+       0,
+       0,
+       0,
+       1440,
+       900,
+       1
+      ]
+     },
+     "error": null
+    },
+    "quote": {
+     "origin_asset": "nep141:wrap.near",
+     "amount": "15"
+    },
+    "addressState": "S4.13",
+    "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+    "heading": [
+     "NEAR"
+    ],
+    "stages": [
+     "S4.14",
+     "S4.15",
+     "S4.16"
+    ],
+    "credited": "73.18",
+    "recentDone": [
+     "Deposited",
+     "$73.18"
+    ],
+    "closed": true
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-deposit-mount",
+  "at": "2026-11-07T01:51:54.767Z",
+  "source": "harness, terminal build of main before this card, the stand-in shell signed in",
+  "browser": "157.0.8103.38",
+  "runs": [
+   {
+    "width": "phone",
+    "scheme": "dark",
+    "framed": true,
+    "opened": 0
+   },
+   {
+    "width": "phone",
+    "scheme": "light",
+    "framed": true,
+    "opened": 0
+   },
+   {
+    "width": "desktop",
+    "scheme": "dark",
+    "framed": true,
+    "opened": 0
+   },
+   {
+    "width": "desktop",
+    "scheme": "light",
+    "framed": true,
+    "opened": 0
+   }
+  ]
+ }
+}

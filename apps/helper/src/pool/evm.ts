@@ -1770,9 +1770,10 @@ export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, slee
  * simmedSells), so a sale from any other key would run where the sim did not. With no sell key, or on a chain whose venue
  * pins no sell sender (the sell key is then not used), the network starts and refuses every sell (503 not_configured).
  * `holds`: the helper's one pace and hold per provider (limits.ts providerHolds), which each sender's reads draw on
- * (pacedEvmRpc); the server passes its own, shared with the swap, maker and /v1/rpc reads.
+ * (pacedEvmRpc); the server passes its own, shared with the swap, maker and /v1/rpc reads. `sleep`: the pace's wait
+ * (setTimeout unless a test passes its clock's, card helper-pace-test-clock).
  */
-export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues(), holds?: ProviderHolds): Map<string, EvmPoolSender> {
+export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues(), holds?: ProviderHolds, sleep?: (ms: number) => Promise<void>): Map<string, EvmPoolSender> {
   const out = new Map<string, EvmPoolSender>();
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
     const [pool, key, fee, feeTo, rpcs] = names.map((n) => env[n] ?? "");
@@ -1810,7 +1811,7 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     // a plain JSON-RPC client, drawn from the helper's pace for its provider when the server gives one
     const providers = urls.map((u) => {
       const r = solanaJsonRpc(u) as unknown as EvmRpc;
-      return holds === undefined ? r : pacedEvmRpc(u, r, holds);
+      return holds === undefined ? r : pacedEvmRpc(u, r, holds, sleep);
     }) as [EvmRpc, EvmRpc];
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     // sales go only from the pin: a chain with none starts with sales off, never with an unpinned key

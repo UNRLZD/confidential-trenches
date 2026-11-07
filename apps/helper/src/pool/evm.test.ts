@@ -587,6 +587,11 @@ test("MEDIUM-A the start refuses an env RPC that cannot answer the fee's state r
 // one pace per provider (limits.ts providerHolds, which the swap, maker and /v1/rpc reads draw on) from the senders' reserve,
 // and a throttle it is answered holds the provider for every path. Before, the sender's own client sent outside the
 // pace, so a halted chain's start reads and their retries could spend the limit the pace keeps for the rest.
+// card helper-pace-test-clock: the pace and its waits run on this test's clock (a timer queue, as review M-3's), never
+// wall time, and the gaps are read at the pace's grants, where pacedEvmRpc hands each post to its client in the same
+// tick. Read at the node's arrival on wall time, a post held up on its way (a busy runner) came in under the pace though
+// its grant was a full pace after the last one (PR #388 job 128288759745: "posts 37, 52, 51 ms apart"); a 13 ms stall
+// between the first grant and its post is planted here, so that case runs every time.
 test("the pool sender's reads draw on the helper's pace per provider, from the sender's reserve, and a throttle it is answered holds the provider for every path", async (t) => {
   const realNow = Date.now;
   t.after(() => void (Date.now = realNow));
@@ -594,17 +599,43 @@ test("the pool sender's reads draw on the helper's pace per provider, from the s
   const n = await nodes(0n, 1);
   try {
     const env = { POOL_EVM_ADDRESS_BASE_SEPOLIA: POOL, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: "0x" + Buffer.from(KEY).toString("hex"), POOL_EVM_RPCS_BASE_SEPOLIA: n.urls.join(",") };
+    // the clock: a sleeper wakes at its own time, the earliest first, so one wait never adds to another's beside it
+    let now = 1_000_000;
+    const timers: { at: number; go: () => void }[] = [];
+    let armed = false;
+    const wake = () => {
+      armed = false;
+      timers.sort((x, y) => x.at - y.at);
+      const next = timers.shift();
+      if (next === undefined) return;
+      now = Math.max(now, next.at);
+      next.go();
+      if (timers.length > 0) arm();
+    };
+    const arm = () => void (armed || ((armed = true), setImmediate(wake)));
+    const sleep = (ms: number) => new Promise<void>((go) => (timers.push({ at: now + ms, go }), arm()));
     // one post at a time, 20 a second, on each: a post at most every 50 ms
-    const holds = providerHolds(undefined, Object.fromEntries(n.urls.map((u) => [u, { perS: 20, burst: 1, unit: "post" as const }])));
+    const holds = providerHolds(() => now, Object.fromEntries(n.urls.map((u) => [u, { perS: 20, burst: 1, unit: "post" as const }])));
     const took: [boolean, boolean | undefined][] = [];
     const held: string[] = [];
-    const spy: ProviderHolds = { ...holds, take: (u, c, bg, sender) => (took.push([bg, sender]), holds.take(u, c, bg, sender)), hold: (u, s) => (held.push(u), holds.hold(u, s)) };
-    await evmPoolSendersFromEnv(env, evmPoolVenues(), spy).get(POOL)!.ready(async () => {});
-    for (const u of [0, 1]) {
-      const at = n.calls.filter((c) => c.url === u).map((c) => c.at);
+    const granted = new Map<string, number[]>(n.urls.map((u) => [u, []]));
+    const take: ProviderHolds["take"] = (u, c, bg, sender) => {
+      took.push([bg, sender]);
+      const w = holds.take(u, c, bg, sender);
+      if (w === 0) {
+        granted.get(u)!.push(now);
+        if (granted.get(u)!.length === 1 && u === n.urls[0]) now += 13; // the first post stalls on its way
+      }
+      return w;
+    };
+    const spy: ProviderHolds = { ...holds, take, hold: (u, s) => (held.push(u), holds.hold(u, s)) };
+    await evmPoolSendersFromEnv(env, evmPoolVenues(), spy, sleep).get(POOL)!.ready(async () => {});
+    for (const [u, url] of n.urls.entries()) {
+      const at = granted.get(url)!;
+      assert.equal(at.length, n.calls.filter((c) => c.url === u).length, `rpc ${u + 1}: every post the node had was granted by the pace`);
       assert.ok(at.length >= 4, `rpc ${u + 1}: ${at.length} posts`);
-      const gaps = at.slice(1).map((x, k) => Math.round(x - at[k]!));
-      assert.ok(gaps.every((g) => g >= 40), `rpc ${u + 1}: posts ${gaps.join(", ")} ms apart, under the pace's 50`);
+      const gaps = at.slice(1).map((x, k) => x - at[k]!);
+      assert.ok(gaps.every((g) => g >= 50), `rpc ${u + 1}: posts ${gaps.join(", ")} ms apart, under the pace's 50`);
     }
     assert.ok(took.length > 0 && took.every(([bg, sender]) => bg === false && sender === true), "every draw the sender's, never background's");
     assert.deepEqual(held, [n.urls[1]], "the second's HTTP 429 holds it for every path");

@@ -558,8 +558,11 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
 /** `holdersRpc` is the provider holders' getTokenLargestAccounts goes to (D-S11: a keyed one, the only kind that
  *  answers it); with none, holders is Jupiter's fallback and the shared RPC path never sees the call, since a provider's
  *  429 on it would be the device's own reads' and sends' 429 too. */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget } = {}) {
+/** `sleep`: the GeckoTerminal budget's wait (setTimeout unless a test passes its clock's beside `now`, card
+ *  helper-pace-test-clock). */
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget } = {}) {
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
 
   async function call(method: string, params: unknown[], via: Rpc = rpc, client?: string): Promise<{ result: Record<string, unknown>; timing: string[] }> {
@@ -911,7 +914,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     for (let round = 0; !gt.take(lane, false, false, what); round++) {
       const at = gt.retryAt("pages");
       if (lane !== "pages" || round >= 8 || at > untilMs) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
-      await new Promise((ok) => setTimeout(ok, Math.max(at - now(), 0) + 5));
+      await sleep(Math.max(at - now(), 0) + 5);
     }
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
