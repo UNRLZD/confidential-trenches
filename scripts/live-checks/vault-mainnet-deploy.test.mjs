@@ -10,10 +10,12 @@
 //   - vault-mainnet-deploy.answers.json: the deployed vault, recorded by contracts/vault/scripts/mainnet-v1/
 //     3-readback-write.sh after the owner's deploy, with its storage_prepay read back: PASS (skipped until recorded).
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { check } from "./vault-mainnet.mjs";
 import { ACCOUNT, PIN_RECORD, PREPAY_P, PREPAY_TX, RECORD, SIGNER, args, deployment } from "./vault-mainnet-deploy.mjs";
 
@@ -119,6 +121,40 @@ test("planted from the good reads: a full-access key in the vault's key list FAI
   assert.equal(r.ok, false);
   assert.equal(r.pending, undefined);
   assert.equal(bads(r).filter((l) => / key list is \[\] on .*1 key\(s\) \(FullAccess\)/.test(l)).length, 2, r.lines.join("\n"));
+});
+
+// review L1: the CLI's --registered reaches the check. vault-mainnet.mjs runs as a process over the recorded vault-test
+// answers with its USDC registration planted null on dRPC: with --registered it FAILs on that line and prints no
+// write; without it the same answers end in the write (exit 3), so the flag is what decides.
+test("the CLI with --registered FAILs an unregistered vault and prints no write; without the flag the write is printed", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "vault-mainnet-deploy-cli-"));
+  try {
+    const answers = load("vault-mainnet-deploy.vault-test.answers.json").map((a) => (a.url === RPCS[1] && a.params?.method_name === "storage_balance_of" ? { ...a, json: { ...a.json, result: { ...a.json.result, result: [...Buffer.from("null")] } } } : a));
+    const file = path.join(dir, "answers.json");
+    writeFileSync(file, JSON.stringify(answers));
+    const stub = path.join(dir, "stub.mjs");
+    writeFileSync(stub, `import { readFileSync } from "node:fs";
+const answers = JSON.parse(readFileSync(${JSON.stringify(file)}, "utf8"));
+const byKey = new Map(answers.map((a) => [\`\${a.url} \${a.method} \${JSON.stringify(a.params)}\`, a]));
+globalThis.fetch = async (url, init) => {
+  const { method, params } = JSON.parse(init.body);
+  const a = byKey.get(\`\${url} \${method} \${JSON.stringify(params)}\`);
+  if (!a) throw new Error("no recorded answer for " + method);
+  return { ok: true, status: a.status, json: async () => a.json };
+};
+`);
+    const cli = (extra) => spawnSync(process.execPath, ["--import", pathToFileURL(stub).href, path.join(HERE, "vault-mainnet.mjs"), "--network", "mainnet", "--account", TEST_VAULT, "--signer", SIGNER, "--deployment", path.join(HERE, "../../contracts/vault/deployments/mainnet-test.json"), ...extra, "--precommitment", "12345"], { encoding: "utf8" });
+    const flagged = cli(["--registered"]);
+    assert.equal(flagged.status, 1, flagged.stdout + flagged.stderr);
+    assert.match(flagged.stdout, new RegExp(`BAD ${TEST_VAULT.replaceAll(".", "\\.")} is registered on ${pin.asset} on ${RPCS[1].replaceAll(".", "\\.")}: null`));
+    assert.doesNotMatch(flagged.stdout, /near call /);
+    assert.match(flagged.stdout, /live-check vault-mainnet: FAIL\n$/);
+    const plain = cli([]);
+    assert.equal(plain.status, 3, plain.stdout + plain.stderr);
+    assert.match(plain.stdout, /^near call vault-test\.confidential\.unrlzd\.near storage_prepay /m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const GOOD = path.join(HERE, "vault-mainnet-deploy.answers.json");
