@@ -1,6 +1,6 @@
 // Replays card helper-evm-range-cap-walk's live check, evm-rpc-spare-list (helper-evm-range-cap-walk.mjs runs it), on its
 // recorded answers (evm-rpc-spare-list.answers.json). Good: `good`, a real run on this card's branch (this Mac,
-// 2026-11-06, a keyless helper started from the branch as --base): the helper's caller read with its first two answering
+// 2026-11-07 00:48Z, the branch merged with main 63c90229 at 988aa0e7, a keyless helper started from it as --base): the helper's caller read with its first two answering
 // nodies' 50-block cap answered 200 past them on both chains, and the address-less Transfer read a list. Bad:
 // `badRangeCap`, a real run of this check at main 1e3e9a05 (the deployed helper at 1e3e9a0, 2026-11-06 16:1xZ): the
 // planted cap held on the first two is the caller's answer on both chains; and live run 42241935061's line (15:19Z,
