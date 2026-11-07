@@ -7,14 +7,17 @@
 import { pinnedBuildQuoted, type EvmPoolBuy, type EvmPoolVenueList } from "./buy-unpinned.ts";
 import { EvmPoolSellError, pinnedBuildSell, type EvmPoolSell } from "./sell-unpinned.ts";
 import { EVM_QUOTE_MAX_AGE_MS, EvmQuoteError, evmIsDeviceQuote, evmIsDeviceSellQuote, type EvmPoolBuyQuote, type EvmPoolSellQuote } from "../../checks/evm/quote.ts";
+import { evmSellReleasesClear, type EvmSellReleases } from "./sell-releases.ts";
 
 /** What W adds to a device sell quote: the return note's precommitment, the deadline (unix seconds), W's sell nonce,
  *  the sender's fee cap: by default the quote's feeMax, the device's own fee rule (card evm-buy-hookdata-fee); a
  *  lower one may be named, a higher one is refused (bad_fee); and `feeRecipient`, the address SellDelegate pays the
  *  fee to (card pool-review-3, L-1): the chain's pinned FeeCollector in the venue list (evmPoolVenues().feeCollector),
  *  the one recipient the helper sends a Sell for; any other is refused not_pinned, and a chain that pins none
- *  not_deployed (card evm-testnet-delegate-review3). */
-export type EvmPoolSellFields = { precommitment: bigint; feeCap?: bigint; feeRecipient: string; deadline: bigint; nonce: bigint };
+ *  not_deployed (card evm-testnet-delegate-review3); and `releases`, W's releases as evmSellReleases read them
+ *  (sell-releases.ts, card evm-sell-no-release-in-flight): one with a release to W not final on two RPCs, or one not
+ *  made for the quote's chain and W, is refused release_in_flight, naming the wait. */
+export type EvmPoolSellFields = { precommitment: bigint; feeCap?: bigint; feeRecipient: string; deadline: bigint; nonce: bigint; releases: EvmSellReleases };
 
 // Every buy and sell built here: a copy, a spread or a build made any other way is in neither
 const QUOTED_BUILDS = new WeakSet<EvmPoolBuy>();
@@ -49,8 +52,11 @@ export function evmQuotedSell(venues: EvmPoolVenueList, quote: EvmPoolSellQuote,
   if (!evmIsDeviceSellQuote(quote)) throw new EvmQuoteError("bad_request", "a sell is built only from a quote evmPoolSellQuote returned");
   fresh(quote.block.timestamp, nowMs);
   if (typeof fields !== "object" || fields === null) throw new EvmPoolSellError("bad_amount", "the sell's fields are an object");
-  const { precommitment, feeCap: asked, feeRecipient, deadline, nonce } = fields;
+  const { precommitment, feeCap: asked, feeRecipient, deadline, nonce, releases } = fields;
   const { chain, w, token, amountIn: amount, target, route, minOut, feeMax, hooked } = quote;
+  // no sale while a release to W is on its way: a hostile route could land it mid-swap and pass minOut with its ETH
+  // (audit E-01; sell-releases.ts)
+  evmSellReleasesClear(chain, w, releases);
   // the sender takes no more than the device's own fee rule allows, never a figure a caller or a server names
   const feeCap = asked === undefined ? feeMax : asked;
   if (feeCap > feeMax) throw new EvmPoolSellError("bad_fee", `the fee cap is above the device's fee rule's ${feeMax}`);

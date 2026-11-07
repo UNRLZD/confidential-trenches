@@ -27,6 +27,9 @@ import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/tra
 import { evmPoolBuildSimSellUnpinned, pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmPoolBuyQuoteWith, type EvmPoolBuyQuote, type EvmRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
 import { evmQuotedBuy, evmQuotedSell } from "../../kit/src/trade/evm/quoted.ts";
+import { evmSellReleases } from "../../kit/src/trade/evm/sell-releases.ts";
+// W's releases read with none pending (card evm-sell-no-release-in-flight): the kit's sell builder takes only such a verdict
+const clear = (q: { chain: Parameters<typeof evmSellReleases>[0]["chain"]; w: string }) => evmSellReleases({ chain: q.chain, w: q.w, fin: { number: 0n, timestamp: 0n }, releases: [], sent: [] });
 import { flat, provider as sellModel, req as sellReq, sellQuoteWith } from "../../kit/test/evm-sell-quote-fx.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
@@ -552,7 +555,7 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
   // the device's own sell quote on the kit's modelled chain (kit test/evm-sell-quote-fx.ts), W the page's
   const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
   const req = { amount: q.amountIn, minOut: q.minOut, feeCap: 10n ** 13n, deadline: t + 120n };
-  const built = evmQuotedSell(VENUES, q, { feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now());
+  const built = evmQuotedSell(VENUES, q, { feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n, releases: clear(q) }, Date.now());
   const X = q.token;
   const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: X, amount: q.amountIn, slippageBps: 100, decimals: 18 };
   const ctx = { ...evmCtx({ nowMs: t * 1000n }), precommitment: 5n };
@@ -574,7 +577,7 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
     // the fee goes to the Sell's signed recipient (card pool-review-3, L-1)
     // the fee goes to the venue's pinned FeeCollector (card evm-testnet-delegate-review3): a sell paying another address
     // (built under a list that pins it), or a page that pins another collector, is refused
-    [() => checkEvmSell(evmQuotedSell(Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), q, { feeRecipient: other, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }, Date.now()), ask, ctx, 1n), "fee_recipient"],
+    [() => checkEvmSell(evmQuotedSell(Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), q, { feeRecipient: other, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n, releases: clear(q) }, Date.now()), ask, ctx, 1n), "fee_recipient"],
     [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: Object.freeze({ base: pin(VENUES.base, { feeCollector: other }) }), feeRecipient: FEE_TO } }, 1n), "fee_recipient"],
     // the kit's unquoted pinned builder, of the same route and min out: not the device's quote
     [() => checkEvmSell(pinnedBuildSell(VENUES, "base", { w: EVM_W, token: X, amount: q.amountIn, target: q.target, route: q.route, minOut: q.minOut, feeRecipient: COLLECTOR, precommitment: 5n, feeCap: req.feeCap, deadline: req.deadline, nonce: 0n }), ask, ctx, 1n), "not_quoted"],
@@ -603,7 +606,7 @@ test("card evm-testnet-delegate-review3: an EVM sell pays its fee only to the ve
   const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
   const COLL = "0x00000000000000000000000000000000000c011e";
   const venues = Object.freeze({ base: pin(B, { pool: EVM_POOL, adapters: Object.freeze({ v3: A_V3, v4: A_V4 }), sellDelegate: DELEGATE, feeCollector: COLL }) });
-  const fields = (feeRecipient: string) => ({ feeRecipient, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n });
+  const fields = (feeRecipient: string) => ({ feeRecipient, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n, releases: clear(q) });
   const ask: PoolAsk = { kind: "pool.sell", chain: "base", token: q.token, amount: q.amountIn, slippageBps: 100, decimals: 18 };
   const ctx = { ...evmCtx({ nowMs: t * 1000n, evm: { venues, feeRecipient: FEE_TO } }), precommitment: 5n };
   // the collector's sell passes and signs
@@ -653,7 +656,7 @@ test("EVM sim sell: W signs a sim only into EVM_SELL_SIM, deadline at most the a
   // a real sell (the kit's sell builder, into the pinned pool, live for 120 s), even one the sell check passed, is
   // refused by the sim check and by the sim signer
   const q = await sellQuoteWith(sellReq("base", { w: EVM_W }), [sellModel({ price: flat }), sellModel({ price: flat })], Date.now());
-  const real = evmQuotedSell(VENUES, q, { feeRecipient: COLLECTOR, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n }, Date.now());
+  const real = evmQuotedSell(VENUES, q, { feeRecipient: COLLECTOR, precommitment: 5n, feeCap: 10n ** 13n, deadline: t + 120n, nonce: 0n, releases: clear(q) }, Date.now());
   const realAsk: PoolAsk = { ...ask, token: q.token, amount: q.amountIn };
   assert.throws(() => checkEvmSellSim(real as never, t, realAsk, ctx), refusedAs("sim_pool"));
   assert.throws(() => signEvmSellSim(EVM_SECRET, ctx, real as never), refusedAs("unchecked"));

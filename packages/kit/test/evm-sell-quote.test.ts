@@ -18,6 +18,8 @@ import { evmQuotedSell } from "../src/trade/evm/quoted.ts";
 import { AMOUNT, BOUGHT, NATIVE, TOKEN, V3_POOL, WALLET, flat, provider, req, sell, sellQuoteWith, verdict, type Pool, type Seen } from "./evm-sell-quote-fx.ts";
 
 const keccak = (t: string) => keccak_256(new TextEncoder().encode(t));
+// W's releases read with none pending (card evm-sell-no-release-in-flight): the builder takes only such a verdict
+const clear = (q: { chain: EvmPoolChain; w: string }) => kit.evmSellReleases({ chain: q.chain, w: q.w, fin: { number: 0n, timestamp: 0n }, releases: [], sent: [] });
 
 test("the device picks the pool: the best of its own candidates, minOut from it, on both providers", async () => {
   const seen: Seen = { pools: [], probes: [] };
@@ -76,7 +78,7 @@ test("planted: a server's route is never taken: a request with a route is refuse
   const serverSell = pinnedBuildSell(evmPoolVenues(), "base-sepolia", { w: WALLET, token: TOKEN, amount: AMOUNT, target: evmPoolVenues()["base-sepolia"].poolManager!, route: route as kit.EvmSellRoute, minOut: 10n ** 15n, ...fields });
   assert.equal(code(() => kit.evmPoolSignSell(W_KEY, "base-sepolia", serverSell)), "not_built");
   // the device's own quote builds and signs, into the chain's pinned pool, at the quote's minOut
-  const built = build(q, fields);
+  const built = build(q, { ...fields, releases: clear(q) });
   assert.equal(built.minOut, q.minOut);
   assert.equal(built.target, evmPoolVenues()["base-sepolia"].poolManager);
   assert.equal(built.pool, evmPoolVenues()["base-sepolia"].pool);
@@ -94,7 +96,7 @@ test("planted: a stale quote is refused, when quoted (a head 31 s old) and when 
   const old = Math.floor(Date.now() / 1000) - 31;
   assert.deepEqual(await verdict(sell({ price: flat, headSec: old })), { accepted: false, code: "stale_quote" });
   const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat }), provider({ price: flat })], Date.now());
-  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  const fields = { precommitment: 0x5e11n, feeCap: 10n ** 13n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n, releases: clear(q) };
   const later = Number(q.block.timestamp) * 1000 + 30_001;
   enableTimers(mock.timers, { apis: ["Date"], now: later });
   try {
@@ -284,7 +286,7 @@ test("planted: the sender's fee cap is the device's own rule's at the agreed blo
     const q = await sellQuoteWith(req(chain), [provider({ price: flat, baseFee }), provider({ price: flat, baseFee })], Date.now());
     assert.equal((q as { feeMax?: bigint }).feeMax, want, `${chain} at ${baseFee}`);
     // the fee recipient is the chain's FeeCollector pin (card evm-testnet-delegate-review3)
-    const f = { ...fields, feeRecipient: evmPoolVenues()[chain].feeCollector! };
+    const f = { ...fields, feeRecipient: evmPoolVenues()[chain].feeCollector!, releases: clear(q) };
     // no cap named: the rule's; the rule's own or a lower one: as named; above it: refused
     assert.equal(kit.evmPoolBuildSell(q, f).feeCap, want);
     // the fee recipient is checked by the builder (card pool-review-3, L-1): never W or zero (bad_fee)
@@ -316,7 +318,7 @@ test("card evm-testnet-delegate-review3: a quoted sell pays its fee only to the 
   for (const chain of ["base-sepolia", "robinhood-testnet"] as EvmPoolChain[]) {
     const collector = evmPoolVenues()[chain].feeCollector!;
     const q = await sellQuoteWith(req(chain), [provider({ price: flat }), provider({ price: flat })], Date.now());
-    const f = { precommitment: 0x5e11n, feeRecipient: collector, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+    const f = { precommitment: 0x5e11n, feeRecipient: collector, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n, releases: clear(q) };
     assert.equal(kit.evmPoolBuildSell(q, f).feeRecipient, collector, chain);
     assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: RELAYER })), "not_pinned", chain);
     assert.equal(code(() => kit.evmPoolBuildSell(q, { ...f, feeRecipient: "0x000000000000000000000000000000000000fee1" })), "not_pinned", chain);
@@ -357,4 +359,57 @@ test("planted: a sell quote takes the buy's block (boughtBlock): none, 0, a nega
     assert.deepEqual(await verdict(sell({ price: flat }, "base", { boughtBlock })), { accepted: false, code: "bad_request" }, String(boughtBlock));
   }
   assert.equal((await verdict(sell({ price: flat }, "base", { boughtBlock: 1n }))).accepted, true);
+});
+
+// card evm-sell-no-release-in-flight (audit E-01, Pillow Auditors v1.0): SellDelegate's minOut counts any ETH that
+// reaches W during the sale, so the kit builds no sell for a W with a release on its way (src/trade/evm/sell-releases.ts)
+test("card evm-sell-no-release-in-flight: a release to W not final on two RPCs refuses the sell (release_in_flight, naming the wait); a final one builds it as before", async () => {
+  const q = await sellQuoteWith(req("base-sepolia"), [provider({ price: flat }), provider({ price: flat })], Date.now());
+  const base = { precommitment: 0x5e11n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n };
+  // the round's finalized anchor: block 100 at 1,000 s
+  const read = (over: Partial<kit.EvmReleaseRead>) => kit.evmSellReleases({ chain: q.chain, w: q.w, fin: { number: 100n, timestamp: 1_000n }, releases: [], sent: [], ...over });
+  const why = (releases: unknown): string => {
+    try {
+      kit.evmPoolBuildSell(q, { ...base, releases } as kit.EvmPoolSellFields);
+      return "built";
+    } catch (e) {
+      // the error's message leads with its code
+      const c = (e as { code?: string }).code;
+      return c === "release_in_flight" ? (e as Error).message : `another code ${c}: ${(e as Error).message}`;
+    }
+  };
+  const OTHER = "0x" + "42".repeat(20);
+  const NOTE = "change:5:1";
+  // pending: a withdraw or a buy's fallback that landed on W in the tail, above the finalized block
+  const tail = why(read({ releases: [{ block: 101n, recipient: q.w, nullifier: 7n }] }));
+  assert.match(tail, /^release_in_flight: .*landed in block 101, above the finalized block: the sell waits until block 101 is final on both RPCs/);
+  // the same with W's address in another case, and the device's own note named
+  assert.match(why(read({ releases: [{ block: 150n, recipient: q.w.toUpperCase().replace("0X", "0x"), nullifier: 7n }], sent: [{ note: NOTE, nullifier: 7n, deadlineMs: 0n }] })), /^release_in_flight: .*change:5:1 landed in block 150/);
+  // pending: W's release sent and not landed, its deadline not yet passed by the finalized block's time (at it, or after)
+  for (const deadlineMs of [1_000_000n, 1_000_001n, 10n ** 15n]) {
+    assert.match(why(read({ sent: [{ note: NOTE, nullifier: 7n, deadlineMs }] })), new RegExp(`^release_in_flight: .*${NOTE} was sent and has not landed: the sell waits until it lands in a final block or a final block's time passes its deadline ${deadlineMs} ms`));
+  }
+  // final: landed on W at or below the finalized block, a sent one that landed there, one whose deadline the finalized
+  // block passed (it can never land), and a release in the tail paid to another address
+  assert.equal(why(read({ releases: [{ block: 100n, recipient: q.w, nullifier: 7n }] })), "built");
+  assert.equal(why(read({ releases: [{ block: 99n, recipient: q.w, nullifier: 7n }], sent: [{ note: NOTE, nullifier: 7n, deadlineMs: 10n ** 15n }] })), "built");
+  assert.equal(why(read({ sent: [{ note: NOTE, nullifier: 7n, deadlineMs: 999_999n }] })), "built");
+  assert.equal(why(read({ releases: [{ block: 101n, recipient: OTHER, nullifier: 7n }] })), "built");
+  // a sent release that landed in the tail paid to another address moves no ETH onto W either
+  assert.equal(why(read({ releases: [{ block: 101n, recipient: OTHER, nullifier: 7n }], sent: [{ note: NOTE, nullifier: 7n, deadlineMs: 10n ** 15n }] })), "built");
+  // the verdict is the kit's own, for this chain and this W: none, a copy, another W's or chain's is refused
+  const ok = read({});
+  assert.equal(why(ok), "built");
+  assert.match(why(undefined), /^release_in_flight: /);
+  assert.match(why({ ...ok }), /^release_in_flight: /);
+  assert.match(why(Object.freeze({ chain: q.chain, w: q.w, finalBlock: 100n, pending: [] })), /^release_in_flight: /);
+  assert.match(why(read({ w: OTHER })), /^release_in_flight: the releases read is another chain's or another W's/);
+  assert.match(why(kit.evmSellReleases({ chain: "robinhood-testnet", w: q.w, fin: { number: 100n, timestamp: 1_000n }, releases: [], sent: [] })), /^release_in_flight: the releases read is another chain's or another W's/);
+  // a verdict cannot be changed after it was made
+  assert.throws(() => (ok.pending as unknown[]).push({ note: null, landed: 1n }));
+  // a read the kit cannot judge is refused, never a verdict: a nullifier released twice, a release with no recipient
+  assert.throws(() => read({ releases: [{ block: 1n, recipient: OTHER, nullifier: 7n }, { block: 2n, recipient: OTHER, nullifier: 7n }] }), /release_in_flight: .*a nullifier released twice/);
+  assert.throws(() => read({ releases: [{ block: 1n, recipient: "W", nullifier: 7n }] }), /release_in_flight: /);
+  assert.throws(() => read({ sent: [{ note: "", nullifier: 7n, deadlineMs: 0n }] }), /release_in_flight: /);
+  assert.throws(() => read({ fin: { number: -1n, timestamp: 0n } }), /release_in_flight: /);
 });

@@ -14,6 +14,9 @@ import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuot
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import * as sellMod from "../src/trade/evm/sell-unpinned.ts";
 import { evmQuotedBuy, evmQuotedSell } from "../src/trade/evm/quoted.ts";
+import { evmSellReleases } from "../src/trade/evm/sell-releases.ts";
+// W's releases read with none pending (card evm-sell-no-release-in-flight): the builder takes only such a verdict
+const clear = (q: { chain: string; w: string }) => evmSellReleases({ chain: q.chain as EvmPoolSellQuote["chain"], w: q.w, fin: { number: 0n, timestamp: 0n }, releases: [], sent: [] });
 const { evmSellRouteOf } = quoteMod as unknown as { evmSellRouteOf: (r: EvmRoute) => import("../src/trade/evm/sell-unpinned.ts").EvmSellRoute };
 const { evmSellRouteCheck } = sellMod as unknown as { evmSellRouteCheck: (chain: "base", token: string, r: unknown) => void };
 // the builder as a namespace: the red run before the fix reads it where evmPoolRouteDataQuoted is not there yet
@@ -4816,7 +4819,7 @@ const saleInput = (q: HookedQuote): string => {
   const realNow = Date.now;
   Date.now = () => NOW;
   try {
-    const built = evmQuotedSell(SALE_VENUES, q as unknown as EvmPoolSellQuote, { precommitment: 0x5e11n, feeRecipient: SALE_COLLECTOR, deadline: BigInt(Math.floor(NOW / 1000) + 300), nonce: 0n }, NOW);
+    const built = evmQuotedSell(SALE_VENUES, q as unknown as EvmPoolSellQuote, { precommitment: 0x5e11n, feeRecipient: SALE_COLLECTOR, deadline: BigInt(Math.floor(NOW / 1000) + 300), nonce: 0n, releases: clear(q as unknown as EvmPoolSellQuote) }, NOW);
     return sellMod.evmSellCallData(built, 0n, new Uint8Array(65));
   } finally {
     Date.now = realNow;
@@ -4929,7 +4932,7 @@ test("HC6 the device's quote of a sale through an unlisted hook builds, and the 
   // Base's venue with a pool and a FeeCollector pinned, as pool-evm-deploy pins them
   const [POOL, COLLECTOR] = ["0x00000000000000000000000000000000000b0011", "0x00000000000000000000000000000000000fee11"];
   const venues = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: POOL, feeCollector: COLLECTOR }) }) as builder.EvmPoolVenueList;
-  const f = { precommitment: 0x5e11n, feeRecipient: COLLECTOR, deadline: BigInt(Math.floor(NOW / 1000) + 300), nonce: 0n };
+  const f = { precommitment: 0x5e11n, feeRecipient: COLLECTOR, deadline: BigInt(Math.floor(NOW / 1000) + 300), nonce: 0n, releases: clear(q) };
   const realNow = Date.now;
   Date.now = () => NOW; // the unpinned builder reads the device's clock for the deadline
   try {
