@@ -19,7 +19,7 @@ import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
   EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolScopeOf, evmTreeSync,
+  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -1898,4 +1898,74 @@ test("card helper-evm-range-cap-walk (re-check of 6e90f580): with blastapi 30 ms
   const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
   assert.deepEqual(r.events.map((e) => String((e as { value?: bigint }).value)), Array(3).fill(String(10n ** 18n)));
   assert.ok(count.n < 40, `${count.n} getLogs`);
+});
+
+test("card helper-evm-range-cap-walk (review of e30c5c46, P5): a block read answered beside a log read holds no provider at its cap: blastapi's refusal still walks the seat to Pocket, free", async () => {
+  const B = bareRpc("https://base-mainnet.public.blastapi.io", [], (span) => { if (span > 10) throw new Error(BLAST_WORDS()); return ["B"]; });
+  const pair = evmPair([bareRpc("https://base-rpc.publicnode.com", [], () => ["A"]), B, bareRpc("https://base.api.pocket.network", [], () => ["C"])]);
+  // as queue.take()'s now() beside a pass's trees(): seat 1's block read is answered by blastapi inside the read
+  const [, y] = await evmAgreedRead(pair, async (rpc) => {
+    await rpc("eth_getBlockByNumber", ["latest", false]);
+    return rpc("eth_getLogs", logRange(0, 39_999));
+  });
+  assert.deepEqual(y, ["C"]);
+  assert.equal(pair[1].url, "https://base.api.pocket.network");
+});
+
+test("card helper-evm-range-cap-walk (review of e30c5c46, P6): a seat moved back from a narrow provider to a wide one pages at the wide one's own size, never the narrow page doubled", async () => {
+  const real = Date.now;
+  let t = real();
+  Date.now = () => t;
+  const pages: Record<string, number> = {};
+  let once = true;
+  const mk = (name: string, cap: number, throttleOnce = false) => Object.assign(async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_getBlockByNumber") { const b = BigInt(params[0] as string); return { number: q(b), hash: `0x${w64(b)}`, timestamp: q(b) }; }
+    const f = params[0] as { fromBlock: string; toBlock: string };
+    if (throttleOnce && once) { once = false; throw HTTP_429(); }
+    if (BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n > BigInt(cap)) throw new Error(`HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a ${cap} block range.`);
+    pages[name] = (pages[name] ?? 0) + 1;
+    return [];
+  }, { url: `https://${name}.example` }) as EvmRpc;
+  try {
+    const pair = evmPair([mk("a", 100_000), mk("b", 10), mk("d", 100_000, true)]);
+    const pager = evmPoolLogPager();
+    const read = (to: bigint) => {
+      const anchor = { number: to, hash: `0x${w64(to)}`, timestamp: to, baseFeePerGas: null };
+      return evmAgreedLogs(pair, { address: "0x1", topics: [] }, () => { throw new Error("no logs here"); }, 0n, { fin: anchor, anchor }, pager, 0, undefined, async (ms) => void (t += ms));
+    };
+    // read 1: seat 1 on b (10 blocks); d throttles once and rests, so seat 1 pages b
+    await read(300n);
+    assert.ok((pages.b ?? 0) >= 30, `b's pages ${pages.b}`);
+    t += EVM_SPARE_REST_MS + 1_000;
+    // read 2: d's rest is over: seat 1 moves back to d at its first call and reads 100,000 blocks in d's own pages
+    const d1 = pages.d ?? 0;
+    await read(99_999n);
+    assert.equal(pair[1].url, "https://d.example");
+    assert.ok((pages.d ?? 0) - d1 <= 2, `${(pages.d ?? 0) - d1} pages on d for 100,000 blocks it takes in one`);
+  } finally {
+    Date.now = real;
+  }
+});
+
+test("card helper-evm-range-cap-walk (review of e30c5c46, M5): a move back that fails returns the seat to its own provider, never on to the next in the list", async () => {
+  const real = Date.now;
+  let t = real();
+  Date.now = () => t;
+  let pocketOnce = true;
+  try {
+    const H = bareRpc("https://h.example", [], (span) => { if (span > 1000) throw new Error("HTTP 400: RPC error -32614: eth_getLogs is limited to a 1000 range"); return ["H"]; });
+    const M = Object.assign(async () => { throw HTTP_429(); }, { url: "https://m.example" }) as EvmRpc;
+    const P = bareRpc("https://p.example", [], () => { if (pocketOnce) { pocketOnce = false; throw HTTP_429(); } return ["P"]; });
+    const pair = evmPair([H, bareRpc("https://s.example", [], () => ["S"]), M, P]);
+    const [s0] = pair;
+    // H names its 1,000 cap; M and P throttle, so seat 0 stays on H, whose own refusal goes up
+    await assert.rejects(s0("eth_getLogs", logRange(0, 1999)), /limited to a 1000 range/);
+    assert.equal(s0.url, "https://h.example");
+    t += EVM_SPARE_REST_MS + 1_000;
+    // M's rest is over: seat 0 moves back to M (no cap known), which throttles: the seat returns to H, not on to P
+    assert.deepEqual(await s0("eth_getLogs", logRange(0, 999)), ["H"]);
+    assert.equal(s0.url, "https://h.example");
+  } finally {
+    Date.now = real;
+  }
 });
