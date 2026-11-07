@@ -26,7 +26,7 @@ import { solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
+import { POOL_DEPOSIT_FOLLOW_FOR_MS, POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { pairDown } from "./outage.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -207,6 +207,9 @@ function chain() {
             return { ...ctx, value: FEE };
           case "getBlockHeight":
             return c.height;
+          case "getEpochInfo":
+            // the finalized height with the slot it is of, one node's one view (src/pool-deposit.ts finals)
+            return { absoluteSlot: slot, blockHeight: c.height, epoch: 0, slotIndex: slot, slotsInEpoch: 432_000, transactionCount: null };
           case "getSignatureStatuses":
             // saysFailed: a lying RPC, every signature finalized with an error
             return { ...ctx, value: (params[0] as string[]).map((s) => (over.saysFailed ? { err: { InstructionError: [0, "lie"] }, confirmationStatus: "finalized" } : over.hideStatus ? null : (statuses.get(s) ?? null))) };
@@ -853,7 +856,7 @@ test("R3: the heights are read before the mark, so a send that finalizes between
   // the send finalizes, and the chain moves past its last valid height, at the first finalized height read
   let moved = false;
   const late = (rpc: ReturnType<typeof c.rpc>) => async (m: string, p: readonly unknown[]) => {
-    if (m === "getBlockHeight" && (p[0] as { commitment?: string } | undefined)?.commitment === "finalized" && !moved) {
+    if (m === "getEpochInfo" && (p[0] as { commitment?: string } | undefined)?.commitment === "finalized" && !moved) {
       moved = true;
       c.apply(first!);
       c.height += 1_000;
@@ -1653,7 +1656,7 @@ test("review L4: a page-load pass where one note lands with no tx named and anot
 // send of the ask can land: each one past its last valid height at finalized on both RPCs (or failed on both) with no
 // mark, or taken (the precommitment's mark holds another deposit on both); a send that lands late is "filled".
 /** The kind run with its stages: `ran` once the run ends; every wait after that (the end's reads) parks until `go`. */
-function followed(c: ReturnType<typeof chain>, ns: NoteStore, over: Partial<PoolDepositHost> = {}) {
+function followed(c: ReturnType<typeof chain>, ns: NoteStore, over: Partial<PoolDepositHost> = {}, a: PoolAsk = ask(RUNG)) {
   const stages: string[] = [];
   let ended = false;
   let ran!: () => void;
@@ -1669,7 +1672,7 @@ function followed(c: ReturnType<typeof chain>, ns: NoteStore, over: Partial<Pool
     });
   };
   const kind = poolDepositKind(() => ({ ...host(c, ns, { wait, ...over }), end: () => ((ended = true), ran()) }));
-  const r = kind(ask(RUNG), { id: "e1", sha: "00", progress: (s) => (stages.push(String(s)), onStage?.()) });
+  const r = kind(a, { id: "e1", sha: "00", progress: (s) => (stages.push(String(s)), onStage?.()) });
   const within = (p: Promise<void>, ms = 2_000): Promise<boolean> => Promise.race([p.then(() => true), new Promise<boolean>((ok) => setTimeout(() => ok(false), ms))]);
   return {
     r,
@@ -1706,14 +1709,15 @@ test("pool-deposit-sent-end, review pool-answer-unknown r2 item 5: the only send
   assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", MIN_DEPOSIT], ["second", "PLANNED", undefined]], "the front-runner's deposit is the user's note; the rung's money stays in U");
 });
 
-test("pool-deposit-sent-end: one RPC alone saying the send's last valid height is final gives no not_landed; both saying it, with no mark, do", async () => {
+test("pool-deposit-sent-end review 1 (repro R): every send of the ask past its last valid height on both RPCs with no mark is no end: the pass builds the note again from U's money, so the app is never told not_landed; the end's reads start the pass and follow the rebuilt send to filled", async () => {
   const c = chain();
   const ns = await notes();
   const u = await plannedU(ns);
   c.fund(u.address, 50_000_000);
   c.lands = false; // the send is dropped
-  const ahead = (rpc: SolanaRpc): SolanaRpc => async (m, p) => (m === "getBlockHeight" && (p[0] as { commitment?: string })?.commitment === "finalized" ? c.height + 10_000 : rpc(m, p));
-  const f = followed(c, ns, { rpcs: [c.rpc(), ahead(c.rpc())] });
+  let kicks = 0;
+  const ahead = (rpc: SolanaRpc): SolanaRpc => async (m, p) => (m === "getEpochInfo" && (p[0] as { commitment?: string })?.commitment === "finalized" ? { ...((await rpc(m, p)) as object), blockHeight: c.height + 10_000 } : rpc(m, p));
+  const f = followed(c, ns, { rpcs: [c.rpc(), ahead(c.rpc())], settle: () => void kicks++ });
   await (f.r as { after: Promise<void> }).after;
   await f.runEnd;
   assert.deepEqual(f.stages, [], "nothing told at the run's end while the send may land");
@@ -1723,12 +1727,130 @@ test("pool-deposit-sent-end: one RPC alone saying the send's last valid height i
     assert.equal(await f.parked(), true);
   }
   assert.deepEqual(f.stages, [], "one RPC's expiry alone tells the app nothing");
-  c.height += 1_000; // past the last valid height on both
+  assert.equal(kicks, 0, "no pass started while a send may land");
+  c.height += 1_000; // past the last valid height on both, no mark
+  f.go();
+  assert.equal(await f.parked(), true, "every send dead with no mark is no end: the reads go on");
+  assert.deepEqual(f.stages, [], "never not_landed for a note the pass builds again");
+  assert.equal(kicks, 1, "the end's reads start the pass");
+  // the page's passes (the state read the kick starts): the same note built again from U's money, then it lands
+  c.lands = true;
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "not_landed", "built again and sent: pending");
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "filled");
+  assert.deepEqual((await ours(ns)).map((n) => n.state), ["UNSPENT"]);
   f.go();
   assert.equal(await f.staged(1), true);
-  assert.deepEqual(f.stages, ["not_landed"]);
-  assert.equal(c.lamports(u.address), 50_000_000, "the money stays in U");
-  assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"], "the next ask or load builds it again, as today");
+  assert.deepEqual(f.stages, ["filled"], "the ask's end is the rebuilt send's landing, never not_landed");
+  assert.equal(c.sent.length, 2);
+});
+
+test("pool-deposit-sent-end review 1: a note the pass cannot build again (U short of its send again) is no end either: nothing told, the reads back off to POOL_DEPOSIT_FOLLOW_MAX_MS, and give up after POOL_DEPOSIT_FOLLOW_FOR_MS telling nothing; a top-up then lands it with the app never told not_landed", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  c.lands = false;
+  const waits: number[] = [];
+  let ended = false;
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  const stages: string[] = [];
+  const shorts: bigint[] = [];
+  let passing: Promise<unknown> | null = null;
+  const kind = poolDepositKind(() => ({
+    ...host(c, ns),
+    wait: async (ms: number) => {
+      if (!ended) return;
+      await gate;
+      waits.push(ms);
+    },
+    // the page's pass, one at a time (pool-testnet.ts settleSolana), as the kick starts it
+    settle: () => void (passing ??= settlePoolDeposits(host(c, ns, { short: (_, l) => void shorts.push(l) })).finally(() => (passing = null))),
+    end: () => void (ended = true),
+  }));
+  const r = kind(ask(RUNG), { id: "e2", sha: "00", progress: (s) => void stages.push(String(s)) }) as { after: Promise<void> };
+  await r.after;
+  while (!ended) await new Promise((ok) => setTimeout(ok, 5));
+  // dead on both, and U below the rung and its costs: the pass's send again is short (fees and rent rose)
+  c.height += 1_000;
+  c.accounts.get(u.address)!.lamports = 1_000_000;
+  open();
+  for (let n = -1; n !== waits.length; ) {
+    n = waits.length;
+    await new Promise((ok) => setTimeout(ok, 100));
+  }
+  await passing;
+  assert.deepEqual(stages, [], "nothing told: the note may still land once U is topped up");
+  assert.ok(shorts.length > 0, "the pass was started and named the top-up");
+  assert.deepEqual(waits.slice(1, 8), [2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000], "doubling from 2 s to 60 s once every send is dead");
+  const total = waits.reduce((a, b) => a + b, 0);
+  assert.ok(total <= POOL_DEPOSIT_FOLLOW_FOR_MS && total > POOL_DEPOSIT_FOLLOW_FOR_MS - 60_000, `gives up at its bound: ${total}`);
+  assert.equal(c.sent.length, 1, "nothing sent while U is short");
+  c.fund(u.address, 50_000_000);
+  c.lands = true;
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "not_landed", "built again and sent: pending");
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "filled");
+  assert.deepEqual(stages, [], "and the app was never told not_landed for a note that landed");
+});
+
+test("pool-deposit-sent-end review 4: the end's reads stop when the page leaves the deposit (signal aborted at sign out): no read, no stage", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  const out = new AbortController();
+  const f = followed(c, ns, { signal: out.signal });
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  const before = c.calls.length;
+  out.abort();
+  c.lands = true;
+  c.height += 1_000;
+  f.go();
+  assert.equal(await f.parked(), false, "no read after the sign out");
+  assert.equal(c.calls.length, before, "no RPC call after the sign out");
+  assert.deepEqual(f.stages, []);
+});
+
+test("pool-deposit-sent-end review 2 (repro Q): the mark is read at or past each RPC's slot of its finalized height (minContextSlot): a node behind answers -32016 and is read again, so a deposit that landed late in its life is filled, never not_landed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  const kept: string[] = [];
+  let behind = 0;
+  let stale = 0;
+  // a load-balanced URL: each finalized mark read goes first to a node whose finalized view predates the deposit's slot.
+  // A real node answers a read below minContextSlot with -32016; with no minContextSlot it answers its stale view
+  const lb = (rpc: SolanaRpc, keep: boolean): SolanaRpc => async (m, p) => {
+    if (keep && m === "sendTransaction") kept.push(p[0] as string);
+    const o = (p[1] ?? {}) as { commitment?: string; minContextSlot?: number };
+    if (behind > 0 && m === "getAccountInfo" && o.commitment === "finalized") {
+      behind--;
+      const r = (await rpc(m, p)) as { context: { slot: number } };
+      const nodeSlot = r.context.slot - 100;
+      if (o.minContextSlot !== undefined && o.minContextSlot > nodeSlot) throw new Error(`RPC error -32016: Minimum context slot has not been reached`);
+      stale++;
+      return { context: { slot: nodeSlot }, value: null };
+    }
+    return rpc(m, p);
+  };
+  const f = followed(c, ns, { rpcs: [lb(c.rpc(), true), lb(c.rpc(), false)] });
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  c.lands = true;
+  c.apply(base64.decode(kept[0]!)); // it lands, late in its life
+  c.height += 1_000; // and the finalized height is past its last valid height on both
+  behind = 2; // each RPC's next mark read hits the node behind
+  f.go();
+  assert.equal(await f.parked(), true, "a node behind the height's slot is read again after a wait");
+  assert.deepEqual(f.stages, []);
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["filled"], "never not_landed for a deposit that landed");
+  assert.equal(stale, 0, "no stale mark read was ever taken for no mark");
 });
 
 test("pool-deposit-sent-end: a send that lands late, before its last valid height, gives filled and never not_landed", async () => {
@@ -1753,4 +1875,57 @@ test("pool-deposit-sent-end: a send that lands late, before its last valid heigh
   assert.equal(await f.staged(1), true);
   assert.deepEqual(f.stages, ["filled"]);
   assert.equal(c.sent.length, 1, "never sent again");
+});
+
+test("pool-deposit-sent-end review 3: rung 1 landed, rung 2 sent, then a provider read down: no end at part_filled while rung 2 may land; its send is read on and the ask ends filled once it lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const kept: string[] = [];
+  let sends = 0;
+  let down2 = false;
+  const base = c.rpc();
+  const w: SolanaRpc = async (m, p) => {
+    if (m === "sendTransaction" && ++sends === 2) {
+      c.lands = false; // rung 2 is dropped for now
+      kept.push(p[0] as string);
+      down2 = true;
+    }
+    // the run's read back of rung 2 (its finalized height): a provider down
+    if (down2 && (m === "getEpochInfo" || (m === "getBlockHeight" && optsOf(p)?.commitment === "finalized"))) throw down();
+    return base(m, p);
+  };
+  const f = followed(c, ns, { rpcs: [w, c.rpc()] }, ask(3n * RUNG));
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  down2 = false;
+  assert.equal(c.sent.length, 2);
+  assert.deepEqual(f.stages, ["filled", "sent"], "rung 1's landing and rung 2's send only: never part_filled while rung 2 may land");
+  assert.equal(await f.parked(), true, "rung 2's send is read on");
+  c.lands = true;
+  c.apply(base64.decode(kept[0]!));
+  f.go();
+  assert.equal(await f.staged(3), true);
+  assert.deepEqual(f.stages, ["filled", "sent", "filled"], "the whole ask went in: filled");
+});
+
+test("pool-deposit-sent-end review 5: the only send taken, then a raw store error past it: the run's throw still hands the kind its end (not_landed), never left at sent", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const base = c.rpc();
+  let sends = 0;
+  const racing: SolanaRpc = async (method, params) => {
+    if (method === "sendTransaction" && sends++ === 0) c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    return base(method, params);
+  };
+  // the rung's next note cannot be written: a raw store fault (not a Refused, not a provider's)
+  const broken: NoteStore = new Proxy(ns, { get: (t, k) => (k === "add" ? async () => { throw new Error("store write failed"); } : (t as unknown as Record<string | symbol, unknown>)[k as string]) }) as NoteStore;
+  const f = followed(c, ns, { rpcs: [racing, c.rpc()], notes: async () => broken });
+  await (f.r as { after: Promise<void> }).after;
+  assert.deepEqual((f.r as { answer(): unknown }).answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] } });
+  await f.runEnd;
+  assert.equal(await f.staged(1), true, `no end told: ${JSON.stringify(f.stages)}`);
+  assert.deepEqual(f.stages, ["not_landed"]);
 });

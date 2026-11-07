@@ -369,7 +369,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return null;
     }
   };
+  // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
+  let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
+    follows.abort();
+    follows = new AbortController();
     const p = open;
     open = null;
     prover.stop();
@@ -391,6 +395,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes: async () => (notes = await openNoteStore(await page.store())),
       seed64: page.seed64,
       landed: () => void proofs(),
+      settle: () => void settleSolana(),
+      signal: follows.signal,
       end: () => {
         notes?.close();
         end?.();
@@ -433,6 +439,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         round: e.round,
         notes: async () => (notes = await openNoteStore(await page.store())),
         seed64: page.seed64,
+        settle: () => void settleEvm(chain),
+        signal: follows.signal,
         end: () => {
           notes?.close();
           end?.();
