@@ -608,6 +608,22 @@ export const MUTANTS = [
   [QUOTE, '() => refuse("rpc_disagree", `the providers answer the system state', '() => refuse("rpc_error", `the providers answer the system state', R, "review of da11bbb6, H1 the system slots are read"],
   [QUOTE, "  if (sysSlots.length > 0) {\n", "  if (sysSlots.length > 19) {\n", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
   [QUOTE, "  if (BigInt(sale.l1Gas) !== 0n) return [];\n", "  if (BigInt(sale.l1Gas) > 1n) return [];\n", R, "review of da11bbb6, L1"],
+  // card evm-sell-hook-intrablock: on Robinhood the replay at the trade's traced pre-state, ArbOS's state left out; the
+  // as-is leg on an errored frame into the route's unlisted hook; the trace two companies' word for the trade, bounded.
+  // Not listed: the PoolManager's frame left out of `errored` (equivalent while no route's unlisted hook is the
+  // PoolManager, which the hooks compared against never are)
+  [QUOTE, "Object.entries(p?.over ?? {})", "Object.entries({} as Record<string, Override>)", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
+  [QUOTE, "(r) => r.ok, (r) => !r.ok, preStateOf(v, trace));", "(r) => r.ok, (r) => !r.ok, undefined);", R, "card evm-sell-hook-intrablock, HC2 and HIGH 1 (sell, Robinhood)"],
+  [QUOTE, "(r) => boughtOf(r) === false, preStateOf(v, trace));", "(r) => boughtOf(r) === false, undefined);", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
+  [QUOTE, "    if (lower(a) !== EVM_ARBOS_STATE) out[lower(a)] = one;", "    out[lower(a)] = one;", R, "card evm-sell-hook-intrablock, HC2 (buy, Robinhood) a hook flipped"],
+  [QUOTE, " && !(p !== undefined && hooks.some((hk) => p.errored.includes(lower(hk))))", "", R, "review of ca907a05, HIGH 1 (buy, Robinhood)"],
+  [QUOTE, "hooks.some((hk) => p.errored.includes(lower(hk)))", "p.errored.length > 0", R, "card evm-sell-hook-intrablock, the as-is leg"],
+  [QUOTE, '    (x, y) => JSON.stringify(x) === JSON.stringify(y),\n    () => refuse("rpc_disagree", `the trace providers', '    (x, y) => true,\n    () => refuse("rpc_disagree", `the trace providers', R, "card evm-sell-hook-intrablock, a trace that"],
+  [QUOTE, ' || typeof root.input !== "string" || lower(root.input) !== sale.input', "", R, "card evm-sell-hook-intrablock, a trace that"],
+  [QUOTE, "  if (accounts.length > PRE_MAX_ACCOUNTS) return null;\n", "", R, "card evm-sell-hook-intrablock, a trace that"],
+  [QUOTE, "      if (slots > PRE_MAX_SLOTS) return null;\n", "", R, "card evm-sell-hook-intrablock, a trace that"],
+  [QUOTE, "hex(o.code, /^0x([0-9a-fA-F]{2})*$/, PRE_MAX_CODE_HEX)", "hex(o.code, /^0x([0-9a-fA-F]{2})*$/, 1 << 20)", R, "card evm-sell-hook-intrablock, a trace that"],
+  [QUOTE, "  if (sale.index !== sale.rcIndex) return [];\n", "", R, "card evm-sell-hook-intrablock, a trace that"],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => boughtOf(r) === true, (r) => !r.ok);", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],

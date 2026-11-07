@@ -73,6 +73,10 @@ export type EvmPoolVenue = {
    *  evm.ts EVM_LOG_PAGE_BLOCKS) from the deploy block to the head. A quote ranks `providers` by eth_call speed, which no
    *  log read measures. Absent: `providers` is the pool's list too. */
   readonly poolProviders?: readonly string[];
+  /** The two providers, each of another company, a ban's evidence reads the reverted trade's own trace on
+   *  (debug_traceTransaction, prestateTracer and callTracer; card evm-sell-hook-intrablock): the state the trade saw at
+   *  its start, after every earlier transaction of its block. Absent: the evidence replays at the parent block. */
+  readonly traceProviders?: readonly [string, string];
   readonly maxLag?: number;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
@@ -287,6 +291,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // rpc.degenprotocol.io (Pocket's very words "max 10001 blocks", and a finalized block above its head),
       // robinhood.rpc.blxrbdn.com and rpc.nodeflare.app (403), lb.routeme.sh (429), rpc.ordofi.network (no answer).
       poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
+      // The trace pair (card evm-sell-hook-intrablock), read 2026-11-07 16:16-16:24Z from this Mac: of the five quote
+      // providers only dRPC answers debug_traceTransaction (prestateTracer, diffMode and callTracer, 3, 100 and 600 blocks
+      // back); publicnode, Robinhood's own and Globalstake answer -32601, bloXroute -32601 or 403. Of the keyless others,
+      // Pocket (the pool list's) answers too, and rpc-robinhood.blockmachine.io (the newest 5,000 blocks keyless) and
+      // rpc.degenprotocol.io (Pocket's own errors); daybreak, blockreq and thirdweb do not. dRPC's and Pocket's prestates
+      // were equal as JSON for every one of the 7 transactions read.
+      traceProviders: Object.freeze(["https://robinhood.drpc.org", "https://robinhood.api.pocket.network"] as const),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,
