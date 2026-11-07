@@ -17,7 +17,7 @@
 .dhd { height: 56px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border-panel); }
 .dhd .bal { margin-left: auto; font: 14px var(--font-num); color: var(--text-2); }
 .dep-x { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-2); }
-.dbody { flex: 1; min-height: 0; overflow: hidden; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.dbody { flex: 1; min-height: 0; overflow: hidden; contain: paint; padding: 16px; display: flex; flex-direction: column; gap: 12px; } /* contain: paint: nothing in the body (the focused amount field included) paints or takes a tap outside its own box */
 .dseg { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; border: 1px solid var(--border-panel); flex: none; }
 .dseg button { height: 38px; border-radius: 9px; font: 500 15px var(--font-ui); color: var(--text-2); }
 .dseg button.on { background: var(--border-strong); color: var(--text-1); }
@@ -76,7 +76,7 @@
 .ddone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 0 8px; }
 .damt-done { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); }
 .dsub { font: 14px var(--font-ui); color: var(--text-2); }
-.dfoot { flex: none; height: 81px; padding: 12px 16px 16px; border-top: 1px solid var(--border-panel); }
+.dfoot { flex: none; height: 81px; padding: 12px 16px 16px; border-top: 1px solid var(--border-panel); position: relative; z-index: 1; } /* the action sits above the body: on CI's phone run the focused amount field took the tap meant for Get address (app-deposit-mount live check, "the input ... intercepts pointer events") */
 .dbtn { height: 52px; border-radius: 13px; font: 600 16px var(--font-ui); display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
 .dep .dbtn.buy { background: var(--acc); color: var(--on-acc); box-shadow: 0 10px 30px rgba(var(--acc-rgb), .18); }
 .dep .dbtn.paper { background: var(--paper); color: var(--on-paper); }
