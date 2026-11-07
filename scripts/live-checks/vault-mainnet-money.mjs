@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 // Live check of card vault-mainnet-money: on the real mainnet vault (contracts/vault/deployments/mainnet-v1.json, the
-// kit's mainnet row), one 5 USDC deposit by U's signed call and one withdrawal, both carried by the deployed helper,
-// landed and stay as the run record says (scripts/live-checks/vault-mainnet-money.run.json, written by
+// kit's mainnet row), one deposit of at least 1 USDC by U's signed call and one withdrawal of the whole note less the
+// relayer's fee to the NEAR account the owner named, both carried by the deployed helper, landed and stay as the run
+// record says (scripts/live-checks/vault-mainnet-money.run.json, written by
 // contracts/vault/scripts/mainnet-money.ts record). It needs no tx read (the money gate reads every Tx line of
 // vault-mainnet-money.md). On two mainnet operators (operatorProblems), at the final block, it holds the run's rows,
 // which never change once settled, to their exact values:
 //   - the vault's key list is [] and its code hash is the record's (no key added, no other code since the deploy);
-//   - the deposits pages hold the run's precommitment once: depositor U, 5 USDC, the label and the leaf index; the
-//     leaf at that index is the run's note commitment;
-//   - the spends pages hold the note's nullifier hash once: recipient A, withdrawn, fee = the relay fee, payer the
-//     release's withdrawal relayer, settled; the leaf at new_leaf_index is the run's change commitment, once;
+//   - the deposits pages hold the run's precommitment once: depositor U, the note's value (at least the vault's
+//     MIN_DEPOSIT), the label and the leaf index; the leaf at that index is the run's note commitment;
+//   - the spends pages hold the note's nullifier hash once: recipient the named account, withdrawn + fee = the note (no
+//     change), payer the release's withdrawal relayer, paid or settled with nothing refunded; the leaf at
+//     new_leaf_index is the run's change commitment (a zero note), once;
 //   - the vault holds at least what its totals owe (deposited - spent + returned, I1: equal once nothing is in flight).
-// A's and the fee recipient's balances are the record's (the .md, read in the run), not held here: both accounts have
-// keys, so their owners may move what they hold; the spend row is the chain's lasting word on the payout.
+// The named account's and the fee recipient's balances are the record's (the .md, read in the run), not held here: both
+// accounts have keys, so their owners may move what they hold; the spend row is the chain's lasting word on the payout.
 //   node scripts/live-checks/vault-mainnet-money.mjs [--run <file>] [--record <file>]   PASS exit 0, FAIL 1, error 2
 // --record writes every RPC answer the check read to <file>, so its test can replay it.
 // Runs: once, a recorded mainnet vault run read back on chain; no host deploy changes it
@@ -34,8 +36,9 @@ export const TOKEN = record.asset;
 export const CODE_HASH = record.code_hash;
 /** Mainnet's release pair: one FastNEAR URL and dRPC, two operators (the kit's NEAR_NETWORKS.mainnet; the driver's pair). */
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
-/** The run's deposit, 5 USDC (contracts/vault/scripts/mainnet-money.ts AMOUNT). */
-export const AMOUNT = 5_000_000n;
+/** The vault's smallest deposit (contracts/vault/src/constants.rs MIN_DEPOSIT): the run deposits what lands at U, at least this. */
+export const MIN_DEPOSIT = 1_000_000n;
+const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
 const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -77,14 +80,14 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS, sleep = pause }
   };
   for (const p of operatorProblems(rpcs, "mainnet")) say(false, p);
   rpcs = rpcs.slice(0, 2);
-  const { U, A, R } = run.accounts ?? {};
+  const { U, to, R } = run.accounts ?? {};
   const d = run.deposit ?? {};
   const w = run.withdraw ?? {};
   const value = BigInt(d.value ?? -1);
   const withdrawn = BigInt(w.withdrawn ?? -1);
   const fee = BigInt(w.relay_fee ?? -1);
   say(run.network === "mainnet" && run.vault === VAULT && run.asset === TOKEN, `the run record names the mainnet vault ${VAULT} on ${TOKEN}: ${run.vault} on ${run.asset}`);
-  say(/^[0-9a-f]{64}$/.test(U ?? "") && /^[0-9a-f]{64}$/.test(A ?? "") && value === AMOUNT && withdrawn > fee && fee >= 0n && value >= withdrawn, `the record: U and A NEAR-implicit, the note ${value} = ${AMOUNT}, at or above withdrawn ${withdrawn}, above the fee ${fee}`);
+  say(/^[0-9a-f]{64}$/.test(U ?? "") && ACCOUNT_ID.test(to ?? "") && ![VAULT, TOKEN, "intents.near"].includes(to) && value >= MIN_DEPOSIT && fee >= 0n && withdrawn > 0n && withdrawn + fee === value, `the record: U NEAR-implicit, the named account ${to} not the vault, the token or intents.near, the note ${value} at least ${MIN_DEPOSIT} = withdrawn ${withdrawn} + fee ${fee}`);
   for (const url of rpcs) {
     const at = `on ${url}`;
     try {
@@ -106,8 +109,8 @@ export async function check({ run, fetchFn = fetch, rpcs = RPCS, sleep = pause }
       say(sp.length === 1, `one spend row for the note's nullifier ${at}: ${sp.map((x) => `#${x.index}`).join(", ") || "none"} of ${spends.length}`);
       if (sp.length === 1) {
         const x = sp[0];
-        say(x.recipient === A && BigInt(x.withdrawn) === withdrawn && BigInt(x.fee) === fee && x.payer === R, `spend row: ${withdrawn} to A, fee ${fee}, paid by the relayer ${R} ${at}: ${x.withdrawn} to ${x.recipient}, fee ${x.fee}, payer ${x.payer}`);
-        say(x.status === "settled", `spend row: settled ${at}: ${x.status}`);
+        say(x.recipient === to && BigInt(x.withdrawn) === withdrawn && BigInt(x.fee) === fee && x.payer === R, `spend row: ${withdrawn} to ${to}, fee ${fee}, paid by the relayer ${R} ${at}: ${x.withdrawn} to ${x.recipient}, fee ${x.fee}, payer ${x.payer}`);
+        say((x.status === "paid" || x.status === "settled") && String(x.refund_value) === "0", `spend row: paid or settled, nothing refunded ${at}: ${x.status}, refund ${x.refund_value}`);
         say(leaves[x.new_leaf_index] === w.change_commitment && count(leaves, w.change_commitment) === 1, `the change leaf at ${x.new_leaf_index} is the run's change note, once ${at}`);
       }
       const vu = await view(fetchFn, url, TOKEN, "ft_balance_of", { account_id: VAULT }, sleep);

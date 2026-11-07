@@ -81,3 +81,15 @@ test("four rate limits in a row exit 2, not 1, with no FAIL line", async () => {
   assert.deepEqual(waits, [2000, 4000, 8000]);
   assert.ok(!out.some((l) => /FAIL|BAD/.test(l)), out.join("\n"));
 });
+
+test("a run record that leaves change, pays the vault or deposits under the vault's minimum fails on the record line", async () => {
+  for (const run of [
+    { ...planted, withdraw: { ...planted.withdraw, withdrawn: "4000000" } },
+    { ...planted, accounts: { ...planted.accounts, to: planted.vault } },
+    { ...planted, accounts: { ...planted.accounts, to: undefined, A: "0".repeat(63) + "1" } },
+    { ...planted, deposit: { ...planted.deposit, value: "900000" }, withdraw: { ...planted.withdraw, withdrawn: "600000" } },
+  ]) {
+    const r = await check({ run, fetchFn: replay(bad()) });
+    assert.ok(bads(r).some((l) => /the record: U NEAR-implicit, the named account/.test(l)), bads(r).join("\n"));
+  }
+});

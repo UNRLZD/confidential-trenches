@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AMOUNT, feeProblems, PIN, RECORD, runProblems, vaultReadProblems } from "./mainnet-money.ts";
+import { feeProblems, PIN, RECORD, runProblems, vaultReadProblems } from "./mainnet-money.ts";
 import { NEAR_NETWORKS } from "../../../packages/kit/src/near/networks.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -77,14 +77,11 @@ test("a release with no mainnet relayer is refused: the device pays no fee to an
 });
 
 test("a fee above the device's cap is refused, and a fee that leaves nothing to withdraw; at the cap it passes", () => {
+  const AMOUNT = 1_000_000n; // the vault's min_deposit, the smallest note the run may hold
   assert.deepEqual(feeProblems({ relayFee: 100n, feeMax: 100n, note: AMOUNT }), []);
   assert.ok(feeProblems({ relayFee: 101n, feeMax: 100n, note: AMOUNT }).some((p) => /above the device's fee_max/.test(p)));
   assert.ok(feeProblems({ relayFee: AMOUNT, feeMax: AMOUNT * 2n, note: AMOUNT }).some((p) => /leaves nothing/.test(p)));
   assert.ok(feeProblems({ relayFee: -1n, feeMax: 100n, note: AMOUNT }).length > 0);
-});
-
-test("the amount is 5 USDC in base units (6 decimals)", () => {
-  assert.equal(AMOUNT, 5_000_000n);
 });
 
 // the vault as two operators read it at final: keys [], config naming the record's asset and scope, the record's code

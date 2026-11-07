@@ -1,43 +1,54 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// The mainnet money run (card vault-mainnet-money): one 5 USDC deposit and one relayed withdrawal on the real vault of
-// contracts/vault/deployments/mainnet-v1.json, both carried by the deployed helper. testnet-t02.ts and
-// testnet-withdraw-send.ts opened to mainnet: their device side is kept (the wallet's and the signing page's own
-// modules), and their in-process carry, with relayer keys of this script's own, is what mainnet drops. Here the
-// release's helper carries both legs, so nothing in this script holds a key that sends a transaction:
-//   - the deposit: the note store's planDeposit, U = U_{s,i} (packages/wallet/src/deposit/account.ts), U's signed call and
-//     its follow to the note's leaf (deposit/bind.ts bindDeposit), sent to RELEASE_BIND_URL with the release's deposit
-//     relayer (RELEASE_RELAYER.mainnet), exactly as the signing page sends it;
-//   - the withdrawal: the signing page's withdrawHandoff (packages/signpage/src/withdraw/handoff.ts), which asks the
-//     release relayer's fee, makes the wallet's withdrawRequest (the kit's request and circuit input, the device's own
-//     fee_max, the note RESERVED) and follows relayWithdraw (POST /v1/withdraw) to the change note on two RPCs.
-// The one stand-in: the prover. The page's prover worker (packages/signpage/public/prover-worker.js) runs snarkjs'
-// groth16.fullProve on the pinned setup files in a browser; here the same call runs in this process on the same files,
-// each refused unless its sha256 is the kit's pin (ZK_SETUP_FILES), and the proof is checked against withdraw.vkey.
+// The mainnet money run (card vault-mainnet-money): one deposit and one relayed withdrawal on the real vault of
+// contracts/vault/deployments/mainnet-v1.json, both carried by the deployed helper, the withdrawal paid straight to a
+// NEAR account the owner names. testnet-t02.ts and testnet-withdraw-send.ts opened to mainnet: their device side is
+// kept (the wallet's own modules), and their in-process carry, with relayer keys of their own, is what this drops. With
+// --network testnet the same run goes to the testnet vault of testnet-v1.json, its release relayers, for the rehearsal.
 //
-// Refused before anything is read, signed or sent (runProblems, tested in mainnet-money.test.ts): a record that is not
-// mainnet-v1.pin.json field for field, or not deployed; a vault id or asset other than the kit's mainnet row; RPCs that
-// are not mainnet's release pair (one FastNEAR URL and dRPC: two operators); a release that names no mainnet deposit or
-// withdrawal relayer. Then the vault is read on both operators (vaultReadProblems): no key, the record's code hash, its
-// asset and scope. The fee is asked and held to the device's fee_max before the deposit (feeProblems), so no USDC goes
-// into the vault while its way out would be refused.
+// The device side, every step the wallet's own call:
+//   - the deposit: the note store's planDeposit, U = U_{s,i} (packages/wallet/src/deposit/account.ts), U's signed call
+//     and its follow to the note's leaf (deposit/bind.ts bindDeposit), sent to RELEASE_BIND_URL, for whatever lands at U
+//     at or above the vault's min_deposit (an exchange's fee taken from the sum does not stall the run);
+//   - the withdrawal: the release relayer's fee (withdraw/relay.ts askWithdrawFee), then withdrawRequest with `to` (card
+//     wallet-withdraw-move-out: the vault pays the named account, fund_recipient false) for the note's whole value less
+//     that fee, so no change is left (the form's two-quote draw is the one step of the signing page's hand-off not used:
+//     a lower second quote leaves its difference as a change note), then relayWithdraw (POST /v1/withdraw) and
+//     withdrawArrival (the spend row paid to that account, on two RPCs);
+//   - a stop at any point resumes: the notes are restored from the seed and the vault's pages (notes/restore.ts
+//     restoreNotes, every lane), into a note store of the run's own lane, so the deposit index and U are the run's
+//     again (a fresh store draws its lane at random, store/index.ts); a note that landed is withdrawn, one that did not
+//     is planned again at the same index and its USDC at U deposited.
+// The one stand-in: the prover. The page's prover worker runs snarkjs' groth16.fullProve on the pinned setup files in a
+// browser; here the same call runs in this process on the same files, each refused unless its sha256 is the kit's pin,
+// and the proof is checked against withdraw.vkey.
 //
-// Accounts: U  the deposit account U_{s,i} of this run's 12 words (s the vault's scope, i a fresh note store's first);
-//              opened by the owner's paste 2 (0.01 NEAR and its USDC registration, mainnet-money/2-open-u.sh) and
-//              funded with 5 USDC from any wallet or exchange, while paste 1 (1-run.sh) waits.
-//           A  the withdrawal's recipient, A_{l,j} of the spent note (the wallet's rule, request.ts): this seed's.
-// This run's seed (32 random bytes: its 12 words) lives in --state, a file outside the repo (mode 600, t04's loadState);
-// it holds 5 USDC at most, and the exit tool takes it out with the words alone. Nothing secret is printed.
+// Refused before anything is read, signed or sent (runProblems): a record that is not mainnet-v1.pin.json field for
+// field, or not deployed; a vault id or asset other than the kit's row; RPCs that are not the release pair (two
+// operators); a release with no deposit or withdrawal relayer. Then the vault is read on both operators (no key, the
+// record's code, asset and scope), the named recipient on both (it must exist: recipientProblems), and the fee is held
+// to the device's own fee_max before any deposit (feeProblems).
 //
-//   node contracts/vault/scripts/mainnet-money.ts check [--u <U>]        the gate, the vault read, U's state (no money)
-//   node contracts/vault/scripts/mainnet-money.ts run --state <path>     plans U (written alone to <path>.u), waits for
-//        its NEAR account and 5 USDC, deposits, withdraws: one process, as its note store lives in memory
-//   node contracts/vault/scripts/mainnet-money.ts record --state <path> [--tx <hash> <signer>]...
-//        writes scripts/live-checks/vault-mainnet-money.run.json and .md (the txs the device did not see, the owner's
-//        pastes and the helper's settle, are named with --tx; every tx is read back on both operators first)
+// The state, --state <dir> (mode 700, outside the repo; stateDir): the run's seed (32 random bytes, its 12 words) in
+// <dir>/seed, written once (a mode 600 temporary file, fsync, then link: never overwritten, never rewritten); each step
+// in its own <dir>/<step>.json (temporary file, fsync, rename), so a stop mid-write leaves the old step whole and the
+// seed untouched. Keep the folder: it is the only key to the run's money until the withdrawal arrives. Nothing secret
+// is printed. No shipped tool other than this one withdraws from it yet (packages/exit reads the vault's lists only).
+//
+//   node contracts/vault/scripts/mainnet-money.ts check [--network n] [--state <dir>] [--to <account>]
+//        the gate, the vault read; with --state, the run's U (its seed's, checked), U's state on both RPCs
+//   node contracts/vault/scripts/mainnet-money.ts run --state <dir> --to <account> [--network n] [--bind-relayer r]
+//        makes the seed when the folder has none, else goes on from where the run stopped; waits for U's USDC
+//   node contracts/vault/scripts/mainnet-money.ts resume --state <dir> --to <account> [--network n] [--bind-relayer r]
+//        the same, refused when the folder holds no seed
+//   node contracts/vault/scripts/mainnet-money.ts open-u --state <dir> --payer <account> --key-file <path> [--network n]
+//        the payer opens U: 0.01 NEAR (an implicit account exists once it holds NEAR) and its USDC registration,
+//        signed here from the key file (no binary of anyone else's sees it); each tx kept in <dir>/open-u.json
+//   node contracts/vault/scripts/mainnet-money.ts record --state <dir> --fund-tx <hash> <signer> [--fund-tx ...]
+//        [--settle-tx <hash> <signer>]   writes scripts/live-checks/vault-mainnet-money.run.json and .md
 import "../../../scripts/net-window.mjs";
-import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, sign } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -48,35 +59,41 @@ const ROOT = path.resolve(HERE, "../../..");
 export const CARD = "vault-mainnet-money";
 export const RECORD = path.join(HERE, "..", "deployments", "mainnet-v1.json");
 export const PIN = path.join(HERE, "..", "deployments", "mainnet-v1.pin.json");
+export const TESTNET_RECORD = path.join(HERE, "..", "deployments", "testnet-v1.json");
 export const RUN_RECORD = `scripts/live-checks/${CARD}.run.json`;
 export const MONEY_RECORD = `scripts/live-checks/${CARD}.md`;
-/** The deposit: 5 USDC in base units (6 decimals). */
-export const AMOUNT = 5_000_000n;
+const NEAR = 10n ** 24n;
+const TGAS = 10n ** 12n;
+/** What opens U: an implicit account exists once it holds NEAR; 0.01 N covers its 182 B and its one key. */
+export const U_OPEN_YOCTO = NEAR / 100n;
 const POLL_MS = 10_000;
-const FUND_BOUND_MS = 60 * 60_000;
-const FEE_TRIES = 3;
-/** Mainnet's release pair, the two operators every read and the record's read-back use. */
-const RPC_URLS = [NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc] as const;
+const LANES = 8;
+const INTENTS = "intents.near";
 
+type Network = "mainnet" | "testnet";
 type Rpcish = { name: string; query: (p: Record<string, unknown>) => Promise<unknown> };
 type Relayers = { bind: string | null; withdraw: { relayer_account: string; fee_recipient: string } | null };
 type Net = { vault: string | null; usdc: string };
 
 // ---- the refusals (pure; mainnet-money.test.ts) ----
 
-/** [] when the run may start: the deployed record is the pin, the kit's mainnet row, on mainnet's release pair, with both relayers. */
-export function runProblems(a: { record: any; pin: any; net: Net; rpcs: readonly Rpcish[]; relayers: Relayers }): string[] {
+/** [] when the run may start: the deployed record is the pin (mainnet), the kit's row, on the release pair, with both relayers. */
+export function runProblems(a: { record: any; pin: any; net: Net; rpcs: readonly Rpcish[]; relayers: Relayers; network?: Network }): string[] {
   const { record, pin, net, rpcs, relayers } = a;
+  const network = a.network ?? "mainnet";
   const p: string[] = [];
   if (record === null || typeof record !== "object") return ["the record is not a JSON object"];
-  if (record.network !== "mainnet") p.push(`the record's network is ${String(record.network)}, not mainnet`);
-  for (const k of Object.keys(pin)) if (k !== "sources" && JSON.stringify(record[k]) !== JSON.stringify(pin[k])) p.push(`the record's ${k} is not the pin's (mainnet-v1.pin.json)`);
+  if (record.network !== network) p.push(`the record's network is ${String(record.network)}, not ${network}`);
+  if (network === "mainnet") {
+    if (pin === null || typeof pin !== "object") p.push("no pin to hold the mainnet record to");
+    else for (const k of Object.keys(pin)) if (k !== "sources" && JSON.stringify(record[k]) !== JSON.stringify(pin[k])) p.push(`the record's ${k} is not the pin's (mainnet-v1.pin.json)`);
+  }
   if (typeof record.tx_hash !== "string" || typeof record.code_hash !== "string") p.push("the record has no tx_hash or code_hash: no deploy wrote it");
-  if (net.vault === null || record.account_id !== net.vault) p.push(`the record's vault ${String(record.account_id)} is not the kit's mainnet vault ${String(net.vault)}`);
-  if (record.asset !== net.usdc) p.push(`the record's asset ${String(record.asset)} is not the kit's mainnet USDC ${net.usdc}`);
-  if (nearPairNetwork(rpcs) !== "mainnet") p.push(`RPCs ${rpcs.map((r) => r?.name).join(", ")}: ${nearPairRule("mainnet")}`);
-  if (!relayers.bind) p.push("the release names no mainnet deposit relayer (packages/wallet/src/deposit/bind.ts RELEASE_RELAYER.mainnet is null)");
-  if (!relayers.withdraw) p.push("the release names no mainnet withdrawal relayer (packages/wallet/src/withdraw/relay.ts RELEASE_WITHDRAW_RELAYER.mainnet is null)");
+  if (net.vault === null || record.account_id !== net.vault) p.push(`the record's vault ${String(record.account_id)} is not the kit's ${network} vault ${String(net.vault)}`);
+  if (record.asset !== net.usdc) p.push(`the record's asset ${String(record.asset)} is not the kit's ${network} USDC ${net.usdc}`);
+  if (nearPairNetwork(rpcs) !== network) p.push(`RPCs ${rpcs.map((r) => r?.name).join(", ")}: ${nearPairRule(network)}`);
+  if (!relayers.bind) p.push(`the release names no ${network} deposit relayer (packages/wallet/src/deposit/bind.ts RELEASE_RELAYER.${network} is null)`);
+  if (!relayers.withdraw) p.push(`the release names no ${network} withdrawal relayer (packages/wallet/src/withdraw/relay.ts RELEASE_WITHDRAW_RELAYER.${network} is null)`);
   return p;
 }
 
@@ -104,32 +121,128 @@ export function feeProblems(a: { relayFee: bigint; feeMax: bigint; note: bigint 
   return p;
 }
 
+/** nearcore's account id rule (as the wallet's request.ts reads `to`). */
+const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+/**
+ * [] when `to` may be paid: a NEAR account id, not the vault, intents.near or the token, that exists on both RPCs (its
+ * view_account on each: the amounts may differ by a block, existence may not). An implicit id that does not exist yet
+ * is refused too: nobody may have its key, and the owner names an account they hold.
+ */
+export function recipientProblems(to: unknown, a: { vault: string; token: string; reads: readonly (null | { amount: string } | "absent")[] }): string[] {
+  if (typeof to !== "string" || !ACCOUNT_ID.test(to)) return [`--to ${String(to)}: not a NEAR account id`];
+  if (to === a.vault || to === INTENTS || to === a.token) return [`--to ${to}: the vault, intents.near or the token`];
+  if (a.reads.length !== 2 || a.reads.some((r) => r === null)) return [`--to ${to}: not read on two operators`];
+  if (a.reads.some((r) => r === "absent")) return [`--to ${to}: no such account on ${a.reads.every((r) => r === "absent") ? "either RPC" : "one RPC"}; name an existing account you hold`];
+  return [];
+}
+
+/** [] when a request the wallet made pays `to` straight, with no change note: what the run sends, checked before it is sent. */
+export function requestProblems(req: { recipient: string; changeValue: bigint; body: { fund_recipient: unknown } }, to: string): string[] {
+  const p: string[] = [];
+  if (req.recipient !== to) p.push(`the wallet's request pays ${req.recipient}, not ${to}: this wallet does not pay a named account yet (card wallet-withdraw-move-out)`);
+  if (req.body.fund_recipient !== false) p.push(`the request's fund_recipient is ${String(req.body.fund_recipient)}, not false`);
+  if (req.changeValue !== 0n) p.push(`the request leaves a change note of ${req.changeValue}`);
+  return p;
+}
+
+/** A run's fingerprint of its seed, kept in its run step: a step of another seed is never used. */
+export const fingerprintOf = (seed: Buffer): string => createHash("sha256").update(seed).update("vault-mainnet-money/fingerprint").digest("hex");
+
+// ---- the state folder (mainnet-money-state.test.ts) ----
+
+type Fs = { openSync: typeof openSync; writeSync: typeof writeSync; fsyncSync: typeof fsyncSync; closeSync: typeof closeSync; linkSync: typeof linkSync; renameSync: typeof renameSync; unlinkSync: typeof unlinkSync };
+const REAL_FS: Fs = { openSync, writeSync, fsyncSync, closeSync, linkSync, renameSync, unlinkSync };
+
+/** Writes `text` to a new mode 600 temporary file beside `file`, fsyncs it, then puts it at `file` by `place`. */
+function durable(file: string, text: string, place: "link" | "rename", fs: Fs): void {
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const fd = fs.openSync(tmp, "wx", 0o600);
+  try {
+    fs.writeSync(fd, text);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    if (place === "link") fs.linkSync(tmp, file); // refuses an existing file: the seed is never overwritten
+    else fs.renameSync(tmp, file);
+  } finally {
+    if (place === "link") fs.unlinkSync(tmp);
+  }
+  const dfd = fs.openSync(path.dirname(file), "r");
+  try {
+    fs.fsyncSync(dfd);
+  } finally {
+    fs.closeSync(dfd);
+  }
+}
+
+export const STEPS = ["run", "deposit", "withdraw", "open-u", "heard"] as const;
+export type Step = (typeof STEPS)[number];
+
+/** The run's folder: its seed (made once when `create`), and its steps, each its own file. */
+export function stateDir(dir: string, roots: string[], { create, fs = REAL_FS }: { create: boolean; fs?: Fs }) {
+  const real = path.resolve(dir);
+  for (const r of roots) if (real === r || real.startsWith(r + path.sep)) throw new Error(`--state is inside the repository (${r}): the run's seed never lives in the repo`);
+  const seedFile = path.join(real, "seed");
+  if (!existsSync(seedFile)) {
+    if (!create) throw new Error(`--state ${real} holds no seed: resume goes on with a run that has one; keep the folder the run made`);
+    mkdirSync(real, { recursive: true, mode: 0o700 });
+    try {
+      durable(seedFile, randomBytes(32).toString("hex") + "\n", "link", fs);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; // another run made it first: use that one
+    }
+  }
+  if ((statSync(seedFile).mode & 0o077) !== 0) throw new Error(`${seedFile} is readable by others: chmod 600 it`);
+  const hex = readFileSync(seedFile, "utf8").trim();
+  if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error(`${seedFile} holds no seed: keep the folder and do not edit it`);
+  const seed = Buffer.from(hex, "hex");
+  const fileOf = (step: Step) => {
+    if (!STEPS.includes(step)) throw new Error(`no step ${step}`);
+    return path.join(real, `${step}.json`);
+  };
+  return {
+    dir: real,
+    seed,
+    read(step: Step): any {
+      const f = fileOf(step);
+      return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : undefined;
+    },
+    write(step: Step, value: unknown): void {
+      durable(fileOf(step), json(value) + "\n", "rename", fs);
+    },
+  };
+}
+
 // ---- the network ----
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const log = (s: string) => console.log(`mainnet-money: ${s}`);
-const json = (x: unknown) => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v));
+function json(x: unknown): string {
+  return JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v));
+}
 const wallet = (p: string) => import(pathToFileURL(path.join(ROOT, "packages/wallet/src", p)).href);
 
-/** One query on one operator, at final; a JSON-RPC error throws. */
 async function q(rpc: Rpcish, params: Record<string, unknown>): Promise<any> {
   const j: any = await rpc.query({ finality: "final", ...params });
-  if (!j?.result || j.result.error) throw new Error(`${rpc.name}: ${String(j?.error?.cause?.name ?? j?.error?.message ?? j?.result?.error ?? "no result").slice(0, 200)}`);
+  if (!j?.result || j.result.error) {
+    const e = new Error(`${rpc.name}: ${String(j?.error?.cause?.name ?? j?.error?.message ?? j?.result?.error ?? "no result").slice(0, 200)}`);
+    (e as any).unknownAccount = /UNKNOWN_ACCOUNT|does not exist/.test(JSON.stringify(j?.error ?? j?.result?.error ?? ""));
+    throw e;
+  }
   return j.result;
 }
 const viewOn = async (rpc: Rpcish, account_id: string, method_name: string, args: unknown) =>
   JSON.parse(Buffer.from((await q(rpc, { request_type: "call_function", account_id, method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64") })).result).toString("utf8"));
-/** The same view on both operators; they must agree. */
 async function view2(rpcs: readonly Rpcish[], account: string, method: string, args: unknown): Promise<any> {
   const [a, b] = await Promise.all(rpcs.map((r) => viewOn(r, account, method, args)));
   if (json(a) !== json(b)) throw new Error(`${account}.${method}: the two operators disagree`);
   return a;
 }
-async function near2(rpcs: readonly Rpcish[], account: string): Promise<bigint | null> {
-  const r = await Promise.all(rpcs.map((x) => q(x, { request_type: "view_account", account_id: account }).then((v) => String(v.amount)).catch((e) => (/UNKNOWN_ACCOUNT|does not exist/.test(String(e.message)) ? null : Promise.reject(e)))));
-  if (r[0] !== r[1]) throw new Error(`${account}: the two operators disagree on its NEAR`);
-  return r[0] === null ? null : BigInt(r[0]!);
-}
+/** view_account on each operator: its amount, or "absent" for an account that does not exist; a failed read throws. */
+const accountOn = (rpcs: readonly Rpcish[], account: string) =>
+  Promise.all(rpcs.map((r) => q(r, { request_type: "view_account", account_id: account }).then((v) => ({ amount: String(v.amount) }), (e) => (e.unknownAccount ? ("absent" as const) : Promise.reject(e)))));
 
 /** The vault on each operator at final: its key list, its code hash and its config. */
 export async function readVault(rpcs: readonly Rpcish[], vault: string) {
@@ -142,67 +255,78 @@ export async function readVault(rpcs: readonly Rpcish[], vault: string) {
   );
 }
 
+/** --network: mainnet unless testnet is named. The testnet build's release values need __SIGN_NETWORK__ set before the wallet loads. */
+function networkOf(v: Record<string, string>): Network {
+  const n = v["--network"] ?? "mainnet";
+  if (n !== "mainnet" && n !== "testnet") throw new Error("--network: mainnet or testnet");
+  if (n === "testnet") (globalThis as any).__SIGN_NETWORK__ = "testnet";
+  return n;
+}
+
 /** The gate and the vault's reads, then the release's values the run uses. */
-async function opened() {
-  const record = JSON.parse(readFileSync(RECORD, "utf8"));
-  const pin = JSON.parse(readFileSync(PIN, "utf8"));
+async function opened(network: Network, bindRelayer?: string) {
+  const record = JSON.parse(readFileSync(network === "mainnet" ? RECORD : TESTNET_RECORD, "utf8"));
+  const pin = network === "mainnet" ? JSON.parse(readFileSync(PIN, "utf8")) : null;
   const { relayRpc, RELEASE_WITHDRAW_RELAYER } = await wallet("withdraw/relay.ts");
   const { RELEASE_RELAYER } = await wallet("deposit/bind.ts");
-  const net = NEAR_NETWORKS.mainnet;
-  const rpcs = [relayRpc(RPC_URLS[0]), relayRpc(RPC_URLS[1])] as const;
-  const relayers: Relayers = { bind: RELEASE_RELAYER.mainnet, withdraw: RELEASE_WITHDRAW_RELAYER.mainnet };
-  const gate = runProblems({ record, pin, net, rpcs, relayers });
+  const net = NEAR_NETWORKS[network];
+  const urls = [net.fastnear[0], net.drpc] as const;
+  const rpcs = [relayRpc(urls[0]), relayRpc(urls[1])] as const;
+  // testnet's deposit relayer: the release names none (bind.ts RELEASE_RELAYER.testnet), so the rehearsal names the
+  // helper's testnet gas account with --bind-relayer; on mainnet only the release's own is used
+  if (bindRelayer !== undefined && network !== "testnet") throw new Error("--bind-relayer is for --network testnet only: mainnet uses the release's deposit relayer");
+  const bind = network === "testnet" ? (bindRelayer ?? null) : RELEASE_RELAYER.mainnet;
+  const relayers: Relayers = { bind, withdraw: RELEASE_WITHDRAW_RELAYER[network] };
+  const gate = runProblems({ record, pin, net, rpcs, relayers, network });
   if (gate.length) throw new Error(`refused, nothing read or sent:\n  ${gate.join("\n  ")}`);
   const vp = vaultReadProblems(record, await readVault(rpcs, record.account_id));
   if (vp.length) throw new Error(`refused, nothing sent:\n  ${vp.join("\n  ")}`);
-  log(`the vault ${record.account_id} reads as the record on ${rpcs.map((r: Rpcish) => r.name).join(" and ")}: no key, code ${record.code_hash}, asset ${record.asset}, scope ${record.scope}`);
-  return { record, net, rpcs, relayers: relayers as { bind: string; withdraw: { relayer_account: string; fee_recipient: string } }, vault: record.account_id as string, token: record.asset as string, scope: BigInt(record.scope) };
+  const cfg = await view2(rpcs, record.account_id, "config", {});
+  log(`the vault ${record.account_id} reads as the record on ${urls.join(" and ")}: no key, code ${record.code_hash}, asset ${record.asset}, scope ${record.scope}`);
+  return { network, record, net, urls, rpcs, relayers: relayers as { bind: string; withdraw: { relayer_account: string; fee_recipient: string } }, vault: record.account_id as string, token: record.asset as string, scope: BigInt(record.scope), minDeposit: BigInt(cfg.min_deposit) };
 }
 
-/** The run's words, its seed64 and a fresh in-memory note store with the run's one deposit note planned. */
-export async function device(stateFile: string, scope: bigint) {
-  const { loadState } = await import("./testnet-t04.mjs");
-  const { repoRoots } = await import("./deploy.mjs");
-  const st = loadState(stateFile, repoRoots());
+type Opened = Awaited<ReturnType<typeof opened>>;
+
+async function checkRecipient(o: Opened, to: unknown): Promise<string> {
+  const reads = typeof to === "string" && ACCOUNT_ID.test(to) ? await accountOn(o.rpcs, to).catch(() => [null, null]) : [null, null];
+  const p = recipientProblems(to, { vault: o.vault, token: o.token, reads });
+  if (p.length) throw new Error(`refused, nothing sent: ${p.join("; ")}`);
+  return to as string;
+}
+
+/** The run's seed64 from its words (16 bytes of entropy from the seed, testnet-t02.ts entropyOf's rule, its own tag). */
+async function seed64Of(seed: Buffer): Promise<Uint8Array> {
+  const { entropyToWords, wordsToSeed64 } = await wallet("derive/index.ts");
+  const entropy = Uint8Array.from(createHash("sha256").update(seed).update("vault-mainnet-money/words").digest().subarray(0, 16));
+  const s: Uint8Array = wordsToSeed64(entropyToWords(entropy));
+  entropy.fill(0);
+  return s;
+}
+
+/** A fresh in-memory wallet store whose lane is `lane` (each fresh store draws one of 8 at random), and its note store. */
+export async function storeOfLane(lane: number | null) {
   const req = createRequire(path.join(ROOT, "packages/wallet/package.json"));
   const { IDBFactory } = await import(pathToFileURL(req.resolve("fake-indexeddb")).href);
-  const { entropyToWords, wordsToSeed64 } = await wallet("derive/index.ts");
   const { openWalletStore } = await wallet("store/index.ts");
   const { openNoteStore } = await wallet("notes/store.ts");
-  const { noteSecrets } = await wallet("notes/secrets.ts");
-  const { depositAccount } = await wallet("deposit/account.ts");
-  // the words: 16 bytes of entropy from the run's seed (testnet-t02.ts entropyOf's rule, its own tag)
-  const entropy = Uint8Array.from(createHash("sha256").update(st.seed).update("vault-mainnet-money/words").digest().subarray(0, 16));
-  const seed64: Uint8Array = wordsToSeed64(entropyToWords(entropy));
-  entropy.fill(0);
-  const w = await openWalletStore({ indexedDB: new IDBFactory() });
-  const ns = await openNoteStore(w);
-  const note = await ns.planDeposit(scope, (ref: unknown) => noteSecrets(seed64, ref).precommitment);
-  // the index a fresh store gives its first deposit note: the same on every run of this seed, so U is too
-  const i: number = note.ref.i;
-  const U: string = depositAccount(seed64, scope, i).account;
-  return { st, seed64, w, ns, note, i, U, noteSecrets };
-}
-
-// ---- check: the gate, the vault read and, with --u, U's state on both operators (no money, no state) ----
-
-async function check(argv: string[]) {
-  const v = argv.length ? flags(argv, ["--u"]) : {};
-  const o = await opened();
-  const out: Record<string, unknown> = { vault: o.vault, token: o.token, amount: AMOUNT, bind_relayer: o.relayers.bind, withdraw_relayer: o.relayers.withdraw };
-  if (v["--u"] !== undefined) {
-    const U = v["--u"];
-    if (!/^[0-9a-f]{64}$/.test(U)) throw new Error("--u: a NEAR-implicit account id, 64 hex");
-    // does U exist (its key usable for a delegate), is it registered on USDC, what it holds
-    const uNear = await near2(o.rpcs, U);
-    const uReg = await view2(o.rpcs, o.token, "storage_balance_of", { account_id: U });
-    Object.assign(out, { U, u_exists: uNear !== null, u_registered: uReg !== null, u_usdc: uReg === null ? "0" : await view2(o.rpcs, o.token, "ft_balance_of", { account_id: U }) });
+  for (let t = 0; t < 256; t++) {
+    const w = await openWalletStore({ indexedDB: new IDBFactory() });
+    if (lane === null || w.lane === lane) return { w, ns: await openNoteStore(w) };
+    w.close?.();
   }
-  console.log(json(out));
-  process.exit(0);
+  throw new Error(`no store drew lane ${lane} in 256 opens`);
 }
 
-// ---- run: U's 5 USDC, the deposit and the withdrawal, all carried by the deployed helper ----
+/**
+ * The run's deposit note at index i again, in a store of i's lane with its counter raised to i (store/index.ts
+ * raiseDepositIndex, as a restore does): the same i, so the same U and precommitment, whatever lane a fresh store drew.
+ */
+export async function replanAt(w: { raiseDepositIndex(s: bigint, min: number): Promise<number> }, ns: { planDeposit(s: bigint, p: (ref: any) => bigint): Promise<any> }, seed64: Uint8Array, scope: bigint, i: number) {
+  const { noteSecrets } = await wallet("notes/secrets.ts");
+  await w.raiseDepositIndex(scope, i);
+  return ns.planDeposit(scope, (ref: unknown) => noteSecrets(seed64, ref as never).precommitment);
+}
 
 /** The node stand-in for the page's prover worker: the pinned setup files, snarkjs fullProve, its own time. */
 export async function nodeProver() {
@@ -218,7 +342,6 @@ export async function nodeProver() {
   const times: number[] = [];
   return {
     times,
-    snarkjs,
     async load(circuit: string) {
       file(`${circuit}.wasm`);
       file(`${circuit}.zkey`);
@@ -235,189 +358,369 @@ export async function nodeProver() {
   };
 }
 
-async function run(argv: string[]) {
-  const v = flags(argv, ["--state"]);
-  const o = await opened();
-  const { rpcs, vault, token, scope, relayers } = o;
+// ---- check: the gate, the vault read and, with --state, the run's U ----
+
+async function check(argv: string[]) {
+  const v = flags(argv, [], ["--network", "--state", "--to", "--bind-relayer"]);
+  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const out: Record<string, unknown> = { network: o.network, vault: o.vault, token: o.token, min_deposit: o.minDeposit, bind_relayer: o.relayers.bind, withdraw_relayer: o.relayers.withdraw };
+  if (v["--to"] !== undefined) out.to = await checkRecipient(o, v["--to"]);
+  if (v["--state"] !== undefined) {
+    const { repoRoots } = await import("./deploy.mjs");
+    const st = stateDir(v["--state"], repoRoots(), { create: false });
+    const run = st.read("run");
+    if (run === undefined) throw new Error("the run has not planned its note yet: paste 1 first, and this once it prints U");
+    if (run.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network) throw new Error("the folder's run step is not this seed's, or another network's: nothing is sent to its U");
+    const U = run.U as string;
+    const [a, b] = await accountOn(o.rpcs, U);
+    const reg = await view2(o.rpcs, o.token, "storage_balance_of", { account_id: U });
+    Object.assign(out, { U, u_exists: a !== "absent" && b !== "absent", u_registered: reg !== null, u_usdc: reg === null ? "0" : await view2(o.rpcs, o.token, "ft_balance_of", { account_id: U }) });
+  }
+  console.log(json(out));
+  process.exit(0);
+}
+
+// ---- run / resume: plan, U's USDC, the deposit, the withdrawal to --to; every stop goes on from the chain ----
+
+async function go(argv: string[], create: boolean) {
+  const v = flags(argv, ["--state", "--to"], ["--network", "--bind-relayer"]);
+  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const { rpcs, vault, token, scope, relayers, network, minDeposit } = o;
+  const to = await checkRecipient(o, v["--to"]);
   const { readWithdrawFeeMax } = await wallet("withdraw/feemax.ts");
-  const { askWithdrawFee, WITHDRAW_URL } = await wallet("withdraw/relay.ts");
-  const { readTokenStorageMin } = await wallet("arming/accounts.ts");
+  const { askWithdrawFee, relayWithdraw, WITHDRAW_URL } = await wallet("withdraw/relay.ts");
+  const accounts = await wallet("arming/accounts.ts");
+  const { readTokenStorageMin } = accounts;
+  // the typed account's register deposit as SIGN_HOST's hand-off reads it (card wallet-withdraw-move-out), else main's
+  // reader, which names no account (relayer-cost-guards: always the token's storage minimum)
+  const registerDepositOf = (accounts.typedRegisterDepositOf ?? accounts.armingRegisterDepositOf)(network, rpcs);
+  // the wallet must pay a named account and read its arrival (card wallet-withdraw-move-out): refused before any money
+  // moves when it does not, so no deposit is made that this run cannot withdraw to --to
+  const { withdrawArrival } = await wallet("withdraw/arrival.ts").catch(() => {
+    throw new Error("refused, nothing sent: this wallet has no withdraw/arrival.ts, so it cannot pay a named account yet (card wallet-withdraw-move-out)");
+  });
   const { bindDeposit, bindRpc } = await wallet("deposit/bind.ts");
   const { RELEASE_BIND_URL } = await wallet("deposit/delegate.ts");
-  const { withdrawHandoff } = await import(pathToFileURL(path.join(ROOT, "packages/signpage/src/withdraw/handoff.ts")).href);
+  const { noteSecrets } = await wallet("notes/secrets.ts");
+  const { depositAccount } = await wallet("deposit/account.ts");
+  const { restoreNotes, writeRestored } = await wallet("notes/restore.ts");
+  const { withdrawRequest, withdrawDeadlineMs } = await wallet("withdraw/request.ts");
+  const { lowerFinalTime, treesOf } = await import(pathToFileURL(path.join(ROOT, "packages/signpage/src/withdraw/handoff.ts")).href);
+  const { vaultSync, vaultSyncStart } = await import(pathToFileURL(path.join(ROOT, "packages/kit/src/vault/sync.ts")).href);
 
-  // the fee, before any money moves: the release relayer's quote, held to the device's own fee_max at the largest
-  // register_deposit any A can need (the token's storage minimum), as the withdraw form draws it
-  const feeOf = async () => {
-    const quote = await askWithdrawFee({ token, relayer: relayers.withdraw, amount: AMOUNT });
-    const feeMax: bigint = await readWithdrawFeeMax({ network: "mainnet", rpcs, priceRpcs: rpcs, registerDeposit: await readTokenStorageMin("mainnet", rpcs) });
-    const fp = feeProblems({ relayFee: quote.relayFee, feeMax, note: AMOUNT });
+  // the fee, before any money moves: held to the device's own fee_max at the token's storage minimum (the register
+  // deposit every withdrawal carries, arming/accounts.ts), on the smallest note the vault takes
+  const feeOf = async (note: bigint) => {
+    const quote = await askWithdrawFee({ token, relayer: relayers.withdraw, amount: note });
+    const feeMax: bigint = await readWithdrawFeeMax({ network, rpcs, priceRpcs: network === "mainnet" ? rpcs : (await opened_mainnet_pair()), registerDeposit: await readTokenStorageMin(network, rpcs) });
+    const fp = feeProblems({ relayFee: quote.relayFee, feeMax, note });
     if (fp.length) throw new Error(`refused: ${fp.join("; ")}`);
     return { relayFee: quote.relayFee as bigint, feeMax, feeRecipient: quote.feeRecipient as string };
   };
-  const fee0 = await feeOf();
-  log(`fee: ${fee0.relayFee} to ${fee0.feeRecipient}, at most the device's fee_max ${fee0.feeMax}`);
+  const fee0 = await feeOf(minDeposit);
+  log(`fee now: ${fee0.relayFee} to ${fee0.feeRecipient}, at most the device's fee_max ${fee0.feeMax}`);
 
-  const d = await device(v["--state"]!, scope);
-  const { st, seed64, ns, note, U } = d;
-  // one process holds the run's note store from plan to change note: a fresh store draws a new lane (wallet.md:247),
-  // so a stopped run is never planned again; its note, if it landed, is the 12 words' (restore, or the exit tool)
-  if (st.steps.run !== undefined) throw new Error("this state has a run already: a stopped run is not started again (its deposit, if it landed, is the run's 12 words'); start a new --state");
-  st.steps.run = { U, i: d.i, note: note.id, precommitment: String(note.precommitment), amount: String(AMOUNT) };
-  st.save();
-  // U alone, public, for paste 2 (2-open-u.sh): the state file holds the seed and is never read by a paste
-  writeFileSync(`${path.resolve(v["--state"]!)}.u`, U + "\n", { mode: 0o600 });
+  const { repoRoots } = await import("./deploy.mjs");
+  const st = stateDir(v["--state"]!, repoRoots(), { create });
+  const seed64 = await seed64Of(st.seed);
+  const fp = fingerprintOf(st.seed);
+  let run = st.read("run");
+  if (run !== undefined && (run.fingerprint !== fp || run.network !== network)) throw new Error("the folder's run step is not this seed's, or another network's: keep the folder as it is and say so");
+  if (run === undefined) {
+    // the first plan: a store of any lane; its index i and U are the run's from now on
+    const first = await storeOfLane(null);
+    const note = await first.ns.planDeposit(scope, (ref: unknown) => noteSecrets(seed64, ref).precommitment);
+    run = { network, fingerprint: fp, i: note.ref.i, U: depositAccount(seed64, scope, note.ref.i).account, precommitment: String(note.precommitment), to };
+    st.write("run", run);
+    first.ns.close();
+    first.w.close?.();
+  }
+  if (run.to !== to) throw new Error(`refused, nothing sent: this run pays ${run.to}; paste the same line with ${run.to}`);
+  const { i, U } = run as { i: number; U: string };
+  log(`U is ${U} (U_{s,i}, i ${i}); the withdrawal goes to ${to}`);
+
+  // the notes from the chain, in a store of the run's lane: the run's deposit note, if it landed, comes back UNSPENT
+  // (or SPENT once withdrawn), and the deposit index i is the next the store plans when it did not
+  const { w, ns } = await storeOfLane(i % LANES);
+  const restored = await restoreNotes({ seed64, vault, token, rpcs });
+  await writeRestored(ns, restored);
+  const mine = (await ns.list()).find((n: any) => n.ref.kind === "deposit" && n.ref.i === i);
   const balances = async (extra: Record<string, string> = {}) => {
     const out: Record<string, unknown> = { at: new Date().toISOString(), vault_usdc: await view2(rpcs, token, "ft_balance_of", { account_id: vault }), totals: await view2(rpcs, vault, "totals", {}) };
     for (const [k, id] of Object.entries(extra)) out[`${k}_usdc`] = await view2(rpcs, token, "ft_balance_of", { account_id: id });
     return out;
   };
-
-  // U: its NEAR account (paste 1) and its 5 USDC (paste 2), read on both operators
-  log(`U is ${U}: waiting up to an hour for it to exist and hold ${AMOUNT} USDC (paste 2, then 5 USDC from any wallet or exchange)`);
-  for (const t0 = Date.now(); ; ) {
-    const n = await near2(rpcs, U).catch(() => null);
-    const u = n === null ? null : await view2(rpcs, token, "ft_balance_of", { account_id: U }).catch(() => null);
-    if (n !== null && u !== null && BigInt(u) >= AMOUNT) break;
-    if (Date.now() - t0 > FUND_BOUND_MS) throw new Error("U was not funded within an hour: nothing was signed");
-    await sleep(POLL_MS);
-  }
-  const before = await balances({ U });
-  log(`before the deposit: ${json(before)}`);
-
-  // the deposit: the wallet's bindDeposit to the release's helper, its answers kept (the relayer's tx hashes)
-  const seen: { url: string; status: number; body: unknown }[] = [];
+  // every tx hash a relayer answers, kept the moment it is heard: a stop after it loses none of the record's txs
+  const heard: { bind: string[]; withdraw: string[] } = st.read("heard") ?? { bind: [], withdraw: [] };
   const watch = async (url: unknown, init?: RequestInit): Promise<Response> => {
     const res = await fetch(url as string, init);
-    if (String(url) === RELEASE_BIND_URL || String(url).startsWith(WITHDRAW_URL)) seen.push({ url: String(url), status: res.status, body: await res.clone().json().catch(() => null) });
+    const leg = String(url) === RELEASE_BIND_URL ? "bind" : String(url) === WITHDRAW_URL ? "withdraw" : null;
+    if (leg !== null && res.status === 200) {
+      const h = ((await res.clone().json().catch(() => null)) as { tx_hash?: unknown } | null)?.tx_hash;
+      if (typeof h === "string" && !heard[leg].includes(h)) {
+        heard[leg].push(h);
+        st.write("heard", heard);
+      }
+    }
     return res;
   };
-  const tBind = Date.now();
-  const outcome = await bindDeposit(seed64, { network: "mainnet", s: scope, i: d.i, noteId: note.id, amount: AMOUNT }, { store: ns, rpcs: [bindRpc(NEAR_NETWORKS.mainnet.fastnear[0]), bindRpc(NEAR_NETWORKS.mainnet.drpc)], fetchFn: watch });
-  log(`bindDeposit: ${outcome.kind} in ${Date.now() - tBind} ms`);
-  if (outcome.kind !== "deposited") throw new Error(`deposit: ${json(outcome)}`);
-  const leaf = outcome.note.leaf;
-  const calls = (await ns.get(note.id))?.calls ?? [];
-  const depositTxs = [...new Set([...calls.flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []), ...seen.filter((s) => s.url === RELEASE_BIND_URL).map((s: any) => s.body?.tx_hash)].filter((h): h is string => typeof h === "string"))];
-  const afterDeposit = await balances({ U });
-  st.steps.run.deposit = { done: true, bind_ms: Date.now() - tBind, txs: depositTxs, before, after: afterDeposit, leaf: { value: String(leaf.value), label: String(leaf.label), commitment: String(leaf.commitment), leaf_index: String(leaf.leafIndex) } };
-  st.save();
-  log(`deposited: leaf ${leaf.leafIndex}, label ${leaf.label}; relayer txs ${depositTxs.join(", ") || "none heard"}; after: ${json(afterDeposit)}`);
 
-  // the withdrawal: the signing page's hand-off, the whole note less the fee to A
-  const prover = await nodeProver();
-  const page = { store: async () => d.w, notes: async () => ns, seed64: async () => Uint8Array.from(seed64), prover };
-  const handoff = withdrawHandoff(page, { network: "mainnet", fetchFn: watch });
-  if (handoff === null) throw new Error("the signing page gives no mainnet hand-off (no vault, scope or relayer in the release)");
-  const nf: bigint = d.noteSecrets(seed64, note.ref).nullifierHash;
-  const beforeW = await balances({ F: fee0.feeRecipient });
-  let end: { kind: string; fee?: bigint } = { kind: "fee", fee: fee0.relayFee };
-  let fee = fee0;
-  for (let i = 0; i < FEE_TRIES && end.kind === "fee"; i++) {
-    if (i > 0) fee = await feeOf();
-    end = await handoff({ recipient: "", amount: AMOUNT - fee.relayFee }, fee.relayFee);
-    log(`withdrawHandoff: ${end.kind}${end.kind === "fee" ? ` (a fresh quote ${end.fee} is above the drawn ${fee.relayFee}: nothing proved)` : ""}`);
+  let note = mine;
+  if (note === undefined) {
+    // not landed: plan index i again (the store's counter raised to it, in its lane) and deposit what is at U
+    note = await replanAt(w, ns, seed64, scope, i);
+    if (note.ref.i !== i || String(note.precommitment) !== run.precommitment) throw new Error(`planned index ${note.ref.i}, not the run's ${i}: nothing signed`);
+    log(`waiting for U ${U} to exist and hold at least ${minDeposit} USDC (paste 2, then USDC from any wallet or exchange); no time limit, Ctrl-C and resume at any time`);
+    let amount = 0n;
+    for (let t = 0; ; t++) {
+      const acct = await accountOn(rpcs, U).catch(() => null);
+      const usdc = acct === null || acct.some((x) => x === "absent") ? null : await view2(rpcs, token, "ft_balance_of", { account_id: U }).catch(() => null);
+      if (usdc !== null && BigInt(usdc) >= minDeposit) {
+        amount = BigInt(usdc);
+        break;
+      }
+      if (t % 30 === 0) log(`U ${acct === null ? "not read" : acct.some((x) => x === "absent") ? "does not exist yet" : `holds ${usdc ?? "?"} USDC`}`);
+      await sleep(POLL_MS);
+    }
+    const before = await balances({ U });
+    const tBind = Date.now();
+    const deps: Record<string, unknown> = { store: ns, rpcs: [bindRpc(o.urls[0]), bindRpc(o.urls[1])], fetchFn: watch };
+    if (network === "testnet") deps.relayerAccount = relayers.bind;
+    const outcome = await bindDeposit(seed64, { network, s: scope, i, noteId: note.id, amount }, deps);
+    log(`bindDeposit: ${outcome.kind} in ${Date.now() - tBind} ms`);
+    if (outcome.kind !== "deposited") throw new Error(`deposit: ${json(outcome)}; the USDC is at U or in the vault: resume goes on from here`);
+    note = outcome.note;
+    const calls = (await ns.get(note.id))?.calls ?? [];
+    const txs = [...new Set([...calls.flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []), ...heard.bind])];
+    const leaf = note.leaf;
+    st.write("deposit", { amount: String(amount), bind_ms: Date.now() - tBind, txs, relayer: relayers.bind, before, after: await balances({ U }), leaf: { value: String(leaf.value), label: String(leaf.label), commitment: String(leaf.commitment), leaf_index: String(leaf.leafIndex) } });
+    log(`deposited ${amount}: leaf ${leaf.leafIndex}; relayer txs ${txs.join(", ") || "none heard"}`);
+  } else if (st.read("deposit") === undefined) {
+    // landed in an earlier attempt whose step file was not written: the record takes the leaf from the chain
+    st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
   }
-  if (end.kind !== "landed") throw new Error(`withdrawal: ${end.kind}`);
-  const { vaultSync, vaultSyncStart } = await import(pathToFileURL(path.join(ROOT, "packages/kit/src/vault/sync.ts")).href);
+
+  const nf: bigint = noteSecrets(seed64, note.ref).nullifierHash;
+  if (note.state === "UNSPENT") {
+    // the whole note to `to`, less the fee of this one quote: withdrawn = value, so no change note is left
+    const value: bigint = note.leaf.value;
+    const fee = await feeOf(value);
+    const prover = await nodeProver();
+    const trees = treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] }));
+    const ns2 = await lowerFinalTime(rpcs);
+    const before = await balances({ to, F: fee.feeRecipient });
+    const req = await withdrawRequest({
+      seed64, notes: ns, prover, vaultId: vault, token, ...trees, registerDepositOf,
+      feeRecipient: fee.feeRecipient, relayFee: fee.relayFee, network, rpcs, priceRpcs: network === "mainnet" ? rpcs : await opened_mainnet_pair(),
+      amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(ns2), blockTimestampNanosec: ns2,
+    });
+    const rp = requestProblems(req, to);
+    if (rp.length) throw new Error(`refused, the proof made and nothing sent: ${rp.join("; ")}; the note stays in the vault, and resume makes a new request`);
+    st.write("withdraw", { to, value: String(value), relay_fee: String(fee.relayFee), fee_recipient: fee.feeRecipient, nullifier_hash: String(nf), prove_ms: prover.times, before });
+    const out = await relayWithdraw(seed64, req, { notes: ns, network, rpcs, priceRpcs: network === "mainnet" ? rpcs : await opened_mainnet_pair(), fetchFn: watch });
+    log(`relayWithdraw: ${out.kind}`);
+    if (out.kind !== "landed") throw new Error(`withdrawal: ${out.kind}; the note is in the vault: resume makes a new request`);
+  }
+  // the arrival at `to`: the spend row paid to it, read on both RPCs (arrival.ts)
+  const arrival = await withdrawArrival({ network, rpcs, nullifierHash: nf, recipient: to });
+  if (arrival.kind !== "arrived") throw new Error(`the withdrawal ${arrival.kind}: ${json(arrival.spend)}`);
   const s = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["spends", "leaves"] });
-  const row = s.spends.find((x: { nullifierHash: bigint }) => x.nullifierHash === nf);
-  if (!row) throw new Error("no spends row for the note's nullifier");
-  const withdrawTx = seen.filter((x) => x.url === WITHDRAW_URL && x.status === 200).map((x: any) => x.body?.tx_hash).find((h) => typeof h === "string");
-  const afterW = await balances({ F: fee0.feeRecipient, A: row.recipient });
-  st.steps.run.withdraw = {
-    done: true, nullifier_hash: String(nf), withdraw_tx: withdrawTx ?? null, prove_ms: prover.times,
-    row: { index: row.index, status: row.status, recipient: row.recipient, withdrawn: String(row.withdrawn), fee: String(row.fee), payer: row.payer, new_leaf_index: String(row.newLeafIndex) },
-    change_commitment: String(s.leaves[Number(row.newLeafIndex)]), fee_recipient: fee0.feeRecipient, before: beforeW, after: afterW,
-  };
-  st.save();
+  const row = s.spends.find((x: { nullifierHash: bigint }) => x.nullifierHash === nf)!;
+  const prev = st.read("withdraw") ?? {};
+  st.write("withdraw", {
+    ...prev, done: true, to, nullifier_hash: String(nf),
+    row: { index: row.index, status: row.status, recipient: row.recipient, withdrawn: String(row.withdrawn), fee: String(row.fee), payer: row.payer, new_leaf_index: String(row.newLeafIndex), refund_value: String(row.refundValue) },
+    change_commitment: String(s.leaves[Number(row.newLeafIndex)]), after: await balances({ to, F: prev.fee_recipient ?? to }),
+  });
   seed64.fill(0);
-  log(`spends row #${row.index}: ${json(st.steps.run.withdraw.row)}; withdraw tx ${withdrawTx ?? "not heard"}; after: ${json(afterW)}`);
-  log("next: paste 3, the record (mainnet-money/3-record.sh), with the USDC send to U and the settle tx the helper sent");
+  log(`arrived: spends row #${row.index} ${row.status}, ${row.withdrawn} withdrawn, fee ${row.fee}, to ${row.recipient}; withdraw txs heard ${heard.withdraw.join(", ") || "none"}`);
+  log("next: paste 3, the record");
+  process.exit(0);
+}
+
+/** Mainnet's release pair, for fee_max's NEAR price pool on a testnet run (the wallet's priceRpcs rule). */
+async function opened_mainnet_pair() {
+  const { relayRpc } = await wallet("withdraw/relay.ts");
+  return [relayRpc(NEAR_NETWORKS.mainnet.fastnear[0]), relayRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
+}
+
+// ---- open-u: the payer opens U, signed here ----
+
+/** Signs and sends one transaction on the pair's first RPC, then reads it back FINAL on both; { hash } or throws. */
+async function sendTx(o: Opened, signer: string, key: any, receiver: string, actions: unknown[]) {
+  const { encodeTx } = await import("./testnet-usdc.mjs");
+  const { b58decode, b58encode } = await import("./near-tx.mjs");
+  const pk = `ed25519:${b58encode(key.pub)}`;
+  const ak = await q(o.rpcs[0], { request_type: "view_access_key", account_id: signer, public_key: pk });
+  const block: any = await (o.rpcs[0] as any).block({ finality: "final" });
+  const tx = encodeTx({ signer, publicKey: key.pub, nonce: BigInt(ak.nonce) + 1n, receiver, blockHash: b58decode(block.result.header.hash), actions });
+  const h = createHash("sha256").update(tx).digest();
+  const signed = Buffer.concat([tx, Buffer.from([0]), sign(null, h, key.privateKey)]);
+  const hash = b58encode(h);
+  await fetch(o.urls[0], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: CARD, method: "send_tx", params: { signed_tx_base64: signed.toString("base64"), wait_until: "FINAL" } }), signal: AbortSignal.timeout(60_000) }).catch(() => null);
+  await readBackBoth(o.urls, hash, signer);
+  return hash;
+}
+
+/** Every receipt of `hash` FINAL and a success on both RPCs (asked again for up to a minute while unknown); else throws. */
+async function readBackBoth(urls: readonly string[], hash: string, signer: string) {
+  const { successProblems } = await import("./testnet-t04.mjs");
+  for (const url of urls) {
+    let p: string[] = ["not read"];
+    for (let t = 0; t < 20; t++) {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: CARD, method: "EXPERIMENTAL_tx_status", params: { tx_hash: hash, sender_account_id: signer, wait_until: "FINAL" } }), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+      const j: any = await res?.json().catch(() => null);
+      if (j?.result) {
+        p = successProblems(j.result);
+        if (j.result.final_execution_status !== "FINAL") p.push("not FINAL");
+        break;
+      }
+      p = [`not read: ${JSON.stringify(j?.error ?? null).slice(0, 160)}`];
+      await sleep(3000);
+    }
+    if (p.length) throw new Error(`${hash} (${signer}) on ${url}: ${p.join("; ")}`);
+  }
+}
+
+async function openU(argv: string[]) {
+  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network"]);
+  const o = await opened(networkOf(v));
+  const { repoRoots, loadKey } = await import("./deploy.mjs");
+  const { act } = await import("./testnet-usdc.mjs");
+  const st = stateDir(v["--state"]!, repoRoots(), { create: false });
+  const run = st.read("run");
+  if (run === undefined || run.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network) throw new Error("the folder holds no run step of this seed and network: paste 1 first; nothing sent");
+  const U = run.U as string;
+  const payer = v["--payer"]!;
+  const key = loadKey(v["--key-file"], payer, repoRoots());
+  const kept = st.read("open-u") ?? { txs: [] as { hash: string; signer: string; what: string }[] };
+  const keep = (hash: string, what: string) => {
+    kept.txs.push({ hash, signer: payer, what });
+    st.write("open-u", kept);
+    log(`${what}: ${hash} read back FINAL on both RPCs, every receipt a success`);
+  };
+  const acct = await accountOn(o.rpcs, U);
+  if (acct.every((x) => x === "absent")) keep(await sendTx(o, payer, key, U, [act.transfer(U_OPEN_YOCTO)]), `Transfer 0.01 NEAR to U ${U}`);
+  else if (acct.some((x) => x === "absent")) throw new Error(`U ${U} exists on one RPC only: nothing sent; run this again in a minute`);
+  if ((await view2(o.rpcs, o.token, "storage_balance_of", { account_id: U })) === null) {
+    const b = await view2(o.rpcs, o.token, "storage_balance_bounds", {});
+    if (b?.min !== b?.max) throw new Error(`the token's storage_balance_bounds ${json(b)} is not min = max: nothing sent`);
+    keep(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: U, registration_only: true }, 30n * TGAS, BigInt(b.min))]), `storage_deposit of U on ${o.token}`);
+  }
+  log(`U ${U} exists and is registered on both RPCs: send at least ${o.minDeposit} USDC (base units) to it from any wallet or exchange`);
   process.exit(0);
 }
 
 // ---- record: public values only ----
 
-/** The record the money gate reads: Money path, one Tx line per transaction (near = mainnet), then the prose. */
-export function recordText(txs: { hash: string; signer: string }[], prose: string[]): string {
-  return [`CARD ${CARD} / live: PASS`, "Money path: yes", ...txs.map((t) => `Tx: near ${t.hash} ${t.signer}`), "", ...prose, ""].join("\n");
+/** The record the money gate reads: Money path, one Tx line per transaction, then the prose. */
+export function recordText(txs: { hash: string; signer: string }[], prose: string[], network: Network = "mainnet"): string {
+  return [`CARD ${CARD} / live: PASS`, "Money path: yes", ...txs.map((t) => `Tx: ${network === "mainnet" ? "near" : "near-testnet"} ${t.hash} ${t.signer}`), "", ...prose, ""].join("\n");
+}
+
+/**
+ * [] when the record names every transaction of the run: U's opening (open-u.json; none when U was opened another
+ * way), its USDC funding (--fund-tx, the sender's: the run cannot see it), at least one deposit and one withdrawal tx
+ * of the relayers that read back a success, and the settle (--settle-tx) when the spend row is settled.
+ */
+export function recordProblems(a: { fund: number; deposit: number; withdraw: number; status: string; settle: number }): string[] {
+  const p: string[] = [];
+  if (a.fund === 0) p.push("no --fund-tx: name the transaction(s) that sent U its USDC (the wallet's or the exchange's), with its signer");
+  if (a.deposit === 0) p.push("no deposit tx heard from the relayer reads back a success");
+  if (a.withdraw === 0) p.push("no withdrawal tx heard from the relayer reads back a success");
+  if (a.status === "settled" && a.settle === 0) p.push("the spend row is settled: name its settle tx with --settle-tx");
+  if (a.status !== "settled" && a.status !== "paid") p.push(`the spend row is ${a.status}, not paid or settled`);
+  return p;
+}
+
+/** The relayers' heard txs that read back a success on both RPCs; the rest (a resend the vault refused) are left out. */
+async function landedOf(urls: readonly string[], hashes: string[], signer: string) {
+  const ok: { hash: string; signer: string }[] = [];
+  for (const hash of [...new Set(hashes)]) {
+    try {
+      await readBackBoth(urls, hash, signer);
+      ok.push({ hash, signer });
+    } catch (e) {
+      log(`${hash} (${signer}) left out: ${(e as Error).message}`);
+    }
+  }
+  return ok;
 }
 
 async function record(argv: string[]) {
-  const extra: { hash: string; signer: string }[] = [];
+  const named: Record<"--fund-tx" | "--settle-tx", { hash: string; signer: string }[]> = { "--fund-tx": [], "--settle-tx": [] };
   const rest: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--tx" && /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(argv[i + 1] ?? "") && /^[a-z0-9._-]{2,64}$/.test(argv[i + 2] ?? "")) {
-      extra.push({ hash: argv[i + 1]!, signer: argv[i + 2]! });
-      i += 2;
-    } else rest.push(argv[i]!);
+  for (let k = 0; k < argv.length; k++) {
+    const a = argv[k]!;
+    if (a === "--fund-tx" || a === "--settle-tx") {
+      if (!/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(argv[k + 1] ?? "") || !ACCOUNT_ID.test(argv[k + 2] ?? "")) throw new Error(`${a} takes a tx hash and its signer`);
+      named[a].push({ hash: argv[k + 1]!, signer: argv[k + 2]! });
+      k += 2;
+    } else rest.push(a);
   }
-  const v = flags(rest, ["--state"]);
-  const o = await opened();
-  const { loadState } = await import("./testnet-t04.mjs");
+  const v = flags(rest, ["--state"], ["--network"]);
+  const o = await opened(networkOf(v));
   const { repoRoots } = await import("./deploy.mjs");
-  const st = loadState(v["--state"]!, repoRoots());
-  const r = st.steps.run;
-  if (r?.deposit?.done !== true || r?.withdraw?.done !== true) throw new Error("record: the run has not landed both legs");
-  const txs = [...extra.filter((t) => t.signer !== o.relayers.bind), ...r.deposit.txs.map((hash: string) => ({ hash, signer: o.relayers.bind })), ...(r.withdraw.withdraw_tx ? [{ hash: r.withdraw.withdraw_tx, signer: o.relayers.withdraw.relayer_account }] : []), ...extra.filter((t) => t.signer === o.relayers.bind)];
-  if (txs.length === 0) throw new Error("record: no transaction to record");
-  const { successProblems } = await import("./testnet-t04.mjs");
-  for (const t of txs) {
-    for (const url of RPC_URLS) {
-      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: CARD, method: "EXPERIMENTAL_tx_status", params: { tx_hash: t.hash, sender_account_id: t.signer, wait_until: "FINAL" } }), signal: AbortSignal.timeout(30_000) });
-      const j: any = await res.json();
-      const p = j?.result ? successProblems(j.result) : [`not read: ${JSON.stringify(j?.error ?? j).slice(0, 200)}`];
-      if (p.length) throw new Error(`record: ${t.hash} (${t.signer}) on ${url}: ${p.join("; ")}`);
-    }
-    log(`${t.hash} (${t.signer}) read back FINAL on both operators, every receipt a success`);
-  }
-  const run = {
-    card: CARD, network: "mainnet", vault: o.vault, asset: o.token,
-    accounts: { U: r.U, A: r.withdraw.row.recipient, F: r.withdraw.fee_recipient, R: o.relayers.withdraw.relayer_account, G: o.relayers.bind },
-    deposit: { value: r.deposit.leaf.value, precommitment: r.precommitment, label: r.deposit.leaf.label, leaf_index: r.deposit.leaf.leaf_index, commitment: r.deposit.leaf.commitment },
-    withdraw: { withdrawn: r.withdraw.row.withdrawn, relay_fee: r.withdraw.row.fee, nullifier_hash: r.withdraw.nullifier_hash, change_leaf_index: r.withdraw.row.new_leaf_index, change_commitment: r.withdraw.change_commitment },
+  const st = stateDir(v["--state"]!, repoRoots(), { create: false });
+  const run = st.read("run"), d = st.read("deposit"), w = st.read("withdraw"), u = st.read("open-u") ?? { txs: [] };
+  const heard = st.read("heard") ?? { bind: [], withdraw: [] };
+  if (run?.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network || d === undefined || w?.done !== true) throw new Error("record: the run has not landed both legs");
+  const owners = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...named["--settle-tx"]];
+  for (const t of owners) await readBackBoth(o.urls, t.hash, t.signer); // each must read back a success, or nothing is written
+  const deposits = await landedOf(o.urls, [...d.txs, ...heard.bind], d.relayer);
+  const withdraws = await landedOf(o.urls, heard.withdraw, o.relayers.withdraw.relayer_account);
+  const rp = recordProblems({ fund: named["--fund-tx"].length, deposit: deposits.length, withdraw: withdraws.length, status: w.row.status, settle: named["--settle-tx"].length });
+  if (rp.length) throw new Error(`record: ${rp.join("; ")}`);
+  const txs = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...deposits, ...withdraws, ...named["--settle-tx"]];
+  for (const t of txs) log(`${t.hash} (${t.signer}) read back FINAL on both operators, every receipt a success`);
+  const runRec = {
+    card: CARD, network: o.network, vault: o.vault, asset: o.token,
+    accounts: { U: run.U, to: w.to, F: w.fee_recipient, R: o.relayers.withdraw.relayer_account, G: d.relayer },
+    deposit: { value: d.leaf.value, precommitment: run.precommitment, label: d.leaf.label, leaf_index: d.leaf.leaf_index, commitment: d.leaf.commitment },
+    withdraw: { withdrawn: w.row.withdrawn, relay_fee: w.row.fee, nullifier_hash: w.nullifier_hash, change_leaf_index: w.row.new_leaf_index, change_commitment: w.change_commitment },
   };
-  const b = r.deposit.before, a = r.deposit.after, c = r.withdraw.before, e = r.withdraw.after;
   const prose = [
-    `The run: contracts/vault/scripts/mainnet-money.ts on NEAR mainnet, the keyless vault ${o.vault} (contracts/vault/deployments/mainnet-v1.json) on USDC ${o.token}, both legs carried by the deployed helper.`,
-    `Deposit: U ${r.U} (U_{s,i} of the run's 12 words, i a fresh note store's first) signed its ft_transfer_call as a NEP-366 DelegateAction (packages/wallet/src/deposit/bind.ts bindDeposit), carried by the release's deposit relayer ${o.relayers.bind}; the deposits page holds P ${r.precommitment} by U with ${r.deposit.leaf.value}, label ${r.deposit.leaf.label}, leaf ${r.deposit.leaf.leaf_index}.`,
-    `Withdrawal: the signing page's withdrawHandoff (packages/signpage/src/withdraw/handoff.ts), proved in this process by snarkjs fullProve on the kit's pinned setup files (the stand-in for the page's prover worker), carried by the release's relayer ${o.relayers.withdraw.relayer_account}; spends row #${r.withdraw.row.index}: ${r.withdraw.row.withdrawn} withdrawn to A ${r.withdraw.row.recipient}, fee ${r.withdraw.row.fee} to ${r.withdraw.fee_recipient}, payer ${r.withdraw.row.payer}, ${r.withdraw.row.status}.`,
-    `Every Tx above read back FINAL on https://rpc.mainnet.fastnear.com and https://near.drpc.org, every receipt a success.`,
-    `Before the deposit (${b.at}): U USDC ${b.U_usdc}, vault USDC ${b.vault_usdc}, totals ${JSON.stringify(b.totals)}. After (${a.at}): U USDC ${a.U_usdc}, vault USDC ${a.vault_usdc}, totals ${JSON.stringify(a.totals)}.`,
-    `Before the withdrawal (${c.at}): F USDC ${c.F_usdc}, vault USDC ${c.vault_usdc}, totals ${JSON.stringify(c.totals)}. After (${e.at}): A USDC ${e.A_usdc}, F USDC ${e.F_usdc}, vault USDC ${e.vault_usdc}, totals ${JSON.stringify(e.totals)}.`,
-  ];
-  const text = recordText(txs, prose);
+    `The run: contracts/vault/scripts/mainnet-money.ts on NEAR ${o.network}, the keyless vault ${o.vault} on USDC ${o.token}, both legs carried by the deployed helper.`,
+    `Deposit: U ${run.U} (U_{s,i} of the run's 12 words, i ${run.i}) signed its ft_transfer_call as a NEP-366 DelegateAction (packages/wallet/src/deposit/bind.ts bindDeposit), carried by ${d.relayer}; the deposits page holds P ${run.precommitment} by U with ${d.leaf.value}, label ${d.leaf.label}, leaf ${d.leaf.leaf_index}.`,
+    `Withdrawal: the wallet's withdrawRequest to ${w.to} (fund_recipient false, no change: withdrawn = the note), proved in this process by snarkjs fullProve on the kit's pinned setup files (the stand-in for the page's prover worker), carried by ${o.relayers.withdraw.relayer_account}; spends row #${w.row.index}: ${w.row.withdrawn} withdrawn to ${w.row.recipient}, fee ${w.row.fee} to ${w.fee_recipient}, payer ${w.row.payer}, ${w.row.status}.`,
+    `Every Tx above read back FINAL on ${o.urls.join(" and ")}, every receipt a success.`,
+    d.before ? `Before the deposit (${d.before.at}): U USDC ${d.before.U_usdc}, vault USDC ${d.before.vault_usdc}, totals ${JSON.stringify(d.before.totals)}. After (${d.after.at}): U USDC ${d.after.U_usdc}, vault USDC ${d.after.vault_usdc}, totals ${JSON.stringify(d.after.totals)}.` : "The deposit's balances were not kept: its step was restored from the chain.",
+    w.before ? `Before the withdrawal (${w.before.at}): ${w.to} USDC ${w.before.to_usdc}, F USDC ${w.before.F_usdc}, vault USDC ${w.before.vault_usdc}. After (${w.after.at}): ${w.to} USDC ${w.after.to_usdc}, F USDC ${w.after.F_usdc}, vault USDC ${w.after.vault_usdc}, totals ${JSON.stringify(w.after.totals)}.` : "",
+  ].filter(Boolean);
+  const text = recordText(txs, prose, o.network);
   const { localProblems } = await import("./testnet-t02.ts");
   const os = await import("node:os");
-  const lp = localProblems(text + JSON.stringify(run), [os.hostname(), os.hostname().split(".")[0]!, os.userInfo().username]);
+  const lp = localProblems(text + JSON.stringify(runRec), [os.hostname(), os.hostname().split(".")[0]!, os.userInfo().username]);
   if (lp.length) throw new Error(`record: ${lp.join("; ")}`);
-  writeFileSync(path.join(ROOT, RUN_RECORD), JSON.stringify(run, null, 2) + "\n");
-  writeFileSync(path.join(ROOT, MONEY_RECORD), text);
+  const suffix = o.network === "mainnet" ? "" : ".testnet";
+  writeFileSync(path.join(ROOT, RUN_RECORD.replace(/\.run\.json$/, `${suffix}.run.json`)), JSON.stringify(runRec, null, 2) + "\n");
+  writeFileSync(path.join(ROOT, MONEY_RECORD.replace(/\.md$/, `${suffix}.md`)), text);
   console.log(text);
-  log(`written ${RUN_RECORD} and ${MONEY_RECORD}; next: node scripts/ci/money-gate.mjs ${MONEY_RECORD} and node scripts/live-checks/${CARD}.mjs`);
 }
 
-function flags(argv: string[], allowed: string[]): Record<string, string> {
+function flags(argv: string[], required: string[], optional: string[] = []): Record<string, string> {
   const v: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]!;
-    if (allowed.includes(a) && i + 1 < argv.length && !argv[i + 1]!.startsWith("--")) v[a] = argv[++i]!;
+  const allowed = [...required, ...optional];
+  for (let k = 0; k < argv.length; k++) {
+    const a = argv[k]!;
+    if (allowed.includes(a) && k + 1 < argv.length && !argv[k + 1]!.startsWith("--")) v[a] = argv[++k]!;
     else throw new Error(`unknown argument ${a}`);
   }
-  for (const k of allowed) if (!v[k]) throw new Error(`${k} is required`);
+  for (const k of required) if (!v[k]) throw new Error(`${k} is required`);
   return v;
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const go = cmd === "check" ? () => check(rest) : cmd === "run" ? () => run(rest) : cmd === "record" ? () => record(rest) : null;
-  if (!go) {
-    console.error("usage: mainnet-money.ts check [--u <U>] | run --state <path> | record --state <path> [--tx <hash> <signer>]...");
+  const commands: Record<string, () => Promise<void>> = { check: () => check(rest), run: () => go(rest, true), resume: () => go(rest, false), "open-u": () => openU(rest), record: () => record(rest) };
+  const fn = cmd === undefined ? undefined : commands[cmd];
+  if (!fn) {
+    console.error("usage: mainnet-money.ts check|run|resume|open-u|record ... (see the file's head)");
     process.exit(2);
   }
-  go().catch((e) => {
+  fn().catch((e) => {
     console.error(`mainnet-money: ${e?.message ?? e}`);
+    console.error("mainnet-money: keep the --state folder as it is; resume goes on from where this stopped");
     process.exit(1);
   });
 }
