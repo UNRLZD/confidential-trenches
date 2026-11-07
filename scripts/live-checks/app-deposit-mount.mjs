@@ -85,6 +85,11 @@ export function judge(rec) {
     say(r.quoteState === "S4.3" && r.youGet === "$73.18", `${n}: the dry quote draws ${r.quoteState ?? "no state"}, You get ${r.youGet ?? "nothing"}`);
     const c = r.clear ?? {};
     say(c.ok === true, `${n}: the element at Get address's centre is ${c.first ?? "unread"}, and ${c.under?.length ? `the body's ${c.under.join(", ")} lies under it` : c.ok ? "nothing from the body lies under it" : (c.why ?? "unread")}${c.ok ? "" : ` (${JSON.stringify(c)})`}`);
+    if (r.width === "phone") {
+      const presses = Array.isArray(r.tapGet?.presses) ? r.tapGet.presses : [];
+      const off = presses.filter((p) => !/ button\.dbtn\.buy /.test(`${p} `));
+      say(presses.length > 0 && off.length === 0, `${n}: the tap on Get address ${presses.length === 0 ? "reaches nothing" : off.length ? `lands on ${off.join(", ")}` : `reaches the button itself (${presses.length} press events)`}`);
+    }
     const qOk = same(r.quote, { origin_asset: NEAR.origin_asset, amount: AMOUNT });
     say(qOk, `${n}: Get address sends deposit.quote ${r.quote ? JSON.stringify(r.quote) : "nothing"}${!qOk && r.tapGet ? ` (the tap: ${JSON.stringify(r.tapGet)})` : ""}`);
     say(r.addressState === "S4.13" && r.address === ADDRESS, `${n}: the address state ${r.addressState ?? "none"} draws ${r.address === ADDRESS ? "the quote's own address" : (r.address ?? "no address")}`);
@@ -201,14 +206,23 @@ async function runOne(browser, w, scheme, shots, route) {
     // where the tap really lands: the top window's viewports and scroll, and each press the terminal's frame receives
     // (its point and target), read before and after the tap, since the element under the button's centre was the button
     // while CI's tap reached the amount field
-    const views = () => page.evaluate(() => ({ scroll: [scrollX, scrollY], vv: visualViewport && [visualViewport.offsetLeft, visualViewport.offsetTop, visualViewport.pageTop, visualViewport.width, visualViewport.height, visualViewport.scale] })).catch(() => null);
+    const views = () => page.evaluate(() => ({ scroll: [scrollX, scrollY], dpr: devicePixelRatio, vv: visualViewport && [visualViewport.offsetLeft, visualViewport.offsetTop, visualViewport.pageTop, visualViewport.width, visualViewport.height, visualViewport.scale] })).catch(() => null);
     run.tapGet.topBefore = await views();
     await f.evaluate(() => {
       window.__ctPress = [];
       const name = (e) => (e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === "string" ? `.${e.className.trim().split(/\s+/).join(".")}` : ""}` : null);
-      for (const t of ["pointerdown", "mousedown", "touchstart"]) addEventListener(t, (e) => { const p = e.touches?.[0] ?? e; window.__ctPress.push(`${t} ${Math.round(p.clientX)},${Math.round(p.clientY)} ${name(e.target)} vv ${visualViewport?.offsetTop},${visualViewport?.pageTop},${visualViewport?.scale}`); }, { capture: true });
+      for (const t of ["pointerdown", "mousedown", "touchstart"]) addEventListener(t, (e) => { const p = e.touches?.[0] ?? e; window.__ctPress.push(`${t} ${Math.round(p.clientX)},${Math.round(p.clientY)} ${name(e.target)} vv ${visualViewport?.offsetTop},${visualViewport?.pageTop},${visualViewport?.scale} dpr ${devicePixelRatio}`); }, { capture: true });
     }).catch(() => {});
-    run.tapGet.error = await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).then(() => null, (e) => [...new Set(String(e?.message ?? e).split("\n").map((l) => l.trim()).filter(Boolean))].slice(0, 40).join(" | "));
+    // a phone taps with a finger: a touch at the button's centre, which the browser hit-tests as a real tap, and the
+    // press recorder names what it reached (judged: the button itself). Playwright 1.63's click on Linux Chrome 157 at
+    // dpr 2 refused the tap on its own hit-target computation and sent no input, while the browser's hit test returned
+    // the button (run 42338709153, job 128301399307). The desktop clicks.
+    const get = f.locator("[data-control='deposit-get']").filter({ visible: true }).first();
+    const why = (e) => [...new Set(String(e?.message ?? e).split("\n").map((l) => l.trim()).filter(Boolean))].slice(0, 40).join(" | ");
+    run.tapGet.error = w.hasTouch
+      ? await get.boundingBox({ timeout: 3_000 }).then((b) => (b ? page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2).then(() => null) : "no box"), why)
+      : await get.click({ timeout: 3_000 }).then(() => null, why);
+    if (w.hasTouch) run.tapGet.presses = await f.evaluate(() => window.__ctPress ?? null).catch(() => null);
     if (run.tapGet.error) {
       run.tapGet.topAfter = await views();
       Object.assign(run.tapGet, await f.evaluate(async () => {
@@ -247,7 +261,12 @@ async function runOne(browser, w, scheme, shots, route) {
 /** Every width and scheme in Chromium. `route` answers the hosts' names (see main). */
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route, source }) {
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  // the screen's pixel ratio is 2, as the phone runs ask for: on a Linux host at 1 the terminal's frame (another site,
+  // so its own process) kept a ratio of 1 under the phone's 2, and taps into it landed at half the point (Linux
+  // Chrome 156: a tap at 195,796 reached the frame at 98,398, the amount field), as Playwright 1.63's click on Linux
+  // Chrome 157 at 390 did on CI (run 42338709153, job 128301399307: the amount field "intercepts pointer events"
+  // while the browser's own hit test returned the button). The Mac's screen is already 2, and never failed.
+  const browser = await launchBrowser("chromium", { args: ["--force-device-scale-factor=2"] });
   try {
     const runs = [];
     for (const w of WIDTHS) for (const s of SCHEMES) runs.push(await runOne(browser, w, s, shots, route));
