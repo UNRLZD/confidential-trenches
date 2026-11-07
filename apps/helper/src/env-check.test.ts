@@ -98,3 +98,33 @@ test("fold B: POOL_EVM_RPCS_* of two URLs of one operator is refused at the star
   // unset: the kit's fee pair, of two operators on every network
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) assert.equal(refusal({ [names[0]]: EVM[0]!, [names[1]]: EVM[1]! }), null, network);
 });
+
+// review L-2 and L-3 (op-edges): the start's operator is the kit's one rule (evmRpcOperator), so no spelling of one
+// operator passes as two, no text that is not a URL passes at all, and one URL written twice is one URL
+test("L-2/L-3: POOL_EVM_RPCS_* of one operator however written, a CNAME of the other, or Pocket's words twice is refused; a non-URL is refused naming no key; a trailing slash is the same URL", () => {
+  const env = (rpcs: string) => ({ POOL_EVM_ADDRESS_ROBINHOOD: EVM[0]!, POOL_EVM_SENDER_KEY_ROBINHOOD: EVM[1]!, POOL_EVM_RPCS_ROBINHOOD: rpcs });
+  const one: [string, string][] = [
+    ["https://rpc.mainnet.chain.robinhood.com.,https://robinhood.com", "robinhood.com"],
+    ["https://a.robinhood.com.,https://b.robinhood.com", "robinhood.com"],
+    ["https://RPC.Mainnet.Chain.Robinhood.COM,https://x.robinhood.com", "robinhood.com"],
+    ["https://user:s3cr3t@a.robinhood.com/v2/KEY?k=1,https://b.robinhood.com", "robinhood.com"],
+    ["https://rpc.mainnet.chain.robinhood.com,https://customer-origin.offchainlabs.com", "robinhood.com"],
+    ["https://robinhood.api.pocket.network,https://rpc.degenprotocol.io", "pocket.network"],
+    ["https://rpc.foo.co.uk,https://rpc.bar.co.uk", "co.uk"],
+    ["http://127.0.0.1:1,http://127.1:2", "127.0.0.1"],
+    ["http://2130706433:1,http://127.0.0.1:2", "127.0.0.1"],
+    ["http://[::ffff:127.0.0.1]:1,http://127.0.0.1:2", "127.0.0.1"],
+    ["http://[::1]:1,http://[0:0:0:0:0:0:0:1]:2", "[::1]"],
+    ["http://localhost:1,http://localhost:2", "localhost"],
+  ];
+  for (const [rpcs, op] of one) {
+    const why = refusal(env(rpcs));
+    assert.equal(why, `POOL_EVM_RPCS_ROBINHOOD must be two RPC URLs of two operators: both are ${op}`, rpcs);
+  }
+  for (const rpcs of ["not a url/KEY,also not/KEY2", "robinhood.com,https://x.robinhood.com/KEY", "ws://a.example/s3cr3t,https://b.example"]) {
+    const why = refusal(env(rpcs));
+    assert.equal(why, "POOL_EVM_RPCS_ROBINHOOD must be two http or https URLs", rpcs);
+  }
+  assert.equal(refusal(env("https://robinhood.drpc.org/,https://robinhood.drpc.org")), "POOL_EVM_RPCS_ROBINHOOD must be two different RPC URLs");
+  assert.equal(refusal(env("https://robinhood.drpc.org/,https://rpc.mainnet.chain.robinhood.com/")), null);
+});

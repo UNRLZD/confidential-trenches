@@ -18,6 +18,7 @@ export {
   EVM_POOL_MAX_HOOK_DATA,
   EVM_POOL_MAX_HOPS,
   EvmPoolBuyError,
+  evmPoolProvidersOf,
   evmPoolRouteData,
   evmPoolVenues,
   type EvmPoolBuy,
@@ -30,6 +31,8 @@ export {
   type EvmV4Hop,
   type EvmV4Route,
 } from "./buy-unpinned.ts";
+// who runs an EVM RPC, the one rule every RPC pair is held to (card robinhood-mainnet-rpcs, review L-2)
+export { EVM_RPC_OPERATORS, evmRpcOperator } from "./rpc-operator.ts";
 
 // W signs only a buy evmPoolBuildQuoted returned (review of b17d1fc, item 4; quoted.ts holds the record). The kit
 // exports no builder that takes a minOut from its caller.

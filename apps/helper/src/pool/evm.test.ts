@@ -753,3 +753,92 @@ test("fold 8 a sender with no POOL_EVM_RPCS_* reads only the kit's feeProviders 
   const { feeProviders: _, ...none } = kit["base-sepolia"];
   assert.throws(() => evmPoolSendersFromEnv(env, { ...kit, "base-sepolia": none }), /POOL_EVM_RPCS_BASE_SEPOLIA must be set: the kit lists no fee providers for base-sepolia/);
 });
+
+// review M-3: the epoch's first block is found by the chain's block time, never a second as a block, and the sender's
+// own reads go to dRPC (the kit's fee pair, dRPC first), so an epoch's first fee and a withdraw in an epoch with no
+// cached fee wait under 3 s on the helper's pace (PROVIDER_PACE: Robinhood's own 1 post a second, burst 2; dRPC 15 a
+// second). Before: 11 to 14 searches' reads, all on Robinhood's own, 9 to 12 s of waits and 20 to 23 s for a withdraw.
+const chainAt = (tsOf: (n: bigint) => bigint, head: bigint, log?: bigint[]): EvmRpc => async (_method, params) => {
+  const p = params[0] as string;
+  const n = p === "latest" ? head : BigInt(p);
+  log?.push(n);
+  return { number: `0x${n.toString(16)}`, timestamp: `0x${tsOf(n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x1" };
+};
+// Robinhood's blocks, 0.102 s apart (the kit's maxLag comment), so about ten share each timestamp; the head `lateS` into
+// the epoch that starts at S
+const S = 1_800_000_000n;
+const HEAD = 100_000_000n;
+const robinhoodAt = (lateS: bigint) => (n: bigint) => S + lateS - ((HEAD - n) * 102n) / 1000n;
+const firstAtOrAfter = (tsOf: (n: bigint) => bigint, head: bigint, seconds: bigint) => {
+  let n = head;
+  while (n > 0n && tsOf(n - 1n) >= seconds) n--;
+  return n;
+};
+
+test("review M-3: the epoch's first block, on Robinhood's 0.1 s blocks, is found in at most 10 reads up to a proof's life (600 s) back, and is the first at or after it", async () => {
+  // about four of them halve the run of some ten blocks with one timestamp, which no block time can narrow
+  for (const lateS of [1n, 5n, 30n, 55n, 59n, 600n]) {
+    const log: bigint[] = [];
+    const b = await evmFirstBlockAtOrAfter(chainAt(robinhoodAt(lateS), HEAD, log), S);
+    assert.equal(b!.number, firstAtOrAfter(robinhoodAt(lateS), HEAD, S), `${lateS} s in`);
+    assert.ok(log.length <= 10, `${lateS} s into the epoch: ${log.length} reads (${log.join(", ")})`);
+  }
+});
+
+test("review M-3: the search finds the first block at or after any time on any chain: 2 s blocks, 0.1 s runs of one timestamp, a chain that stopped for an hour, block 0", async () => {
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed / 2 ** 31);
+  const chains: [string, bigint, (n: bigint) => bigint][] = [
+    ["2 s blocks", 5_000n, (n) => 1_700_000_000n + 2n * n],
+    ["0.1 s blocks", 50_000n, (n) => 1_700_000_000n + n / 10n],
+    ["stopped an hour at block 30,000", 50_000n, (n) => 1_700_000_000n + n / 10n + (n >= 30_000n ? 3_600n : 0n)],
+    ["one timestamp for its first 1,000 blocks", 5_000n, (n) => 1_700_000_000n + (n < 1_000n ? 0n : n - 1_000n)],
+  ];
+  for (const [name, head, tsOf] of chains) {
+    const lo = tsOf(0n), hi = tsOf(head);
+    for (let k = 0; k < 40; k++) {
+      const seconds = lo - 5n + BigInt(Math.floor(rnd() * Number(hi - lo + 10n)));
+      const b = await evmFirstBlockAtOrAfter(chainAt(tsOf, head), seconds);
+      if (seconds > hi) assert.equal(b, null, `${name} ${seconds}`);
+      else assert.equal(b!.number, firstAtOrAfter(tsOf, head, seconds), `${name} ${seconds}`);
+    }
+    // each time a run of one timestamp starts at, and the one after it
+    for (const n of [0n, 1n, head / 3n, head / 2n, head - 1n, head]) {
+      for (const seconds of [tsOf(n), tsOf(n) + 1n]) {
+        const b = await evmFirstBlockAtOrAfter(chainAt(tsOf, head), seconds);
+        if (seconds > hi) assert.equal(b, null);
+        else assert.equal(b!.number, firstAtOrAfter(tsOf, head, seconds), `${name} at ${seconds}`);
+      }
+    }
+  }
+});
+
+test("review M-3: on Robinhood mainnet an epoch's first fee and a withdraw in an epoch with no cached fee each wait under 3 s on the helper's pace, the search and the sender's reads on dRPC", async () => {
+  const [a, b] = evmPoolVenues().robinhood.feeProviders ?? assert.fail("robinhood: no fee pair");
+  assert.equal(a, "https://robinhood.drpc.org", "the sender's single-provider reads and its sends go to dRPC");
+  for (const lateS of [5n, 30n, 55n]) {
+    let t = 1_800_000_000_000;
+    const holds = providerHolds(() => t);
+    const sleep = async (ms: number) => void (t += ms);
+    const ra = pacedEvmRpc(a, chainAt(robinhoodAt(lateS), HEAD), holds, sleep);
+    const rb = pacedEvmRpc(b, chainAt(robinhoodAt(lateS), HEAD), holds, sleep);
+    const t0 = t;
+    // the fee: the epoch's first block on a, then the depth, the L1 fee bound and the operator fee on both (the test
+    // above: 3 eth_call on each), both providers at once
+    await evmFirstBlockAtOrAfter(ra, S);
+    await Promise.all([ra, rb].map(async (r) => { for (let k = 0; k < 3; k++) await r("eth_getBlockByNumber", ["latest"]); }));
+    const fee = t - t0;
+    assert.ok(fee < 3_000, `${lateS} s in: the fee waited ${fee} ms`);
+    // a withdraw's reads and its send on a (2 getCode, 4 reads, estimateGas, eth_call, sendRaw)
+    for (let k = 0; k < 9; k++) await ra("eth_getBlockByNumber", ["latest"]);
+    assert.ok(t - t0 < 3_000, `${lateS} s in: the fee and the withdraw waited ${t - t0} ms`);
+  }
+});
+
+// review L-3: a trailing slash is the pace's own key, never a second provider with no pace or hold
+test("review L-3: POOL_EVM_RPCS_* written with a trailing slash draws on the pace of the kit's spelling", () => {
+  const reserved: string[] = [];
+  const holds = { ...providerHolds(), reserve: (u: string) => void reserved.push(u) } as ProviderHolds;
+  evmPoolSendersFromEnv({ POOL_EVM_ADDRESS_ROBINHOOD: "0x" + "ab".repeat(20), POOL_EVM_SENDER_KEY_ROBINHOOD: "0x" + "11".repeat(32), POOL_EVM_RPCS_ROBINHOOD: "https://robinhood.drpc.org/,https://rpc.mainnet.chain.robinhood.com/" }, undefined, holds);
+  assert.deepEqual(reserved, ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]);
+});

@@ -9,7 +9,7 @@
 // Live check base-200ms-blocks reads Base's again after every helper deploy and fails when it moves.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
+import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../src/index.ts";
 
 const BLOCK_MS = { base: 200, "base-sepolia": 200, robinhood: 101.2, "robinhood-testnet": 163.4 } as const;
 // the time each chain's maxLag stands for (the comment beside it): two heads at most this far apart
@@ -67,21 +67,22 @@ const MAINNET_WIDEST: Record<string, number> = {
   "robinhood.api.pocket.network": 10_001,
   "robinhood-rpc.publicnode.com": 100,
   "robinhood.drpc.org": 100,
+  // review M-1: 0.5-6.6 s at 10,000 blocks 13M back and no answer in 15 s at 100,000, past the device's 3.5 s client
+  // (packages/wallet/src/pool/evm.ts): no page it answers in time, so not even a spare
+  "rpc-robinhood.globalstake.io": 0,
 };
-const operatorOf = (host: string) => host.split(".").slice(-2).join(".");
 
-test("Robinhood mainnet's pool list seats two operators that each page the pool's logs at the sync's full page (never publicnode's archive refusal or dRPC's 100 blocks)", () => {
-  const r = evmPoolVenues().robinhood as { poolProviders?: readonly string[]; providers?: readonly string[] };
-  const list = r.poolProviders ?? r.providers ?? assert.fail("robinhood: no pool list");
+test("Robinhood mainnet's pool list: every entry, seat or spare, another operator's and paging the pool's logs at the sync's full page in the device's client (never publicnode's archive refusal, dRPC's 100 blocks or GlobalStake's timeouts)", () => {
+  const list = evmPoolProvidersOf(evmPoolVenues().robinhood) ?? assert.fail("robinhood: no pool list");
   assert.ok(Object.isFrozen(list), "the list is frozen");
   assert.ok(list.length >= 2, "a pair at least");
   const hosts = list.map((u) => new URL(u).host);
   for (const u of list) assert.match(u, /^https:\/\/[a-z0-9.-]+$/, `${u}: a keyless https URL`);
-  assert.equal(new Set(hosts.map(operatorOf)).size, hosts.length, "every provider another operator");
-  for (const h of hosts.slice(0, 2)) {
+  assert.equal(new Set(list.map(evmRpcOperator)).size, list.length, "every provider another operator");
+  for (const h of hosts) {
     assert.ok(h in MAINNET_WIDEST, `${h}'s widest page on the pool's logs was never read`);
     assert.ok(MAINNET_WIDEST[h]! >= PAGE, `${h} pages the pool's logs at ${MAINNET_WIDEST[h]} blocks, under the sync's ${PAGE}`);
   }
   // the quote list stays the quote list: its order is the cold quote's (card rh-cold-quote), untouched by the pool's
-  assert.equal(r.providers?.[0], "https://robinhood-rpc.publicnode.com");
+  assert.equal(evmPoolVenues().robinhood.providers?.[0], "https://robinhood-rpc.publicnode.com");
 });

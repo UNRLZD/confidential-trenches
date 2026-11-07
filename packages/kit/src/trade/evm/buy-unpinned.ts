@@ -98,6 +98,13 @@ export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "w
 const bare = <T extends object>(o: T): Readonly<T> => Object.freeze(Object.assign(Object.create(null) as T, o));
 /** A venue list the pinned functions read (evmPoolVenues(), or a test's): a chain it does not have is refused. */
 export type EvmPoolVenueList = Readonly<Partial<Record<EvmPoolChain, EvmPoolVenue>>>;
+/** The list a venue's pool is synced and read on (card robinhood-mainnet-rpcs, review M-2): its `poolProviders`, or its
+ *  `providers` when it has none. Every reader of a pool list takes it from here (the wallet's pool reads check, the
+ *  card's live check), so none reads the quote list where the pool has its own. Own fields only: a list on the
+ *  prototype is not the venue's. */
+export function evmPoolProvidersOf(venue: EvmPoolVenue): readonly string[] | undefined {
+  return Object.hasOwn(venue, "poolProviders") ? venue.poolProviders : Object.hasOwn(venue, "providers") ? venue.providers : undefined;
+}
 let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
 export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
   (venues ??= bare({
@@ -253,8 +260,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // only these two of the five keep state 600 s back: Robinhood's own answers 630 s and refuses 660 s, dRPC 600 s
       // (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s, 2026-11-04 20:12Z); publicnode, bloXroute and
       // Globalstake refused a state read at the block 600 s back, "historical state ... is not available" (card
-      // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac)
-      feeProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
+      // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac). dRPC first (card robinhood-mainnet-rpcs, review
+      // M-3): a read one provider answers goes to the first, and the helper's pool sender reads and sends on the first of
+      // POOL_EVM_RPCS_ROBINHOOD (the same order, apps/helper/deploy/compose.yaml), so they draw on dRPC's pace (15 a
+      // second) and leave Robinhood's own (1 a second) to the pool sync, whose seat it is
+      feeProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"] as const),
       // The pool's list (card robinhood-mainnet-rpcs): the quote list's first two cannot page the pool's logs.
       // Every keyless Robinhood mainnet RPC the chain's docs (docs.robinhood.com/chain/connecting: its own RPC; GlobalStake
       // and dRPC named) and the chainid.network and DefiLlama chainlist entries for 4663 name, read 2026-11-07
@@ -268,15 +278,15 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       //   "exceeds maximum 50000", which the pager asks again, then halves), 20 of 20 of 10,000, p50 208-220 ms. The
       //   PoolManager's Swap logs over 100 blocks the same as Robinhood's own, digest for digest; CORS from the signing
       //   page's origin 204 and 200, allow-origin that origin; x-ratelimit-limit 1200 a minute.
-      // - rpc-robinhood.globalstake.io (GlobalStake; nitro v3.12.1, blockTimestamp set): all four at the head and 10,000
-      //   13M back, but 0.5-6.6 s and no answer in 15 s at 100,000 13M back and past the head: a spare, never a seat.
-      // Not taken: robinhood-rpc.publicnode.com (HTTP 403 "Archive requests require a personal token" from 1,000 blocks),
+      // Not taken: rpc-robinhood.globalstake.io (GlobalStake; nitro v3.12.1, blockTimestamp set: all four at the head
+      // and 10,000 13M back, but 0.5-6.6 s and no answer in 15 s at 100,000 13M back and past the head, past the
+      // device's 3.5 s client even as a spare), robinhood-rpc.publicnode.com (HTTP 403 "Archive requests require a personal token" from 1,000 blocks),
       // robinhood.drpc.org (code 35 at 1,000), robinhood.daybreak-rpc.network (2,000), rpc-robinhood.blockmachine.io
       // and robinhood-mainnet-rpc.blockreq.com (the newest 5,000 and 1,024 blocks keyless), api.blockvectra.com (100
       // blocks, its history window), the Tatum gateway (100, then 429), 4663.rpc.thirdweb.com (1,000, then 429),
       // rpc.degenprotocol.io (Pocket's very words "max 10001 blocks", and a finalized block above its head),
       // robinhood.rpc.blxrbdn.com and rpc.nodeflare.app (403), lb.routeme.sh (429), rpc.ordofi.network (no answer).
-      poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]),
+      poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,

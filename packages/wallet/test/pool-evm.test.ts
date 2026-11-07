@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
-import { evmPoolFee, evmPoolGas, evmPoolVenues, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
+import { evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
@@ -819,8 +819,8 @@ test("F3c no answer in time never halves the pool sync's page (card evm-pool-syn
   assert.ok(wide.length <= 20 + 4, `${wide.length} pages: ${wide}`);
 });
 
-test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (Robinhood's 100,000; Pocket's backends 50,000 and 10,001), the spare untouched", async () => {
-  const list = evmPoolVenues().robinhood.poolProviders ?? assert.fail("robinhood: the kit pins no pool list");
+test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (Robinhood's 100,000; Pocket's backends 50,000 and 10,001), any spare untouched", async () => {
+  const list = evmPoolProvidersOf(evmPoolVenues().robinhood) ?? assert.fail("robinhood: the kit pins no pool list");
   const c = longChain([...deps(PP, [10, 1_200_000, 1_990_000])], 2_000_000);
   const logs = list.map((): string[] => []);
   let pocketCalls = 0;
@@ -838,9 +838,12 @@ test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs t
   const rpcs = list.map((url, i) => rpc(c, { url, chainId: 4663n, log: logs[i], getLogs: caps[url] ?? (() => assert.fail(`${url} asked`)) }));
   const r = await evmTreeSync({ rpcs, pin: { ...PIN, network: "robinhood" }, ...noWait }).events();
   assert.equal(r.events.length, 3);
-  const [own, pocket, spare] = logs.map(pageSizes);
+  // review M-1: no spare today (GlobalStake answers past the device's client); one the kit adds is asked only for a
+  // seat out
+  const [own, pocket, ...spares] = logs.map(pageSizes);
+  assert.deepEqual(list.slice(0, 2), ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]);
   assert.ok(own!.length > 0 && pocket!.length > 0, "both seats read the pool's logs");
-  assert.equal(spare!.length, 0, "the spare is asked only for a seat out");
+  assert.deepEqual(spares.map((x) => x.length), spares.map(() => 0), "a spare is asked only for a seat out");
   assert.ok(own!.every((s) => s <= 800_000) && own!.filter((s) => s > 100_000).length <= 2 + Math.ceil(own!.length / EVM_LOG_CEILING_PAGES), `own: ${own}`);
   assert.ok(Math.min(...pocket!) >= 5_000, `pocket: ${pocket}`);
 });

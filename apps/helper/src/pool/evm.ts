@@ -150,6 +150,7 @@ import {
   evmPoolGas,
   evmPoolSellTip,
   evmPoolVenues,
+  evmRpcOperator,
   evmSellRouteOf,
   solanaJsonRpc,
   type EvmPoolChain,
@@ -462,14 +463,23 @@ const blockOf = (v: unknown): EvmBlock => {
 const tag = (n: bigint) => `0x${n.toString(16)}`;
 
 /**
- * The first block at or after `seconds`, read on `rpc`: null when the newest block is still before it. Steps back from
- * the newest block, doubling, until a block is before it, then halves the gap.
+ * The first block at or after `seconds`, read on `rpc`: null when the newest block is still before it. Searches by the
+ * chain's own block time (card robinhood-mainnet-rpcs, review M-3), never a second as a block: the first step back is
+ * one block a second, at most as far as the time on a chain of a block a second or slower; each later step is the
+ * time still to go at the block time the two newest reads show, a tenth more, at least twice the step before (so a chain
+ * whose blocks stopped is still passed). Inside the bracket each probe lands where the block times put `seconds` less
+ * half a second (the gap between the blocks before it and the blocks at it, where the run of blocks with one timestamp
+ * makes the first at it), and halves the gap instead when the probe before took less than half of it.
+ * 8 to 10 reads at Robinhood's 0.1 s blocks, 1 to 600 s back, where a second as a block took 11 to 14 a minute back.
  */
 export async function evmFirstBlockAtOrAfter(rpc: EvmRpc, seconds: bigint): Promise<EvmBlock | null> {
   const at = async (n: bigint | "latest") => blockOf(await rpc("eth_getBlockByNumber", [n === "latest" ? n : tag(n), false]));
   let hi = await at("latest");
   if (hi.timestamp < seconds) return null;
+  // blocks per second over two reads, as a fraction (blocks, seconds); null when they share a timestamp
+  const rate = (a: EvmBlock, b: EvmBlock): [bigint, bigint] | null => (b.timestamp > a.timestamp ? [b.number - a.number, b.timestamp - a.timestamp] : null);
   let step = hi.timestamp - seconds + 1n;
+  let newer: EvmBlock | null = null;
   let lo: EvmBlock | null = null;
   for (;;) {
     if (hi.number === 0n) return hi;
@@ -479,13 +489,25 @@ export async function evmFirstBlockAtOrAfter(rpc: EvmRpc, seconds: bigint): Prom
       lo = b;
       break;
     }
+    newer = hi;
     hi = b;
-    step *= 2n;
+    const r = rate(hi, newer);
+    const want = r === null ? 0n : ((hi.timestamp - seconds + 1n) * r[0] * 11n) / (r[1] * 10n) + 1n;
+    step = want > step * 2n ? want : step * 2n;
   }
+  let halve = false;
   while (hi.number - lo.number > 1n) {
-    const mid = await at((lo.number + hi.number) / 2n);
+    const gap = hi.number - lo.number;
+    let n = (lo.number + hi.number) / 2n;
+    if (!halve) {
+      // where seconds - 1/2 falls between lo and hi, in half seconds so the arithmetic stays whole
+      const guess = lo.number + ((2n * (seconds - lo.timestamp) - 1n) * gap) / (2n * (hi.timestamp - lo.timestamp));
+      n = guess <= lo.number ? lo.number + 1n : guess >= hi.number ? hi.number - 1n : guess;
+    }
+    const mid = await at(n);
     if (mid.timestamp >= seconds) hi = mid;
     else lo = mid;
+    halve = !halve && (hi.number - lo.number) * 2n > gap;
   }
   return hi;
 }
@@ -1433,18 +1455,18 @@ export const POOL_EVM_COLLECTOR_ENV = {
 } as const;
 
 /**
- * An RPC URL's operator, the rule the kit's pool list is held to (card robinhood-mainnet-rpcs): its host's last two
- * labels (robinhood.com, pocket.network, drpc.org, publicnode.com), or an IP host's address, never its port. A URL that
- * does not parse is its own text, so it differs from any other and the client refuses it on its first call.
+ * One spelling for an RPC URL (card robinhood-mainnet-rpcs, review L-3): what the URL parser writes, the bare origin
+ * when there is no path, query, fragment or userinfo, so `https://robinhood.drpc.org/` is the pace's and the holds' key
+ * `https://robinhood.drpc.org` (PROVIDER_PACE, the /v1/rpc proxy's pinned URLs), never a second provider with no pace.
+ * A URL that does not parse is left as written; its operator is none and the start refuses it.
  */
-export function evmRpcOperator(url: string): string {
-  let h: string;
+export function evmRpcUrlOf(url: string): string {
   try {
-    h = new URL(url).hostname.toLowerCase();
+    const u = new URL(url);
+    return u.pathname === "/" && u.search === "" && u.hash === "" && u.username === "" && u.password === "" ? u.origin : u.href;
   } catch {
     return url;
   }
-  return /^\[|^\d+\.\d+\.\d+\.\d+$/.test(h) ? h : h.split(".").slice(-2).join(".");
 }
 
 /**
@@ -1514,10 +1536,12 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
     const pair = v !== undefined && Object.hasOwn(v, "feeProviders") ? v.feeProviders : undefined;
     if (rpcs === "" && pair === undefined) throw new Error(`${names[4]} must be set: the kit lists no fee providers for ${network}`);
-    const urls = rpcs === "" ? [...pair!] : rpcs!.split(",");
+    const urls = (rpcs === "" ? [...pair!] : rpcs!.split(",")).map(evmRpcUrlOf);
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
-    // fold B: two operators, as the kit's pool list (card robinhood-mainnet-rpcs): two URLs of one operator are one word
+    // fold B: two operators, by the kit's one rule (evmRpcOperator, card robinhood-mainnet-rpcs review L-2): two URLs of
+    // one operator are one word
     const ops = urls.map(evmRpcOperator);
+    if (ops.includes(null)) throw new Error(`${names[4]} must be two http or https URLs`);
     if (ops[0] === ops[1]) throw new Error(`${names[4]} must be two RPC URLs of two operators: both are ${ops[0]}`);
     // a plain JSON-RPC client, drawn from the helper's pace for its provider when the server gives one
     const providers = urls.map((u) => {

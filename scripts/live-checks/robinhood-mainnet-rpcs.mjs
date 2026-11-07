@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // Live check of card robinhood-mainnet-rpcs: the device syncs the Robinhood mainnet pool on two independent RPC
-// operators. The kit's Robinhood pool list (evmPoolVenues().robinhood.poolProviders, the wallet's evmPair: the first two
-// the seats) must seat two providers of two operators, each of which, read now:
+// operators. The kit's Robinhood pool list (evmPoolProvidersOf(evmPoolVenues().robinhood), the wallet's evmPair: the
+// first two the seats) must seat two providers of two operators (the kit's evmRpcOperator), each of which, read now:
 //   - answers eth_chainId 0x1237 (4663);
 //   - answers the pool's filter (the pinned pool once pool-evm-deploy pins it, the v4 PoolManager until then, with the
 //     pool's three event topics in one position) over 10,000 blocks to its head, and over 10,000 blocks 1,000,000 back:
 //     the sync's page (packages/wallet/src/pool/evm.ts EVM_LOG_PAGE_BLOCKS), from a pool's deploy block to the head;
-//   - answers the PoolManager's Swap logs over the same 100 blocks as the other seat, log for log.
+//   - answers the PoolManager's Swap logs over the same 100 blocks as the other seat, log for log, some logs in them
+//     (about 70 to 100 a 100 blocks, read 2026-11-07 02:5xZ), at the head and 1,000,000 blocks back: two seats that
+//     agree on no logs, or only at the head, prove nothing about the history the sync reads.
 // It fails on a list whose seats are one operator, on a seat that refuses or lacks a read (robinhood-rpc.publicnode.com:
 // HTTP 403 "Archive requests require a personal token" from 1,000 blocks), and on two seats whose logs differ. A refused
 // log read is asked again twice, as the wallet's pager asks a refusal of a size the provider answered (Pocket's backends
@@ -21,7 +23,7 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
 
 const KEY = "robinhood-mainnet-rpcs";
 export const CHAIN_ID = "0x1237";
@@ -40,7 +42,7 @@ const TRIES = 3;
 /** The kit's Robinhood mainnet pool list, and the address its filter reads. */
 export function kitList() {
   const v = evmPoolVenues().robinhood;
-  return { list: [...(v.poolProviders ?? v.providers ?? [])], address: (v.pool ?? v.poolManager).toLowerCase(), poolManager: v.poolManager.toLowerCase() };
+  return { list: [...(evmPoolProvidersOf(v) ?? [])], address: (v.pool ?? v.poolManager).toLowerCase(), poolManager: v.poolManager.toLowerCase() };
 }
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -97,8 +99,8 @@ export function replayer(log) {
 }
 
 const host = (u) => new URL(u).host;
-/** An operator: the host's last two labels (robinhood.com, pocket.network, globalstake.io, publicnode.com). */
-export const operatorOf = (u) => host(u).split(".").slice(-2).join(".");
+/** An operator: the kit's one rule (evmRpcOperator), the helper's and the kit's tests' too. */
+export const operatorOf = (u) => evmRpcOperator(u);
 const hx = (n) => `0x${n.toString(16)}`;
 const digest = (logs) => createHash("sha256").update(JSON.stringify(logs.map((l) => [l.blockHash, l.logIndex, l.transactionHash, l.data, l.topics]))).digest("hex").slice(0, 16);
 
@@ -108,6 +110,7 @@ export async function check(transport, { list, address, poolManager } = kitList(
   try {
     if (!Array.isArray(list) || list.length < 2) throw new Error(`the pool list holds ${list?.length ?? 0} providers, not a pair`);
     const seats = list.slice(0, 2);
+    for (const u of seats) if (operatorOf(u) === null) throw new Error(`${JSON.stringify(u)} is not an http or https URL`);
     if (operatorOf(seats[0]) === operatorOf(seats[1])) throw new Error(`the two seats are one operator (${operatorOf(seats[0])}): ${seats.map(host).join(" and ")}`);
     const ask = async (url, method, params, what) => {
       let a;
@@ -132,16 +135,19 @@ export async function check(transport, { list, address, poolManager } = kitList(
       const back = await logs(head - BigInt(BACK), `the pool's filter over ${PAGE} blocks ${BACK} back`);
       lines.push(`${host(url)} (${operatorOf(url)}): chain ${CHAIN_ID}, head ${head}; the pool's filter on ${address} over ${PAGE} blocks to the head ${atHead} logs, ${PAGE} blocks ${BACK} back ${back} logs`);
     }
-    // the same 100 blocks on both, under both heads
-    const from = (heads[0] < heads[1] ? heads[0] : heads[1]) - 1_100n;
-    const swaps = [];
-    for (const url of seats) {
-      const r = await ask(url, "eth_getLogs", [{ address: poolManager, topics: [SWAP4], fromBlock: hx(from), toBlock: hx(from + 99n) }], "the PoolManager's Swap logs");
-      if (!Array.isArray(r)) throw new Error(`${host(url)}: the PoolManager's Swap logs: not a list`);
-      swaps.push({ n: r.length, d: digest(r) });
+    // the same 100 blocks on both, under both heads, and the same 100 blocks 1,000,000 back
+    const low = heads[0] < heads[1] ? heads[0] : heads[1];
+    for (const [from, where] of [[low - 1_100n, "at the head"], [low - BigInt(BACK), `${BACK} back`]]) {
+      const swaps = [];
+      for (const url of seats) {
+        const r = await ask(url, "eth_getLogs", [{ address: poolManager, topics: [SWAP4], fromBlock: hx(from), toBlock: hx(from + 99n) }], `the PoolManager's Swap logs ${where}`);
+        if (!Array.isArray(r)) throw new Error(`${host(url)}: the PoolManager's Swap logs ${where}: not a list`);
+        swaps.push({ n: r.length, d: digest(r) });
+      }
+      if (swaps[0].d !== swaps[1].d) throw new Error(`the seats' Swap logs ${where} over blocks ${from}-${from + 99n} differ: ${swaps.map((s, k) => `${host(seats[k])} ${s.n} logs ${s.d}`).join(", ")}`);
+      if (swaps[0].n === 0) throw new Error(`the seats' Swap logs ${where} over blocks ${from}-${from + 99n}: no logs on either, so their agreement proves nothing`);
+      lines.push(`both seats: the PoolManager's Swap logs ${where} over blocks ${from}-${from + 99n}, ${swaps[0].n} logs, digest ${swaps[0].d} on both`);
     }
-    if (swaps[0].d !== swaps[1].d) throw new Error(`the seats' Swap logs over blocks ${from}-${from + 99n} differ: ${swaps.map((s, k) => `${host(seats[k])} ${s.n} logs ${s.d}`).join(", ")}`);
-    lines.push(`both seats: the PoolManager's Swap logs over blocks ${from}-${from + 99n}, ${swaps[0].n} logs, digest ${swaps[0].d} on both`);
     return { ok: true, lines };
   } catch (e) {
     lines.push(`${e?.message ?? e}`);
