@@ -5,7 +5,9 @@
 //   CHAINS, card evm-venues-pin), each answered as the app's "base" and "robinhood". A chain is pinned only when the
 //   wallet's EVM_POOLS holds its testnet pool, so until then every EVM pool kind is refused, as on mainnet.
 // - The flow (card signpage-pool-notes): pool.deposit on the devnet pool (src/pool-deposit.ts), with the page's own
-//   note store and seed; every other op is refused until its card. A signed-in load finishes the pool's INCOMING notes,
+//   note store and seed; on Base or Robinhood (card pool-deposits) pool.deposit goes to src/pool-deposit-evm.ts when that
+//   chain's EVM pin exists on the page's network and the page has its two RPCs (EVM_POOLS is empty today, so it is
+//   refused not_allowed); every other op is refused until its card. A signed-in load finishes the pool's INCOMING notes,
 //   and so does each state read of the page while one is open (card signpage-pool-notes-2), one pass at a time.
 // - The next buy's proof (card signpage-pool-notes-2): each landed deposit note runs a pass of the wallet's proof queue
 //   (../../wallet/src/pool/queue.ts openProofQueue), opened at the first landing on the page's prover
@@ -50,7 +52,8 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
-import { EVM_POOLS } from "../../wallet/src/pool/evm.ts";
+import { EVM_POOLS, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import type { PoolChain } from "./rules/pool.ts";
 import type { HostAnswer, KindContext } from "./api.ts";
@@ -214,6 +217,11 @@ export type TestnetOver = {
    *  run outlives its test (fold 5: each held node ~120 s on the wall clock). */
   now?: () => bigint;
   wait?: (ms: number) => Promise<void>;
+  /** An EVM chain's pool pin (EVM_POOLS of the page's network otherwise), its two RPCs (the testnet pair otherwise) and
+   *  its pool's event round (evmTreeSync over that pair otherwise): tests run the EVM deposit flow on a fake pool. */
+  evmPin?: (chain: "base" | "robinhood") => EvmPoolPin | undefined;
+  evmRpcs?: (chain: "base" | "robinhood") => readonly [EvmRpc, EvmRpc] | null;
+  evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc]) => () => Promise<EvmDepositRound>;
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -391,6 +399,35 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
 
   const deposit = poolDepositKind(() => host());
+  // pool.deposit on Base or Robinhood: only with the chain's pin on the page's network and its two RPCs
+  const evmPin = over.evmPin ?? ((chain: "base" | "robinhood") => EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain]);
+  const evmRpcs = over.evmRpcs ?? ((chain: "base" | "robinhood") => (POOL_TESTNET ? ([testnetRpc(TESTNET_RPCS[chain][0]), testnetRpc(TESTNET_RPCS[chain][1])] as const) : null));
+  const evmRound =
+    over.evmRound ??
+    ((p: EvmPoolPin, r: readonly [EvmRpc, EvmRpc]) => {
+      const sync = evmTreeSync({ rpcs: r, pin: p });
+      return async (): Promise<EvmDepositRound> => {
+        const round = await sync.events();
+        return { events: round.events, finalBlock: round.fin.number };
+      };
+    });
+  const evmDeposit = (chain: "base" | "robinhood") => {
+    const p = evmPin(chain);
+    const r = p === undefined ? null : evmRpcs(chain);
+    if (p === undefined || r === null) return null;
+    const round = evmRound(p, r);
+    return poolDepositEvmKind(() => {
+      let notes: NoteStore | null = null;
+      return {
+        pin: p,
+        rpcs: r,
+        round,
+        notes: async () => (notes = await openNoteStore(await page.store())),
+        seed64: page.seed64,
+        end: () => notes?.close(),
+      };
+    });
+  };
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
   const table = over.table === undefined ? PAGE_TABLE : over.table;
   const claimed = new Set<string>();
@@ -817,7 +854,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   });
   return {
     flow: (ask, ctx) =>
-      ask.chain !== "solana" || pin === undefined
+      ask.chain !== "solana"
+        ? ask.kind === "pool.deposit"
+          ? (evmDeposit(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
+          : { error: "not_allowed" }
+        : pin === undefined
         ? { error: "not_allowed" }
         : ask.kind === "pool.deposit"
           ? deposit(ask, ctx)
