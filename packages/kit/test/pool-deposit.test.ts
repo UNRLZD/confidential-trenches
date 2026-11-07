@@ -1,8 +1,9 @@
 // node --test packages/kit/test/pool-deposit.test.ts: the kit's same-chain pool deposit builders (card pool-deposits),
 // against deposits that landed:
-// - Solana: fixtures/solana-pool-deposit.json, the devnet pool's first deposit (the mark recorded in
-//   packages/signpage/test/fixtures/pool-devnet.json), read on both devnet RPCs; and that fixture's pool account, whose
-//   tree sizes pick the pages.
+// - Solana: fixtures/solana-pool-deposit.json, the devnet pool's first two deposits with their balances before and after
+//   (the first made the mark recorded in packages/signpage/test/fixtures/pool-devnet.json and both pages; the second
+//   inserted onto existing pages), and the pool account and the Rent sysvar read later (state 44, label 32), each on
+//   both devnet RPCs; and pool-devnet.json's pool account (one leaf on each tree).
 // The EVM deposit is encoded in the wallet, after its note is picked (packages/wallet/src/pool/same-chain.ts).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -10,6 +11,10 @@ import { test } from "node:test";
 import { base58, base64 } from "@scure/base";
 import {
   SOLANA_POOL_MIN_DEPOSIT,
+  SOLANA_SYSTEM_PROGRAM,
+  solanaPoolPreMarkOf,
+  solanaRentMin,
+  solanaRentOf,
   SolanaPoolDepositError,
   solanaPoolDepositCost,
   solanaPoolDepositIx,
@@ -21,8 +26,9 @@ import {
 import { solanaDecodeMessage } from "../src/checks/solana/message.ts";
 
 const json = (u: string) => JSON.parse(readFileSync(new URL(u, import.meta.url), "utf8"));
-const SOL = json("./fixtures/solana-pool-deposit.json") as { answers: { rpc: string; err: unknown; transaction: string }[] };
-const DEVNET = json("../../signpage/test/fixtures/pool-devnet.json") as { program: string; pool: string; addresses: Record<string, string>; answers: { accounts: Record<string, { data: [string, string] } | null> }[] };
+type TxAnswer = { rpc: string; err: unknown; fee: number; preBalances: number[]; postBalances: number[]; transaction: string };
+const SOL = json("./fixtures/solana-pool-deposit.json") as { deposits: { signature: string; answers: TxAnswer[] }[]; now: { rpc: string; pool: { owner: string; data: string }; rent: { owner: string; data: string } }[] };
+const DEVNET = json("../../signpage/test/fixtures/pool-devnet.json") as { program: string; pool: string; addresses: Record<string, string>; answers: { accounts: Record<string, { owner: string; data: [string, string] } | null> }[] };
 
 // a legacy message (the recorded run's): header, keys, blockhash, instructions
 function legacy(msg: Uint8Array) {
@@ -45,24 +51,44 @@ function legacy(msg: Uint8Array) {
     return { program, accounts, data };
   });
   assert.equal(o, msg.length);
-  return { blockhash, ixs };
+  return { blockhash, ixs, keys };
+}
+function v0(msg: Uint8Array) {
+  const m = solanaDecodeMessage(msg);
+  assert.equal(m.lookups.length, 0);
+  const keys = m.staticKeys;
+  return { keys, ixs: m.instructions.map((x) => ({ program: keys[x.programIndex]!, accounts: x.accounts.map((k) => ({ key: keys[k]! })), data: x.data })) };
 }
 const beInt = (b: Uint8Array) => b.reduce((a, x) => (a << 8n) | BigInt(x), 0n);
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
-test("the recorded devnet deposit is one tag 1, the same on both RPCs, landed", () => {
-  assert.equal(SOL.answers.length, 2);
-  assert.notEqual(SOL.answers[0]!.rpc, SOL.answers[1]!.rpc);
-  assert.equal(SOL.answers[0]!.transaction, SOL.answers[1]!.transaction);
-  assert.deepEqual(SOL.answers.map((a) => a.err), [null, null]);
+test("the recorded devnet deposits are one tag 1 each, the same bytes and balances on both RPCs, landed", () => {
+  assert.equal(SOL.deposits.length, 2);
+  for (const d of SOL.deposits) {
+    const [a, b] = d.answers;
+    assert.notEqual(a!.rpc, b!.rpc);
+    assert.deepEqual([a!.transaction, a!.preBalances, a!.postBalances, a!.fee], [b!.transaction, b!.preBalances, b!.postBalances, b!.fee]);
+    assert.deepEqual([a!.err, b!.err], [null, null]);
+  }
 });
 
-test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte (pool, depositor, pages, mark, system; 41 bytes)", () => {
-  const wire = base64.decode(SOL.answers[0]!.transaction);
-  const { ixs } = legacy(wire.subarray(1 + 64 * wire[0]!));
+/** A recorded deposit: its tag 1 and the lamports each of its accounts held before and after. */
+function landed(k: number) {
+  const a = SOL.deposits[k]!.answers[0]!;
+  const wire = base64.decode(a.transaction);
+  const msg = wire.subarray(1 + 64 * wire[0]!);
+  // the first is a legacy message, the second (the signing page's) a v0 one with no lookup table
+  const { ixs, keys } = msg[0]! & 0x80 ? v0(msg) : legacy(msg);
   const dep = ixs.filter((x) => x.program === DEVNET.program);
   assert.equal(dep.length, 1);
-  const got = dep[0]!;
+  const ix = dep[0]!;
+  const bal = (key: string, at: "preBalances" | "postBalances") => BigInt(a[at][keys.indexOf(key)]!);
+  return { ix, fee: BigInt(a.fee), bal };
+}
+const RENT = solanaRentOf({ owner: SOL.now[0]!.rent.owner, data: base64.decode(SOL.now[0]!.rent.data) });
+
+test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte (pool, depositor, pages, mark, system; 41 bytes)", () => {
+  const got = landed(0).ix;
   assert.equal(got.data[0], 1);
   const value = new DataView(got.data.buffer, got.data.byteOffset).getBigUint64(1, true);
   const precommitment = beInt(got.data.subarray(9, 41));
@@ -80,18 +106,41 @@ test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte 
   assert.equal(solanaPoolPreMark(DEVNET.program, precommitment), DEVNET.addresses.mark);
 });
 
-test("Solana: the tree sizes come from the recorded pool account (both RPCs' bytes), and pick the pages a deposit writes", () => {
-  const [a, b] = DEVNET.answers.map((x) => base64.decode(x.accounts.pool!.data[0]));
-  assert.equal(hex(a!), hex(b!));
-  const sizes = solanaPoolTreeSizes(a!);
+test("Solana: the tree sizes come from the pool account (both RPCs' bytes), the program's own, and pick the pages a deposit writes", () => {
+  const [a, b] = DEVNET.answers.map((x) => ({ owner: x.accounts.pool!.owner, data: base64.decode(x.accounts.pool!.data[0]) }));
+  assert.equal(hex(a!.data), hex(b!.data));
   // one deposit landed: one leaf on each tree
+  const sizes = solanaPoolTreeSizes(a!, DEVNET.program);
   assert.deepEqual(sizes, { stateSize: 1, labelSize: 1 });
   const ix = solanaPoolDepositIx(DEVNET.program, "11111111111111111111111111111112", { value: 10_000_000n, precommitment: 7n }, sizes);
   assert.equal(ix.accounts[2]!.key, DEVNET.addresses.state0); // entry 1 is still on page 0
-  assert.throws(() => solanaPoolTreeSizes(a!.subarray(1)), SolanaPoolDepositError);
-  const bad = a!.slice();
+  // read later: the trees at different sizes (releases add state leaves only), each read from its own offset
+  const [n0, n1] = SOL.now.map((x) => ({ owner: x.pool.owner, data: base64.decode(x.pool.data) }));
+  assert.equal(hex(n0!.data), hex(n1!.data));
+  assert.deepEqual(solanaPoolTreeSizes(n0!, DEVNET.program), { stateSize: 44, labelSize: 32 });
+  assert.throws(() => solanaPoolTreeSizes({ owner: a!.owner, data: a!.data.subarray(1) }, DEVNET.program), SolanaPoolDepositError);
+  const bad = a!.data.slice();
   bad[0] = bad[0]! ^ 1;
-  assert.throws(() => solanaPoolTreeSizes(bad), SolanaPoolDepositError);
+  assert.throws(() => solanaPoolTreeSizes({ owner: a!.owner, data: bad }, DEVNET.program), SolanaPoolDepositError);
+  // the same bytes under another owner are not the pool
+  assert.throws(() => solanaPoolTreeSizes({ owner: SOLANA_SYSTEM_PROGRAM, data: a!.data }, DEVNET.program), /not the program's/);
+});
+
+test("Solana: a mark's read: no account or a funded system account is no mark; the recorded mark is its value and nonce; anything else refused", () => {
+  const rec = DEVNET.answers[0]!.accounts.mark!;
+  const data = base64.decode(rec.data[0]);
+  assert.deepEqual(solanaPoolPreMarkOf({ owner: rec.owner, data }, DEVNET.program), { value: 10_000_000n, nonce: 1n });
+  assert.equal(solanaPoolPreMarkOf(null, DEVNET.program), null);
+  // a stranger's lamports at the mark's address: a system account with no data, which the deposit takes over
+  assert.equal(solanaPoolPreMarkOf({ owner: SOLANA_SYSTEM_PROGRAM, data: new Uint8Array(0) }, DEVNET.program), null);
+  for (const bad of [
+    { owner: SOLANA_SYSTEM_PROGRAM, data: new Uint8Array(1) },
+    { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data },
+    { owner: rec.owner, data: data.subarray(0, 16) },
+    { owner: rec.owner, data: Uint8Array.from(data, (x, i) => (i === 16 ? 2 : x)) },
+    { owner: rec.owner, data: Uint8Array.from(data, (x, i) => (i < 8 ? 0 : x)) },
+  ])
+    assert.throws(() => solanaPoolPreMarkOf(bad, DEVNET.program), SolanaPoolDepositError);
 });
 
 test("Solana: the unsigned v0 tx carries exactly the one tag 1, the depositor its one signer and payer, the signature slot zeroed", () => {
@@ -118,9 +167,31 @@ test("Solana: a value below MIN_DEPOSIT or past u64, a precommitment of 0 or at 
     assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, bad), SolanaPoolDepositError);
 });
 
-test("Solana: one note's cost is the fee, the 17-byte mark's rent and each page's entry, or a new page's rent at a boundary", () => {
-  const perByte = 6_960n;
-  const rentMin = (n: number) => BigInt(128 + n) * perByte;
-  assert.equal(solanaPoolDepositCost(5_000n, rentMin, perByte, { stateSize: 1, labelSize: 1 }), 5_000n + rentMin(17) + 2n * 72n * perByte);
-  assert.equal(solanaPoolDepositCost(5_000n, rentMin, perByte, { stateSize: 1024, labelSize: 1 }), 5_000n + rentMin(17) + rentMin(88) + 72n * perByte);
+test("Solana: one note's cost is what the depositor really lost in each recorded deposit, less its value", () => {
+  // the first: no page yet, no lamports at the mark's address; the second: both pages hold one entry's rent
+  for (const [k, sizes] of [[0, { stateSize: 0, labelSize: 0 }], [1, { stateSize: 1, labelSize: 1 }]] as const) {
+    const { ix, fee, bal } = landed(k);
+    const [, depositor, statePage, labelPage, mark] = ix.accounts.map((x) => x.key);
+    const value = new DataView(ix.data.buffer, ix.data.byteOffset).getBigUint64(1, true);
+    const have = { mark: bal(mark!, "preBalances"), statePage: bal(statePage!, "preBalances"), labelPage: bal(labelPage!, "preBalances") };
+    const lost = bal(depositor!, "preBalances") - bal(depositor!, "postBalances");
+    assert.equal(solanaPoolDepositCost(fee, RENT, sizes, have) + value, lost, `deposit ${k}`);
+    // and each account ends at the rent-exempt minimum of its length, as the program leaves it
+    assert.equal(bal(mark!, "postBalances"), solanaRentMin(RENT, 17));
+    assert.equal(bal(statePage!, "postBalances"), solanaRentMin(RENT, 16 + 72 * (sizes.stateSize + 1)));
+  }
+});
+
+test("Solana: lamports a stranger sends to a page or the mark's address lower the cost exactly as the program charges it (max(0, rent - held))", () => {
+  const s = { stateSize: 1, labelSize: 1 };
+  const page = solanaRentMin(RENT, 16 + 72); // a page with one entry
+  const base = solanaPoolDepositCost(5_000n, RENT, s, { mark: 0n, statePage: page, labelPage: page });
+  assert.equal(solanaPoolDepositCost(5_000n, RENT, s, { mark: 0n, statePage: page + 1n, labelPage: page }), base - 1n);
+  assert.equal(solanaPoolDepositCost(5_000n, RENT, s, { mark: 7n, statePage: page, labelPage: page }), base - 7n);
+  // held above what the new length needs: that account costs nothing, never less
+  const full = solanaRentMin(RENT, 16 + 72 * 2);
+  assert.equal(solanaPoolDepositCost(5_000n, RENT, s, { mark: solanaRentMin(RENT, 17) * 3n, statePage: full * 2n, labelPage: full }), 5_000n);
+  // a page's last slot (1023) and the next page's first: the new length is 16 + 72 x (slot + 1)
+  assert.equal(solanaPoolDepositCost(0n, RENT, { stateSize: 1023, labelSize: 1024 }, { mark: 0n, statePage: 0n, labelPage: 0n }), solanaRentMin(RENT, 17) + solanaRentMin(RENT, 16 + 72 * 1024) + solanaRentMin(RENT, 16 + 72));
+  assert.throws(() => solanaPoolDepositCost(-1n, RENT, s, { mark: 0n, statePage: 0n, labelPage: 0n }), SolanaPoolDepositError);
 });

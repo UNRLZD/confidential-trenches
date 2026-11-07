@@ -11,14 +11,16 @@
 //   the frozen path does not give: that derivation is a later slice and goes to the CO first (derive/ is outside this
 //   card's paths); the EVM call here names no sender.
 // - How the device deposits, its fee carried: U pays each deposit's costs out of what it holds (Solana: the fee, the
-//   17-byte precommitment mark's rent and each page's growth, M353 (1), kit solanaPoolDepositCost; EVM: gas), so the
+//   17-byte precommitment mark's rent and each page's growth less what those accounts already hold, as the program
+//   charges it, M353 (1), kit solanaPoolDepositCost; EVM: gas), so the
 //   user sends once and never tops up a fee. Each note of the ladder plan is its own deposit, largest rung first
 //   (./ladder.ts poolDepositPlan: U's deposit note, then U's second arrivals n = 0, 1, ...). Only rungs go in; what is
 //   left below the smallest rung, or too little to carry another deposit's cost, stays in U for its next deposit
 //   (M350 (4), research 11-merge-notes.md:358), so no note is ever off the ladder. A later send to the same address is
 //   a second arrival of the same U.
 // - The reload rule: no second deposit at a new index. The note to deposit is the first note of U's chain that no
-//   deposit on chain names (Solana: its precommitment mark ["pre", P] absent on both RPCs; EVM: the wallet's
+//   deposit on chain names (Solana: no precommitment mark ["pre", P] on both RPCs, each read parsed by the kit's
+//   solanaPoolPreMarkOf, so a stranger's lamports at that address are no mark and never skip the note; EVM: the wallet's
 //   evmNextNote over the pool's events), and every note before it must be held landed in the store. An open note (its
 //   deposit signed and written INCOMING before it left, notes/store.ts:125) is settled first, never passed over: its
 //   precommitment fixes its index, so a resend lands on the same note or is refused by the pool
@@ -32,7 +34,7 @@
 //
 // Nothing here logs or reads a network; the caller reads on two RPCs and hands the reads in. U's secret key is derived
 // only for its address and zeroed at once.
-import { EVM_POOL_MIN_DEPOSIT, solanaPoolDepositTx, VAULT_FIELD_P } from "@blindfill/kit";
+import { EVM_POOL_MIN_DEPOSIT, solanaPoolDepositCost, solanaPoolDepositTx, solanaPoolPreMarkOf, solanaRentMin, type SolanaRent, VAULT_FIELD_P } from "@blindfill/kit";
 import { base58 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
@@ -109,19 +111,31 @@ export function sameChainNext(a: { seed64: Uint8Array; scope: bigint; ladder: La
   return { kind: "keep", left: a.balance };
 }
 
-/** The first note of U's chain whose precommitment mark is not on chain (`marked`: the marks both RPCs hold, read at
- *  finalized), on the Solana pool. */
-export function solanaChainNext(seed64: Uint8Array, scope: bigint, first: NoteRef, marked: (precommitment: bigint) => boolean): { ref: NoteRef; precommitment: bigint } {
+/** A read of an account (the lower lamports of two RPCs, the same owner and bytes on both), or null for none. */
+export type AccountRead = { readonly owner: string; readonly data: Uint8Array; readonly lamports: bigint } | null;
+
+/** The first note of U's chain no precommitment mark names on the Solana pool (`markAt`: the read at that note's mark
+ *  address, at finalized on both RPCs, parsed by the kit's solanaPoolPreMarkOf), and what that address holds. */
+export function solanaChainNext(seed64: Uint8Array, scope: bigint, first: NoteRef, program: string, markAt: (precommitment: bigint) => AccountRead): { ref: NoteRef; precommitment: bigint; held: bigint } {
   uOf(first, scope);
   for (let n = -1; n <= U32; n++) {
     const ref = refAt(first as Extract<NoteRef, { kind: "deposit" }>, n);
     const precommitment = noteSecrets(seed64, ref).precommitment;
-    if (!marked(precommitment)) return { ref, precommitment };
+    const read = markAt(precommitment);
+    if (solanaPoolPreMarkOf(read, program) === null) {
+      const held = read === null ? 0n : read.lamports;
+      if (typeof held !== "bigint" || held < 0n) throw new Error("a mark read's lamports: a bigint at or above 0");
+      return { ref, precommitment, held };
+    }
   }
   throw new Error("no second arrival left on this id");
 }
 
-/** The Solana step, with the unsigned tx of a deposit step (U its signer and fee payer). */
+/**
+ * The Solana step, with the unsigned tx of a deposit step (U its signer and fee payer). U's cost is priced as the
+ * program charges it: the fee, and the mark's and both pages' rent less what they hold (`pages`: the lamports of the
+ * pages the sizes name, the lower of two RPCs). U keeps 0 or at least an empty account's rent.
+ */
 export function solanaSameChainDeposit(a: {
   program: string;
   seed64: Uint8Array;
@@ -129,10 +143,11 @@ export function solanaSameChainDeposit(a: {
   ladder: Ladder;
   first: NoteRef;
   held: readonly HeldNote[];
-  marked: (precommitment: bigint) => boolean;
+  markAt: (precommitment: bigint) => AccountRead;
   balance: bigint;
-  cost: bigint;
-  floor: bigint;
+  fee: bigint;
+  rent: SolanaRent;
+  pages: { state: bigint; label: bigint };
   sizes: { stateSize: number; labelSize: number };
   blockhash: string;
 }): SameChainStep & { u: string; tx?: { message: Uint8Array; wire: Uint8Array } } {
@@ -141,7 +156,9 @@ export function solanaSameChainDeposit(a: {
   const id = depositId(a.seed64, s, i);
   id.secretKey.fill(0);
   const u = base58.encode(id.publicKey);
-  const step = sameChainNext({ ...a, next: solanaChainNext(a.seed64, a.scope, a.first, a.marked) });
+  const next = solanaChainNext(a.seed64, a.scope, a.first, a.program, a.markAt);
+  const cost = solanaPoolDepositCost(a.fee, a.rent, a.sizes, { mark: next.held, statePage: a.pages.state, labelPage: a.pages.label });
+  const step = sameChainNext({ ...a, next, cost, floor: solanaRentMin(a.rent, 0) });
   if (step.kind !== "deposit") return { ...step, u };
   return { ...step, u, tx: solanaPoolDepositTx(a.program, u, { value: step.value, precommitment: step.precommitment }, a.sizes, a.blockhash) };
 }

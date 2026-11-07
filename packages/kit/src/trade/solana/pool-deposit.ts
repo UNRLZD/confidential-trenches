@@ -11,13 +11,19 @@
 //   sizes are the pool account's as read on two RPCs (solanaPoolTreeSizes).
 // - the program refuses a value below MIN_DEPOSIT (lib.rs:78), a precommitment at or above p or 0, and a precommitment
 //   whose mark exists; the builder refuses the first three itself, so it never hands out a message that cannot land.
-// - the depositor pays every rent the deposit makes (M353 (1)): the 17-byte mark and each page's entry (or a new page),
-//   plus the fee. U's cost of one note is solanaPoolDepositCost's.
+// - the builder passes the 6 accounts, never the optional next pages: a deposit planned at a page's last slot (size
+//   1023 mod 1024) that an insert overtakes fails on chain and loses only its fee, and the retry, planned from the
+//   sizes read again, lands (state::page_for takes the next page only when it is named).
+// - the depositor pays every rent the deposit makes (M353 (1)), as the program charges it (src/state.rs create_pda and
+//   push_entry): the mark's rent-exempt minimum of 17 bytes less what the mark's address already holds, and each page's
+//   minimum at its new length (16 + 72 x (slot + 1)) less what the page holds, never below 0; plus the fee. Lamports a
+//   stranger sends to a page or a mark's address lower that cost, so it is priced from both accounts' balances, read on
+//   two RPCs (solanaPoolDepositCost), never from a page's expected size.
 import { solanaProgramAddress } from "../../checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 import { VAULT_FIELD_P } from "../../vault/shapes.ts";
 import { solanaCompileV0, type SolanaApiInstruction } from "./build.ts";
-import { solanaPoolAccount, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES } from "./pool-buy.ts";
+import { solanaPoolAccount, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
 
 /** The deposit's tag and data length (contracts/pool-solana/src/lib.rs:84, deposit.rs:69). */
 export const SOLANA_POOL_TAG_DEPOSIT = 1;
@@ -33,6 +39,7 @@ export const SOLANA_POOL_PAGE_HEADER = 16;
 // the pool account (src/state.rs Pool::store): "bfpool01", then the trees, each size u64 LE ‖ depth u8 ‖ 33 x 32
 const POOL_LEN = 2179;
 const POOL_DISC = /* @__PURE__ */ new TextEncoder().encode("bfpool01");
+const MARK_TAG = 1;
 const OFF_TREES = 49;
 const TREE_LEN = 8 + 1 + 33 * 32;
 const U64 = 1n << 64n;
@@ -63,8 +70,11 @@ const u64le = (x: bigint): Uint8Array => {
 };
 const size = (x: unknown, name: string): number => (Number.isSafeInteger(x) && (x as number) >= 0 && (x as number) < 2 ** 32 ? (x as number) : refuse(`${name} is not a tree size`));
 
-/** The two tree sizes of the pool account's bytes (both RPCs' bytes, the caller's to compare first). */
-export function solanaPoolTreeSizes(data: Uint8Array): { stateSize: number; labelSize: number } {
+/** The two tree sizes of the pool account (both RPCs' read, the caller's to compare first): the program's own account
+ *  at its 2,179 bytes, else refused. */
+export function solanaPoolTreeSizes(account: { owner: string; data: Uint8Array }, program: string): { stateSize: number; labelSize: number } {
+  if (account === null || typeof account !== "object" || account.owner !== program) return refuse("the pool account is not the program's");
+  const data = account.data;
   if (!(data instanceof Uint8Array) || data.length !== POOL_LEN || !POOL_DISC.every((b, i) => data[i] === b)) return refuse("not the pool account");
   const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const at = (o: number) => size(Number(v.getBigUint64(o, true)), "a tree's size");
@@ -73,6 +83,27 @@ export function solanaPoolTreeSizes(data: Uint8Array): { stateSize: number; labe
 
 /** The precommitment mark of a precommitment: the account the deposit makes, which a reload reads to tell it landed. */
 export const solanaPoolPreMark = (program: string, precommitment: bigint): string => solanaProgramAddress([enc.encode("pre"), be32(checkPrecommitment(precommitment))], program);
+
+/** A precommitment mark as the deposit wrote it: its value and the nonce its label hashes. */
+export type SolanaPoolPreMark = { readonly value: bigint; readonly nonce: bigint };
+
+/**
+ * The read of a mark's address: null when no deposit has used the precommitment (no account, or a system account a
+ * stranger funded, which the deposit takes over: src/state.rs create_pda); the deposit's record when the program owns
+ * it at 17 bytes with its tag (src/state.rs PRE_MARK_LEN, MARK_TAG); anything else refused, never read as either.
+ */
+export function solanaPoolPreMarkOf(account: { owner: string; data: Uint8Array } | null, program: string): SolanaPoolPreMark | null {
+  if (account === null) return null;
+  if (typeof account !== "object" || typeof account.owner !== "string" || !(account.data instanceof Uint8Array)) return refuse("a mark read is an account or null");
+  if (account.owner === SOLANA_SYSTEM_PROGRAM && account.data.length === 0) return null;
+  if (account.owner !== program) return refuse("the mark's address is held by another program");
+  const d = account.data;
+  if (d.length !== SOLANA_POOL_PRE_MARK_LEN || d[16] !== MARK_TAG) return refuse("not a precommitment mark");
+  const v = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const value = v.getBigUint64(0, true), nonce = v.getBigUint64(8, true);
+  if (value < SOLANA_POOL_MIN_DEPOSIT || nonce === 0n) return refuse("a mark the program never writes");
+  return Object.freeze({ value, nonce });
+}
 
 function checkPrecommitment(p: unknown): bigint {
   if (typeof p !== "bigint" || p <= 0n || p >= VAULT_FIELD_P) return refuse("the precommitment is not a field element above 0");
@@ -108,11 +139,15 @@ export function solanaPoolDepositTx(program: string, depositor: string, note: So
   return { message, wire };
 }
 
-/** What one note's deposit costs its depositor beyond the value: the fee, the mark's rent and each page's growth (a
- *  72-byte entry, or a new page's rent at a page boundary), from the Rent sysvar read on two RPCs (`rentMin(n)`: the
- *  rent-exempt minimum of n bytes; `perByte`: lamports per byte-year x the exemption factor). */
-export function solanaPoolDepositCost(fee: bigint, rentMin: (bytes: number) => bigint, perByte: bigint, sizes: { stateSize: number; labelSize: number }): bigint {
-  const grow = (s: number): bigint => (s % SOLANA_POOL_PAGE_ENTRIES === 0 ? rentMin(SOLANA_POOL_PAGE_HEADER + SOLANA_POOL_PAGE_ENTRY) : BigInt(SOLANA_POOL_PAGE_ENTRY) * perByte);
-  if (typeof fee !== "bigint" || fee < 0n || typeof perByte !== "bigint" || perByte < 0n) refuse("the fee and the rent are bigints at or above 0");
-  return fee + rentMin(SOLANA_POOL_PRE_MARK_LEN) + grow(size(sizes.stateSize, "stateSize")) + grow(size(sizes.labelSize, "labelSize"));
+/**
+ * What one note's deposit costs its depositor beyond the value, as the program charges it (src/state.rs create_pda,
+ * push_entry): the fee, max(0, rent(17) - the mark address's lamports), and for each tree max(0, rent(16 + 72 x (slot +
+ * 1)) - its page's lamports), slot = size mod 1024 (a page not made yet holds what strangers sent it, often 0). `rent`
+ * is the Rent sysvar read on two RPCs (readSolanaRent); the balances are the lower of two RPCs'.
+ */
+export function solanaPoolDepositCost(fee: bigint, rent: SolanaRent, sizes: { stateSize: number; labelSize: number }, have: { mark: bigint; statePage: bigint; labelPage: bigint }): bigint {
+  for (const x of [fee, have.mark, have.statePage, have.labelPage]) if (typeof x !== "bigint" || x < 0n) refuse("the fee and the balances are bigints at or above 0");
+  const short = (need: bigint, held: bigint): bigint => (need > held ? need - held : 0n);
+  const page = (s: number, held: bigint): bigint => short(solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER + SOLANA_POOL_PAGE_ENTRY * ((s % SOLANA_POOL_PAGE_ENTRIES) + 1)), held);
+  return fee + short(solanaRentMin(rent, SOLANA_POOL_PRE_MARK_LEN), have.mark) + page(size(sizes.stateSize, "stateSize"), have.statePage) + page(size(sizes.labelSize, "labelSize"), have.labelPage);
 }
