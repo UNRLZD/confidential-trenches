@@ -29,12 +29,21 @@ const RETQ = "return quote: each bad field is refused";
 const SOL = "return on Solana: each bad field of W's send is refused";
 const EVMOK = "return on Base: W's one plain send";
 const EVM = "return on EVM: each bad field of W's send is refused";
+const RHOK = "return on Robinhood: W's one plain send at the two RPCs' gas estimate signs as W";
+const RH = "return on Robinhood: each bad gas or fee field is refused";
+const DEPADDR = "return quote: the signed deposit address is an address of the chain and never W";
+const QDL = "id intent: it dies before the quote's deposit address does";
+const NET = "id intents: mainnet only";
+const SLIP = "quotes: the slippage is at most the device's own 100 bps";
+const VAULT = "never the vault: an injected vault id is refused";
+const FTA = "ft_withdraw out of intents.near: every USDC the deposit path takes, each to its own pinned code hash";
+const ONCE = "one ask, one signature";
 
 // [text in refund.ts, its replacement, the test that must fail]
 export const MUTANTS = [
   // the quotes
   ['  if (req.dry !== false) return refuse("dry");\n', "", RQ],
-  ['  if (req.swapType !== "EXACT_INPUT") return refuse("swapType");\n  return req;', "  return req;", RQ],
+  ['  if (req.swapType !== "EXACT_INPUT") return refuse("swapType");\n', "", RQ],
   ['if (Object.keys(req).some((k) => !QUOTE_KEYS.has(k))) return refuse("request");', "", RQ],
   ['  if (s.role === "R") return refuse("signer"); // a return\'s refund goes to W on its own chain, never under R\n', "", RQ],
   ['  if (req.recipient !== s.id) return refuse("recipient");\n  if (req.recipientType !== "DESTINATION_CHAIN") return refuse("recipientType");\n  if (req.refundTo !== s.id) return refuse("refundTo");\n  if (req.refundType !== "INTENTS") return refuse("refundType");\n  const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: true });\n  return passQuote(checked, { kind: "refund"', '  const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: true });\n  return passQuote(checked, { kind: "refund"', RQ],
@@ -42,6 +51,7 @@ export const MUTANTS = [
   ['  if (req.destinationAsset === DEPOSIT_DESTINATION_ASSET) return refuse("destinationAsset");\n', "", WQ],
   ['typed === s.id || typed === INTENTS || typed === net.usdc ||', "typed === s.id ||", WQ],
   ['  if (req.recipient !== typed) return refuse("recipient");\n', "", WQ],
+  ["typed === s.id || typed === INTENTS", "typed === INTENTS", WQ],
   ['  if (ctx.ownArm !== true) return refuse("own_arm");\n', "", RETQ],
   ['  if (req.refundTo !== w) return refuse("refundTo");\n', "", RETQ],
   ['  if (req.refundType !== "ORIGIN_CHAIN") return refuse("refundType");\n', "", RETQ],
@@ -70,16 +80,22 @@ export const MUTANTS = [
   ['  if (BigInt(amount) > (withdraw ? held - 1n : held)) return refuse("held");\n', "", TR],
   // the ft_withdraw
   ['if (it.intent !== "ft_withdraw" || !keysExactly(it, ["intent", "token", "receiver_id", "amount"])) return refuse("intent");', 'if (it.intent !== "ft_withdraw") return refuse("intent");', FT],
-  ['  if (it.token !== net.usdc) return refuse("token");\n', "", FT],
-  ['!== VAULT_TOKEN_CODE_HASH) return refuse("code_hash");', '=== "") return refuse("code_hash");', FT],
+  ['!Object.hasOwn(FT_WITHDRAW_TOKENS, token) || ', "", FTA],
+  [" || ft.asset !== `nep141:${token}`) return refuse(\"token\");", ') return refuse("token");', FTA],
+  ['!== FT_WITHDRAW_TOKENS[token]) return refuse("code_hash");', '=== "") return refuse("code_hash");', FT],
+  ['!== FT_WITHDRAW_TOKENS[token]) return refuse("code_hash");', '!== VAULT_TOKEN_CODE_HASH) return refuse("code_hash");', FTA],
+  ['if (agreed(ft.codeHash, (x) => typeof x === "string") !== FT_WITHDRAW_TOKENS[token]) return refuse("code_hash");', 'if (!Object.values(FT_WITHDRAW_TOKENS).includes(agreed(ft.codeHash, (x) => typeof x === "string"))) return refuse("code_hash");', FTA],
+  ['"Ba6uZKxsuRPW5X7XVQrSnYEYScEjFLJLMqMWvZ1aS3tC"', '"11111111111111111111111111111111"', FTA],
+  ['"2VUeqHTx9sk2AjDrs88HazLqS6LUgVQorjWcacotNCDP"', '"11111111111111111111111111111111"', FTA],
+  ['if (typed === INTENTS || Object.hasOwn(FT_WITHDRAW_TOKENS, typed) ||', "if (typed === INTENTS || typed === NEAR_NETWORKS.mainnet.usdc ||", FTA],
   ['if (form === null || form.account !== typed || it.receiver_id !== typed) return refuse("receiver_id");', 'if (form === null) return refuse("receiver_id");', FT],
-  ['  if (typed === INTENTS || typed === net.usdc || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");\n', "", FT],
+  ['  if (typed === INTENTS || Object.hasOwn(FT_WITHDRAW_TOKENS, typed) || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");\n', "", FT],
   ['  if (form.kind === "named" && agreed(ft.receiverExists, (x) => typeof x === "boolean", "receiver") !== true) return refuse("receiver");\n', "", FT],
   ['  agreed(ft.receiverRegistered, (x) => typeof x === "boolean", "registration");\n', "", FT],
   ['  if (BigInt(amount) > held - 1n) return refuse("held");\n', "", FT],
   // the intent's signer
   ['  if (!read) return refuse("unchecked");\n  let pub: Uint8Array;\n  try {\n    pub = ed25519.getPublicKey(secretKey);\n  } catch {\n    return refuse("key");\n  }\n  if (hexOf(pub) !== read.signer.id)', '  let pub: Uint8Array;\n  try {\n    pub = ed25519.getPublicKey(secretKey);\n  } catch {\n    return refuse("key");\n  }\n  if (hexOf(pub) !== read.signer.id)', ONLY],
-  ['  if (hexOf(pub) !== read.signer.id) return refuse("key");\n  const signature', "  const signature", ONLY],
+  ['  if (hexOf(pub) !== read.signer.id) return refuse("key");\n', "", ONLY],
   // the Solana send
   ['  if (m.lookups.length !== 0) return refuse("lookups");\n', "", SOL],
   ['if (typeof reads?.blockhash !== "string" || m.blockhash !== reads.blockhash) return refuse("blockhash");', "", SOL],
@@ -104,6 +120,44 @@ export const MUTANTS = [
   ['  if (t.value !== q.amountIn) return refuse("value");\n', "", EVM],
   ["if (t.value + t.gasLimit * t.maxFeePerGas + l1Fee > balance)", "if (t.value + t.gasLimit * t.maxFeePerGas > balance + l1Fee)", EVM],
   ['if (!isObj(tx) || Object.keys(tx).sort().join() !== SEND_KEYS || tx.type !== 2) return refuse("type");', 'if (!isObj(tx)) return refuse("type");', EVM],
+  ['  if (!isU(reads.priorityCap)) return refuse("reads");\n', "", EVM],
+  // the Robinhood return (Nitro)
+  [" || t.gasLimit > RETURN_EVM_GAS_MAX) return refuse(\"gas_limit\");", ') return refuse("gas_limit");', RH],
+  ["t.gasLimit > RETURN_EVM_GAS_MAX", "t.gasLimit >= RETURN_EVM_GAS_MAX", RH],
+  ['    if (l1Fee !== 0n) return refuse("l1_fee");\n', "", RH],
+  ["agreed(reads.estimate ?? undefined, isU)", "(reads.estimate?.[0] ?? t.gasLimit)", RH],
+  ['const nitro = q.chain === "robinhood";', "const nitro = false;", RHOK],
+  // the return's deposit address
+  ['  if (chain === "solana" ? !SOL_KEY(addr) || addr === w : !EVM_ADDRESS.test(addr) || lower(addr) === lower(w)) return refuse("deposit_address");\n', "", DEPADDR],
+  ["!SOL_KEY(addr) || addr === w :", "!SOL_KEY(addr) :", DEPADDR],
+  ["!EVM_ADDRESS.test(addr) || lower(addr) === lower(w))", "lower(addr) === lower(w))", DEPADDR],
+  ["!EVM_ADDRESS.test(addr) || lower(addr) === lower(w))", "!EVM_ADDRESS.test(addr))", DEPADDR],
+  // the intent's deadline within the quote's
+  ['  if (deadlineMs > r.deadlineMs) return refuse("deadline");\n', "", QDL],
+  ["if (deadlineMs > r.deadlineMs)", "if (deadlineMs >= r.deadlineMs)", QDL],
+  // mainnet only
+  ['  if (!Object.hasOwn(NEAR_NETWORKS, ctx.network) || ctx.network !== "mainnet") return refuse("network");\n  if (typeof payload', "  if (typeof payload", NET],
+  ['ctx.network !== "mainnet") return refuse("network");\n  const req', 'false) return refuse("network");\n  const req', NET],
+  ['ctx.network !== "mainnet") return refuse("network");\n  const net', 'false) return refuse("network");\n  const net', NET],
+  // the slippage
+  ['  if (!Number.isInteger(req.slippageTolerance) || req.slippageTolerance < 0 || req.slippageTolerance > DEPOSIT_QUOTE_SLIPPAGE_BPS) return refuse("slippage");\n', "", SLIP],
+  ["req.slippageTolerance > DEPOSIT_QUOTE_SLIPPAGE_BPS", "req.slippageTolerance > 10_000", SLIP],
+  ["req.slippageTolerance > DEPOSIT_QUOTE_SLIPPAGE_BPS", "req.slippageTolerance >= DEPOSIT_QUOTE_SLIPPAGE_BPS", SLIP],
+  ["!Number.isInteger(req.slippageTolerance) || ", "", SLIP],
+  ["req.slippageTolerance < 0 || ", "", SLIP],
+  // never the vault (the test's own mainnet vault id)
+  [' || (net.vault !== null && typed === net.vault)) return refuse("typed");', ') return refuse("typed");', VAULT],
+  ['  if (to === INTENTS || to === net.usdc || to === s.id || (net.vault !== null && to === net.vault)) return refuse("receiver_id");\n', "", VAULT],
+  [" || (net.vault !== null && to === net.vault)", "", VAULT],
+  [' || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");', ') return refuse("receiver_id");', VAULT],
+  // one ask, one signature
+  ['  QUOTES.delete(quote);\n  return passIntent(', "  return passIntent(", ONCE],
+  ["  INTENTS_CHECKED.delete(intent);\n", "", ONCE],
+  ["if (ctx.priorDeadline !== null)", "if (ctx.priorDeadline != null)", ONCE],
+  ["  QUOTES.delete(quote);\n  SOLANA_RETURN_CHECKED.set(", "  SOLANA_RETURN_CHECKED.set(", ONCE],
+  ["  QUOTES.delete(quote);\n  EVM_RETURN_CHECKED.set(", "  EVM_RETURN_CHECKED.set(", ONCE],
+  ["  SOLANA_RETURN_CHECKED.delete(wire);\n", "", ONCE],
+  ["  EVM_RETURN_CHECKED.delete(tx);\n", "", ONCE],
   ['if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");', "", EVMOK],
   ['  if (address !== read.wallet) return refuse("key");\n', "", EVMOK],
 ];

@@ -10,21 +10,23 @@
 //
 // - A quote (refund move or V's move, a withdraw from an id to another chain, a return): the device's own 1Click
 //   request, live only (a dry answer's signature does not cover its deposit address, D4), with the recipient, refund
-//   and deposit types the row names, then the kit's one check (signature, echo, signed deadline, fresh timestamp,
-//   floors; MIN_DEPOSIT when the output goes into the vault).
+//   and deposit types the row names, its slippage at most the deposit quote's own (DEPOSIT_QUOTE_SLIPPAGE_BPS, which
+//   the floors and the price reads' agreement both use), then the kit's one check (signature, echo, signed deadline,
+//   fresh timestamp, floors; MIN_DEPOSIT when the output goes into the vault).
 // - An id's intent (raw_ed25519, signed over the payload's UTF-8 bytes; near/intents 16d04f6, read for
 //   proofs/g1-arm-swap/intent.mjs): exactly one intent, in one spelling (canonical JSON, the five keys in order),
 //   signer_id the id, verifying_contract intents.near, deadline the lower of the two RPCs' final-block times + 120 s,
 //   a V1 versioned nonce whose deadline is the intent's, and a fresh intent for the same money only once the earlier
 //   one's deadline has passed on both RPCs (intents.near nonces are not sequential: the deadline keeps two from both
-//   landing).
+//   landing). The caller always says which: the earlier deadline, or null when there is none.
 //   - transfer (the refund move, V's move, and a withdraw from inside intents.near to another chain): exactly one
 //     tokens entry, the quote's origin asset, for exactly the quote's signed amount in, to the quote's signed deposit
 //     address; at most what the id holds there (less one base unit for a withdraw, so restore still finds the id);
-//   - ft_withdraw (a withdraw from inside intents.near to a typed NEAR account): the vault's token only (its code hash
-//     is the one pinned, read on two RPCs), to the typed account, never the vault, intents.near or the token; a named
-//     account must exist on two RPCs; the receiver's registration read on two RPCs must agree; no memo, msg or
-//     storage_deposit; at most what the id holds less one base unit.
+//   - ft_withdraw (a withdraw from inside intents.near to a typed NEAR account): the token the id holds there, one of
+//     the USDC the deposit path takes (FT_WITHDRAW_TOKENS), its code hash the one pinned for it, read on two RPCs; to
+//     the typed account, never the vault, intents.near or a listed token; a named account must exist on two RPCs; the
+//     receiver's registration read on two RPCs must agree; no memo, msg or storage_deposit; at most what the id holds
+//     less one base unit.
 //   A withdraw (both kinds) is signed only while the id's key list reads exactly its own key, or no account at all,
 //   on two RPCs (W:928).
 // - W's return send: only from a W whose arm is the device's own withdrawal; one native send of exactly the quote's
@@ -33,7 +35,8 @@
 //
 // Each signer below signs only a payload a check passed, as the check read it (a checked-payload WeakMap per kind, as
 // the deposit and pool kinds do): a copy, a byte or field changed after the check, or another key is refused
-// "unchecked" or "key".
+// "unchecked" or "key". One ask gives one signature: a checked quote passes one intent or one send, and a checked
+// payload signs once; a second needs a fresh quote (and, for an intent, the first one's deadline).
 //
 // Not here (named in the card's hand-off): the on-token branch of the withdraw from an id (the plain ft_transfer, the
 // onward delegate into intents.near, the self-submit transaction and its registration), an arming account A's moves
@@ -47,6 +50,7 @@ import { SOLANA_MAX_TX_BYTES, solanaDecodeMessage, solanaResolveKeys } from "../
 import { SOLANA_SYSTEM_PROGRAM } from "../../../kit/src/checks/solana/checks.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../../kit/src/near/networks.ts";
 import { VAULT_TOKEN_CODE_HASH } from "../../../kit/src/vault/shapes.ts";
+import { DEPOSIT_QUOTE_SLIPPAGE_BPS } from "../../../wallet/src/deposit/quote.ts";
 import { EVM_CHAIN_IDS } from "../../../wallet/src/pool/evm.ts";
 import { INTENTS, addressForm } from "../withdraw/checks.ts";
 import { DEPOSIT_DESTINATION_ASSET } from "./deposit.ts";
@@ -61,6 +65,19 @@ export const VERSIONED_NONCE_V1 = Uint8Array.of(0x56, 0x28, 0xf6, 0xc6, 0);
  *  docs/research/chains-bnb-robinhood-tron.md:158 and :427). */
 export const RETURN_NATIVE: Readonly<Record<ReturnChain, string>> = Object.freeze({ solana: "nep141:sol.omft.near", base: "nep141:base.omft.near", robinhood: "nep141:hood.omft.near" });
 export type ReturnChain = "solana" | "base" | "robinhood";
+/**
+ * The tokens an id can hold inside intents.near and take out by ft_withdraw (W:930: "token = the asset it holds
+ * there"): every USDC the deposit path takes (rules/deposit-dry.ts DEPOSIT_ASSET_CHAINS, the kit's ONECLICK_USDC_ASSETS),
+ * a refund under U landing in the asset the deposit came in. Each maps to its code hash: NEAR USDC's is the vault's pin;
+ * the two omft tokens' were read 2026-11-07T08:00Z by view_account at final on rpc.mainnet.near.org and
+ * free.rpc.fastnear.com (blocks 223438260-223438273), the two equal. A token upgraded since reads another hash, and
+ * nothing is signed until the release pins it.
+ */
+export const FT_WITHDRAW_TOKENS: Readonly<Record<string, string>> = Object.freeze({
+  [NEAR_NETWORKS.mainnet.usdc]: VAULT_TOKEN_CODE_HASH,
+  "sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near": "Ba6uZKxsuRPW5X7XVQrSnYEYScEjFLJLMqMWvZ1aS3tC", // gitleaks:allow (a public code hash)
+  "base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near": "2VUeqHTx9sk2AjDrs88HazLqS6LUgVQorjWcacotNCDP", // gitleaks:allow (a public code hash)
+});
 /** A plain EVM send's gas, and the most a Nitro (Robinhood) send's own estimate may be (rules/pool.ts's onward bounds). */
 export const RETURN_EVM_GAS = 21_000n;
 export const RETURN_EVM_GAS_MAX = 100_000n;
@@ -128,6 +145,8 @@ const requestOf = (request: OneClickRequest): OneClickRequest => {
   // live only: the next step pays the signed deposit address, which a dry answer leaves unsigned (D4)
   if (req.dry !== false) return refuse("dry");
   if (req.swapType !== "EXACT_INPUT") return refuse("swapType");
+  // the floors and the two price reads' agreement both take this slippage: at most the deposit quote's own
+  if (!Number.isInteger(req.slippageTolerance) || req.slippageTolerance < 0 || req.slippageTolerance > DEPOSIT_QUOTE_SLIPPAGE_BPS) return refuse("slippage");
   return req;
 };
 const passQuote = (checked: OneClickChecked, read: Omit<QuoteRead, "depositAddress" | "amountIn" | "deadlineMs">): RefundQuote => {
@@ -253,13 +272,17 @@ export interface IdIntentContext {
   network: NearNetwork;
   signer: OneTimeId;
   reads: readonly [IdIntentRead, IdIntentRead];
-  /** The deadline of this id's earlier intent for the same money not seen to land, when there is one. */
-  priorDeadline?: string;
+  /** The deadline of this id's earlier intent for the same money not seen to land, or null when there is none: always
+   *  said, so a caller that forgets it signs nothing. */
+  priorDeadline: string | null;
 }
 
-/** For an ft_withdraw, also, per RPC as the two answered (they must agree): the typed account exists (view_account;
- *  not read for an implicit id), it is registered on the token (storage_balance_of not null), the token's code hash. */
+/** For an ft_withdraw, also: the asset the id's `held` reads are of, and per RPC as the two answered (they must agree):
+ *  the typed account exists (view_account; not read for an implicit id), it is registered on the token
+ *  (storage_balance_of not null), the token's code hash. */
 export interface FtWithdrawReads {
+  /** The asset `reads[].held` is of, its 1Click id ("nep141:<token>"): the token the intent takes out must be it. */
+  asset: string;
   receiverExists?: readonly [boolean, boolean];
   receiverRegistered: readonly [boolean, boolean];
   codeHash: readonly [string, string];
@@ -301,7 +324,7 @@ function intentFrame(payload: string, ctx: IdIntentContext, s: Readonly<OneTimeI
   if (Number.isNaN(deadlineMs) || new Date(deadlineMs).toISOString() !== deadline) return refuse("deadline");
   if (deadlineMs !== lowMs + ID_INTENT_WINDOW_MS || deadlineMs <= highMs) return refuse("deadline");
   // a fresh intent for the same money only once the earlier one's deadline has passed on both RPCs
-  if (ctx.priorDeadline !== undefined) {
+  if (ctx.priorDeadline !== null) {
     const prior = typeof ctx.priorDeadline === "string" ? Date.parse(ctx.priorDeadline) : Number.NaN;
     if (Number.isNaN(prior) || !(lowMs > prior)) return refuse("prior_deadline");
   }
@@ -357,6 +380,8 @@ export function checkIdTransferIntent(payload: string, quote: RefundQuote, ctx: 
   if (BigInt(amount) > (withdraw ? held - 1n : held)) return refuse("held");
   // the intent dies before the quote's address does
   if (deadlineMs > r.deadlineMs) return refuse("deadline");
+  // one ask, one intent: the quote passes no second one
+  QUOTES.delete(quote);
   return passIntent({ payload, signer: s, kind: "transfer", amount: BigInt(amount), receiver: to, deadline });
 }
 
@@ -367,14 +392,15 @@ export function checkIdFtWithdrawIntent(payload: string, typed: string, ctx: IdI
   const net = NEAR_NETWORKS[ctx.network];
   // exactly the four fields: no memo, no msg, no storage_deposit, no min_gas (D46)
   if (it.intent !== "ft_withdraw" || !keysExactly(it, ["intent", "token", "receiver_id", "amount"])) return refuse("intent");
-  // the vault's token only: the one asset whose code hash the release pins
-  if (it.token !== net.usdc) return refuse("token");
+  // the token the id holds there (the asset its balance was read on), one the deposit path takes, at its pinned code hash
   const ft = isObj(ctx.ft) ? ctx.ft : refuse("reads");
-  if (agreed(ft.codeHash, (x) => typeof x === "string") !== VAULT_TOKEN_CODE_HASH) return refuse("code_hash");
-  // the typed account, as typed: a NEAR account id, never the vault, intents.near or the token
+  const token = it.token;
+  if (typeof token !== "string" || !Object.hasOwn(FT_WITHDRAW_TOKENS, token) || ft.asset !== `nep141:${token}`) return refuse("token");
+  if (agreed(ft.codeHash, (x) => typeof x === "string") !== FT_WITHDRAW_TOKENS[token]) return refuse("code_hash");
+  // the typed account, as typed: a NEAR account id, never the vault, intents.near or a listed token
   const form = addressForm(typed);
   if (form === null || form.account !== typed || it.receiver_id !== typed) return refuse("receiver_id");
-  if (typed === INTENTS || typed === net.usdc || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");
+  if (typed === INTENTS || Object.hasOwn(FT_WITHDRAW_TOKENS, typed) || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");
   // a named account must exist on two RPCs; an implicit id, which no stranger can create, passes unread
   if (form.kind === "named" && agreed(ft.receiverExists, (x) => typeof x === "boolean", "receiver") !== true) return refuse("receiver");
   // registered or not, the two reads must agree: the relayer registers a null one before it sends (card
@@ -399,6 +425,8 @@ export function signIdIntent(secretKey: Uint8Array, intent: IdIntent): { standar
     return refuse("key");
   }
   if (hexOf(pub) !== read.signer.id) return refuse("key");
+  // a checked intent signs once
+  INTENTS_CHECKED.delete(intent);
   const signature = ed25519.sign(new TextEncoder().encode(read.payload), secretKey);
   return { standard: "raw_ed25519", payload: read.payload, public_key: `ed25519:${base58.encode(pub)}`, signature: `ed25519:${base58.encode(signature)}` };
 }
@@ -441,6 +469,8 @@ export function checkReturnSolana(wire: Uint8Array, quote: RefundQuote, reads: S
   const balance = agreed(reads.balance, isU);
   const fee = agreed(reads.fee, isU);
   if (amount + fee > balance) return refuse("balance");
+  // one ask, one send: the quote passes no second one
+  QUOTES.delete(quote);
   SOLANA_RETURN_CHECKED.set(wire, { bytes, wallet: q.signer });
 }
 
@@ -455,6 +485,8 @@ export function signReturnSolana(secretKey: Uint8Array, wire: Uint8Array): Uint8
     return refuse("key");
   }
   if (base58.encode(pub) !== read.wallet) return refuse("key");
+  // a checked send signs once
+  SOLANA_RETURN_CHECKED.delete(wire);
   return ed25519.sign(read.bytes.subarray(65), secretKey);
 }
 
@@ -523,6 +555,8 @@ export function checkReturnEvm(tx: EvmReturnSend, quote: RefundQuote, reads: Evm
   if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
   if (t.value !== q.amountIn) return refuse("value");
   if (t.value + t.gasLimit * t.maxFeePerGas + l1Fee > balance) return refuse("balance");
+  // one ask, one send: the quote passes no second one
+  QUOTES.delete(quote);
   EVM_RETURN_CHECKED.set(tx, Object.freeze({ ...t, wallet: q.signer }));
 }
 
@@ -576,6 +610,8 @@ export function signReturnEvm(secretKey: Uint8Array, tx: EvmReturnSend): Uint8Ar
     return refuse("key");
   }
   if (address !== read.wallet) return refuse("key");
+  // a checked send signs once
+  EVM_RETURN_CHECKED.delete(tx);
   const rec = secp256k1.sign(keccak_256(cat(Uint8Array.of(2), rlpList(sendFields(read)))), secretKey, { prehash: false, lowS: true, format: "recovered" });
   // noble's recovered form is the recovery bit, then r and s
   const sig = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
