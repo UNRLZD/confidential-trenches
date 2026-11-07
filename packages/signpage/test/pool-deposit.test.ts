@@ -26,7 +26,7 @@ import { solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { POOL_DEPOSIT_READS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
+import { POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { pairDown } from "./outage.ts";
 
@@ -101,6 +101,8 @@ function chain() {
     wrongLabel: false,
     /** a lying pair: the mark and both leaves say one lamport more than the tx deposited */
     moreValue: false,
+    /** a lying pair: the deposit's commitment written twice on the state tree */
+    twiceLeaf: false,
     fund(address: string, lamports: number) {
       accounts.set(address, { owner: "11111111111111111111111111111111", lamports, data: new Uint8Array(0) });
     },
@@ -153,7 +155,8 @@ function chain() {
       const label = vaultLabelOf(keccak_256, SCOPE, nonce);
       const said = c.moreValue ? value + 1n : value;
       const commitment = c.wrongLeaf ? 7n : noteCommitment(said, label, pre);
-      for (const [tree, leaf] of [[0, commitment], [1, c.wrongLabel ? 9n : label]] as const) {
+      const writes: (readonly [0 | 1, bigint])[] = [[0, commitment], [1, c.wrongLabel ? 9n : label], ...(c.twiceLeaf ? [[0, commitment] as const] : [])];
+      for (const [tree, leaf] of writes) {
         const at = tree === 0 ? keys[2]! : keys[3]!;
         const pg = accounts.get(at)!;
         const last = pg.data.subarray(pg.data.length - 72);
@@ -166,7 +169,7 @@ function chain() {
         accounts.set(at, { ...pg, data, lamports: pg.lamports + pageCost(at, tree === 0 ? stateSize : labelSize) });
       }
       dv.setBigUint64(9, nonce, true);
-      dv.setBigUint64(49, BigInt(stateSize + 1), true);
+      dv.setBigUint64(49, BigInt(stateSize + (c.twiceLeaf ? 2 : 1)), true);
       dv.setBigUint64(49 + 1065, BigInt(labelSize + 1), true);
       const md = new Uint8Array(17);
       new DataView(md.buffer).setBigUint64(0, said, true);
@@ -518,12 +521,12 @@ test("precommit-taken-recover: one RPC alone saying a taken note's send succeede
   ]);
 });
 
-test("H2 (probe D): a mark of another value while an RPC says the note's own send succeeded is a lie: refused, the note stays INCOMING, nothing restored or sent again", async () => {
+test("H2 (probe D): a mark of another value while an RPC says the note's own send succeeded is a lie: refused, the note stays INCOMING, nothing restored or sent again; answered sent with it (card pool-answer-unknown: the tx may land)", async () => {
   const c = chain();
   const ns = await notes();
   c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
   c.moreValue = true;
-  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { error: "failed" });
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG)), { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] });
   assert.equal(c.sent.length, 1);
   assert.deepEqual(await shape(ns), [["deposit", "INCOMING", undefined]]);
 });
@@ -597,16 +600,26 @@ test("a deposit that does not read back on both RPCs answers not_landed and its 
   assert.equal(c.sent.length, 1, "never sent again while it could land");
 });
 
-test("a note the tree does not hold, or a label leaf that is not its nonce's, is refused and stays INCOMING", async () => {
-  for (const lie of ["wrongLeaf", "wrongLabel"] as const) {
+test("card pool-answer-unknown: a read back that does not check out after the send (a mark of nonce 0, a label leaf that is not its nonce's, the commitment missing from the state tree or there twice) answers sent with the signature, never failed; the note stays INCOMING and settles at the next load once the reads check out", async () => {
+  for (const lie of ["nonce0", "wrongLabel", "wrongLeaf", "twiceLeaf"] as const) {
     const c = chain();
     const ns = await notes();
     c.fund((await plannedU(ns)).address, 50_000_000);
-    c[lie] = true;
-    const h = host(c, ns);
-    assert.deepEqual(await runPoolDeposit(h, ask(RUNG)), { error: "failed" }, lie);
+    const nonce0 = (_: string, a: Acc): Acc => (a.owner === FIX.program && a.data.length === 17 ? { ...a, data: Uint8Array.from([...a.data.subarray(0, 8), 0, 0, 0, 0, 0, 0, 0, 0, 1]) } : a);
+    if (lie !== "nonce0") c[lie] = true;
+    const rpcs = lie === "nonce0" ? ([c.rpc({ mapAccount: nonce0 }), c.rpc({ mapAccount: nonce0 })] as const) : undefined;
+    const h = host(c, ns, rpcs ? { rpcs } : {});
+    assert.deepEqual(await runPoolDeposit(h, ask(RUNG)), { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] }, lie);
     assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"], lie);
     assert.equal(h.landedNotes.length, 0, lie);
+    // page load while the reads still do not check out: pending, never failed, nothing sent again
+    assert.deepEqual(await settlePoolDeposits(host(c, ns, rpcs ? { rpcs } : {})), { stage: "not_landed", txs: [] }, lie);
+    assert.equal(c.sent.length, 1, lie);
+    if (lie === "nonce0") {
+      // the RPCs' reads check out at the next load: the note lands
+      assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }] });
+      assert.deepEqual((await ours(ns)).map((n) => n.state), ["UNSPENT"]);
+    }
   }
 });
 
@@ -1099,4 +1112,257 @@ test("pool-deposits (e): a pool the two RPCs give different bytes of is read aga
   assert.equal(c.sent.length, 0);
   assert.equal(c.calls.filter((x) => x.method === "getMultipleAccounts" && (x.params[0] as string[]).includes(FIX.pool)).length, 6, "three reads on each RPC");
   assert.equal(c.calls.filter((x) => x.method === "simulateTransaction").length, 0);
+});
+
+// card pool-answer-unknown: the independent review of pool-deposits slice 2 (SHIP, 7 Nov 03:55Z), its findings F1-F6
+// folded here; R1-R7 are its tests, each now with the answer the device must give. A mutant of each rule fails one.
+/** `rpc` with one method's answer changed (the rest as the chain gives). */
+const remap = (rpc: SolanaRpc, method: string, f: (params: readonly unknown[], answer: unknown) => unknown): SolanaRpc => async (m, params) => {
+  const a = await rpc(m, params);
+  return m === method ? f(params, a) : a;
+};
+type SolanaRpc = PoolDepositHost["rpcs"][0];
+const shortsOf = (short: [string, bigint][]) => (a: string, l: bigint) => void short.push([a, l]);
+
+test("review R2 (F1): an RPC that says U holds more than it does never prices the deposit: each RPC's reading must go, so the true one names the exact top-up", async () => {
+  for (const liar of [0, 1] as const) {
+    const c = chain();
+    const ns = await notes();
+    const u = await plannedU(ns);
+    c.fund(u.address, Number(RUNG) + COST - 1_000);
+    const more = (address: string, a: Acc): Acc => (address === u.address ? { ...a, lamports: a.lamports + 5_000_000 } : a);
+    const short: [string, bigint][] = [];
+    const rpcs = liar === 0 ? ([c.rpc({ mapAccount: more }), c.rpc()] as const) : ([c.rpc(), c.rpc({ mapAccount: more })] as const);
+    const got = await runPoolDeposit(host(c, ns, { rpcs, short: shortsOf(short) }), ask(RUNG));
+    assert.deepEqual(got, { error: "not_funded" }, `liar ${liar}`);
+    assert.deepEqual(short, [[u.address, 1_000n]], `liar ${liar}`);
+    assert.equal(c.sent.length, 0);
+  }
+});
+
+test("review R7 (F1): an RPC that says a page holds more than it does never lowers the price: the top-up named makes the deposit go on either reading, and with it the deposit lands", async () => {
+  for (const liar of [0, 1] as const) {
+    for (const at of [page(0, 0), page(1, 0)]) {
+      const c = chain();
+      const ns = await notes();
+      const u = await plannedU(ns);
+      c.fund(u.address, Number(RUNG) + COST - 1);
+      const more = (address: string, a: Acc): Acc => (address === at ? { ...a, lamports: a.lamports + 1_000 } : a);
+      const short: [string, bigint][] = [];
+      const rpcs = liar === 0 ? ([c.rpc({ mapAccount: more }), c.rpc()] as const) : ([c.rpc(), c.rpc({ mapAccount: more })] as const);
+      const got = await runPoolDeposit(host(c, ns, { rpcs, short: shortsOf(short) }), ask(RUNG));
+      assert.deepEqual(got, { error: "not_funded" }, `liar ${liar} ${at}`);
+      // 1 short on the true reading; on the liar's U would keep 999, under an empty account's rent: the least top-up
+      // that goes on both leaves U an empty account's rent on the true one
+      assert.deepEqual(short, [[u.address, BigInt(EMPTY_RENT) + 1n]], `liar ${liar} ${at}`);
+      c.accounts.get(u.address)!.lamports += EMPTY_RENT + 1;
+      const again = await runPoolDeposit(host(c, ns, { rpcs }), ask(RUNG));
+      assert.equal((again as { stage?: string }).stage, "filled", `liar ${liar} ${at}: ${JSON.stringify(again)}`);
+      assert.equal(c.lamports(u.address), EMPTY_RENT, `liar ${liar} ${at}`);
+    }
+  }
+});
+
+test("F1: an RPC that says the mark's address holds lamports it does not never lowers the price", async () => {
+  for (const liar of [0, 1] as const) {
+    const c = chain();
+    const ns = await notes();
+    const u = await plannedU(ns);
+    c.fund(u.address, Number(RUNG) + COST - 1);
+    const [n] = await ours(ns);
+    const mark = markOf(n!.precommitment);
+    // the liar shows a stranger's 1,000 lamports at the mark's address, which the chain does not hold
+    const rpc = (k: number) => {
+      const r = c.rpc();
+      return k !== liar ? r : remap(r, "getMultipleAccounts", (params, a) => {
+        const keys = params[0] as string[];
+        const v = (a as { value: unknown[] }).value.map((x, i) => (keys[i] === mark && x === null ? { owner: SYSTEM, lamports: 1_000, data: ["", "base64"], executable: false, rentEpoch: 0, space: 0 } : x));
+        return { ...(a as object), value: v };
+      });
+    };
+    const short: [string, bigint][] = [];
+    const got = await runPoolDeposit(host(c, ns, { rpcs: [rpc(0), rpc(1)], short: shortsOf(short) }), ask(RUNG));
+    assert.deepEqual(got, { error: "not_funded" }, `liar ${liar}`);
+    assert.deepEqual(short, [[u.address, BigInt(EMPTY_RENT) + 1n]], `liar ${liar}`);
+  }
+});
+
+test("review R5 (F6): a page's lamports differ between the RPCs and U holds exactly the higher reading's price: on the other reading U would keep dust, so the top-up named makes both go, and with it the deposit lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST);
+  c.accounts.get(page(0, 0))!.lamports += 1_000; // on chain; RPC 1 has not seen it
+  const behind = (address: string, a: Acc): Acc => (address === page(0, 0) ? { ...a, lamports: a.lamports - 1_000 } : a);
+  const short: [string, bigint][] = [];
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: behind })], short: shortsOf(short) }), ask(RUNG));
+  assert.deepEqual(got, { error: "not_funded" });
+  assert.deepEqual(short, [[u.address, BigInt(EMPTY_RENT)]], "the top-up: an empty account's rent, so U keeps at least that on both readings");
+  assert.equal(c.sent.length, 0);
+  c.accounts.get(u.address)!.lamports += EMPTY_RENT;
+  const again = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: behind })] }), ask(RUNG));
+  assert.equal((again as { stage?: string }).stage, "filled", JSON.stringify(again));
+  assert.equal(c.lamports(u.address), EMPTY_RENT + 1_000);
+});
+
+test("review R1 (F6): a landed deposit whose mark one RPC still reads as a stranger's system account is never stuck: page load answers not_landed (the deposit may have landed), never not_funded, sends nothing again; it lands once both show the mark", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST + EMPTY_RENT + 10 * FEE);
+  const lagMark = { on: true };
+  const lag = (_: string, a: Acc): Acc => (lagMark.on && a.owner === FIX.program && a.data.length === 17 ? { owner: SYSTEM, lamports: 1_000_000, data: new Uint8Array(0) } : a);
+  const r1 = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: lag })] }), ask(RUNG));
+  assert.deepEqual(r1, { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  const balAfter = c.lamports(u.address);
+  c.height += 1_000; // every send past its last valid height while the lag lasts
+  const r2 = await settlePoolDeposits(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: lag })] }));
+  assert.deepEqual(r2, { stage: "not_landed", txs: [] });
+  assert.equal(c.sent.length, 1, "no send again while one RPC lags");
+  assert.equal(c.lamports(u.address), balAfter);
+  assert.equal((await ours(ns)).length, 1, "no new index");
+  lagMark.on = false;
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", RUNG]]);
+});
+
+test("review R3 (F3): a deposit that keeps failing on chain after both simulations pass is built again at most POOL_DEPOSIT_REBUILDS times in a run, then waits for its blockhash to expire; the next run after expiry goes again and lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST + 200 * FEE);
+  c.failNext = 1_000;
+  const got = await runPoolDeposit(host(c, ns, { reads: POOL_DEPOSIT_READS }), ask(RUNG));
+  assert.equal(c.sent.length, 1 + POOL_DEPOSIT_REBUILDS, "the send and its capped rebuilds, never one per read");
+  assert.deepEqual(got, { stage: "not_landed", txs: c.sent.map((hash) => ({ chain: "solana", hash })) });
+  assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"]);
+  c.failNext = 0;
+  c.height += 1_000; // the last send's blockhash expired on both
+  // page load: one read, the note sent again (its one read spent), then the next load reads it landed
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent.at(-1) }] });
+  assert.equal(c.sent.length, 2 + POOL_DEPOSIT_REBUILDS);
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent.at(-1) }] });
+});
+
+test("F2: one RPC a slot behind on the pool is read again at the higher slot (minContextSlot) on both; a node not there yet answers -32016 and is read again; the deposit lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, Number(RUNG) + COST);
+  let refusedOnce = false;
+  const mins: unknown[] = [];
+  const base = c.rpc();
+  const behind: SolanaRpc = async (method, params) => {
+    const a = (await base(method, params)) as { context: { slot: number }; value: unknown };
+    if (method !== "getMultipleAccounts" || !(params[0] as string[]).includes(FIX.pool)) return a;
+    const min = optsOf(params)?.minContextSlot;
+    mins.push(min);
+    if (min === undefined) {
+      // a slot behind: the pool's bytes as they were (its nonce one lower)
+      const v = (a.value as ({ data: [string, string] } | null)[]).map((x, i) => {
+        if (i !== 0 || x === null) return x;
+        const d = base64.decode(x.data[0]);
+        d[9] = d[9]! ^ 1;
+        return { ...x, data: [base64.encode(d), "base64"] };
+      });
+      return { context: { slot: a.context.slot - 1 }, value: v };
+    }
+    if (!refusedOnce) {
+      refusedOnce = true;
+      throw new Error("RPC error -32016: Minimum context slot has not been reached");
+    }
+    return a;
+  };
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), behind] }), ask(RUNG));
+  assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
+  assert.ok(refusedOnce);
+  const firstSlots = mins.filter((m) => m !== undefined);
+  assert.ok(firstSlots.length >= 2 && firstSlots.every((m) => typeof m === "number"), JSON.stringify(mins));
+  const onHonest = c.calls.filter((x) => x.method === "getMultipleAccounts" && (x.params[0] as string[]).includes(FIX.pool) && optsOf(x.params)?.minContextSlot !== undefined);
+  assert.ok(onHonest.length >= 1, "the read again names the slot on the other RPC too");
+});
+
+test("F3/M5: a send both RPCs say failed only at confirmed is not dead: never built again while its blockhash lives", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  c.failNext = 1;
+  const confirmedOnly = (r: SolanaRpc) => remap(r, "getSignatureStatuses", (_, a) => ({ ...(a as object), value: ((a as { value: (Status | null)[] }).value).map((st) => (st && st.err !== null ? { ...st, confirmationStatus: "confirmed" } : st)) }));
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [confirmedOnly(c.rpc()), confirmedOnly(c.rpc())] }), ask(RUNG));
+  assert.deepEqual(got, { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  assert.equal(c.sent.length, 1);
+});
+
+test("F1/M3b: a read whose pages are not the ones the pool's sizes name (the pool moved past a page since the sizes were read) is read again at the named pages: the price is the true one", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST);
+  // the run's first read of the pool, on both RPCs, names a state tree a page further on (1024 entries more)
+  const stale = (r: SolanaRpc) => {
+    let first = true;
+    return remap(r, "getAccountInfo", (params, a) => {
+      if (params[0] !== FIX.pool || !first) return a;
+      first = false;
+      const x = (a as { value: { data: [string, string] } }).value;
+      const d = base64.decode(x.data[0]);
+      const dv = new DataView(d.buffer, d.byteOffset);
+      dv.setBigUint64(49, dv.getBigUint64(49, true) + 1024n, true);
+      return { ...(a as object), value: { ...x, data: [base64.encode(d), "base64"] } };
+    });
+  };
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [stale(c.rpc()), stale(c.rpc())] }), ask(RUNG));
+  assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
+  assert.equal(c.lamports(u.address), 0);
+});
+
+test("F1/M10: RPCs that disagree on rent are refused before anything is signed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const rent = (address: string, a: Acc): Acc => {
+    if (address !== FIX.addresses.rent) return a;
+    const d = a.data.slice();
+    new DataView(d.buffer).setBigUint64(0, BigInt(PER_BYTE + 1), true);
+    return { ...a, data: d };
+  };
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: rent })] }), ask(RUNG)), { error: "failed" });
+  assert.equal(c.sent.length, 0);
+});
+
+test("F1/M18: a pool account RPC 1 gives with another owner in the deposit's read is refused before anything is signed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const owner = remap(c.rpc(), "getMultipleAccounts", (params, a) => {
+    const keys = params[0] as string[];
+    return { ...(a as object), value: (a as { value: ({ owner: string } | null)[] }).value.map((x, i) => (keys[i] === FIX.pool && x ? { ...x, owner: "BPFLoaderUpgradeab1e11111111111111111111111" } : x)) };
+  });
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), owner] }), ask(RUNG)), { error: "failed" });
+  assert.equal(c.sent.length, 0);
+});
+
+test("F1/M16: a mark the two RPCs give at different nonces is never settled on one's word: the note stays INCOMING, answered sent; it lands once both agree", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  const other = (_: string, a: Acc): Acc => {
+    if (a.owner !== FIX.program || a.data.length !== 17) return a;
+    const d = a.data.slice();
+    const dv = new DataView(d.buffer);
+    dv.setBigUint64(8, dv.getBigUint64(8, true) + 1n, true);
+    return { ...a, data: d };
+  };
+  assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc(), c.rpc({ mapAccount: other })] }), ask(RUNG)), { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] });
+  assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"]);
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[0] }] });
+});
+
+test("F5: the pool's own balance past 2^53 lamports is never parsed (it is never priced): the deposit lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, Number(RUNG) + COST);
+  const rich = (address: string, a: Acc): Acc => (address === FIX.pool || address === FIX.addresses.rent ? { ...a, lamports: 2 ** 60 } : a);
+  const got = await runPoolDeposit(host(c, ns, { rpcs: [c.rpc({ mapAccount: rich }), c.rpc({ mapAccount: rich })] }), ask(RUNG));
+  assert.equal((got as { stage?: string }).stage, "filled", JSON.stringify(got));
 });
