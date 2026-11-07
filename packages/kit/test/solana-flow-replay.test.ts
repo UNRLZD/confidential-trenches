@@ -54,8 +54,9 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
   // wrapped, read by its teardown), which its sell writes: the flow reads it back in a second simulation, which the
   // recording predates too, with the wallet itself (card solana-written-accounts-whole: the native sum from one run).
   // That sell's own instructions close the account into the wallet (S13 holds a create closed once, after the route, to
-  // the wallet), so a clean run of it leaves no account there and the wallet as the recorded simulation left it: the
-  // replay answers that.
+  // the wallet), so a clean run of it leaves the account closed, read back as a real simulation reads a closed account
+  // (the system program's, 0 lamports, no data: a dry buy from that wallet, 7 Nov), and the wallet as the recorded
+  // simulation left it: the replay answers that.
   const known = new Map<string, unknown>();
   for (const r of fx.rpc) {
     if (r.at !== at || !r.ask.startsWith('["getMultipleAccounts"')) continue;
@@ -75,7 +76,7 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
     const back = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
     if (!list && back?.length === 2 && back[0] === WSOL_HELD.wallet && back[1] === WSOL_HELD.account) {
       const main = fx.rpc.find((r) => r.at === at && r.ask.startsWith('["simulateTransaction"') && (JSON.parse(r.ask) as [string, { addresses?: string[] } | null])[1]?.addresses?.[0] === WSOL_HELD.wallet)!;
-      list = [{ context: { slot: 1 }, value: { err: null, accounts: [(main.answer as { value: { accounts: unknown[] } }).value.accounts[0], null] } }]; // edited as a recorded answer
+      list = [{ context: { slot: 1 }, value: { err: null, accounts: [(main.answer as { value: { accounts: unknown[] } }).value.accounts[0], { data: ["", "base64"], executable: false, lamports: 0, owner: "11111111111111111111111111111111", rentEpoch: 0, space: 0 }] } }]; // edited as a recorded answer
     }
     if (!list) throw new Error(`not recorded on ${at}: ${k.slice(0, 160)}`);
     const n = seen.get(k) ?? 0;

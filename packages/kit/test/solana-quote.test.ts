@@ -1069,3 +1069,25 @@ test("S6 legs: the wallet's account at route_v2's first leg (index 10) is refuse
     assert.ok(got.detail.includes(`leg account ${ata} is a token account of the wallet's`), got.detail);
   }
 });
+// A closed account as a simulation reads it back: the system program's, 0 lamports, no data (found on a real dry buy
+// from a wallet holding wSOL, 7 Nov: Jupiter's route closes the held wSOL account after the swap). The runtime removes
+// it when the tx ends, so it is closed, not handed to another owner.
+const CLOSED: SolanaHeldRead = { owner: SYSTEM, lamports: 0n, data: new Uint8Array(0) };
+test("S11 whole base: a wSOL account or the account of the token read back closed (system's, 0 lamports) counts as closed", () => {
+  const ok = buyCase();
+  ok.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  for (const s of ok.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: CLOSED }; x.walletLamports.post += X + 2_039_280n; }
+  assert.equal(s11(run(ok)).ok, true, s11(run(ok)).detail);
+  // closed with its lamports sent elsewhere: the native sum refuses it
+  const gone = buyCase();
+  gone.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  for (const s of gone.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: CLOSED }; }
+  assert.match(s11(run(gone)).detail, /provider A: native out \d+ > \d+/);
+  const sold = sellCase();
+  for (const s of sold.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [OWN]: CLOSED }; }
+  assert.equal(s11(run(sold)).ok, true, s11(run(sold)).detail);
+  // an account of the wallet's other than wSOL or the token's, closed: refused, as any change to it
+  const before = held(W, USDC, TOKEN, 0n);
+  const { ata, v } = writtenUsdc([before, before], CLOSED);
+  assert.match(v.detail, new RegExp(`the wallet's account ${ata} moves: 0 -> not the wallet's, lamports 2039280 -> 0`));
+});

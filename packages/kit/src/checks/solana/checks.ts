@@ -839,8 +839,11 @@ function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: C
     const after = back && typeof back === "object" && Object.hasOwn(back, m.key) ? back[m.key] : undefined;
     if (after === undefined) { wrong.push(`the wallet's account ${m.key} is not read back`); continue; }
     const still = walletToken(after, wallet) ? after : null;
+    // Closed: no account, or one left with 0 lamports, which the runtime removes when the tx ends (a simulation reads it
+    // back as the system program's, 0 lamports, no data), so nothing on it outlives the tx.
+    const closed = after === null || after.lamports === 0n;
     if (m.own) {
-      if (after === null) continue;
+      if (closed) continue;
       const left = !still ? ["owner"] : still.owner !== c.tokenProgram ? ["program"] : m.pre && m.pre.owner === still.owner && !baseChanges(m.pre.data, still.data, false).length ? [] : baseChanges(cleanBase(c.req.token, wallet), still.data, false);
       if (left.length) wrong.push(`the wallet's account of the token ${m.key} is left with its ${left.join(", ")} changed`);
       continue;
@@ -848,7 +851,7 @@ function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], c: C
     const p = m.pre as SolanaHeldRead;
     if (nativeAccount(p)) {
       pre += p.lamports;
-      if (after === null) continue;
+      if (closed) continue;
       const left = !still ? ["owner"] : still.owner !== p.owner ? ["program"] : baseChanges(p.data, still.data, false);
       if (!still || left.length) wrong.push(`the wallet's wSOL account ${m.key} is left with its ${left.join(", ")} changed`);
       else post += still.lamports;
