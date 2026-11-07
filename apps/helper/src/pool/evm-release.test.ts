@@ -320,7 +320,7 @@ test("a buy's worst gas is held against W, the client and the token until it lan
   assert.equal(code(await cheap.carry({ pool: POOL, data: first, epoch: EPOCH })), "ok");
   await settle();
   const worst = await cheap.carry({ pool: POOL, data: buyAs({ n: 1n }), epoch: EPOCH });
-  assert.match(JSON.stringify(worst.body), /unpaid buy gas 39500909133000 wei for W/, "21,000 gas at its maxFeePerGas (fee / gas) held: 1 wei more passes, the next buy's worst does not");
+  assert.match(JSON.stringify(worst.body), /unpaid buy gas 44100000000000 wei for W/, "21,000 gas at its maxFeePerGas (2 x base + tip, under fee / gas) held: 1 wei more passes, the next buy's worst does not");
   // proven only by status 1 and the pool's Bought log of this buy on both providers; anything less stays charged
   for (const [what, ra, rb, held] of [
     ["status 1 and Bought on both", receiptOf(first, "0x1", true), receiptOf(first, "0x1", true), false],

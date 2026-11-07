@@ -41,7 +41,7 @@
 //                    0xef0100..., too): a contract could revert the pool's push after the simulation;
 //   simulation_failed eth_estimateGas or eth_call of the exact transaction at "pending", from the sender with the gas,
 //                    maxFeePerGas and maxPriorityFeePerGas the send then signs, fails in execution, or its gas is over
-//                    EVM_GAS_MAX;
+//                    EVM_GAS_MAX (a buy's over EVM_BUY_GAS_MAX);
 //   fee_stale        the fee's cap per gas (fee / gas limit) is under the current base fee: it could not be mined, so
 //                    the device re-proves at a newer epoch's fee (M356 (2));
 //   rate_limited (429) EVM_QUEUE_MAX sends are already waiting (Retry-After EVM_BUSY_RETRY_S; card helper-abuse-limits:
@@ -175,6 +175,7 @@ import {
   EVM_7702_AUTH_GAS,
   EVM_POOL_FEE_FLOOR,
   EVM_POOL_FEE_STEP,
+  EVM_POOL_MAX_DEPTH,
   EVM_POOL_SELL_DEADLINE_MAX_S,
   EVM_POOL_SELL_GAS,
   EVM_POOL_TX_BYTES,
@@ -204,6 +205,17 @@ export const POOL_EVM_BODY_MAX = 8_192;
 export const EVM_BODY_DATA_MAX = 2_404;
 /** The most gas the helper pays for one withdraw: the measured Privacy Pools withdrawal is 611,391 (M349), so 2.5x [design]. */
 export const EVM_GAS_MAX = 1_500_000n;
+/**
+ * The most gas the helper pays for one buy (card evm-buy-gas-depth): the kit's G at the deepest tree the pool takes,
+ * evmPoolGas(32) = 2,203,913, the most gas any epoch's fee is priced on. PrivacyPoolSimple.buy reverts when gasleft() is
+ * under 651,000 before its swap, so eth_estimateGas lands on that floor and a buy's limit (estimate x 1.2) is about twice
+ * its gas used: at most 1,414,362 at depth 2 and 2,203,899 at depth 32 on the largest calldata the helper carries (kit
+ * pool-fee.ts and test/evm-pool-fee.test.ts hold the measurements). EVM_GAS_MAX refused such a buy from depth 6, and
+ * the helper's one-hop test buy from depth 8. This cap does not widen what the unpaid-gas caps bound: a buy's worst cost
+ * held against them is gas x maxFeePerGas, and maxFeePerGas is at most fee / gas, so it is at most the fee whatever the
+ * gas.
+ */
+export const EVM_BUY_GAS_MAX = evmPoolGas(EVM_POOL_MAX_DEPTH);
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const unhex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"));
@@ -1073,7 +1085,8 @@ export function evmPoolSender(
       return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
     gas = (gas * 12n) / 10n;
-    if (gas > EVM_GAS_MAX) return no(422, "simulation_failed", `gas ${gas} over ${EVM_GAS_MAX}`);
+    const gasMax = w.buy === undefined ? EVM_GAS_MAX : EVM_BUY_GAS_MAX;
+    if (gas > gasMax) return no(422, "simulation_failed", `gas ${gas} over ${gasMax}`);
     // the sender never pays more gas than the fee: maxFeePerGas at most fee / gas limit; a cap under the base fee now
     // could not be mined and would hold every later nonce behind it, so it is refused and the device re-proves
     const cap = w.fee / gas;

@@ -34,7 +34,7 @@ const POOL = "0x00000000000000000000000000000000b1f1f001";
 const OTHER_POOL = "0xb239a38af69b68e6c5c305df64985f283b5d5fe5";
 const FEE_TO = "0x000000000000000000000000000000000000fee1";
 /** evm.test.ts's FEE: the kit's evmPoolFee at depth 2, 1 gwei and a chain fee of 7,917 wei (the test asserts it). */
-const FEE = "1380000000000000";
+const FEE = "2880000000000000";
 /** pool-evm-core's relayed proof words (evm.test.ts PROOF): pubSignals[1] the nullifier, [2] the value, [7] the context. */
 const PROOF = [
   "1184908809424501824094124334635703389819420838650358930182460221215309100428", "1674810211518547383579389468999824331036802579945838824753347570601139960095",

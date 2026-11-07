@@ -39,6 +39,7 @@ export const LIVE_CHECKS = [
   "helper-robinhood-capacity",
   "helper-robinhood-search-ahead",
   "evm-buy-hookdata-fee",
+  "evm-buy-gas-depth",
   "helper-evm-abi-tie",
   "helper-tape-4337-trader",
   "helper-live-bars-no-503",
