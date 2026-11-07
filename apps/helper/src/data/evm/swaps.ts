@@ -56,6 +56,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { operatorOf } from "../../rpc/rpc.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
@@ -1099,9 +1100,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // read out is waited for (each bounded by TIMEOUT_MS), so its answer still counts
     const reads: Promise<void>[] = [];
     const go = (urls: string[]) => (reads.push(read(urls)), hedged(reads.at(-1)!, urls));
-    // two heads within V.lagMax of each other are in hand
+    // review M1 of 424dce1e: each company's newest head once (operatorOf: two keys of one company are one provider)
+    const best = (): [string, { n: number; t: number }][] => {
+      const m = new Map<string, { n: number; t: number }>();
+      for (const [u, h] of heads) if (h.n > (m.get(operatorOf(u))?.n ?? -1)) m.set(operatorOf(u), h);
+      return [...m].sort((a, b) => b[1].n - a[1].n);
+    };
+    // two companies' heads within V.lagMax of each other are in hand
     const pair = (): boolean => {
-      const ns = [...heads.values()].map((h) => h.n).sort((a, b) => b - a);
+      const ns = best().map(([, h]) => h.n);
       return ns.some((n, i) => i > 0 && ns[i - 1]! - n <= V.lagMax);
     };
     await go(ok.slice(0, 2));
@@ -1109,14 +1116,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // evm-rpc-spare-list: with Base's first two providers down the third answered, the patient round asked the first two
     // again and the fourth never, so no head was read and every read of the chain stopped)
     for (let i = 2; i < ok.length && !pair(); i++) await go(ok.slice(i, i + 1));
-    if (heads.size < 2) await Promise.all(reads);
-    // no two heads within the pace's wait, the whole list asked: those that passed a read at their pace's wait read again,
-    // patiently (a provider not yet asked has been, above)
-    if (heads.size < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
-    const sorted = [...heads].sort((a, b) => b[1].n - a[1].n);
+    if (best().length < 2) await Promise.all(reads);
+    // no two companies' heads within the pace's wait, the whole list asked: those that passed a read at their pace's wait
+    // read again, patiently (a provider not yet asked has been, above)
+    if (best().length < 2) await read(ok.filter((u) => !heads.has(u)).slice(0, 2), true);
+    const sorted = best();
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
-    const withIt = sorted.filter(([, h]) => h.n >= agreed).map(([u]) => u);
+    const withIt = [...heads].filter(([, h]) => h.n >= agreed).map(([u]) => u);
     return { n: agreed, t: sorted[1]![1].t, with: withIt };
   }
 
@@ -1137,20 +1144,23 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these
     const order = askOrder(urls, wideFirst, n, only, skip);
     const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
-    const got: A[][] = Array.from({ length: n }, () => []);
+    // review M1 of 424dce1e: an answer counts with its company (operatorOf), and two alike count only from two companies:
+    // two keys of one company are one operator answering twice
+    const got: { a: A; co: string }[][] = Array.from({ length: n }, () => []);
     const by: Set<string>[] = Array.from({ length: n }, () => new Set());
     // the providers that answered something: PROVIDERS_MAX of them at most (a read past its pace's wait or held answers
     // nothing, and the next is asked instead; fold 4: capping the asks left drpc out while daybreak's queue held tapes)
     const answered = new Set<string>();
     const run = async (u: string, idx: number[], patient = false) => {
       const r = await ask(u, idx, patient);
+      const co = operatorOf(u);
       idx.forEach((i, k) => {
-        if (r[k] != null) got[i]!.push(r[k]!), by[i]!.add(u), answered.add(u);
+        if (r[k] != null) got[i]!.push({ a: r[k]!, co }), by[i]!.add(co), answered.add(co);
       });
     };
     const pick = (i: number): A | null => {
       const g = got[i]!;
-      for (let a = 0; a < g.length; a++) for (let b = a + 1; b < g.length; b++) if (same(g[a]!, g[b]!)) return g[a]!;
+      for (let a = 0; a < g.length; a++) for (let b = a + 1; b < g.length; b++) if (g[a]!.co !== g[b]!.co && same(g[a]!.a, g[b]!.a)) return g[a]!.a;
       return null;
     };
     const all = Array.from({ length: n }, (_, i) => i);
@@ -1173,7 +1183,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const want = all.filter((i) => pick(i) === null);
       const u = ranked(tier, wideFirst, want.length)[0]!;
       tier.splice(tier.indexOf(u), 1);
-      const left = want.filter((i) => !by[i]!.has(u));
+      const left = want.filter((i) => !by[i]!.has(operatorOf(u)));
       if (left.length > 0) await hedged(launch(u, left), [u]);
     }
     if (!all.every((i) => pick(i) !== null)) await Promise.all(reads);
@@ -1183,7 +1193,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // pair, 503)
     for (const u of order) {
       if (all.every((i) => pick(i) !== null)) break;
-      const left = all.filter((i) => pick(i) === null && !by[i]!.has(u));
+      const left = all.filter((i) => pick(i) === null && !by[i]!.has(operatorOf(u)));
       if (left.length > 0 && holds.heldFor(u) === 0 && (paced.get(u) ?? 0) > passedBefore.get(u)!) await run(u, left, true);
     }
     return all.map(pick);
