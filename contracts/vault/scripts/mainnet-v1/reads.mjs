@@ -9,6 +9,7 @@
 //                                                  and <account> is unregistered on both, 4 when registered on both,
 //                                                  1 otherwise
 //   node reads.mjs fee-after <token> <account>     exit 0 when <account> is registered on both, else 1
+import "../../../../scripts/net-window.mjs";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
