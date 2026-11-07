@@ -183,8 +183,16 @@ export interface SignpageClient {
  */
 export function signpageBuildRequest<K extends SignpageKind>(kind: K, params: SignpageParams[K], id: string): SignpageRequest<K> {
   if (!signpageIsKind(kind)) throw new TypeError(`signpage: no such kind ${String(kind)}`);
-  if (!SIGNPAGE_PARAM_SCHEMAS[kind](params)) throw new TypeError(`signpage: params are not exactly ${kind}'s`);
-  const msg = { ...params, v: 1, id, type: kind } as SignpageRequest<K>;
+  // the request's own copy, taken before the check: what is checked is what is posted, whatever the caller does to its
+  // params after (card oneclick-fee-path-own-key; the client posts after the handshake, which can be seconds later)
+  let own: SignpageParams[K];
+  try {
+    own = structuredClone(params);
+  } catch {
+    throw new TypeError(`signpage: params are not exactly ${kind}'s`);
+  }
+  if (!SIGNPAGE_PARAM_SCHEMAS[kind](own)) throw new TypeError(`signpage: params are not exactly ${kind}'s`);
+  const msg = { ...own, v: 1, id, type: kind } as SignpageRequest<K>;
   if (new TextEncoder().encode(JSON.stringify(msg)).length > SIGNPAGE_MAX_REQUEST_BYTES) {
     throw new TypeError(`signpage: ${kind} is over ${SIGNPAGE_MAX_REQUEST_BYTES} bytes`);
   }
@@ -249,18 +257,20 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let tries = 0;
   let destroyed = false;
 
-  /** Every snapshot handed out is the caller's own copy, state included, from snapshot() and to each listener (card
-   *  oneclick-fee-path-own-key): a caller's write changes neither another caller's nor `snap`, which the client reads
-   *  to decide whether a request may go. */
-  const own = (): SignpageClientSnapshot => structuredClone(snap);
+  /** What every caller gets: one deep-frozen copy of `snap` per change, the same object from snapshot(), to every
+   *  listener and as a state request's result until the next change (card oneclick-fee-path-own-key). Stable between
+   *  changes, as useSyncExternalStore needs; a write throws; and none of it is `snap`, which the client reads to decide
+   *  whether a request may go. */
+  let view: SignpageClientSnapshot = deepFreeze(structuredClone(snap));
   const set = (patch: Partial<SignpageClientSnapshot>) => {
     snap = { ...snap, ...patch };
+    view = deepFreeze(structuredClone(snap));
     if (snap.status !== "connecting") {
       const w = waiters;
       waiters = [];
       for (const f of w) f();
     }
-    for (const f of listeners) f(own());
+    for (const f of listeners) f(view);
   };
 
   const clearTimer = (t: Timer | null) => {
@@ -451,7 +461,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       // a state's op this client cannot read is left out, never the whole state (card kit-frame-version)
       const result = signpageAnswerOkSchema(m) ? (p.kind === "state" ? signpageReadableOps(m.result) : m.result) : undefined;
       if (result !== undefined && SIGNPAGE_RESULT_SCHEMAS[p.kind](result)) {
-        if (p.kind === "state") set({ state: result as SignpageState, stale: false });
+        if (p.kind === "state") {
+          set({ state: result as SignpageState, stale: false });
+          return settle(m.id as string, { ok: true, result: view.state as SignpageResults[SignpageKind] });
+        }
         return settle(m.id as string, { ok: true, result: result as SignpageResults[SignpageKind] });
       }
       if (signpageAnswerErrorSchema(m)) return settle(m.id as string, { ok: false, error: m.error as { code: ErrorCode } });
@@ -482,7 +495,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   };
 
   const client: SignpageClient = {
-    snapshot: own,
+    snapshot: () => view,
     subscribe(fn) {
       listeners.add(fn);
       return () => void listeners.delete(fn);

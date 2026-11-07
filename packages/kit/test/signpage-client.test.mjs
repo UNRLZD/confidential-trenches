@@ -822,34 +822,77 @@ test("state and progress events from the frame update the state and reach the li
   assert.deepEqual(seen, [["x", "filled"]]);
 });
 
-// card oneclick-fee-path-own-key (the delta review of kit-oneclick-pins-frozen): every snapshot is the caller's own copy,
-// from snapshot() and to each listener; red before, when each got the client's one object, so a caller's write changed
-// the next caller's snapshot and the client's own status (a write of "ready" let a request through while connecting)
-test("a caller that writes into its snapshot changes no other caller's, no listener's and not the client's own", async () => {
-  const forge = (s) => { s.status = "ready"; s.stale = true; s.release = "forged"; s.state.vault_balance = "999999"; s.state.orders.push({ forged: 1 }); };
+// card oneclick-fee-path-own-key (the delta review of kit-oneclick-pins-frozen, then its review): the snapshot is one
+// deep-frozen copy per change, handed to snapshot() and to every listener alike. Same object while nothing changes (an
+// app may wire useSyncExternalStore(client.subscribe, client.snapshot), which compares with Object.is), a write throws,
+// and nothing a caller holds is the client's own state. Red at c13c2451 (one shared, writable object: a write of
+// "ready" let a request go while connecting) and at e93dea74 (a new copy per call, so snapshot() !== snapshot()).
+test("the snapshot is one frozen copy per change: stable identity between changes, a write throws, a change gives a new one", async () => {
   const { h, c } = await readyClient();
-  const want = structuredClone(c.snapshot());
-  forge(c.snapshot());
-  assert.deepEqual(c.snapshot(), want, "snapshot() after a write into an earlier one");
+  const a = c.snapshot();
+  assert.equal(c.snapshot(), a, "snapshot() === snapshot() with no change");
+  for (const v of [a, a.state, a.state.orders, a.state.wallets]) assert.ok(Object.isFrozen(v));
+  assert.throws(() => { a.status = "connecting"; }, TypeError);
+  assert.throws(() => { a.state.vault_balance = "999999"; }, TypeError);
+  assert.throws(() => a.state.orders.push({ forged: 1 }), TypeError);
+  assert.equal(c.snapshot().state.vault_balance, STATE.vault_balance);
   const heard = [];
-  c.subscribe((s) => { heard.push(structuredClone(s)); forge(s); });
-  c.subscribe((s) => heard.push(structuredClone(s)));
+  c.subscribe((s) => heard.push(s));
+  c.subscribe((s) => heard.push(s));
   h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "1" } });
-  assert.equal(heard.length, 2);
-  assert.deepEqual(heard[1], heard[0], "the second listener reads what the first was given, not its write");
-  assert.equal(heard[1].state.vault_balance, "1");
-  assert.equal(c.snapshot().state.vault_balance, "1");
-  assert.equal(c.snapshot().state.orders.length, STATE.orders.length);
-  // a client still connecting stays connecting after a caller writes "ready" into its snapshot: the request waits
+  const b = c.snapshot();
+  assert.notEqual(b, a, "a change gives a new object");
+  assert.equal(b.state.vault_balance, "1");
+  assert.deepEqual(heard.map((s) => s === b), [true, true], "every listener gets the object snapshot() returns");
+  assert.equal(a.state.vault_balance, STATE.vault_balance, "an earlier snapshot keeps what it was");
+  // a client still connecting stays connecting, whatever a caller tries on its snapshot: the request waits
   const h2 = makeHost();
   const c2 = C.createSignpageClient({ url: URL_, host: h2.host });
-  c2.snapshot().status = "ready";
+  assert.throws(() => { c2.snapshot().status = "ready"; }, TypeError);
   assert.equal(c2.snapshot().status, "connecting");
   let settled = false;
   void c2.request("state", {}).outcome.then(() => (settled = true));
   await flush();
   assert.equal(settled, false);
   assert.equal(h2.sent().length, 0, "nothing posted before the handshake");
+});
+
+// review 2: a state request's answer is the snapshot's own frozen state, never the client's working object; red at
+// e93dea74, when a write into the answer's result changed every later snapshot
+test("a state request's answer is the snapshot's frozen state: a write into it throws and changes no later snapshot", async () => {
+  const { h, c } = await readyClient();
+  const handle = c.request("state", {});
+  await flush();
+  const sent = h.frame().contentWindow.sent.at(-1);
+  h.post(answer(sent.msg.id, { ...STATE, vault_balance: "3" }));
+  const o = await handle.outcome;
+  assert.equal(o.ok, true);
+  assert.equal(o.result, c.snapshot().state);
+  assert.ok(Object.isFrozen(o.result));
+  assert.throws(() => { o.result.vault_balance = "999999"; }, TypeError);
+  h.post({ v: 1, type: "progress", id: "x", stage: "filled" }); // no state change
+  h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "3", orders: [] } });
+  assert.equal(c.snapshot().state.vault_balance, "3");
+});
+
+// review 3: a request's params are checked and posted as the client's own copy, taken before the check; red at
+// e93dea74, when a caller who changed its params while the client was connecting had the changed, unchecked ones posted
+test("params changed by the caller after request() are never posted: the client checks and posts its own copy", async () => {
+  const h = makeHost();
+  const c = C.createSignpageClient({ url: URL_, host: h.host });
+  const params = { order_ids: ["o1"] };
+  const handle = c.request("orders.cancel", params);
+  params.order_ids.push("o2", "x".repeat(70_000)); // over the 64 KiB cap, and an order the caller never asked for
+  params.order_ids[0] = { forged: 1 };
+  await handshake(h);
+  await flush();
+  const sent = h.frame().contentWindow.sent.find((x) => x.msg.type === "orders.cancel");
+  assert.ok(sent, "posted after the handshake");
+  assert.deepEqual(sent.msg.order_ids, ["o1"]);
+  assert.equal(sent.msg.id, handle.id);
+  // a param the structured clone cannot copy is refused like any other bad param, at once
+  assert.throws(() => c.request("orders.cancel", { order_ids: ["o1"], f: () => 1 }), TypeError);
+  assert.throws(() => C.signpageBuildRequest("orders.cancel", { order_ids: [() => "o1"] }, "id"), TypeError);
 });
 
 // Card signpage-buy-route-events: a running pool.buy's route (messages.ts BuyRoute) comes as progress events with no
