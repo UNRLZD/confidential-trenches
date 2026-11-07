@@ -1693,6 +1693,31 @@ test("the validity period is read live on both providers; the relayer refuses to
   assert.equal((await r.send(prepayAction(1n), open, () => undefined)).kind, "final");
 });
 
+test("the relayer refuses to start unless its account holds its key as a full-access key on both providers", async () => {
+  const node = new Node();
+  const [a, b] = node.rpcs();
+  const keyAnswer = (answer: (p: Record<string, unknown>) => unknown | Promise<unknown>): Rpc => async (m, p) =>
+    m === "query" && (p as { request_type?: string }).request_type === "view_access_key" ? answer(p as Record<string, unknown>) : b(m, p);
+  const cases: [string, Rpc][] = [
+    ["absent key", keyAnswer((p) => ({ block_hash: "h", block_height: 1, error: `access key ${String(p.public_key)} does not exist while viewing`, logs: [] }))],
+    ["absent account", keyAnswer(() => { throw new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } }); })],
+    ["function-call key", keyAnswer(async (p) => ({ ...((await b("query", p)) as object), permission: { FunctionCall: { allowance: null, receiver_id: VAULT, method_names: [] } } }))],
+  ];
+  for (const [name, other] of cases) {
+    await assert.rejects(startRelayer([a, other], node.archival(), RELAYER, relayerSecret(), VAULT, node.relayerStore), /does not hold its key/, name);
+    await assert.rejects(startRelayer([other, a], node.archival(), RELAYER, relayerSecret(), VAULT, node.relayerStore), /does not hold its key/, `${name}, first provider`);
+  }
+  // the key read asks both providers for this account and this key, at final
+  const asked: Record<string, unknown>[] = [];
+  const seen: Rpc = async (m, p) => {
+    if (m === "query" && (p as { request_type?: string }).request_type === "view_access_key") asked.push(p as Record<string, unknown>);
+    return a(m, p);
+  };
+  await startRelayer([seen, seen], node.archival(), RELAYER, relayerSecret(), VAULT, node.relayerStore);
+  assert.equal(asked.length, 2);
+  for (const p of asked) assert.deepEqual([p.finality, p.account_id, String(p.public_key).startsWith("ed25519:")], ["final", RELAYER, true]);
+});
+
 test("PROBE N1: the key's nonce jumps (key re-added); the next signing reads it, nothing is dropped, and every later call lands", async () => {
   const node = new Node();
   const store = newStore();
