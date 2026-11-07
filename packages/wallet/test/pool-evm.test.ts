@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createHash } from "node:crypto";
-import { evmPoolFee, evmPoolGas, evmPoolVenues, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
+import { evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
 import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
@@ -818,6 +818,35 @@ test("F3c no answer in time never halves the pool sync's page (card evm-pool-syn
   assert.ok(wide.every((s) => s >= 100_000), `wide: ${wide}`);
   assert.equal(wide.filter((s) => s === 100_000).length, 20, `wide: ${wide}`);
   assert.ok(wide.length <= 20 + 4, `${wide.length} pages: ${wide}`);
+});
+
+test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (Robinhood's 100,000; Pocket's backends 50,000 and 10,001), any spare untouched", async () => {
+  const list = evmPoolProvidersOf(evmPoolVenues().robinhood) ?? assert.fail("robinhood: the kit pins no pool list");
+  const c = longChain([...deps(PP, [10, 1_200_000, 1_990_000])], 2_000_000);
+  const logs = list.map((): string[] => []);
+  let pocketCalls = 0;
+  // read 2026-11-07 01:42-01:50Z on the pool's filter (the kit's comment at the list)
+  const caps: Record<string, (p: { from: number; to: number }) => void> = {
+    "https://rpc.mainnet.chain.robinhood.com": ({ from, to }) => {
+      if (to - from + 1 > 100_000) throw new Error(`RPC error -32602: query spans ${to - from + 1} blocks (${from} to ${to}), but only 100000 are allowed for this request; narrow the block range, or send one value per position`);
+    },
+    "https://robinhood.api.pocket.network": ({ from, to }) => {
+      const k = ++pocketCalls;
+      if (to - from + 1 > 50_000 && k === 2) throw new Error("RPC error -32602: invalid argument 0: block range exceeds maximum 50000");
+      if (to - from + 1 > 10_001 && k % 3 === 0) throw new Error("RPC error -32602: eth_getLogs block range too large (max 10001 blocks)");
+    },
+  };
+  const rpcs = list.map((url, i) => rpc(c, { url, chainId: 4663n, log: logs[i], getLogs: caps[url] ?? (() => assert.fail(`${url} asked`)) }));
+  const r = await evmTreeSync({ rpcs, pin: { ...PIN, network: "robinhood" }, ...noWait }).events();
+  assert.equal(r.events.length, 3);
+  // review M-1: no spare today (GlobalStake answers past the device's client); one the kit adds is asked only for a
+  // seat out
+  const [own, pocket, ...spares] = logs.map(pageSizes);
+  assert.deepEqual(list.slice(0, 2), ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]);
+  assert.ok(own!.length > 0 && pocket!.length > 0, "both seats read the pool's logs");
+  assert.deepEqual(spares.map((x) => x.length), spares.map(() => 0), "a spare is asked only for a seat out");
+  assert.ok(own!.every((s) => s <= 800_000) && own!.filter((s) => s > 100_000).length <= 2 + Math.ceil(own!.length / EVM_LOG_CEILING_PAGES), `own: ${own}`);
+  assert.ok(Math.min(...pocket!) >= 5_000, `pocket: ${pocket}`);
 });
 
 test("card evm-pool-sync-wide-pages: a 13M-block span on two providers with caps 50,000 and 100,000 takes at most ceil(span/cap)+10 pages each", async () => {

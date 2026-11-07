@@ -15,7 +15,7 @@
 // or sent. The report: the epoch, the trees' size and roots, the binding's fee, deadline and context.
 import { createInterface } from "node:readline";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
+import { evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues } from "@blindfill/kit";
 import { evmAddress } from "../src/derive/index.ts";
 import { EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, evmPool, type EvmFeeAnswer, type EvmNetwork, type EvmRpc } from "../src/pool/evm.ts";
 
@@ -36,7 +36,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 
 try {
   const venue = evmPoolVenues()[a.network];
-  const providers = venue?.providers;
+  // the pool's own list where the venue has one (the kit's one accessor, card robinhood-mainnet-rpcs)
+  const providers = venue === undefined ? undefined : evmPoolProvidersOf(venue);
   const feeProviders = (venue as { feeProviders?: readonly string[] } | undefined)?.feeProviders ?? providers;
   const pinned = venue?.pool;
   if (venue === undefined || pinned === undefined || providers === undefined || feeProviders === undefined) throw new Error(`network: no pinned pool or providers for ${String(a.network)}`);

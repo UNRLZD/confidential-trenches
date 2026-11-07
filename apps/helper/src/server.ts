@@ -924,7 +924,8 @@ if (import.meta.main) {
     // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
     // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and
     // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
-    const evmPools = evmPoolSendersFromEnv(process.env);
+    // card robinhood-mainnet-rpcs: the senders' reads draw on the one pace per provider the swap, maker and /v1/rpc reads do
+    const evmPools = evmPoolSendersFromEnv(process.env, undefined, holds);
     const release = releaseOf(process.env);
     // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
     // both pool kinds' start checks run from here, and ready (below) waits for them
