@@ -50,6 +50,9 @@
 /* a read's value fills the row from its label on, so its box starts at the same place before the read (the 90 px
    skeleton) and after it ("—", a height, two hosts): only the text inside moves */
 .vmeta dd { flex: 1 1 auto; min-width: 0; margin: 0; text-align: right; }
+/* and both hold the row's top: a read that fills a second line (two hosts) grows the row downward, never moving its
+   label (centred, the RPCs label dropped 5 px as the read landed: BAR-10's CLS) */
+.vmeta > div { align-items: flex-start; }
 
 .vmeta { margin: 6px 0 0; padding: 0 2px; display: flex; flex-direction: column; gap: 6px; }
 .vfy .t3 { color: var(--text-3); }
