@@ -1624,3 +1624,109 @@ test("review L4: a page-load pass where one note lands with no tx named and anot
   assert.deepEqual(await shape(ns).then((s) => s.map((x) => x[1]).sort()), ["INCOMING", "UNSPENT"]);
   assert.deepEqual(got, { stage: "not_landed", txs: [] });
 });
+
+// Card pool-deposit-sent-end: after the kind answers "sent", the app hears the deposit's end. not_landed only once no
+// send of the ask can land: each one past its last valid height at finalized on both RPCs (or failed on both) with no
+// mark, or taken (the precommitment's mark holds another deposit on both); a send that lands late is "filled".
+/** The kind run with its stages: `ran` once the run ends; every wait after that (the end's reads) parks until `go`. */
+function followed(c: ReturnType<typeof chain>, ns: NoteStore, over: Partial<PoolDepositHost> = {}) {
+  const stages: string[] = [];
+  let ended = false;
+  let ran!: () => void;
+  const runEnd = new Promise<void>((r) => (ran = r));
+  const parked: (() => void)[] = [];
+  let onPark: (() => void) | null = null;
+  let onStage: (() => void) | null = null;
+  const wait = async (): Promise<void> => {
+    if (!ended) return;
+    await new Promise<void>((r) => {
+      parked.push(r);
+      onPark?.();
+    });
+  };
+  const kind = poolDepositKind(() => ({ ...host(c, ns, { wait, ...over }), end: () => ((ended = true), ran()) }));
+  const r = kind(ask(RUNG), { id: "e1", sha: "00", progress: (s) => (stages.push(String(s)), onStage?.()) });
+  const within = (p: Promise<void>, ms = 2_000): Promise<boolean> => Promise.race([p.then(() => true), new Promise<boolean>((ok) => setTimeout(() => ok(false), ms))]);
+  return {
+    r,
+    stages,
+    runEnd,
+    /** the end's reads parked at their next wait (false: none within the time, so nothing follows the send) */
+    parked: () => within(new Promise<void>((ok) => (parked.length ? ok() : (onPark = ok)))),
+    /** a stage posted (false: none within the time) */
+    staged: (n: number) => within(new Promise<void>((ok) => (stages.length >= n ? ok() : (onStage = () => stages.length >= n && ok())))),
+    go: () => parked.splice(0).forEach((f) => f()),
+  };
+}
+
+test("pool-deposit-sent-end, review pool-answer-unknown r2 item 5: the only send taken, then a provider down: the app hears not_landed, never left at sent", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  const base = c.rpc();
+  let sends = 0;
+  let blockhashes = 0;
+  const racing: SolanaRpc = async (method, params) => {
+    if (method === "getLatestBlockhash" && ++blockhashes > 1) throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "provider.down.example");
+    if (method === "sendTransaction" && sends++ === 0) c.apply(attackerTx(c, preOf(base64.decode(params[0] as string)), MIN_DEPOSIT));
+    return base(method, params);
+  };
+  const f = followed(c, ns, { rpcs: [racing, c.rpc()] });
+  await (f.r as { after: Promise<void> }).after;
+  assert.deepEqual((f.r as { answer(): unknown }).answer(), { result: { stage: "sent", txs: [{ chain: "solana", hash: c.sent[0] }] } });
+  await f.runEnd;
+  assert.equal(await f.staged(1), true, `no end told: ${JSON.stringify(f.stages)}`);
+  assert.deepEqual(f.stages, ["not_landed"]);
+  assert.equal(c.sent.length, 1, "nothing sent past the take");
+  assert.deepEqual(await shape(ns), [["deposit", "UNSPENT", MIN_DEPOSIT], ["second", "PLANNED", undefined]], "the front-runner's deposit is the user's note; the rung's money stays in U");
+});
+
+test("pool-deposit-sent-end: one RPC alone saying the send's last valid height is final gives no not_landed; both saying it, with no mark, do", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u = await plannedU(ns);
+  c.fund(u.address, 50_000_000);
+  c.lands = false; // the send is dropped
+  const ahead = (rpc: SolanaRpc): SolanaRpc => async (m, p) => (m === "getBlockHeight" && (p[0] as { commitment?: string })?.commitment === "finalized" ? c.height + 10_000 : rpc(m, p));
+  const f = followed(c, ns, { rpcs: [c.rpc(), ahead(c.rpc())] });
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  assert.deepEqual(f.stages, [], "nothing told at the run's end while the send may land");
+  assert.equal(await f.parked(), true, "the end's reads go on while the send may land");
+  for (let k = 0; k < 3; k++) {
+    f.go();
+    assert.equal(await f.parked(), true);
+  }
+  assert.deepEqual(f.stages, [], "one RPC's expiry alone tells the app nothing");
+  c.height += 1_000; // past the last valid height on both
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["not_landed"]);
+  assert.equal(c.lamports(u.address), 50_000_000, "the money stays in U");
+  assert.deepEqual((await ours(ns)).map((n) => n.state), ["INCOMING"], "the next ask or load builds it again, as today");
+});
+
+test("pool-deposit-sent-end: a send that lands late, before its last valid height, gives filled and never not_landed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  const kept: string[] = [];
+  const base = c.rpc();
+  const keep: SolanaRpc = async (m, p) => {
+    if (m === "sendTransaction") kept.push(p[0] as string);
+    return base(m, p);
+  };
+  const f = followed(c, ns, { rpcs: [keep, c.rpc()] });
+  await (f.r as { after: Promise<void> }).after;
+  await f.runEnd;
+  assert.deepEqual(f.stages, [], "nothing told at the run's end while the send may land");
+  assert.equal(await f.parked(), true, "the end's reads go on while the send may land");
+  c.lands = true;
+  c.apply(base64.decode(kept[0]!)); // lands at height + 40, well before its last valid height (+ 150)
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["filled"]);
+  assert.equal(c.sent.length, 1, "never sent again");
+});

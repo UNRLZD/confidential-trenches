@@ -67,6 +67,15 @@
 // - A provider fault is "down" only while nothing of the ask landed and no send of it may still land (none signed, or
 //   each one taken); else part_filled or sent. A note sent again by the pass, never the ask's, leaves the ask's own
 //   fault "down".
+// - The end after "sent" (card pool-deposit-sent-end): the kind answers at the ask's first send, so the run's own end
+//   reaches the app as a progress stage, and a run that ends with no verdict (a send still live, a provider down, a
+//   read back that does not check out) hands the kind the ask's notes still open (`left`). The kind then reads them,
+//   with no lock held and nothing written, every POOL_DEPOSIT_FOLLOW_MS until each is decided: landed (its mark at its
+//   value, its leaf checked as a landing is) or dead. Dead is the rebuild's own test, never one RPC's word: every send
+//   past its last valid height at finalized on both RPCs (or finalized with an error on both), the heights read before
+//   a mark read that finds none; or taken (the mark holds another deposit on both, and neither RPC says a send of it
+//   succeeded). Then: filled when every open note landed and every rung was sent, part_filled when any of the ask
+//   landed, else not_landed. The money of a dead send stays in U, and the next ask or load builds the note again.
 // - Every read names a public account or tx (the pool, its pages, U, the mark the deposit itself named, U's own
 //   signatures), one wallet of the user's per request; no request carries a key, the words, or which note is whose. U's
 //   secret key and the seed are zeroed when the run ends. Nothing here logs.
@@ -108,7 +117,13 @@ export type PoolDepositHost = {
   now?(): bigint;
   /** Called by poolDepositKind once the run ends: the note store opened for it is closed. */
   end?(): void;
+  /** The run's end, past a send of its ask: the ask's notes with a send still open (poolDepositKind reads them on). */
+  left?(left: PoolDepositLeft): void;
 };
+
+/** An ask's notes none of whose sends a run settled (each with the sends the ask made of it), whether any note of the
+ *  ask landed, and whether every rung of the ask was sent (`whole`). */
+export type PoolDepositLeft = { notes: { precommitment: bigint; sends: PoolSend[] }[]; landed: boolean; whole: boolean };
 
 /** What a run answers: the trade stage with the deposits that landed (or, not landed, were sent), or a code. */
 export type PoolDepositAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "failed" | "down" };
@@ -126,6 +141,9 @@ export const POOL_DEPOSIT_BEHIND_MS = 500;
 /** Sends of one note built again in a run because the last one failed on both RPCs: past these, the note waits for its
  *  last send's blockhash to expire (each failed send costs U its fee, so a run never pays for an unbounded chain). */
 export const POOL_DEPOSIT_REBUILDS = 2;
+/** The wait between the kind's reads of an ask's open notes once its run ended with no verdict (a blockhash lives
+ *  about 60 to 90 s, so a dead send is told within a read of its expiry at finalized). */
+export const POOL_DEPOSIT_FOLLOW_MS = 2_000;
 
 // "taken": the run's last taken note (a front-runner took as many as the ask has rungs, and one more), a verdict of its
 // own, never read as a send that may land
@@ -261,6 +279,75 @@ async function landedSend(h: PoolDepositHost, sends: readonly PoolSend[]): Promi
   return null;
 }
 
+/** Each send's statuses on both RPCs (history searched): per RPC, per send, `f` of its status; an RPC that does not
+ *  answer, or answers out of shape, says false for each. */
+async function statusesOf(h: PoolDepositHost, sends: readonly PoolSend[], f: (st: { confirmationStatus?: unknown; err?: unknown } | null) => boolean): Promise<boolean[][]> {
+  const sigs = sends.map((s) => s.signature);
+  const reads = await Promise.allSettled(h.rpcs.map((r) => r("getSignatureStatuses", [sigs, { searchTransactionHistory: true }])));
+  return reads.map((x) => {
+    const v = x.status === "fulfilled" ? (x.value as { value?: unknown })?.value : null;
+    return Array.isArray(v) && v.length === sigs.length ? v.map((st) => f(st as { confirmationStatus?: unknown; err?: unknown } | null)) : sigs.map(() => false);
+  });
+}
+
+/** A send of `sends` both RPCs say finalized with no error: one RPC's word alone never refuses a taken note. */
+async function bothLanded(h: PoolDepositHost, sends: readonly PoolSend[]): Promise<boolean> {
+  const ok = await statusesOf(h, sends, (st) => st?.confirmationStatus === "finalized" && st.err === null);
+  return sends.some((_, k) => ok.every((o) => o[k]));
+}
+
+/** Each send's death, read before the mark (with the heights): `expired`, or finalized with an error on both RPCs, so
+ *  it can never land. One RPC's word alone keeps it alive. */
+async function failedOnBoth(h: PoolDepositHost, sends: readonly PoolSend[], expired: readonly boolean[]): Promise<boolean[]> {
+  const failed = await statusesOf(h, sends, (st) => st?.confirmationStatus === "finalized" && st.err !== null && st.err !== undefined);
+  return sends.map((_, k) => expired[k]! || failed.every((f) => f[k]));
+}
+
+/** A mark's leaf: its label the label tree's leaf nonce - 1, and Poseidon(value, label, precommitment) a leaf of the
+ *  state tree, once, in the trees read at the mark's slot. */
+async function leafOf(sync: ReturnType<typeof solanaTreeSync>, scope: bigint, precommitment: bigint, m: { value: bigint; nonce: bigint; slot: number }): Promise<Leaf> {
+  if (m.nonce === 0n) throw new Refused("failed");
+  const leaves = await sync.leaves(m.slot);
+  const label = vaultLabelOf(keccak_256, scope, m.nonce);
+  if (leaves.label[Number(m.nonce - 1n)] !== label) throw new Refused("failed");
+  const commitment = noteCommitment(m.value, label, precommitment);
+  const at = leaves.state.indexOf(commitment);
+  if (at < 0 || leaves.state.indexOf(commitment, at + 1) >= 0) throw new Refused("failed");
+  return { value: m.value, label, commitment, leafIndex: BigInt(at) };
+}
+
+/** An open note of an ask, read once with nothing written: "landed" (its mark at its value on both RPCs at finalized,
+ *  its leaf checked), "dead" (no send of it can land: each past its last valid height at finalized on both, or failed
+ *  on both, with no mark read after those heights; or taken: the mark holds another deposit and no send of it
+ *  succeeded on both), else null (a send may still land, a mark on one RPC only, or a read that does not check out). */
+async function noteEnd(h: PoolDepositHost, sync: ReturnType<typeof solanaTreeSync>, scope: bigint, n: { precommitment: bigint; sends: readonly PoolSend[] }): Promise<"landed" | "dead" | null> {
+  const hs = await heights(h);
+  const expired = n.sends.map((x) => hs.every((y) => y > x.last_valid_block_height));
+  const dead = expired.every(Boolean) ? expired : await failedOnBoth(h, n.sends, expired);
+  const m = await markOf(h, n.precommitment);
+  if (m === "one") return null;
+  if (m === null) return dead.every(Boolean) ? "dead" : null;
+  if (m.value !== n.sends[0]!.value) return (await bothLanded(h, n.sends)) ? null : "dead";
+  await leafOf(sync, scope, n.precommitment, m);
+  return "landed";
+}
+
+/** The end of an ask whose run ended with no verdict: its open notes read every POOL_DEPOSIT_FOLLOW_MS until each is
+ *  landed or dead (a read that fails or does not check out is read again), with no lock held and nothing written. */
+export async function followPoolDeposit(h: PoolDepositHost, left: PoolDepositLeft): Promise<"filled" | "part_filled" | "not_landed"> {
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sync = solanaTreeSync(h.rpcs, h.pin.program);
+  const { scope } = solanaPoolOf(h.pin.program);
+  const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
+  for (;;) {
+    for (const [k, n] of left.notes.entries()) ends[k] ??= await noteEnd(h, sync, scope, n).catch(() => null);
+    if (ends.every((e) => e !== null)) break;
+    await wait(POOL_DEPOSIT_FOLLOW_MS);
+  }
+  if (left.whole && ends.length > 0 && ends.every((e) => e === "landed")) return "filled";
+  return left.landed || ends.includes("landed") ? "part_filled" : "not_landed";
+}
+
 /** U's id (deposit or second arrival of U): its scope and index. */
 function uOf(ref: NoteRef): { s: bigint; i: number } | null {
   if (ref.kind === "deposit") return { s: ref.s, i: ref.i };
@@ -283,6 +370,10 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
   // the sends of notes this run settled (landed or taken): none of them is a send that may still land
   const closed = new Set<string>();
   const open = (): TxRef[] => sentTxs.filter((t) => !closed.has(t.hash));
+  // the ask's own sends, each with its note's precommitment, and how many of its rungs are not sent yet: what the kind
+  // reads on when the run ends with no verdict (`left`)
+  const askSends: { precommitment: bigint; send: PoolSend }[] = [];
+  let unsent = 0;
   // sends built again this run per note because the last one failed on both RPCs (POOL_DEPOSIT_REBUILDS)
   const rebuilt = new Map<NoteRecord["id"], number>();
   const keys: Uint8Array[] = [];
@@ -347,59 +438,25 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     };
 
     // `own`: a send of this run's ask (or, with no ask, of the notes it settles), the only sends it tells the app of
-    const send = async (b: Built, own: boolean): Promise<void> => {
+    const send = async (b: Built, own: boolean, precommitment: bigint): Promise<void> => {
       const out = await Promise.allSettled(h.rpcs.map((r) => r("sendTransaction", [b.tx, { encoding: "base64", preflightCommitment: "confirmed" }])));
       if (!own) return;
       // written before it left: whether an RPC took it or not, its verdict reads it
       sentTxs.push({ chain: "solana", hash: b.send.signature });
+      askSends.push({ precommitment, send: b.send });
       if (out.some((s) => s.status === "fulfilled" && s.value === b.send.signature)) {
         h.sent?.(b.send.signature);
         h.progress?.("sent");
       }
     };
 
-    // a send of `sends` both RPCs say finalized with no error: one RPC's word alone never refuses a taken note
-    const bothLanded = async (sends: readonly PoolSend[]): Promise<boolean> => {
-      const sigs = sends.map((s) => s.signature);
-      const reads = await Promise.allSettled(h.rpcs.map((r) => r("getSignatureStatuses", [sigs, { searchTransactionHistory: true }])));
-      const ok = reads.map((x) => {
-        const v = x.status === "fulfilled" ? (x.value as { value?: unknown })?.value : null;
-        return Array.isArray(v) && v.length === sigs.length ? v.map((st) => (st as { confirmationStatus?: unknown } | null)?.confirmationStatus === "finalized" && (st as { err?: unknown }).err === null) : sigs.map(() => false);
-      });
-      return sigs.some((_, k) => ok.every((o) => o[k]));
-    };
-
-    // each send's death read before the mark (with the heights): `expired`, or finalized with an error on both RPCs,
-    // so it can never land. One RPC's word alone keeps it alive
-    const failedOnBoth = async (sends: readonly PoolSend[], expired: readonly boolean[]): Promise<boolean[]> => {
-      const sigs = sends.map((s) => s.signature);
-      const reads = await Promise.allSettled(h.rpcs.map((r) => r("getSignatureStatuses", [sigs, { searchTransactionHistory: true }])));
-      const failed = reads.map((x) => {
-        const v = x.status === "fulfilled" ? (x.value as { value?: unknown })?.value : null;
-        return Array.isArray(v) && v.length === sigs.length ? v.map((st) => { const o = st as { confirmationStatus?: unknown; err?: unknown } | null; return o?.confirmationStatus === "finalized" && o.err !== null && o.err !== undefined; }) : sigs.map(() => false);
-      });
-      return sigs.map((_, k) => expired[k]! || failed.every((f) => f[k]));
-    };
-
     // one INCOMING note, read up to `reads` times: landed (UNSPENT), taken (restored UNSPENT at the mark's value),
     // pending (INCOMING, maybe sent again), or stuck (INCOMING: U cannot pay its send again)
-    // a mark's leaf: its label the label tree's leaf nonce - 1, and Poseidon(value, label, precommitment) a leaf of the
-    // state tree, once, in the trees read at the mark's slot
-    const leafOf = async (precommitment: bigint, m: { value: bigint; nonce: bigint; slot: number }): Promise<Leaf> => {
-      if (m.nonce === 0n) throw new Refused("failed");
-      const leaves = await sync.leaves(m.slot);
-      const label = vaultLabelOf(keccak_256, scope, m.nonce);
-      if (leaves.label[Number(m.nonce - 1n)] !== label) throw new Refused("failed");
-      const commitment = noteCommitment(m.value, label, precommitment);
-      const at = leaves.state.indexOf(commitment);
-      if (at < 0 || leaves.state.indexOf(commitment, at + 1) >= 0) throw new Refused("failed");
-      return { value: m.value, label, commitment, leafIndex: BigInt(at) };
-    };
     // another deposit took the note's precommitment first: its deposit is the user's note all the same (only the seed
     // names the precommitment's secrets, so only this device can spend it), stored UNSPENT at the value that deposit
     // carried, whatever it is (MIN_DEPOSIT, or more); its pass starts like any landed note's
     const restore = async (n: NoteRecord, m: { value: bigint; nonce: bigint; slot: number }): Promise<void> => {
-      const leaf = await leafOf(n.precommitment, m);
+      const leaf = await leafOf(sync, scope, n.precommitment, m);
       const incoming = n.state === "PLANNED" ? await store.move(n.id, "PLANNED", "INCOMING") : n;
       // the move outside the optional call: `h.landed?.(x)` never evaluates x on a host with no landed hook
       const done = await store.move(incoming.id, "INCOMING", "UNSPENT", { leaf });
@@ -430,18 +487,18 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
         const expired = sends.map((x) => hs.every((y) => y > x.last_valid_block_height));
         // past POOL_DEPOSIT_REBUILDS sends built again on a failure this run, only expiry makes a send dead
         const capped = (rebuilt.get(n.id) ?? 0) >= POOL_DEPOSIT_REBUILDS;
-        const dead = expired.every(Boolean) || capped ? expired : await failedOnBoth(sends, expired);
+        const dead = expired.every(Boolean) || capped ? expired : await failedOnBoth(h, sends, expired);
         const m = await markOf(h, n.precommitment);
         if (m !== null && m !== "one") {
           // a mark of another value is another deposit's: this precommitment is taken, and that deposit is restored.
           // Then none of the note's sends can have succeeded: an RPC that says one did contradicts the mark, refused
           if (m.value !== value) {
-            if (await bothLanded(sends)) throw new Refused("failed");
+            if (await bothLanded(h, sends)) throw new Refused("failed");
             await restore(n, m);
             for (const x of sends) closed.add(x.signature);
             return "taken";
           }
-          const leaf = await leafOf(n.precommitment, m);
+          const leaf = await leafOf(sync, scope, n.precommitment, m);
           const done = await store.move(n.id, "INCOMING", "UNSPENT", { leaf });
           for (const x of sends) closed.add(x.signature);
           const sig = own ? await landedSend(h, sends) : null;
@@ -468,7 +525,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
           if ("tx" in b) {
             if (!expired.every(Boolean)) rebuilt.set(n.id, (rebuilt.get(n.id) ?? 0) + 1);
             const after = await store.addSend(n.id, b.send, sends.length);
-            if ((after.sends ?? []).length === sends.length + 1 && after.sends!.at(-1)!.signature === b.send.signature) await send(b, own);
+            if ((after.sends ?? []).length === sends.length + 1 && after.sends!.at(-1)!.signature === b.send.signature) await send(b, own, n.precommitment);
             n = after;
           }
         }
@@ -588,7 +645,8 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       }
       // written before the signed tx leaves the device: INCOMING with its send
       const incoming = await store.move(planned.id, "PLANNED", "INCOMING", { send: b.send });
-      await send(b, true);
+      unsent = rungs.length - k - 1;
+      await send(b, true, precommitment);
       const end = await finish(incoming, true, h.reads ?? POOL_DEPOSIT_READS);
       if (end === "pending") throw new Refused("not_landed");
       if (end === "stuck") throw new Refused("not_funded");
@@ -629,6 +687,17 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
   } finally {
     for (const k of keys) k.fill(0);
     seed64.fill(0);
+    // past a send of the ask: its notes with a send this run did not settle (landed or taken), for the kind's end
+    if (ask !== null && sentTxs.length > 0) {
+      const still = new Set(open().map((t) => t.hash));
+      const notes: PoolDepositLeft["notes"] = [];
+      for (const x of askSends.filter((a) => still.has(a.send.signature))) {
+        const n = notes.find((y) => y.precommitment === x.precommitment);
+        if (n) n.sends.push(x.send);
+        else notes.push({ precommitment: x.precommitment, sends: [x.send] });
+      }
+      h.left?.({ notes, landed: landed > 0, whole: unsent === 0 });
+    }
   }
 }
 
@@ -642,20 +711,26 @@ type Locks = Pick<LockManager, "request">;
 
 /** The pool flow's pool.deposit on Solana, run holding the seed lock shared (a sign out, in any tab, waits for it) and
  *  POOL_DEPOSIT_LOCK. Answered at its first send (stage "sent" with that tx), or at its end when nothing was sent; each
- *  rung's landing then goes to the app as a `progress` event ("filled"), and a run that ends short as its stage. */
+ *  rung's landing then goes to the app as a `progress` event ("filled"), and a run that ends short as its stage; a run
+ *  that ends with no verdict past a send of its ask has its open notes read on (followPoolDeposit), and their end goes
+ *  as one more `progress` event (card pool-deposit-sent-end). */
 export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk | null, ctx: KindContext | null): HostRefusal | Running<"pool.deposit"> => {
     if ((ask !== null && (ask.kind !== "pool.deposit" || ask.chain !== "solana")) || !locks) return { error: "not_allowed" };
     let answer: HostAnswer<"pool.deposit"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
+    // a run that ends with no verdict past its ask's send: its open notes, read on once the locks are let go
+    let follow: { h: PoolDepositHost; left: PoolDepositLeft } | null = null;
     const run = locks
       .request(WALLET_SEED_LOCK, { mode: "shared" }, () =>
         locks.request(POOL_DEPOSIT_LOCK, { mode: "exclusive" }, async () => {
           const h = host();
           let first = true;
+          let left: PoolDepositLeft | null = null;
           const run = {
             ...h,
+            left: (l: PoolDepositLeft) => void (left = l),
             sent: (signature: string) => {
               if (!answer) answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } };
               give();
@@ -667,8 +742,20 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
           };
           try {
             const a = await runPoolDeposit(run, ask);
-            if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
-            else if ("stage" in a && a.stage !== "filled") ctx?.progress(a.stage);
+            const l = left as PoolDepositLeft | null;
+            // filled or part_filled is the ask's end (each rung's "filled" already went as progress); anything else
+            // past a send of the ask (not_landed while a send may land, sent, a fault) is no end: its open notes are read
+            // on, and the end goes as progress once each is landed or dead (none open: each send was taken)
+            const ended = "stage" in a && (a.stage === "filled" || a.stage === "part_filled");
+            if (!answer) {
+              // nothing told yet (no RPC took a send): an open send of the ask is answered sent, its end read on
+              if (!ended && ctx && l !== null && l.notes.length > 0) {
+                answer = { result: { stage: "sent", txs: l.notes.flatMap((n) => n.sends.map((x) => ({ chain: "solana" as const, hash: x.signature }))) } };
+                follow = { h, left: l };
+              } else answer = "error" in a ? { error: a.error } : { result: a };
+            } else if (ended) {
+              if (a.stage === "part_filled") ctx?.progress(a.stage);
+            } else if (l !== null) follow = { h, left: l };
           } finally {
             h.end?.();
           }
@@ -678,7 +765,11 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
         if (!answer) answer = { error: "failed" };
       })
       .finally(give);
-    void run;
+    // the end, read with no lock held (a sign out never waits on it) and nothing written; a wait that rejects stops it
+    void run.then(() => {
+      const f = follow;
+      if (f !== null && ctx !== null) return followPoolDeposit(f.h, f.left).then((stage) => ctx.progress(stage), () => {});
+    });
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }
