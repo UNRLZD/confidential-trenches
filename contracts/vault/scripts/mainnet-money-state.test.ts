@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { fingerprintOf, recipientProblems, recordProblems, replanAt, requestProblems, stateDir, storeOfLane } from "./mainnet-money.ts";
+import { fingerprintOf, recipientProblems, recordProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
 
@@ -157,8 +158,8 @@ test("F5: a step of another seed is told apart by its fingerprint; the driver ch
   assert.notEqual(fingerprintOf(a.seed), fingerprintOf(b.seed));
   assert.equal(fingerprintOf(a.seed), fingerprintOf(Buffer.from(a.seed)));
   assert.doesNotMatch(fingerprintOf(a.seed), new RegExp(a.seed.toString("hex")));
-  // every command that uses the run step (check, run/resume, open-u, record) refuses one of another seed
-  assert.equal([...SRC.matchAll(/fingerprint !== (?:fingerprintOf\(st\.seed\)|fp)/g)].length, 4);
+  // every command that uses the run step (check, run/resume, open-u, sweep-u, record) refuses one of another seed
+  assert.equal([...SRC.matchAll(/fingerprint !== (?:fingerprintOf\(st\.seed\)|fp)/g)].length, 5);
   assert.doesNotMatch(SRC, /\.u`|\.u"/, "no loose U file beside the state");
 });
 
@@ -183,8 +184,37 @@ test("F9: U is opened by this script's own signing from the key file; no package
   assert.match(paste, /mainnet-money\.ts open-u /);
 });
 
+test("H2: sweep-u signs as U with U's own key, derived here from the seed: the key's public side is U", () => {
+  const seed64 = Uint8Array.from({ length: 64 }, (_, k) => 200 - k);
+  const scope = 777n;
+  for (const i of [0, 5, 13]) {
+    const U = depositAccount(seed64, scope, i).account;
+    const k = uSigner(seed64, scope, i, U);
+    assert.equal(Buffer.from(k.pub).toString("hex"), U);
+    const msg = Buffer.from("sweep");
+    const pub = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(k.pub).toString("base64url") }, format: "jwk" });
+    assert.ok(edVerify(null, msg, pub, edSign(null, msg, k.privateKey)));
+    assert.throws(() => uSigner(seed64, scope, i + 1, U), /not the run's U/);
+  }
+});
+
+test("H2: a sweep sends U's whole USDC to the named account, refused when the account cannot take it", () => {
+  assert.deepEqual(sweepProblems({ balance: 4_000_000n, toRegistered: true }), []);
+  assert.match(sweepProblems({ balance: 0n, toRegistered: true }).join(), /holds no USDC/);
+  assert.match(sweepProblems({ balance: 4_000_000n, toRegistered: false }).join(), /not registered on the token/);
+  assert.match(SRC, /"sweep-u": \(\) => sweepU\(rest\)/);
+  assert.match(SRC, /act\.call\("ft_transfer", \{ receiver_id: to, amount: String\(balance\) \}, 30n \* TGAS, 1n\)/);
+  // every way USDC stays at U names the way out: a bind that did not deposit, and USDC left after the deposit
+  assert.match(SRC, /deposit: \$\{json\(outcome\)\}[^`]*sweep-u/);
+  assert.match(SRC, /still holds \$\{left\} USDC[^`]*sweep-u/);
+  assert.match(SRC, /\.\.\.withdraws, \.\.\.sweeps,/, "the record holds every sweep");
+  const paste = readFileSync(path.join(HERE, "mainnet-money", "4-sweep-u.sh"), "utf8");
+  assert.match(paste, /mainnet-money\.ts sweep-u --state /);
+  assert.match(readFileSync(path.join(HERE, "mainnet-money", "1-run.sh"), "utf8"), /one transfer/);
+});
+
 test("the usage line names every command", () => {
   const r = spawnSync(process.execPath, [path.join(HERE, "mainnet-money.ts")], { encoding: "utf8" });
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /check\|run\|resume\|open-u\|record/);
+  assert.match(r.stderr, /check\|run\|resume\|open-u\|sweep-u\|record/);
 });

@@ -44,15 +44,20 @@
 //   node contracts/vault/scripts/mainnet-money.ts open-u --state <dir> --payer <account> --key-file <path> [--network n]
 //        the payer opens U: 0.01 NEAR (an implicit account exists once it holds NEAR) and its USDC registration,
 //        signed here from the key file (no binary of anyone else's sees it); each tx kept in <dir>/open-u.json
+//   node contracts/vault/scripts/mainnet-money.ts sweep-u --state <dir> [--network n]
+//        U signs (its key derived here from the seed) one ft_transfer of all the USDC it holds to the run's named
+//        account: the way out for USDC at U that was not deposited (a second transfer, a refused or struck bind, a
+//        front-run's refund, USDC sent after the deposit); kept in <dir>/sweep.json for the record
 //   node contracts/vault/scripts/mainnet-money.ts record --state <dir> --fund-tx <hash> <signer> [--fund-tx ...]
 //        [--settle-tx <hash> <signer>]   writes scripts/live-checks/vault-mainnet-money.run.json and .md
 import "../../../scripts/net-window.mjs";
-import { createHash, randomBytes, sign } from "node:crypto";
+import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule } from "../../../packages/kit/src/near/networks.ts";
+import { depositId } from "../../../packages/wallet/src/derive/keys.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../../..");
@@ -146,6 +151,26 @@ export function requestProblems(req: { recipient: string; changeValue: bigint; b
   return p;
 }
 
+/** U's signing key, derived from the seed (derive/keys.ts depositId), refused unless its public side is the run's U. */
+export function uSigner(seed64: Uint8Array, scope: bigint, i: number, U: string) {
+  const u = depositId(seed64, scope, i);
+  try {
+    if (u.id !== U) throw new Error(`index ${i} derives ${u.id}, not the run's U ${U}: nothing signed`);
+    const pub = Buffer.from(u.publicKey);
+    const privateKey = createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: Buffer.from(u.secretKey).toString("base64url"), x: pub.toString("base64url") }, format: "jwk" });
+    return { pub, privateKey };
+  } finally {
+    u.secretKey.fill(0);
+  }
+}
+
+/** [] when U's USDC may be swept to the named account: U holds some, and the account is registered on the token. */
+export function sweepProblems(a: { balance: bigint; toRegistered: boolean }): string[] {
+  if (a.balance <= 0n) return ["U holds no USDC: nothing to sweep"];
+  if (!a.toRegistered) return ["the named account is not registered on the token, so the transfer would fail: register it (storage_deposit) first"];
+  return [];
+}
+
 /** A run's fingerprint of its seed, kept in its run step: a step of another seed is never used. */
 export const fingerprintOf = (seed: Buffer): string => createHash("sha256").update(seed).update("vault-mainnet-money/fingerprint").digest("hex");
 
@@ -178,7 +203,7 @@ function durable(file: string, text: string, place: "link" | "rename", fs: Fs): 
   }
 }
 
-export const STEPS = ["run", "deposit", "withdraw", "open-u", "heard"] as const;
+export const STEPS = ["run", "deposit", "withdraw", "open-u", "heard", "sweep"] as const;
 export type Step = (typeof STEPS)[number];
 
 /** The run's folder: its seed (made once when `create`), and its steps, each its own file. */
@@ -490,13 +515,15 @@ async function go(argv: string[], create: boolean) {
     if (network === "testnet") deps.relayerAccount = relayers.bind;
     const outcome = await bindDeposit(seed64, { network, s: scope, i, noteId: note.id, amount }, deps);
     log(`bindDeposit: ${outcome.kind} in ${Date.now() - tBind} ms`);
-    if (outcome.kind !== "deposited") throw new Error(`deposit: ${json(outcome)}; the USDC is at U or in the vault: resume goes on from here`);
+    if (outcome.kind !== "deposited") throw new Error(`deposit: ${json(outcome)}; the USDC is at U or in the vault: resume goes on from here, and sweep-u sends what is at U to ${to}`);
     note = outcome.note;
     const calls = (await ns.get(note.id))?.calls ?? [];
     const txs = [...new Set([...calls.flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []), ...heard.bind])];
     const leaf = note.leaf;
     st.write("deposit", { amount: String(amount), bind_ms: Date.now() - tBind, txs, relayer: relayers.bind, before, after: await balances({ U }), leaf: { value: String(leaf.value), label: String(leaf.label), commitment: String(leaf.commitment), leaf_index: String(leaf.leafIndex) } });
     log(`deposited ${amount}: leaf ${leaf.leafIndex}; relayer txs ${txs.join(", ") || "none heard"}`);
+    const left = BigInt(await view2(rpcs, token, "ft_balance_of", { account_id: U }).catch(() => "0"));
+    if (left > 0n) log(`U still holds ${left} USDC that was not deposited: sweep-u sends it to ${to} (the run goes on)`);
   } else if (st.read("deposit") === undefined) {
     // landed in an earlier attempt whose step file was not written: the record takes the leaf from the chain
     st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
@@ -549,7 +576,7 @@ async function opened_mainnet_pair() {
 // ---- open-u: the payer opens U, signed here ----
 
 /** Signs and sends one transaction on the pair's first RPC, then reads it back FINAL on both; { hash } or throws. */
-async function sendTx(o: Opened, signer: string, key: any, receiver: string, actions: unknown[]) {
+async function sendTx(o: Opened, signer: string, key: any, receiver: string, actions: unknown[], keep: (hash: string) => void) {
   const { encodeTx } = await import("./testnet-usdc.mjs");
   const { b58decode, b58encode } = await import("./near-tx.mjs");
   const pk = `ed25519:${b58encode(key.pub)}`;
@@ -559,6 +586,7 @@ async function sendTx(o: Opened, signer: string, key: any, receiver: string, act
   const h = createHash("sha256").update(tx).digest();
   const signed = Buffer.concat([tx, Buffer.from([0]), sign(null, h, key.privateKey)]);
   const hash = b58encode(h);
+  keep(hash); // the hash is kept before it is sent: a stop after the send loses no tx of the record
   await fetch(o.urls[0], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: CARD, method: "send_tx", params: { signed_tx_base64: signed.toString("base64"), wait_until: "FINAL" } }), signal: AbortSignal.timeout(60_000) }).catch(() => null);
   await readBackBoth(o.urls, hash, signer);
   return hash;
@@ -602,14 +630,46 @@ async function openU(argv: string[]) {
     log(`${what}: ${hash} read back FINAL on both RPCs, every receipt a success`);
   };
   const acct = await accountOn(o.rpcs, U);
-  if (acct.every((x) => x === "absent")) keep(await sendTx(o, payer, key, U, [act.transfer(U_OPEN_YOCTO)]), `Transfer 0.01 NEAR to U ${U}`);
+  if (acct.every((x) => x === "absent")) keep(await sendTx(o, payer, key, U, [act.transfer(U_OPEN_YOCTO)], () => {}), `Transfer 0.01 NEAR to U ${U}`);
   else if (acct.some((x) => x === "absent")) throw new Error(`U ${U} exists on one RPC only: nothing sent; run this again in a minute`);
   if ((await view2(o.rpcs, o.token, "storage_balance_of", { account_id: U })) === null) {
     const b = await view2(o.rpcs, o.token, "storage_balance_bounds", {});
     if (b?.min !== b?.max) throw new Error(`the token's storage_balance_bounds ${json(b)} is not min = max: nothing sent`);
-    keep(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: U, registration_only: true }, 30n * TGAS, BigInt(b.min))]), `storage_deposit of U on ${o.token}`);
+    keep(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: U, registration_only: true }, 30n * TGAS, BigInt(b.min))], () => {}), `storage_deposit of U on ${o.token}`);
   }
   log(`U ${U} exists and is registered on both RPCs: send at least ${o.minDeposit} USDC (base units) to it from any wallet or exchange`);
+  process.exit(0);
+}
+
+// ---- sweep-u: U's USDC to the named account, signed by U ----
+
+async function sweepU(argv: string[]) {
+  const v = flags(argv, ["--state"], ["--network", "--bind-relayer"]);
+  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const { repoRoots } = await import("./deploy.mjs");
+  const { act } = await import("./testnet-usdc.mjs");
+  const st = stateDir(v["--state"]!, repoRoots(), { create: false });
+  const run = st.read("run");
+  if (run === undefined || run.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network) throw new Error("the folder holds no run step of this seed and network: nothing sent");
+  const U = run.U as string;
+  const to = await checkRecipient(o, run.to, [U]);
+  const balance = BigInt(await view2(o.rpcs, o.token, "ft_balance_of", { account_id: U }));
+  const toRegistered = (await view2(o.rpcs, o.token, "storage_balance_of", { account_id: to })) !== null;
+  const sp = sweepProblems({ balance, toRegistered });
+  if (balance <= 0n) {
+    log(sp[0]!);
+    process.exit(0);
+  }
+  if (sp.length) throw new Error(`refused, nothing sent: ${sp.join("; ")}`);
+  const seed64 = await seed64Of(st.seed);
+  const key = uSigner(seed64, o.scope, run.i, U);
+  seed64.fill(0);
+  const kept = st.read("sweep") ?? { txs: [] as { hash: string; signer: string; amount: string; to: string }[] };
+  const hash = await sendTx(o, U, key, o.token, [act.call("ft_transfer", { receiver_id: to, amount: String(balance) }, 30n * TGAS, 1n)], (h) => {
+    kept.txs.push({ hash: h, signer: U, amount: String(balance), to });
+    st.write("sweep", kept);
+  });
+  log(`ft_transfer of ${balance} from U ${U} to ${to}: ${hash} read back FINAL on both RPCs, every receipt a success`);
   process.exit(0);
 }
 
@@ -666,14 +726,15 @@ async function record(argv: string[]) {
   const st = stateDir(v["--state"]!, repoRoots(), { create: false });
   const run = st.read("run"), d = st.read("deposit"), w = st.read("withdraw"), u = st.read("open-u") ?? { txs: [] };
   const heard = st.read("heard") ?? { bind: [], withdraw: [] };
+  const sweeps = (st.read("sweep") ?? { txs: [] }).txs.map((t: any) => ({ hash: t.hash, signer: t.signer }));
   if (run?.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network || d === undefined || w?.done !== true) throw new Error("record: the run has not landed both legs");
-  const owners = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...named["--settle-tx"]];
+  const owners = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...sweeps, ...named["--settle-tx"]];
   for (const t of owners) await readBackBoth(o.urls, t.hash, t.signer); // each must read back a success, or nothing is written
   const deposits = await landedOf(o.urls, [...d.txs, ...heard.bind], d.relayer);
   const withdraws = await landedOf(o.urls, heard.withdraw, o.relayers.withdraw.relayer_account);
   const rp = recordProblems({ fund: named["--fund-tx"].length, deposit: deposits.length, withdraw: withdraws.length, status: w.row.status, settle: named["--settle-tx"].length });
   if (rp.length) throw new Error(`record: ${rp.join("; ")}`);
-  const txs = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...deposits, ...withdraws, ...named["--settle-tx"]];
+  const txs = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...deposits, ...withdraws, ...sweeps, ...named["--settle-tx"]];
   for (const t of txs) log(`${t.hash} (${t.signer}) read back FINAL on both operators, every receipt a success`);
   const runRec = {
     card: CARD, network: o.network, vault: o.vault, asset: o.token,
@@ -714,10 +775,10 @@ function flags(argv: string[], required: string[], optional: string[] = []): Rec
 
 const [cmd, ...rest] = process.argv.slice(2);
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const commands: Record<string, () => Promise<void>> = { check: () => check(rest), run: () => go(rest, true), resume: () => go(rest, false), "open-u": () => openU(rest), record: () => record(rest) };
+  const commands: Record<string, () => Promise<void>> = { check: () => check(rest), run: () => go(rest, true), resume: () => go(rest, false), "open-u": () => openU(rest), "sweep-u": () => sweepU(rest), record: () => record(rest) };
   const fn = cmd === undefined ? undefined : commands[cmd];
   if (!fn) {
-    console.error("usage: mainnet-money.ts check|run|resume|open-u|record ... (see the file's head)");
+    console.error("usage: mainnet-money.ts check|run|resume|open-u|sweep-u|record ... (see the file's head)");
     process.exit(2);
   }
   fn().catch((e) => {

@@ -75,6 +75,13 @@ test("3-record.sh passes the named funding and settle txs to the record", () => 
   assert.deepEqual(calls(w), [`node contracts/vault/scripts/mainnet-money.ts record --state ${w.state} --fund-tx ${"9".repeat(44)} sender.near --settle-tx ${"8".repeat(44)} r.near`]);
 });
 
+test("4-sweep-u.sh hands the run's folder to the driver's sweep, which signs as U: no key file, no runner", () => {
+  const w = world();
+  const r = exec(w, "4-sweep-u.sh");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(calls(w), [`node contracts/vault/scripts/mainnet-money.ts sweep-u --state ${w.state}`]);
+});
+
 test("no paste names a package runner, a downloaded CLI or a loose state file", () => {
   for (const f of readdirSync(DIR)) {
     const s = readFileSync(path.join(DIR, f), "utf8");

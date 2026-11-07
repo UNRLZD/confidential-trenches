@@ -10,7 +10,8 @@
 #      fee held to the device's own fee_max; any refusal stops here with nothing signed;
 #   2. the first time, makes the run's seed (written once, mode 600) and plans its note, and prints U; it then waits,
 #      with no time limit, for U to exist and hold at least 1 USDC: run paste 2 (2-open-u.sh) in a second terminal,
-#      then send USDC to U from any wallet or exchange; what lands is deposited whole;
+#      then send the whole amount to U in one transfer, from any wallet or exchange; what lands first is deposited
+#      whole, and USDC that reaches U after it is sent on by paste 4 (4-sweep-u.sh) to the named account;
 #   3. U's deposit (the wallet's bindDeposit to POST /v1/bind), its leaf read on both RPCs, then the withdrawal of the
 #      whole note less the relayer's fee to the named account (the wallet's withdrawRequest, POST /v1/withdraw),
 #      followed until the spends row shows it paid to that account on both RPCs.
