@@ -113,7 +113,7 @@ async function unexported(src) {
 test("every name the run takes from the kit and the wallet is exported there", async () => {
   const r = await unexported(RUN);
   assert.deepEqual(r.missing, []);
-  assert.equal(r.named, 7); // the dry run's quotes on the fork, and the wallet's pool, restore, notes, derive, queue and W's releases at a sell
+  assert.equal(r.named, 6); // the dry run's quotes on the fork, and the wallet's pool, restore, notes, derive and queue
   assert.equal(r.ns, 1); // the kit's index as kit
   // planted: the name the run called from 1343935 on, and a destructured name the module does not export
   assert.deepEqual((await unexported(RUN.replace("kit.evmPoolBuildQuoted(adapters", "kit.evmPoolBuild(adapters"))).missing, ["kit.evmPoolBuild from packages/kit/src/index.ts"]);

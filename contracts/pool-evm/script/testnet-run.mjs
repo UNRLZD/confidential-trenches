@@ -73,7 +73,6 @@ const { evmRestoreNotes } = await imp("packages/wallet/src/pool/evm-restore.ts")
 const { noteSecrets } = await imp("packages/wallet/src/notes/secrets.ts");
 const { entropyToWords, freshWallet, newEntropy, wordsToSeed64 } = await imp("packages/wallet/src/derive/index.ts");
 const { jOf } = await imp("packages/wallet/src/pool/queue.ts");
-const { evmReadSellReleases } = await imp("packages/wallet/src/pool/evm-releases.ts");
 const kitReq = createRequire(path.join(REPO, "packages/kit/package.json"));
 const { secp256k1 } = await import(pathToFileURL(kitReq.resolve("@noble/curves/secp256k1.js")).href);
 
@@ -520,24 +519,16 @@ export async function main(args, io = {}) {
       // under it refuses only zero, W and the pool), and in --sell-helper mode the helper sends only a Sell paying it
       // (apps/helper src/pool/evm.ts)
       const feeTo = lower(kit.evmPoolVenues()[chain].feeCollector ?? "");
-      // no sell while a release to W is not final on two RPCs (card evm-sell-no-release-in-flight, audit E-01): W's buy
-      // landed on W, so the run waits for its block to be final (the pool's own round, read by the relayer's sync; the
-      // run keeps no note store, so only what landed counts). A finalized block trails its head by up to ~1,376 s here
-      let releases;
-      for (let t = 0; ; t++) {
-        releases = await evmReadSellReleases({ seed64, chain, scope, w: W.address, notes: { list: async () => [] }, sync: relaySync });
-        if (releases.pending.length === 0) break;
-        if (t >= 360) throw new Error(`W ${W.address}: a release to W is still not final after 30 min`);
-        if (t % 12 === 0) console.log(`run: W's release in block ${releases.pending.map((p) => p.landed ?? p.deadlineMs).join(", ")} is not final yet (finalized ${releases.finalBlock}); the sell waits`);
-        await sleep(5000);
-      }
       const { q, built } = await fresh(
         // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
         // sell quote requires (it reads at that block or a later one)
-        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
+        // `sent`: the releases the device sent to W that have not landed (card evm-sell-no-release-in-flight): none, the
+        // run keeps no note store and its buy has landed; its Bought pays W no ETH, so the quote's own read of W's
+        // releases does not hold the sale for it
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block, sent: [] }),
         // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole, paid to the fee
         // recipient W signs (pool review round 3, L-1): the chain's FeeCollector, which forwards it to the sell sender
-        (q) => kit.evmPoolBuildSell(q, { feeRecipient: feeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n, releases }),
+        (q) => kit.evmPoolBuildSell(q, { feeRecipient: feeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),
       );
       const fee = built.feeCap;
       const sv = q.route.venue === "uniswap-v4" ? "v4" : "v3";

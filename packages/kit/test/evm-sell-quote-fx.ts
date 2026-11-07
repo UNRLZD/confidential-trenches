@@ -76,7 +76,25 @@ export type Model = {
   baseFee?: bigint | null;
   /** what the chain fee oracle answers, by selector (pool-fee.ts evmPoolChainFeeReads; 0 by default); null: it reverts */
   chainFee?: Record<string, bigint | null>;
+  /** the finalized block (card evm-sell-no-release-in-flight): 0x100 - 0x20 by default, 900 s before the head */
+  fin?: bigint;
+  /** the pool's Withdrawn and Bought logs (to WALLET unless `to`), answered to an eth_getLogs of its range and topic */
+  releases?: Release[];
 };
+export type Release = { kind: "withdraw" | "buy"; block: bigint; nullifier: bigint; to?: string };
+export const TOPIC_WITHDRAWN = "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a";
+export const TOPIC_BOUGHT = "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d";
+/** A release log as an RPC answers it, from `pool`. */
+export const releaseLog = (pool: string, r: Release, i = 0) => ({
+  address: pool,
+  topics: [r.kind === "withdraw" ? TOPIC_WITHDRAWN : TOPIC_BOUGHT, "0x" + W(BigInt(r.to ?? WALLET))],
+  data: "0x" + W(0xfeen) + W(10n ** 15n) + W(0n) + W(r.nullifier) + W(7n) + (r.kind === "buy" ? W(BigInt(TOKEN)) + W(5n) : ""),
+  blockNumber: "0x" + r.block.toString(16),
+  blockHash: "0x" + r.block.toString(16).padStart(64, "c"),
+  logIndex: "0x" + i.toString(16),
+  transactionHash: "0x" + "dd".repeat(32),
+  removed: false,
+});
 export type Seen = { pools: Pool[]; probes: { w: string; token: string; to: string; amount: bigint; code: string }[] };
 /** A provider on the modelled chain; every quote it is asked lands in `seen`. */
 export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmRpc {
@@ -94,7 +112,19 @@ export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmR
   };
   return async (calls: readonly EvmRpcCall[]) =>
     calls.map((c, id) => {
+      if (c.method === "eth_getBlockByNumber" && c.params[0] === "finalized") {
+        const f = m.fin ?? 0x100n - 0x20n;
+        return { jsonrpc: "2.0", id, result: { ...head, number: "0x" + f.toString(16), hash: "0x" + f.toString(16).padStart(64, "f"), timestamp: "0x" + (BigInt(head.timestamp) - 900n).toString(16) } };
+      }
       if (c.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id, result: { ...head } };
+      if (c.method === "eth_getLogs") {
+        const f = c.params[0] as { address: string; fromBlock: string; toBlock: string; topics: [string[], string] };
+        const lo = BigInt(f.fromBlock);
+        const hi = f.toBlock === "latest" ? 1n << 64n : BigInt(f.toBlock);
+        assert.deepEqual(f.topics[0], [TOPIC_WITHDRAWN, TOPIC_BOUGHT]);
+        const logs = (m.releases ?? []).map((r, i) => releaseLog(f.address, r, i)).filter((l) => BigInt(l.blockNumber) >= lo && BigInt(l.blockNumber) <= hi && l.topics[1] === f.topics[1].toLowerCase());
+        return { jsonrpc: "2.0", id, result: logs };
+      }
       assert.equal(c.method, "eth_call");
       const { to, data } = c.params[0] as { to: string; data: string };
       assert.equal((c.params[1] as { blockHash: string }).blockHash, HASH);
@@ -124,7 +154,7 @@ export const verdict = async (p: Promise<kit.EvmPoolSellQuote>) => {
 };
 // the route the buy that paid W took (required, review of edb4dbb F3): the standard 0.3% native pool
 export const BOUGHT = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
-export const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, boughtBlock: 0x100n, ...o });
+export const req = (chain: EvmPoolChain = "base", o: Record<string, unknown> = {}) => ({ chain, token: TOKEN, w: WALLET, amountIn: AMOUNT, slippageBps: 100, bought: BOUGHT, boughtBlock: 0x100n, sent: [], ...o });
 export const sell = (m: Model, chain: EvmPoolChain = "base", o: Record<string, unknown> = {}, m2: Model = m) =>
   sellQuoteWith(req(chain, o), [provider(m), provider(m2)], Date.now());
 /** v4 to the native asset, fee 3000: 2 ETH a token; every other pool 1 */

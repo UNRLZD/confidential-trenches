@@ -710,24 +710,46 @@ export const MUTANTS = [
   [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],
   // the sim signer's signature recovers to W over SellDelegate's own digest (review of the exec sim, LOW 3)
   [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
-  // no sell while a release to W is not final on two RPCs (card evm-sell-no-release-in-flight, audit E-01): the
-  // builder's guard, the verdict's record, its chain and W, and each rule of what is pending
-  [QD, "  evmSellReleasesClear(chain, w, releases);\n", "", S, NR],
+  // no sell while a release that pays W ETH is not final on two RPCs (card evm-sell-no-release-in-flight, audit E-01):
+  // the builder's guard, the verdict's record, its chain, W and block, and each rule of what is pending
+  [QD, "  evmSellReleasesClear(quote);\n", "", S, NR],
   [SR, "!MADE.has(releases as EvmSellReleases)", "false", S, NR],
   [SR, "  MADE.add(v);\n", "", S, NR],
-  [SR, "if (v.chain !== chain || ", "if (", S, NR],
-  [SR, " || v.w !== w.toLowerCase()) throw", ") throw", S, NR],
+  [SR, "if (v.chain !== quote.chain || ", "if (", S, NR],
+  [SR, " || v.w !== quote.w.toLowerCase()) throw", ") throw", S, NR],
+  [SR, "v.w !== quote.w.toLowerCase())", "v.w !== quote.w)", S, NR],
+  // the verdict's block is the quote's (review of 982a19bd, F1b)
+  [SR, "if (v.block !== quote.block.number) throw", "if (false) throw", S, NR],
+  [SR, "if (v.block !== quote.block.number) throw", "if (v.block < quote.block.number) throw", S, NR],
   [SR, "if (v.pending.length > 0) {", "if (false) {", S, NR],
-  [SR, "const me = w.toLowerCase();", "const me = w;", S, NR],
-  [SR, "if (recipient.toLowerCase() === me) paidW.push", "if (true) paidW.push", S, NR],
-  [SR, "if (recipient.toLowerCase() === me) paidW.push", "if (recipient === me) paidW.push", S, NR],
-  [SR, "if (p.block > finalBlock) pending.push(", "if (p.block > finalBlock + 1n) pending.push(", S, NR],
-  [SR, "if (p.block > finalBlock) pending.push(", "if (p.block >= finalBlock) pending.push(", S, NR],
+  // only a Withdrawn is pending, a Bought never (review of 982a19bd, F2), in the agreed tail and above the quote's block
+  // (F3)
+  [SR, 'for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw")', "for (const e of [...r.agreed, ...r.above]) if (true)", S, NR],
+  [SR, 'for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw")', 'for (const e of [...r.agreed]) if (e.kind === "withdraw")', S, NR],
+  [SR, 'for (const e of [...r.agreed, ...r.above]) if (e.kind === "withdraw")', 'for (const e of [...r.above]) if (e.kind === "withdraw")', S, NR],
+  [SR, "noteOf.get(e.nullifier) ?? null", "null", S, NR],
+  [SR, "    landed.add(e.nullifier);\n", "", S, NR],
+  [SR, "if (landed.has(e.nullifier)) throw", "if (false) throw", S, NR],
   [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (finalMs <= s.deadlineMs)", S, NR],
   [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (!landed.has(s.nullifier) && finalMs < s.deadlineMs)", S, NR],
   [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (!landed.has(s.nullifier))", S, NR],
   [SR, "const finalMs = fin.timestamp * 1000n;", "const finalMs = fin.timestamp;", S, NR],
-  [SR, 'if (landed.has(nullifier)) return bad("a nullifier released twice");', "", S, NR],
+  // the quote's own read (review of 982a19bd, F1): the device's list, the finalized block, the pages, the agreed block,
+  // the agreement up to it, the logs' checks
+  [QUOTE, "evmSellSentOf(req.sent) ?? refuse(", "evmSellSentOf(req.sent ?? []) ?? refuse(", S, NR],
+  [QUOTE, "hooked, releases });", "hooked });", S, NR],
+  [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (n - fin.number >= EVM_SELL_TAIL_MAX) return refuse(", S, NR],
+  [QUOTE, "for (let a = low(fin.number + 1n, n); ", "for (let a = low(fin.number, n); ", S, NR],
+  [QUOTE, 'toBlock: b === null ? "latest" : hx(b)', "toBlock: b === null ? hx(n) : hx(b)", S, NR],
+  [QUOTE, "if (header(got[part.length], who).hash !== block.hash) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "(x, y) => upTo(x) === upTo(y),", "() => true,", S, NR],
+  [QUOTE, "const above = new Map([...a, ...b]", "const above = new Map([...a]", S, NR],
+  [QUOTE, 't0 === TOPIC_BOUGHT ? "buy" : null', 't0 === TOPIC_BOUGHT ? "withdraw" : null', S, NR],
+  [QUOTE, 'nullifier: BigInt("0x" + data.slice(2 + 64 * 3, 2 + 64 * 4))', 'nullifier: BigInt("0x" + data.slice(2 + 64 * 2, 2 + 64 * 3))', S, NR],
+  [QUOTE, "|| removed === true) {", ") {", S, NR],
+  [QUOTE, "if (kind === null || lower(topics[1]) !== wTopic) return refuse(", "if (kind === null) return refuse(", S, NR],
+  [QUOTE, "if (keys.size !== out.length) return refuse(", "if (false) return refuse(", S, NR],
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;

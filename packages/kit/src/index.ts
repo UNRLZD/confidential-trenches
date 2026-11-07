@@ -46,7 +46,7 @@ export * from "./trade/evm/buy.ts";
 export * from "./trade/evm/sell.ts";
 // W's releases at a sell (card evm-sell-no-release-in-flight, audit E-01): the sell builder takes only a verdict this
 // made, with no release to W still on its way
-export { evmSellReleases, type EvmReleasePending, type EvmReleaseRead, type EvmSellReleases } from "./trade/evm/sell-releases.ts";
+export { EVM_SELL_SENT_MAX, type EvmReleasePending, type EvmSellReleases, type EvmSellSent } from "./trade/evm/sell-releases.ts";
 // the pins the helper's EVM pool sender sends a sale with (card helper-evm-sender), which the device's sim copies: the
 // sale's gas, its tip per chain and the authorization's intrinsic gas (no digest: the helper writes its own); and the
 // one reading of a signed sale's target and data as a route the builder makes, which the helper sends only on

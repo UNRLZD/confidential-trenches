@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Live check of card evm-sell-no-release-in-flight on SIGN_HOST (https://sign.confidential.unrealized.trade), audit
-// E-01: no EVM sale is built for a one-time wallet W while a release to W is not final on two RPCs, so a hostile route
-// can never pass minOut with a release's ETH. W's key lives only on the signing page, so its bundle is the one place a
-// Sell can be built and signed; the kit's sell builder (packages/kit/src/trade/evm/quoted.ts evmQuotedSell) refuses
-// release_in_flight unless it holds the kit's verdict on W's releases with nothing pending (sell-releases.ts).
+// E-01: no EVM sale is built for a one-time wallet W while a release that pays W ETH is not final on two RPCs, so a
+// hostile route can never pass minOut with a release's ETH. W's key lives only on the signing page, so its bundle is the
+// one place a Sell can be built and signed; the kit's sell builder (packages/kit/src/trade/evm/quoted.ts evmQuotedSell)
+// refuses release_in_flight unless the quote carries its own verdict on W's releases, read at the quote's block, with
+// nothing pending (sell-releases.ts).
 // What it proves, and only that: the served /app.js is the one index.html pins (its sha384), and when that bundle
 // carries the kit's EVM sell builder (any of BUILDER's refusals, string literals the minifier keeps), it carries every
 // line of the guard in GUARD with it. A bundle with no EVM sell builder passes, saying so: it can build no sale at all.
@@ -33,9 +34,10 @@ export const BUILDER = Object.freeze([
 ]);
 /** Each line of the guard, by its text (sell-releases.ts). */
 export const GUARD = Object.freeze({
-  "the builder refuses a sell without the kit's verdict on W's releases": "a sell is built only with W's releases read by evmSellReleases",
-  "a verdict made for another chain or another W is refused": "the releases read is another chain's or another W's",
-  "a release landed above the finalized block holds the sell until that block is final": "above the finalized block: the sell waits until block ",
+  "the builder refuses a sell without the quote's own verdict on W's releases": "a sell is built only with W's releases the sell quote read",
+  "a verdict read for another chain or another W is refused": "the releases read is another chain's or another W's",
+  "a verdict read at another block than the quote's is refused": ", not the quote's block ",
+  "a Withdrawn to W above the finalized block holds the sell until that block is final": "above the finalized block: the sell waits until block ",
   "a release sent and not landed holds the sell until it lands final or its deadline passes": "was sent and has not landed: the sell waits until it lands in a final block or a final block's time passes its deadline ",
   "the refusal's code": "release_in_flight",
 });

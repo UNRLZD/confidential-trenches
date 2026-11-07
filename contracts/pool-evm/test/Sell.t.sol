@@ -711,6 +711,32 @@ contract SellTest is SellBase {
     assertEq(address(pool).balance - _poolBefore, 0.5 ether - FEE, 'the release, less the fee, is the note');
   }
 
+  // Review a5956de3 of the card, item 1: the kit holds a sell only for a Withdrawn to W in the tail, never a Bought. A
+  // Bought pays W the bought token and no ETH (PrivacyPoolSimple.sol buy; its fallback emits Withdrawn), so a reorg that
+  // puts it back in the mempool and a route that lands it mid-sell meets no minOut. Where the bought token is the one W
+  // sells, W's balance of it no longer falls by exactly the amount, and the whole sell reverts at the exact-debit check:
+  // DebitNotExact where the buy pays less than the amount, an underflow (Panic 0x11) where it pays as much or more.
+  function test_aBoughtReplayedMidSellRevertsAtTheExactDebit() public {
+    uint256[2] memory _paid = [AMOUNT / 2, AMOUNT * 2];
+    for (uint256 _k; _k < 2; ++_k) {
+      PendingBuy _buy = new PendingBuy();
+      token.mint(address(_buy), _paid[_k]);
+      BuyReplayRouter _r = new BuyReplayRouter();
+      vm.deal(address(_r), OUT);
+      SellDelegate.Sell memory _s = _good();
+      _s.target = address(_r);
+      _s.data = abi.encodeCall(BuyReplayRouter.swap, (token, AMOUNT, _buy, W, OUT));
+      bytes memory _sig = _signed(_s);
+      uint256 _tokens = token.balanceOf(W);
+      vm.prank(SENDER);
+      if (_k == 0) vm.expectRevert(SellDelegate.DebitNotExact.selector);
+      else vm.expectRevert(abi.encodeWithSignature('Panic(uint256)', 0x11));
+      _w().sell(_s, FEE, _sig);
+      assertEq(token.balanceOf(W), _tokens, 'W keeps its tokens');
+      assertEq(_w().nonce(), 0, 'the nonce is not used');
+    }
+  }
+
   /*///////////////////////////////////////////////////////////////
       REVIEW ROUND 3, L-2: A COPIED PRECOMMITMENT (today's behaviour, held)
   //////////////////////////////////////////////////////////////*/
@@ -856,5 +882,22 @@ contract SkimRouter {
   function swap(MockToken _token, uint256 _pull, PendingRelease _release, address _w) external {
     _token.transferFrom(msg.sender, address(this), _pull);
     _release.land(_w);
+  }
+}
+
+/// A buy of W's own token, landed when a route calls it (a Bought a reorg put back in the mempool)
+contract PendingBuy {
+  function land(MockToken _token, address _to) external {
+    _token.transfer(_to, _token.balanceOf(address(this)));
+  }
+}
+
+/// A router that takes the amount and pays W `_pay` of ETH, and lands a pending buy on W in between
+contract BuyReplayRouter {
+  function swap(MockToken _token, uint256 _pull, PendingBuy _buy, address _w, uint256 _pay) external {
+    _token.transferFrom(msg.sender, address(this), _pull);
+    _buy.land(_token, _w);
+    (bool _ok,) = _w.call{value: _pay}('');
+    require(_ok, 'router: pay failed');
   }
 }
