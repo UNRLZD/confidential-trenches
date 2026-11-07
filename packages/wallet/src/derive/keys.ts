@@ -2,6 +2,7 @@
 //   seed64     BIP-39 seed of the 12 words, empty passphrase (wallet.md:54)
 //   W_{c,l,j}  fresh wallet at m/44'/coin'/a'/b', every step hardened, (a, b) from HKDF info "wallet" ‖ c ‖ l ‖ j
 //   U_{s,i}    one-time deposit id      HKDF info "onetime/in"     ‖ s ‖ i
+//   U^evm_{s,i} one-time EVM deposit wallet, secp256k1: HKDF info "onetime/in/evm" ‖ s ‖ i (card pool-deposits)
 //   R_{c,l,j}  one-time return id       HKDF info "onetime/return" ‖ c ‖ l ‖ j
 //   V_{l,j}    one-time refund id       HKDF info "onetime/refund" ‖ l ‖ j
 //   A_{l,j}    one-use arming account   HKDF info "onetime/arm"    ‖ l ‖ j
@@ -99,6 +100,8 @@ export const info = {
   profile: (k: number) => concat(ascii("profile"), counter("k", k)),
 };
 
+export const infoInEvm = (s: bigint, i: number): Uint8Array => concat(ascii("onetime/in/evm"), field("s", s), counter("i", i));
+
 export function hkdfSeed(seed64: Uint8Array, inf: Uint8Array, length: number): Uint8Array {
   return hkdf(sha512, seedOk(seed64), ascii(HKDF_SALT), inf, length);
 }
@@ -120,6 +123,50 @@ export const returnId = (seed64: Uint8Array, c: Chain, l: bigint, j: number) => 
 export const refundId = (seed64: Uint8Array, l: bigint, j: number) => oneTime(seed64, info.refund(l, j));
 export const armAccount = (seed64: Uint8Array, l: bigint, j: number) => oneTime(seed64, info.arm(l, j));
 export const profileKey = (seed64: Uint8Array, k: number) => oneTime(seed64, info.profile(k));
+
+// ---------- the one-time EVM deposit wallet U^evm_{s,i} (card pool-deposits slice 3, CO's call 7 Nov) ----------
+// U on Base and Robinhood needs a secp256k1 key. Its private key is HKDF-SHA512(seed64, salt "blindfill/v1", info
+// "onetime/in/evm" ‖ s (32 B) ‖ i (4 B big-endian), 32 B), read as a big-endian integer. A value of 0 or at least the
+// curve order n is no key: try k takes bytes [32k, 32k + 32) of the same HKDF output stream (RFC 5869 output of length
+// L is the first L bytes of any longer one), so try 0 is the 32-byte output and no index i ever shifts or repeats.
+// The odds of try 0 failing are about 2^-128. HKDF-SHA512 gives at most 255 * 64 bytes: 510 tries.
+const SECP_N = secp256k1.Point.CURVE().n;
+const EVM_KEY_TRIES = (255 * 64) / 32;
+/** The first try k whose 32 bytes, as a big-endian integer, are in [1, n): its index and a copy of the key. The stream
+ *  is the caller's to zero. */
+export function secpKeyOfStream(stream: Uint8Array): { k: number; key: Uint8Array } {
+  for (let k = 0; (k + 1) * 32 <= stream.length; k++) {
+    const key = stream.subarray(32 * k, 32 * k + 32);
+    let x = 0n;
+    for (const b of key) x = (x << 8n) | BigInt(b);
+    if (x !== 0n && x < SECP_N) return { k, key: key.slice() };
+  }
+  throw new Error("no secp256k1 key in this stream");
+}
+export interface OneTimeEvm {
+  info: string; // the HKDF info bytes, hex
+  address: string; // EIP-55 0x address
+  publicKey: Uint8Array; // 33 B compressed
+  secretKey: Uint8Array; // the 32-byte secp256k1 private key
+}
+/** U^evm_{s,i}: deposit number i of the EVM pool of scope s. */
+export function depositIdEvm(seed64: Uint8Array, s: bigint, i: number): OneTimeEvm {
+  const inf = infoInEvm(s, i);
+  // try 0 alone first; only if it is refused, the whole stream
+  for (const length of [32, 32 * EVM_KEY_TRIES]) {
+    const stream = hkdfSeed(seed64, inf, length);
+    try {
+      const { key } = secpKeyOfStream(stream);
+      const publicKey = secp256k1.getPublicKey(key, true);
+      return { info: hex(inf), address: evmAddress(publicKey), publicKey, secretKey: key };
+    } catch {
+      // every try in this stream refused: a longer one, whose first bytes are this one's
+    } finally {
+      stream.fill(0);
+    }
+  }
+  throw new Error("no secp256k1 key for this id");
+}
 
 // ---------- SLIP-10 ed25519, hardened steps only ----------
 const HARDENED = 0x80000000;
