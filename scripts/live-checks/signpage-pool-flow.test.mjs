@@ -12,9 +12,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { PIN, RUN, check, getRead } from "./signpage-pool-flow.mjs";
-import { REREADS, account, answerOf, behindOf, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
+import { REREADS, account, answerOf, behindOf, devnetPin, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./signpage-pool-flow.answers.json", import.meta.url), "utf8"));
+/** The pin the recordings were checked against: the deploy record each carries (pool-sol-deploy.devnet.json at 1dfba94d). */
+const OLD = devnetPin(A.good.deployment);
 
 /** Answers served in recorded order by (url, method, params); `plant` may change one recorded result. */
 function replay(answers, plant = (a) => a.json) {
@@ -29,7 +31,7 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, headers: new Headers(a.retry_after ? { "retry-after": a.retry_after } : {}), json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign, helper = rec.helper, sleep = async () => {}) => check({ program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep, sign, helper });
+const run = (rec, plant, sign = rec.sign, helper = rec.helper, sleep = async () => {}) => check({ deployment: rec.deployment, pinTable: rec.pin_table, program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep, sign, helper });
 /** A run the answers file keeps as changes on another (`from`): `set` gives the answer at index i a Retry-After or
  * another body, `copy` serves those answers again after the rest. */
 function derived(name) {
@@ -49,14 +51,14 @@ const waits = () => {
 };
 
 test("recorded good answer: the pinned devnet program and pool, read on two devnet RPCs: PASS", async () => {
-  assert.equal(A.good.program, PIN.program);
+  assert.equal(A.good.program, OLD.program);
   const r = await run(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(new Set(A.good.answers.map((a) => a.url)).size, 2, "two RPCs");
   assert.ok(r.lines.some((l) => l.startsWith("ok   upgrade authority is none")));
   assert.ok(r.lines[0].startsWith("ok   SIGN_HOST's /app.js is the mainnet build"), r.lines[0]);
   for (const [name, sig] of Object.entries(RUN)) assert.ok(r.lines.some((l) => l.startsWith(`ok   ${name} ${sig}: succeeded on both RPCs`)), name);
-  assert.ok(r.lines.some((l) => l.startsWith(`ok   table ${PIN.table}`)));
+  assert.ok(r.lines.some((l) => l.startsWith(`ok   table ${A.good.table}`)));
 });
 
 test("recorded bad answer: the pool account in the table's place: FAIL", async () => {
@@ -101,12 +103,12 @@ test("planted on the good answer: SIGN_HOST serving a testnet pin, or not read: 
 });
 
 test("planted on the good answer: the pool owned by another program, or an upgrade authority set: FAIL", async () => {
-  const owner = await run(A.good, (a) => (a.method === "getAccountInfo" && a.params[0] === PIN.pool && a.json?.result?.value ? ((a.json.result.value.owner = "11111111111111111111111111111111"), a.json) : a.json));
+  const owner = await run(A.good, (a) => (a.method === "getAccountInfo" && a.params[0] === OLD.pool && a.json?.result?.value ? ((a.json.result.value.owner = "11111111111111111111111111111111"), a.json) : a.json));
   assert.equal(owner.ok, false);
-  assert.ok(owner.lines.some((l) => l.startsWith(`BAD  pool ${PIN.pool}`)), owner.lines.join("\n"));
+  assert.ok(owner.lines.some((l) => l.startsWith(`BAD  pool ${OLD.pool}`)), owner.lines.join("\n"));
   const authority = await run(A.good, (a) => {
     const v = a.json?.result?.value;
-    if (a.method !== "getAccountInfo" || !v || a.params[0] === PIN.program || v.owner !== "BPFLoaderUpgradeab1e11111111111111111111111") return a.json;
+    if (a.method !== "getAccountInfo" || !v || a.params[0] === OLD.program || v.owner !== "BPFLoaderUpgradeab1e11111111111111111111111") return a.json;
     const d = Buffer.from(v.data[0], "base64");
     if (d[0] !== 3) return a.json;
     d[12] = 1;
@@ -131,15 +133,15 @@ test("card signpage-pool-flow-answers, recorded null_behind run: a null at a slo
   assert.equal(r.ok, true, r.lines.join("\n"));
   const again = r.lines.filter((l) => l.startsWith("info ") && l.includes("answered behind"));
   assert.equal(again.length, 1, r.lines.join("\n"));
-  assert.ok(again[0].includes(`getAccountInfo "${PIN.pool}" null at slot 518538800, https://api.devnet.solana.com a value at slot 518538841`), again[0]);
-  assert.ok(r.lines.some((l) => l.startsWith(`ok   pool ${PIN.pool}`) && l.includes("onfinality")), r.lines.join("\n"));
+  assert.ok(again[0].includes(`getAccountInfo "${OLD.pool}" null at slot 518538800, https://api.devnet.solana.com a value at slot 518538841`), again[0]);
+  assert.ok(r.lines.some((l) => l.startsWith(`ok   pool ${OLD.pool}`) && l.includes("onfinality")), r.lines.join("\n"));
 });
 
 test("card signpage-pool-flow-answers, recorded null_same_slot run: a null at the other provider's own slot FAILs, never read again, naming the answer", async () => {
   const w = waits();
   const r = await run(derived("null_same_slot"), undefined, A.good.sign, A.good.helper, w.sleep);
   assert.equal(r.ok, false);
-  assert.ok(r.lines.some((l) => l.startsWith(`BAD  pool ${PIN.pool}`) && l.endsWith("on https://solana-devnet.api.onfinality.io/public: missing (HTTP 200, null at slot 518538841)")), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD  pool ${OLD.pool}`) && l.endsWith("on https://solana-devnet.api.onfinality.io/public: missing (HTTP 200, null at slot 518538841)")), r.lines.join("\n"));
   assert.ok(!r.lines.some((l) => l.includes("answered behind")), r.lines.join("\n"));
 });
 
@@ -149,13 +151,13 @@ test("card signpage-pool-flow-answers: a null behind that stays behind FAILs at 
   const lagging = async (url) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ jsonrpc: "2.0", result: { context: { slot: url === "a" ? 10 : 11 }, value: url === "a" ? null : { owner: "o", executable: false, lamports: 1, data: ["", "base64"] } } }) });
   const walk = await onTwoOperators(["a", "b"], (u) => u, lagging, async (url, say, f) => {
     if (url === "a") reads++;
-    const v = await account(f, url, PIN.pool, async () => {});
-    say(!!v, `pool on ${url}: ${v ? "a value" : `missing (${answerOf(f, "getAccountInfo", PIN.pool)})`}`);
+    const v = await account(f, url, OLD.pool, async () => {});
+    say(!!v, `pool on ${url}: ${v ? "a value" : `missing (${answerOf(f, "getAccountInfo", OLD.pool)})`}`);
   }, { sleep: async () => {} });
   assert.equal(reads, 1 + REREADS);
   assert.ok(walk.lines.some(([p, t]) => p === false && t === "pool on a: missing (HTTP 200, null at slot 10)"), JSON.stringify(walk.lines));
   assert.ok(walk.lines.some(([p, t]) => p === null && t.startsWith(`a still answers behind b after ${REREADS} read(s) again`)), JSON.stringify(walk.lines));
-  const pool = (slot, value) => ({ method: "getAccountInfo", params: [PIN.pool], status: 200, json: { result: { context: { slot }, value } } });
+  const pool = (slot, value) => ({ method: "getAccountInfo", params: [OLD.pool], status: 200, json: { result: { context: { slot }, value } } });
   assert.equal(behindOf([pool(10, null)], [pool(11, {})]).length, 1);
   assert.equal(behindOf([pool(11, null)], [pool(11, {})]).length, 0, "the same slot is a disagreement");
   assert.equal(behindOf([pool(12, null)], [pool(11, {})]).length, 0, "a slot past it is a disagreement");
@@ -165,7 +167,7 @@ test("card signpage-pool-flow-answers: a null behind that stays behind FAILs at 
   const gone = await run(A.good, (a) => (a.method === "getTransaction" && a.params[0] === RUN.sell && a.url === A.good.rpcs[1] ? ((a.json.result = null), a.json) : a.json));
   assert.equal(gone.ok, false);
   assert.ok(gone.lines.some((l) => l.startsWith(`BAD  sell ${RUN.sell}`) && l.includes(`not found (HTTP 200, null on ${A.good.rpcs[1]})`)), gone.lines.join("\n"));
-  const refused = await run(A.good, (a) => (a.method === "getAccountInfo" && a.params[0] === PIN.table && a.url === A.good.rpcs[1] && a.json.result ? { jsonrpc: "2.0", error: { code: -32602, message: "Invalid param" } } : a.json));
+  const refused = await run(A.good, (a) => (a.method === "getAccountInfo" && a.params[0] === A.good.table && a.url === A.good.rpcs[1] && a.json.result ? { jsonrpc: "2.0", error: { code: -32602, message: "Invalid param" } } : a.json));
   assert.equal(refused.ok, false);
   assert.ok(refused.lines.some((l) => l === `BAD  read on ${A.good.rpcs[1]}: getAccountInfo: HTTP 200 {"code":-32602,"message":"Invalid param"}`), refused.lines.join("\n"));
 });
@@ -181,4 +183,29 @@ test("card signpage-pool-flow-answers: Retry-After in seconds or as an HTTP date
   const r = await getRead(async () => { const a = answers.shift(); return { status: a.status, headers: new Headers(a.ra ? { "retry-after": a.ra } : {}) }; }, "u", w.sleep);
   assert.equal(r.status, 200);
   assert.deepEqual(w.ms, [3000]);
+});
+
+test("the pin is the deploy record's: the good recording PASSES against its own record and FAILS against today's", async () => {
+  assert.equal(OLD.program, "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ");
+  assert.equal((await run(A.good)).ok, true);
+  const now = devnetPin();
+  assert.notEqual(now.program, OLD.program);
+  // today's record in the recording's place, the same chain answers: another program, pool and code
+  const r = await run({ ...A.good, deployment: now.record });
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.includes(`BAD  the program read is the pin's: ${OLD.program}`), r.lines.join("\n"));
+  // the run's transactions are not on today's pool, and the helper's answer names the recording's program
+  for (const name of Object.keys(RUN)) assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${name} ${RUN[name]}`)), name);
+  assert.ok(r.lines.some((l) => l.startsWith("BAD  the helper's fee answer names the pin's program")), r.lines.join("\n"));
+  // a live run's default is today's record
+  assert.equal(PIN.program, now.program);
+  assert.equal(PIN.pool, now.pool);
+});
+
+test("the table pin is the recording's: the good recording FAILS against today's table pin", async () => {
+  assert.notEqual(A.good.pin_table, PIN.table);
+  const r = await run({ ...A.good, pin_table: PIN.table });
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.includes(`BAD  the table read is the pin's: ${A.good.table}`), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD  buy ${RUN.buy}`)), r.lines.join("\n"));
 });

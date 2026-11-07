@@ -18,8 +18,8 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, answerOf, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
-import { PIN, SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
+import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, answerOf, devnetPin, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
+import { SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
 const KEY = "signpage-pool-notes";
@@ -38,13 +38,15 @@ export async function readSignFlow(fetchFn = fetch) {
   return { status: r.status, bytes: text.length, found: TESTNET_ONLY.filter((s) => text.includes(s)), flow: text.includes(DEPOSIT_FLOW) };
 }
 
-/** The verdict for the run `run` (with `precommitment` in its place when given), read through `fetchFn`, and SIGN_HOST's read `sign`. */
-export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign } = {}) {
+/** The verdict for the run `run` (with `precommitment` in its place when given), read through `fetchFn`, and SIGN_HOST's read `sign`,
+ *  against the pin of the deploy record `deployment` (today's, pool-sol-deploy.devnet.json; a replay passes its recording's). */
+export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), deployment = devnetPin().record, precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign } = {}) {
+  const pin = devnetPin(deployment);
   const lines = [];
   const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
   say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0,
     `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}], deposit flow ${sign.flow}` : "not read"}`);
-  say(run.cluster === "devnet" && run.program === PIN.program && run.pool === PIN.pool, `the run is on the pinned devnet pool: ${run.cluster}, ${run.program}, ${run.pool}`);
+  say(run.cluster === "devnet" && run.program === pin.program && run.pool === pin.pool, `the run is on the pinned devnet pool ${pin.pool}: ${run.cluster}, ${run.program}, ${run.pool}`);
   say(precommitment === run.precommitment, `the precommitment read is the run's: ${precommitment}`);
   const problems = operatorProblems(rpcs, "devnet");
   say(problems.length === 0, `two devnet operators or more, in order: ${rpcs.join(", ")}${problems.length ? `: ${problems.join("; ")}` : ""}`);
@@ -101,8 +103,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const rec = recorder();
     const sign = await readSignFlow();
     const precommitment = opt("--precommitment") ?? run.precommitment;
-    const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
+    const deployment = devnetPin().record;
+    const r = await check({ run, deployment, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign });
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);

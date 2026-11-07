@@ -11,6 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BASE, judge, PACE_P50_MS, POOL_READS, read, SIGN } from "./pool-buy-send-fast.mjs";
+import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "pool-buy-send-fast.answers.json"), "utf8"));
@@ -27,7 +28,8 @@ const replay = (run) => async (url, init) => {
   assert.equal(body.method, r.method);
   return new Response(r.body, { status: r.status, headers: r.headers });
 };
-const run = async (rec) => judge(await read(BASE, replay(rec)));
+// each recording is read again for the pin it carries (its deploy record, pool-sol-deploy.devnet.json at 1dfba94d)
+const run = async (rec, deployment = rec.deployment) => judge(await read(BASE, replay(rec), devnetPin(deployment)));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (rec, f) => ({ ...rec, reads: rec.reads.map((x, i) => f(x, i) ?? x) });
 
@@ -90,4 +92,22 @@ test("made from the good run: a 1-request-a-second provider, a mainnet read, a r
   assert.equal(judge(star).ok, false);
   const noCommit = edit(g, (x, i) => (i === 0 ? { ...x, headers: { ...x.headers, "x-helper-commit": "dev" } } : undefined));
   assert.equal(judge(noCommit).ok, false);
+});
+
+test("the pin is the deploy record's: the good recording PASSES against its own record and FAILS against today's", async () => {
+  const old = devnetPin(A.good_local.deployment);
+  const now = devnetPin();
+  assert.equal(old.program, "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ");
+  assert.notEqual(now.program, old.program);
+  assert.equal((await run(A.good_local)).ok, true);
+  // the same answers read for today's pin: the pool read is owned by the recording's program, not today's
+  const r = await run(A.good_local, now.record);
+  assert.equal(r.ok, false);
+  const b = bad(r);
+  assert.equal(b.length, 1, b.join("\n"));
+  assert.ok(b[0].startsWith(`BAD [solana-devnet getAccountInfo] the devnet pool ${now.pool}, owned by ${now.program}: 200 ${old.program}`), b[0]);
+  // a recording read with no deploy record at all is refused, not passed
+  assert.throws(() => judge({ reads: A.good_local.reads }), /not a devnet deploy record/);
+  // a live run's reads name today's pool and program
+  assert.ok(JSON.stringify(POOL_READS).includes(now.pool) && JSON.stringify(POOL_READS).includes(now.program));
 });

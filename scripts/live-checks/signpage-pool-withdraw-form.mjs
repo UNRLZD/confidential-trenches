@@ -6,22 +6,24 @@
 //   - each part's two transactions of the run (scripts/live-checks/signpage-pool-withdraw-form.md), at finalized on
 //     both devnet RPCs of two operators, read as base64 and decoded here, each succeeded with the same bytes on both:
 //     - the release: two signers, the helper's devnet fee payer (the pin) then W; after the compute budget exactly one
-//       instruction, a tag 2 release of the pinned program with W its 2nd account (the recipient); no lookup table;
+//       instruction, a tag 2 release of the pinned program on the pinned pool (its 1st account) with W its 2nd (the
+//       recipient); no lookup table. The program and pool are the deploy record's (pool-sol-deploy.devnet.json, read by
+//       devnetPin); a replay passes the record its recording carries (its `deployment`);
 //     - the onward send: one signer, that same W, its fee payer; exactly one instruction, a System transfer from W to
 //       To of the part; no lookup table; To's balance up by exactly the part, and W left with nothing.
-// The pins, To and the run's parts are written out here, not read from the repo.
+// The fee payer, To and the run's parts are written out here, not read from the repo.
 //   node scripts/live-checks/signpage-pool-withdraw-form.mjs [--tx <release>:<onward>:<part>] [--record <file>] [--answer <file>]
 // --tx reads other transactions in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, onTwoOperators, operatorOf, rpc } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, devnetPin, onTwoOperators, operatorOf, rpc } from "./pool-sol-deploy.mjs";
 
 const KEY = "signpage-pool-withdraw-form";
 export const SIGN = "https://sign.confidential.unrealized.trade";
-/** SOL_POOLS.devnet in the testnet build. */
-export const PIN = Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" });
+/** SOL_POOLS.devnet's fee payer in the testnet build: the helper's devnet one. */
+export const PIN = Object.freeze({ feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" });
 /** The address typed for the run: our devnet wallet. */
 export const TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 export const SYSTEM = "11111111111111111111111111111111";
@@ -84,8 +86,10 @@ export function decode(b) {
 
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
-/** The verdict on an answer { sign: { index, sha384 }, run: [{ part, release: { signature, reads }, onward }] }. */
+/** The verdict on an answer { deployment, sign: { index, sha384 }, run: [{ part, release: { signature, reads }, onward }] },
+ *  against the pin of its deploy record `deployment`. */
 export function judge(a) {
+  const pool = devnetPin(a.deployment ?? null); // an answer carries its record: none is refused, never read as today's
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a.sign?.index ?? "")?.[1];
@@ -116,7 +120,8 @@ export function judge(a) {
       const rest = m.ixs.filter((ix) => m.keys[ix.program] !== COMPUTE_BUDGET);
       if (rest.length !== 1) bad(`${tag}: not the release alone after the compute budget`);
       const r = rest[0];
-      if (!r || m.keys[r.program] !== PIN.program || r.data[0] !== 2) bad(`${tag}: not a tag 2 release of the pinned program`);
+      if (!r || m.keys[r.program] !== pool.program || r.data[0] !== 2) bad(`${tag}: not a tag 2 release of the pinned program ${pool.program}`);
+      else if (m.keys[r.accounts[0]] !== pool.pool) bad(`${tag}: the release is not on the pinned pool ${pool.pool}`);
       else if (m.keys[r.accounts[1]] !== m.keys[1]) bad(`${tag}: the release's recipient is not W`);
       else W = m.keys[1];
     }
@@ -152,7 +157,7 @@ export async function read(run = RUN, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, 
   };
   const parts = [];
   for (const p of run) parts.push({ part: String(p.part), release: await tx(p.release), onward: await tx(p.onward) });
-  return { sign: { index, sha384: sha384(js) }, run: parts };
+  return { deployment: devnetPin().record, sign: { index, sha384: sha384(js) }, run: parts };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {

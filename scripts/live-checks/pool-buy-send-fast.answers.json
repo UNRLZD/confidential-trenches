@@ -1,6 +1,76 @@
 {
  "note": "good_local: apps/helper at af47aaaa (re-review L-2) run on the Mac, 2026-11-05 23:41Z, the devnet pool pinned (POOL_SOLANA_PROGRAM_DEVNET 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ, its fee payer a key made in memory for the run) and SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com for the recording only: the restore's scan forwarded (9 marks), the open scan refused. bad_unpinned: the same helper with no POOL_SOLANA_PROGRAM_DEVNET, 23:37Z: the restore's scan refused 400. bad_deployed: HELPER_HOST at main 3d416775dd4244ab5a713092a414594bf65d2003, before this card, 23:41Z: /v1/rpc/solana-devnet 404, the pool path reads refused 400",
  "good_local": {
+  "deployment": {
+   "cluster": "devnet",
+   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+   "rpc": "https://api.devnet.solana.com",
+   "at": "2026-11-03T19:30:39.249Z",
+   "program_id": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "programdata": "2z2CxFYEeik3PQsui67mxUFFjAVZcmb1z61GJiPdyDrv",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "scope": "2e2c02e1ea70ff51ed15a9e901d9e6d2a0852b2df75582b775dd65346029d0eb",
+   "so_len": 77472,
+   "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+   "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "ci_run": "41700702945",
+   "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "deposit": {
+    "value": "10000000",
+    "nonce": "1",
+    "precommitment": "13d795c96f00c2a5ea68c15e29ba995b6914a00da16e14d9ce596fd57921bc6a",
+    "label": "1c1b38e96453a87883eed3197fb66f3cf68371442d2c12cf19038ef87acdc59b",
+    "commitment": "0e4076e2b452c124ac30d8d23e4ec2017d2e796ca1ab7a273d6398c1b905f6f9"
+   },
+   "funder": "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn",
+   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+   "need": "421550680",
+   "need_parts": {
+    "program_account": "833120",
+    "programdata": "394436600",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "980000"
+   },
+   "funder_after": "0",
+   "swept": "1200240",
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "3Pk3GhfX9nZ8NnLA69rah6afoCBDMJJbqRtkWLHhm533XYr4ZGJ339sQGyJ7GWwt3pVbhT6xYiQqL6V5Kk3jLbMc"
+    },
+    {
+     "step": "deploy with the upgradeable loader, --final",
+     "signature": "5uAzzsgscZsdPHDLqBy9DZKRLxDYCBaEc2iU4JBgPonNAxJJzn76evSNKML3B8GETpcp5iuMkd3qBwP9tZyhiVMg"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (--final: to none)",
+     "signature": "66BcwYwsdXDmMmbgWg9yfcTuUCR97Y8Ahk6V1vu8pRHG5dqomp8qydc8sCCUAqqxBbLgmFULHVS8e6WgofBuaNf"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "3A1jysvq6P2CJMTxZD2oardRS5BEtKSuUakHaSFUGUzc4Zs8ahWYurrNhivJWX6vFbZxdtXG95x92bUfshd5gshW"
+    },
+    {
+     "step": "deposit 0.01 SOL (tag 1)",
+     "signature": "D2xcLtj9sBWpwT2HoNMt8kromhZKDmnvSVjn78CvHbAGLW8h66tCt8APP11wCWgo94iJwUD69o6ZUCKs8Rd3uwj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "25QsubihKQh3rebfAd9Nbsd8t6dt63KdSWAbNhJTbfZai9JdGYERxc2W5xmccHiy41Kz2mmRpKH2rb5KsJ9dMJJj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "2g8ypRJJNggQCusW9EuJWrwnTkcjq5fU7wyTWdjfme45rfUcWF8ntu1VZTba88dd57qeD5HX3Ud7fjfQ2Db7eVhf"
+    }
+   ],
+   "funders": [
+    "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn"
+   ]
+  },
   "base": "http://127.0.0.1:18787",
   "reads": [
    {
@@ -420,6 +490,76 @@
   ]
  },
  "bad_unpinned": {
+  "deployment": {
+   "cluster": "devnet",
+   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+   "rpc": "https://api.devnet.solana.com",
+   "at": "2026-11-03T19:30:39.249Z",
+   "program_id": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "programdata": "2z2CxFYEeik3PQsui67mxUFFjAVZcmb1z61GJiPdyDrv",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "scope": "2e2c02e1ea70ff51ed15a9e901d9e6d2a0852b2df75582b775dd65346029d0eb",
+   "so_len": 77472,
+   "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+   "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "ci_run": "41700702945",
+   "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "deposit": {
+    "value": "10000000",
+    "nonce": "1",
+    "precommitment": "13d795c96f00c2a5ea68c15e29ba995b6914a00da16e14d9ce596fd57921bc6a",
+    "label": "1c1b38e96453a87883eed3197fb66f3cf68371442d2c12cf19038ef87acdc59b",
+    "commitment": "0e4076e2b452c124ac30d8d23e4ec2017d2e796ca1ab7a273d6398c1b905f6f9"
+   },
+   "funder": "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn",
+   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+   "need": "421550680",
+   "need_parts": {
+    "program_account": "833120",
+    "programdata": "394436600",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "980000"
+   },
+   "funder_after": "0",
+   "swept": "1200240",
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "3Pk3GhfX9nZ8NnLA69rah6afoCBDMJJbqRtkWLHhm533XYr4ZGJ339sQGyJ7GWwt3pVbhT6xYiQqL6V5Kk3jLbMc"
+    },
+    {
+     "step": "deploy with the upgradeable loader, --final",
+     "signature": "5uAzzsgscZsdPHDLqBy9DZKRLxDYCBaEc2iU4JBgPonNAxJJzn76evSNKML3B8GETpcp5iuMkd3qBwP9tZyhiVMg"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (--final: to none)",
+     "signature": "66BcwYwsdXDmMmbgWg9yfcTuUCR97Y8Ahk6V1vu8pRHG5dqomp8qydc8sCCUAqqxBbLgmFULHVS8e6WgofBuaNf"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "3A1jysvq6P2CJMTxZD2oardRS5BEtKSuUakHaSFUGUzc4Zs8ahWYurrNhivJWX6vFbZxdtXG95x92bUfshd5gshW"
+    },
+    {
+     "step": "deposit 0.01 SOL (tag 1)",
+     "signature": "D2xcLtj9sBWpwT2HoNMt8kromhZKDmnvSVjn78CvHbAGLW8h66tCt8APP11wCWgo94iJwUD69o6ZUCKs8Rd3uwj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "25QsubihKQh3rebfAd9Nbsd8t6dt63KdSWAbNhJTbfZai9JdGYERxc2W5xmccHiy41Kz2mmRpKH2rb5KsJ9dMJJj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "2g8ypRJJNggQCusW9EuJWrwnTkcjq5fU7wyTWdjfme45rfUcWF8ntu1VZTba88dd57qeD5HX3Ud7fjfQ2Db7eVhf"
+    }
+   ],
+   "funders": [
+    "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn"
+   ]
+  },
   "base": "http://127.0.0.1:18787",
   "reads": [
    {
@@ -839,6 +979,76 @@
   ]
  },
  "bad_deployed": {
+  "deployment": {
+   "cluster": "devnet",
+   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+   "rpc": "https://api.devnet.solana.com",
+   "at": "2026-11-03T19:30:39.249Z",
+   "program_id": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "programdata": "2z2CxFYEeik3PQsui67mxUFFjAVZcmb1z61GJiPdyDrv",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "scope": "2e2c02e1ea70ff51ed15a9e901d9e6d2a0852b2df75582b775dd65346029d0eb",
+   "so_len": 77472,
+   "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+   "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "ci_run": "41700702945",
+   "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "deposit": {
+    "value": "10000000",
+    "nonce": "1",
+    "precommitment": "13d795c96f00c2a5ea68c15e29ba995b6914a00da16e14d9ce596fd57921bc6a",
+    "label": "1c1b38e96453a87883eed3197fb66f3cf68371442d2c12cf19038ef87acdc59b",
+    "commitment": "0e4076e2b452c124ac30d8d23e4ec2017d2e796ca1ab7a273d6398c1b905f6f9"
+   },
+   "funder": "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn",
+   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+   "need": "421550680",
+   "need_parts": {
+    "program_account": "833120",
+    "programdata": "394436600",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "980000"
+   },
+   "funder_after": "0",
+   "swept": "1200240",
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "3Pk3GhfX9nZ8NnLA69rah6afoCBDMJJbqRtkWLHhm533XYr4ZGJ339sQGyJ7GWwt3pVbhT6xYiQqL6V5Kk3jLbMc"
+    },
+    {
+     "step": "deploy with the upgradeable loader, --final",
+     "signature": "5uAzzsgscZsdPHDLqBy9DZKRLxDYCBaEc2iU4JBgPonNAxJJzn76evSNKML3B8GETpcp5iuMkd3qBwP9tZyhiVMg"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (--final: to none)",
+     "signature": "66BcwYwsdXDmMmbgWg9yfcTuUCR97Y8Ahk6V1vu8pRHG5dqomp8qydc8sCCUAqqxBbLgmFULHVS8e6WgofBuaNf"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "3A1jysvq6P2CJMTxZD2oardRS5BEtKSuUakHaSFUGUzc4Zs8ahWYurrNhivJWX6vFbZxdtXG95x92bUfshd5gshW"
+    },
+    {
+     "step": "deposit 0.01 SOL (tag 1)",
+     "signature": "D2xcLtj9sBWpwT2HoNMt8kromhZKDmnvSVjn78CvHbAGLW8h66tCt8APP11wCWgo94iJwUD69o6ZUCKs8Rd3uwj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "25QsubihKQh3rebfAd9Nbsd8t6dt63KdSWAbNhJTbfZai9JdGYERxc2W5xmccHiy41Kz2mmRpKH2rb5KsJ9dMJJj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "2g8ypRJJNggQCusW9EuJWrwnTkcjq5fU7wyTWdjfme45rfUcWF8ntu1VZTba88dd57qeD5HX3Ud7fjfQ2Db7eVhf"
+    }
+   ],
+   "funders": [
+    "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn"
+   ]
+  },
   "base": "https://api.confidential.unrealized.trade",
   "reads": [
    {
