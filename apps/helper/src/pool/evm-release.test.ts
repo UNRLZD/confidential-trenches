@@ -89,10 +89,12 @@ test("the helper's release digest is the pool's: cast's EIP-712 of the pool's Wi
 });
 
 test("every withdraw and buy that landed on Base Sepolia and Robinhood testnet recovers to the W its run named, under the kit's pinned chain id and the pool it ran on", () => {
-  assert.deepEqual(LANDED.txs.map((t) => t.kind).sort(), ["buy", "buy", "buy", "buy", "buy", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw"]);
-  // the kit's pinned Base Sepolia pool has its own landings: a buy that swapped, one whose swap failed, and withdraws
-  const pinned = LANDED.txs.filter((t) => t.network === "base-sepolia" && t.pool === evmPoolVenues()["base-sepolia"].pool);
-  assert.deepEqual(pinned.map((t) => `${t.kind}${t.swapFailed ? " (swap failed)" : ""}`).sort(), ["buy", "buy (swap failed)", "withdraw", "withdraw", "withdraw"]);
+  assert.deepEqual(LANDED.txs.map((t) => t.kind).sort(), ["buy", "buy", "buy", "buy", "buy", "buy", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw", "withdraw"]);
+  // each kit-pinned pool has its own landings: on Base Sepolia a buy that swapped, one whose swap failed, and withdraws;
+  // on Robinhood testnet a buy and two withdraws
+  const pinned = (n: "base-sepolia" | "robinhood-testnet") => LANDED.txs.filter((t) => t.network === n && t.pool === evmPoolVenues()[n].pool).map((t) => `${t.kind}${t.swapFailed ? " (swap failed)" : ""}`).sort();
+  assert.deepEqual(pinned("base-sepolia"), ["buy", "buy (swap failed)", "withdraw", "withdraw", "withdraw"]);
+  assert.deepEqual(pinned("robinhood-testnet"), ["buy", "withdraw", "withdraw"]);
   for (const t of LANDED.txs) {
     const v = evmPoolVenues()[t.network as "base-sepolia"];
     assert.ok(t.pool === v.pool || t.pool === FIRST_POOL[t.network], `${t.hash}: the kit's pinned pool or the first set's`);
