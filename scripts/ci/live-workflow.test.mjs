@@ -119,9 +119,10 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's forty-three checks (signpage-shell runs four ways, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's forty-four checks (signpage-shell runs four ways, wallet-withdraw-move-out, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 43);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 44);
+  assert.ok(sign.include.some((e) => e.key === "wallet-withdraw-move-out" && !e.chrome && e.args === ""), "wallet-withdraw-move-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-release-reads-paced" && !e.chrome && e.args === ""), "solana-release-reads-paced runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposit-sent-end" && !e.chrome && e.args === ""), "pool-deposit-sent-end runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-written-accounts-whole" && !e.chrome && e.args === ""), "solana-written-accounts-whole runs after every sign deploy");
