@@ -157,7 +157,7 @@ import {
 } from "@blindfill/kit";
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
-import { heldPerClient, throttleOf } from "../limits/limits.ts";
+import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, type ProviderHolds } from "../limits/limits.ts";
 
 /** POST /v1/pool/evm/send's body limit, and the calldata's (a withdraw is 4 + 32 x 32 = 1,028 bytes, WITHDRAW_LEN). */
 export const POOL_EVM_BODY_MAX = 4_096;
@@ -1433,13 +1433,43 @@ export const POOL_EVM_COLLECTOR_ENV = {
 } as const;
 
 /**
+ * `rpc` (provider `url`'s client) drawn from the helper's one pace and hold for that provider (card
+ * robinhood-mainnet-rpcs; helper-evm-sender review 4 Nov 22:38Z, L1): each call waits while the provider is held, then
+ * takes its post as a caller's read (limits.ts take, background false), so it draws the CALLER_ROOM the swap and maker
+ * reads leave and never spends the provider's limit outside the pace, however often a halted chain's reads are asked
+ * again; a throttle it is answered holds the provider for every path (its Retry-After, else 1 s). A provider with no
+ * pace (an env URL of the host's own) is only held.
+ */
+export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, sleep: (ms: number) => Promise<void> = (ms) => new Promise((go) => setTimeout(go, ms))): EvmRpc {
+  return async (method, params) => {
+    for (;;) {
+      const h = holds.heldMs(url);
+      const w = h > 0 ? h : holds.take(url, 1, false);
+      if (w === 0) break;
+      await sleep(w);
+    }
+    try {
+      return await rpc(method, params);
+    } catch (e) {
+      if (throttleOf(e, true) > 0) {
+        const after = (e as { afterMs?: unknown }).afterMs;
+        holds.hold(url, typeof after === "number" && after > 0 ? Math.min(Math.ceil(after / 1000), RETRY_AFTER_MAX_S) : 1);
+      }
+      throw e;
+    }
+  };
+}
+
+/**
  * The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off (a
  * sell key set alone is refused). A network whose venue in the kit (`venues`, the kit's own list) pins a sell sender
  * starts only with that sell key: the device sims each sale as sent from the pin (the kit's checks/evm/quote.ts
  * simmedSells), so a sale from any other key would run where the sim did not. With no sell key, or on a chain whose venue
  * pins no sell sender (the sell key is then not used), the network starts and refuses every sell (503 not_configured).
+ * `holds`: the helper's one pace and hold per provider (limits.ts providerHolds), which each sender's reads draw on
+ * (pacedEvmRpc); the server passes its own, shared with the swap, maker and /v1/rpc reads.
  */
-export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues()): Map<string, EvmPoolSender> {
+export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues(), holds?: ProviderHolds): Map<string, EvmPoolSender> {
   const out = new Map<string, EvmPoolSender>();
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
     const [pool, key, fee, feeTo, rpcs] = names.map((n) => env[n] ?? "");
@@ -1469,7 +1499,11 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     if (rpcs === "" && pair === undefined) throw new Error(`${names[4]} must be set: the kit lists no fee providers for ${network}`);
     const urls = rpcs === "" ? [...pair!] : rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[4]} must be two different RPC URLs`);
-    const providers = urls.map((u) => solanaJsonRpc(u)) as unknown as [EvmRpc, EvmRpc]; // a plain JSON-RPC client
+    // a plain JSON-RPC client, drawn from the helper's pace for its provider when the server gives one
+    const providers = urls.map((u) => {
+      const r = solanaJsonRpc(u) as unknown as EvmRpc;
+      return holds === undefined ? r : pacedEvmRpc(u, r, holds);
+    }) as [EvmRpc, EvmRpc];
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     // sales go only from the pin: a chain with none starts with sales off, never with an unpinned key
     const sells = sellKey !== "" && pin !== undefined;

@@ -36,7 +36,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 
 try {
   const venue = evmPoolVenues()[a.network];
-  const providers = venue?.providers;
+  const providers = venue?.poolProviders ?? venue?.providers;
   const feeProviders = (venue as { feeProviders?: readonly string[] } | undefined)?.feeProviders ?? providers;
   const pinned = venue?.pool;
   if (venue === undefined || pinned === undefined || providers === undefined || feeProviders === undefined) throw new Error(`network: no pinned pool or providers for ${String(a.network)}`);

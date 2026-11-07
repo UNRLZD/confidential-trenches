@@ -67,6 +67,12 @@ export type EvmPoolVenue = {
    *  which live check evm-buy-hookdata-fee reads after every deploy; `providers` need not (a quote reads the latest
    *  block). */
   readonly feeProviders?: readonly [string, string];
+  /** The pool's own list, where `providers` cannot page the pool's logs (card robinhood-mainnet-rpcs): the wallet's pool
+   *  sync and pool reads take it as a pair with spares (the wallet's evmPair: the first two the seats, the rest spares),
+   *  each of another operator, each seat paging the pool's eth_getLogs over the sync's page (packages/wallet/src/pool/
+   *  evm.ts EVM_LOG_PAGE_BLOCKS) from the deploy block to the head. A quote ranks `providers` by eth_call speed, which no
+   *  log read measures. Absent: `providers` is the pool's list too. */
+  readonly poolProviders?: readonly string[];
   readonly maxLag?: number;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
@@ -249,6 +255,28 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Globalstake refused a state read at the block 600 s back, "historical state ... is not available" (card
       // evm-quote-warm-round fold 8, 2026-11-05 01:15Z from this Mac)
       feeProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"] as const),
+      // The pool's list (card robinhood-mainnet-rpcs): the quote list's first two cannot page the pool's logs.
+      // Every keyless Robinhood mainnet RPC the chain's docs (docs.robinhood.com/chain/connecting: its own RPC; GlobalStake
+      // and dRPC named) and the chainid.network and DefiLlama chainlist entries for 4663 name, read 2026-11-07
+      // 01:42-01:50Z from this Mac on the pool's filter (an address, its three topics in one position) over 100, 1,000,
+      // 10,000 and 100,000 blocks to the head and 10,000 and 100,000 blocks from 13M back:
+      // - rpc.mainnet.chain.robinhood.com (Robinhood; nitro v3.12.3-rc.4, logs' blockTimestamp 0x0): all six, 270 ms;
+      //   30 of 30 pages of 100,000 walking back 3M blocks, p50/p95 270/356 ms.
+      // - robinhood.api.pocket.network (Pocket, on its own pocket.network; nitro v3.11.2, logs' blockTimestamp set, so
+      //   not Robinhood's node): all four at the head, 13M back 10,000 and "-32602: eth_getLogs block range too large
+      //   (max 10001 blocks)" at 100,000; its backends differ: 23 of 30 pages of 100,000 back 3M blocks (6 "max 10001", 1
+      //   "exceeds maximum 50000", which the pager asks again, then halves), 20 of 20 of 10,000, p50 208-220 ms. The
+      //   PoolManager's Swap logs over 100 blocks the same as Robinhood's own, digest for digest; CORS from the signing
+      //   page's origin 204 and 200, allow-origin that origin; x-ratelimit-limit 1200 a minute.
+      // - rpc-robinhood.globalstake.io (GlobalStake; nitro v3.12.1, blockTimestamp set): all four at the head and 10,000
+      //   13M back, but 0.5-6.6 s and no answer in 15 s at 100,000 13M back and past the head: a spare, never a seat.
+      // Not taken: robinhood-rpc.publicnode.com (HTTP 403 "Archive requests require a personal token" from 1,000 blocks),
+      // robinhood.drpc.org (code 35 at 1,000), robinhood.daybreak-rpc.network (2,000), rpc-robinhood.blockmachine.io
+      // and robinhood-mainnet-rpc.blockreq.com (the newest 5,000 and 1,024 blocks keyless), api.blockvectra.com (100
+      // blocks, its history window), the Tatum gateway (100, then 429), 4663.rpc.thirdweb.com (1,000, then 429),
+      // rpc.degenprotocol.io (Pocket's very words "max 10001 blocks", and a finalized block above its head),
+      // robinhood.rpc.blxrbdn.com and rpc.nodeflare.app (403), lb.routeme.sh (429), rpc.ordofi.network (no answer).
+      poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]),
       // blocks 104,343,212 and 105,310,444 are 99,125 s apart on rpc.mainnet.chain.robinhood.com (read 2026-11-03
       // 19:38Z): 0.102 s a block, so 100 blocks are about 10 s
       maxLag: 100,

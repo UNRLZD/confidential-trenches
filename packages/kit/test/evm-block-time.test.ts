@@ -54,3 +54,34 @@ test("each testnet's pool pair pages the pool's logs at the pool sync's full pag
   }
 });
 
+
+// Card robinhood-mainnet-rpcs: Robinhood mainnet's pool list (`poolProviders`, else `providers`) is where the wallet's
+// pool sync pages the pool's logs from its deploy block, its first two the seats (the wallet's evmPair). Each seat must
+// page the pool's filter over the sync's full page and be another operator's, so no one operator alone can lie. The
+// widest each answered on the pool's filter, the worst of its backends (2026-11-07 01:42-01:50Z, the comment at the
+// list): Robinhood's own 100,000 to the head and 13M back; Pocket 100,000 at the head and 10,001 13M back.
+// robinhood-rpc.publicnode.com, the quote list's first, refused 1,000 blocks (HTTP 403 "Archive requests require a
+// personal token") and robinhood.drpc.org, its second, 1,000 (code 35): seated, one operator synced the pool alone.
+const MAINNET_WIDEST: Record<string, number> = {
+  "rpc.mainnet.chain.robinhood.com": 100_000,
+  "robinhood.api.pocket.network": 10_001,
+  "robinhood-rpc.publicnode.com": 100,
+  "robinhood.drpc.org": 100,
+};
+const operatorOf = (host: string) => host.split(".").slice(-2).join(".");
+
+test("Robinhood mainnet's pool list seats two operators that each page the pool's logs at the sync's full page (never publicnode's archive refusal or dRPC's 100 blocks)", () => {
+  const r = evmPoolVenues().robinhood as { poolProviders?: readonly string[]; providers?: readonly string[] };
+  const list = r.poolProviders ?? r.providers ?? assert.fail("robinhood: no pool list");
+  assert.ok(Object.isFrozen(list), "the list is frozen");
+  assert.ok(list.length >= 2, "a pair at least");
+  const hosts = list.map((u) => new URL(u).host);
+  for (const u of list) assert.match(u, /^https:\/\/[a-z0-9.-]+$/, `${u}: a keyless https URL`);
+  assert.equal(new Set(hosts.map(operatorOf)).size, hosts.length, "every provider another operator");
+  for (const h of hosts.slice(0, 2)) {
+    assert.ok(h in MAINNET_WIDEST, `${h}'s widest page on the pool's logs was never read`);
+    assert.ok(MAINNET_WIDEST[h]! >= PAGE, `${h} pages the pool's logs at ${MAINNET_WIDEST[h]} blocks, under the sync's ${PAGE}`);
+  }
+  // the quote list stays the quote list: its order is the cold quote's (card rh-cold-quote), untouched by the pool's
+  assert.equal(r.providers?.[0], "https://robinhood-rpc.publicnode.com");
+});
