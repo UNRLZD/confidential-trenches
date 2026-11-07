@@ -16,6 +16,7 @@ export {
   evmIsDeviceSellQuote,
   evmPoolBuyQuote,
   evmPoolSellQuote,
+  evmSellRevertedPools,
   EvmQuoteError,
   type EvmHookTake,
   type EvmPoolBuyQuote,

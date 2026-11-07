@@ -23,8 +23,13 @@ const code = (f: () => unknown): string => {
   }
   return "built";
 };
-const record = (chain: string) =>
-  JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+// pool-evm-deploy's set, its pool and verifier the chain's newest pool set's (pool-evm-deploy.mjs poolFile: card
+// pool-evm-buy-pays-revert's, whose buy pays a failed swap's chunk to W)
+const record = (chain: string): Record<string, { address: string }> => {
+  const first = JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/pool-evm-deploy.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
+  const pool = JSON.parse(readFileSync(DEPLOY.poolFile(chain), "utf8")).contracts as Record<string, { address: string }>;
+  return { ...first, PrivacyPoolSimple: pool.PrivacyPoolSimple!, WithdrawalVerifier: pool.WithdrawalVerifier! };
+};
 // the SellDelegate at the pool-review-3 build (the 11-field Sell the kit signs, its fee to the signed feeRecipient),
 // deployed again by card evm-testnet-delegate-review3 (card evm-selldelegate-exact-debit's and card evm-sell-v4's
 // delegates before it, which the build file freezes: they dispatch the 10-field sell)
@@ -36,7 +41,7 @@ const sellRecord = (chain: string) => sellFile("evm-testnet-delegate-review3", c
 const collector = (chain: string) => sellFile("evm-fee-collector", chain).FeeCollector!.address;
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
-const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
+const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }>; poolFile: (chain: string) => string };
 
 const NOW = 1_800_000_000;
 enableTimers(mock.timers, { apis: ["Date"], now: NOW * 1000 });

@@ -96,6 +96,10 @@ type RpcQueue = { lastOf: Map<string, number>; slots: RpcSlot[]; limits: Map<str
 const queueOfUrl = new Map<string, RpcQueue>();
 const queueOfFn = new WeakMap<SolanaRpc, RpcQueue>();
 const bareOf = new WeakMap<SolanaRpc, SolanaRpc>();
+// The queue whose slot is making its call in this tick. A slot calls the outermost wrapper it was given (a caller's
+// fault watch runs under pacing), never the bare provider; a paced wrapper on that queue called inside it (paced again,
+// or under a caller's wrapper) is that slot's own call, sent at once, never queued behind the slot it runs in.
+let inSlot: RpcQueue | null = null;
 const WINDOW_MAX_MS = 60_000;
 // The queue's clock: monotonic, so a step of the wall clock (an NTP fix, a user changing the time) can never make the
 // calls in a window look older than they are and let one more through.
@@ -138,7 +142,6 @@ function queueWith(rpc: SolanaRpc, limit: SolanaRpcLimit): RpcQueue {
 }
 function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: (params: readonly unknown[]) => Promise<unknown>; wait: Promise<void> | null; drop: () => void } {
   const queue = queueWith(rpc, limit);
-  const bare = bareOf.get(rpc) ?? rpc;
   const now = queueNow();
   queue.slots = queue.slots.filter((x) => !x.started || x.t > now - WINDOW_MAX_MS);
   const slot: RpcSlot = { t: fitsAt(queue.slots, queue.limits.values(), method, Math.max(now, queue.lastOf.get(method) ?? 0)), method, started: false };
@@ -156,11 +159,14 @@ function rpcSlot(rpc: SolanaRpc, limit: SolanaRpcLimit, method: string): { run: 
     if (ms > 0) return new Promise<void>((r) => setTimeout(r, ms)).then(() => run(params));
     slot.t = queueNow();
     slot.started = true;
+    const was = inSlot;
+    inSlot = queue;
     // Stamped again once the call has been handed over: a pause in between (a GC, a slow tick) then makes the call look
     // later, never earlier, than when it left this queue, so the window this queue counts never starts too soon.
     try {
-      return bare(method, params);
+      return rpc(method, params);
     } finally {
+      inSlot = was;
       slot.t = queueNow();
     }
   };
@@ -217,12 +223,23 @@ export function solanaProviderLimits(providerRps?: SolanaProviderRps): readonly 
 export function solanaSameProvider(a: SolanaRpc, b: SolanaRpc): boolean {
   return (bareOf.get(a) ?? a) === (bareOf.get(b) ?? b) || (a.url !== undefined && b.url !== undefined && urlKey(a.url) === urlKey(b.url));
 }
+/** `call` as the provider `rpc` under a wrapper of the caller's (a fault watch): the same provider to
+ *  solanaSameProvider and in the same shared queue, its URL carried. `call` calls the provider once, synchronously: a
+ *  paced call of the same queue made synchronously inside a slot's call is that slot's own, so a second one would go
+ *  out on the first one's turn, past the queue. */
+export function solanaWrappedRpc(rpc: SolanaRpc, call: (method: string, params: readonly unknown[]) => Promise<unknown>): SolanaRpc {
+  const bare = bareOf.get(rpc) ?? rpc;
+  const out: SolanaRpc = rpc.url === undefined ? call : Object.assign(call, { url: rpc.url });
+  bareOf.set(out, bare);
+  return out;
+}
 /** The provider with every call in its shared queue (SOLANA_KEYLESS_RPC_LIMIT when no limit is named). */
 export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KEYLESS_RPC_LIMIT): SolanaRpc {
   const bare = bareOf.get(rpc) ?? rpc;
-  queueWith(bare, limit);
+  const queue = queueWith(bare, limit);
   const paced = (method: string, params: readonly unknown[]): Promise<unknown> => {
-    const s = rpcSlot(bare, limit, method);
+    if (inSlot === queue) return rpc(method, params);
+    const s = rpcSlot(rpc, limit, method);
     // a call its limit allows now starts in this tick, as the bare provider's would
     return s.wait ? s.wait.then(() => s.run(params)) : s.run(params);
   };

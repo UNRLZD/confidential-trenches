@@ -348,7 +348,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Uniswap v3 SwapRouter02, the v3 adapter's router (scripts/live-checks/pool-evm-deploy.mjs CHAINS: its code hash
       // read on sepolia.base.org and base-sepolia-rpc.publicnode.com)
       routers: Object.freeze(["0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4"]),
-      pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+      // the pool whose buy pays a failed swap's chunk to W instead of reverting (card pool-evm-buy-pays-revert:
+      // scripts/live-checks/pool-evm-buy-pays-revert.base-sepolia.json, deploy tx
+      // 0x47fa9d64f391118425e42cec266d7bee4d8c0117dda24e5e33219b0cc366424d, its verifier 0xa46aee47…0be3; its code the
+      // build's on sepolia.base.org and base-sepolia-rpc.publicnode.com, 7 Nov 04:5xZ). The 3 Nov pool
+      // 0xb239a38af69b68e6c5c305df64985f283b5d5fe5 keeps the build before it (pool-evm-deploy.build.json frozen). That
+      // run's adapters and delegate are the same builds as the pins below, which stay
+      pool: "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
       adapters: bare({ v3: "0xee89916bc4bdeee46dbcaf8fad2b7604724b5645", v4: "0x706b3f75e80be70494d1414b85788462bfeb7eb1" }),
       // the delegate at the pool-review-3 build: the 11-field Sell (0x0c2cb9ca) this kit signs, its fee paid to the
       // signed feeRecipient (card evm-testnet-delegate-review3: scripts/live-checks/evm-testnet-delegate-review3.
@@ -394,7 +400,12 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       middles: Object.freeze([]),
       // no Uniswap v3 on Robinhood testnet (M365): no v3 adapter and no router; a sell goes through the PoolManager
       routers: Object.freeze([]),
-      pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
+      // the pool whose buy pays a failed swap's chunk to W (card pool-evm-buy-pays-revert: scripts/live-checks/
+      // pool-evm-buy-pays-revert.robinhood-testnet.json, deploy tx
+      // 0x83ab94117dc9659a95f08966be9f49e02dc313afb54e8fccf1fbd25fca82567b, its verifier 0xe9a698c1…d27b; its code the
+      // build's on rpc.testnet.chain.robinhood.com and robinhood-sepolia-rpc.publicnode.com, 7 Nov 04:5xZ); the 3 Nov
+      // pool 0xe5e948414a89c23e73d76cd740dacdd9364c25d5 keeps the build before it
+      pool: "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
       adapters: bare({ v4: "0x6c43a39fcb2ea65f47625ef5ce5fea98fc669797" }),
       // the delegate at the pool-review-3 build, selling through the v4 PoolManager alone here (card
       // evm-testnet-delegate-review3: scripts/live-checks/evm-testnet-delegate-review3.robinhood-testnet.json, deploy tx

@@ -591,7 +591,9 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       holds,
       rpcs: url === undefined || url === "" ? SWAP_RPCS[chain] : [url, ...SWAP_RPCS[chain]],
       index: INDEX_RPCS[chain],
-      listed: async (token) => (await snapshot())?.tokens.has(token) ?? false,
+      // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
+      // refresh between drops tokens (card robinhood-listed-tape-opens)
+      listed: lists.listed,
       // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's
       hint: async (token) => {
         const s = await snapshot();
@@ -614,7 +616,6 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
 export function solanaTradesFromEnv(env: Record<string, string | undefined>, lists: Lists, token: Token, rpc?: Rpc, slots?: Map<SlotName, Slot>): SolanaTrades {
   const ws = env.SOLANA_STREAM_WS_URL;
   const url = env.SOLANA_TRADES_RPC_URL;
-  let seen: { asOfMs: number; tokens: Set<string> } | null = null;
   // card helper-solana-failover: the keyed trades provider and stream each fall back to the public one (rpc/slot.ts)
   const slot = createSlot("trades", url !== undefined && url !== "");
   const streamSlot = createSlot("stream", ws !== undefined && ws !== "");
@@ -628,16 +629,9 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     log: (line) => console.log(`helper: ${line}`),
     // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
     ...(rpc === undefined ? {} : { budget: (u: string, m: string) => rpc.background("solana", u, m), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),
-    listed: async (mint) => {
-      const a = await lists.get();
-      // no lists answer yet: unknown, never "not listed" (trades.ts listed)
-      if (a.status !== 200 || a.asOfMs === undefined) return null;
-      if (seen === null || seen.asOfMs !== a.asOfMs) {
-        const snap = JSON.parse(a.body) as { lists: Record<string, { token: string }[]> };
-        seen = { asOfMs: a.asOfMs, tokens: new Set(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token))) };
-      }
-      return seen.tokens.has(mint);
-    },
+    // every mint an answer of the last SERVED_MS held (card robinhood-listed-tape-opens); no answer yet: unknown, never
+    // "not listed" (trades.ts listed)
+    listed: lists.listed,
   });
 }
 

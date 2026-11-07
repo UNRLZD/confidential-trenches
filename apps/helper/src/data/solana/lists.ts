@@ -346,6 +346,50 @@ export type ListsAnswer = { status: number; body: string; gzip?: Buffer; asOfMs?
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
 
+/** A token a lists answer held stays listed this long after the last answer that held it: its chart and tape open
+ *  (card robinhood-listed-tape-opens). A user acts on the answer they read, and a list refresh between that read and
+ *  the tap drops tokens: helper live run 42345906841 (2026-11-07 06:12Z) read 12 Robinhood tokens from the lists and 3
+ *  of their tapes answered 404 not_found in ~800 ms, gone from the next answer, while a token whose pool was found
+ *  already opened for the pool's keep (../evm/swaps.ts POOL_KEEP_MS). [design: the pool's keep, 6 h, so a token opens
+ *  as long whether or not its pool was found first; the gate stays one on what the lists served, never any address.] */
+export const SERVED_MS = 6 * 3_600_000;
+/** Tokens kept per chain, the least recently served dropped first: a chain's lists (60 to 300 rows a refresh) turn
+ *  over far fewer than this in SERVED_MS. */
+export const SERVED_MAX = 5_000;
+
+/** The tokens a chain's lists served, each with the last time an answer held it. */
+export function servedTokens(now: () => number) {
+  const at = new Map<string, number>(); // the least recently served first
+  const put = (token: string, t: number) => {
+    at.delete(token);
+    at.set(token, t);
+    while (at.size > SERVED_MAX) at.delete(at.keys().next().value!);
+  };
+  return {
+    /** Every token of an answer as it is built. */
+    add(tokens: Iterable<string>): void {
+      const t = now();
+      for (const x of tokens) put(x, t);
+    },
+    /** Whether an answer of the last SERVED_MS held the token. */
+    has(token: string): boolean {
+      const t = at.get(token);
+      return t !== undefined && now() - t <= SERVED_MS;
+    },
+    /** What a next process takes over: [token, time] pairs, least recently served first. */
+    state(): [string, number][] {
+      return [...at];
+    },
+    /** A previous process's pairs (checked by the caller), merged by time, the newest kept per token. */
+    restore(pairs: readonly [string, number][]): void {
+      const t = now();
+      const merged = [...at, ...pairs.filter(([, s]) => s <= t && t - s <= SERVED_MS)].sort((a, b) => a[1] - b[1]);
+      at.clear();
+      for (const [x, s] of merged) put(x, s);
+    },
+  };
+}
+
 /** Discover's Solana lists, refreshed at most once per FRESH_MS and shared by every caller. */
 export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => number } = {}) {
   const now = deps.now ?? Date.now;
@@ -353,6 +397,8 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
   // when `last` was built: freshness counts from our own read, since the proxy's cache may hand back an older answer
   let builtAt = -Infinity;
   let running: Promise<ListsAnswer> | null = null;
+  // every token an answer held, and when (listed)
+  const served = servedTokens(now);
 
   // each token's launch, read on chain once, and the progress of those on a curve each refresh (origin.ts)
   const origins = createOrigins(rpcAccounts(rpc, true)); // rpc.ts RPC_RESERVE
@@ -391,10 +437,18 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
     const hints = new Map([...n.hints, ...t5.hints, ...t1.hints]);
     const asks = [...n.rows, ...t5.rows, ...t1.rows].map((r) => ({ mint: r.token as string, hint: hints.get(r.token as string), createdS: r.created_s as number | null }));
     await origins.refresh(asks, now());
-    const body = JSON.stringify(snapshot({ new: n.rows, trending_5m: t5.rows, trending_1h: t1.rows }, origins.get, asOf));
+    const snap = snapshot({ new: n.rows, trending_5m: t5.rows, trending_1h: t1.rows }, origins.get, asOf);
+    const body = JSON.stringify(snap);
+    served.add(Object.values(snap.lists).flatMap((rows) => rows.map((r) => r.token as string)));
     last = { status: 200, body, gzip: gzipSync(body), asOfMs: asOf };
     builtAt = now();
     return last;
+  }
+
+  /** Whether an answer of the last SERVED_MS held the mint (trades.ts listed); null while no answer was built. */
+  async function listed(mint: string): Promise<boolean | null> {
+    await get();
+    return last === null ? null : served.has(mint);
   }
 
   function start(): Promise<ListsAnswer> {
@@ -426,5 +480,5 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
     return () => clearInterval(t);
   }
 
-  return { get, warm };
+  return { get, warm, listed };
 }

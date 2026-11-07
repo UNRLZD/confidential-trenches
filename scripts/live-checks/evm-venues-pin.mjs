@@ -31,7 +31,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { BUILD, CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, poolFile, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-venues-pin";
 const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
@@ -62,7 +62,11 @@ export function recordOf(chain, file = deploymentFile(chain)) {
   const f = SELL_KEYS.map((k) => sellFile(k, chain)).find(existsSync);
   // a testnet's fee collector, deployed beside its set (a mainnet's set holds its own)
   const fc = Object.hasOwn(MAINNETS, chain) ? undefined : sellFile("evm-fee-collector", chain);
-  return { ...d, contracts: { ...d.contracts, ...(f ? alone(f, "SellDelegate") : {}), ...(fc && existsSync(fc) ? alone(fc, "FeeCollector") : {}) } };
+  // a testnet's pool and its verifier from its newest pool set (pool-evm-deploy.mjs poolFile: card
+  // pool-evm-buy-pays-revert's, whose buy pays a failed swap's chunk to W); the adapters and the delegate stay the kit's
+  const pv = poolFile(chain);
+  const pool = pv !== file && existsSync(pv) ? { ...alone(pv, "PrivacyPoolSimple"), ...alone(pv, "WithdrawalVerifier") } : {};
+  return { ...d, contracts: { ...d.contracts, ...pool, ...(f ? alone(f, "SellDelegate") : {}), ...(fc && existsSync(fc) ? alone(fc, "FeeCollector") : {}) } };
 }
 
 /** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record: the testnets, then the
