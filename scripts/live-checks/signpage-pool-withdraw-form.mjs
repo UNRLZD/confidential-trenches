@@ -21,7 +21,7 @@ import { DEVNET_PROVIDERS, onTwoOperators, operatorOf, rpc } from "./pool-sol-de
 const KEY = "signpage-pool-withdraw-form";
 export const SIGN = "https://sign.confidential.unrealized.trade";
 /** SOL_POOLS.devnet in the testnet build. */
-export const PIN = Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" });
+export const PIN = Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" });
 /** The address typed for the run: our devnet wallet. */
 export const TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 export const SYSTEM = "11111111111111111111111111111111";

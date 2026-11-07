@@ -12,7 +12,7 @@ import { read } from "./pool-senders-next-page.mjs";
 
 const commit = process.argv[2];
 if (!/^[0-9a-f]{40}$/.test(commit ?? "")) throw new Error("usage: record-local.mjs <40-hex commit>");
-const PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ"; // the devnet pool's program (pool-sol-deploy.devnet.json)
+const PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8"; // the devnet pool's program (pool-sol-deploy.devnet.json)
 const k = generateKeyPairSync("ed25519");
 const seed = k.privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
 const pub = createPublicKey(k.privateKey).export({ format: "der", type: "spki" }).subarray(-32);

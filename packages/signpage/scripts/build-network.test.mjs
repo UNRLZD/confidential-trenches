@@ -11,7 +11,7 @@ import { bundle, NETWORKS } from "./build-app.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const TESTNET_ONLY = [
-  "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", // the devnet pool's program (pool-sol-deploy.devnet.json)
+  "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", // the devnet pool's program (pool-sol-deploy.devnet.json)
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
   "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy", // the devnet pool's lookup table (src/pool-testnet.ts DEVNET_TABLE)
   "api.devnet.solana.com",

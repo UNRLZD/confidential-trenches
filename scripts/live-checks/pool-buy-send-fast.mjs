@@ -28,8 +28,8 @@ const KEY = "pool-buy-send-fast";
 export const BASE = "https://api.confidential.unrealized.trade";
 export const SIGN = "https://sign.confidential.unrealized.trade";
 /** The devnet pool (scripts/live-checks/pool-sol-deploy.devnet.json) and its program. */
-export const DEVNET_POOL = "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr";
-export const DEVNET_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+export const DEVNET_POOL = "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr";
+export const DEVNET_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 export const PACE_READS = 6;
 /** [design: 1 s: a public endpoint at 1 request a second answers every other read of a run like this 429, and a
  *  keyed provider answers a getSlot in tens of ms; the median keeps one slow read from deciding.] */

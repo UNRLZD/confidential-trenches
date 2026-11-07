@@ -31,9 +31,9 @@ import { DEPLOYMENT, DEVNET_PROVIDERS, RETRY_AFTER_CAP_MS, account, answerOf, ch
 const KEY = "signpage-pool-flow";
 /** SOL_POOLS.devnet in the testnet build, and the pool its program derives. */
 export const PIN = Object.freeze({
-  program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+  program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
   feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb",
-  pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+  pool: "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
   /** DEVNET_TABLE (packages/signpage/src/pool-testnet.ts). */
   table: "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy",
 });

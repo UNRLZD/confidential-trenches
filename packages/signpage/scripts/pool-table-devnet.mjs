@@ -22,7 +22,7 @@ import { solanaPda, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 
 const SERVICE = "confidential-trenches-solana-devnet-table";
 const ACCOUNT = "T";
-const PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ"; // SOL_POOLS.devnet (../../wallet/src/pool/solana.ts)
+const PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8"; // SOL_POOLS.devnet (../../wallet/src/pool/solana.ts)
 const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
 const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 const SYSTEM = "11111111111111111111111111111111";
