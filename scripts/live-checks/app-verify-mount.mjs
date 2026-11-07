@@ -351,12 +351,19 @@ async function main() {
   const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
   const rec = await collect({ shots, route, network, source });
   const record = opt("--record");
-  if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
+  if (record) writeFileSync(record, recorded(rec));
   const r = judge(rec);
   for (const l of r.lines) console.log(l);
   console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chrome ${rec.browser}, shots ${shots})`);
   process.exit(r.ok ? 0 : 1);
 }
+
+/**
+ * A run as --record writes it: each URL's token query (the page's market reads, e.g. /v1/market/token?token=<mint>) is
+ * written as <mint>, as app-console-429 records it, since a long base58 there reads to a secret scan as a key. judge()
+ * reads NEAR RPC posts only, which carry no query.
+ */
+export const recorded = (rec) => `${JSON.stringify(rec, null, 2).replace(/([?&]token=)(?!<)[^&"\\\s]+/g, "$1<mint>")}\n`;
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((e) => {
