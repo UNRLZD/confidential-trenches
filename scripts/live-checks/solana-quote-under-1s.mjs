@@ -12,6 +12,7 @@
 // second); and over the runs the quote is complete at p50 < 1,000 ms and p95 < 1,300 ms.
 //   node scripts/live-checks/solana-quote-under-1s.mjs [--base <helper origin>] [--runs <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, which judge() reads as the test replays it.
+// Runs: pending solana-quote-under-1s, its recorded head run misses the time bound from a host about 200 ms from the helper; it joins the helper's runs once a run passes
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { readSolanaReference, runSolanaTrade, solanaHelperRpc, solanaJsonRpc, solanaSendPaths } from "../../packages/kit/src/index.ts";
