@@ -20,9 +20,9 @@ import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import { base58, NEP366_PREFIX } from "./bind/checks.ts";
 import { createFileStore, type DepositRecord } from "./bind/send.ts";
 import { start } from "./server.ts";
-import { TESTNET_TOKEN, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus, type TokenWatches } from "./token-status/status.ts";
+import { statusesOf, TESTNET_TOKEN, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus, type TokenWatches } from "./token-status/status.ts";
 import type { FeeQuoter } from "./withdraw/fee.ts";
-import { A_STORE_YOCTO, idKeyOf } from "./withdraw/send.ts";
+import { A_STORE_YOCTO, idKeyOf, withdrawSenderFromEnv } from "./withdraw/send.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const fixture = JSON.parse(readFileSync(join(import.meta.dirname, "withdraw/fixtures/withdraw-request.json"), "utf8")) as {
@@ -138,8 +138,11 @@ async function withHelper(env: Record<string, string>, w: TokenWatches, run: (po
   enableTimers(mock.timers, { apis: ["Date", "setTimeout"], now: NOW });
   Object.assign(process.env, MAINNET, TESTNET, env);
   globalThis.fetch = near.fetchFn;
-  // the senders are left to the server's own defaults (handler's parameters), exactly as the deployed main builds them
-  const server = start(COMMIT, 0, undefined, undefined, w, undefined, quoter);
+  // the senders are left to the server's own defaults (handler's parameters), exactly as the deployed main builds them,
+  // but for the withdraw sender's mainnet pin: the recorded proof was made for fixture.vault, not the release's vault
+  // (send.ts MAINNET_VAULT), so this sender is built from the same environment with fixture.vault as its pin
+  const withdraw = withdrawSenderFromEnv(process.env, quoter, statusesOf(w), near.fetchFn, fixture.vault);
+  const server = start(COMMIT, 0, undefined, undefined, w, undefined, quoter, withdraw);
   try {
     await new Promise<void>((ok) => server.on("listening", () => ok()));
     await run((server.address() as AddressInfo).port, near);

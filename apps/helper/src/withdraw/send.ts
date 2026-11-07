@@ -536,6 +536,8 @@ export function withdrawSenderFromEnv(
   fee: FeeQuoter,
   status: Partial<Record<FeeNetwork, (at: HoldAt) => Promise<TokenStatus>>> = statusesOf(tokenWatchesFromEnv(env)),
   fetchFn: typeof fetch = fetch,
+  // the one mainnet vault carried: the release's pin, never read from the host's environment (a test passes its own)
+  mainnetVault: string = MAINNET_VAULT,
 ): WithdrawSender {
   const release = env[RELEASE_ENV] ?? "";
   const storeDir = env[STORE_ENV] ?? "";
@@ -553,7 +555,7 @@ export function withdrawSenderFromEnv(
     if (vault === "" && keyList === "") continue;
     const keys = keyList!.split(",").filter((k) => k !== "");
     if (!isAccountId(vault) || keys.length === 0 || keys.length > KEYS_MAX || !keys.every((k) => /^ed25519:[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(k))) throw new Error(`${SEND_ENV[n].join(" and ")} must be a NEAR account id and 1 to ${KEYS_MAX} ed25519 keys`);
-    if (n === "mainnet" && vault !== MAINNET_VAULT) throw new Error(`${SEND_ENV.mainnet[0]} must be ${MAINNET_VAULT}, the vault of the mainnet deploy record`);
+    if (n === "mainnet" && vault !== mainnetVault) throw new Error(`${SEND_ENV.mainnet[0]} must be ${mainnetVault}, the vault of the mainnet deploy record`);
     if (!/^[1-9][0-9]{0,8}$/.test(release)) throw new Error(`${RELEASE_ENV} must be a whole number, 1 or more, to carry withdrawals`);
     if (storeDir === "") throw new Error(`${STORE_ENV} must be set to carry withdrawals`);
     if (!isAccountId(relayerOf[n]) || !isAccountId(feeTo[n])) throw new Error(`${RELAYER_ENV[n].join(" and ")} must be set to carry withdrawals`);
