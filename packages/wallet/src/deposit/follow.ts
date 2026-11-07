@@ -56,9 +56,10 @@
 //     contracts/defuse/src/contract/garbage_collector.rs, the method live on intents.near, read 7 Nov), so this false
 //     alone never says the move did not land: the balance is read with it, and a new move takes only what U holds then,
 //     its earlier deadline handed to the rule (prior_ms).
-//   - A held op's move (struck, or held by the bind while the move was out) is read once its deadline is past on both
-//     RPCs, at a block past it, by the same rule: through, and the op is followed on as moved until its USDC binds (a
-//     helper that answers sender_struck and lands the intent anyway); over, and the move is cleared. Until then the op's
+//   - A held op's move (struck, or held by the bind while the move was out) is read first in each round once its
+//     deadline is past on both RPCs, at a block past it: through only on its nonce read used (no read watched its
+//     window, so U short with the nonce unused may be U's own way out), and the op is followed on as moved until its
+//     USDC binds (a helper that answers sender_struck and lands the intent anyway); else over, and the move is cleared. Until then the op's
 //     follow does not end (followEnded, a reload resumes it) and no done op of U goes final.
 //   - A refund the quote's MIN_DEPOSIT floor refuses waits under U for withdraw.open: only an op whose own refund it is
 //     (its origin the asset) ends held (under_min); a stranger's dust, or what is left after a move, is left as it is.
@@ -806,6 +807,35 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   const backoff = new Map<string, number>();
   const round = async (): Promise<boolean> => {
     let fast = false;
+    // first, before any bind or count hold can end the round (S1: a held op's move is never starved of its read)
+    let readAt: (nonce: string | null, asset: string) => Promise<MoveRead | null> = async () => null;
+    if (intents !== null) {
+      const all = await opsOfU();
+      // the strike is kept in the store: a reload signs nothing more for U either (L1)
+      if (all.some(([, op]) => op.follow.intents_struck === true)) struck = true;
+      // a read below a move's own block, the block that found the last move through or over, or this session's highest: no read
+      const floor = Math.max(readFloor, ...all.map(([, op]) => Math.max(op.follow.move?.height ?? 0, op.follow.prior_height ?? 0)));
+      readAt = async (nonce: string | null, asset: string): Promise<MoveRead | null> => {
+        const r = await readMoveAt(intents, U, nonce, asset, rpcs);
+        if (r === null || r.height < floor) return null;
+        readFloor = Math.max(readFloor, r.height);
+        return r;
+      };
+      // L3: a held op's move (struck, or held by the bind while it was out) is read once its deadline is past on both
+      // RPCs, at a block past it: through only on its nonce read used (S2: no read watched its window, so a debit of U
+      // with the nonce unused may be U's own way out), and its op is followed on as moved until its USDC binds; else
+      // over, and the move is cleared
+      for (const [id, op] of all) {
+        const m = op.follow.move;
+        if (op.stage !== "held" || m === undefined || !(await pastOnBoth(rpcs, m.deadline_ms))) continue;
+        const at = await readAt(m.nonce, m.asset);
+        if (at === null || at.used === null || at.timeMs <= m.deadline_ms) continue;
+        if (at.used) {
+          const its = op.follow.origin === m.asset && !op.follow.moved;
+          await write(id, its ? "in_transit" : "held", its ? legFacts(op, "in_transit", true) : factsOf(op), { move: undefined, prior_ms: undefined, prior_height: at.height, ...(its ? { moved: true as const, why: undefined } : {}) });
+        } else await write(id, "held", factsOf(op), { move: undefined, prior_ms: m.deadline_ms, prior_height: at.height });
+      }
+    }
     // every op held, none with a move out (L3: a held op's move is read on to through or over)
     if ((await opsOfU()).every(([, op]) => op.stage === "held" && op.follow.move === undefined)) return false;
     // the chain first: U's own USDC; MIN_DEPOSIT or more is bound as U's next note
@@ -831,30 +861,6 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     // what U holds inside intents.near, for the ops whose own status read REFUNDED: their origin assets and NEAR USDC
     // (1Click refunds there, refundType INTENTS). refunded is a stage, no end: U's USDC is still bound each round
     if (intents !== null) {
-      const all = await opsOfU();
-      // the strike is kept in the store: a reload signs nothing more for U either (L1)
-      if (all.some(([, op]) => op.follow.intents_struck === true)) struck = true;
-      // a read below a move's own block, the block that found the last move through or over, or this session's highest: no read
-      const floor = Math.max(readFloor, ...all.map(([, op]) => Math.max(op.follow.move?.height ?? 0, op.follow.prior_height ?? 0)));
-      const readAt = async (nonce: string | null, asset: string): Promise<MoveRead | null> => {
-        const r = await readMoveAt(intents, U, nonce, asset, rpcs);
-        if (r === null || r.height < floor) return null;
-        readFloor = Math.max(readFloor, r.height);
-        return r;
-      };
-      // L3: a held op's move (struck, or held by the bind while it was out) is read once its deadline is past on both
-      // RPCs, at a block past it, by the rule below: through (its nonce used, or pruned with U short of it and no other
-      // debit seen), and its op is followed on as moved until its USDC binds; else over, and the move is cleared
-      for (const [id, op] of all) {
-        const m = op.follow.move;
-        if (op.stage !== "held" || m === undefined || !(await pastOnBoth(rpcs, m.deadline_ms))) continue;
-        const at = await readAt(m.nonce, m.asset);
-        if (at === null || at.used === null || at.timeMs <= m.deadline_ms) continue;
-        if (at.used || (at.held < BigInt(m.amount) && m.foreign !== true)) {
-          const its = op.follow.origin === m.asset && !op.follow.moved;
-          await write(id, its ? "in_transit" : "held", its ? legFacts(op, "in_transit", true) : factsOf(op), { move: undefined, prior_ms: undefined, prior_height: at.height, ...(its ? { moved: true as const, why: undefined } : {}) });
-        } else await write(id, "held", factsOf(op), { move: undefined, prior_ms: m.deadline_ms, prior_height: at.height });
-      }
       // every such op still followed, its money moved or not: what U holds after a move (dust, a second refund) is
       // moved by a new one (D1); `open` are the ones whose own money is still under U inside intents.near
       const back = (await opsOfU()).filter(([, op]) => op.follow.status === "REFUNDED" && op.stage !== "held" && op.follow.final !== true && (op.stage !== "done" || deps.untilFinal === true));
@@ -911,9 +917,10 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
           // an op whose own move went unlanded and whose own asset U now holds none of, read at one block: its money left
           // U by another intent of U's own (a withdraw.open); it ends held, with nothing left to move (L2)
           for (const [id, op] of open) if (op.follow.unlanded === true && holds.get(op.follow.origin) === 0n) await write(id, "held", legFacts(op, "held"), { why: "moved_out" });
-          // L1: once U is struck (this session or kept from an earlier one), an op refunded later whose own money waits
-          // under U inside intents.near is held for the way out too; nothing is signed for it
-          if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && (holds.get(op.follow.origin) ?? 0n) > 0n) await write(id, "held", legFacts(op, "held"), { why: "sender_struck" });
+          // L1: once U is struck (this session or kept from an earlier one), an op refunded later whose money waits under
+          // U inside intents.near (its origin asset, or NEAR USDC where 1Click also refunds: S3) is held for the way out
+          // too; nothing is signed for it
+          if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && ((holds.get(op.follow.origin) ?? 0n) > 0n || (holds.get(usdcId) ?? 0n) > 0n)) await write(id, "held", legFacts(op, "held"), { why: "sender_struck" });
           if (movable && now() >= moveAt) {
             const f = found!;
             const prior = back.find(([, op]) => op.follow.prior_ms !== undefined)?.[1].follow.prior_ms ?? null;

@@ -3,7 +3,7 @@
 // that rule, expects it to fail, and puts the source back. Each rule is wallet.md §2.4 point 8 and the §2.8 refund move
 // row as the card's end state reads them, with the deposit-follow review's D1, finding 5 and r4.
 // Then review wrm-58c238ab's M1, M2, L1 and L2 as folded, and its own plants no named test held; then the delta review
-// of cf8a5524 (M1, L2, L4, L5 and its three pins); then the delta review of 8c046c2d (L1 to L4).
+// of cf8a5524 (M1, L2, L4, L5 and its three pins); then the delta review of 8c046c2d (L1 to L4) and of dedd6401 (S1 to S4).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -115,17 +115,26 @@ const M = [
     [["export const INTENTS_ANSWER_MAX_BYTES = 1_024;", "export const INTENTS_ANSWER_MAX_BYTES = 1_023;"]], WR, "pin \\(delta\\)"],
   // the delta review of 8c046c2d (L1 to L4)
   ["L1: an op refunded after the strike is never held", FOLLOW,
-    [["if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && (holds.get(op.follow.origin) ?? 0n) > 0n) await write(id, \"held\", legFacts(op, \"held\"), { why: \"sender_struck\" });", ""]], WT, "REVIEW R1 \\(L1\\):"],
+    [["if (struck) for (const [id, op] of open) if (!ENDS.has(op.stage) && ((holds.get(op.follow.origin) ?? 0n) > 0n || (holds.get(usdcId) ?? 0n) > 0n)) await write(id, \"held\", legFacts(op, \"held\"), { why: \"sender_struck\" });", ""]], WT, "REVIEW R1 \\(L1\\):|REVIEW2 S4"],
   ["L1: the strike not read back from the store after a reload", FOLLOW,
     [["if (all.some(([, op]) => op.follow.intents_struck === true)) struck = true;", ""]], WT, "REVIEW R1 \\(L1, after a reload\\)"],
   ["L2: the block that read a move through not kept", FOLLOW,
     [["// through on its own debit, read at a final block on both RPCs. Whatever U holds after it is moved by a new move\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }", "// through on its own debit, read at a final block on both RPCs. Whatever U holds after it is moved by a new move\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: undefined }"]], WT, "REVIEW R4"],
   ["L3: a held op's landed move cleared, its USDC never bound", FOLLOW,
-    [["if (at.used || (at.held < BigInt(m.amount) && m.foreign !== true)) {", "if (false) {"]], WT, "REVIEW R2"],
+    [["        if (at.used) {\n          const its = op.follow.origin === m.asset && !op.follow.moved;", "        if (false) {\n          const its = op.follow.origin === m.asset && !op.follow.moved;"]], WT, "REVIEW R2"],
   ["L3: a held op's move does not keep U followed (a done op final first)", FOLLOW,
-    [["for (const [, op] of await opsOfU()) if (op.follow.move !== undefined) moveOut = true;", "for (const [, op] of await opsOfU()) if (op.follow.move !== undefined && op.stage !== \"held\") moveOut = true;"]], WT, "REVIEW R2"],
+    [["for (const [, op] of await opsOfU()) if (op.follow.move !== undefined) moveOut = true;", "for (const [, op] of await opsOfU()) if (op.follow.move !== undefined && op.stage !== \"held\") moveOut = true;"]], WT, "REVIEW R2 \\(L3\\):"],
   ["L4 (P1): the session floor never raised", FOLLOW,
-    [["readFloor = Math.max(readFloor, r.height);", "void readFloor;"]], WT, "REVIEW R3"],
+    [["readFloor = Math.max(readFloor, r.height);", "void readFloor;"]], WT, "REVIEW R3|REVIEW2 P1"],
+  // the delta review of dedd6401 (S1 to S4)
+  ["S1: a held op's move read after the bind and count holds (starved)", FOLLOW,
+    [["if (op.stage !== \"held\" || m === undefined || !(await pastOnBoth(rpcs, m.deadline_ms))) continue;", "if (op.stage !== \"held\" || m === undefined || !(await pastOnBoth(rpcs, m.deadline_ms)) || ((await readCredit(U, token, rpcs)) ?? 0n) >= VAULT_CONSTANTS.MIN_DEPOSIT) continue;"]], WT, "REVIEW2 S1"],
+  ["S2: a held op's move through on U short with its nonce unused", FOLLOW,
+    [["        if (at.used) {\n          const its = op.follow.origin === m.asset && !op.follow.moved;", "        if (at.used || at.held < BigInt(m.amount)) {\n          const its = op.follow.origin === m.asset && !op.follow.moved;"]], WT, "REVIEW2 S2|REVIEW2 S3"],
+  ["L2: the block that read a pruned move through not kept", FOLLOW,
+    [["            // pruned nonce (intents.near's cleanup_nonces) of a move that landed\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: at.height }", "            // pruned nonce (intents.near's cleanup_nonces) of a move that landed\n            await mark(\"in_transit\", { move: undefined, prior_ms: undefined, prior_height: undefined }"]], WT, "REVIEW2 L2b"],
+  ["L3: the block that read a held op's move through not kept", FOLLOW,
+    [["{ move: undefined, prior_ms: undefined, prior_height: at.height, ...(its ? { moved: true as const, why: undefined } : {}) }", "{ move: undefined, prior_ms: undefined, ...(its ? { moved: true as const, why: undefined } : {}) }"]], WT, "REVIEW2 L3b"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {
