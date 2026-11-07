@@ -481,7 +481,8 @@ async function prepareLeg(
   const walletToken = (a: Acc | null | undefined): boolean => !!a && (a.owner === SOLANA_TOKEN_PROGRAM || a.owner === SOLANA_TOKEN_2022_PROGRAM) && a.data.length >= 165 && base58.encode(a.data.subarray(32, 64)) === w;
   // The simulation on both providers, at once, reading back this wallet's own four accounts, and, beside it, every account
   // the tx writes read on both providers: any token account of the wallet's among them but its account of the token is
-  // read back too, in a second simulation (none on a trade that writes no other: its wSOL account is new and closed). No other wallet of the user is in it: S11 refuses a tx that names one, so none can change. It runs with
+  // read back too, in a second simulation (none on a trade that writes no other: its wSOL account is new and closed).
+  // No other wallet of the user is in it: S11 refuses a tx that names one, so none can change. It runs with
   // replaceRecentBlockhash, so it holds for this tx on any blockhash (solanaWithBlockhash changes no other byte).
   type State = { simulations: [SolanaSimulation | null, SolanaSimulation | null]; spendable: bigint; writable: Record<string, [Acc | null, Acc | null]> };
   const stateOn = async (wire: Uint8Array, before: readonly [(Acc | null)[], (Acc | null)[]]): Promise<State | null> => {

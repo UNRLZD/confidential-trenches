@@ -821,8 +821,8 @@ function nativeOutOf(sim: SolanaSimulation, mine: readonly WalletAccount[], wall
 // W_k's output account gaining, up to its rent (anyone can create or pre-fund that address, so the rent is never assumed)
 // + each of the wallet's own volume accounts (pump's and PumpSwap's), if the route funds it, each up to its rent; and its
 // token in reaches minOut_k. Native out counts the wallet's lamports and every wSOL account of its the tx writes; every
-// other token account of the wallet's the tx writes, but its account of the token, stays as it was. A sell's token out is exactly a_k, its native in, before fees and tips, reaches minOut_k,
-// and it funds neither volume account. No other wallet of this user is touched, read statically: the tx names none of
+// other token account of the wallet's the tx writes, but its account of the token, stays as it was. A sell's token out
+// is exactly a_k, its native in, before fees and tips, reaches minOut_k, and it funds neither volume account. No other wallet of this user is touched, read statically: the tx names none of
 // the user's other wallets, nor any of their accounts in SolanaWalletLinks (the volume accounts, the PumpSwap cashback
 // account, the associated token account for any mint the tx names), in any role, statically or through a lookup table.
 // So no simulation ever needs another wallet in its request.
