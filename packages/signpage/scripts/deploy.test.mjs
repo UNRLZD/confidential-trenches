@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, deploy, liveRuns } from "./deploy.mjs";
+import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, checkPins, deploy, liveRuns } from "./deploy.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -236,7 +236,7 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
   for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "evm-pool-sync-wide-pages", "kit-deposit-assets-dry", "kit-deposit-calls", "kit-frame-version", "kit-renewal-read-bounded", "pool-read-down", "pool-ready-no-flicker", "pool-restore-wired", "signpage-buy-own-spend", "signpage-buy-route-events", "signpage-error-after-timeout", "signpage-pool-flow", "signpage-pool-kinds", "signpage-pool-mainnet", "signpage-pool-notes", "signpage-pool-pins", "signpage-pool-price", "signpage-pool-withdraw-form", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-sent-read-back", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "signpage-withdraw-handoff", "signpage-withdraw-own-spend", "sol-buy-rent-back", "wallet-deposit-follow", "wallet-passkey-prf"]);
+  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "evm-pool-sync-wide-pages", "kit-deposit-assets-dry", "kit-deposit-calls", "kit-frame-version", "kit-oneclick-pins-frozen", "kit-renewal-read-bounded", "pool-read-down", "pool-ready-no-flicker", "pool-restore-wired", "signpage-buy-own-spend", "signpage-buy-route-events", "signpage-error-after-timeout", "signpage-pool-flow", "signpage-pool-kinds", "signpage-pool-mainnet", "signpage-pool-notes", "signpage-pool-pins", "signpage-pool-price", "signpage-pool-withdraw-form", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-sent-read-back", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "signpage-withdraw-handoff", "signpage-withdraw-own-spend", "sol-buy-rent-back", "wallet-deposit-follow", "wallet-passkey-prf"]);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   // the release check reads SIGN_HOST alone, against this commit's build
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);
@@ -338,5 +338,27 @@ test("a SIGN_HOST that cannot be read, or answers other than 200, is never taken
     const r = await deploy([], ENV, rec.run, undefined, { fetch: fail, sleep: async () => {} });
     assert.equal(r.code, 1, (r.out ?? []).join("\n"));
     assert.doesNotMatch([...(r.out ?? []), ...(r.err ?? [])].join("\n"), /next:/);
+  }
+});
+
+// Card kit-oneclick-pins-frozen: the gate names the pinned 1Click key bytes in the build's app.js, so a build that ships
+// a test harness's key, or a 1Click pin left writable, is refused before anything is uploaded or listed.
+test("planted: a build whose app.js names a harness 1Click key, or leaves a pin unfrozen, is refused; the real build passes", () => {
+  const dir = build();
+  try {
+    assert.deepEqual(checkPins(dir), []);
+    const js = readFileSync(join(dir, "app.js"), "utf8");
+    const KEYS = "Object.freeze([`ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc`])";
+    assert.equal(js.split(KEYS).length, 2, "the key set's minified form moved; update this test");
+    const harness = "ed25519:5Mbn3Ajg8a4x3tgXqLqgdx2GvnyLRB3exyzi9apAYVt8"; // a made-up 32-byte key, no secret of any kind
+    writeFileSync(join(dir, "app.js"), js.replace(KEYS, `Object.freeze([\`ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc\`,\`${harness}\`])`));
+    assert.ok(checkPins(dir).some((l) => l.includes(`names the 1Click key ${harness}, which the release does not pin`)), checkPins(dir).join("\n"));
+    assert.ok(checkDir(dir).some((l) => l.includes(harness)));
+    writeFileSync(join(dir, "app.js"), js.replace(KEYS, "[`ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc`]"));
+    assert.ok(checkPins(dir).some((l) => l.includes("copies of ONECLICK_SIGNING_KEYS in the bundle are not frozen")), checkPins(dir).join("\n"));
+    writeFileSync(join(dir, "app.js"), js.replace("Object.freeze({keyless:1,partner:1})", "{keyless:1,partner:1}"));
+    assert.ok(checkPins(dir).some((l) => l.includes("copies of ONECLICK_FEE_BPS in the bundle are not frozen")), checkPins(dir).join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

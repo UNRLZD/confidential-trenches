@@ -74,6 +74,8 @@ export function matches(file, paths = PATHS) {
 // s19 (VT-S19, two sandboxes in turn, as settle's 41 s) joins shard 4, then the lightest at 345.
 // CI run 42313947891 (96cea2a, 2026-11-06), each shard job's wall time: 430, 404, 528 and 463 s. s16 (VT-S16, four
 // sandboxes in parallel) ran 46 s on the Mac (2026-11-07) and joins shard 2, the lightest, for about 458.
+// tree_prop's long run (VT-P01's 100,000 inserts through the on-chain store, which run.sh's --include-ignored runs)
+// took 47 s on the Mac (2026-11-07); tree_prop stays in shard 4, for about 510, under shard 3's 528.
 // p02 (VT-P02, 24 cases of 48 steps, real proofs in the mocked VM) ran 118 s on the box (4 threads, 2026-11-07) and
 // joins shard 1, then the lightest at 430, for about 556 with its 8 s of compile and link.
 export const SHARDS = [

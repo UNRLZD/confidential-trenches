@@ -11,6 +11,7 @@ import {
   SIGNPAGE_KINDS,
 } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
+import { deepFreeze } from "../freeze.ts";
 
 /** A check of one value. */
 export type SignpageSchema = (v: unknown) => boolean;
@@ -320,6 +321,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.assets": depositAssets,
   "deposit.dry": depositDry,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
+deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
 const exit = obj({ trigger_price: dec, share_bps: bps(1) });
 
@@ -349,6 +351,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "deposit.assets": obj({}),
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
+deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 
 /** The handshake, page to app. Any whole `api` passes here; the client refuses one it does not speak. */
 export const signpageReadySchema = obj({ v: lit(1), type: lit("ready"), release: str, api: uint });
@@ -357,7 +360,11 @@ export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id
 /** A route event's `out`: a token amount above 0 in whole units, at most 78 digits each side of the point, no leading
  *  zero, no trailing zero after it. The signing page tells no amount this refuses (src/pool-buy.ts). */
 export const SIGNPAGE_ROUTE_OUT = /^(0|[1-9]\d{0,77})(\.\d{0,77}[1-9])?$/;
-const routeOutAmount: SignpageSchema = (v) => typeof v === "string" && v !== "0" && SIGNPAGE_ROUTE_OUT.test(v);
+deepFreeze(SIGNPAGE_ROUTE_OUT);
+/** This file's own copy: a frozen RegExp's matcher can still be swapped (RegExp.prototype.compile), so a reader builds
+ *  its own when the module loads and never tests against the shared one (card kit-oneclick-pins-frozen review). */
+const ROUTE_OUT = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags);
+const routeOutAmount: SignpageSchema = (v) => typeof v === "string" && v !== "0" && ROUTE_OUT.test(v);
 /** A Solana address: base58 of exactly 32 bytes. */
 const solAddress: SignpageSchema = (v) => {
   if (typeof v !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) return false;

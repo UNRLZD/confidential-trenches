@@ -1,17 +1,20 @@
 // The deposit.quote kind (card wallet-deposit-quote; wallet.md at research 3a6b03e, W:407-409 and the deposit quote row
 // W:888) on an H-1c-shaped mock (app.md §5.0, A:1315): a fetch standing in for the helper's 1Click proxy that answers
 // in 1Click's own shape (quote, quoteRequest with what 1Click adds, signature, timestamp) and signs each answer with
-// the mock's throwaway ed25519 key, which this test process alone adds to the kit's pinned set, as the harness's test
-// build does. A good quote gives an address; every bad answer, and a no-PRF seed with no saved backup, gives a code
-// and no address.   node --test test/rules-deposit-quote.test.ts      (from packages/signpage)
+// the mock's throwaway ed25519 key, which this test process alone trusts (test/oneclick-mock.ts gives it its own
+// oneclick-keys.ts through a load hook; the kit's pins are frozen, card kit-oneclick-pins-frozen). A good quote gives an
+// address; every bad answer, and a no-PRF seed with no saved backup, gives a code and no address.
+//   node --test test/rules-deposit-quote.test.ts      (from packages/signpage)
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkOneClickQuote } from "../../kit/src/checks/oneclick.ts";
-import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
-import { DEPOSIT_QUOTE_URL, depositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
-import { depositQuoteKind, type DepositQuoteKindAnswer, type DepositQuoteKindContext } from "../src/rules/deposit-quote.ts";
+import type { DepositQuoteKindAnswer, DepositQuoteKindContext } from "../src/rules/deposit-quote.ts";
 import { U, ATTACKER, SOL_USDC, NEAR_USDC, ADDRESS, NOW, H72, mockKey, otherKey, signAnswer, COLLECTOR, FLOOR_OUT, FLOOR_MIN, liveAnswer, h1c, type Answer, type Mock } from "./oneclick-mock.ts";
+// after the mock, so the check loads the mock's keys (a static import would load the kit's first)
+const { checkOneClickQuote } = await import("../../kit/src/checks/oneclick.ts");
+const { HELPER_BIND_DEPOSIT_CAP } = await import("../../kit/src/helper/v1.ts");
+const { DEPOSIT_QUOTE_URL, depositQuoteRequest } = await import("../../wallet/src/deposit/quote.ts");
+const { depositQuoteKind } = await import("../src/rules/deposit-quote.ts");
 
 const ctx = (fetchFn: typeof fetch, over: Partial<DepositQuoteKindContext> = {}): DepositQuoteKindContext => ({
   seed: { source: "words", code_saved: true }, depositId: U, fetch: fetchFn, now: () => NOW, ...over,
