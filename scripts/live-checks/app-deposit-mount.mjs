@@ -83,6 +83,8 @@ export function judge(rec) {
     const dryOk = dry.length === 1 && same(dry[0], { origin_asset: NEAR.origin_asset, amount: AMOUNT });
     say(dryOk, `${n}: typing ${AMOUNT} sends ${dry.length} deposit.dry${dry.length ? ` (${dry.map((d) => JSON.stringify(d)).join(", ")})` : ""}, want one with ${NEAR.origin_asset} and ${AMOUNT} only`);
     say(r.quoteState === "S4.3" && r.youGet === "$73.18", `${n}: the dry quote draws ${r.quoteState ?? "no state"}, You get ${r.youGet ?? "nothing"}`);
+    const c = r.clear ?? {};
+    say(c.ok === true, `${n}: the element at Get address's centre is ${c.first ?? "unread"}, and ${c.under?.length ? `the body's ${c.under.join(", ")} lies under it` : c.ok ? "nothing from the body lies under it" : (c.why ?? "unread")}${c.ok ? "" : ` (${JSON.stringify(c)})`}`);
     const qOk = same(r.quote, { origin_asset: NEAR.origin_asset, amount: AMOUNT });
     say(qOk, `${n}: Get address sends deposit.quote ${r.quote ? JSON.stringify(r.quote) : "nothing"}${!qOk && r.tapGet ? ` (the tap: ${JSON.stringify(r.tapGet)})` : ""}`);
     say(r.addressState === "S4.13" && r.address === ADDRESS, `${n}: the address state ${r.addressState ?? "none"} draws ${r.address === ADDRESS ? "the quote's own address" : (r.address ?? "no address")}`);
@@ -151,6 +153,25 @@ async function runOne(browser, w, scheme, shots, route) {
     run.youGet = await f.locator("[data-sheet='deposit'] .dget .v .num").first().textContent({ timeout: 1_000 }).catch(() => null);
     await shot(page, "quote");
 
+    // the action's box is its own (CI's phone run on 4d2b3dee: the focused amount field took the Get address tap): with
+    // the button scrolled into view, the element at its centre is the button, and at its centre and four inner corners
+    // nothing from the sheet's body lies under it, on top or beneath; the boxes and scroll offsets say where they sat
+    run.clear = await f.evaluate(() => {
+      const name = (e) => (e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === "string" ? `.${e.className.trim().split(/\s+/).join(".")}` : ""}` : null);
+      const box = (e) => { const q = e?.getBoundingClientRect(); return q ? [q.x, q.y, q.width, q.height].map(Math.round) : null; };
+      const sheet = document.querySelector("[data-sheet='deposit']");
+      const b = sheet?.querySelector("[data-control='deposit-get']");
+      const body = sheet?.querySelector(".dbody");
+      if (!b || !body) return { ok: false, why: "no button or body" };
+      b.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const r = b.getBoundingClientRect();
+      const pts = [[0.5, 0.5], [0.05, 0.1], [0.95, 0.1], [0.05, 0.9], [0.95, 0.9]].map(([x, y]) => [r.x + r.width * x, r.y + r.height * y]);
+      const first = document.elementsFromPoint(...pts[0])[0] ?? null;
+      const under = [...new Set(pts.flatMap((p) => document.elementsFromPoint(...p).filter((e) => body.contains(e)).map(name)))];
+      const scrolled = [...sheet.querySelectorAll("*"), document.scrollingElement].filter((e) => e && (e.scrollTop || e.scrollLeft)).map((e) => `${name(e)} ${e.scrollLeft},${e.scrollTop}`);
+      return { ok: (first === b || b.contains(first)) && under.length === 0, first: first === b || b.contains(first) ? "the button" : name(first), under, button: box(b), body: box(body), foot: box(b.closest(".dfoot")), sheet: box(sheet.querySelector(".dep-box")), input: box(sheet.querySelector("[data-field='amount']")), scrolled };
+    }).catch((e) => ({ ok: false, why: String(e?.message ?? e).split("\n")[0] }));
+
     // what the tap meets: the button's box, whether it is on, the element at its centre, and the tap's own error, so a
     // tap that sends nothing says why
     run.tapGet = await f.evaluate(() => {
@@ -177,7 +198,27 @@ async function runOne(browser, w, scheme, shots, route) {
       await new Promise((done) => { const step = () => (performance.now() - t0 < 500 ? (n++, requestAnimationFrame(step)) : done()); requestAnimationFrame(step); });
       return { frames: [...new Set(frames)], framesIn500ms: n, active: document.activeElement?.tagName.toLowerCase() ?? null };
     }).catch((e) => ({ frames: `unread: ${String(e?.message ?? e).split("\n")[0]}` })));
+    // where the tap really lands: the top window's viewports and scroll, and each press the terminal's frame receives
+    // (its point and target), read before and after the tap, since the element under the button's centre was the button
+    // while CI's tap reached the amount field
+    const views = () => page.evaluate(() => ({ scroll: [scrollX, scrollY], vv: visualViewport && [visualViewport.offsetLeft, visualViewport.offsetTop, visualViewport.pageTop, visualViewport.width, visualViewport.height, visualViewport.scale] })).catch(() => null);
+    run.tapGet.topBefore = await views();
+    await f.evaluate(() => {
+      window.__ctPress = [];
+      const name = (e) => (e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === "string" ? `.${e.className.trim().split(/\s+/).join(".")}` : ""}` : null);
+      for (const t of ["pointerdown", "mousedown", "touchstart"]) addEventListener(t, (e) => { const p = e.touches?.[0] ?? e; window.__ctPress.push(`${t} ${Math.round(p.clientX)},${Math.round(p.clientY)} ${name(e.target)} vv ${visualViewport?.offsetTop},${visualViewport?.pageTop},${visualViewport?.scale}`); }, { capture: true });
+    }).catch(() => {});
     run.tapGet.error = await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).then(() => null, (e) => [...new Set(String(e?.message ?? e).split("\n").map((l) => l.trim()).filter(Boolean))].slice(0, 40).join(" | "));
+    if (run.tapGet.error) {
+      run.tapGet.topAfter = await views();
+      Object.assign(run.tapGet, await f.evaluate(async () => {
+        const b = document.querySelector("[data-sheet='deposit'] [data-control='deposit-get']")?.getBoundingClientRect();
+        let n = 0;
+        const t0 = performance.now();
+        await Promise.race([new Promise((done) => { const step = () => (performance.now() - t0 < 500 ? (n++, requestAnimationFrame(step)) : done()); requestAnimationFrame(step); }), new Promise((done) => setTimeout(done, 1_000))]);
+        return { presses: window.__ctPress ?? null, boxAfter: b ? [b.x, b.y, b.width, b.height].map(Math.round) : null, framesAfter: n, activeAfter: document.activeElement?.tagName.toLowerCase() ?? null };
+      }).catch((e) => ({ presses: `unread: ${String(e?.message ?? e).split("\n")[0]}` })));
+    }
     await waitState(f, "S4.13");
     run.quote = (await asked(page)).filter((m) => m.type === "deposit.quote").map(fieldsOf)[0] ?? null;
     run.addressState = await sheetState(f);
