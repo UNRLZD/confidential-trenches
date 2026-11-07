@@ -4,7 +4,9 @@
 //   sign    packages/signpage/scripts/deploy.mjs  LIVE_CHECKS and liveRuns
 //   helper  scripts/ci/helper-live-checks.mjs     LIVE_CHECKS, liveRuns and SKIPPED (the helper deploys from its server)
 // each read by running the file with --live-runs, which prints its list as JSON (listOf).
-// One matrix entry for each run of each check, so each is its own parallel job. A check the runner cannot run (SKIPPED:
+// One matrix entry for each run of each check, so each is its own parallel job, except a host's serial groups (card
+// helper-live-jup-serial: helper-live-checks.mjs SERIAL_GROUPS): the checks that spend one shared budget are one entry,
+// `group` the keys in the order they run, which scripts/ci/live-serial.mjs runs one after another in that job. A check the runner cannot run (SKIPPED:
 // it needs a secret or an account the release has not named) is listed with its reason, run nowhere and never counted a
 // pass. A list's notApplicable names the part of a check with nothing to run on (helper-pool-senders on a cluster with
 // no pool deploy record): it is listed not-applicable with that reason, and the check's runs still run. Each run is held
@@ -96,12 +98,16 @@ export function listOf(host, root, { commit, network }) {
     throw new Error(`${HOSTS[host]} --live-runs printed no JSON list`);
   }
   if (!Array.isArray(list.checks) || !list.checks.length) throw new Error(`${HOSTS[host]} lists no live check`);
-  return { checks: list.checks, skipped: list.skipped ?? {}, notApplicable: list.notApplicable ?? {}, runs: list.runs ?? {} };
+  return { checks: list.checks, skipped: list.skipped ?? {}, notApplicable: list.notApplicable ?? {}, serial: list.serial ?? {}, budgetExempt: list.budgetExempt ?? {}, runs: list.runs ?? {} };
 }
 
+/** The keys one matrix entry runs: its group's members in order, or its own key. */
+export const keysOf = (entry) => (entry.group ? entry.group.split(" ") : [entry.key]);
+
 /**
- * The plan for `host` at `commit`: { host, commit, include: [{ id, key, args, name, chrome, engines }], skipped: [{ key,
- * reason, detail }] }. Throws on a check that has no file, or a name or run that is not what a job can take.
+ * The plan for `host` at `commit`: { host, commit, include: [{ id, key, args, group, name, chrome, engines }], skipped: [{ key,
+ * reason, detail }] }. An entry of a serial group has key "" and `group` its members' keys, space apart, in run order; every
+ * other entry has group "". Throws on a check that has no file, or a name or run that is not what a job can take.
  */
 export async function planFor(host, { commit, network = "mainnet", root = ROOT } = {}) {
   if (!HOSTS[host]) throw new Error(`host must be one of ${Object.keys(HOSTS).join(", ")}, not ${host}`);
@@ -134,13 +140,58 @@ export async function planFor(host, { commit, network = "mainnet", root = ROOT }
         id: runs.length === 1 ? key : `${key}-${i + 1}`,
         key,
         args,
+        group: "",
         name: args && runs.length > 1 ? `${key} ${args.replace(/--/g, "")}` : key,
         chrome: reachesLauncher(root, path.join("scripts/live-checks", `${key}.mjs`)),
         engines: enginesFor(args).join(" "),
       });
     });
   }
-  return { host, commit, network, include, skipped };
+  return { host, commit, network, include: collapse(include, mod, host), skipped };
+}
+
+/**
+ * Each serial group (the list's `serial`: { id: [key, ...] }) becomes ONE entry, where its first member was, so its
+ * members run one after another in one job. Throws on a group that is not one the job can run: an id that is not a
+ * name, a check's key or another group's; fewer than two members; a member twice, in two groups, not listed, skipped or
+ * with no run; a member with more than one run or with arguments (the entry carries keys alone).
+ */
+function collapse(include, mod, host) {
+  const taken = new Map();
+  for (const [id, members] of Object.entries(mod.serial)) {
+    const at = `${HOSTS[host]}'s serial group ${id}`;
+    if (!KEY.test(id) || mod.checks.includes(id)) throw new Error(`${at}: the id is no name a job can take, or is a check's key`);
+    if (!Array.isArray(members) || members.length < 2 || new Set(members).size !== members.length) throw new Error(`${at}: needs two or more different checks`);
+    for (const k of members) {
+      if (typeof k !== "string" || !mod.checks.includes(k)) throw new Error(`${at}: ${k} is not a listed check`);
+      if (mod.skipped[k]) throw new Error(`${at}: ${k} is skipped, so it has nothing to run`);
+      if (taken.has(k)) throw new Error(`${k} is in two serial groups, ${taken.get(k)} and ${id}`);
+      taken.set(k, id);
+      const own = include.filter((e) => e.key === k);
+      if (own.length !== 1) throw new Error(`${at}: ${k} has ${own.length} runs, and a member has exactly one`);
+      if (own[0].args !== "") throw new Error(`${at}: ${k} runs with arguments (${own[0].args}), and a member runs with none`);
+    }
+  }
+  const out = [];
+  for (const e of include) {
+    const id = taken.get(e.key);
+    if (id === undefined) {
+      out.push(e);
+      continue;
+    }
+    if (out.some((x) => x.id === id)) continue;
+    const members = mod.serial[id].map((k) => include.find((x) => x.key === k));
+    out.push({
+      id,
+      key: "",
+      args: "",
+      group: members.map((m) => m.key).join(" "),
+      name: `${id} (${members.length} checks, one after another)`,
+      chrome: members.some((m) => m.chrome),
+      engines: [...new Set(members.flatMap((m) => m.engines.split(" ").filter(Boolean)))].join(" "),
+    });
+  }
+  return out;
 }
 
 /** What `host` reports of its commit: the helper's X-Helper-Commit; the two Pages hosts report none (null). */

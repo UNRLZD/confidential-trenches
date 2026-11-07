@@ -594,6 +594,7 @@ test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start 
   // two JSON-RPC nodes on loopback, a block every 2 s up to now; the second answers state reads only for the last
   // 15 s, and each a second late, so the helper is up and answering its health while the check runs
   const g = BigInt(Math.floor(Date.now() / 1000)) - 2_000n;
+  // two loopback addresses: an env pair must be two operators (fold B), and an IP host is its address
   const nodes = [0, 15].map((keepS) =>
     createServer((q, r) => {
       let body = "";
@@ -608,11 +609,11 @@ test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start 
         if (keepS === 0) return answer({ result: `0x${"0".repeat(63)}2` });
         setTimeout(() => answer(g + 2n * at < BigInt(Math.floor(Date.now() / 1000)) - 15n ? { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } } : { result: `0x${"0".repeat(63)}2` }), 1_000);
       });
-    }).listen(0, "127.0.0.1"),
+    }).listen(0, keepS === 0 ? "::1" : "127.0.0.1"),
   );
   t.after(() => nodes.forEach((s) => (s.closeAllConnections(), s.close())));
   await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
-  const urls = nodes.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`);
+  const urls = nodes.map((s, i) => `http://${i === 0 ? "[::1]" : "127.0.0.1"}:${(s.address() as AddressInfo).port}`);
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
   const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: "0x00000000000000000000000000000000b1f1f001", POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
   assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);

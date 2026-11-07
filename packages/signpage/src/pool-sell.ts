@@ -58,6 +58,7 @@ import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_SELL_FEE, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
@@ -138,8 +139,6 @@ const POOL_LEN = 2179;
 const POOL_DISC = /* @__PURE__ */ new TextEncoder().encode("bfpool01");
 const TREE_LEN = 8 + 1 + 33 * 32;
 const OFF_TREES = 49;
-const PRE_MARK_LEN = 17;
-const MARK_TAG = 1;
 const U32 = 0xffff_ffff;
 const enc = /* @__PURE__ */ new TextEncoder();
 
@@ -246,13 +245,21 @@ type Mark = { value: bigint; nonce: bigint; slot: number };
 async function markOf(rpcs: Rpcs, program: string, precommitment: bigint, at?: readonly [number, number]): Promise<Mark | "one" | null> {
   const address = solanaProgramAddress([enc.encode("pre"), be32(precommitment)], program);
   const [a, b] = await Promise.all([account(rpcs[0], address, "finalized", at?.[0]), account(rpcs[1], address, "finalized", at?.[1])]);
-  if ("none" in a && "none" in b) return null;
-  if ("none" in a || "none" in b) return "one";
-  if (a.owner !== program || b.owner !== program || !sameBytes(a.data, b.data)) return no();
-  const d = a.data;
-  if (d.length !== PRE_MARK_LEN || d[16] !== MARK_TAG) return no();
-  const v = new DataView(d.buffer, d.byteOffset, 16);
-  return { value: v.getBigUint64(0, true), nonce: v.getBigUint64(8, true), slot: Math.max(a.slot, b.slot) };
+  // the kit's parse: a stranger's system account at the address is no mark (the deposit takes it over; card
+  // pool-deposits I-3), anything but the program's 17-byte mark refused
+  const mark = (x: typeof a): SolanaPoolPreMark | null => {
+    if ("none" in x) return null;
+    try {
+      return solanaPoolPreMarkOf(x, program);
+    } catch {
+      return no();
+    }
+  };
+  const [ma, mb] = [mark(a), mark(b)];
+  if (ma === null && mb === null) return null;
+  if (ma === null || mb === null) return "one";
+  if (ma.value !== mb.value || ma.nonce !== mb.nonce) return no();
+  return { value: ma.value, nonce: ma.nonce, slot: Math.max(a.slot, b.slot) };
 }
 
 /** A mark's leaf, as pool-deposit.ts's verdict reads it: its label the label tree's leaf nonce - 1, and the commitment

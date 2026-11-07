@@ -6,11 +6,17 @@
 #
 # which each deploy script prints once it has deployed. The plan job reads the checks to run from the deploy
 # (scripts/ci/live-plan.mjs: LIVE_CHECKS and liveRuns of apps/terminal/scripts/deploy.mjs, packages/signpage/scripts/deploy.mjs
-# and scripts/ci/helper-live-checks.mjs), never a copy. Each run of each check is its own job, in parallel: the job
+# and scripts/ci/helper-live-checks.mjs), never a copy. Each run of each check is its own job, in parallel (except a
+# serial group, below): the job
 # checks out the deployed commit, starts Chrome through scripts/browsers.mjs (and installs Playwright's Firefox and WebKit
 # where the run names them), runs the check, and uploads its full output and its screenshots. The run fails on any FAIL
 # or error. The helper's commit is held to what the helper reports (X-Helper-Commit). APP_HOST and SIGN_HOST report none:
 # signpage-release holds their files to the commit's own build, and fails when a host serves another commit's.
+#
+# A serial group (card helper-live-jup-serial; SERIAL_GROUPS in scripts/ci/helper-live-checks.mjs) is ONE job: its checks
+# spend one shared budget, the helper's Jupiter window, so they run one after another (scripts/ci/live-serial.mjs), each
+# once the helper's own answer says the budget is idle (scripts/ci/jup-idle.mjs), and none is retried. Run in parallel they
+# spent it between them and a page fell back to chain reads (run 42332950254 attempt 1), a red that was no fault of the code.
 #
 # The workflow reads no secret and holds the read-only token alone. A check that needs one (helper-proxy reads the vendor
 # keys the host holds) is not run: the plan lists it as skipped-needs-secret in the run's summary, which is no pass.
@@ -83,7 +89,8 @@ jobs:
     if: needs.plan.outputs.count != '' && needs.plan.outputs.count != '0'
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # a serial group runs its checks one after another (about 11 minutes of checks, and the waits for an idle budget)
+    timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -177,6 +184,7 @@ jobs:
           key: ${{ steps.engines-key.outputs.key }}
       # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default
       - name: ${{ matrix.name }}
+        if: matrix.group == ''
         env:
           KEY: ${{ matrix.key }}
           ARGS: ${{ matrix.args }}
@@ -188,6 +196,19 @@ jobs:
           set -o pipefail
           # shellcheck disable=SC2086
           node "scripts/live-checks/$KEY.mjs" $ARGS 2>&1 | tee "$out/$ID.log"
+      # a serial group: its checks one after another, each once the helper's Jupiter budget is idle, none retried
+      - name: ${{ matrix.name }} (in turn)
+        if: matrix.group != ''
+        env:
+          GROUP: ${{ matrix.group }}
+          ID: ${{ matrix.id }}
+        run: |
+          out="$RUNNER_TEMP/live"
+          mkdir -p "$out"
+          export TMPDIR="$out"
+          set -o pipefail
+          # shellcheck disable=SC2086
+          node scripts/ci/live-serial.mjs $GROUP 2>&1 | tee "$out/$ID.log"
       - name: the lines that matter, in the run's summary
         if: always()
         env:

@@ -76,8 +76,10 @@ export function matches(file, paths = PATHS) {
 // sandboxes in parallel) ran 46 s on the Mac (2026-11-07) and joins shard 2, the lightest, for about 458.
 // tree_prop's long run (VT-P01's 100,000 inserts through the on-chain store, which run.sh's --include-ignored runs)
 // took 47 s on the Mac (2026-11-07); tree_prop stays in shard 4, for about 510, under shard 3's 528.
+// p02 (VT-P02, 24 cases of 48 steps, real proofs in the mocked VM) ran 118 s on the box (4 threads, 2026-11-07) and
+// joins shard 1, then the lightest at 430, for about 556 with its 8 s of compile and link.
 export const SHARDS = [
-  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
+  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "p02"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
