@@ -355,3 +355,15 @@ test("S6 legs: a writable leg the device has not read is refused; the same leg r
     assert.equal(result(check(c, () => {}, undefined, undefined, { [key]: [pool, pool] }), "S6").ok, true, c.name);
   }
 });
+
+// Card solana-written-accounts-whole: S6 scans every account the shared route names, with no offset by the IDL's count,
+// so a token account of the wallet's at the first leg (index 12) is refused like any other.
+test("S6 legs: the wallet's account at the shared route's first leg (index 12) is refused", () => {
+  for (const c of PICK) {
+    const key = solanaAta(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM);
+    const v = check(c, (s) => { s.accounts[12] = { pubkey: key, isSigner: false, isWritable: true }; }, undefined, undefined, { [key]: [tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM), tokenAccount(c.run.wallet, OTHER_MINT, SOLANA_TOKEN_PROGRAM)] });
+    const got = result(v, "S6");
+    assert.equal(got.ok, false, `${c.name}: ${got.detail}`);
+    assert.ok(got.detail.includes(`leg account ${key} is a token account of the wallet's`), got.detail);
+  }
+});

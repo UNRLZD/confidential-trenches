@@ -99,6 +99,9 @@ const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 // Another wallet of the same user, which the good trades never name.
 const OTHER = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + 3) & 0xff));
 const buyToken = 55_991_176_135n; // the landed buy's token in (meta.postTokenBalances of the wallet's account)
+// The wallet's account of the token (Token-2022), which both trades write: S11 holds its base after each simulation
+// (card solana-written-accounts-whole), so each case reads it back: the buy creates it clean, the sell empties it.
+const OWN = solanaAta(W, F.mint, T22);
 function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQuoteReads } {
   const sim: SolanaSimulation = {
     err: null,
@@ -107,7 +110,7 @@ function buyCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQu
     tokenAccountLamports: { pre: 0n, post: 1_513_840n }, // the landed buy: ECDKZF… 0 -> 1,513,840 (meta)
     pumpVolumeAccumulator: { pre: 0n, post: 1_346_200n },
     pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
-    walletAccounts: {},
+    walletAccounts: { [OWN]: held(W, F.mint, T22, buyToken, 1_513_840n) },
   };
   return {
     m: msgOf(BUY),
@@ -141,13 +144,14 @@ function sellCase(): { m: SolanaMessage; req: SolanaQuoteRequest; reads: SolanaQ
     tokenAccountLamports: { pre: 1_513_840n, post: 1_513_840n },
     pumpVolumeAccumulator: { pre: 1_346_200n, post: 1_346_200n },
     pumpSwapVolumeAccumulator: { pre: 0n, post: 0n },
-    walletAccounts: {},
+    walletAccounts: { [OWN]: held(W, F.mint, T22, 0n, 1_513_840n) },
   };
   const b = buyCase();
+  const own = held(W, F.mint, T22, buyToken, 1_513_840n);
   return {
     m,
     req: { side: "sell", wallet: W, token: F.mint, amount: buyToken, spendable: buyToken, minOut: 8_738_870n, otherWallets: [] },
-    reads: { ...b.reads, simulations: [sim, structuredClone(sim)], reference: { expectedOut: 9_656_210n, slippageBps: 950 } },
+    reads: { ...b.reads, simulations: [sim, structuredClone(sim)], writable: { [OWN]: [own, own] }, reference: { expectedOut: 9_656_210n, slippageBps: 950 } },
   };
 }
 // The device's reads of the accounts a tx writes: the case's own, and every other one as no account (none of them is
@@ -883,7 +887,7 @@ test("S11: a writable token account of the wallet's is held to its read before: 
     const c = buyCase();
     legTo(c, ata);
     c.reads.writable = { [ata]: [before, before] };
-    for (const s of c.reads.simulations) (s as SolanaSimulation).walletAccounts = after === undefined ? {} : { [ata]: after };
+    for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = after === undefined ? { ...x.walletAccounts } : { ...x.walletAccounts, [ata]: after }; }
     return s11(run(c));
   };
   assert.equal(at(held(W, USDC, TOKEN, 7_000_000n)).ok, true, "unmoved");
@@ -908,11 +912,11 @@ const wsolHeld = held(W, "So11111111111111111111111111111111111111112", TOKEN, X
 test("S11 wSOL: the buy's wSOL account held 0.05 SOL; closed back into the wallet passes, closed anywhere else is refused", () => {
   const ok = buyCase();
   ok.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
-  for (const s of ok.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { [WSOL_ATA]: null }; x.walletLamports.post += X + 2_039_280n; }
+  for (const s of ok.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: null }; x.walletLamports.post += X + 2_039_280n; }
   assert.equal(s11(run(ok)).ok, true, s11(run(ok)).detail);
   const gone = buyCase();
   gone.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
-  for (const s of gone.reads.simulations) (s as SolanaSimulation).walletAccounts = { [WSOL_ATA]: null };
+  for (const s of gone.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: null }; }
   const v = s11(run(gone));
   assert.equal(v.ok, false);
   assert.match(v.detail, /provider A: native out \d+ > \d+/);
@@ -926,10 +930,142 @@ test("S11 wSOL: a sell whose own out is under minOut is refused though the walle
   for (const s of c.reads.simulations) {
     const x = s as SolanaSimulation;
     x.walletLamports.post = x.walletLamports.pre + c.req.minOut - 1n - ft + X + 2_039_280n;
-    x.walletAccounts = { [WSOL_ATA]: null };
+    x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: null };
   }
   c.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
   const v = s11(run(c));
   assert.equal(v.ok, false, v.detail);
   assert.match(v.detail, new RegExp(`provider A: native in ${c.req.minOut - 1n} < minOut ${c.req.minOut}`));
+});
+
+// Card solana-written-accounts-whole. The solana-legs-checked review (7 Nov 06:35Z) found S11 held a written account of
+// the wallet's to its amount, lamports and owner field only, and the providers to agree on lamports and amount only: a
+// route could leave a stranger as the delegate or close authority of the wallet's held wSOL account and pass S11 and S6.
+// S11 now holds every byte of the 165-byte base: all but the amount on a wSOL account, all on any other, the providers
+// agreeing on all of it; and the wallet's account of the token keeps its base or, created, a clean one.
+const copyHeld = (a: SolanaHeldRead): SolanaHeldRead => ({ owner: a.owner, lamports: a.lamports, data: Uint8Array.from(a.data) });
+// The account with a stranger as its delegate for all of it, and as its close authority.
+const hostile = (a: SolanaHeldRead): SolanaHeldRead => {
+  const x = copyHeld(a);
+  setU32(x.data, 72, 1); x.data.set(base58.decode(randomKey()), 76); x.data.set(x.data.subarray(64, 72), 121);
+  setU32(x.data, 129, 1); x.data.set(base58.decode(randomKey()), 133);
+  return x;
+};
+// A Token-2022 account as the chain holds it: the base, the account type byte (2) and ImmutableOwner (type 7, length 0).
+const wide = (a: SolanaHeldRead): SolanaHeldRead => {
+  const d = new Uint8Array(170);
+  d.set(a.data.subarray(0, 165));
+  d[165] = 2;
+  setU16(d, 166, 7);
+  return { owner: T22, lamports: a.lamports, data: d };
+};
+// S11 on the buy whose route writes the wallet's USDC account (a leg, so S6 refuses it too; S11 is read alone here),
+// read `pair` before and `after` after on both providers.
+const writtenUsdc = (pair: readonly [SolanaHeldRead, SolanaHeldRead], after: SolanaHeldRead | null) => {
+  const ata = solanaAta(W, USDC, pair[0].owner);
+  const c = buyCase();
+  legTo(c, ata);
+  c.reads.writable = { [ata]: pair };
+  for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [ata]: after }; }
+  return { ata, v: s11(run(c)) };
+};
+test("S11 whole base: an account of the wallet's the route leaves with a stranger as delegate and close authority is refused, naming both", () => {
+  const before = held(W, USDC, TOKEN, 7_000_000n);
+  const { ata, v } = writtenUsdc([before, before], hostile(before));
+  assert.equal(v.ok, false, v.detail);
+  assert.match(v.detail, new RegExp(`provider A: the wallet's account ${ata} moves: 7000000 -> 7000000, lamports 2039280 -> 2039280, its delegate, delegated_amount, close authority changed`));
+});
+test("S11 whole base: the buy's held wSOL source left open with a stranger as delegate and close authority is refused, by S11", () => {
+  const c = buyCase();
+  c.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: hostile(wsolHeld) }; }
+  const v = s11(run(c));
+  assert.equal(v.ok, false, v.detail);
+  assert.match(v.detail, new RegExp(`provider A: the wallet's wSOL account ${WSOL_ATA} is left with its delegate, delegated_amount, close authority changed`));
+  // its amount and lamports alone may move: synced to 0.04 SOL with the 0.01 SOL that left counted as native out, it passes
+  const ok = buyCase();
+  ok.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  const less = copyHeld(wsolHeld);
+  less.lamports -= 10_000_000n;
+  setU64(less.data, 64, X - 10_000_000n);
+  for (const s of ok.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: less }; x.walletLamports.post += 10_000_000n; }
+  assert.equal(s11(run(ok)).ok, true, s11(run(ok)).detail);
+});
+test("S11 whole base: a wSOL account handed to another owner with its lamports kept is refused (no longer the wallet's never counts)", () => {
+  const c = buyCase();
+  c.reads.writable = { [WSOL_ATA]: [wsolHeld, wsolHeld] };
+  const theirs = copyHeld(wsolHeld);
+  theirs.data.set(base58.decode(randomKey()), 32);
+  for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [WSOL_ATA]: theirs }; x.walletLamports.post += X + 2_039_280n; }
+  const v = s11(run(c));
+  assert.equal(v.ok, false, v.detail);
+  assert.match(v.detail, new RegExp(`the wallet's wSOL account ${WSOL_ATA} is left with its owner changed`));
+});
+test("S11 whole base: an account of the wallet's whose lamports alone change is refused", () => {
+  const before = held(W, USDC, TOKEN, 7_000_000n);
+  const after = copyHeld(before);
+  after.lamports += 1n;
+  const { ata, v } = writtenUsdc([before, before], after);
+  assert.equal(v.ok, false, v.detail);
+  assert.match(v.detail, new RegExp(`the wallet's account ${ata} moves: 7000000 -> 7000000, lamports 2039280 -> 2039281$|the wallet's account ${ata} moves: 7000000 -> 7000000, lamports 2039280 -> 2039281;`));
+});
+test("S11 whole base: the providers disagreeing on an account of the wallet's in its lamports alone, or its delegate alone, is refused", () => {
+  const before = held(W, USDC, TOKEN, 7_000_000n);
+  const richer = copyHeld(before);
+  richer.lamports += 1n;
+  const delegated = copyHeld(before);
+  setU32(delegated.data, 72, 1); delegated.data.set(base58.decode(randomKey()), 76);
+  for (const b of [richer, delegated]) {
+    const { ata, v } = writtenUsdc([before, b], before);
+    assert.equal(v.ok, false, v.detail);
+    assert.equal(v.detail, `the providers disagree on the wallet's account ${ata}`);
+  }
+});
+test("S11 whole base: a Token-2022 account of the wallet's at its real size (170 bytes) is held too, as a leg by S6 and moved by S11", () => {
+  const before = wide(held(W, USDC, T22, 7_000_000n));
+  const drained = copyHeld(before);
+  setU64(drained.data, 64, 0n);
+  const { ata, v } = writtenUsdc([before, before], drained);
+  assert.equal(v.ok, false, v.detail);
+  assert.match(v.detail, new RegExp(`the wallet's account ${ata} moves: 7000000 -> 0`));
+  const odd = randomKey();
+  const c = buyCase();
+  legTo(c, odd);
+  c.reads.writable = { [odd]: [null, before] };
+  const got = s6(run(c));
+  assert.equal(got.ok, false, got.detail);
+  assert.ok(got.detail.includes(`leg account ${odd} is a token account of the wallet's`), got.detail);
+});
+test("S11 whole base: the wallet's account of the token after the buy (created) or the sell (kept) with a stranger as delegate or close authority is refused", () => {
+  for (const make of [buyCase, sellCase]) {
+    const c = make();
+    for (const s of c.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [OWN]: hostile(x.walletAccounts[OWN] as SolanaHeldRead) }; }
+    const v = s11(run(c));
+    assert.equal(v.ok, false, `${c.req.side}: ${v.detail}`);
+    assert.match(v.detail, new RegExp(`provider A: the wallet's account of the token ${OWN} is left with its delegate, (delegated_amount, )?close authority changed`)); // the sold-out account delegates 0
+    // frozen, or another owner's: refused too; not read back: refused
+    const frozen = make();
+    for (const s of frozen.reads.simulations) { const x = s as SolanaSimulation; const a = copyHeld(x.walletAccounts[OWN] as SolanaHeldRead); a.data[108] = 2; x.walletAccounts = { ...x.walletAccounts, [OWN]: a }; }
+    assert.match(s11(run(frozen)).detail, /of the token \S+ is left with its state changed/);
+    const unread = make();
+    for (const s of unread.reads.simulations) { const x = s as SolanaSimulation; const { [OWN]: _, ...rest } = x.walletAccounts; x.walletAccounts = rest; }
+    assert.match(s11(run(unread)).detail, new RegExp(`the wallet's account ${OWN} is not read back`));
+  }
+  // a sell that closes it: nothing left to hold
+  const closed = sellCase();
+  for (const s of closed.reads.simulations) { const x = s as SolanaSimulation; x.walletAccounts = { ...x.walletAccounts, [OWN]: null }; }
+  assert.equal(s11(run(closed)).ok, true, s11(run(closed)).detail);
+});
+// The legs from the first one (card solana-written-accounts-whole: S6 scans every account the route names, no offset).
+test("S6 legs: the wallet's account at route_v2's first leg (index 10) is refused", () => {
+  for (const make of [buyCase, sellCase]) {
+    const c = make();
+    const ata = solanaAta(W, USDC, TOKEN);
+    const at = addWritableKey(c.m, ata);
+    c.m.instructions[progAt(c.m, JUP)[0] as number]!.accounts[10] = at;
+    c.reads.writable = { [ata]: [held(W, USDC, TOKEN, 7n), held(W, USDC, TOKEN, 7n)] };
+    const got = s6(run(c));
+    assert.equal(got.ok, false, got.detail);
+    assert.ok(got.detail.includes(`leg account ${ata} is a token account of the wallet's`), got.detail);
+  }
 });

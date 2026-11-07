@@ -52,8 +52,10 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
   // the recording never asked together answers each from the recording's own reads of it on this provider, and as no
   // account where it holds none. One sell wallet, 9UnZ…dw3v, also holds a wSOL account (FVee…8qQi, 28,771,090,189
   // wrapped, read by its teardown), which its sell writes: the flow reads it back in a second simulation, which the
-  // recording predates too. That sell's own instructions close the account into the wallet (S13 holds a create closed
-  // once, after the route, to the wallet), so a clean run of it leaves no account there: the replay answers that.
+  // recording predates too, with the wallet itself (card solana-written-accounts-whole: the native sum from one run).
+  // That sell's own instructions close the account into the wallet (S13 holds a create closed once, after the route, to
+  // the wallet), so a clean run of it leaves no account there and the wallet as the recorded simulation left it: the
+  // replay answers that.
   const known = new Map<string, unknown>();
   for (const r of fx.rpc) {
     if (r.at !== at || !r.ask.startsWith('["getMultipleAccounts"')) continue;
@@ -68,10 +70,13 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
     asks.push(k);
     times.push(Date.now());
     if (method === "isBlockhashValid") return { context: { slot: 1 }, value: valid(at, params[0] as string, asks.filter((x) => x.startsWith('["isBlockhashValid"')).length - 1) };
-    const list = by.get(k);
+    let list = by.get(k);
     if (!list && method === "getMultipleAccounts") return { context: { slot: 1 }, value: (params[0] as string[]).map((x) => clone(known.get(x) ?? null)) };
     const back = method === "simulateTransaction" ? (params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses : undefined;
-    if (!list && back?.length === 1 && back[0] === WSOL_HELD.account) return { context: { slot: 1 }, value: { err: null, accounts: [null] } };
+    if (!list && back?.length === 2 && back[0] === WSOL_HELD.wallet && back[1] === WSOL_HELD.account) {
+      const main = fx.rpc.find((r) => r.at === at && r.ask.startsWith('["simulateTransaction"') && (JSON.parse(r.ask) as [string, { addresses?: string[] } | null])[1]?.addresses?.[0] === WSOL_HELD.wallet)!;
+      list = [{ context: { slot: 1 }, value: { err: null, accounts: [(main.answer as { value: { accounts: unknown[] } }).value.accounts[0], null] } }]; // edited as a recorded answer
+    }
     if (!list) throw new Error(`not recorded on ${at}: ${k.slice(0, 160)}`);
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
@@ -1054,7 +1059,7 @@ test("a set whose every leg is dropped as late never calls onSigned: refused, an
 test("card solana-legs-checked: the sell wallet that already holds 28.77 wSOL has that account read on both providers and read back after its sell, and its sell is held to its own proceeds", async () => {
   const d = deps(SELL);
   const r = await runSolanaTrade(request(SELL), d);
-  const back = JSON.stringify(["simulateTransaction", { addresses: [WSOL_HELD.account], encoding: "base64" }]);
+  const back = JSON.stringify(["simulateTransaction", { addresses: [WSOL_HELD.wallet, WSOL_HELD.account], encoding: "base64" }]);
   for (const p of d.providers) {
     assert.ok(p.asks.some((k) => k.startsWith('["getMultipleAccounts"') && k.includes(WSOL_HELD.account) && k.includes(WSOL_HELD.wallet)), "read with the accounts its sell writes");
     assert.ok(p.asks.includes(back), "read back after the sell");
@@ -1065,4 +1070,26 @@ test("card solana-legs-checked: the sell wallet that already holds 28.77 wSOL ha
   const s12 = leg.verdict!.results.find((x) => x.id === "S12")!.detail;
   const out = BigInt(/^simulated out (\d+)/.exec(s12)![1]!);
   assert.ok(out > 0n && out < BigInt(WSOL_HELD.lamports), `${out}`);
+});
+
+test("card solana-written-accounts-whole: the wallet's held wSOL account read again after its simulations; a deposit into it meanwhile refuses that leg alone", async () => {
+  const d = deps(SELL);
+  const wrap = (p: (typeof d.providers)[number]) =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      const x = await p(method, params);
+      const keys = method === "getMultipleAccounts" ? (params[0] as string[]) : [];
+      // the read after the simulations: the wallet's four accounts, then its wSOL account the sell writes
+      if (keys.length === 5 && keys[0] === WSOL_HELD.wallet && keys[4] === WSOL_HELD.account) {
+        const acc = (x as { value: ({ lamports: number } | null)[] }).value[4]!;
+        acc.lamports += 1;
+      }
+      return x;
+    }, { asks: p.asks, times: p.times });
+  const providers = [wrap(d.providers[0]), wrap(d.providers[1])] as const;
+  const r = await runSolanaTrade(request(SELL), { ...d, providers });
+  for (const p of providers) assert.ok(p.asks.some((k) => k.startsWith('["getMultipleAccounts"') && JSON.parse(k)[1][0].length === 5 && k.includes(WSOL_HELD.account)), "read again after the simulations");
+  for (const l of r.legs) {
+    if (l.wallet === WSOL_HELD.wallet) assert.match(l.refused ?? "", /changed while the trade was checked/);
+    else assert.equal(l.refused, undefined, l.refused);
+  }
 });
