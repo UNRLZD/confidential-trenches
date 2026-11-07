@@ -2783,14 +2783,15 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    PRE_MAX_ACCOUNTS accounts and PRE_MAX_SLOTS slots, is the replay's state override over the system slots: the
 //    state the trade read at its start, after every earlier transaction of its block, so a hook flipped by one (HC2)
 //    sees in the replay what it saw in the trade. Where the replay as the trade ran passes anyway (a hook keyed on
-//    ArbOS's state, which no override carries), the as-is leg holds only on a frame of the trade's own trace into one
-//    of the route's unlisted hooks that errored there: the hook reverted in the trade itself, read from the trace (never
-//    from the route alone), never a listed hook's frame nor the PoolManager's. Still open there: a hook keyed on ArbOS's
-//    state that fails the trade by a fee taken through a delta, not by reverting (no frame of its errors; the trade
-//    misses minOut after it); it costs a failed try each time it is taken. A trace that differs, fails or passes its
-//    bounds bans nothing. Base and Base Sepolia have no such pair (one keyless company serves traces there): their
-//    replay stays at the parent block (card evm-sell-hook-intrablock-base); so does Robinhood's testnet (none of its
-//    pinned providers serves a trace);
+//    ArbOS's state, which no override carries), the as-is leg holds only on a frame the PoolManager called in the
+//    trade's own trace into one of the route's unlisted hooks that errored there: the hook reverted in the trade itself,
+//    read from the trace (never from the route alone), never a listed hook's frame nor the PoolManager's; those hooks
+//    alone are at fault (step 4 asks no set). Still open there: a hook keyed on ArbOS's state that fails the trade by a
+//    fee taken through a delta, not by reverting (no frame of its errors; the trade misses minOut after it); it costs a
+//    failed try each time it is taken. A trace that differs, fails or passes its bounds adds nothing: the evidence runs
+//    at the parent block as it does without one. Base and Base Sepolia have no such pair (one keyless company serves
+//    traces there): their replay stays at the parent block (card evm-sell-hook-intrablock-base); so does Robinhood's
+//    testnet (none of its pinned providers serves a trace);
 // 3. the market held: V4Quoter, at the parent block, prices the quote's route with its hooks as they are at the
 //    quote's minOut or more, so the price did not move: the hooks treated the sale and the quoter apart. A price that
 //    moved, by the market or by an attacker before the sale, bans nothing, even where an honest hook's own fee (one
@@ -2982,9 +2983,10 @@ function preOverOf(r: unknown): Record<string, Override> | null {
   }
   return out;
 }
-/** The callees of the frames that errored in a callTracer answer for `sale` (lowercased, sorted), `pm` (the venue's
- *  PoolManager) never among them; null where the answer is not the trade's own call (its root frame's from, to, input
- *  and value the transaction's) or passes PRE_MAX_FRAMES. */
+/** The callees of the frames that errored in a callTracer answer for `sale` (lowercased, sorted): each frame the
+ *  PoolManager `pm` called (a hook's call; a frame from anyone else, which could catch the revert, never counts), `pm`
+ *  itself never among them; null where the answer is not the trade's own call (its root frame's from, to, input and
+ *  value the transaction's) or passes PRE_MAX_FRAMES (review of 29498693, MEDIUM and LOW). */
 function erroredOf(r: unknown, sale: Trade, pm: string | undefined): string[] | null {
   type Frame = { from?: unknown; to?: unknown; input?: unknown; value?: unknown; error?: unknown; calls?: unknown };
   const root = r as Frame | null;
@@ -2997,18 +2999,20 @@ function erroredOf(r: unknown, sale: Trade, pm: string | undefined): string[] | 
     if (n >= PRE_MAX_FRAMES) return null;
     const f = stack.pop()!;
     if (typeof f !== "object" || f === null) return null;
-    if (typeof f.error === "string" && f.error.length > 0 && isAddress(f.to) && lower(f.to) !== pm) out.add(lower(f.to));
+    if (typeof f.error === "string" && f.error.length > 0 && isAddress(f.from) && lower(f.from) === pm && isAddress(f.to) && lower(f.to) !== pm) out.add(lower(f.to));
     if (f.calls !== undefined) {
       if (!Array.isArray(f.calls)) return null;
-      stack.push(...(f.calls as Frame[]));
+      // bounded before it is walked: a spread of a huge array throws before any cap
+      if (stack.length + f.calls.length > PRE_MAX_FRAMES) return null;
+      for (const c of f.calls as Frame[]) stack.push(c);
     }
   }
   return [...out].sort();
 }
 /** The trade `sale`'s pre-state and errored callees from its own trace, read once on each of the two providers `trace`
- *  (one request each, both tracers; no retry: a ban is never on a quote's path, and one not proved now bans nothing),
- *  equal on both or a refusal (rpc_disagree: the caller bans nothing); a provider that does not answer with a trace,
- *  rpc_error (thrown: the caller may ask again). */
+ *  (one request each, both tracers; no retry: a ban is never on a quote's path), equal on both or a refusal
+ *  (rpc_disagree); a provider that does not answer with a trace within its bounds, rpc_error. Either refusal leaves the
+ *  evidence as it is without a trace (blamed: the trace only ever adds a leg). */
 async function tracedPre(trace: readonly EvmRpc[], sale: Trade, pm: string | undefined): Promise<Pre> {
   const { a } = await agreeing(
     trace,
@@ -3097,12 +3101,20 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
     sysSlots.forEach(([a, s], i) => ((sys[a] ??= { stateDiff: {} }).stateDiff[s] = words[i]!));
   }
   // the trade's true pre-state where the chain has one (preStateOf): every account its trace names but ArbOS's state,
-  // over the system slots (a slot both name takes the trace's word)
-  const p = pre === undefined ? undefined : await pre(sale);
+  // over the system slots (a slot both name takes the trace's word). A trace not read, past its bounds or not the two
+  // providers' same word adds nothing: the evidence runs as on a chain with none, at the parent block with its system
+  // slots, so a trace a hook makes too big to read never turns off what the replay alone proves (review of 29498693, HIGH)
+  let p: Pre | undefined;
+  try {
+    p = pre === undefined ? undefined : await pre(sale);
+  } catch {
+    p = undefined;
+  }
   const base: Record<string, Override> = { ...sys };
   for (const [a, o] of Object.entries(p?.over ?? {})) base[a] = { ...o, ...(sys[a] !== undefined || o.stateDiff !== undefined ? { stateDiff: { ...sys[a]?.stateDiff, ...o.stateDiff } } : {}) };
   // the sale's own call: its sender, value, gas and fees, to where it went; the sender's balance its own at the parent
-  // block, never overridden (as the device's sale sim runs), so a hook that reads it sees what the trade saw
+  // block (as the device's sale sim runs), or on a chain with a trace the prestate's, so a hook that reads it sees what
+  // the trade saw
   const call = { from: sale.from, to: sale.to, data: sale.input, gas: qty(gas), value: sale.value, ...sale.fees };
   const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
     const state: Record<string, Override> = { ...base };
@@ -3116,22 +3128,29 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
     return a;
   };
   const hooks = [...new Set(keys.filter((k) => quote.hooked.includes("0x" + poolId(k))).map((k) => k.hooks))];
-  // the replay as the sale ran: it fails as the trade did, the same on both; or, where the trade's own trace is read,
-  // a frame of the trade into one of the route's unlisted hooks errored there (the hook reverted in the trade itself, two
-  // companies' word, whatever its replay tells: a hook keyed on ArbOS's backlog or L1 block number, which no replay can
-  // carry; never a listed hook's frame, nor the PoolManager's)
-  if (!failed(await replay({})) && !(p !== undefined && hooks.some((hk) => p.errored.includes(lower(hk))))) return [];
+  // the replay as the sale ran: it fails as the trade did, the same on both; or, where it passes and the trade's own
+  // trace is read, the route's unlisted hooks whose frame the PoolManager called errored there (each hook reverted in the
+  // trade itself, two companies' word, whatever its replay tells: a hook keyed on ArbOS's backlog or L1 block number,
+  // which no replay can carry; never a listed hook's frame, nor the PoolManager's)
+  const asIs = failed(await replay({}));
+  const tr = p;
+  const errored = asIs || tr === undefined ? [] : hooks.filter((hk) => tr.errored.includes(lower(hk)));
+  if (!asIs && errored.length === 0) return [];
   // 3. the market held: the quoter prices the route, its hooks as they are, at minOut or more at the parent block
   const [held] = await readBoth(rpcs, blk.parentHash, [held0]);
   if (held!.kind !== "out" || held!.amountOut < quote.minOut) return [];
   // 4. the hooks at fault: each smallest set of `hooked`'s hooks whose no-op at once rescues the trade (a set holding a
-  // smaller one that rescued it is not asked); every pool of the route behind a hook of one is banned
+  // smaller one that rescued it is not asked); every pool of the route behind a hook of one is banned. Where the replay
+  // passed and the trace named the hooks, those hooks alone: any set's no-op "rescues" a replay that never failed, so no
+  // set tells, and a hook outside them is never banned (review of 29498693, MEDIUM)
   const rescued: string[][] = [];
-  for (const set of subsetsOf(hooks)) {
-    if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;
-    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);
+  if (asIs) {
+    for (const set of subsetsOf(hooks)) {
+      if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;
+      if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);
+    }
   }
-  const fault = new Set(rescued.flat());
+  const fault = new Set(asIs ? rescued.flat() : errored);
   const out: string[] = [];
   for (const k of keys) if (fault.has(k.hooks) && !out.includes("0x" + poolId(k))) out.push("0x" + poolId(k));
   return out;

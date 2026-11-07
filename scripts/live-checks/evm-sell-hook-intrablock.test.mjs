@@ -36,7 +36,7 @@ test("each rule fails alone on the good answer with one thing changed", () => {
   assert.equal(one((g) => (g.txs[0].traces[1].digest = { ok: false, answer: '{"http":499,"body":""}' })), false, "a trace unanswered");
   assert.equal(one((g) => (g.txs[0].traces[1].digest.pre = "00".repeat(32))), false, "the prestates differ");
   assert.equal(one((g) => g.txs[0].traces.pop()), false, "one trace provider read");
-  assert.equal(one((g) => (g.txs[1].traces[0].digest.accounts = g.txs[1].traces[0].digest.accounts.filter((a) => !a.startsWith("0xa4b05f")))), false, "no ArbOS in the prestate");
+  for (const i of [0, 1]) assert.equal(one((g) => (g.txs[1].traces[i].digest.accounts = g.txs[1].traces[i].digest.accounts.filter((a) => !a.startsWith("0xa4b05f")))), false, `no ArbOS in provider ${i + 1}'s prestate`);
   assert.equal(one((g) => (g.txs[2].replays[0].answer = { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "historical state not available" } })), false, "the state refused");
   assert.equal(one((g) => g.txs[2].replays.pop()), false, "one quote provider");
 });

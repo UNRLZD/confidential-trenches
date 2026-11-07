@@ -106,6 +106,7 @@ export const OUT = {
   "app-export-every-wallet": "a browser",
   "evm-quote-warm-round": "EVM RPC quotes",
   "evm-quote-lag-held": "EVM RPC quotes",
+  "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",

@@ -13,10 +13,11 @@
 //     replay reverted), which is why no ban rests on a replay alone.
 // A trace is kept as read time's digest (sha-256 of the prestate's sorted JSON, its accounts, the call frame's error and
 // output), so a record stays small.
-// It passes when at least 3 transactions were read and every read and replay holds.
+// It passes when at least 3 transactions were read and every read and replay holds. It runs after every app deploy
+// (apps/terminal/scripts/deploy.mjs LIVE_CHECKS): the kit ships in the app's bundle and its bans fail open, so a pin
+// that changes or a provider that stops serving traces would turn Robinhood's trace evidence off without a sound.
 //   node scripts/live-checks/evm-sell-hook-intrablock.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. Reads only.
-// Runs: once, the two trace providers' answers the kit's Robinhood replay reads; no host deploy changes them
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -68,7 +69,7 @@ export function judge(run) {
     for (const x of tr) say(x.digest?.ok === true, `[${h}] ${x.url} answers both traces: ${x.digest?.ok === true ? "yes" : x.digest?.answer}`);
     const d = tr.map((x) => (x.digest?.ok === true ? x.digest : null));
     say(tr.length === 2 && d.every((x) => x !== null) && d[0].pre === d[1].pre, `[${h}] the two prestates are equal as JSON`);
-    say(d[0]?.accounts?.includes(ARBOS) === true, `[${h}] the prestate holds ArbOS's state account`);
+    for (const [i, x] of d.entries()) say(x?.accounts?.includes(ARBOS) === true, `[${h}] ${tr[i]?.url}'s prestate holds ArbOS's state account`);
     const reverted = typeof d[0]?.error === "string";
     const replays = Array.isArray(t.replays) ? t.replays : [];
     for (const r of replays) {
@@ -83,7 +84,7 @@ export function judge(run) {
 
 /** The run: the kit's own pins, the newest Robinhood transactions that call a contract. */
 export async function read(fetchFn = fetch, over = overOf) {
-  const { evmPoolVenues } = await import("../../packages/kit/src/trade/evm/buy-unpinned.ts");
+  const { evmPoolVenues } = await import("../../packages/kit/src/index.ts");
   const v = evmPoolVenues().robinhood;
   const trace = [...(v.traceProviders ?? [])];
   // two quote providers that keep the state of the blocks read (publicnode dropped it 20 blocks back in the probe)

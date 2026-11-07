@@ -146,13 +146,14 @@ test("the signing page's forty-two checks (signpage-shell runs four ways, solana
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 33, "the app's thirty-three checks, app-deposit-mount and page-evm-rpc-csp the newest");
+  assert.equal(app.include.length, 34, "the app's thirty-four checks, app-deposit-mount, page-evm-rpc-csp and evm-sell-hook-intrablock the newest");
   assert.ok(app.include.some((e) => e.key === "app-deposit-mount" && e.chrome && e.args === ""), "app-deposit-mount runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host app"), "page-evm-rpc-csp reads APP_HOST alone after every app deploy");
   assert.ok(app.include.some((e) => e.key === "rh-cold-quote" && e.args === ""), "rh-cold-quote runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "token-page-fills-after" && e.chrome && e.args === ""), "token-page-fills-after runs after every app deploy, in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-chart-live"), "app-chart-live runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "evm-quote-warm-round" && e.args === ""), "evm-quote-warm-round runs after every app deploy");
+  assert.ok(app.include.some((e) => e.key === "evm-sell-hook-intrablock" && !e.chrome && e.args === ""), "evm-sell-hook-intrablock runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "balances-per-chain" && e.chrome && e.args === ""), "balances-per-chain runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-export-every-wallet" && e.chrome && e.args === ""), "app-export-every-wallet runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-verify-mount" && e.args === "--network mainnet"));

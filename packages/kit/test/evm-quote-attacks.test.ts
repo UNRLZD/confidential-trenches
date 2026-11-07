@@ -4853,7 +4853,8 @@ function traceOf(s: ModelSale, tracer: string, who: 0 | 1, balances: Record<stri
   }
   assert.equal(tracer, "callTracer");
   const err = (x: object, bad: boolean) => (bad ? { ...x, error: "execution reverted" } : x);
-  const inner = [...(s.errored ?? []), ...(e.erroredToo ?? [])].map((h) => ({ type: "CALL", from: RH_PM, to: h, input: "0x", value: "0x0", error: "execution reverted" }));
+  const inner: object[] = [...(s.errored ?? []), ...(e.erroredToo ?? [])].map((h) => ({ type: "CALL", from: e.erroredFrom ?? RH_PM, to: h, input: "0x", value: "0x0", error: "execution reverted" }));
+  for (let i = 0; i < (e.frames ?? 0); i++) inner.push({ type: "STATICCALL", from: RH_PM, to: EARLIER, input: "0x", value: "0x0" });
   return err({ type: "CALL", from: SENDER, to: s.to ?? SELL_W, input: s.input, value: "0x0", ...e.root, calls: [err({ type: "CALL", from: s.to ?? SELL_W, to: RH_PM, input: "0x", value: "0x0", calls: inner }, failed)] }, s.status === "0x0");
 }
 const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: SALE_POOL, feeCollector: SALE_COLLECTOR }) }) as builder.EvmPoolVenueList;
@@ -4861,9 +4862,9 @@ const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEG
 // `gas`: its gas limit, where it is not the model's (SALE_GAS for a sale, BUY_GAS for a buy)
 // `rcIndex`: its receipt's transactionIndex where it is not its transaction's ("0x3"); `errored`: the hooks whose frames
 // errored in the real run (the trace's callTracer names them); `trace`: edits to its trace (a provider's answer apart,
-// another call's root frame, extra accounts or errored frames)
+// another call's root frame, extra accounts, errored frames, the caller of the errored frames, more frames)
 type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string; bought?: boolean; gas?: bigint; logs?: { address: string; topics: string[] }[]; l1Gas?: bigint; rcIndex?: string; errored?: string[]; trace?: TraceEdit };
-type TraceEdit = { apartOn?: 0 | 1; root?: Record<string, string>; accounts?: number; slots?: number; code?: number; erroredToo?: string[]; withArbos?: false };
+type TraceEdit = { apartOn?: 0 | 1; root?: Record<string, string>; accounts?: number; slots?: number; code?: number; erroredToo?: string[]; erroredFrom?: string; frames?: number; withArbos?: false };
 const SALES = new Map<string, ModelSale>();
 let saleNo = 0;
 /** The sale of quote `q` as the device builds and W signs it (the signature is the model's: the modelled delegate takes any). */
@@ -6084,20 +6085,49 @@ test("card evm-sell-hook-intrablock, the as-is leg: an errored frame into the ro
   assert.deepEqual(await buyProved(open.pools, open.q, own, undefined, RH_NET), [hcPid(open.hostile.key)]);
 });
 
-test("card evm-sell-hook-intrablock, a trace that is not two companies' word for the trade bans nothing: one provider's prestate apart, its root frame another call, past 256 accounts, or the receipt's index not the transaction's", async () => {
+test("card evm-sell-hook-intrablock, a trace that is not two companies' word for the trade adds nothing, so the evidence runs at the parent block (a hook flipped by an earlier transaction goes unbanned): one provider's prestate apart, its root frame another call (from, to, input or value), past 256 accounts, 4,096 slots, EIP-170's code or 4,096 frames, or one trace provider down; the receipt's index not the transaction's bans nothing", async () => {
   const { pools, q, hostile } = await ihBuy(earlierHook, 4);
-  const ok = await landBuy(pools, q, HEAD_NO + 1, { trace: { accounts: 253 } }, {}, RH_NET);
+  const at = (t: Partial<ModelSale>) => landBuy(pools, q, HEAD_NO + 1, t, {}, RH_NET);
+  const ok = await at({ trace: { accounts: 253 } });
   assert.deepEqual(await buyProved(pools, q, ok, undefined, RH_NET), [hcPid(hostile.key)], "256 accounts, the cap");
-  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { apartOn: 1 } }, {}, RH_NET), undefined, RH_NET), []);
-  await assert.rejects(buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { accounts: 254 } }, {}, RH_NET), undefined, RH_NET), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error");
-  // 4,096 storage slots and an account's code of 24,576 bytes (EIP-170), the caps; one more of either is no evidence
-  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { slots: 4094, code: 24576 } }, {}, RH_NET), undefined, RH_NET), [hcPid(hostile.key)]);
-  for (const t of [{ slots: 4095 }, { code: 24577 }]) await assert.rejects(buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: t }, {}, RH_NET), undefined, RH_NET), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error", show(t));
-  await assert.rejects(buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { root: { input: "0x1234" } } }, {}, RH_NET), undefined, RH_NET), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error");
-  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { rcIndex: "0x4" }, {}, RH_NET), undefined, RH_NET), []);
-  // one trace provider down: thrown, so the caller may ask again; nothing banned on one provider's word
+  // 4,096 storage slots, an account's code of 24,576 bytes (EIP-170) and 4,096 call frames (the root, the PoolManager's,
+  // the hook's errored one and 4,093 more), the caps
+  assert.deepEqual(await buyProved(pools, q, await at({ trace: { slots: 4094, code: 24576, frames: 4093 } }), undefined, RH_NET), [hcPid(hostile.key)]);
+  for (const t of [{ apartOn: 1 as const }, { accounts: 254 }, { slots: 4095 }, { code: 24577 }, { frames: 4094 }, { root: { input: "0x1234" } }, { root: { from: PH(0xef) } }, { root: { to: PH(0xef) } }, { root: { value: "0x1" } }]) assert.deepEqual(await buyProved(pools, q, await at({ trace: t }), undefined, RH_NET), [], show(t));
+  assert.deepEqual(await buyProved(pools, q, await at({ rcIndex: "0x4" }), undefined, RH_NET), []);
   const down: EvmRpc = async () => { throw new Error("down"); };
-  await assert.rejects(quoteMod.evmBuyRevertedPoolsWith(q, ok, rhTrace(pools), RH_NET.venues, [rhTrace(pools)[0]!, down]), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error");
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, ok, rhTrace(pools), RH_NET.venues, [rhTrace(pools)[0]!, down]), []);
+});
+
+// ------------------------------------------------------------------------------------- review of 29498693
+// HIGH a trace that adds nothing (past its caps, a provider down) turned off the parent replay's evidence; MEDIUM the
+// as-is leg on an errored frame banned every unlisted hook of the route, and counted a frame from any caller.
+test("review of 29498693, HIGH (buy and sell, Robinhood) a hook that fails the real trade only where BASEFEE is the trade block's, which the replay at the parent block sees: its pool is banned with the trade's trace past 256 accounts, and with one trace provider down, as on a chain with no trace", async () => {
+  const { pools, q, hostile } = await ihBuy(tellHook("baseFee"), 5);
+  const big = await landBuy(pools, q, HEAD_NO + 1, { trace: { accounts: 254 } }, {}, RH_NET);
+  assert.deepEqual(await buyProved(pools, q, big, undefined, RH_NET), [hcPid(hostile.key)], "past the cap");
+  const down: EvmRpc = async () => { throw new Error("down"); };
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(await quoteMod.evmBuyRevertedPoolsWith(q, h, rhTrace(pools), RH_NET.venues, [rhTrace(pools)[0]!, down]), [hcPid(hostile.key)], "a trace provider down");
+  const token = "0x000000000000000000000000000000000ae29901";
+  const sh: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(0xd8)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: tellHook("baseFee") };
+  const sq = await hcQuote([seeded(token), sh], token, [{ key: sh.key, at: 4_500_001 }], undefined, RH_SALE);
+  assert.ok(!("code" in sq) && sq.hooked.length === 1, show(sq));
+  assert.deepEqual(await proved([seeded(token), sh], sq, await land([seeded(token), sh], sq, HEAD_NO + 1, { trace: { accounts: 254 } }, (x) => x, RH_SALE), undefined, RH_SALE), [hcPid(sh.key)], "a sale past the cap");
+});
+
+test("review of 29498693, MEDIUM (buy, Robinhood) a route through an honest hook and one keyed on ArbOS's backlog: the replay passes, the trace names the hostile hook's frame errored, so its pool alone is banned, never the honest one; a frame into it the PoolManager did not call counts for nothing", async () => {
+  const [token, x] = ["0x000000000000000000000000000000000ae29902", xAt(0x7f9)];
+  const pools: ModelPool[] = [
+    seeded(token),
+    { key: keyOf(x, NATIVE, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedAt(2n) },
+    { key: keyOf(token, x, 3000, 60, N1_H2), give: (a) => a, lie: (a) => a, exec: (a, ctx) => (later(ctx) && ctx.sees?.baseFee === true && backlogOf(ctx) < 3_000_000n ? null : a) },
+  ];
+  const logs = [{ key: pools[2]!.key, at: 4_500_000 }, { key: pools[1]!.key, at: 4_100_001 }];
+  const q = await hbQuote(pools, token, logs, n1BuyRoute(token, x), undefined, RH_NET);
+  assert.ok(!("code" in q) && q.hooked.length === 2, show(q));
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET), undefined, RH_NET), [hcPid(pools[2]!.key)], "the hostile pool alone");
+  assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q, HEAD_NO + 1, { trace: { erroredFrom: PH(0xef) } }, {}, RH_NET), undefined, RH_NET), [], "a frame another caller made");
 });
 
 test("card evm-sell-hook-intrablock, the trace pair is Robinhood mainnet's alone: dRPC and Pocket; the testnet and Base have none (the parent replay)", () => {
