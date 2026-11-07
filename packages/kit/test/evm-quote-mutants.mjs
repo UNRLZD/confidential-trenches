@@ -501,8 +501,8 @@ export const MUTANTS = [
   // reverted, went to W and the replay reverts too; providers that disagree ban nothing; a hook behind two pools of the
   // route explains neither
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
-  [QUOTE, "        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) rescued.push(set);", "        rescued.push(set);", R, "RV4 "],
-  [QUOTE, "        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) rescued.push(set);", "        rescued.push(set);", R, "RV7 "],
+  [QUOTE, "        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) got.push(set);", "        got.push(set);", R, "RV4 "],
+  [QUOTE, "        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) got.push(set);", "        got.push(set);", R, "RV7 "],
   [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return unread ? again() : [];\n", "", R, "RV9 "],
   // (card evm-sell-hook-intrablock: the as-is check is `asIs`; the line that returns where it passes and the trace names
@@ -692,12 +692,19 @@ export const MUTANTS = [
   [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && unread ? again() : out;", R, "review of 1ee73a00, 1b"],
   [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && unread ? again() : out;", R, "review of 1ee73a00, 1c"],
   [QUOTE, "  return out.length === 0 && (unread || (none && legUnread)) ? again() : out;", "  return out.length === 0 && (unread || none) ? again() : out;", R, "review of fb923143, 2 step 4"],
-  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_NOOP_HOOK_CODE]) {", R, "review of 1ee73a00, 1d"],
-  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_NOOP_HOOK_CODE]) {", R, "review of 1ee73a00, 1e"],
-  // review of d6d055bf, 1: the stored-fee pass first, the fee-0 pass only where it rescued nothing
-  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_EVIDENCE_NOOP_HOOK_CODE]) {", R, "review of d6d055bf, 1 "],
-  [QUOTE, "    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {", "    for (const code of [EVM_EVIDENCE_NOOP_HOOK_CODE, EVM_NOOP_HOOK_CODE]) {", R, "review of d6d055bf, 1 "],
-  [QUOTE, "      if (rescued.length > 0) break;\n", "", R, "review of d6d055bf, 1 "],
+  [QUOTE, "    const atZero = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);", "    const atZero: string[][] = [];", R, "review of 1ee73a00, 1d"],
+  [QUOTE, "    const atZero = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);", "    const atZero: string[][] = [];", R, "review of 1ee73a00, 1e"],
+  // review of d6d055bf, 1: the stored-fee pass's sets count, the fee-0 pass's only where it has none
+  [QUOTE, "  for (const s of atStored.length > 0 ? atStored : atZero) {", "  for (const s of atZero) {", R, "review of d6d055bf, 1 "],
+  [QUOTE, "    const atStored = await pass(EVM_NOOP_HOOK_CODE);", "    const atStored = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);", R, "review of d6d055bf, 1 "],
+  [QUOTE, "  for (const s of atStored.length > 0 ? atStored : atZero) {", "  for (const s of atStored) {", R, "review of 1ee73a00, 1d"],
+  // review of 2fccaa67, 1: a stored-fee set yields to the smaller fee-0 sets inside it
+  [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under: string[][] = [];", R, "review of 2fccaa67, 1 "],
+  [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under: string[][] = [];", R, "review of 2fccaa67, 1 rule"],
+  [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under = atZero.filter((t) => t.length < s.length);", R, "review of 2fccaa67, 1 rule"],
+  // ("<=" for "<" in that filter is equivalent: a set yielding to an equal fee-0 set is the same set)
+  [QUOTE, "    for (const x of under.length > 0 ? under : [s]) if (", "    for (const x of under.length > 0 ? under.slice(0, 1) : [s]) if (", R, "review of 2fccaa67, 1 rule"],
+  [QUOTE, "if (!out.some((r) => r.length === x.length && r.every((h) => x.includes(h)))) out.push([...x]);", "out.push([...x]);", R, "review of 2fccaa67, 1 rule"],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1d"],
   [QUOTE, "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b60606000f3\";", "export const EVM_NOOP_HOOK_CODE = \"0x6004600060003760003560e01c63575e24b414601b5760406000f35b6240000060405260606000f3\";", R, "review of 1ee73a00, 1 "],

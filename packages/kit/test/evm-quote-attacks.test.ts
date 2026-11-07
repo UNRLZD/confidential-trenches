@@ -6672,3 +6672,36 @@ test("review of d6d055bf, 1 (buy, Base) an honest dynamic pool's stored fee besi
   assert.ok(!("code" in q), show(q));
   assert.deepEqual(await buyProved(pools, q, await landBuy(pools, q)), [hcPid(pools[2]!.key)], "the hostile pool alone");
 });
+
+// ------------------------------------------------------------------------------------- review of 2fccaa67
+// 1: both no-op passes in full, and a stored-fee set that holds a smaller fee-0 set yields to it. h1 honest (its 5% fee
+// one every no-op removes: a delta fee, or an override over a stored 0); h2 the stored-fee bait on a dynamic pool, armed
+// by an earlier transaction of the block: it reverts the real buy in its own frame, gives the quoter the normal price,
+// and its arming transaction raised its stored fee to only 4% (more than the slippage, less than h1's fee plus it).
+// At the stored fee only {h1, h2} rescues (2.0 x 0.96 = 1.92 against minOut 1.881); at fee 0 {h2} alone does.
+test("review of 2fccaa67, 1 (buy, Robinhood) an honest hook beside a 4% stored-fee bait: the stored-fee pair yields to the bait alone, which rescues at fee 0 (ehi6 Q2)", async () => {
+  const n = 0x7fa;
+  const [token, x] = ["0x" + (0xc1f00 + n).toString(16).padStart(40, "0"), xAt(n)];
+  const armed = (ctx: SimCtx) => later(ctx) && ctx.sees?.earlier === true;
+  const pools: ModelPool[] = [
+    seeded(token),
+    { key: keyOf(x, NATIVE, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 95n) / 100n, state: pricedAt(2n) },
+    { key: keyOf(token, x, 3000, 60, N1_H2), give: (a) => a, lie: (a) => a, exec: (a, ctx) => (armed(ctx) ? null : a), neutral: (a, ctx) => (feeOverridden(ctx, N1_H2) || !armed(ctx) ? a : (a * 96n) / 100n) },
+  ];
+  const logs = [{ key: pools[2]!.key, at: 4_500_000 }, { key: pools[1]!.key, at: 4_100_001 }];
+  const q = await hbQuote(pools, token, logs, n1BuyRoute(token, x), undefined, RH_NET);
+  assert.ok(!("code" in q), show(q));
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual(await buyProved(pools, q, h, undefined, RH_NET), [hcPid(pools[2]!.key)], "the bait's pool alone");
+});
+test("review of 2fccaa67, 1 rule: the stored-fee pass's sets, or the fee-0 pass's where none; a stored-fee set yields to every smaller fee-0 set inside it, never to one outside it; each set once", () => {
+  const f = quoteMod.evmFaultSets;
+  assert.deepEqual(f([["a"]], [["a"], ["b"]]), [["a"]], "the stored-fee pass's singleton holds; the fee-0 one beside it is not taken");
+  assert.deepEqual(f([], [["a"], ["b"]]), [["a"], ["b"]], "none at the stored fee: the fee-0 pass's");
+  assert.deepEqual(f([["a", "b"]], [["b"]]), [["b"]], "the pair yields to the bait inside it (ehi6)");
+  assert.deepEqual(f([["a", "b"]], [["c"]]), [["a", "b"]], "a fee-0 set outside it is no reason to yield");
+  assert.deepEqual(f([["a", "b"]], [["a", "b"]]), [["a", "b"]], "the same set at both is no smaller one");
+  assert.deepEqual(f([["a", "b", "c"]], [["a"], ["b"]]), [["a"], ["b"]], "every smaller fee-0 set inside it");
+  assert.deepEqual(f([["a", "b"], ["b", "c"]], [["b"]]), [["b"]], "each set once");
+  assert.deepEqual(f([], []), []);
+});

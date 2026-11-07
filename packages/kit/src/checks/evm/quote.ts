@@ -2833,8 +2833,10 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //      flood);
 //    - the same with a hook without the beforeSwap permission, on a dynamic-fee pool: it raised the stored LP fee (to
 //      as much as 100%), and gives the quoter alone an afterSwap return delta that offsets it, unsettled in V4Quoter;
-//      no beforeSwap is ever called for it, so every no-op leaves the stored fee and none rescues: banned on its errored
-//      frame with the callTracer read, and under a flood EVM_TRACE_UNANSWERED on every ask (review of d6d055bf, info).
+//      no beforeSwap is ever called for it, so every no-op leaves the stored fee, and where that fee alone fails
+//      minOut none rescues: banned on its errored frame with the callTracer read, and under a flood
+//      EVM_TRACE_UNANSWERED on every ask (review of d6d055bf, info; with a smaller fee a no-op rescues and it is
+//      banned).
 //    Base and Base Sepolia have no such pair (one keyless company serves traces there): their replay stays at the parent
 //    block (card evm-sell-hook-intrablock-base); so does Robinhood's testnet (none of its pinned providers serves a
 //    trace);
@@ -2846,10 +2848,13 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    fee (one taken through a delta, which the quoter sees) is more than the miss;
 // 4. the hooks at fault: for each set of the hooks behind a pool of `hooked`, smallest first (at most 15: a route is at
 //    most EVM_POOL_MAX_HOPS hops), the replay with that set's code replaced by a no-op at once succeeds on both
-//    providers (the trade held its minOut), and no smaller set's did; the no-op is EVM_NOOP_HOOK_CODE (the pool's
-//    stored fee) in a first pass over every set, and only where no set rescues, EVM_EVIDENCE_NOOP_HOOK_CODE (LP fee 0)
-//    in a second (review of d6d055bf, 1: fee 0 first would also rescue an honest pool whose stored fee is more than a
-//    hostile hook's skim beside it). That set's code together
+//    providers (the trade held its minOut), and no smaller set's did, in two passes over every set, each its own
+//    smallest sets: the no-op EVM_NOOP_HOOK_CODE (the pool's stored fee) and EVM_EVIDENCE_NOOP_HOOK_CODE (LP fee 0).
+//    The stored-fee pass's sets count, or the fee-0 pass's where the first has none (review of d6d055bf, 1: fee 0 alone
+//    would also rescue an honest pool whose stored fee is more than a hostile hook's skim beside it), and a stored-fee
+//    set that holds smaller fee-0 sets gives way to them (review of 2fccaa67, 1: an honest hook whose fee every no-op
+//    removes beside a stored-fee bait is otherwise banned as half of the pair the stored-fee pass rescues). Worst case,
+//    once the replay failed: 30 replays per provider (15 sets a pass), beside the as-is replay. That set's code together
 //    stood between the trade and its minOut (a hook's error, WrappedError; a fee taken from the trade alone through a delta, MinOutNotMet;
 //    a malformed answer; gas burned; hooks that each revert the trade while any other is intact), and the override
 //    replaces it for every pool behind it, so every pool of the route behind a hook of such a smallest set is banned,
@@ -3273,8 +3278,8 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // ban: asked again too (review of fb923143, 2)
   if (held!.kind !== "out" || held!.amountOut < quote.minOut) return unread ? again() : [];
   // 4. the hooks at fault: each smallest set of `hooked`'s hooks whose no-op at once rescues the trade (the stored-fee
-  // no-op first, then, where none rescues, the fee-0 one, so a stored dynamic fee a hook with beforeSwap raised cannot
-  // fail it; a set holding a smaller one that rescued it is not asked); every pool of the route behind a hook of one is banned. Where the replay passed and the
+  // no-op's sets, or the fee-0 one's where none, a stored-fee set giving way to smaller fee-0 sets inside it, so a stored
+  // dynamic fee a hook with beforeSwap raised cannot fail it; a set holding a smaller one that rescued it is not asked); every pool of the route behind a hook of one is banned. Where the replay passed and the
   // trace named the hooks, those hooks alone: any set's no-op "rescues" a replay that never failed, so no set tells, and
   // a hook outside them is never banned (review of 29498693, MEDIUM). Where the replay failed and no set rescued it,
   // the hooks the callTracer names: a hook can make its own no-op pool fail too, through state an earlier transaction of
@@ -3282,22 +3287,41 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // (review of 1ee73a00, 1); with that callTracer unread, asked again
   const rescued: string[][] = [];
   if (asIs) {
-    // two passes: every set's no-op at the pool's stored fee first (EVM_NOOP_HOOK_CODE), and only where none rescues,
-    // the fee-0 no-op (EVM_EVIDENCE_NOOP_HOOK_CODE): asked first, the fee-0 no-op would also rescue an honest pool whose
-    // stored fee is more than a hostile hook's skim beside it, and ban it (review of d6d055bf, 1)
-    for (const code of [EVM_NOOP_HOOK_CODE, EVM_EVIDENCE_NOOP_HOOK_CODE]) {
+    // two passes in full, each its own smallest sets: every set's no-op at the pool's stored fee (EVM_NOOP_HOOK_CODE),
+    // and every set's fee-0 no-op (EVM_EVIDENCE_NOOP_HOOK_CODE). The stored-fee sets count, or the fee-0 ones where no
+    // stored-fee set rescues: fee 0 alone would also rescue an honest pool whose stored fee is more than a hostile hook's
+    // skim beside it (review of d6d055bf, 1). A stored-fee set that holds smaller fee-0 sets yields to them: an honest
+    // hook whose fee every no-op removes is otherwise banned with a stored-fee bait that its removed fee lets the
+    // stored-fee no-op of the pair rescue (review of 2fccaa67, 1)
+    const pass = async (code: string) => {
+      const got: string[][] = [];
       for (const set of subsetsOf(hooks)) {
-        if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;
-        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) rescued.push(set);
+        if (got.some((r) => r.every((h) => set.includes(h)))) continue;
+        if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code }]))))) got.push(set);
       }
-      if (rescued.length > 0) break;
-    }
+      return got;
+    };
+    const atStored = await pass(EVM_NOOP_HOOK_CODE);
+    const atZero = await pass(EVM_EVIDENCE_NOOP_HOOK_CODE);
+    rescued.push(...evmFaultSets(atStored, atZero));
   }
   const none = asIs && rescued.length === 0;
   const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);
   const out: string[] = [];
   for (const k of keys) if (fault.has(k.hooks) && !out.includes("0x" + poolId(k))) out.push("0x" + poolId(k));
   return out.length === 0 && (unread || (none && legUnread)) ? again() : out;
+}
+
+/** Step 4's sets at fault from its two passes' smallest rescuing sets (tests only, not in the index): the stored-fee
+ *  pass's (`atStored`), or the fee-0 pass's (`atZero`) where the first has none; a stored-fee set that holds smaller
+ *  fee-0 sets gives way to them, each kept once (review of d6d055bf, 1; of 2fccaa67, 1). */
+export function evmFaultSets(atStored: readonly (readonly string[])[], atZero: readonly (readonly string[])[]): string[][] {
+  const out: string[][] = [];
+  for (const s of atStored.length > 0 ? atStored : atZero) {
+    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));
+    for (const x of under.length > 0 ? under : [s]) if (!out.some((r) => r.length === x.length && r.every((h) => x.includes(h)))) out.push([...x]);
+  }
+  return out;
 }
 
 /** evmSellRevertedPools on the providers `rpcsIn`, the venue list `venues` and, on a chain with a trace pair, the trace
