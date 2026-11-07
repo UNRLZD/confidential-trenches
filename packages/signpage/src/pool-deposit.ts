@@ -819,9 +819,10 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
             try {
               const l = left as PoolDepositLeft | null;
               // filled is the ask's end, and part_filled with no send of the ask still open, each told once, here or
-              // as the answer (a rung's landing is no stage: review 1); anything else past a send of the ask (part_filled while a send may still land: review
-              // 3; not_landed while a send may land; sent; a fault) is no end: its open notes are read on, and the end goes
-              // as progress once each is landed or dead (none open: each send was taken)
+              // as the answer (a rung's landing is no stage: review 1); anything else past a send of the ask
+              // (part_filled while a send may still land: review 3; not_landed while a send may land; sent; a fault) is
+              // no end: its open notes are read on, and the end goes as progress once each is landed or dead (none
+              // open: each send was taken)
               const ended = a !== null && "stage" in a && (a.stage === "filled" || (a.stage === "part_filled" && (l === null || l.notes.length === 0)));
               if (!answer) {
                 // nothing told yet (no RPC took a send): an open send of the ask is answered sent, its end read on
