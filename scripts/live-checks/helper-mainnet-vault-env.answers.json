@@ -1,0 +1,261 @@
+{
+ "good": {
+  "note": "apps/helper at card/helper-mainnet-vault-env dee733d run with node src/server.ts on a Mac (2026-11-07), mainnet carried for vault-test.confidential.unrlzd.near: a throwaway relayer key no account holds, stand-in accounts that exist on mainnet for the relayer (confidential.unrlzd.near, one full-access key, 0.77 NEAR) and the fee recipient (v2.ref-finance.near, registered on USDC); the box gets its own from deploy/withdraw-relayer-key.sh. The route read the vault config() on two mainnet RPCs and answered the record-vault probe bad_fee_recipient (past check 2) and the other-vault probe bad_proof",
+  "base": "http://127.0.0.1:18151",
+  "record": {
+   "account_id": "vault-test.confidential.unrlzd.near",
+   "scope": "8086271268364488307551911707115823685859436809391798291511922449751894623475"
+  },
+  "reads": [
+   {
+    "asked": "fee",
+    "readAt": "2026-11-07T06:29:48.236Z",
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "dee733dbd115c9b0ef1190f3eb683d897540dab2",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"relayer_account\":\"confidential.unrlzd.near\",\"fee_recipient\":\"v2.ref-finance.near\",\"relay_fee\":\"187691\",\"gp\":\"100000000\",\"px\":\"3.739002172297\",\"g_w\":\"92505000000000\",\"valid_until_block\":223428838}"
+   },
+   {
+    "asked": "the record's vault",
+    "readAt": "2026-11-07T06:29:48.250Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "dee733dbd115c9b0ef1190f3eb683d897540dab2",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"bad_fee_recipient\"}}"
+   },
+   {
+    "asked": "another vault",
+    "readAt": "2026-11-07T06:29:48.256Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "dee733dbd115c9b0ef1190f3eb683d897540dab2",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"bad_proof\"}}"
+   }
+  ],
+  "chain": {
+   "account": "confidential.unrlzd.near",
+   "height": 223428740,
+   "finals": [
+    223428740,
+    223428740
+   ],
+   "at": [
+    {
+     "rpc": "rpc.mainnet.fastnear.com",
+     "block": {
+      "height": 223428740,
+      "hash": "2cbyfpdfR5xqbBtR4QxfbC65NjcBP5n4UrG9tYyqZW22"
+     },
+     "view_account": {
+      "amount": "771245291696027900000000",
+      "block_hash": "2cbyfpdfR5xqbBtR4QxfbC65NjcBP5n4UrG9tYyqZW22",
+      "block_height": 223428740,
+      "code_hash": "11111111111111111111111111111111",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 182
+     },
+     "keys": {
+      "block_hash": "2cbyfpdfR5xqbBtR4QxfbC65NjcBP5n4UrG9tYyqZW22",
+      "block_height": 223428740,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 223168356000003,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:WHHJ4Rmp2dzkkWtE5UuNkeEnw6JCnXLPrnXV6fiQhhh"
+       }
+      ]
+     }
+    },
+    {
+     "rpc": "near.drpc.org",
+     "block": {
+      "height": 223428740,
+      "hash": "2cbyfpdfR5xqbBtR4QxfbC65NjcBP5n4UrG9tYyqZW22"
+     },
+     "view_account": {
+      "amount": "771245291696027900000000",
+      "block_hash": "2cbyfpdfR5xqbBtR4QxfbC65NjcBP5n4UrG9tYyqZW22",
+      "block_height": 223428740,
+      "code_hash": "11111111111111111111111111111111",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 182
+     },
+     "keys": {
+      "block_hash": "2cbyfpdfR5xqbBtR4QxfbC65NjcBP5n4UrG9tYyqZW22",
+      "block_height": 223428740,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 223168356000003,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:WHHJ4Rmp2dzkkWtE5UuNkeEnw6JCnXLPrnXV6fiQhhh"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "bad_deployed": {
+  "note": "the deployed helper at main 358d8f4 (2026-11-07), before this card: mainnet not carried, the fee route 404 and both probes bad_shape",
+  "base": "https://api.confidential.unrealized.trade",
+  "record": {
+   "account_id": "vault-test.confidential.unrlzd.near",
+   "scope": "8086271268364488307551911707115823685859436809391798291511922449751894623475"
+  },
+  "reads": [
+   {
+    "asked": "fee",
+    "readAt": "2026-11-07T06:27:10.807Z",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   },
+   {
+    "asked": "the record's vault",
+    "readAt": "2026-11-07T06:27:11.344Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   {
+    "asked": "another vault",
+    "readAt": "2026-11-07T06:27:11.521Z",
+    "status": 400,
+    "headers": {
+     "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   }
+  ],
+  "chain": {
+   "error": "the fee answer names no relayer account"
+  }
+ },
+ "bad_other_vault": {
+  "note": "apps/helper at main 358d8f4 run the same way with WITHDRAW_VAULT_MAINNET=vault.confidential.unrlzd.near, which it takes at start (no pin); that account has no vault on mainnet, so every withdrawal holds 503 upstream",
+  "base": "http://127.0.0.1:18152",
+  "record": {
+   "account_id": "vault-test.confidential.unrlzd.near",
+   "scope": "8086271268364488307551911707115823685859436809391798291511922449751894623475"
+  },
+  "reads": [
+   {
+    "asked": "fee",
+    "readAt": "2026-11-07T06:29:51.067Z",
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"relayer_account\":\"confidential.unrlzd.near\",\"fee_recipient\":\"v2.ref-finance.near\",\"relay_fee\":\"187691\",\"gp\":\"100000000\",\"px\":\"3.739002172297\",\"g_w\":\"92505000000000\",\"valid_until_block\":223428843}"
+   },
+   {
+    "asked": "the record's vault",
+    "readAt": "2026-11-07T06:29:51.676Z",
+    "status": 503,
+    "headers": {
+     "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "asked": "another vault",
+    "readAt": "2026-11-07T06:29:52.282Z",
+    "status": 503,
+    "headers": {
+     "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   }
+  ],
+  "chain": {
+   "account": "confidential.unrlzd.near",
+   "height": 223428746,
+   "finals": [
+    223428746,
+    223428747
+   ],
+   "at": [
+    {
+     "rpc": "rpc.mainnet.fastnear.com",
+     "block": {
+      "height": 223428746,
+      "hash": "GzQ791mKNXU7E6iAtg8eanQHVuRvxznpxj8xt1svbiXU"
+     },
+     "view_account": {
+      "amount": "771245291696027900000000",
+      "block_hash": "GzQ791mKNXU7E6iAtg8eanQHVuRvxznpxj8xt1svbiXU",
+      "block_height": 223428746,
+      "code_hash": "11111111111111111111111111111111",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 182
+     },
+     "keys": {
+      "block_hash": "GzQ791mKNXU7E6iAtg8eanQHVuRvxznpxj8xt1svbiXU",
+      "block_height": 223428746,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 223168356000003,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:WHHJ4Rmp2dzkkWtE5UuNkeEnw6JCnXLPrnXV6fiQhhh"
+       }
+      ]
+     }
+    },
+    {
+     "rpc": "near.drpc.org",
+     "block": {
+      "height": 223428746,
+      "hash": "GzQ791mKNXU7E6iAtg8eanQHVuRvxznpxj8xt1svbiXU"
+     },
+     "view_account": {
+      "amount": "771245291696027900000000",
+      "block_hash": "GzQ791mKNXU7E6iAtg8eanQHVuRvxznpxj8xt1svbiXU",
+      "block_height": 223428746,
+      "code_hash": "11111111111111111111111111111111",
+      "locked": "0",
+      "storage_paid_at": 0,
+      "storage_usage": 182
+     },
+     "keys": {
+      "block_hash": "GzQ791mKNXU7E6iAtg8eanQHVuRvxznpxj8xt1svbiXU",
+      "block_height": 223428746,
+      "keys": [
+       {
+        "access_key": {
+         "nonce": 223168356000003,
+         "permission": "FullAccess"
+        },
+        "public_key": "ed25519:WHHJ4Rmp2dzkkWtE5UuNkeEnw6JCnXLPrnXV6fiQhhh"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}
