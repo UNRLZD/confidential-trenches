@@ -357,10 +357,25 @@ test("--only FeeCollector deploys the fee collector alone beside the chain's set
   }
   // a chain whose sell sender the kit does not pin gets no collector: refused before a key is made
   const c2 = chain();
-  const r2 = await run(t, c2, { args: ["--only", "FeeCollector"], io: { sinkOf: async () => { throw new Error("the kit pins no sell sender on base-sepolia, the FeeCollector's sink: nothing was sent"); } } });
+  const r2 = await run(t, c2, { args: ["--only", "FeeCollector"], out: path.join(TMP, "only-fee-collector-no-sink.json"), io: { sinkOf: async () => { throw new Error("the kit pins no sell sender on base-sepolia, the FeeCollector's sink: nothing was sent"); } } });
   assert.match(String(r2.error?.message), /the kit pins no sell sender/);
   assert.equal(c2.created.length, 0, "nothing deployed");
   assert.equal(c2.deployer, null, "refused before a run key exists");
+});
+
+// a rerun cannot overwrite a card's record (card evm-testnet-delegate-review3's review): the record a live check and the
+// money gate read stays the deployment's
+test("a testnet run whose record exists is refused before any read, key or send: --only SellDelegate, --only FeeCollector and the set", OPTS, async (t) => {
+  for (const args of [["--only", "SellDelegate"], ["--only", "FeeCollector"], []]) {
+    const c = chain();
+    const out = path.join(TMP, `exists-${args[1] ?? "set"}.json`);
+    writeFileSync(out, "{}\n");
+    const r = await run(t, c, { args, out, io: { sinkOf: async () => "0x" + "5e".repeat(20) } });
+    assert.match(String(r.error?.message), /exists: .* is deployed on base-sepolia by that record: run its live check alone: node scripts\/live-checks\/\S+\.mjs --deployment .*nothing was read or sent/, String(args));
+    assert.equal(c.created.length, 0, "nothing deployed");
+    assert.equal(c.deployer, null, "refused before a run key exists");
+    assert.equal(readFileSync(out, "utf8"), "{}\n", "the record is untouched");
+  }
 });
 
 test("--only takes the sell delegate alone: any other contract, or none named, is refused before a key is made", OPTS, async (t) => {

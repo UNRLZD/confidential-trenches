@@ -3,6 +3,8 @@
 //   node --test contracts/pool-evm/test/deploy.test.mjs     (after a forge build: it reads out/)
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { BUILD_FILE, CHAINS } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
 import { BUILT, ORDER, addressOf, buildOf, createAddress, main, signTx } from "../script/deploy.mjs";
@@ -58,16 +60,19 @@ function withChainId(id, f) {
   return f().finally(() => (globalThis.fetch = real));
 }
 const RET = ["--return", "0x000000000000000000000000000000000000dead"];
+// a record path no run wrote: a testnet run over an existing record is refused before any read (card
+// evm-testnet-delegate-review3), so the chain checks below are reached only with a fresh --out
+const FRESH = (chain) => ["--out", path.join(os.tmpdir(), `deploy-test-${process.pid}-${chain}.json`)];
 
 test("a mainnet is refused: Base and Robinhood answer 0x2105 and 0x1237, their deploy is the owner's", async () => {
   for (const [chain, id] of [["base-sepolia", "0x2105"], ["robinhood-testnet", "0x1237"]])
-    await withChainId(id, () => assert.rejects(main(["--chain", chain, ...RET, "--rpc", "https://rpc.example", "--no-build"]), /mainnet .*the owner's/));
+    await withChainId(id, () => assert.rejects(main(["--chain", chain, ...RET, ...FRESH(chain), "--rpc", "https://rpc.example", "--no-build"]), /mainnet .*the owner's/));
 });
 
 test("an RPC answering another chain's id is refused, a dry run needs --out, and --chain and --return are required", async () => {
-  await withChainId("0xb626", () => assert.rejects(main(["--chain", "base-sepolia", ...RET, "--rpc", "https://rpc.example", "--no-build"]), /not base-sepolia's 0x14a34/));
+  await withChainId("0xb626", () => assert.rejects(main(["--chain", "base-sepolia", ...RET, ...FRESH("base-sepolia"), "--rpc", "https://rpc.example", "--no-build"]), /not base-sepolia's 0x14a34/));
   await assert.rejects(main(["--chain", "base-sepolia", ...RET, "--rpc", "http://127.0.0.1:8545", "--no-build"]), /needs --out/);
   await assert.rejects(main(["--chain", "base", ...RET]), /base is a mainnet: its deploy is the owner's paste .* which passes --mainnet/);
   await assert.rejects(main(["--chain", "ethereum", ...RET]), /--chain is one of/);
-  await assert.rejects(main(["--chain", "base-sepolia", "--return", "E"]), /--return <address>/);
+  await assert.rejects(main(["--chain", "base-sepolia", "--return", "E", ...FRESH("base-sepolia")]), /--return <address>/);
 });

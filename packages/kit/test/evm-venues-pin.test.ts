@@ -31,6 +31,9 @@ const record = (chain: string) =>
 const sellFile = (key: string, chain: string) =>
   JSON.parse(readFileSync(new URL(`../../../scripts/live-checks/${key}.${chain}.json`, import.meta.url), "utf8")).contracts as Record<string, { address: string }>;
 const sellRecord = (chain: string) => sellFile("evm-testnet-delegate-review3", chain);
+// the FeeCollector card evm-fee-collector deployed on each testnet, the one recipient a Sell pays (the helper sends no
+// other): the kit's feeCollector pin is held to it below
+const collector = (chain: string) => sellFile("evm-fee-collector", chain).FeeCollector!.address;
 
 // pool-evm-deploy's pinned chain table: the WETH each testnet's contracts were deployed with
 const DEPLOY = (await import(new URL("../../../scripts/live-checks/pool-evm-deploy.mjs", import.meta.url).href)) as { CHAINS: Record<string, { weth: { address: string }; poolManager: { address: string } }> };
@@ -115,8 +118,9 @@ test("a sell pays only into the chain's pinned pool, and W's authorization names
     const r = record(chain);
     const req = {
       w: W, token: X, amount: 10n ** 18n, target: routers[0] ?? "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4", route: { venue: "uniswap-v3" as const, tokens: [X, v.weth], fees: [500] },
-      minOut: 10n ** 15n, precommitment: 0x5e11n, feeCap: 10n ** 14n, feeRecipient: "0x000000000000000000000000000000000000fee1", deadline: BigInt(NOW + 300), nonce: 0n,
+      minOut: 10n ** 15n, precommitment: 0x5e11n, feeCap: 10n ** 14n, feeRecipient: collector(chain), deadline: BigInt(NOW + 300), nonce: 0n,
     };
+    assert.equal(lower(v.feeCollector!), lower(collector(chain)), chain);
     if (routers.length > 0) {
       // a pool the caller sneaks in is not read: the pin is the pool
       // the pinned builder under the kit's evmPoolBuildSell (sell.ts, which builds only from a device quote)
@@ -131,6 +135,8 @@ test("a sell pays only into the chain's pinned pool, and W's authorization names
     // target: not the other testnet's PoolManager, not the router (review of a22060d, item 3)
     const v4sell = { ...req, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
     const built4 = pinnedBuildSell(evmPoolVenues(), c, v4sell);
+    // any other recipient, the withdraw relayer's included, is not the pin: no Sell is built
+    assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), c, { ...v4sell, feeRecipient: "0x000000000000000000000000000000000000fee1" })), "not_pinned", chain);
     assert.equal(lower(built4.pool), lower(r.PrivacyPoolSimple!.address), chain);
     for (const other of TESTNETS.map((t) => evmPoolVenues()[t.chain as EvmPoolChain].poolManager!).filter((p) => lower(p) !== lower(v.poolManager!))) {
       assert.equal(code(() => pinnedBuildSell(evmPoolVenues(), c, { ...v4sell, target: other })), "bad_target", chain);

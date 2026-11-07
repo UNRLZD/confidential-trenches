@@ -45,11 +45,11 @@ export const deploymentFile = (chain) =>
 /** The one build the code of `name` at `address` on `chain` must be: the frozen older build when the build file pins
  * that exact address to it (a contract deployed before the build moved on, e.g. the v1 SellDelegate), else the current
  * build. Never either one: each address has exactly one build. */
-export function pinnedBuild(chain, name, address) {
+export function pinnedBuild(chain, name, address, build = BUILD) {
   const a = String(address ?? "").toLowerCase();
   // each frozen entry names its contract (`contract`, else its key): the v1 SellDelegate, then the evm-sell-v4 one
-  const f = Object.entries(BUILD.frozen ?? {}).find(([k, b]) => (b.contract ?? k) === name && b.at?.[chain]?.toLowerCase() === a);
-  return f ? f[1] : BUILD.contracts[name];
+  const f = Object.entries(build.frozen ?? {}).find(([k, b]) => (b.contract ?? k) === name && b.at?.[chain]?.toLowerCase() === a);
+  return f ? f[1] : build.contracts[name];
 }
 
 // @noble/hashes from the helper's own dependencies (apps/ is outside Blindfill, so this check reaches nothing of the

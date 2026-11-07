@@ -9,8 +9,8 @@
 //     Robinhood WETH's implementation) are the pinned ones, and the run key sent exactly the record's transactions and
 //     keeps at most DUST;
 //   - evm-venues-pin.mjs's check of the kit's venue for it (evmPoolVenues(), through the kit's public entry) passes:
-//     the pool, v3 and v4 adapter and sell delegate pins are the record's, each the build's code with the right
-//     immutables on both RPCs at the newest block both have.
+//     the pool, v3 and v4 adapter, sell delegate and fee collector pins are the record's, each the build's code with the
+//     right immutables on both RPCs at the newest block both have (the fee collector's sink the kit's sell sender pin).
 //   node scripts/live-checks/pool-evm-deploy-mainnet.mjs [--record <file>] [--write-record]   PASS exit 0, FAIL 1, error 2
 // --record writes every RPC answer read to <file>, for the test's replay (pool-evm-deploy-mainnet.answers.json).
 // --write-record, on PASS, writes the mainnets' run record scripts/live-checks/pool-evm-deploy-mainnet.md (Money path:

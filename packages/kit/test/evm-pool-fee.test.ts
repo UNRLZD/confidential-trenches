@@ -75,7 +75,7 @@ test("L1 the largest sell the builder makes, in its EIP-7702 transaction, is und
   const t = (n: number) => "0x" + n.toString(16).padStart(40, "0");
   const hops = [t(0xa1), t(0xa2), t(0xa3), "0x0000000000000000000000000000000000000000"].map((currency) => ({ currency, fee: 0xffffff - 1, tickSpacing: 32_767, hooks: "0x0000000000000000000000000000000000000000", hookData: "0x" }));
   const max = 2n ** 255n;
-  const s = pinnedBuildSell(venues, "base-sepolia", { w: t(0xfe), token: t(0xa0), amount: max, target: v.poolManager!, route: { venue: "uniswap-v4", hops }, minOut: max, precommitment: 2n ** 253n, feeCap: max - 1n, feeRecipient: t(0xfd), deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 2n ** 255n });
+  const s = pinnedBuildSell(venues, "base-sepolia", { w: t(0xfe), token: t(0xa0), amount: max, target: v.poolManager!, route: { venue: "uniswap-v4", hops }, minOut: max, precommitment: 2n ** 253n, feeCap: max - 1n, feeRecipient: v.feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 2n ** 255n });
   const data = (evmSellCallData(s, max - 1n, new Uint8Array(65).fill(0xff)).length - 2) / 2;
   // the rest of a type 4 transaction, each field at its widest: chain id, nonce, both fees and gas (8 x 9 bytes), to
   // (21), value (1), the list headers (12), one authorization (chain id, delegate, nonce, y, r, s: 9 + 21 + 9 + 1 + 33 +

@@ -47,8 +47,9 @@ export function runRecordFor(KEY, ds) {
 }
 const addrWord = (a) => "0x" + a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 
-/** `current`: the delegate must be the current build (a later card's redeploy), never one the build file froze */
-export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep, current = false }) {
+/** `current`: the delegate must be the current build (a later card's redeploy), never one the build file froze. `build`:
+ *  the build file the code is held to (pool-evm-deploy.build.json; a test's own) */
+export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep, current = false, build = BUILD }) {
   const lines = [];
   let ok = true;
   const say = (pass, text) => {
@@ -69,8 +70,8 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep, curre
   const txs = d.txs ?? [];
   say(txs.filter((t) => t.contract).length === 1 && txs.some((t) => t.contract === "SellDelegate"), `the record lists the run's transactions, one deploy, SellDelegate's: ${txs.map((t) => t.step).join(", ") || "none"}`);
   // the build pinned to this address: the frozen evm-sell-v4 build at its own redeploys, else the current one
-  const b = pinnedBuild(d.chain, "SellDelegate", a);
-  if (current) say(b === BUILD.contracts.SellDelegate, `SellDelegate ${a} is not an address the build file froze to an older build`);
+  const b = pinnedBuild(d.chain, "SellDelegate", a, build);
+  if (current) say(b === build.contracts.SellDelegate, `SellDelegate ${a} is not an address the build file froze to an older build`);
   const getters = [["WETH()", addrWord(chain.weth.address)], ["POOL_MANAGER()", addrWord(chain.poolManager.address)]];
   for (const url of rpcs.slice(0, 2)) {
     const on = `on ${url}`;
@@ -81,7 +82,7 @@ export async function check({ deployment: d, fetchFn = fetch, rpcs, sleep, curre
         const code = await rpc(fetchFn, url, "eth_getCode", [a, "latest"], sleep);
         const r = runtimeOf(code, b.immutables);
         say(r.length === b.length && r.masked === b.masked,
-          `SellDelegate ${a} code is the build pinned to it${b === BUILD.contracts.SellDelegate ? " (the current one)" : ""}: ${r.length} bytes (build ${b.length}), immutables zeroed keccak256 ${r.masked} (build ${b.masked}) ${on}`);
+          `SellDelegate ${a} code is the build pinned to it${b === build.contracts.SellDelegate ? " (the current one)" : ""}: ${r.length} bytes (build ${b.length}), immutables zeroed keccak256 ${r.masked} (build ${b.masked}) ${on}`);
         const held = r.words.map((w) => (w.length === 1 ? w[0] : `${w.length} words`)).sort();
         say(JSON.stringify(held) === JSON.stringify(getters.map(([, w]) => w).sort()),
           `SellDelegate's ${b.immutables.length} immutables each hold one word, the chain's WETH and PoolManager ${on}: ${held.join(", ") || "none"}`);

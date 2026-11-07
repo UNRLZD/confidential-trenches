@@ -1,0 +1,147 @@
+{
+  "key": "pool-evm-testnet-run",
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "dryRun": false,
+  "at": "2026-11-06T18:51:49.041Z",
+  "pool": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+  "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+  "venues": [
+    "v3"
+  ],
+  "asked": [
+    "v3"
+  ],
+  "relayer": "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a",
+  "return": "0x49f2425b7f33f3a10912de8add6839226ce663a2",
+  "need": "2065890000016656",
+  "restore": {
+    "notes": 5,
+    "spends": 3,
+    "wallets": [
+      {
+        "w": "0x784d936b67af99d633b379756498964129ef4c39",
+        "tokens": [
+          "0x036cbd53842c5426634e7929541ec2318f3dcf7e"
+        ]
+      },
+      {
+        "w": "0x6eb843de1358f2fd5ed9d7d8eddd9e59d2a625fe",
+        "tokens": []
+      },
+      {
+        "w": "0x7a8568aac4d14f426f8ed8106b772d24dc512dc1",
+        "tokens": []
+      }
+    ],
+    "block": "55345950"
+  },
+  "txs": [
+    {
+      "step": "deposit",
+      "hash": "0x79133bd0e7ca51d2a380408b7cd62f6205f75687ac354ffdbfe95d0409b11958",
+      "from": "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a",
+      "kind": "deposit",
+      "block": "55345468",
+      "gasUsed": "379210",
+      "commitment": "2893097259602204498640297128421683618368682000469815846320410240925587935394",
+      "label": "5921612580566915050707510754951191610756633074120048231307546815871762177712",
+      "value": "2000000000000000",
+      "precommitment": "8407173975245637861756059563523158832196820353600470349576283509255314735287"
+    },
+    {
+      "step": "buy through v3",
+      "hash": "0x86905b6ff578083836d0dba4398a7b27c66ac9932b0399eac076bdbdd23b9b00",
+      "from": "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a",
+      "kind": "buy",
+      "venue": "v3",
+      "w": "0x784d936b67af99d633b379756498964129ef4c39",
+      "nullifier": "9628888636730645915507491273720216118592656519253313826087071287572241738734",
+      "minOut": "2094629",
+      "quoted": "2204873",
+      "quoteBlock": "55345604",
+      "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "block": "55345623",
+      "gasUsed": "621113",
+      "out": "2204873",
+      "newCommitment": "18646912720170334524363812386624801341226214579686806444218190246049699082997",
+      "value": "1000000000000000",
+      "fee": "10000000000000"
+    },
+    {
+      "step": "sell through SellDelegate (helper)",
+      "hash": "0x8aa0bda23849fdfd59e60bee5e1805d143dd43211b0fdf136e0b30e996487077",
+      "from": "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553",
+      "via": "helper",
+      "kind": "sell",
+      "venue": "v4",
+      "target": "0x05e73354cfdd6745c338b50bcfdfa3aa6fa03408",
+      "w": "0x784d936b67af99d633b379756498964129ef4c39",
+      "amount": "2204873",
+      "minOut": "8121394597743052",
+      "quoted": "8548836418676897",
+      "quoteBlock": "55345633",
+      "fee": "20000000000000",
+      "coin": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "feeTo": "0x9cc4788af51677aaa7770d78277c41fb864b35e1",
+      "block": "55345653",
+      "gasUsed": "566651",
+      "commitment": "1706404858298035498933226769011967289244817976450967069124761656202446616169",
+      "label": "16934607701065700059751510376690814139493059094575034721202520796248317005923",
+      "value": "8528836418676897",
+      "precommitment": "12664621148235146836934668755085232867244855901002803590817706685595183752540"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0x97db04f6d4fe992dac75560a6f44f73646292950e9c5447f65060d21d8809f30",
+      "from": "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a",
+      "kind": "withdraw",
+      "w": "0x6eb843de1358f2fd5ed9d7d8eddd9e59d2a625fe",
+      "nullifier": "4833843277302937354720328132005622429286148070476191006762055235892603155125",
+      "value": "1000000000000000",
+      "fee": "10000000000000",
+      "block": "55345773",
+      "gasUsed": "528035",
+      "newCommitment": "18517668253915482060489792692680037297848498019063597216607433137204401162548"
+    },
+    {
+      "step": "withdraw",
+      "hash": "0xb3dc2f1b0bb8bf486b86dfe8047cab646d16ec890c50b12336713d99b713227a",
+      "from": "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a",
+      "kind": "withdraw",
+      "w": "0x7a8568aac4d14f426f8ed8106b772d24dc512dc1",
+      "nullifier": "7878099440629381214875341180657473840681152115740633736065011578068355603055",
+      "value": "8528836418676897",
+      "fee": "10000000000000",
+      "block": "55345902",
+      "gasUsed": "543880",
+      "newCommitment": "14554642375251111085529570638075148605490927579755448896296373268245666337623"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0x458055218a26ec5aa744bcde945e2e726d01b50986940ecb97e33fe7d856e3cb",
+      "from": "0x6eb843de1358f2fd5ed9d7d8eddd9e59d2a625fe",
+      "kind": "sweep",
+      "w": "0x6eb843de1358f2fd5ed9d7d8eddd9e59d2a625fe",
+      "block": "55345918",
+      "gasUsed": "21000"
+    },
+    {
+      "step": "sweep (a W's ETH back)",
+      "hash": "0x1c7abd18dc67ece320ee9b0214b85963539dfe8887bb57d61365ed9f804851a1",
+      "from": "0x7a8568aac4d14f426f8ed8106b772d24dc512dc1",
+      "kind": "sweep",
+      "w": "0x7a8568aac4d14f426f8ed8106b772d24dc512dc1",
+      "block": "55345935",
+      "gasUsed": "21000"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0xf2511c743df275ef2895acb0832c3aa9de40f5a97b0ceedd14e69c7b46731f10",
+      "from": "0xf8351fe1ddc748f51c08b42d14868abf181d8c4a",
+      "kind": "sweep",
+      "block": "55346191",
+      "gasUsed": "21000"
+    }
+  ]
+}

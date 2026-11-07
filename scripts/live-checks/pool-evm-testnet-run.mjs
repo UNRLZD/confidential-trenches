@@ -41,7 +41,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { recorder } from "./notes-per-pool-evm.mjs";
-import { CHAINS as DEPLOYED } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS as DEPLOYED, pinnedBuild } from "./pool-evm-deploy.mjs";
 
 const KEY = "pool-evm-testnet-run";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -93,8 +93,7 @@ const pinsOf = (chain, at) => {
   return {
     pool: d.contracts.PrivacyPoolSimple.address.toLowerCase(),
     sellDelegate: s.contracts.SellDelegate.address.toLowerCase(),
-    // the sell that delegate dispatches: the 11-field one from card evm-testnet-delegate-review3's redeploy on
-    sellSelector: s.key === "evm-testnet-delegate-review3" ? SELL_SELECTOR : SELL_SELECTOR_10,
+    sellSelector: sellSelectorOf(chain, s.contracts.SellDelegate.address),
     poolManager: c.poolManager.address.toLowerCase(),
     router: c.router?.address ? c.router.address.toLowerCase() : null,
   };
@@ -113,6 +112,14 @@ const word = (x) => BigInt(x).toString(16).padStart(64, "0");
 // before it, which the runs before card evm-testnet-delegate-review3 went through (pool-evm-testnet-run.<chain>.json,
 // e.g. Base Sepolia 0x32bb0d25..., input 0xbea5695c on sepolia.base.org and base-sepolia-rpc.publicnode.com)
 export const SELL_SELECTOR = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)");
+/** The sell the SellDelegate at `address` on `chain` dispatches: the selector of the build its code must be (the build
+ *  file's `sell`, forge's ABI for the current build, the deployed code's for a frozen one), whether that build is current
+ *  or frozen; a build that names none is refused, never given a guess. `build` is the build file (a test's own). */
+export function sellSelectorOf(chain, address, build = BUILD) {
+  const b = pinnedBuild(chain, "SellDelegate", address, build);
+  if (!/^0x[0-9a-f]{8}$/.test(b?.sell ?? "")) throw new Error(`the SellDelegate build at ${address} on ${chain} names no sell selector (pool-evm-deploy.build.json "sell")`);
+  return b.sell;
+}
 export const SELL_SELECTOR_10 = sel("sell((address,uint256,address,bytes,uint256,address,uint256,uint256,uint256,uint256),uint256,bytes)");
 /** The target W signed, from a SellDelegate.sell call's input (the Sell tuple's third word, in both shapes), or null
  *  when the input is not a call of `selector`, the sell the run's delegate dispatches. */

@@ -41,6 +41,8 @@ const V4 = "planted: a v4 sell";
 const FEETO = "pool-review-3 L-1: the fee recipient is";
 const FEETOSIG = "pool-review-3 L-1: W's Sell signature binds";
 const CALL = "pool-review-3 L-1: SellDelegate.sell's calldata";
+const FEECOLL = "card evm-testnet-delegate-review3: a pinned sell pays";
+const SIGNCOLL = "card evm-testnet-delegate-review3: the pinned signer refuses";
 
 // [file, text, replacement, the test that must fail]
 export const MUTANTS = [
@@ -130,11 +132,19 @@ export const MUTANTS = [
   [SELL, "for (let i = 1; i < path.length; i++)", "for (let i = 2; i < path.length; i++)", REVIEW],
   // the pins (M370): the chain's pool for a sell, its sell delegate for W's authorization
   [SELL, 'if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool yet`);', "", PINPOOL],
-  [SELL, "return evmPoolBuildSellUnpinned(chain, { ...req, pool });", "return evmPoolBuildSellUnpinned(chain, { pool, ...req });", PINPOOL],
+  [SELL, "= evmPoolBuildSellUnpinned(chain, { ...req, pool });", "= evmPoolBuildSellUnpinned(chain, { pool, ...req });", PINPOOL],
   [SELL, 'if (pool === undefined) return refuse("not_deployed", `${chain} has no pinned pool to sign a sell into yet`);', "", PINPOOL],
   [SELL, 'if (BUILT.has(built) && lower(built.pool) !== lower(pool)) return refuse("not_pinned", `the sell\'s pool is not ${chain}\'s pinned pool`);', "", PINPOOL],
   [SELL, 'if (delegate === undefined) return refuse("not_deployed", `${chain} has no pinned sell delegate yet`);', "", PINAUTH],
   [SELL, 'if (typeof chain !== "string" || !Object.hasOwn(venues, chain)) return refuse("bad_route", "no such chain");', "", PINPOOL],
+  // the sale's fee only to the chain's pinned FeeCollector (card evm-testnet-delegate-review3)
+  [SELL, 'if (feeCollector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector yet`);', "", FEECOLL],
+  [SELL, 'if (lower(built.feeRecipient) !== lower(feeCollector)) return refuse("not_pinned", `the sell\'s fee recipient is not ${chain}\'s pinned FeeCollector`);', "", FEECOLL],
+  [SELL, "if (lower(built.feeRecipient) !== lower(feeCollector))", "if (lower(req.feeRecipient) !== lower(feeCollector))", FEECOLL],
+  [BUY, 'feeCollector: ownPin(v, "feeCollector")', "feeCollector: (v as { feeCollector?: string }).feeCollector", FEECOLL],
+  [SELL, "if (BUILT.has(built) && lower(built.feeRecipient) !== lower(collector)) return refuse(", "if (false) return refuse(", SIGNCOLL],
+  [SELL, 'if (collector === undefined) return refuse("not_deployed", `${chain} has no pinned FeeCollector to sign a sell for yet`);', "", SIGNCOLL],
+  [SELL, "lower(built.feeRecipient) !== lower(collector)", "built.feeRecipient !== collector", SIGNCOLL],
   // no read of a pin reaches Object.prototype (the review of 8d8675d): the list has no prototype, a pin is an own key
   [BUY, "(venues ??= bare({", "(venues ??= Object.freeze({", "M370 a polluted Object.prototype names no pool"],
   [BUY, "    base: bare({", "    base: Object.freeze({", "M370 a polluted Object.prototype names no pool"],
