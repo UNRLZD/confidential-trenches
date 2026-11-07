@@ -21,8 +21,8 @@
 // EVM path is in pool-deposits.md (its Tx lines), read back by the money gate.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEVNET_PROVIDERS, recorder } from "./pool-sol-deploy.mjs";
 import { check as checkRun, readSignFlow } from "./signpage-pool-notes.mjs";
@@ -60,12 +60,12 @@ export async function readSignEvm(fetchFn = fetch) {
 /** The first release whose tree routes pool.deposit on Base and Robinhood to the runner with this fold. */
 export const ROUTED_FROM = 77;
 /** SIGN_HOST's /app.js sha384 in every release list from ROUTED_FROM on (packages/signpage/releases/). */
-export function routedReleases(dir = new URL("../../packages/signpage/releases/", import.meta.url)) {
+export function routedReleases(dir = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases")) {
   const out = new Set();
   for (const f of readdirSync(dir)) {
     const n = /^release-(\d+)\.json$/.exec(f)?.[1];
     if (n === undefined || Number(n) < ROUTED_FROM) continue;
-    const list = JSON.parse(readFileSync(new URL(f, dir), "utf8"));
+    const list = JSON.parse(readFileSync(path.join(dir, f), "utf8"));
     for (const x of list.hosts?.SIGN_HOST?.files ?? []) if (x.path === "/app.js") out.add(x.sha384);
   }
   return out;
