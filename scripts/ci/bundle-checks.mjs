@@ -59,6 +59,7 @@ export const OUT = {
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",
+  "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "signpage-release": "the release list against what the host serves",
