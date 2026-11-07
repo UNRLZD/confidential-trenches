@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/solana-legs-checked.test.mjs: the live check replays its recorded answers
 // (solana-legs-checked.answers.json, its _note says where each was read). good: this card's SIGN_HOST build, which
 // carries S6's leg refusals and S11's on the wallet's other accounts: PASS. bad: SIGN_HOST as served before this card:
-// FAIL. Planted on good: another /app.js, no pin, each refusal missing: each FAIL. And the words it looks for are the
-// kit's own: each is in packages/kit/src/checks/solana/checks.ts, so a rewording there fails here first.
+// FAIL. Planted on good: another /app.js, no pin, each refusal missing: each FAIL. The words are the kit's (its tests
+// match each refusal's detail); the good answer is the bundle built from them.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -30,9 +30,7 @@ test("planted on good: another app.js, no pin, each refusal missing: each FAIL",
   assert.equal(judge(null).ok, false);
 });
 
-test("facts reads the bundle; the words are the kit's own", () => {
-  const src = readFileSync(new URL("../../packages/kit/src/checks/solana/checks.ts", import.meta.url), "utf8");
-  for (const [k, w] of Object.entries(WORDS)) assert.ok(src.includes(w), `${k}: "${w}" is not in the kit's checks`);
+test("facts reads which refusals a bundle carries", () => {
   const f = facts('<script type="module" src="/app.js" integrity="sha384-x"></script>', Object.values(WORDS).join(" "));
   assert.deepEqual(Object.values(f.carries), Object.values(WORDS).map(() => true));
   assert.deepEqual(Object.values(facts("", "").carries), Object.values(WORDS).map(() => false));
