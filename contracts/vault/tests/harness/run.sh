@@ -137,5 +137,7 @@ if [ -n "$OUT" ]; then ls -l "$OUT"; date -u +"end %Y-%m-%dT%H:%M:%SZ"; exit 0; 
 
 cd "$V"
 if [ "$#" -eq 0 ]; then set -- --tests; fi
-cargo $TC test --locked --features sandbox "$@" -- --nocapture
+# --include-ignored: a vault test marked #[ignore] is a long run that a plain `cargo test` (CI's test job) skips; this
+# suite runs every one (today VT-P01's 100,000 inserts through the on-chain store, tests/tree_prop.rs)
+cargo $TC test --locked --features sandbox "$@" -- --nocapture --include-ignored
 date -u +"end %Y-%m-%dT%H:%M:%SZ"
