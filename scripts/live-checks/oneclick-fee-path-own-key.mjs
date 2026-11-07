@@ -5,10 +5,15 @@
 // any other path by name:
 //   - the bundle holds each fee table, ONECLICK_FEE_BPS {keyless: 1, partner: 1} and ONECLICK_PAIR_FEE_BPS {keyless: 20,
 //     partner: 20}, assigned to a name;
-//   - every read of either table by a key that is not a literal, `T[k]`, sits in a function that first checks
-//     Object.hasOwn(T, k) for that table and that key and holds the refusal "no such 1Click path". A read through the
-//     prototype chain, as SIGN_HOST served before this card (release-68), lets a polluted Object.prototype.nopath = 1
-//     name a fee for a path that does not exist, and a real dry quote on it passed the device's check.
+//   - every read of either table by a key that is not a literal, `T[k]` for any expression k (a name or a member such
+//     as n.path), sits in a function (its nearest start, `function` or `=>`) that before the read checks
+//     typeof k == "string" chained straight into an own-key check, and Object.hasOwn(T, k) for that table and that key,
+//     and holds the refusal "no such 1Click path". A read through the prototype chain, as SIGN_HOST served before this card (release-68), lets a polluted
+//     Object.prototype.nopath = 1 name a fee for a path that does not exist, and a real dry quote on it passed the
+//     device's check; without the typeof, a key object whose toString answers "partner" to the checks and "nopath" to
+//     the read does the same.
+// Outside what a text scan of the bundle sees: a read that does not index the table by name, such as Reflect.get(T, k),
+// a computed destructuring of T, or T passed along and indexed under another name.
 // That the check refuses such a quote is packages/kit/test/oneclick.test.ts's ("a path outside keyless and partner names
 // no fee, even when a polluted Object.prototype has one"); this check reads that the build SIGN_HOST serves carries it.
 // This file reaches no package code (the import check holds it): its test holds TABLES to the kit's own exports.
@@ -36,9 +41,31 @@ const ID = "[A-Za-z_$][\\w$]*";
 const assigned = (values) =>
   new RegExp(`(?<![\\w$.])(${ID})\\s*=\\s*(?:Object\\.freeze\\(\\s*)?\\{\\s*${Object.entries(values).map(([k, v]) => `[\`'"]?${esc(k)}[\`'"]?\\s*:\\s*${v}`).join("\\s*,\\s*")}\\s*,?\\s*\\}`, "g");
 
+/** The text inside the bracket that opens at `open`, nested brackets and quoted strings followed, or null. */
+function bracketed(js, open) {
+  let depth = 0;
+  let quote = null;
+  for (let i = open; i < js.length && i < open + 500; i++) {
+    const ch = js[i];
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "[") depth++;
+    else if (ch === "]" && --depth === 0) return js.slice(open + 1, i);
+  }
+  return null;
+}
+/** A key that is a literal: a number, or a string with no ${} in it. */
+const LITERAL = /^\s*(?:\d+|"[^"\\]*"|'[^'\\]*'|`[^`$\\]*`)\s*$/;
+/** The nearest function start before `at`: a `function` keyword or an arrow. */
+const fnStart = (js, at) => Math.max(js.lastIndexOf("function", at), js.lastIndexOf("=>", at));
+
 /** What the check keeps of the reads: the index, the served bundle's sha384, per table the names it is assigned to, and
- *  every read of one of those names by a non-literal key, with whether its function checks Object.hasOwn for that table
- *  and key first and holds the refusal. */
+ *  every read of one of those names by a key that is not a literal, with whether its function, before the read, checks
+ *  typeof key == "string" and Object.hasOwn for that table and key, and holds the refusal. */
 export function facts(index, js) {
   const tables = {};
   const reads = [];
@@ -46,12 +73,18 @@ export function facts(index, js) {
     const names = [...new Set([...js.matchAll(assigned(values))].map((m) => m[1]))];
     tables[table] = names;
     for (const name of names) {
-      for (const m of js.matchAll(new RegExp(`(?<![\\w$.])${esc(name)}\\[(${ID})\\]`, "g"))) {
-        const key = m[1];
-        const start = js.lastIndexOf("function", m.index);
+      for (const m of js.matchAll(new RegExp(`(?<![\\w$.])${esc(name)}\\s*(?:\\?\\.)?\\s*\\[`, "g"))) {
+        const key = bracketed(js, m.index + m[0].length - 1);
+        if (key !== null && LITERAL.test(key)) continue;
+        const k = esc((key ?? "").trim()).replace(/\\s+/g, "\\s*");
+        const start = fnStart(js, m.index);
         const body = js.slice(start < 0 ? 0 : start, m.index);
-        const owns = new RegExp(`Object\\.hasOwn\\(\\s*${esc(name)}\\s*,\\s*${esc(key)}\\s*\\)`).test(body);
-        reads.push({ table, name, key, owns, refuses: body.includes(REFUSAL) });
+        const owns = key !== null && new RegExp(`Object\\.hasOwn\\(\\s*${esc(name)}\\s*,\\s*${k}\\s*\\)`).test(body);
+        // the type check is the guard's own first term, chained straight into an own-key check (`typeof k == "string" &&
+        // Object.hasOwn(` or `typeof k != "string" || !Object.hasOwn(`), not a typeof elsewhere, as in the message
+        const typeofK = `(?:typeof\\s*\\(?\\s*${k}\\s*\\)?\\s*[!=]==?\\s*[\x60'"]string[\x60'"]|[\x60'"]string[\x60'"]\\s*[!=]==?\\s*typeof\\s*\\(?\\s*${k}\\s*\\)?)`;
+        const typed = key !== null && new RegExp(`${typeofK}\\s*(?:&&|\\|\\|)\\s*!?\\s*Object\\.hasOwn\\(`).test(body);
+        reads.push({ table, name, key: key ?? "?", owns, typed, refuses: body.includes(REFUSAL) });
       }
     }
   }
@@ -73,6 +106,7 @@ export function judge(a) {
   }
   for (const r of reads) {
     if (!r?.owns) bad(`${r?.table} is read as ${r?.name}[${r?.key}] with no Object.hasOwn(${r?.name}, ${r?.key}) first: a polluted Object.prototype can name a fee for a path that does not exist`);
+    else if (!r.typed) bad(`${r.table}'s read ${r.name}[${r.key}] is not behind typeof ${r.key} == "string": a key object can answer one name to the check and another to the read`);
     else if (!r.refuses) bad(`${r.table}'s read ${r.name}[${r.key}] is in a function without the refusal "${REFUSAL}"`);
   }
   return { ok: lines.length === 0, lines };
