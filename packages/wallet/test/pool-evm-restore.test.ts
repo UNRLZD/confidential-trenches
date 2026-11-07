@@ -1113,3 +1113,110 @@ test("B1 refusals under the cap (no answer in time, an unknown error) never shri
     assert.ok(last.length > 0 && last.every((n) => n >= 624), `${name}: the last pages ${sizes.slice(-12)}`);
   }
 });
+
+// ---- card helper-evm-range-cap-walk: a refusal that names its cap pages at that cap, never under it ----
+
+/** A W's Transfer read (evmTokensSentToOne) over `span` blocks on a provider that caps a page at `cap` blocks in `words`
+ *  (its message as the kit's client throws it, or made from the refused page's size): each eth_getLogs page's size and
+ *  whether it was refused. Past CALLS_MAX calls the provider answers no list, which ends the read with an error: a pager
+ *  that never moves on fails the test instead of hanging it (review fold 5). */
+const CALLS_MAX = 2_000;
+async function readCapped(span: bigint, cap: number, words: string | ((size: number) => string)) {
+  const head = 1_050_000n, from = head - span + 1n;
+  const block = { number: q(head), hash: h32("head"), timestamp: q(T0) };
+  const pages: [number, boolean][] = [];
+  const rpc: EvmRpc = async (method, params) => {
+    if (method === "eth_getBlockByNumber") return block;
+    if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
+    const f = params[0] as { fromBlock: string; toBlock: string };
+    const size = Number(BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n);
+    pages.push([size, size > cap]);
+    if (pages.length > CALLS_MAX) return "no list" as never;
+    if (size > cap) throw new Error(typeof words === "string" ? words : words(size));
+    return [];
+  };
+  const anchor = { number: head, hash: block.hash, timestamp: T0, baseFeePerGas: null };
+  assert.deepEqual(await evmTokensSentToOne(rpc, W(0n, 0), from, { fin: anchor, anchor }, [EVM_LOG_PAGE_BLOCKS], undefined, async () => {}), []);
+  return pages;
+}
+
+test("card helper-evm-range-cap-walk: a cap's named span is the page at once (base-pokt.nodies.app's 50 blocks, live run 42241935061), never halved under it; its probes past it are few", async () => {
+  for (const [cap, words] of [
+    [50, "RPC error -32001: Block range too large: maximum allowed is 50 blocks on your current plan. Upgrade your subscription at https://nodies.app"],
+    [50, "RPC error -32602: eth_getLogs is limited to 0 - 50 blocks range"],
+    // Robinhood's own form (its read named 30000, past this read's widest page of 10,000): the asked span named first
+    [3_000, "RPC error -32602: query spans 10000 blocks (from 0x1 to 0x2710), but only 3000 are allowed"],
+    [1_000, "RPC error -32005: Log response size exceeded. Maximum allowed number of requested blocks is 1000"],
+    [500, "HTTP 400: RPC error -32602: invalid argument 0: block range exceeds maximum 500"],
+    // base-mainnet.public.blastapi.io's words, as evm-transfer-rpc-spares recorded them: the page goes to 10 at once,
+    // where halving went 2,001 to 7 in 8 refusals
+    [10, "HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a 10 block range. Based on your parameters, this block range should work: [0x33437f9, 0x3343802]"],
+  ] as const) {
+    const span = BigInt(cap) * 100n;
+    const pages = await readCapped(span, cap, words);
+    const answered = pages.filter(([, refused]) => !refused).map(([n]) => n);
+    assert.equal(answered.reduce((a, n) => a + n, 0), Number(span), `${words}: the span tiled`);
+    assert.ok(answered.every((n) => n === cap), `${words}: every page at the cap ${cap}: ${[...new Set(answered)]}`);
+    const refused = pages.filter(([, r]) => r).length;
+    assert.ok(refused <= 6, `${words}: ${refused} refused pages (the first, then a probe past the cap at most every 8, 16, 32 pages)`);
+    // review fold 5 (W4): the ceiling sits just past the named span, so the 8 pages after the jump are all at it, no probe
+    assert.deepEqual(pages.slice(1, 9).map(([n]) => n), Array(8).fill(cap), `${words}: the pages after the jump ${pages.slice(1, 10).map(([n]) => n)}`);
+  }
+});
+
+test("card helper-evm-range-cap-walk: a named span no smaller than the page refused, or none, halves it as before", async () => {
+  // a provider that names 20,000 while refusing 10,000 (a lie, or a cap on something else): halved, not grown
+  const pages = await readCapped(5_000n, 1_000, "RPC error -32000: query exceeds max block range 20000");
+  assert.deepEqual(pages.slice(0, 4).map(([n]) => n), [5_000, 2_500, 1_250, 625]);
+  const none = await readCapped(5_000n, 1_000, "RPC error -32602: invalid params");
+  assert.deepEqual(none.slice(0, 4).map(([n]) => n), [5_000, 2_500, 1_250, 625]);
+});
+
+test("card helper-evm-range-cap-walk: the pager's cap forms are the helper's, word for word (apps/helper/src/rpc/rpc.ts CAP_SPANS, which picks the largest span when every provider caps)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const forms = (text: string) => /const CAP_SPANS: readonly RegExp\[\] = \[\n([\s\S]*?)\n\];/.exec(text)?.[1];
+  const wallet = forms(readFileSync(new URL("../src/pool/evm.ts", import.meta.url), "utf8"));
+  const helper = forms(readFileSync(new URL("../../../apps/helper/src/rpc/rpc.ts", import.meta.url), "utf8"));
+  assert.ok(wallet !== undefined && wallet.split("\n").length >= 11, "the pager's forms read");
+  assert.equal(helper, wallet);
+});
+
+test("card helper-evm-range-cap-walk (review fold 2): a span named just under each refused page (a lie, or a cap moving with the ask) halves the page, never steps it down one block a call", async () => {
+  const pages = await readCapped(5_000n, 50, (size) => `RPC error -32001: Block range too large: maximum allowed is ${size - 1} blocks on your current plan`);
+  // halving: 7 refusals to 39 blocks, about 129 pages of it and a probe past it now and then; one block a call: 4,950
+  assert.ok(pages.length <= 200, `${pages.length} calls`);
+  assert.deepEqual(pages.slice(0, 4).map(([n]) => n), [5_000, 2_500, 1_250, 625]);
+});
+
+test("card helper-evm-range-cap-walk (review fold 5): a named span of 0, or one at or above the page refused, is no span: the page halves and the read ends", async () => {
+  for (const words of ["RPC error -32001: Block range too large: maximum allowed is 0 blocks on your current plan", "RPC error -32000: query exceeds max block range 10000", "RPC error -32000: query exceeds max block range 5000"]) {
+    const pages = await readCapped(5_000n, 1_000, words);
+    assert.deepEqual(pages.slice(0, 3).map(([n]) => n), [5_000, 2_500, 1_250], words);
+    assert.equal(pages.filter(([, r]) => !r).reduce((a, [n]) => a + n, 0), 5_000, `${words}: the span tiled`);
+  }
+});
+
+test("card helper-evm-range-cap-walk (review fold 3): on a W's Transfer read, a span named under a page this read already answered in full is one backend's: the page halves, never drops to it", async () => {
+  const head = 1_050_000n, from = head - 20_000n + 1n;
+  const block = { number: q(head), hash: h32("head"), timestamp: q(T0) };
+  const pages: number[] = [];
+  const rpc: EvmRpc = async (method, params) => {
+    if (method === "eth_getBlockByNumber") return block;
+    const f = params[0] as { fromBlock: string; toBlock: string };
+    const size = Number(BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n);
+    pages.push(size);
+    if (pages.length > CALLS_MAX) return "no list" as never;
+    if (size > 1_000) throw new Error("RPC error -32001: Block range too large: maximum allowed is 1000 blocks on your current plan");
+    // the fourth page, at a size this read answered in full three times: one backend's 50-block plan
+    if (pages.length === 5) throw new Error("RPC error -32001: Block range too large: maximum allowed is 50 blocks on your current plan");
+    return [];
+  };
+  const anchor = { number: head, hash: block.hash, timestamp: T0, baseFeePerGas: null };
+  assert.deepEqual(await evmTokensSentToOne(rpc, W(0n, 0), from, { fin: anchor, anchor }, [EVM_LOG_PAGE_BLOCKS], undefined, async () => {}), []);
+  assert.deepEqual(pages.slice(0, 6), [10_000, 1_000, 1_000, 1_000, 1_000, 500], `pages ${pages.slice(0, 8)}`);
+});
+
+test("card helper-evm-range-cap-walk: a read no provider refuses pages at its widest every page, the last page's remainder aside: never a smaller page", async () => {
+  const pages = await readCapped(95_001n, 1_000_000, "unused");
+  assert.deepEqual(pages.map(([n]) => n), [...Array(9).fill(10_000), 5_001]);
+});
