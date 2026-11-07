@@ -10,7 +10,8 @@ import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
 import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
-import { TradeBox } from "../trade/TradeBox.tsx";
+import { TradeView, useTrade } from "../trade/TradeBox.tsx";
+import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
@@ -295,16 +296,17 @@ interface Ready {
   nowMs: number;
 }
 
-/** The box with the safety grid under it: the desktop column and the phone sheet draw the same. */
-function Ticket({ r }: { r: Ready }) {
+/** The box with the safety grid under it: the desktop column and the phone sheet draw the same, from the page's one
+ *  trade state (TokenPage's useTrade), so a buy started at one width is the buy the other width draws. */
+function Ticket({ r, t }: { r: Ready; t: Trade }) {
   const { row, risk } = r.data;
-  return <TradeBox chain={row.chain} token={row.token} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
+  return <TradeView t={t} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
 }
 
 /** The strip's and the tiles' Tax: the token read's transfer fee as the safety grid draws it (trade/safety.ts). */
 const taxOf = (r: Ready) => safetyCells(r.data.row, r.data.risk, r.nowMs).find((c) => c.id === "tax")!;
 
-function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
+function Desktop({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade }) {
   // null draws the tile's skeleton: the page is loading, or its row is still filling (card token-page-fills-after)
   const s = (x: string | null | undefined) => (v === null ? null : (x ?? null));
   const tax = r ? taxOf(r) : null;
@@ -352,7 +354,7 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
         <Chart c={c} />
       </div>
       <aside className="tkp-trade" data-slot="trade">
-        {r ? <Ticket r={r} /> : <span className="tkp-sk tkp-tradesk" />}
+        {r ? <Ticket r={r} t={t} /> : <span className="tkp-sk tkp-tradesk" />}
       </aside>
     </div>
   );
@@ -384,7 +386,7 @@ function back() {
   else window.location.assign("/");
 }
 
-function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
+function Phone({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade }) {
   const sheet = useTradeSheet();
   const tax = r ? taxOf(r) : null;
   const cells = r ? safetyCells(r.data.row, r.data.risk, r.nowMs) : null;
@@ -460,7 +462,7 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
       )}
       {v && r && (
         <TradeSheet state={sheet.state} onClose={sheet.close} label={`${WORDS.buy.text} ${v.symbol}`} closeLabel={signinWord("close")} head={<SheetHead v={v} />}>
-          <Ticket r={r} />
+          <Ticket r={r} t={t} />
         </TradeSheet>
       )}
     </div>
@@ -473,6 +475,8 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const row = data.status === "ready" ? data.row : null;
   const [tf, setTf] = useState<ChartTf>(DEFAULT_TF);
   const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
+  // the page's one trade state, drawn by the desktop column's box and the phone sheet's (card app-phone-trade-sheet)
+  const trade = useTrade(row ? { chain: row.chain, token: row.token } : null);
   if (data.status === "error" || data.status === "empty")
     return (
       <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
@@ -485,8 +489,8 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const c: ChartState = { sym: v?.symbol ?? null, tf, onTf: setTf, data: candles, retry };
   return (
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
-      <Desktop v={v} r={ready} c={c} />
-      <Phone v={v} r={ready} c={c} />
+      <Desktop v={v} r={ready} c={c} t={trade} />
+      <Phone v={v} r={ready} c={c} t={trade} />
     </section>
   );
 }

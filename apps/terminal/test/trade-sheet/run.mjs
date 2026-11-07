@@ -9,7 +9,10 @@
 // no browser dialog, no dialog but the sheet itself, no external request. Then the close: a buy still Landing when the
 // grab handle closes the sheet keeps running in the hidden box, its fill toast shows over the page, and the reopened
 // sheet draws it Filled, one buy sent; the scrim and Escape close it too, the page scrolls again once it is closed, and a
-// window grown past the phone width closes it.
+// window grown past the phone width closes it. Then the token page itself (fixtures.tsx ?page=1: TokenPage on the
+// recorded read, both widths in the page, one trade state): a buy taken to Landing in the sheet at 390 is the buy the
+// desktop column draws after a resize to 1440, Landing then Filled, one buy sent and one quote asked; and a buy taken to
+// Landing at 1440 is the buy the reopened sheet draws after a resize to 390.
 //   node apps/terminal/test/trade-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -236,6 +239,70 @@ try {
       }
       await ctx.close();
     }
+  }
+  // the token page: one trade state at every width
+  for (const [from, to] of [
+    [{ width: 390, height: 844 }, { width: 1440, height: 900 }],
+    [{ width: 1440, height: 900 }, { width: 390, height: 844 }],
+  ]) {
+    const tag = `token page ${from.width} to ${to.width}`;
+    const ctx = await browser.newContext({ viewport: from, deviceScaleFactor: 1, reducedMotion: "reduce" });
+    await ctx.addInitScript(INIT);
+    // the page's candle and logo reads go to the helper and the token's hosts: refused here, the chart draws its error
+    await ctx.route((u) => !u.href.startsWith(BASE) && !u.href.startsWith("data:"), (r) => r.abort());
+    const page = await ctx.newPage();
+    const dialogs = [];
+    page.on("dialog", (d) => {
+      dialogs.push(d.type());
+      void d.dismiss();
+    });
+    await page.clock.install({ time: NOW - 1000 });
+    await page.clock.pauseAt(NOW);
+    await page.goto(`${BASE}/?page=1&f=ready&route=1`);
+    await page.waitForSelector('.tkp[data-token-page="ready"]');
+    await page.evaluate(() => document.fonts.ready);
+    const desk = page.locator('.tkp-desk [data-testid="trade-box"]');
+    const phoneBox = box(page);
+    const st = (b) => settle(() => b.getAttribute("data-state"), "S8.10");
+    if (from.width < 768) {
+      await page.locator(".tkp-phone .tkp-buy").click();
+      check(await sheet(page).waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false), `${tag}: the sheet did not open`);
+      await phoneBox.locator('[data-preset="25.00"]').click();
+      await page.clock.runFor(400);
+      check((await st(phoneBox)) === "S8.10", `${tag}: the sheet's buy is not Landing`);
+    } else {
+      await desk.locator('[data-preset="25.00"]').click();
+      await page.clock.runFor(400);
+      check((await st(desk)) === "S8.10", `${tag}: the desktop buy is not Landing`);
+    }
+    await page.setViewportSize(to);
+    let shown;
+    if (to.width >= 768) {
+      check(await sheet(page).waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false), `${tag}: the sheet stays open past the phone width`);
+      check((await page.evaluate(() => document.body.style.overflow)) === "", `${tag}: the page stays locked at the desktop width`);
+      shown = desk;
+    } else {
+      await page.locator(".tkp-phone .tkp-buy").click();
+      check(await sheet(page).waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false), `${tag}: the sheet did not open at 390`);
+      shown = phoneBox;
+    }
+    check(await shown.isVisible(), `${tag}: the box at ${to.width} is not visible`);
+    const landing = await settle(() => shown.getAttribute("data-state"), "S8.10");
+    check(landing === "S8.10", `${tag}: the box at ${to.width} reads ${landing}, not Landing (S8.10)`);
+    const ll = norm(await shown.locator('[data-testid="trade-cta"]').innerText());
+    check(/^Landing \d+\.\ds$/.test(ll), `${tag}: the button at ${to.width} reads "${ll}"`);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `token-page-${from.width}-to-${to.width}-landing.png`) });
+    await page.clock.runFor(800);
+    const filled = await settle(() => shown.getAttribute("data-state"), "S8.12");
+    check(filled === "S8.12", `${tag}: the box at ${to.width} reads ${filled}, not Filled (S8.12)`);
+    const fl = await settle(async () => norm(await shown.locator('[data-testid="trade-cta"]').innerText()), "Filled 1.1s Final");
+    check(fl === "Filled 1.1s Final", `${tag}: the button at ${to.width} reads "${fl}"`);
+    check((await page.evaluate(() => window.__calls)).length === 1, `${tag}: ${(await page.evaluate(() => window.__calls)).length} buys sent`);
+    check((await page.evaluate(() => window.__previews)) === 1, `${tag}: ${await page.evaluate(() => window.__previews)} quotes asked for one amount`);
+    check((await page.locator('[data-testid="fill-toast"]:visible').count()) === 1, `${tag}: not one fill toast in view`);
+    check(dialogs.length === 0, `${tag}: a browser dialog ${dialogs.join(" ")}`);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `token-page-${from.width}-to-${to.width}-filled.png`) });
+    await ctx.close();
   }
 } finally {
   await browser.close();

@@ -12,7 +12,9 @@
 // (scripts/live-checks/pool-evm-testnet-run.base-sepolia.json), ETH at a planted $3,500.12345678. ?amt= sets the
 // amount in the box. ?sheet=1 (card app-phone-trade-sheet) draws the same box in the phone trade sheet with the safety
 // grid under it, from the recorded token read (test/token-source/helper-token-2026-11-03.json), behind an open button, as
-// the token page's phone bar opens it. Test only.
+// the token page's phone bar opens it. ?page=1 draws the token page itself (TokenPage, both widths, one trade state) on
+// the recorded read, its candle reads answered by the run. Every set preview asked is counted in window.__previews.
+// Test only.
 import type { BuyRoute, SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,6 +22,7 @@ import { centsToDecimal, ladderSplit, parseUsd } from "../../src/screens/trade/m
 import { TradeBox } from "../../src/screens/trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../../src/screens/trade/TradeSheet.tsx";
 import { SafetyGrid } from "../../src/screens/trade/SafetyGrid.tsx";
+import { TokenPage } from "../../src/screens/token/TokenPage.tsx";
 import type { RiskRead } from "../../src/screens/trade/safety.ts";
 import type { MarketRow } from "../../src/screens/discover/fields.ts";
 import READ from "../token-source/helper-token-2026-11-03.json";
@@ -39,9 +42,11 @@ const PER_CENT = 480_000_000n;
 declare global {
   interface Window {
     __calls: unknown[];
+    __previews: number;
   }
 }
 window.__calls = [];
+window.__previews = 0;
 
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "ready";
@@ -72,6 +77,7 @@ let n = 0;
 
 const kit: TradeKit = {
   setPreview: async (req) => {
+    window.__previews++;
     const amount = parseUsd(req.amount)!;
     const { sizes, rest } = ladderSplit(amount);
     const set = sizes.length ? sizes.map((s, i) => (i === 0 ? s + rest : s)) : [amount];
@@ -157,8 +163,17 @@ function SheetPage() {
   );
 }
 
+function TokenPageFx() {
+  return (
+    <TradeSourceProvider value={src}>
+      <TokenPage data={{ status: "ready", row: ROW, risk: RISK }} nowMs={Date.now()} onRetry={() => {}} />
+    </TradeSourceProvider>
+  );
+}
+
 function Page() {
   if (q.get("sheet") === "1") return <SheetPage />;
+  if (q.get("page") === "1") return <TokenPageFx />;
   return (
     <TradeSourceProvider value={src}>
       <div className="trb-fx">
