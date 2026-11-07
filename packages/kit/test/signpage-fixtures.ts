@@ -67,5 +67,6 @@ export const FIXTURES = {
     params: { origin_asset: "nep141:usdc", amount: "25" },
     result: { amount_out_usd: "24.94", min_amount_out_usd: "24.6906", fee_usd: "0.06", time_estimate_s: 20 },
   },
+  "pool.address": { params: { chain: "solana" }, result: { chain: "solana", address: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", asset: "SOL" } },
 } satisfies { [K in SignpageKind]: { params: SignpageParams[K]; result: SignpageResults[K] } };
 
