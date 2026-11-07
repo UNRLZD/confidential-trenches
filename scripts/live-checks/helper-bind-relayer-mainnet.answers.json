@@ -1,28 +1,32 @@
 {
  "good": {
-  "base": "http://127.0.0.1:18793",
+  "base": "http://127.0.0.1:18794",
   "record": {
    "account_id": "vault-test.confidential.unrlzd.near"
   },
-  "readAt": "2026-11-07T14:12:23.737Z",
+  "commit": "c04a490b4d701dea2f9a47e9ce616fce41f23ff0",
+  "pin": "vault-test.confidential.unrlzd.near",
+  "readAt": "2026-11-07T15:27:01.185Z",
   "status": 200,
   "headers": {
-   "x-helper-commit": "e2e35323470b46d11c9d54802e15cfd25b9908b9",
+   "x-helper-commit": "c04a490b4d701dea2f9a47e9ce616fce41f23ff0",
    "access-control-allow-origin": "https://confidential.unrealized.trade"
   },
-  "body": "{\"ok\":true,\"commit\":\"e2e35323470b46d11c9d54802e15cfd25b9908b9\",\"release\":7,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\",\"trades\":\"public\",\"stream\":\"public\"},\"bind\":{\"mainnet\":{\"account\":\"f708b4fe8d67dfabbe4d199d3127f090cc45f7b390f50e5a2524c57547405e19\",\"vault\":\"vault-test.confidential.unrlzd.near\"}}}"
+  "body": "{\"ok\":true,\"commit\":\"c04a490b4d701dea2f9a47e9ce616fce41f23ff0\",\"release\":7,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\",\"trades\":\"public\",\"stream\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[]},\"bind\":{\"mainnet\":\"6cf3b2339b24ec11cf5575beb5d3de0f5a443ab708ad9212f89b9b1483152048\"}}"
  },
  "bad_deployed": {
   "base": "https://api.confidential.unrealized.trade",
   "record": {
    "account_id": "vault-test.confidential.unrlzd.near"
   },
-  "readAt": "2026-11-07T14:12:24.322Z",
+  "commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
+  "pin": "vault-test.confidential.unrlzd.near",
+  "readAt": "2026-11-07T15:27:19.733Z",
   "status": 200,
   "headers": {
-   "x-helper-commit": "46b16ca48be23c19dace0cddfe4c75a3bab0f0d9",
+   "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
    "access-control-allow-origin": "https://confidential.unrealized.trade"
   },
-  "body": "{\"ok\":true,\"commit\":\"46b16ca48be23c19dace0cddfe4c75a3bab0f0d9\",\"release\":92,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"}}"
+  "body": "{\"ok\":true,\"commit\":\"af75100a34cbd641835ccd30fe4de36509436d5a\",\"release\":93,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\"],\"base\":[],\"robinhood\":[],\"near\":[]}}"
  }
 }
