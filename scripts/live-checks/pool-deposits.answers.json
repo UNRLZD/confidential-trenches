@@ -561,9 +561,9 @@
    }
   ],
   "evm": {
-   "from": "packages/signpage/index.html and public/app.js of the release-77 build (build-app at ee538c67, the slice 3 review fold)",
-   "pin": "sha384-F01NlD0MRFmJ/EXSYL5GpLAqDgMIYPOzEkSkP/1WAkytExHIHnfZAs+VLYbb7Zwx",
-   "sha384": "sha384-F01NlD0MRFmJ/EXSYL5GpLAqDgMIYPOzEkSkP/1WAkytExHIHnfZAs+VLYbb7Zwx",
+   "from": "packages/signpage/index.html and public/app.js of the release-77 build (build-app at b29b4148, the slice 3 review fold on main 4bc11280)",
+   "pin": "sha384-Y1WfqpguVdGY13sIf62WxKU4DEw5Y/z1acuyDeu9PXXaVp9LY00RfcYHEVqgD2BO",
+   "sha384": "sha384-Y1WfqpguVdGY13sIf62WxKU4DEw5Y/z1acuyDeu9PXXaVp9LY00RfcYHEVqgD2BO",
    "marks": {
     "U^evm derivation": true,
     "deposit rule": true,
