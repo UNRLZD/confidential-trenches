@@ -414,7 +414,7 @@ test("a registration claimed but never signed (the process stopped between the c
   t.store.close();
 });
 
-test("a simulation that executed no intent, or violated an invariant on one provider, is simulation_refused", async () => {
+test("a simulation that executed no intent is simulation_refused", async () => {
   const s = setup({ chain: { executed: 0 } });
   const u = hex();
   seeSigner(s.store, u);
