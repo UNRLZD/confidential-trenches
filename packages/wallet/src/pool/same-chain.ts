@@ -8,8 +8,8 @@
 //   the 12 words (derive/keys.ts depositId, HKDF info "onetime/in" ‖ s ‖ i; docs/plan1/wallet.md:64 at research). On
 //   Solana U's ed25519 key is a Solana account as it is (the signing page's pool.deposit has used it since card
 //   signpage-pool-notes, packages/signpage/src/pool-deposit.ts:5). On Base and Robinhood U needs a secp256k1 key, which
-//   the frozen path does not give: that derivation is a later slice and goes to the CO first (derive/ is outside this
-//   card's paths); the EVM call here names no sender.
+//   the frozen path does not give: that derivation comes in a later slice, HKDF info "onetime/in/evm" ‖ s ‖ i (derive/
+//   is outside this card's paths); the EVM call here names no sender.
 // - How the device deposits, its fee carried: U pays each deposit's costs out of what it holds (Solana: the fee, the
 //   17-byte precommitment mark's rent and each page's growth less what those accounts already hold, as the program
 //   charges it, M353 (1), kit solanaPoolDepositCost; EVM: gas), so the
