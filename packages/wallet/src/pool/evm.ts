@@ -27,7 +27,7 @@
 //   would need N calls), so every page is a range that ends at or below the newest anchor; a log in either anchor's
 //   block must carry that anchor's hash, and both RPCs' lists must agree byte for byte (every field
 //   the device reads). Each RPC pages on its own: any refusal of a page over one block but a head lag halves that
-//   RPC's page and tries again, down to one block, and a full page read doubles it again, so no provider's cap, in any
+//   RPC's page (or takes it to the span the refusal names, CAP_SPANS) and tries again, down to one block, and a full page read doubles it again, so no provider's cap, in any
 //   words (200 blocks on sepolia.base.org, 50,000 on publicnode, read 3 Nov 05:35Z; Tenderly's 1,000 as "invalid
 //   params", 5 Nov), is a limit on the pool. A page of one block refused is that provider's true failure. A log in the
 //   finalized anchor's block must carry its hash; one in the newest anchor's block that names another hash goes to the
@@ -146,7 +146,7 @@ export const EVM_POOL_LOG_PAGE_MAX_BLOCKS = 800_000n;
 export const EVM_LOG_REFUSED_AGAIN = 2;
 /** A log read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the page
  * may double past it once more: a W's Transfer read (card restore-check-bounded; evmTokensSentTo, evmTokensSentToOne)
- * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words, so a refusal under a provider's
+ * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words but a span named (CAP_SPANS), so a refusal under a provider's
  * cap (no answer in time, a spare's own error behind the helper's route) sets a ceiling as a cap does; held for the
  * whole read, each one halved the rest of it: the helper's Base route, capped at 1,000 blocks, ended CI's W reads of
  * 50,000 blocks at 312, 78 and 624-block pages against the Mac's 625 (live runs 42125976095, 42143211092 and
@@ -386,55 +386,206 @@ export const EVM_SPARE_REST_MS = 60_000;
  * on two. thirdweb's keyless daily quota answered every chain HTTP 429 with Retry-After 26,741,000 ms (5 Nov 16:28Z):
  * the kit's client ends that call at once, and with no spare it was the pair's failure. A seat's `url` is its
  * provider's now.
+ * A range cap walks too (card helper-evm-range-cap-walk, the helper's rule in rpc.ts callEvm): an eth_getLogs refused in
+ * words that name a span (CAP_SPANS) under the span asked, and no smaller than the widest that provider answered (a
+ * smaller one is one backend's, the pager's to ask again), moves the seat to the next provider in the list, not the
+ * other seat's and not resting, whose cap is not known to be under the span asked, and the call is made there at once;
+ * with none, to the provider of the largest cap named, whose own refusal goes up so the pager pages at that cap. The
+ * capped provider is not rested: it still answers the seat's other reads when a later move seats it. Which two
+ * providers sit changes, never that two read and agree: within the agreed reads in flight (both), neither walk ever
+ * seats a provider that answered on the other seat or that the other seat has a call open to (an answer still on its
+ * way), so one provider's answer never stands on both sides of a read paged over many calls; with none left the seat's
+ * own error goes up (the pager halves, the read refuses). A seat read alone, outside an agreed read, binds no provider
+ * once its calls end. A seat call asks each provider at most once (review of 8cdf6ee8: two providers naming a cap one
+ * under each span walked without end). With no provider free, rested and wide enough for a page, the seat takes the
+ * one where the page ends first (review of 6e90f580): a rested one of a known cap under it, at its pages times its last
+ * call's time, or a resting one that answered a page, after its rest (its Retry-After, else EVM_SPARE_REST_MS), when
+ * the seat waits for it with that provider's own throttle; so a seat whose wide provider throttled waits for it rather
+ * than page blastapi's 10 blocks, and takes a narrow spare for a page it ends sooner. A seat on a provider of a known
+ * cap moves back to a free one wider than it once that one's rest ends (inside an agreed read, from a provider that
+ * answered the seat a page, only to one held to its side already), and to its own again when that one fails; a
+ * provider that answers is no longer resting. Inside an agreed read a capped provider that answered the seat an
+ * eth_getLogs page holds it at its cap, so one seat's walk takes no second wide provider the other seat needs.
+ * A pair passed in again (evmPool's to evmTreeSync, the restore's) is that pair, so its reads bind its own seats. Read live: the kit's Base list seats blastapi second, which
+ * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
+ * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
  */
 export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
+  // a pair passed in is read as it is: one pair object per read, so its agreed reads bind its own seats (review of
+  // 6e90f580, HIGH: evmPool's pair, wrapped again by evmTreeSync, walked in an inner pair that no read bound); a seat in
+  // any other list would be that same fault again, so it is refused
+  const own = SEATS.get(list[0]!);
+  if (own !== undefined && list.length === 2 && list[0] === own.pair[0] && list[1] === own.pair[1]) return own.pair;
+  if (list.some((r) => SEATS.has(r))) throw new Error(`${what}: a pair's seat in another list`);
   for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (solanaSameProvider(list[i]!, list[j]!)) throw new Error(`${what}: one provider twice is one read`);
   const restUntil = list.map(() => 0);
-  // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess)
+  // whether a provider's rest is its own Retry-After (else EVM_SPARE_REST_MS, a guess), and the throttle that rested it
   const named = list.map(() => false);
+  const restErr: unknown[] = list.map(() => null);
   const at = [0, 1];
-  // the provider seat k moves to: a resting-free one after its own in list order, else (`soonest`) the one whose rest
-  // ends first; never the other seat's
-  const next = (k: number, soonest: boolean): number | null => {
-    let best: number | null = null;
+  // within the agreed reads in flight (both), the providers that answered on each seat (review of 8cdf6ee8, HIGH),
+  // cleared when the last one ends; and on each seat the calls open to each provider, counted from the ask (review of
+  // 6e90f580, MEDIUM: an answer still on its way stands as one that came). A seat never moves to a provider the other
+  // seat holds either way, so no provider's answer stands on both sides of one agreed read
+  const sides: [Set<number>, Set<number>] = [new Set(), new Set()];
+  const open: [number[], number[]] = [list.map(() => 0), list.map(() => 0)];
+  // within the same reads, the providers that answered an eth_getLogs page on each seat: the ones that hold it at their
+  // cap (review of e30c5c46: a block read's answer beside a log read held blastapi's 10 blocks with Pocket free)
+  const paged: [Set<number>, Set<number>] = [new Set(), new Set()];
+  let inflight = 0;
+  // the narrow provider each seat last took for want of a wider one (cheapest): a seat leaves it for any wider one
+  const narrowed: (number | null)[] = [null, null];
+  const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i) && open[1 - k]![i] === 0;
+  const rested = (i: number) => restUntil[i]! <= Date.now();
+  // each provider's eth_getLogs cap as its last refusal named it (null: none known), the widest span it answered, and
+  // how long its last call took (ms: a page's cost there)
+  const capOf: (bigint | null)[] = list.map(() => null);
+  const answered: (bigint | null)[] = list.map(() => null);
+  const took = list.map(() => 0);
+  // a provider whose known cap is under `span` (more pages than one for it)
+  const narrow = (i: number, span: bigint | null) => span !== null && capOf[i] !== null && capOf[i]! < span;
+  // the provider seat k moves to: the next one in list order after its own, free for it, rested, not asked in this
+  // call, and with no cap known under `span`; `held`: only one already held to its side in the reads in flight
+  const next = (k: number, span: bigint | null, asked: ReadonlyMap<number, unknown>, held = false): number | null => {
     for (let s = 1; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (i === at[1 - k]) continue;
-      if (restUntil[i]! <= Date.now()) return i;
-      if (soonest && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
+      if (free(k, i) && rested(i) && !asked.has(i) && !narrow(i, span) && (!held || sides[k]!.has(i))) return i;
     }
-    return best !== null && restUntil[best]! <= restUntil[at[k]!]! ? best : null;
+    return null;
+  };
+  // the resting provider free for seat k whose rest ends first
+  const soonest = (k: number): number | null => {
+    let best: number | null = null;
+    for (let i = 0; i < list.length; i++) if (free(k, i) && !rested(i) && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
+    return best;
+  };
+  // a page of `span` blocks on provider i (ms): its rest left, then its pages for the span at its last call's time, a
+  // page never under 1 ms (a call answered within the clock's millisecond took 0, which made 10,000 pages cost as
+  // little as one and the walk's choice the clock's: the 50 cap or the 10, PR #369's fresh run)
+  const costOf = (i: number, span: bigint): number =>
+    Math.max(0, restUntil[i]! - Date.now()) + (capOf[i] === null || capOf[i]! >= span ? 1 : Number((span + capOf[i]! - 1n) / capOf[i]!)) * Math.max(1, took[i]!);
+  // with no provider free, rested and wide enough: the one free for seat k where a page of `span` ends first, a rested
+  // one of a known cap under it (more pages) or a resting one that answered a page (its rest, then its pages); its own
+  // first on a tie
+  const cheapest = (k: number, span: bigint): number | null => {
+    let best: number | null = null;
+    for (let s = 0; s < list.length; s++) {
+      const i = (at[k]! + s) % list.length;
+      if (!free(k, i) || (rested(i) ? !narrow(i, span) : answered[i] === null)) continue;
+      if (best === null || costOf(i, span) < costOf(best, span)) best = i;
+    }
+    return best;
+  };
+  // provider j's own Retry-After left (none when it named none): the read's wait for it
+  const afterOf = (j: number) => (named[j] ? Math.max(0, restUntil[j]! - Date.now()) : null);
+  const spanOf = (params: readonly unknown[]): bigint | null => {
+    const f = params[0] as { fromBlock?: unknown; toBlock?: unknown } | null;
+    if (typeof f?.fromBlock !== "string" || typeof f.toBlock !== "string") return null;
+    try {
+      return BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n;
+    } catch {
+      return null;
+    }
   };
   const seat = (k: number): EvmRpc => {
     const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+      const span = method === "eth_getLogs" ? spanOf(params) : null;
+      // each provider asked at most once in one call, its error kept (review of 8cdf6ee8, MEDIUM: as the helper's
+      // callEvm): a call ends after at most one ask of each provider in the list
+      const asked = new Map<number, unknown>();
+      // a seat on a resting provider, or on one of a known cap with a wider one free and rested (back from a narrow
+      // provider once the wide one's rest ends), moves at once; held to its provider in the read, only to one held to
+      // its side already, unless it took that provider narrow for want of a wider one
+      const c = capOf[at[k]!]!;
+      const home = at[k]!;
+      if (!rested(at[k]!)) at[k] = next(k, span, asked) ?? at[k]!;
+      else if (span !== null && c !== null) at[k] = next(k, c + 1n, asked, paged[k]!.has(at[k]!) && narrowed[k] !== at[k]) ?? at[k]!;
       for (;;) {
-        if (restUntil[at[k]!]! > Date.now()) at[k] = next(k, true) ?? at[k]!;
         const i = at[k]!;
+        if (asked.has(i)) throw asked.get(i);
+        open[k]![i]!++;
+        const t0 = Date.now();
+        let r: unknown;
         try {
-          return await list[i]!(method, params);
+          r = await list[i]!(method, params);
         } catch (e) {
+          open[k]![i]!--;
+          took[i] = Date.now() - t0;
+          asked.set(i, e);
           const t = throttled(e);
-          if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
-          restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
-          named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
-          if (at[k] !== i) continue; // another call on this seat moved it already
-          const n = next(k, false);
-          if (n === null) {
-            at[k] = next(k, true) ?? i;
-            // the read's wait is for the provider now seated: its own Retry-After, else the read's backoff
-            const j = at[k]!;
-            if (j === i) throw e;
-            throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: named[j] ? Math.max(0, restUntil[j]! - Date.now()) : null });
+          const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
+          const capped = span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!);
+          if (capped) {
+            capOf[i] = cap;
+            restUntil[i] = 0; // it answers: no longer resting
+          } else if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
+          else {
+            restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
+            named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
+            restErr[i] = e;
           }
-          at[k] = n;
+          if (at[k] !== i) continue; // another call on this seat moved it already
+          // a provider that answered this seat a page in the read is held to this side to its end anyway: the seat pages
+          // at its cap, and binds no second wide provider the other seat may need (with a 30 ms slower blastapi, seat 0
+          // walked from publicnode onto Pocket first and left seat 1 blastapi's 10 blocks for the whole read)
+          if (capped && paged[k]!.has(i)) throw e;
+          // a free provider, rested and wide enough: the call again there at once, the seat's own from the call's start
+          // first (a move back that failed returns to it, never on to a provider the other seat may need)
+          const n = home !== i && free(k, home) && rested(home) && !asked.has(home) && !narrow(home, span) ? home : next(k, span, asked);
+          if (n !== null) {
+            at[k] = n;
+            continue;
+          }
+          // none: a narrower one (more pages) or a wait for a wider one of its own (review of 6e90f580, MEDIUM),
+          // whichever ends this page first
+          const x = span === null ? null : cheapest(k, span);
+          if (x !== null) {
+            at[k] = x;
+            if (rested(x)) narrowed[k] = x;
+            if (x === i) throw e;
+            // the narrow one asked here at once (asked already in this call: its own refusal goes up, so the pager
+            // pages at its cap)
+            if (rested(x)) continue;
+            // the read waits for its own provider's throttle, a throttle to the read whatever this call's refusal was
+            const c = restErr[x];
+            throw Object.assign(new Error(String((c as Error)?.message ?? c), { cause: c }), { name: "EvmRestingError", afterMs: afterOf(x) });
+          }
+          // nothing free: the provider whose rest ends first, and the read's wait is for it
+          const s = soonest(k) ?? i;
+          at[k] = s;
+          if (s === i) throw e;
+          throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: afterOf(s) });
         }
+        open[k]![i]!--;
+        took[i] = Date.now() - t0;
+        // bound only inside an agreed read: a seat read alone compares nothing, so it binds no provider
+        if (inflight > 0) sides[k]!.add(i);
+        if (inflight > 0 && span !== null) paged[k]!.add(i);
+        restUntil[i] = 0; // it answers: no longer resting
+        if (span !== null && (answered[i] === null || span > answered[i]!)) answered[i] = span;
+        if (span !== null && capOf[i] !== null && span > capOf[i]!) capOf[i] = null;
+        return r;
       }
     };
     return Object.defineProperty(call, "url", { get: () => list[at[k]!]!.url, enumerable: true }) as EvmRpc;
   };
-  return [seat(0), seat(1)];
+  const pair: Rpcs = [seat(0), seat(1)];
+  const read = {
+    pair,
+    begin: () => void inflight++,
+    end: () => {
+      if (--inflight === 0) sides[0].clear(), sides[1].clear(), paged[0].clear(), paged[1].clear();
+    },
+  };
+  SEATS.set(pair[0], read);
+  SEATS.set(pair[1], read);
+  return pair;
 }
+/** Each pair's seats (evmPair), to its reads in flight: both() opens one around each agreed read. */
+const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; begin(): void; end(): void }>();
+/** both(), an agreed read on a pair's two seats: for the tests (not in the index). */
+export const evmAgreedRead = <T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> => both(rpcs, f, signal);
 
 /**
  * f on both RPCs at once, under one AbortController: when one side fails (or the caller aborts) the other is aborted
@@ -442,6 +593,16 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
  */
 async function both<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   signal?.throwIfAborted();
+  const s = SEATS.get(rpcs[0]);
+  const read = s !== undefined && SEATS.get(rpcs[1]) === s ? s : undefined;
+  read?.begin();
+  try {
+    return await bothIn(rpcs, f, signal);
+  } finally {
+    read?.end();
+  }
+}
+async function bothIn<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   const ac = new AbortController();
   const stop = () => ac.abort(signal!.reason);
   signal?.addEventListener("abort", stop, { once: true });
@@ -526,7 +687,7 @@ const readBlock = (rpc: EvmRpc, at: string, what: string, signal: AbortSignal | 
 /** A JSON-RPC error that says the node does not know the block yet (a lag, not a lie). */
 const UNKNOWN_BLOCK = /unknown block|header not found|block not found|no such block/i;
 // A provider's cap on one eth_getLogs call (its range, its number of results or its answer's size) has no standard
-// code or words, so the pager reads none of them: any refusal of a page over one block but a head lag (HEAD_LAG) halves
+// code or words, so the pager needs none of them: any refusal of a page over one block but a head lag (HEAD_LAG) halves
 // that RPC's page (readLogs). The caps' words read live, each one a refusal the pager meets this way:
 // - 3 Nov 04:21-07:05Z: sepolia.base.org "-32614: eth_getLogs is limited to a 200 range"; base-sepolia-rpc.publicnode.com
 //   and robinhood-sepolia-rpc.publicnode.com "-32701: exceed maximum block range: 50000"; base.drpc.org code 35 "ranges
@@ -557,6 +718,33 @@ const THROTTLE_WORDS = /HTTP 429\b|(RPC error |"code":\s*)(-32029|-32429|-429|15
 const SLOW_WORDS = /no answer in \d+ ms|\btimed? ?out\b|TimeoutError|ETIMEDOUT/i;
 const LIMIT_32005 = /(RPC error |"code":\s*)-32005\b/;
 const CAP_WORDS = /\b(results?|range|blocks?|logs? matched|response size)\b/i;
+/** The span a cap's words name, in each provider's own form (card helper-evm-range-cap-walk; the reads above, and
+ *  base-pokt.nodies.app's -32001 "maximum allowed is 50 blocks on your current plan", 6 Nov 15:19Z and 15:58Z), held to
+ *  the helper's (apps/helper/src/rpc/rpc.ts CAP_SPANS) by their tests. Robinhood's names the asked span first, so each
+ *  form is its own. A refusal that names a span under the page refused pages at it at once; one naming none, or one no
+ *  smaller, halves the page as any refusal does. */
+const CAP_SPANS: readonly RegExp[] = [
+  /maximum allowed is (\d{1,12}) blocks/i,
+  /limited to 0 ?- ?(\d{1,12}) blocks/i,
+  /limited to a (\d{1,12}) range/i,
+  /ranges over (\d{1,12}) blocks/i,
+  /max(?:imum)? block range:? (\d{1,12})/i,
+  /block range exceeds maximum (?:allowed \(max=)?(\d{1,12})/i,
+  /maximum (\d{1,12}) blocks/i,
+  /but only (\d{1,12}) are allowed/i,
+  /up to a (\d{1,12}) block range/i,
+  /requested blocks is (\d{1,12})/i,
+  /\bmax (\d{1,12}) blocks/i,
+];
+/** The span a refusal's words name (CAP_SPANS, in its first 1,000 characters), or null. */
+const capSpanOf = (m: string): bigint | null => {
+  const w = m.slice(0, 1_000);
+  for (const f of CAP_SPANS) {
+    const x = f.exec(w);
+    if (x !== null) return BigInt(x[1]!);
+  }
+  return null;
+};
 /** A provider out, never a word on the read (card evm-transfer-rpc-spares): an HTTP error with no JSON-RPC answer in it
  * (the kit's client: "HTTP 410", where a refusal reads "HTTP 400: RPC error 35: ..."), an answer to another request
  * (the client's "answer id null is not request id 6") and a standard method the provider says it lacks (-32601). Read
@@ -572,6 +760,8 @@ const throttled = (e: unknown): { kind: "throttle" | "slow"; afterMs: number | n
   const t = e as { name?: unknown; afterMs?: unknown; message?: unknown; fault?: unknown } | null;
   if (t?.name === "EvmUnansweredError") return null;
   const afterMs = typeof t?.afterMs === "number" ? t.afterMs : null;
+  // a seat waiting for its own provider's rest (evmPair): a throttle, whatever rested it
+  if (t?.name === "EvmRestingError") return { kind: "throttle", afterMs };
   if (t?.name === "SolanaRpcTransportError") return { kind: t.fault === "timeout" ? "slow" : "throttle", afterMs };
   const m = String(t?.message ?? e);
   if ((e as Error)?.name === "TimeoutError" || SLOW_WORDS.test(m)) return { kind: "slow", afterMs: null };
@@ -732,7 +922,8 @@ export function evmPoolLogPager(): EvmLogPager {
  * EVM_LOG_THROTTLE_TRIES tries, then the read's failure (unread, never an empty list). No answer in time on a page over
  * one block halves it where the rules say so (slowHalves); where not, it is a throttle too, but on a page wider than
  * the provider ever answered in full, which takes the page back to that width (the read's ceiling), never below it.
- * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page, but one no wider
+ * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page (or, naming a span
+ * under it and no smaller than the provider answered in full, takes it to that span, CAP_SPANS), but one no wider
  * than the provider answered in full, asked again at once first (EVM_LOG_REFUSED_AGAIN); after a full page
  * reads, the page doubles again, up to the rules' max and below the smallest size refused in this read until the
  * rules' ceilingPages full pages in a row have read under it (doubled while its probe meets that same size), so a
@@ -751,6 +942,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
   let tries = 0;
   // refusals in a row of a page no wider than its provider answered (EVM_LOG_REFUSED_AGAIN)
   let again = 0;
+  // the widest page this read answered in full: a named span under it is one backend's, never this provider's cap (a
+  // W's Transfer pager keeps no `answered`, review fold 3)
+  let widest: bigint | null = null;
   const ceiling = (size: bigint) => {
     hold = size === lastCeiling ? hold * 2 : pager.rules.ceilingPages;
     refused = lastCeiling = size;
@@ -759,6 +953,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
   for (let at = from; at <= to; ) {
     signal?.throwIfAborted();
     const p = pager.of(rpc, k);
+    // the provider asked: a seat's provider now (evmPair), compared by its URL, since a pager may hand out a fresh page
+    // object at each call (a W's Transfer pager does)
+    const via = (rpc as { url?: unknown }).url;
     const size = p.size;
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
@@ -767,6 +964,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     } catch (e) {
       // the other RPC failed and this read was stopped: never a smaller page for the next W
       signal?.throwIfAborted();
+      // the refusal is the page of the provider that refused it: the seat's provider now, which a cap walk may have
+      // moved during the call (review of 8cdf6ee8, LOW)
+      const p = pager.of(rpc, k);
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       const t = throttled(e);
@@ -784,6 +984,18 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       if (end > at && p.answered !== null && end - at + 1n <= p.answered && ++again <= EVM_LOG_REFUSED_AGAIN) continue;
       if (end > at) {
         again = 0;
+        // a cap that names its span at most half this page: that span at once, held as the read's ceiling just past it
+        // (card helper-evm-range-cap-walk: halving 10,000 to a named 50 took 8 refusals and paged at 39); a span named
+        // nearer the page is halved past, so no words step the page down a block a call (review fold 2); never under a
+        // page this provider or this read answered in full, where the words are one backend's, not its cap (Pocket's,
+        // 6 Nov 07:44Z; review fold 3)
+        const named = capSpanOf(m);
+        const floor = p.answered !== null && (widest === null || p.answered > widest) ? p.answered : widest;
+        if (named !== null && named >= 1n && named <= (end - at + 1n) / 2n && (floor === null || named >= floor)) {
+          ceiling(named + 1n);
+          p.size = named;
+          continue;
+        }
         ceiling(end - at + 1n);
         p.size = (end - at + 1n) / 2n;
         continue;
@@ -793,11 +1005,17 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     tries = 0;
     again = 0;
     if (!Array.isArray(got)) throw new Error(`rpc ${k}: eth_getLogs ${at}..${end}: not a list`);
+    // the page of the provider that answered (a cap walk may have moved the seat during the call)
+    const q = pager.of(rpc, k);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     const full = end - at + 1n === size;
-    if (full && (p.answered === null || size > p.answered)) p.answered = size;
+    // the provider that answered is the one asked: a page asked at another provider's size is neither its widest nor
+    // grown (a move back mid-call: review of e30c5c46, P6; review of a81876ab, P7)
+    const same = (rpc as { url?: unknown }).url === via;
+    if (full && same && (q.answered === null || size > q.answered)) q.answered = size;
+    if (full && (widest === null || size > widest)) widest = size;
     if (full && refused !== null && ++held >= hold) refused = null;
-    if (full && size * 2n <= max && (refused === null || size * 2n < refused)) p.size = size * 2n;
+    if (full && same && size * 2n <= max && (refused === null || size * 2n < refused)) q.size = size * 2n;
     at = end + 1n;
   }
   for (let i = 1; i < out.length; i++) {

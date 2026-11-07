@@ -26,12 +26,34 @@
 //     (M362 (2): every device refuses any other fee, so a helper publishing another one breaks every release);
 //   - every planted transaction answers 422 with its own code (plantsFor: PLANTS, and tip_low on mainnet);
 //   - every answer carries a full-sha X-Helper-Commit, and APP_HOST is echoed only to the read that sent it.
+// An EVM pool (--pool 0x + 40 lower-case hex, card helper-evm-sender-2): the same two fee reads (EvmFeeAnswer's fields,
+// helper-evm-sender's FIELDS), then POST /v1/pool/evm/send { pool, data, epoch } four releases of that pool, each in
+// solc's one ABI encoding, at the published fee for the answer's epoch, a fee cap above it, the answer's fee_recipient, a
+// fresh nullifier and junk proof words (under the BN254 field), each refused on the request's bytes before a send:
+//   - "evm_bad_signature": a withdraw whose signature is a throwaway W's (W the recipient) over the Withdraw of
+//     value + 1 (bad_signature: W did not sign this release);
+//   - "evm_buy_bad_signature": a buy whose signature is W's Withdraw of the same proof, the method swapped
+//     (bad_signature);
+//   - "evm_deadline_expired": a withdraw W signed whose deadlineMs is already past, at the epoch before now's
+//     (deadline_near);
+//   - "evm_recipient_code": a withdraw W signed whose W is anvil's account 0 (EVM.ANVIL0), its key derived here from the
+//     published test mnemonic, an EIP-7702-delegated account on each network (recipient_code: the recipient has code).
+// It reads eth_getCode of anvil's account 0 at latest on the venue's two feeProviders (the kit's evmPoolVenues()); it
+// passes only when both are code (else it names why), the fee answers are right for both callers (the same fee within
+// one epoch), every plant answers 422 with its own code, and the headers are as for a Solana pool.
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
-import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
+import { createHmac, createPublicKey, generateKeyPairSync, pbkdf2Sync, randomBytes, sign } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { createRequire } from "node:module";
+import { evmPoolVenues, SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { FIELDS as EVM_FIELDS } from "./helper-evm-sender.mjs";
+
+// @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, signatures and the digests
+const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
+const { secp256k1 } = req("@noble/curves/secp256k1.js");
+const { keccak_256 } = req("@noble/hashes/sha3.js");
 
 export const BASE = "https://api.confidential.unrealized.trade";
 export const APP = "https://confidential.unrealized.trade";
@@ -95,6 +117,7 @@ export function kitFee(run, cluster) {
 
 /** The check on one recorded run: { pool, rent: [{ url, status, body }] x2, reads: [{ asked, origin, status, headers, body }] }. */
 export function judge(run) {
+  if (EVM_POOL.test(run.pool ?? "")) return judgeEvm(run);
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const fees = run.reads.filter((r) => r.asked === "fee");
@@ -235,6 +258,7 @@ export function plant({ program, pool, feePayer, relayFee, budget = 0n, kind = "
 // ---- The reads ----
 
 export async function read(base, pool, fetchFn = fetch) {
+  if (EVM_POOL.test(pool)) return readEvm(base, pool, fetchFn);
   const reads = [];
   const get = async (asked, origin, url, init = {}) => {
     const r = await fetchFn(url, { ...init, redirect: "error", headers: { ...(origin ? { origin: APP } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(15_000) });
@@ -267,6 +291,262 @@ export async function read(base, pool, fetchFn = fetch) {
   return { pool, rent, reads };
 }
 
+// ---- EVM pools (card helper-evm-sender-2): POST /v1/pool/evm/send { pool, data, epoch } ----
+
+/** An EVM pool's address as the route takes it: 0x and 40 lower-case hex. */
+export const EVM_POOL = /^0x[0-9a-f]{40}$/;
+/** Each EVM plant and the refusal it must get, every one a 422. */
+export const EVM_PLANTS = [
+  ["evm_bad_signature", "bad_signature"],
+  ["evm_buy_bad_signature", "bad_signature"],
+  ["evm_deadline_expired", "deadline_near"],
+  ["evm_recipient_code", "recipient_code"],
+];
+/** The headers an EVM run keeps of each answer: the ones the judge reads. */
+const EVM_HEADERS = ["x-helper-commit", "access-control-allow-origin"];
+const EVM_STEP = "10000000000000";
+const EPOCH_MS = 60_000;
+const ADDRESS = /^0x[0-9a-f]{40}$/;
+const QUANTITY = /^0x(0|[1-9a-f][0-9a-f]*)$/;
+const WEI = /^[1-9][0-9]{0,77}$/;
+const FIELD_P = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001n; // BN254's scalar field
+const ORDER_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n; // secp256k1's group order
+/** anvil's (and Hardhat's) account 0: m/44'/60'/0'/0/0 of the published test mnemonic. Each network has delegated it
+ *  with EIP-7702 (eth_getCode 0xef0100..., read on both fee providers of base, robinhood, base-sepolia and
+ *  robinhood-testnet on 2026-11-07), so it is a W that signs and still has code. */
+const ANVIL0 = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+const TEST_MNEMONIC = "test test test test test test test test test test test junk";
+/** The pools' EIP-712 types (contracts/pool-evm/src/PrivacyPool.sol, PrivacyPoolSimple.sol; the test holds them equal). */
+const DOMAIN_TYPE = "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
+const WITHDRAW_TYPE = "Withdraw(uint256 nullifier,uint256 context,uint256 value)";
+const BUY_TYPE = "Buy(address adapter,bytes data,uint256 minOut,address token,uint256 nullifier,uint256 context,uint256 value)";
+
+const hexOf = (b) => Buffer.from(b).toString("hex");
+const unhex = (h) => new Uint8Array(Buffer.from(h.replace(/^0x/, ""), "hex"));
+const w32 = (n) => {
+  const v = BigInt(n);
+  if (v < 0n || v >= 1n << 256n) throw new Error(`${v} is no uint256`);
+  return v.toString(16).padStart(64, "0");
+};
+const a32 = (a) => {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(a)) throw new Error(`${a} is no address`);
+  return a.slice(2).toLowerCase().padStart(64, "0");
+};
+const kText = (t) => hexOf(keccak_256(new TextEncoder().encode(t)));
+const kHex = (h) => hexOf(keccak_256(unhex(h)));
+const padRight = (h) => h.padEnd(Math.ceil(h.length / 64) * 64, "0");
+/** A bytes value's tail: its length, then its bytes padded to a word. */
+const bytesTail = (h) => {
+  const x = h.replace(/^0x/, "");
+  if (x.length % 2 || /[^0-9a-f]/i.test(x)) throw new Error("not hex bytes");
+  return w32(x.length / 2) + padRight(x.toLowerCase());
+};
+/** solc's head and tail encoding of a tuple: a static part inline, a dynamic one as its offset from the tuple's start. */
+function tuple(parts) {
+  const headLen = parts.reduce((s, p) => s + (p.dyn ? 32 : p.hex.length / 2), 0);
+  let head = "";
+  let tail = "";
+  for (const p of parts) {
+    if (p.dyn) {
+      head += w32(headLen + tail.length / 2);
+      tail += p.hex;
+    } else head += p.hex;
+  }
+  return head + tail;
+}
+const selector = (sig) => kText(sig).slice(0, 8);
+const WITHDRAW_SELECTOR = selector("withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)");
+const BUY_SELECTOR = selector("buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)");
+
+/** abi.encode(RelayData): recipient, feeRecipient, feeCap, uint64 deadlineMs, refundPrecommitment, bytes16 salt (192 bytes). */
+function relayData({ recipient, feeRecipient, feeCap, deadlineMs, refundPrecommitment, salt }) {
+  if (BigInt(deadlineMs) >= 1n << 64n) throw new Error("deadlineMs is no uint64");
+  if (!/^0x[0-9a-fA-F]{32}$/.test(salt)) throw new Error("salt is no bytes16");
+  return `0x${a32(recipient)}${a32(feeRecipient)}${w32(feeCap)}${w32(deadlineMs)}${w32(refundPrecommitment)}${padRight(salt.slice(2).toLowerCase())}`;
+}
+/** WithdrawProof's 16 words in order: pA, pB (row by row), pC, pubSignals. */
+function proofWords(p) {
+  const words = [...p.pA, ...p.pB.flat(), ...p.pC, ...p.pubSignals];
+  if (p.pA.length !== 2 || p.pB.length !== 2 || p.pB.some((r) => r.length !== 2) || p.pC.length !== 2 || p.pubSignals.length !== 8) throw new Error("not a withdraw proof's shape");
+  return words.map(w32).join("");
+}
+const sig65 = (h) => {
+  if (!/^0x[0-9a-f]{130}$/.test(h)) throw new Error("a signature is exactly 65 bytes");
+  return h;
+};
+const withdrawalPart = (processooor, data) => ({ dyn: true, hex: tuple([{ hex: a32(processooor) }, { dyn: true, hex: bytesTail(data) }]) });
+/** PrivacyPool.withdraw(Withdrawal, WithdrawProof, fee, signature) calldata. */
+function withdrawCalldata({ processooor, data, proof, fee, signature }) {
+  return `0x${WITHDRAW_SELECTOR}${tuple([withdrawalPart(processooor, data), { hex: proofWords(proof) }, { hex: w32(fee) }, { dyn: true, hex: bytesTail(sig65(signature)) }])}`;
+}
+/** PrivacyPoolSimple.buy(Withdrawal, WithdrawProof, fee, Buy, signature) calldata. */
+function buyCalldata({ processooor, data, proof, fee, buy, signature }) {
+  const b = { dyn: true, hex: tuple([{ hex: a32(buy.adapter) }, { dyn: true, hex: bytesTail(buy.data) }, { hex: w32(buy.minOut) }, { hex: a32(buy.token) }]) };
+  return `0x${BUY_SELECTOR}${tuple([withdrawalPart(processooor, data), { hex: proofWords(proof) }, { hex: w32(fee) }, b, { dyn: true, hex: bytesTail(sig65(signature)) }])}`;
+}
+/** The pool's EIP-712 digest of a struct hash: domain { "Blindfill", "1", chainId, the pool }. */
+const typedDigest = (chainId, pool, struct) => `0x${kHex(`1901${kHex(`${kText(DOMAIN_TYPE)}${kText("Blindfill")}${kText("1")}${w32(chainId)}${a32(pool)}`)}${struct}`)}`;
+/** The Withdraw W signs: nullifier pubSignals[1], value pubSignals[2], context pubSignals[7] (ProofLib.sol). */
+const withdrawDigest = ({ chainId, pool, nullifier, context, value }) => typedDigest(chainId, pool, kHex(`${kText(WITHDRAW_TYPE)}${w32(nullifier)}${w32(context)}${w32(value)}`));
+/** The Buy W signs, its data hashed with keccak. */
+const buyDigest = ({ chainId, pool, buy, nullifier, context, value }) =>
+  typedDigest(chainId, pool, kHex(`${kText(BUY_TYPE)}${a32(buy.adapter)}${kHex(buy.data)}${w32(buy.minOut)}${a32(buy.token)}${w32(nullifier)}${w32(context)}${w32(value)}`));
+/** r ‖ s ‖ v over a digest, s low, v 27 or 28, as PrivacyPool._signer reads it. */
+function sign65(key, digest) {
+  const rec = secp256k1.sign(unhex(digest), key, { prehash: false, lowS: true, format: "recovered" });
+  return `0x${hexOf(rec.subarray(1, 65))}${(27 + rec[0]).toString(16)}`;
+}
+const addressOf = (key) => `0x${hexOf(keccak_256(secp256k1.getPublicKey(key, false).subarray(1)).subarray(12))}`;
+/** The address that signed `digest` (ecrecover), for the test. */
+function recover(digest, sig) {
+  const b = unhex(sig);
+  const pub = secp256k1.Point.fromBytes(secp256k1.recoverPublicKey(Uint8Array.from([b[64] - 27, ...b.subarray(0, 64)]), unhex(digest), { prehash: false })).toBytes(false);
+  return `0x${hexOf(keccak_256(pub.subarray(1)).subarray(12))}`;
+}
+/** BIP-39's seed and BIP-32's m/44'/60'/0'/0/0 of the published test mnemonic, with node:crypto and @noble's
+ *  secp256k1 (the test holds the address to cast's): anvil's account 0's key, made at run time and never written. */
+function anvilKey() {
+  const seed = pbkdf2Sync(Buffer.from(TEST_MNEMONIC.normalize("NFKD")), Buffer.from("mnemonic"), 2048, 64, "sha512");
+  let I = createHmac("sha512", "Bitcoin seed").update(seed).digest();
+  let k = BigInt(`0x${hexOf(I.subarray(0, 32))}`);
+  let c = I.subarray(32);
+  for (const [i, hard] of [[44, true], [60, true], [0, true], [0, false], [0, false]]) {
+    const idx = Buffer.alloc(4);
+    idx.writeUInt32BE(hard ? i + 0x80000000 : i);
+    const kb = unhex(w32(k));
+    const data = hard ? Buffer.concat([Buffer.of(0), kb, idx]) : Buffer.concat([secp256k1.getPublicKey(kb, true), idx]);
+    I = createHmac("sha512", c).update(data).digest();
+    const t = BigInt(`0x${hexOf(I.subarray(0, 32))}`);
+    k = (t + k) % ORDER_N;
+    if (t >= ORDER_N || k === 0n) throw new Error("bad child key");
+    c = I.subarray(32);
+  }
+  return unhex(w32(k));
+}
+/** A throwaway secp256k1 key, made here and never written anywhere. */
+const randomKey = () => secp256k1.utils.randomSecretKey();
+/** A junk proof word, under the BN254 field and never 0. */
+const randomField = () => (BigInt(`0x${randomBytes(32).toString("hex")}`) % (FIELD_P - 1n)) + 1n;
+const epochStartOf = (ms) => ms - (ms % EPOCH_MS);
+
+/**
+ * The four EVM plants for `pool` on the venue `chainId`, as POST /v1/pool/evm/send bodies { pool, data, epoch }: each a
+ * release at the published `fee` (a cap of twice it), paying `feeRecipient`, its own nullifier, context and junk proof
+ * words, a deadline 300 s out at the answer's `epoch`, except where the plant says otherwise. W is a throwaway key, and
+ * anvil's account 0 for evm_recipient_code. `adapter` is the buy's adapter (the venue's v4 adapter where the kit pins one).
+ */
+function evmPlants({ pool, chainId, feeRecipient, fee, epoch, adapter = "0x00000000000000000000000000000000000000ad", nowMs = Date.now(), wKey = randomKey(), anvil = anvilKey() }) {
+  if (!EVM_POOL.test(pool) || !ADDRESS.test(feeRecipient)) throw new Error("the pool or the fee recipient is no lower-case address");
+  const release = ({ key, deadlineMs = BigInt(nowMs) + 300_000n, at = epoch, kind = "withdraw" }) => {
+    const nullifier = randomField();
+    const context = randomField();
+    const value = 10n ** 16n;
+    const proof = { pA: [randomField(), randomField()], pB: [[randomField(), randomField()], [randomField(), randomField()]], pC: [randomField(), randomField()], pubSignals: [randomField(), nullifier, value, randomField(), 20n, randomField(), 20n, context] };
+    const data = relayData({ recipient: addressOf(key), feeRecipient, feeCap: 2n * fee, deadlineMs, refundPrecommitment: randomField(), salt: `0x${randomBytes(16).toString("hex")}` });
+    const d = { chainId, pool, nullifier, context, value };
+    const base = { processooor: pool, data, proof, fee };
+    let calldata;
+    if (kind === "other_value") calldata = withdrawCalldata({ ...base, signature: sign65(key, withdrawDigest({ ...d, value: value + 1n })) });
+    else if (kind === "buy_as_withdraw") calldata = buyCalldata({ ...base, buy: { adapter, data: "0x1234", minOut: 1_000n, token: "0x0000000000000000000000000000000000007070" }, signature: sign65(key, withdrawDigest(d)) });
+    else calldata = withdrawCalldata({ ...base, signature: sign65(key, withdrawDigest(d)) });
+    return { pool, data: calldata, epoch: at };
+  };
+  // a deadline already past: inside the epoch before now's, which is within the proof's life of both
+  const before = epochStartOf(nowMs) - EPOCH_MS;
+  return {
+    evm_bad_signature: release({ key: wKey, kind: "other_value" }),
+    evm_buy_bad_signature: release({ key: wKey, kind: "buy_as_withdraw" }),
+    evm_deadline_expired: release({ key: wKey, deadlineMs: BigInt(before + 59_000), at: before }),
+    evm_recipient_code: release({ key: anvil }),
+  };
+}
+
+/** The pool's code reads of one recorded run, judged: null when both are code, else why not. */
+function codeProblem(code, urls) {
+  if (!Array.isArray(code) || code.length !== 2 || urls.length !== 2 || code[0]?.url !== urls[0] || code[1]?.url !== urls[1]) return `not the two reads of ${show(urls)} (read ${show((code ?? []).map((x) => x?.url))})`;
+  const results = code.map((x) => {
+    const r = json(x.body ?? "")?.result;
+    return x.status === 200 && typeof r === "string" && /^0x([0-9a-f]{2})*$/i.test(r) ? r.toLowerCase() : null;
+  });
+  if (results.some((r) => r === null)) return `a read with no code answer: ${show(code.map((x) => `${x.status} ${String(x.body).slice(0, 80)}`))}`;
+  if (results.some((r) => r === "0x")) return `no code on ${show(urls.filter((_, i) => results[i] === "0x"))}, so evm_recipient_code's recipient has none to be refused for`;
+  return null;
+}
+
+/** The check on one recorded EVM run: { pool, code: [{ url, status, body }] x2, reads: [{ asked, origin, status, headers, body }] }. */
+export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
+  const lines = [];
+  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  const fees = run.reads.filter((r) => r.asked === "fee");
+  const network = json(fees[0]?.body ?? "")?.network;
+  const v = typeof network === "string" && Object.hasOwn(venues, network) ? venues[network] : undefined;
+  say(v !== undefined && Number.isSafeInteger(v.chainId) && v.feeProviders?.length === 2, `the kit's venue for network ${show(network)}: chain id ${show(v?.chainId)}, fee providers ${show(v?.feeProviders)}`);
+  say(fees.length === 2, `two fee reads (${fees.length})`);
+  const answers = [];
+  for (const r of fees) {
+    const tag = `[fee ${r.origin ? "APP_HOST" : "no origin"}]`;
+    say(r.status === 200, `${tag} GET /v1/pool/fee answers ${r.status}`);
+    const b = json(r.body);
+    const keys = b && typeof b === "object" && !Array.isArray(b) ? Object.keys(b) : [];
+    say(keys.length === EVM_FIELDS.length && EVM_FIELDS.every((k) => keys.includes(k)), `${tag} fields: ${show(keys)}`);
+    say(b?.chain === "evm" && b?.network === network && b?.pool === run.pool, `${tag} chain ${show(b?.chain)}, network ${show(b?.network)}, pool ${show(b?.pool)} (asked ${run.pool})`);
+    say(typeof b?.fee_recipient === "string" && ADDRESS.test(b.fee_recipient), `${tag} fee recipient ${show(b?.fee_recipient)}`);
+    say(b?.epoch_ms === EPOCH_MS && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms > 0 && b.epoch_start_ms % EPOCH_MS === 0, `${tag} epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
+    const fee = typeof b?.fee === "string" && WEI.test(b.fee) ? BigInt(b.fee) : null;
+    say(typeof b?.block === "string" && QUANTITY.test(b.block) && fee !== null && b?.step === EVM_STEP && fee % BigInt(EVM_STEP) === 0n, `${tag} block ${show(b?.block)}, fee ${show(b?.fee)} wei on its step ${show(b?.step)}`);
+    answers.push(b);
+  }
+  const [a, b] = answers;
+  say(answers.length === 2 && a?.fee_recipient === b?.fee_recipient && (a?.epoch_start_ms !== b?.epoch_start_ms || a?.fee === b?.fee), `the same fee recipient for both callers, and the same fee within one epoch: ${show(answers.map((x) => [x?.epoch_start_ms, x?.fee, x?.fee_recipient]))}`);
+  const why = codeProblem(run.code, v?.feeProviders ?? []);
+  say(why === null, `eth_getCode of anvil's account 0 (${ANVIL0}) at latest on ${show(v?.feeProviders)}: ${why ?? show((run.code ?? []).map((x) => json(x.body)?.result?.slice(0, 50)))}`);
+  for (const [asked, code] of EVM_PLANTS) {
+    const r = run.reads.find((x) => x.asked === asked);
+    say(r?.status === 422 && json(r.body)?.error?.code === code, `planted ${asked}: POST /v1/pool/evm/send answers ${r?.status} ${r?.body?.slice(0, 100)} (want 422 ${code})`);
+  }
+  for (const r of run.reads) {
+    say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${r.asked}] X-Helper-Commit: ${show(r.headers?.["x-helper-commit"])}`);
+    const echo = r.headers?.["access-control-allow-origin"];
+    say(r.origin ? echo === APP : echo === undefined, `[${r.asked}] Access-Control-Allow-Origin: ${show(echo)}`);
+  }
+  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+}
+
+/** An EVM pool's run: the two fee reads, the two code reads of anvil's account 0, then the four plants. */
+export async function readEvm(base, pool, fetchFn = fetch, { venues = evmPoolVenues(), nowMs = () => Date.now() } = {}) {
+  const reads = [];
+  const get = async (asked, origin, url, init = {}) => {
+    const r = await fetchFn(url, { ...init, redirect: "error", headers: { ...(origin ? { origin: APP } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(15_000) });
+    const body = await r.text();
+    // only what the judge reads: the two headers, and the body (an error or the fee answer, short)
+    reads.push({ asked, origin, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(EVM_HEADERS.filter((h) => r.headers.has(h)).map((h) => [h, r.headers.get(h)])), body: body.slice(0, 1_000) });
+    return json(body);
+  };
+  const feeUrl = `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`;
+  const f = await get("fee", true, feeUrl);
+  await get("fee", false, feeUrl);
+  const v = typeof f?.network === "string" && Object.hasOwn(venues, f.network) ? venues[f.network] : undefined;
+  const code = [];
+  for (const url of v?.feeProviders ?? []) {
+    const r = await fetchFn(url, {
+      method: "POST",
+      redirect: "error",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getCode", params: [ANVIL0, "latest"] }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    code.push({ url, readAt: new Date().toISOString(), status: r.status, body: (await r.text()).slice(0, 200) });
+  }
+  if (v && typeof f?.fee === "string" && WEI.test(f.fee) && Number.isSafeInteger(f.epoch_start_ms) && f.epoch_start_ms % EPOCH_MS === 0 && typeof f.fee_recipient === "string" && ADDRESS.test(f.fee_recipient)) {
+    const plants = evmPlants({ pool, chainId: v.chainId, feeRecipient: f.fee_recipient, fee: BigInt(f.fee), epoch: f.epoch_start_ms, adapter: v.adapters?.v4, nowMs: nowMs() });
+    for (const [asked] of EVM_PLANTS) await get(asked, true, `${base}/v1/pool/evm/send`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(plants[asked]) });
+  }
+  return { pool, code, reads };
+}
+
+/** The EVM parts the test reads. */
+export const EVM = { ANVIL0, WITHDRAW_TYPE, BUY_TYPE, anvilKey, addressOf, relayData, withdrawDigest, buyDigest, sign65, recover, withdrawCalldata, buyCalldata, plants: evmPlants, epochStartOf };
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const opt = (k) => {
@@ -274,8 +554,8 @@ if (import.meta.main) {
     return i < 0 ? undefined : args[i + 1];
   };
   const pool = opt("--pool");
-  if (!pool || !B58.test(pool)) {
-    console.error("helper-pool-senders: --pool <the pool account> is required");
+  if (!pool || !(B58.test(pool) || EVM_POOL.test(pool))) {
+    console.error("helper-pool-senders: --pool <the pool account, or an EVM pool's address in lower case> is required");
     process.exit(2);
   }
   try {
