@@ -46,6 +46,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-rpc-spare-list.mjs",
   "scripts/live-checks/evm-scan-second-provider.mjs",
   "scripts/live-checks/evm-sell-hook-converge.mjs",
+  "scripts/live-checks/evm-sell-hook-intrablock.mjs",
   "scripts/live-checks/evm-sell-v4.mjs",
   "scripts/live-checks/evm-testnet-delegate-review3.mjs",
   "scripts/live-checks/evm-venues-pin.mjs",
