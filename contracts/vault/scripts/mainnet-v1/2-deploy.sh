@@ -15,7 +15,10 @@
 # 4. Sends that one batch (no AddKey: the vault never holds a key), reads keys [] and the code hash back on both RPCs at
 #    final, registers the vault on mainnet USDC with storage_balance_bounds().min (0.00125 N, min = max read on both
 #    RPCs 7 Nov 09:59Z) and reads storage_balance_of back, then writes contracts/vault/deployments/mainnet-v1.json from
-#    mainnet-v1.pin.json and the landed transactions (a partial record as soon as the batch lands).
+#    mainnet-v1.pin.json and the landed transactions. Until both are done the only record is mainnet-v1.partial.json.
+# 5. If anything fails once the batch is sent (a timeout, the registration), this paste is never run again as it is:
+#    deploy.mjs prints the same command with --resume-tx <the batch hash>, which checks the landed batch on both RPCs
+#    and finishes the read-back, the registration and mainnet-v1.json. Paste it with `sh 2-deploy.sh --resume-tx <hash>`.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
@@ -23,6 +26,8 @@ REPO=UNRLZD/confidential-trenches
 RUN=42355216946
 REVIEWED=e0623bf3244dee5115a8b18cbdb54ca355fd3c25
 PIN=a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc
+RESUME=
+if [ $# -eq 2 ] && [ "$1" = --resume-tx ]; then RESUME="$2"; elif [ $# -ne 0 ]; then echo "usage: 2-deploy.sh [--resume-tx <batch hash>]"; exit 2; fi
 GOT=$(gh api "repos/$REPO/actions/runs/$RUN" --jq '[.head_repository.full_name, .head_sha, .path, .status, .conclusion] | join(" ")')
 [ "$GOT" = "$REPO $REVIEWED .github/workflows/vault-build.yml completed success" ] || { echo "vault-build run $RUN is \"$GOT\", not $REPO at $REVIEWED, completed and successful: nothing was sent"; exit 1; }
 D=$(mktemp -d)
@@ -35,4 +40,5 @@ node contracts/vault/scripts/deploy.mjs --network mainnet --parent confidential.
   --vault vault.confidential.unrlzd.near \
   --key-file "$HOME/.confidential-trenches/keys/confidential.unrlzd.near.json" \
   --wasm "$D/blindfill_vault.wasm" \
-  --deployment contracts/vault/deployments/mainnet-v1.pin.json --out contracts/vault/deployments/mainnet-v1.json
+  --deployment contracts/vault/deployments/mainnet-v1.pin.json --out contracts/vault/deployments/mainnet-v1.json \
+  ${RESUME:+--resume-tx "$RESUME"}

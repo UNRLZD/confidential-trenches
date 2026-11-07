@@ -9,12 +9,30 @@
 #    this process only) and sends it.
 # 3. The check reads the write back on both RPCs by its Transaction ID and the same precommitment, and records every
 #    answer to scripts/live-checks/vault-mainnet-deploy.answers.json (signatures replaced), the card's good answer.
+# Never two writes (review L3): P goes to scripts/live-checks/vault-mainnet-deploy.pending before the send, and the
+# Transaction ID after it. While that file is there, a rerun sends nothing: it reads back that P with the file's
+# Transaction ID or the one given (`sh 3-readback-write.sh <tx id>`), or, with neither, stops and says how to find it.
+# The file is removed once the read-back passes.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
 KEY="$HOME/.confidential-trenches/keys/confidential.unrlzd.near.json"
 VAULT=vault.confidential.unrlzd.near
+PENDING=scripts/live-checks/vault-mainnet-deploy.pending
+RECORD=scripts/live-checks/vault-mainnet-deploy.answers.json
 [ -f contracts/vault/deployments/mainnet-v1.json ] || { echo "no contracts/vault/deployments/mainnet-v1.json: run paste 2 first; nothing was signed"; exit 1; }
+if [ -f "$PENDING" ]; then
+  P=$(sed -n 's/^P \([0-9]*\)$/\1/p' "$PENDING" | head -1)
+  TX=${1:-$(sed -n 's/^TX \([1-9A-HJ-NP-Za-km-z]*\)$/\1/p' "$PENDING" | head -1)}
+  [ -n "$P" ] || { echo "$PENDING holds no precommitment: nothing was signed"; exit 1; }
+  if [ -z "$TX" ]; then
+    echo "a storage_prepay of precommitment $P may have been sent already ($PENDING): nothing was signed. Find its Transaction ID (confidential.unrlzd.near's latest transactions) and run: sh contracts/vault/scripts/mainnet-v1/3-readback-write.sh <its id>"
+    exit 1
+  fi
+  node scripts/live-checks/vault-mainnet-deploy.mjs --precommitment "$P" --tx "$TX" --record "$RECORD"
+  rm -f "$PENDING"
+  exit 0
+fi
 set +e
 OUT=$(node scripts/live-checks/vault-mainnet-deploy.mjs)
 RC=$?
@@ -23,10 +41,13 @@ echo "$OUT"
 [ "$RC" = 3 ] || { echo "the reads did not pass (exit $RC): nothing was signed"; exit 1; }
 P=$(echo "$OUT" | sed -n 's/^near call vault\.confidential\.unrlzd\.near storage_prepay .{"precommitment":"\([0-9]*\)"}. .*--networkId mainnet$/\1/p' | head -1)
 [ -n "$P" ] || { echo "no precommitment in the check's write line: nothing was signed"; exit 1; }
+printf 'P %s\n' "$P" > "$PENDING"
 SENT=$(npx --yes near-cli-rs@0.30.1 contract call-function as-transaction "$VAULT" storage_prepay \
   json-args "{\"precommitment\":\"$P\"}" prepaid-gas '30 Tgas' attached-deposit '7560000000000000000000 yoctoNEAR' \
-  sign-as confidential.unrlzd.near network-config mainnet sign-with-access-key-file "$KEY" send 2>&1) || { echo "$SENT"; echo "the send failed"; exit 1; }
+  sign-as confidential.unrlzd.near network-config mainnet sign-with-access-key-file "$KEY" send 2>&1) || { echo "$SENT"; echo "the send failed, or its answer was lost: do not send again. If it landed, run: sh contracts/vault/scripts/mainnet-v1/3-readback-write.sh <its Transaction ID>"; exit 1; }
 echo "$SENT"
 TX=$(echo "$SENT" | grep -o 'Transaction ID: [1-9A-HJ-NP-Za-km-z]\{43,44\}' | head -1 | sed 's/.* //')
-[ -n "$TX" ] || { echo "no Transaction ID in the answer above: read it back with --precommitment $P --tx <its id>"; exit 1; }
-node scripts/live-checks/vault-mainnet-deploy.mjs --precommitment "$P" --tx "$TX" --record scripts/live-checks/vault-mainnet-deploy.answers.json
+[ -n "$TX" ] || { echo "no Transaction ID in the answer above: run sh contracts/vault/scripts/mainnet-v1/3-readback-write.sh <its id>"; exit 1; }
+printf 'TX %s\n' "$TX" >> "$PENDING"
+node scripts/live-checks/vault-mainnet-deploy.mjs --precommitment "$P" --tx "$TX" --record "$RECORD"
+rm -f "$PENDING"
