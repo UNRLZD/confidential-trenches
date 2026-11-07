@@ -11,13 +11,18 @@
 //     names a check that does not exist; the plan job runs on a dispatch alone; no step installs Playwright's own
 //     Chromium (a browser starts only as the installed Chrome, scripts/browsers.mjs); the check job's summary grep keeps
 //     every verdict line a check prints (SUMMARY_LINES: card jupiter-build-budget-503, an INCONCLUSIVE line it dropped);
+//   - the check job runs a serial group's checks in one step (scripts/ci/live-serial.mjs, GROUP the matrix's) and a single
+//     check in the other, each `if` on matrix.group so no check runs twice or not at all (card helper-live-jup-serial);
+//   - the helper's plan puts every check that reads the helper's Jupiter budget (BUDGET_READS: a Jupiter proxy path, a
+//     build, a Solana token page) in a serial group, one matrix entry, or lists it exempt with the reason: two such checks
+//     in separate jobs spend one shared window between them and a page reads chain (run 42332950254 attempt 1);
 //   - every check each host's plan runs exists, with its test and its recorded answers, and none reads the
 //     environment (a check that needs a secret is listed SKIPPED, never run); each run gives every flag its check's
 //     usage line needs (live-plan's planFor refuses a run that lacks one).
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HOSTS, ROOT, planFor } from "./live-plan.mjs";
+import { HOSTS, ROOT, keysOf, listOf, planFor } from "./live-plan.mjs";
 
 const SHA_FULL = "0123456789012345678901234567890123456789";
 const uncommented = (text) => text.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => !/^\s*#/.test(l));
@@ -87,6 +92,10 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");
   want(/^  live:\n(?:.*\n)*?    if: always\(\)/m.test(jobText("live") || ""), "the live job does not run `if: always()`");
   want(/node "scripts\/live-checks\/\$KEY\.mjs"/.test(jobText("check")), "the check job does not run the check its matrix names");
+  // card helper-live-jup-serial: a serial group is one step, a single check the other, and each runs on its own `if`
+  want(/- name: [^\n]*\n {8}if: matrix\.group == ''\n {8}env:\n(?: {10}.*\n)*? {10}KEY: \$\{\{ matrix\.key \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node "scripts\/live-checks\/\$KEY\.mjs"/.test(jobText("check")), "the check job's single-check step does not run `if: matrix.group == ''`");
+  want(/- name: [^\n]*\n {8}if: matrix\.group != ''\n {8}env:\n {10}GROUP: \$\{\{ matrix\.group \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node scripts\/ci\/live-serial\.mjs \$GROUP/.test(jobText("check")), "the check job does not run a serial group's checks with scripts/ci/live-serial.mjs on `if: matrix.group != ''`");
+  want(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.test(jobText("check")) && (([, g, o]) => Number(g) > Number(o))(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.exec(jobText("check"))), "a serial group's job has no longer limit than a single check's (timeout-minutes: ${{ matrix.group != '' && <longer> || <shorter> }})");
   want(/KEY: \$\{\{ matrix\.key \}\}/.test(jobText("check")), "the check job's key is not the matrix's");
   const grep = /grep -E '([^']+)' "\$log"/.exec(jobText("check"))?.[1];
   let keeps = null;
@@ -104,6 +113,11 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   return p;
 }
 
+/** What marks a live check as one that spends the helper's Jupiter budget: a call through its Jupiter proxy, a swap build the
+ *  kit makes through it, or a Solana token page (its search). A check that names none of these, as helper-launchpad-origin
+ *  (Jupiter's own keyless search, outside the helper), spends none of the helper's. */
+export const BUDGET_READS = /\/v1\/proxy\/jupiter|swap\/v2\/build|fetchSolanaJupiter|SolanaBuildRoom|runSolanaTrade|\/v1\/market\/token\?chain=solana/;
+
 const filesUnder = (dir, test) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile() && test(e.name)).map((e) => path.join(e.parentPath ?? e.path, e.name)) : []);
 
 /** The problems with the checks one host's plan runs. */
@@ -115,7 +129,7 @@ export async function planProblems(host, root = ROOT) {
   } catch (e) {
     return [`${host}: ${e.message}`];
   }
-  const keys = [...new Set(plan.include.map((e) => e.key))];
+  const keys = [...new Set(plan.include.flatMap(keysOf))];
   for (const k of keys) {
     for (const f of [`${k}.mjs`, `${k}.test.mjs`, `${k}.answers.json`]) if (!existsSync(path.join(root, "scripts/live-checks", f))) p.push(`${host}: ${k} has no scripts/live-checks/${f}`);
     const file = path.join("scripts/live-checks", `${k}.mjs`);
@@ -132,6 +146,49 @@ export async function planProblems(host, root = ROOT) {
       }
     };
     walk(file);
+  }
+  p.push(...budgetProblems(host, plan, root));
+  return p;
+}
+
+/**
+ * Card helper-live-jup-serial: on the helper's plan, every check whose source (and the scripts it imports) matches
+ * BUDGET_READS is a member of a serial group, so it runs one after another with the others in one job, or is in the
+ * list's budgetExempt with a reason. A check outside both runs in a job of its own, in parallel with the group, and
+ * spends the helper's one Jupiter window beside it.
+ */
+export function budgetProblems(host, plan, root = ROOT) {
+  if (host !== "helper") return [];
+  const p = [];
+  let list;
+  try {
+    list = listOf(host, root, { commit: SHA_FULL, network: "mainnet" });
+  } catch (e) {
+    return [`${host}: ${e.message}`];
+  }
+  const grouped = new Set(plan.include.filter((e) => e.group).flatMap(keysOf));
+  for (const [k, why] of Object.entries(list.budgetExempt)) {
+    if (!list.checks.includes(k)) p.push(`${host}: ${k} is exempt from the Jupiter budget group but is no listed check`);
+    else if (typeof why !== "string" || why.trim().length < 20) p.push(`${host}: ${k} is exempt from the Jupiter budget group with no reason (at least 20 characters)`);
+    else if (grouped.has(k)) p.push(`${host}: ${k} is both in a serial group and exempt from it`);
+  }
+  for (const e of plan.include) {
+    for (const k of keysOf(e)) {
+      if (grouped.has(k) || Object.hasOwn(list.budgetExempt, k)) continue;
+      const seen = new Set();
+      const reads = (f) => {
+        const abs = path.resolve(root, f);
+        if (seen.has(abs) || !existsSync(abs)) return false;
+        seen.add(abs);
+        const text = readFileSync(abs, "utf8");
+        if (BUDGET_READS.test(text)) return true;
+        return [...text.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+\.mjs)["']/g)].some((m) => {
+          const next = path.join(path.dirname(f), m[1]);
+          return next.startsWith("scripts/") && reads(next);
+        });
+      };
+      if (reads(path.join("scripts/live-checks", `${k}.mjs`))) p.push(`${host}: ${k} reads the helper's Jupiter budget (${BUDGET_READS.source.replace(/\\\//g, "/")}) in a job of its own: put it in a serial group (SERIAL_GROUPS in scripts/ci/helper-live-checks.mjs) so it runs one after another with the others, or list it in BUDGET_EXEMPT with the reason it spends none`);
+    }
   }
   return p;
 }
