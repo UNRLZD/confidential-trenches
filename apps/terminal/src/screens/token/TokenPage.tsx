@@ -6,12 +6,12 @@ import { parseTokenRoute } from "../../routes/routes.ts";
 import type { MarketChain } from "../discover/fields.ts";
 import { DASH, price, usd } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
-import { useSigninSheet } from "../signin/source.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
 import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeBox } from "../trade/TradeBox.tsx";
+import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { liveBars, mountChart, unmountChart } from "./chart.ts";
@@ -34,6 +34,8 @@ import "./token.css";
 // Card app-trade-box-mount puts the trade box and the safety grid under it (the token read's row and risk) in the
 // desktop's right column, signed out as designed (S8.1: `Bal —`, the exit plan off, `Sign in to trade`), and opens the
 // same box in a bottom sheet from the phone bar's Buy, Sell and quick buys. The signed-in money path is trade-box-pool's.
+// Card app-phone-trade-sheet moves the sheet to trade/TradeSheet.tsx: its box stays mounted when it closes, so a running
+// buy is drawn where it is on the next open; a pushed page (/token/<chain>/<id>) has no tab bar, its bar at the bottom.
 
 /** A word, marked when it is still the owner's draft. */
 function W({ id }: { id: WordId }) {
@@ -356,34 +358,14 @@ function Desktop({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartSt
   );
 }
 
-/** The trade box in a bottom sheet (R5 token-390.html tradeSheet: scrim, grab handle, the symbol and price, then the box). The
- *  scrim, the handle and Escape close it; the page behind does not scroll while it is open. */
-function TradeSheet({ v, r, onClose }: { v: TokenView; r: Ready; onClose: () => void }) {
-  // the sign-in sheet opens over this one: its Escape closes only that
-  const { open: signinOpen } = useSigninSheet();
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && !signinOpen && onClose();
-    window.addEventListener("keydown", esc);
-    const was = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", esc);
-      document.body.style.overflow = was;
-    };
-  }, [onClose, signinOpen]);
+/** The sheet's head row (R5 token-390.html tradeSheet ms-head): the token's avatar, the symbol over the price. */
+function SheetHead({ v }: { v: TokenView }) {
   return (
-    <div className="tkp-sheet" data-sheet="trade">
-      <div className="tkp-scrim" onClick={onClose} />
-      <div className="tkp-sheetbox" role="dialog" aria-modal="true" aria-label={`${WORDS.buy.text} ${v.symbol}`}>
-        <button type="button" className="tkp-grab" aria-label={signinWord("close")} onClick={onClose}><i /></button>
-        <div className="tkp-shead">
-          <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} />
-          <div className="tkp-stitle">
-            <span className="tkp-ssym" title={v.symbol}>{v.symbol}</span>
-            {v.price === null ? <SkLine cls="tkp-sprice" w={80} /> : <span className="tkp-sprice">{v.price}</span>}
-          </div>
-        </div>
-        <Ticket r={r} />
+    <div className="tkp-shead">
+      <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} />
+      <div className="tkp-stitle">
+        <span className="tkp-ssym" title={v.symbol}>{v.symbol}</span>
+        {v.price === null ? <SkLine cls="tkp-sprice" w={80} /> : <span className="tkp-sprice">{v.price}</span>}
       </div>
     </div>
   );
@@ -403,14 +385,12 @@ function back() {
 }
 
 function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartState }) {
-  const [sheet, setSheet] = useState(false);
+  const sheet = useTradeSheet();
   const tax = r ? taxOf(r) : null;
   const cells = r ? safetyCells(r.data.row, r.data.risk, r.nowMs) : null;
   // while the row fills, a holder share it has no value for yet is still loading (card token-page-fills-after)
   const waits = (f: "top10_bps" | "dev_bps") => v?.filling === true && r !== null && r.data.row[f] == null;
   const cell = (id: "top10" | "dev") => (waits(id === "top10" ? "top10_bps" : "dev_bps") ? null : (cells?.find((x) => x.id === id) ?? null));
-  const open = () => setSheet(true);
-  const close = useCallback(() => setSheet(false), []);
   return (
     <div className="tkp-phone">
       <div className="tkp-nav" data-testid="token-nav">
@@ -467,30 +447,35 @@ function Phone({ v, r, c }: { v: TokenView | null; r: Ready | null; c: ChartStat
         <div className="tkp-bottom" data-testid="token-bar">
           <div className="tkp-quick">
             {QUICK.map((q) => (
-              <button key={q} type="button" className="tkp-chip" onClick={open}>
+              <button key={q} type="button" className="tkp-chip" onClick={sheet.open}>
                 <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>${q}
               </button>
             ))}
           </div>
           <div className="tkp-trade2">
-            <button type="button" className="tkp-sell" onClick={open}><W id="sell" /></button>
-            <button type="button" className="tkp-buy" onClick={open}><span className="tkp-buylbl" title={`${WORDS.buy.text} ${v.symbol}`}><W id="buy" /> {v.symbol}</span></button>
+            <button type="button" className="tkp-sell" onClick={sheet.open}><W id="sell" /></button>
+            <button type="button" className="tkp-buy" onClick={sheet.open}><span className="tkp-buylbl" title={`${WORDS.buy.text} ${v.symbol}`}><W id="buy" /> {v.symbol}</span></button>
           </div>
         </div>
       )}
-      {sheet && v && r && <TradeSheet v={v} r={r} onClose={close} />}
+      {v && r && (
+        <TradeSheet state={sheet.state} onClose={sheet.close} label={`${WORDS.buy.text} ${v.symbol}`} closeLabel={signinWord("close")} head={<SheetHead v={v} />}>
+          <Ticket r={r} />
+        </TradeSheet>
+      )}
     </div>
   );
 }
 
-/** S7. `nowMs` is the clock the age is drawn against; `onRetry` asks the caller to read again. */
-export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: number; onRetry: () => void }) {
+/** S7. `nowMs` is the clock the age is drawn against; `onRetry` asks the caller to read again; `pushed` is a token's own
+ *  route (/token/<chain>/<id>), pushed over the tabs with no tab bar (09-design-brief S7 phone), not the home route. */
+export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: TokenData; nowMs: number; onRetry: () => void; pushed?: boolean }) {
   const row = data.status === "ready" ? data.row : null;
   const [tf, setTf] = useState<ChartTf>(DEFAULT_TF);
   const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
   if (data.status === "error" || data.status === "empty")
     return (
-      <section className="tkp tkp-msg" data-token-page={data.status}>
+      <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
         {data.status === "error" ? <W id="offline" /> : <W id="noToken" />}
         {data.status === "error" && <button type="button" className="tkp-retry" onClick={onRetry}>{WORDS.retry.text}</button>}
       </section>
@@ -499,7 +484,7 @@ export function TokenPage({ data, nowMs, onRetry }: { data: TokenData; nowMs: nu
   const ready = data.status === "ready" ? { data, nowMs } : null;
   const c: ChartState = { sym: v?.symbol ?? null, tf, onTf: setTf, data: candles, retry };
   return (
-    <section className="tkp" data-token-page={data.status} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
+    <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} />
       <Phone v={v} r={ready} c={c} />
     </section>
@@ -512,7 +497,7 @@ export function TokenRoute() {
   const params = useParams();
   if (params.chain === undefined) return <TopToken />;
   const t = parseTokenRoute(params);
-  if (!t) return <TokenPage data={{ status: "empty" }} nowMs={0} onRetry={() => {}} />;
+  if (!t) return <TokenPage data={{ status: "empty" }} nowMs={0} onRetry={() => {}} pushed />;
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
 }
 
@@ -523,5 +508,5 @@ function TopToken() {
 
 function ReadToken({ chain, id }: { chain: MarketChain; id: string }) {
   const { data, nowMs, retry } = useToken(chain, id);
-  return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
+  return <TokenPage data={data} nowMs={nowMs} onRetry={retry} pushed />;
 }

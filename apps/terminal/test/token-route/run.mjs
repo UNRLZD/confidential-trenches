@@ -186,8 +186,15 @@ try {
         check(page.url() === `${SIGN_HOST}/token/solana/${mint}`, `${tag} click ${k + 1}: the top window's address is ${page.url()}`);
         check(f.url() === `${APP_HOST}/token/solana/${mint}`, `${tag} click ${k + 1}: the terminal is at ${f.url()}`);
         if (k === 0) await shot(page, `token-after-click-${w.name}-${scheme}`);
-        // back to Discover through the tab bar / top bar, for the next pick
-        await f.locator(phone ? '.tabbar a[href="/discover"]' : '.tb .nav a[href="/discover"]').click();
+        // a token's own page is pushed over the tabs on the phone: no tab bar, the page's bar at the window's bottom
+        // (card app-phone-trade-sheet); back to Discover through the page's Back (phone) or the top bar, for the next pick
+        if (phone) {
+          check((await f.locator(".tabbar").count()) === 0, `${tag} click ${k + 1}: a tab bar on the pushed token page`);
+          const bar = await f.locator(".tkp-bottom").boundingBox();
+          const vh = await f.evaluate(() => window.innerHeight);
+          check(!!bar && Math.abs(bar.y + bar.height - vh) <= 0.5, `${tag} click ${k + 1}: the bottom bar does not end at the window's bottom (${JSON.stringify(bar)}, ${vh})`);
+        }
+        await f.locator(phone ? '.tkp-nav button[aria-label="Back"]' : '.tb .nav a[href="/discover"]').click();
         await f.waitForSelector(`${list} [role="listitem"] a`, { timeout: 10_000 });
       }
 
