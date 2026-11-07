@@ -74,7 +74,7 @@ export function matches(file, paths = PATHS) {
 // s19 (VT-S19, two sandboxes in turn, as settle's 41 s) joins shard 4, then the lightest at 345.
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
-  ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay"],
+  ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
 ];
