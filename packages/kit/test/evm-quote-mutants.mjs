@@ -503,7 +503,7 @@ export const MUTANTS = [
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV4 "],
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
-  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }] }]", R, "HC1 "],
+  [QUOTE, "params: [call, parent, state, env] }]", "params: [call, parent, state] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
   [QUOTE, "  if (!failed(await replay({}))) return [];\n", "", R, "HC2 "],
   // review of a2d82dc6, F1: the replay runs at the trade's own gas less its authorizations (more gas, or the sender's
@@ -514,8 +514,8 @@ export const MUTANTS = [
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of 72e28658, M3 (buy)"],
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas);\n", R, "review of a2d82dc6, F3"],
   [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas);\n", R, "review of a2d82dc6, F1 (sell)"],
-  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) }, ...extra }, env] }]", R, "review of a2d82dc6, F1 (buy)"],
-  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) }, ...extra }, env] }]", R, "review of a2d82dc6, F1 (sell)"],
+  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) } };", R, "review of a2d82dc6, F1 (buy)"],
+  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) } };", R, "review of a2d82dc6, F1 (sell)"],
   [QUOTE, "    if (BigInt(sale.gas) !== EVM_POOL_SELL_GAS) return [];\n", "", R, "review of 72e28658, M3 (sell)"],
   [QUOTE, "    if (BigInt(sale.gas) !== EVM_POOL_SELL_GAS) return [];\n", "    if (BigInt(sale.gas) < EVM_POOL_SELL_GAS) return [];\n", R, "review of 72e28658, M3 (sell)"],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
@@ -578,6 +578,24 @@ export const MUTANTS = [
   [QUOTE, "    if (withdrawn < 0n || fee < 0n || withdrawn - fee !== quote.amountIn) return [];\n", "", R, "HB6 "],
   // review of a2d82dc6, L3: a sender that takes a bigger fee, so the pool swaps less than the quote's amount
   [QUOTE, "withdrawn - fee !== quote.amountIn", "withdrawn - fee > quote.amountIn", R, "review of a2d82dc6, L3"],
+  // review of da11bbb6, H1: every replay sees the trade's block as the trade saw it: the system calls' storage read at
+  // the block on two providers that agree word for word, and its header's base fee and (Base) PREVRANDAO
+  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = {};", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
+  [QUOTE, "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };", "const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = {};", R, "review of da11bbb6, H1 (sell) the same hook on a sale, where block.number"],
+  [QUOTE, "(x, y) => JSON.stringify(x) === JSON.stringify(y),\n      () => refuse(\"rpc_disagree\", `the providers answer the system state", "(x, y) => true,\n      () => refuse(\"rpc_disagree\", `the providers answer the system state", R, "review of da11bbb6, H1 the system slots are read"],
+  [QUOTE, "params: [a, s, { blockHash: blk.hash, requireCanonical: true }]", "params: [a, s, { blockHash: blk.parentHash, requireCanonical: true }]", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
+  [QUOTE, "params: [a, s, { blockHash: blk.hash, requireCanonical: true }]", "params: [a, s, { blockHash: blk.parentHash, requireCanonical: true }]", R, "review of da11bbb6, H1 the system slots are read"],
+  [QUOTE, "baseFeePerGas: qty(BigInt(blk.baseFeePerGas)), ", "", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where BASEFEE"],
+  [QUOTE, ", ...(opStack ? { prevRandao: blk.mixHash } : {}) };", " };", R, "review of da11bbb6, H1 (sell) the same hook on a sale, where PREVRANDAO"],
+  [QUOTE, "[EVM_L1_BLOCK, Array.from({ length: 16 },", "[EVM_L1_BLOCK, Array.from({ length: 3 },", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where block.number"],
+  [QUOTE, "[EVM_BEACON_ROOTS, [time % 8191n, (time % 8191n) + 8191n]]", "[EVM_BEACON_ROOTS, [time % 8191n]]", R, "review of da11bbb6, H1 (buy) a hook that fails the real buy only where EIP-4788"],
+  [QUOTE, "[EVM_HISTORY, [(n - 1n) % 8191n]]", "[EVM_HISTORY, [n % 8191n]]", R, "review of da11bbb6, H1 (sell) the same hook on a sale, where EIP-2935"],
+  [QUOTE, "[[EVM_HISTORY, [(n - 1n) % 393168n]]]", "[[EVM_HISTORY, [(n - 1n) % 8191n]]]", R, "review of da11bbb6, H1 evmSystemSlotsOf"],
+  // review of da11bbb6, L1: a trade with Nitro poster gas is no evidence
+  [QUOTE, "  if (BigInt(sale.l1Gas) !== 0n) return [];\n", "", R, "review of da11bbb6, L1"],
+  [QUOTE, "l1Gas: rc.gasUsedForL1 === undefined ? \"0x0\" : str(rc, \"gasUsedForL1\", who),", "l1Gas: \"0x0\",", R, "review of da11bbb6, L1"],
+  // review of da11bbb6, L2: a proper set's read that answers 0 counts the sale's route for nothing (mutant R6)
+  [QUOTE, "      if (x === null || x === 0n) return null;\n", "      if (x === null) return null;\n", R, "review of da11bbb6, L2"],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => boughtOf(r) === true, (r) => !r.ok);", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],

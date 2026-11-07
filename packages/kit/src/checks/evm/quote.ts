@@ -2746,12 +2746,24 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    with more gas, or a balance set apart, told every hook it was being replayed). The gas is the sender's pick, bound
 //    on the sender's side: a sale is evidence only at the gas the device pins and its sim ran at (EVM_POOL_SELL_GAS); a
 //    buy below main's pool's floor reverts SwapGasTooLow (no evidence), and above it the helper sends a buy only after
-//    its eth_call at that very gas answers true, so only a hostile sender starves an honest hook, a ban that expires;
-//    W's code the 7702 designator of the chain's pinned sell delegate (the
-//    sale carries its own authorization), and the block's number and time set to the sale's own (eth_call's block
-//    override: every pinned Base and Robinhood provider ran Multicall3's getBlockNumber and getCurrentBlockTimestamp
-//    under one, 2026-11-07 04:44Z), so a hook that flips by block number or time flips here too: it fails on both
-//    providers with the same answer (a sale reverts; a buy returns false, its swap undone);
+//    its eth_call at that very gas answers true, so an honest hook is starved only by a hostile sender or by a route's
+//    gas rising between that eth_call and the block the buy lands in (the helper's gas margin, card evm-buy-gas-depth),
+//    a ban that expires; W's code the 7702 designator of the chain's pinned sell delegate (the sale carries its own
+//    authorization); the block as the trade saw it: eth_call's block override sets the trade's block's number, time and
+//    base fee, and on Base its PREVRANDAO (every pinned Base and Robinhood provider ran Multicall3's getBlockNumber,
+//    getCurrentBlockTimestamp and getBasefee under one, 2026-11-07 04:44Z and 13:55Z, and Base's four its
+//    getCurrentBlockDifficulty), and a state override sets the storage the block's system calls wrote before its first
+//    transaction (evmSystemSlotsOf: Base's L1Block, both chains' block-hash history, Base's beacon roots), so a hook
+//    keyed on any of them sees the trade's values and fails on both providers with the same answer (a sale reverts; a
+//    buy returns false, its swap undone). Per chain, what still differs from the trade:
+//    - both: the gas limit and coinbase are the parent header's, equal to the trade's block's but at a gas-limit change
+//      (Base's coinbase is its fee vault 0x4200…0011; Nitro's a constant); and the state an earlier transaction of the
+//      block changed (HC2 below);
+//    - Robinhood (Nitro): NUMBER answers the L1 block number from ArbOS's state, never the override (at L2 block
+//      108,429,325 the replay and the block itself both answered 0x1924523), and ArbOS keeps that number in hashed
+//      storage its block-start transaction writes, with no clean override; so a hook keyed on NUMBER sees the parent's
+//      L1 number and escapes only at an L2 block where the L1 number steps (time-keyed hooks are caught). Open gap.
+//      A trade with poster gas (its receipt's gasUsedForL1 above 0) is no evidence at all (below); every one is 0 today;
 // 3. the market held: V4Quoter, at the parent block, prices the quote's route with its hooks as they are at the
 //    quote's minOut or more, so the price did not move: the hooks treated the sale and the quoter apart. A price that
 //    moved, by the market or by an attacker before the sale, bans nothing, even where an honest hook's own fee (one
@@ -2772,7 +2784,9 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 // does not answer (rpc_error) is thrown, so the caller may ask again.
 // The gap still open (HC2): a hook flipped by a transaction earlier in the sale's own block leaves no evidence at the
 // parent block, so it is never banned and can freeze the sale until card evm-sell-hook-intrablock proves the sale's true
-// pre-state.
+// pre-state. Every block has such transactions that cost an attacker nothing: its system calls, the OP Stack's
+// L1-attributes deposit among them. Those writes are closed here (evmSystemSlotsOf); what stays open is the state any
+// other earlier transaction of the block changed: an attacker's own, landed ahead of the trade, or anyone's.
 
 /** The PoolIds of the quote's `hooked` pools that the sale `txHash`'s revert proves at fault (see above), on the
  *  chain's pinned providers; [] where nothing is proved. The caller bans these (wallet pool/evm-sell-bans.ts). */
@@ -2808,7 +2822,7 @@ const str = (r: Record<string, unknown>, k: string, who: string): string => {
 
 /** A reverted trade's transaction and receipt, the same on two of the providers `rpcs` (steps 1 of a sale's and a buy's
  *  evidence). */
-type Trade = { hash: string; from: string; to: string; input: string; gas: string; value: string; fees: Record<string, string>; auths: number; blockHash: string; blockNumber: string; status: string; rcHash: string; rcBlock: string; logs: string[] };
+type Trade = { hash: string; from: string; to: string; input: string; gas: string; value: string; fees: Record<string, string>; auths: number; blockHash: string; blockNumber: string; status: string; rcHash: string; rcBlock: string; logs: string[]; l1Gas: string };
 /** A receipt's logs, each its address and first topic ("<address>:<topic0>"), in order; at most 256 are read. */
 function logsOf(rc: Record<string, unknown>, who: string): string[] {
   const ls = rc.logs;
@@ -2834,6 +2848,8 @@ async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
         hash: str(tx, "hash", who), from: str(tx, "from", who), to: typeof tx.to === "string" ? str(tx, "to", who) : "", input: str(tx, "input", who), gas: str(tx, "gas", who), value: str(tx, "value", who), fees,
         auths: Array.isArray(auths) ? auths.length : 0, blockHash: str(tx, "blockHash", who), blockNumber: str(tx, "blockNumber", who),
         status: str(rc, "status", who), rcHash: str(rc, "transactionHash", who), rcBlock: str(rc, "blockHash", who), logs: logsOf(rc, who),
+        // Nitro's poster gas, charged inside the trade's gas limit (none on Base: its receipts carry no gasUsedForL1)
+        l1Gas: rc.gasUsedForL1 === undefined ? "0x0" : str(rc, "gasUsedForL1", who),
       };
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
@@ -2842,12 +2858,37 @@ async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
   return sale;
 }
 
+// The storage a block's own system calls write before its first transaction, which a replay at the parent block would
+// otherwise see as the parent left it (review of da11bbb6, H1: a hook keyed on L1Block's sequenceNumber told every
+// replay from the trade). Each account takes writes from its system caller only, so its storage at the end of the
+// trade's block is what every transaction in the block saw; read 2026-11-07 13:45-14:05Z on the pinned providers
+// (eth_getCode, eth_getStorageAt and eth_call at a block and at its parent):
+// - Base and Base Sepolia (OP Stack): L1Block (0x4200…0015), written by the block's L1-attributes deposit. Its
+//   implementation 0x8bde8f549f56d405f07e1aa15df9e1fc69839881 answers version() 1.8.0, whose storage layout
+//   (ethereum-optimism/optimism, packages/contracts-bedrock/snapshots/storageLayout/L1Block.json, unchanged from
+//   3c82c3f761 to the parent of e7a1f70331, where L1Block.sol returns "1.8.0") holds slots 0 to 8 (number, timestamp,
+//   basefee, hash, sequenceNumber and the fee scalars, batcherHash, l1FeeOverhead, l1FeeScalar, blobBaseFee, the
+//   operator fee and daFootprintGasScalar); slots 0 to 15 are read. EIP-4788's beacon roots (the two slots get(the
+//   block's time) reads: a replay at an epoch's first block reverted where the trade's block answered) and EIP-2935's
+//   history (slot (N-1) % 8191: every replay answered a hash 8,191 blocks old for block N-1).
+// - Robinhood and its testnet (Arbitrum Nitro): no L1Block and no EIP-4788; EIP-2935's history is ArbOS's, its ring
+//   393,168 blocks (its code's 0x05ffd0), slot (N-1) % 393168, the replay's answer stale as on Base.
+/** The system slots of block `n` at time `time` on `chain`, each account's slots as numbers (tests only). Not in the index. */
+export function evmSystemSlotsOf(chain: EvmPoolChain, n: bigint, time: bigint): [string, bigint[]][] {
+  if (chain === "base" || chain === "base-sepolia") return [[EVM_L1_BLOCK, Array.from({ length: 16 }, (_, i) => BigInt(i))], [EVM_BEACON_ROOTS, [time % 8191n, (time % 8191n) + 8191n]], [EVM_HISTORY, [(n - 1n) % 8191n]]];
+  if (chain === "robinhood" || chain === "robinhood-testnet") return [[EVM_HISTORY, [(n - 1n) % 393168n]]];
+  return [];
+}
+const EVM_L1_BLOCK = "0x4200000000000000000000000000000000000015";
+const EVM_BEACON_ROOTS = "0x000f3df6d732807ef1319fb7b8bb8522d0beac02";
+const EVM_HISTORY = "0x0000f90827f1c53a10cb7a02335b175320002935";
+
 /** Steps 2 to 4 of the evidence, a sale's and a buy's alike (card evm-buy-hook-converge): `sale`, the trade the quote
  *  made, already read back as the quote's own; `asW`, the state its replay runs with (a sale's W as its 7702 delegate,
  *  none for a buy); `keys`, the route's pools in the direction `held` reads it, the quoter's read of the route with its
  *  hooks as they are; `done`, whether a replay's answer is the trade done (a sale's: any result; a buy's: true), and
  *  `failed`, whether it is the trade failed as it did (a sale's: a revert; a buy's: false, its swap undone). */
-async function blamed(rpcs: EvmRpc[], quote: { readonly minOut: bigint; readonly hooked: readonly string[] }, sale: Trade, asW: Record<string, { code: string }>, keys: readonly EvmPoolKey[], held0: { to: string; data: string }, done: (r: Replay) => boolean, failed: (r: Replay) => boolean): Promise<string[]> {
+async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly minOut: bigint; readonly hooked: readonly string[] }, sale: Trade, asW: Record<string, { code: string }>, keys: readonly EvmPoolKey[], held0: { to: string; data: string }, done: (r: Replay) => boolean, failed: (r: Replay) => boolean): Promise<string[]> {
   // 2. the sale's block: its parent, number and time, the same on two providers
   const { a: blk } = await agreeing(
     rpcs,
@@ -2855,7 +2896,7 @@ async function blamed(rpcs: EvmRpc[], quote: { readonly minOut: bigint; readonly
       const who = `provider ${k + 1}`;
       const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }]);
       const r = resultOf(b, who, "block of the sale");
-      return { hash: str(r, "hash", who), number: str(r, "number", who), timestamp: str(r, "timestamp", who), parentHash: str(r, "parentHash", who) };
+      return { hash: str(r, "hash", who), number: str(r, "number", who), timestamp: str(r, "timestamp", who), parentHash: str(r, "parentHash", who), baseFeePerGas: str(r, "baseFeePerGas", who), mixHash: str(r, "mixHash", who) };
     },
     (x, y) => JSON.stringify(x) === JSON.stringify(y),
     () => refuse("rpc_disagree", `the providers answer the sale's block ${sale.blockHash} differently`),
@@ -2865,15 +2906,44 @@ async function blamed(rpcs: EvmRpc[], quote: { readonly minOut: bigint; readonly
   // charge: a hook sees in its replay the gas it saw in the trade (review of a2d82dc6, F1)
   const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);
   if (gas <= 0n) return [];
+  // a trade whose poster gas Nitro charged inside its limit bans nothing: whether Nitro's eth_call charges the replay
+  // the same is unread (Robinhood's L1 base fee estimate is 0, so every gasUsedForL1 read is 0: pool-fee.ts), and a
+  // replay given less gas than the trade could fail an honest hook (review of da11bbb6, L1)
+  if (BigInt(sale.l1Gas) !== 0n) return [];
   const parent = { blockHash: blk.parentHash, requireCanonical: true };
-  const env = { number: qty(BigInt(blk.number)), time: qty(BigInt(blk.timestamp)) };
+  // the trade's block as its transactions saw it: its header's number, time and base fee (and on the OP Stack its
+  // PREVRANDAO, the L1 origin's mixHash, which steps at an epoch's first block), and the storage its own system calls
+  // wrote before its first transaction (evmSystemSlotsOf), read at the block on two providers that agree word for word
+  const opStack = chain === "base" || chain === "base-sepolia";
+  const env = { number: qty(BigInt(blk.number)), time: qty(BigInt(blk.timestamp)), baseFeePerGas: qty(BigInt(blk.baseFeePerGas)), ...(opStack ? { prevRandao: blk.mixHash } : {}) };
+  const sysSlots = evmSystemSlotsOf(chain, BigInt(blk.number), BigInt(blk.timestamp)).flatMap(([a, ss]) => ss.map((s) => [a, "0x" + word(s)] as const));
+  const sys: Record<string, { stateDiff: Record<string, string> }> = {};
+  if (sysSlots.length > 0) {
+    const { a: words } = await agreeing(
+      rpcs,
+      async (rpc, k) => {
+        const who = `provider ${k + 1}`;
+        const got = await askAt(rpc, sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] })));
+        return got.map((g) => {
+          const r = (g as { result?: unknown } | null)?.result;
+          if (typeof r !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(r)) return refuse("rpc_error", `${who} answered a system slot of the sale's block with no word`);
+          return "0x" + r.slice(2).toLowerCase().padStart(64, "0");
+        });
+      },
+      (x, y) => JSON.stringify(x) === JSON.stringify(y),
+      () => refuse("rpc_disagree", `the providers answer the system state of the sale's block ${blk.hash} differently`),
+    );
+    sysSlots.forEach(([a, s], i) => ((sys[a] ??= { stateDiff: {} }).stateDiff[s] = words[i]!));
+  }
   // the sale's own call: its sender, value, gas and fees, to where it went; the sender's balance its own at the parent
   // block, never overridden (as the device's sale sim runs), so a hook that reads it sees what the trade saw
   const call = { from: sale.from, to: sale.to, data: sale.input, gas: qty(gas), value: sale.value, ...sale.fees };
   const replay = async (extra: Record<string, { code: string }>): Promise<Replay> => {
+    const state: Record<string, { code?: string; stateDiff?: Record<string, string> }> = { ...sys };
+    for (const [a, o] of Object.entries({ ...asW, ...extra })) state[lower(a)] = { ...state[lower(a)], ...o };
     const { a } = await agreeing(
       rpcs,
-      async (rpc, k) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, { ...asW, ...extra }, env] }]))[0], `provider ${k + 1}`),
+      async (rpc, k) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }]))[0], `provider ${k + 1}`),
       (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data),
       () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
     );
@@ -2943,7 +3013,7 @@ export async function evmSellRevertedPoolsWith(quote: EvmPoolSellQuote, txHash: 
     if (JSON.stringify(evmSellRouteOf(bought)) !== JSON.stringify(route)) return [];
     // 2 to 5, W's code the 7702 designator of the chain's pinned sell delegate (the sale carries its own authorization)
     const asW = { [lower(w)]: { code: designator(v.sellDelegate) } };
-    return await blamed(rpcs, quote, sale, asW, hopKeys(bought), sellRead(v, token, bought, quote.amountIn), (r) => r.ok, (r) => !r.ok);
+    return await blamed(rpcs, chain, quote, sale, asW, hopKeys(bought), sellRead(v, token, bought, quote.amountIn), (r) => r.ok, (r) => !r.ok);
   } catch (e) {
     if (e instanceof EvmQuoteError && e.code === "rpc_disagree") return [];
     throw e;
@@ -3014,7 +3084,7 @@ export async function evmBuyRevertedPoolsWith(quote: EvmPoolBuyQuote, txHash: st
     if (data !== "0x" + hex(evmPoolRouteDataQuoted(chain, route).data)) return [];
     // 2 to 4: the buy runs in the pool's own code, so its replay replaces no account's; it is done where it returns
     // true, and failed as it did where it returns false
-    return await blamed(rpcs, quote, buy, {}, hopKeys(route), quoteCall(chain, v, route, quote.amountIn), (r) => boughtOf(r) === true, (r) => boughtOf(r) === false);
+    return await blamed(rpcs, chain, quote, buy, {}, hopKeys(route), quoteCall(chain, v, route, quote.amountIn), (r) => boughtOf(r) === true, (r) => boughtOf(r) === false);
   } catch (e) {
     if (e instanceof EvmQuoteError && e.code === "rpc_disagree") return [];
     throw e;
