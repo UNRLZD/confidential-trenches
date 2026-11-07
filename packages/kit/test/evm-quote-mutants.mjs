@@ -533,10 +533,12 @@ export const MUTANTS = [
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1)) {", R, "RVX "],
   [QUOTE, "  for (const set of subsetsOf(hooks)) {", "  for (const set of subsetsOf(hooks).filter((x) => x.length === 1 || x.length === hooks.length)) {", R, "N1D "],
   [QUOTE, "  const fault = new Set(asIs ? (none ? named : rescued.flat()) : errored);", "  const fault = new Set(asIs ? (none ? named : rescued.slice(0, 1).flat()) : errored);", R, "review of 72e28658, H3 (buy)"],
-  [QUOTE, "    if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "N1D "],
+  // (no N1D entry for this line since rule C, review of 2fccaa67, 1: in N1D the fee-0 pass rescues the same two hooks, so
+  // evmFaultSets puts that set in place of every larger stored-fee set and N1D holds without the skip; the same break
+  // stays killed by "review of 72e28658, L2 (RV4)" below)
   // review of 72e28658, L2: the RV4 mutant ("step 5 always") is not equivalent: a set holding the one hook that rescued
   // the trade, asked anyway, bans an honest capped hook beside it
-  [QUOTE, "    if (rescued.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "review of 72e28658, L2 (RV4)"],
+  [QUOTE, "    if (got.some((r) => r.every((h) => set.includes(h)))) continue;\n", "", R, "review of 72e28658, L2 (RV4)"],
   // card evm-buy-hook-converge: the buy takes a route through an unlisted hook (its sell leaves through it), at the lowest
   // of its reads, only where no route through listed pools is within the slippage of it; a listed route within the
   // slippage of such a reference is taken at the reference's minOut; a banned pool is no route; each unlisted hook is
