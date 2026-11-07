@@ -50,6 +50,7 @@ export const LIVE_CHECKS = [
   "vault-review-fixes-1",
   "oneclick-partner-fee-live",
   "evm-testnet-delegate-review3",
+  "helper-usdc-pending-pause",
 ];
 
 // `{commit}` is the deployed commit

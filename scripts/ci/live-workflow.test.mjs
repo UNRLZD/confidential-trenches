@@ -162,7 +162,7 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   const na = existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"];
   assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
   assert.ok(!plan.include.some((e) => SKIPPED[e.key]), "a skipped check is never in the matrix");
-  for (const key of ["solana-jupiter-build", "wallet-per-buy"]) assert.ok(plan.include.some((e) => e.key === key && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
+  for (const key of ["solana-jupiter-build", "wallet-per-buy", "helper-usdc-pending-pause"]) assert.ok(plan.include.some((e) => e.key === key && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
 });
 
 test("a job gets Chrome when its check reaches the launcher, and Firefox or WebKit only where its arguments name them", async () => {
