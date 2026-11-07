@@ -30,9 +30,10 @@ test("a ban is kept per chain and token, read back oldest first, each pool once;
   assert.deepEqual(await evmSellBanned(s, "base", "0x2222222222222222222222222222222222222222"), []);
   assert.equal(evmSellBanKey("base", TOKEN), `${WALLET_BAN_PREFIX}base/${TOKEN}`);
   // a record not in its shape holds no pool (the permanent v1 bans of 919742f5 among them), and is replaced by the next ban
-  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 1, pools: [P(9)] });
+  const later = Date.now() + 3_600_000;
+  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 1, pools: [P(9), { id: P(9), until: later, n: 1 }] });
   assert.deepEqual(await evmSellBanned(s, "base", TOKEN), []);
-  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 2, pools: [P(9), { id: P(9), until: "never", n: 1 }] });
+  await s.put("meta", evmSellBanKey("base", TOKEN), { v: 2, pools: [P(9), { id: P(9), until: String(later), n: 1 }, { id: P(9), until: later, n: 0 }] });
   assert.deepEqual(await evmSellBanned(s, "base", TOKEN), []);
   assert.deepEqual(await evmSellBan(s, "base", TOKEN, [P(3)]), [P(3)]);
 });
