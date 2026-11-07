@@ -597,10 +597,8 @@ test("check 7 (card relayer-cost-guards, audit V-03): register_deposit is exactl
     assert.equal(code(await carryWithdraw(req(), x.deps)), "ok", JSON.stringify(registered));
     assert.equal(x.relayer.sent.length, 1);
   }
-  // a minimum that moved under the pin: the fixture's is no longer it (above the pin the read refuses: the cap test)
-  const moved = setup(chain({ min: MIN - 1n }));
-  assert.equal(code(await carryWithdraw(req(), moved.deps)), "register_deposit_wrong");
-  assert.equal(moved.relayer.sent.length, 0);
+  // a minimum off the pin is refused at the read (503 upstream, the cap test and review F1), so check 7 only ever
+  // compares against the pin itself
   // on what was read: the reviewer's R2, a register_deposit of 0 to a registered recipient is not carried, since the
   // recipient can storage_unregister after any read and only the minimum in the payout's own receipt stops the bounce
   const w = { register_deposit: 0n, recipient: "griefer.near", fee_recipient: CFG.feeRecipient, deadline_ms: Number(DEADLINE) } as CheckedWithdraw;
@@ -1034,7 +1032,7 @@ test("a start that fails after the stores open closes them: the next try starts"
 
 // ---- The relayer's cost guards (card relayer-cost-guards, audit V-03) ----
 
-test("V-03 register_deposit cap: a token minimum above the pinned REGISTER_DEPOSIT_MAX is not taken by POST's check 7 (503 upstream, nothing sent)", async () => {
+test("V-03 register_deposit pin: a token minimum above the pinned REGISTER_DEPOSIT_MAX is not taken by POST's check 7 (503 upstream, nothing sent)", async () => {
   assert.equal(MIN, REGISTER_DEPOSIT_MAX, "the fixture's register_deposit is the pinned minimum");
   const v = await checkWithdraw(req(), CFG, { feeMin: async () => BigInt(W.relay_fee) });
   assert.ok(v.ok);
@@ -1043,6 +1041,20 @@ test("V-03 register_deposit cap: a token minimum above the pinned REGISTER_DEPOS
   const at = chain({ min: REGISTER_DEPOSIT_MAX });
   assert.equal((await readChecks([provider(at, 0), provider(at, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(at.ms))).registerMin, REGISTER_DEPOSIT_MAX);
   const { deps, relayer } = setup(chain({ min: REGISTER_DEPOSIT_MAX + 1n }));
+  const a = await carryWithdraw(req(), deps);
+  assert.deepEqual([a.status, code(a), relayer.sent.length], [503, "upstream", 0]);
+});
+
+test("V-03, review F1: a token minimum other than the pin, 0 or under it, is not taken either, so a register_deposit of 0 is never carried", async () => {
+  const v = await checkWithdraw(req(), CFG, { feeMin: async () => BigInt(W.relay_fee) });
+  assert.ok(v.ok);
+  for (const min of [0n, 1n, REGISTER_DEPOSIT_MAX - 1n]) {
+    const c = chain({ min });
+    await assert.rejects(readChecks([provider(c, 0), provider(c, 1)], CFG.vault, CFG.token, v.withdraw, () => Number(c.ms)), FeeReadRefused, String(min));
+  }
+  // both RPCs read the minimum as 0: check 7 has no minimum to hold a register_deposit of 0 to (checks7to9 with 0 and a
+  // registerMin of 0 would pass), so the read itself refuses: 503 upstream, nothing signed or sent
+  const { deps, relayer } = setup(chain({ min: 0n }));
   const a = await carryWithdraw(req(), deps);
   assert.deepEqual([a.status, code(a), relayer.sent.length], [503, "upstream", 0]);
 });

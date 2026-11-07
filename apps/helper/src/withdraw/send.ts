@@ -14,8 +14,8 @@
 //        relayer-cost-guards, audit V-03). The vault's one payout receipt then runs storage_deposit(recipient,
 //        registration_only) before ft_transfer (vault promise.rs:85-91), so a recipient that unregisters after any read
 //        is registered again inside that receipt and cannot bounce it, the fee with it; for one still registered the
-//        token returns the minimum to the vault, which the quote prices (fee.ts S_w). The minimum is held at or below
-//        fee.ts REGISTER_DEPOSIT_MAX (USDC's as read on two RPCs), else 503 upstream: no quote and no send.
+//        token returns the minimum to the vault, which the quote prices (fee.ts S_w). The minimum must be exactly
+//        fee.ts REGISTER_DEPOSIT_MAX (USDC's as read on two RPCs), else 503 upstream: no quote and no send (review F1).
 //   7b.  the fee account (fee_recipient, check 3's own): storage_balance_of(fee_recipient) a NEP-145 balance (not null)
 //        and is_blocklisted(fee_recipient) exactly false at check 7's block on both RPCs (fee.ts readFeeAccount), else
 //        503 relayer_low with the log line "withdraw 503 relayer_low: relayer fee account not ready (<fee> on <token>:
@@ -254,7 +254,7 @@ export async function accountAt(rpcs: readonly [Rpc, Rpc], b: Block, id: string)
 export async function readChecks(rpcs: readonly [Rpc, Rpc], vault: string, token: string, w: CheckedWithdraw, now: () => number = Date.now): Promise<ChainReads> {
   const [block, finalMs] = await Promise.all([agreedBlock(rpcs, now), newestFinalMs(rpcs)]);
   const [registerMin, stateKnown, labelKnown, totals, recipient, feeAccount, recipientListed] = await Promise.all([
-    readRegisterMin(rpcs, block, token), // above REGISTER_DEPOSIT_MAX it throws: nothing is carried
+    readRegisterMin(rpcs, block, token), // any minimum but REGISTER_DEPOSIT_MAX throws: nothing is carried
     viewAt(rpcs, block, vault, "is_known_state_root", { root: w.stateRoot.toString() }),
     viewAt(rpcs, block, vault, "is_known_label_root", { root: w.ASPRoot.toString() }),
     viewAt(rpcs, block, vault, "totals", {}),

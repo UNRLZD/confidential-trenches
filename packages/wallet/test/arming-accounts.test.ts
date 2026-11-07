@@ -18,7 +18,6 @@ import {
   ArmingRegistrationRefused,
   armingAccount,
   armingRegisterDepositOf,
-  readArmingRegistration,
 } from "../src/arming/accounts.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../src/deposit/account.ts";
 import { P, wordsToSeed64 } from "../src/derive/index.ts";
@@ -166,127 +165,89 @@ test("the recording: GOOD is registered, TEST_A is A_{l,0} of the A.8 seed, and 
   }
 });
 
-test("registered on both: register_deposit is still the minimum (card relayer-cost-guards, audit V-03: the relayer carries only the minimum, so A cannot bounce its payout by unregistering)", async () => {
-  const r = await readArmingRegistration(rec.good, "mainnet", pair("mainnet", { reg: "reg_set" }));
-  assert.deepEqual(r, { account: rec.good, registered: true, min: MIN, registerDeposit: MIN });
-  // withdrawRequest's registerDepositOf gives the same for a registered A
-  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good, NEAR_NETWORKS.mainnet.usdc), MIN);
-});
+const depositOf = (network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], a = rec.test_a) => armingRegisterDepositOf(network, rpcs)(a, NEAR_NETWORKS[network].usdc);
 
-test("not registered on both: register_deposit = storage_balance_bounds().min, mainnet and testnet", async () => {
+test("register_deposit is storage_balance_bounds().min for any A, registered or not, read without naming A (card relayer-cost-guards, audit V-03 and review F2)", async () => {
   for (const net of ["mainnet", "testnet"] as const) {
-    const o = net === "mainnet" ? {} : { reg: "reg_null_testnet", bounds: "bounds_testnet" };
-    const r = await readArmingRegistration(rec.test_a, net, pair(net, o));
-    assert.deepEqual(r, { account: rec.test_a, registered: false, min: MIN, registerDeposit: MIN }, net);
+    const o: Opts = net === "mainnet" ? {} : { bounds: "bounds_testnet" };
+    const seen: unknown[] = [];
+    // GOOD is registered and TEST_A is not: the same minimum, from the same two reads
+    assert.equal(await depositOf(net, pair(net, { ...o, seen }), rec.good), MIN, net);
+    assert.equal(await depositOf(net, pair(net, { ...o, seen }), rec.test_a), MIN, net);
+    assert.equal(seen.length, 4, `${net}: one bounds read per RPC per call`);
+    for (const p of seen as { account_id: string; method_name: string; args_base64: string }[]) {
+      assert.equal(p.method_name, "storage_balance_bounds", `${net}: the device never asks storage_balance_of`);
+      assert.equal(p.account_id, NEAR_NETWORKS[net].usdc);
+      assert.deepEqual(decode(p.args_base64), {}, `${net}: no read names an A`);
+      assert.deepEqual(Object.keys(p).sort(), ["account_id", "args_base64", "finality", "method_name", "request_type"]);
+    }
   }
 });
 
 test("register_deposit is storage_balance_bounds().min, never max: max 2 × min and max null on both sides", async () => {
   for (const max of [String(2n * MIN), null]) {
     const edit = (r: Read, j: any) => r === "bounds" && setBytes(j, { min: String(MIN), max }); // edited: max, both sides
-    const r = await readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", { edit }));
-    assert.equal(r.registerDeposit, MIN, `max ${max}`);
-    assert.equal(r.min, MIN, `max ${max}`);
+    assert.equal(await depositOf("mainnet", pair("mainnet", { edit })), MIN, `max ${max}`);
   }
 });
 
-test("the two RPCs disagree: refused, nothing decided", async () => {
-  // registered on one, null on the other, either way round
-  const set = { reg: "reg_set" } as Opts;
-  const nul = { reg: "reg_set", edit: (r: Read, j: any) => r === "reg" && setBytes(j, null) } as Opts; // edited: GOOD's answer to null
-  await refused(readArmingRegistration(rec.good, "mainnet", pair("mainnet", set, nul)), "disagree", /registered/);
-  await refused(readArmingRegistration(rec.good, "mainnet", pair("mainnet", nul, set)), "disagree", /registered/);
+test("the two RPCs disagree on the minimum: refused, nothing decided", async () => {
   // edited: the dRPC side's min one yocto higher
   const up = { edit: (r: Read, j: any) => r === "bounds" && setBytes(j, { min: String(MIN + 1n), max: String(MIN + 1n) }) };
-  await refused(readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", {}, up)), "disagree", /minimum/);
+  await refused(depositOf("mainnet", pair("mainnet", {}, up)), "disagree", /minimum/);
 });
 
-test("one RPC down: refused, either side and either read", async () => {
-  await refused(readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", { down: true }, {})), "rpc", /did not answer/);
-  await refused(readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", {}, { down: true })), "rpc", /did not answer/);
-  // only the bounds read lost on one side, with A registered on both
-  const lost: NearRpc = { ...replay("mainnet", "b", { reg: "reg_set" }) };
-  const inner = lost.query;
-  lost.query = async (p) => ((p as { method_name: string }).method_name === "storage_balance_bounds" ? Promise.reject(new Error("timeout")) : inner(p));
-  await refused(readArmingRegistration(rec.good, "mainnet", [replay("mainnet", "a", { reg: "reg_set" }), lost]), "rpc", /bounds read/);
+test("one RPC down: refused, either side", async () => {
+  await refused(depositOf("mainnet", pair("mainnet", { down: true }, {})), "rpc", /did not answer/);
+  await refused(depositOf("mainnet", pair("mainnet", {}, { down: true })), "rpc", /did not answer/);
 });
 
-test("an error answer or a malformed value is refused, never read as unregistered", async () => {
-  // the real panic answer of storage_balance_of on both sides, then on one
-  await refused(readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", { reg: "reg_panic" })), "rpc", /failed/);
-  await refused(readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", {}, { reg: "reg_panic" })), "rpc", /failed/);
-  // edited: a JSON-RPC error, a value that is neither null nor a storage balance, bytes that are not JSON, no min
+test("an error answer or a malformed minimum is refused", async () => {
+  // edited: a JSON-RPC error, bytes that are not JSON, no bytes, no min in its one form
   const edits: [string, (r: Read, j: any) => void, RegExp][] = [
-    ["rpc error", (r, j) => r === "reg" && ((j.error = { name: "HANDLER_ERROR" }), delete j.result), /failed/],
-    ["a top-level error next to a null result", (r, j) => r === "reg" && (j.error = { name: "HANDLER_ERROR" }), /failed/],
-    ["0", (r, j) => r === "reg" && setBytes(j, 0), /neither null/],
-    ["available not U128", (r, j) => r === "reg" && setBytes(j, { total: String(MIN), available: "-1" }), /neither null/],
-    ["no available", (r, j) => r === "reg" && setBytes(j, { total: String(MIN) }), /neither null/],
-    ["total not U128", (r, j) => r === "reg" && setBytes(j, { total: "1.5", available: "0" }), /neither null/],
-    ["total above 2^128", (r, j) => r === "reg" && setBytes(j, { total: String(1n << 128n), available: "0" }), /neither null/],
-    ["not JSON", (r, j) => r === "reg" && (j.result.result = [0x7b]), /not JSON/],
-    ["no bytes", (r, j) => r === "reg" && delete j.result.result, /no bytes/],
-    ["a byte above 255 that wraps to \"null\"", (r, j) => r === "reg" && (j.result.result = [0x16e, 0x75, 0x6c, 0x6c]), /no bytes/],
-    ["total with a leading zero", (r, j) => r === "reg" && setBytes(j, { total: "0" + String(MIN), available: "0" }), /neither null/],
+    ["rpc error", (r, j) => r === "bounds" && ((j.error = { name: "HANDLER_ERROR" }), delete j.result), /failed/],
+    ["a top-level error next to a result", (r, j) => r === "bounds" && (j.error = { name: "HANDLER_ERROR" }), /failed/],
+    ["not JSON", (r, j) => r === "bounds" && (j.result.result = [0x7b]), /not JSON/],
+    ["no bytes", (r, j) => r === "bounds" && delete j.result.result, /failed/],
+    ["a byte above 255", (r, j) => r === "bounds" && (j.result.result = [0x17b, 0x7d]), /failed/],
     ["min with a leading zero", (r, j) => r === "bounds" && setBytes(j, { min: "0" + String(MIN), max: null }), /no min/],
     ["min a number", (r, j) => r === "bounds" && setBytes(j, { min: 1250000000000000000000, max: null }), /no min/],
     ["min above 2^128", (r, j) => r === "bounds" && setBytes(j, { min: String(1n << 128n), max: null }), /no min/],
   ];
-  for (const [what, edit, re] of edits) await refused(readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", {}, { edit })), "rpc", re).catch((e) => assert.fail(`${what}: ${e}`));
+  for (const [what, edit, re] of edits) await refused(depositOf("mainnet", pair("mainnet", {}, { edit })), "rpc", re).catch((e) => assert.fail(`${what}: ${e}`));
 });
 
 test("the RPC pair must be one FastNEAR URL and the network's dRPC URL, exactly", async () => {
   const net = NEAR_NETWORKS.mainnet;
-  // the pair the other way round is fine
-  const r = await readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "b"), replay("mainnet", "a")]);
-  assert.equal(r.registerDeposit, MIN);
-  // the other FastNEAR URL is fine
-  assert.equal((await readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", { name: net.fastnear[1] }), replay("mainnet", "b")])).registerDeposit, MIN);
+  // the pair the other way round is fine, and so is the other FastNEAR URL
+  assert.equal(await depositOf("mainnet", [replay("mainnet", "b"), replay("mainnet", "a")]), MIN);
+  assert.equal(await depositOf("mainnet", [replay("mainnet", "a", { name: net.fastnear[1] }), replay("mainnet", "b")]), MIN);
   const bad: [string, NearRpc, NearRpc][] = [
     ["two FastNEAR URLs, one operator", replay("mainnet", "a"), replay("mainnet", "b", { name: net.fastnear[1] })],
     ["dRPC twice", replay("mainnet", "b"), replay("mainnet", "b")],
     ["a testnet RPC on mainnet", replay("mainnet", "a"), replay("mainnet", "b", { name: NEAR_NETWORKS.testnet.drpc })],
     ["a URL off the list", replay("mainnet", "a"), replay("mainnet", "b", { name: net.drpc + "/" })],
   ];
-  for (const [what, x, y] of bad) await refused(readArmingRegistration(rec.test_a, "mainnet", [x, y]), "input", /exactly/).catch((e) => assert.fail(`${what}: ${e}`));
-  await refused(readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a")] as unknown as [NearRpc, NearRpc]), "input");
+  for (const [what, x, y] of bad) await refused(depositOf("mainnet", [x, y]), "input", /exactly/).catch((e) => assert.fail(`${what}: ${e}`));
+  await refused(depositOf("mainnet", [replay("mainnet", "a")] as unknown as [NearRpc, NearRpc]), "input");
 });
 
-test("A must be a lowercase 64-hex implicit id, and the network one of the kit's", async () => {
-  for (const a of [rec.test_a.toUpperCase(), "alice.near", rec.test_a.slice(1), `${rec.test_a}0`, 7 as unknown as string])
-    await refused(readArmingRegistration(a, "mainnet", pair("mainnet")), "input", /64-hex/);
-  for (const n of ["devnet", "toString", "__proto__", "constructor"])
-    await refused(readArmingRegistration(rec.test_a, n as NearNetwork, pair("mainnet")), "input", /network/);
-});
-
-test("each request names only A or the token, at final", async () => {
-  const seen: unknown[] = [];
-  await readArmingRegistration(rec.test_a, "mainnet", pair("mainnet", { seen }));
-  assert.equal(seen.length, 4);
-  for (const p of seen as { account_id: string; method_name: string; args_base64: string }[]) {
-    assert.equal(p.account_id, VAULT_CONSTANTS.TOKEN);
-    assert.deepEqual(decode(p.args_base64), p.method_name === "storage_balance_of" ? { account_id: rec.test_a } : {});
-    assert.deepEqual(Object.keys(p).sort(), ["account_id", "args_base64", "finality", "method_name", "request_type"]);
-  }
-});
-
-test("armingRegisterDepositOf is withdrawRequest's registerDepositOf", async () => {
+test("armingRegisterDepositOf is withdrawRequest's registerDepositOf; the withdrawal's token must be the network's", async () => {
   const f: WithdrawRequestArgs["registerDepositOf"] = armingRegisterDepositOf("mainnet", pair("mainnet"));
   assert.equal(await f(rec.test_a, VAULT_CONSTANTS.TOKEN), MIN);
-  assert.equal(await armingRegisterDepositOf("mainnet", pair("mainnet", { reg: "reg_set" }))(rec.good, VAULT_CONSTANTS.TOKEN), MIN); // registered: still the minimum (V-03)
-  await refused(armingRegisterDepositOf("mainnet", pair("mainnet", {}, { down: true }))(rec.test_a, VAULT_CONSTANTS.TOKEN), "rpc");
   // the withdrawal's token must be the token the read is made on, and nothing is read otherwise
   const seen: unknown[] = [];
   for (const [net, token] of [["mainnet", NEAR_NETWORKS.testnet.usdc], ["testnet", NEAR_NETWORKS.mainnet.usdc], ["mainnet", undefined]] as const)
     await refused(armingRegisterDepositOf(net, pair(net, { seen }))(rec.test_a, token as unknown as string), "input", /token/);
   assert.equal(seen.length, 0);
+  for (const n of ["devnet", "toString", "__proto__", "constructor"])
+    await refused(armingRegisterDepositOf(n as NearNetwork, pair("mainnet"))(rec.test_a, VAULT_CONSTANTS.TOKEN), "input", /network/);
 });
 
 test("a stale final: answers more than HEIGHT_SPREAD_MAX blocks apart are refused; within it they are read", async () => {
-  // the recorded four answers span 222686288-222686290: 27 back on a puts them 30 apart, 400 back is a stale final
+  // the recorded bounds answers are at 222686290 on both: 30 back on a is within the spread, 400 back is a stale final
   const back = (n: number): Opts => ({ edit: (_r, j) => (j.result.block_height -= n) });
-  const a = await readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", back(27)), replay("mainnet", "b", back(0))]);
-  assert.equal(typeof a.registerDeposit, "bigint");
-  await refused(readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", back(400)), replay("mainnet", "b", back(0))]), "disagree", /spread/);
-  await refused(readArmingRegistration(rec.test_a, "mainnet", [replay("mainnet", "a", { edit: (_r, j) => delete j.result.block_height }), replay("mainnet", "b")]), "rpc", /block height/);
+  assert.equal(await depositOf("mainnet", [replay("mainnet", "a", back(30)), replay("mainnet", "b", back(0))]), MIN);
+  await refused(depositOf("mainnet", [replay("mainnet", "a", back(400)), replay("mainnet", "b", back(0))]), "disagree", /spread/);
+  await refused(depositOf("mainnet", [replay("mainnet", "a", { edit: (_r, j) => delete j.result.block_height }), replay("mainnet", "b")]), "rpc", /block height/);
 });

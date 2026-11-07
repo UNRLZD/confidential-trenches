@@ -515,7 +515,7 @@ function tempDir(t: TestContext): string {
 
 // ---- The register_deposit cap (card relayer-cost-guards, audit V-03) ----
 
-test("V-03: REGISTER_DEPOSIT_MAX is the token's minimum as recorded on two providers of each network, and a quote is not given above it", async () => {
+test("V-03: REGISTER_DEPOSIT_MAX is the token's minimum as recorded on two providers of each network, and a quote is not given at any other minimum", async () => {
   const rec = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/usdc-storage-bounds.json"), "utf8")) as { reads: { network: string; rpc: string; answer: { min: string } }[] };
   for (const network of ["mainnet", "testnet"]) {
     const rows = rec.reads.filter((r) => r.network === network);
@@ -526,6 +526,9 @@ test("V-03: REGISTER_DEPOSIT_MAX is the token's minimum as recorded on two provi
     ...base(),
     plant: (_who, _m, p, r) => (p.method_name === "storage_balance_bounds" ? { ...r, result: [...Buffer.from(JSON.stringify({ min: min.toString(), max: min.toString() }))] } : r),
   });
-  await assert.rejects(quoterOn(() => bounds(REGISTER_DEPOSIT_MAX + 1n)).quote(USDC), (e: Error) => e instanceof FeeReadRefused && /above the pinned/.test(e.message));
+  await assert.rejects(quoterOn(() => bounds(REGISTER_DEPOSIT_MAX + 1n)).quote(USDC), (e: Error) => e instanceof FeeReadRefused && /not the pinned/.test(e.message));
   assert.ok(await quoterOn(() => bounds(REGISTER_DEPOSIT_MAX)).quote(USDC));
+  // review F1: a minimum under the pin, 0 included, gives no quote either
+  for (const min of [0n, 1n, REGISTER_DEPOSIT_MAX - 1n])
+    await assert.rejects(quoterOn(() => bounds(min)).quote(USDC), (e: Error) => e instanceof FeeReadRefused && /not the pinned/.test(e.message), String(min));
 });

@@ -22,6 +22,8 @@
 //!    account, nonce unmoved, no record. Then ready: same_call carried, 200 {tx_hash, submitted}; the outcome rounds
 //!    read it from blocks as succeeded; one payout receipt pays alice the withdrawal less the fee and the relayer the
 //!    fee; settled with refund_value 0.
+//!    3c (review F4): one_block_b, register_deposit 0 to the now registered alice: 400 register_deposit_wrong, nonce
+//!    unmoved, no record.
 //! 4. A restart: same_call again: 400 spent, nothing signed.
 //! 5. same_nullifier_a and same_nullifier_b (one nullifier, two proofs) at once: one 200, the other 400 in_flight; one
 //!    spend on chain; paid, settled with 0 attached, the reserve back to the relayer.
@@ -275,6 +277,14 @@ async fn relayer_withdraw_checks_send_and_settle() -> R<()> {
     assert!(fee > 0, "same_call is relayed with a fee: {s}");
     assert_eq!(w.h.token_balance(w.alice.id()).await? - alice0, withdrawn - fee, "alice holds the withdrawal less the fee");
     assert_eq!(w.h.token_balance(w.relayer.id()).await? - fee0, fee, "the relayer holds the fee");
+
+    // 3c. review F4: alice registered and the fee account ready, a register_deposit of 0 to her (one_block_b, an
+    // unspent note) is still refused: only the minimum is carried, registered recipient or not (V-03)
+    let n1 = w.key_nonce().await?;
+    let v = w.carry(&["ok"], &["one_block_b"], 0).await?;
+    assert_eq!(code(&v, 0), (400, "register_deposit_wrong".into()), "alice registered, register_deposit 0: {}", v["answers"]);
+    assert!(row(&v, "one_block_b").is_null(), "no record for a refused request");
+    assert_eq!(w.key_nonce().await?, n1, "a register_deposit of 0 signs nothing");
 
     // 4. a restart: the same note again
     let n1 = w.key_nonce().await?;

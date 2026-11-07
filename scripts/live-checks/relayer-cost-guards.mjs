@@ -5,8 +5,8 @@
 //   (relayer-withdraw-fee's PAIRS) at one final block, the same bytes on both, and GET /v1/withdraw/fee for the token
 //   with Origin APP_HOST. It passes only while that minimum equals the pinned REGISTER_DEPOSIT_MAX of this checkout
 //   (apps/helper/src/withdraw/fee.ts; live.yml checks out the deployed commit), the one register_deposit the relayer
-//   carries: any other minimum FAILs, so a change to USDC's bounds raises an alarm instead of a quiet 503 (above the pin
-//   the helper holds every withdrawal; below it the device's own read no longer matches the pin). The quote answers 200,
+//   carries: any other minimum FAILs, so a change to USDC's bounds raises an alarm instead of a quiet 503 (off the pin,
+//   up or down, the helper holds every withdrawal). The quote answers 200,
 //   or 404 not_found for a network the helper does not carry.
 //   Solana, for each pool a deploy record names (helper-live-checks.mjs solanaPools): GET /v1/pool/fee, then POST
 //   /v1/pool/solana/send two releases built as helper-pool-senders builds them (a throwaway W, W-signed, slot 0 empty):
