@@ -85,15 +85,34 @@ test("MUTABLE names only RegExps the kit exports, each frozen, and no source fil
   for (const t of trees) {
     let list: string[];
     try { list = filesAny(t); } catch { continue; }
-    for (const f of list) {
-      const text = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, "$1").replace(/\b(?:import|export)\s+(?:type\s+)?\{[^}]*\}(?:\s*from\s*["'][^"']+["'])?/g, "");
-      for (const k of Object.keys(MUTABLE)) {
-        const rest = text.replace(new RegExp(`export const ${k} =|deepFreeze\\(${k}\\);|\\b${k}\\.(?:source|flags)\\b`, "g"), "");
-        if (new RegExp(`\\b${k}\\b`).test(rest)) reads.push(`${path.relative(root, f)}: ${k}`);
-      }
-    }
+    for (const f of list) for (const k of mutableReads(readFileSync(f, "utf8"))) reads.push(`${path.relative(root, f)}: ${k}`);
   }
   assert.deepEqual(reads, []);
+});
+
+/** The MUTABLE names `text` uses other than as allowed above. An import or export list is allowed only when it names
+ *  each one as itself: `import { SIGNPAGE_ROUTE_OUT as ROUTE_BOUND }` would let ROUTE_BOUND.test(...) through the
+ *  strip below, so an alias is a use (card oneclick-fee-path-own-key, from the delta review of kit-oneclick-pins-frozen). */
+function mutableReads(source: string): string[] {
+  const code = source.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, "$1");
+  const text = code.replace(/\b(?:import|export)\s+(?:type\s+)?\{[^}]*\}(?:\s*from\s*["'][^"']+["'])?/g, "");
+  return Object.keys(MUTABLE).filter((k) => {
+    if (new RegExp(`\\b${k}\\s+as\\b`).test(code)) return true;
+    const rest = text.replace(new RegExp(`export const ${k} =|deepFreeze\\(${k}\\);|\\b${k}\\.(?:source|flags)\\b`, "g"), "");
+    return new RegExp(`\\b${k}\\b`).test(rest);
+  });
+}
+
+test("planted: an aliased import or export of a MUTABLE name is a use, so a test against the alias cannot hide", () => {
+  const aliased = 'import { SIGNPAGE_ROUTE_OUT as ROUTE_BOUND } from "@blindfill/kit";\nexport const bound = (u: string) => ROUTE_BOUND.test(u);\n';
+  assert.deepEqual(mutableReads(aliased), ["SIGNPAGE_ROUTE_OUT"]);
+  assert.deepEqual(mutableReads('export { HELPER_SALT_PATTERN as SALT } from "./v1.ts";\n'), ["HELPER_SALT_PATTERN"]);
+  assert.deepEqual(mutableReads('import {\n  HELPER_TOKEN_HASH_PATTERN as H,\n} from "@blindfill/kit";\n'), ["HELPER_TOKEN_HASH_PATTERN"]);
+  // what stays allowed: a plain list, the definition and its freeze line, and a copy from .source and .flags
+  const allowed = 'import { SIGNPAGE_ROUTE_OUT, type X } from "@blindfill/kit";\nconst own = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags);\n' +
+    'export const HELPER_SALT_PATTERN = /^x$/;\ndeepFreeze(HELPER_SALT_PATTERN);\n// SIGNPAGE_ROUTE_OUT as a word in a comment\n';
+  assert.deepEqual(mutableReads(allowed), []);
+  assert.deepEqual(mutableReads("const ok = SIGNPAGE_ROUTE_OUT.test(u);\n"), ["SIGNPAGE_ROUTE_OUT"]);
 });
 
 /** Every .ts, .tsx, .js and .mjs file under `dir`, with node_modules left out. */
