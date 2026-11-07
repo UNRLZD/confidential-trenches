@@ -443,12 +443,16 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   root.replaceChildren(...parts);
 }
 
-// The withdraw form's reads on the build's network (src/withdraw/handoff.ts): the note value over the note store and the
-// relayer's fee bounded by the device's fee_max. No hand-off yet: Withdraw is drawn pending until the move from A to the
-// typed account is on this page (card wallet-withdraw-move-out).
+// The withdraw form's reads on the build's network (src/withdraw/handoff.ts): the note value over the note store, the
+// relayer's fee bounded by the device's fee_max, and the hand-off where the release names a relayer (the vault pays the
+// typed account straight, card wallet-withdraw-move-out); with the last settle pass's drifts, shown on the form.
 function withdrawDeps() {
-  return withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault });
+  const page = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+  return { ...withdrawFormDeps(page), unmatched: () => withdrawsUnmatched };
 }
+// How many RESERVED vault withdrawals the last settle pass read "unmatched" (a spend of the note whose change is not this
+// device's): kept for the form, never dropped (card wallet-withdraw-move-out).
+let withdrawsUnmatched = 0;
 // Sign out (this tab's or another's) stops a vault withdrawal's wait; its note stays RESERVED with its request.
 let withdrawWait = new AbortController();
 function withdrawsSignedOut(): void {
@@ -461,13 +465,14 @@ async function settleWithdraws(): Promise<void> {
   if (!prover) return;
   let ns: NoteStore | null = null;
   try {
-    await withdrawSettle({
+    const pass = await withdrawSettle({
       store: () => open(),
       notes: async () => (ns ??= await openNoteStore(await open())),
       seed64: () => openSeed64(),
       prover: prover.vault,
       signal: withdrawWait.signal,
     });
+    withdrawsUnmatched = Object.values(pass.outcomes).filter((k) => k === "unmatched").length;
   } finally {
     (ns as NoteStore | null)?.close();
   }
