@@ -37,7 +37,7 @@ import { evmAgreedBlock, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPool
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
+import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
 import { POOL_DEPOSIT_LOCK, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -336,7 +336,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
     if (landedTxs.length > 0) return { stage: "part_filled", txs: landedTxs };
     // a take not final yet before the note to sign: "not now" (pool-kinds.ts answers it busy), nothing signed
     if (e instanceof EvmNotFinalError) throw e;
-    return { error: e instanceof Error && e.name === "PoolRuleRefused" ? "not_allowed" : "down" };
+    return { error: e instanceof PoolRuleRefused ? "not_allowed" : "down" };
   } finally {
     seed.fill(0);
     for (const k of keys) k.fill(0);

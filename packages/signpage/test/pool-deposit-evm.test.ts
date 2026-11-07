@@ -275,3 +275,15 @@ test("a take of U's deposit note in a block not final yet: nothing signed, the r
   assert.equal(ch.c.sent.length, 0, "nothing sent");
   assert.equal((await ns.get(planned.id))!.state, "PLANNED");
 });
+
+test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), whatever its name", async () => {
+  const { ch, ns } = await funded(RUNG + FEE);
+  // a Robinhood ask on Base Sepolia's pin: the rule refuses the pin (evm_not_pinned)
+  const a = await runPoolDepositEvm(hostOf(ch, ns), { ...ASK, chain: "robinhood" });
+  assert.deepEqual(a, { error: "not_allowed" });
+  assert.equal(ch.c.sent.length, 0);
+  // an error that only names itself PoolRuleRefused is not a rule refusal
+  const fake = Object.assign(new Error("x"), { name: "PoolRuleRefused" });
+  const b = await runPoolDepositEvm(hostOf(ch, ns, { round: async () => Promise.reject(fake) }), ASK);
+  assert.notDeepEqual(b, { error: "not_allowed" });
+});
