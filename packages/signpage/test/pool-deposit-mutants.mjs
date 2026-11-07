@@ -1,6 +1,7 @@
 // The deposit runners' end rules (card pool-deposit-sent-end, review 8): each rule of src/pool-deposit.ts and
 // src/pool-deposit-evm.ts that tells the app a deposit's end, removed or weakened one at a time, fails the test named for
-// it (the reviewer's 15 survivors at 6f20021b, and the fold's own rules). A mutant is written to a copy beside its source
+// it (the reviewer's 15 survivors at 6f20021b, and the fold's own rules; the delta review of 37abecea's 10 survivors and
+// the second fold's rules, "fold review N" below, with src/pool-testnet.ts's wiring). A mutant is written to a copy beside its source
 // (src/.<name>-mutant-<pid>.ts) and run by a copy of the test file that imports it, all removed after: no tracked file is
 // changed, so a test run at the same time never reads a mutant. Exits 1 when a named test passes on its mutant, fails or
 // runs no test on the code as it is, or a mutant's text is not in its source exactly once.
@@ -12,6 +13,7 @@ import { runSync } from "../../../scripts/group-run.mjs";
 
 const SOL = { src: "pool-deposit.ts", test: "pool-deposit.test.ts" };
 const EVM = { src: "pool-deposit-evm.ts", test: "pool-deposit-evm.test.ts" };
+const TESTNET = { src: "pool-testnet.ts", test: "pool-testnet-evm-deposit.test.ts" };
 
 // [runner, [[text in its source, its replacement], ...], the test (a name prefix) that must fail]
 export const MUTANTS = [
@@ -47,7 +49,8 @@ export const MUTANTS = [
   [SOL, [['(a.stage === "part_filled" && (l === null || l.notes.length === 0))', 'a.stage === "part_filled"']], "pool-deposit-sent-end review 3: rung 1"],
   // review 4: no backoff, no give-up, no stop
   [SOL, [["    if (quiet) gap = Math.min(gap * 2, POOL_DEPOSIT_FOLLOW_MAX_MS);\n", ""]], "pool-deposit-sent-end review 1: a note the pass cannot"],
-  [SOL, [["    if (spent + gap > POOL_DEPOSIT_FOLLOW_FOR_MS) return null;\n", ""]], "pool-deposit-sent-end review 1: a note the pass cannot"],
+  // fold review 5: a give-up on a clock (the old hour) back in
+  [SOL, [["  let gap = POOL_DEPOSIT_FOLLOW_MS;\n  for (;;) {", "  let gap = POOL_DEPOSIT_FOLLOW_MS;\n  let spent = 0;\n  for (;;) {"], ["    await wait(gap);\n    if (quiet)", "    if (spent + gap > 3_600_000) return null;\n    await wait(gap);\n    spent += gap;\n    if (quiet)"]], "pool-deposit-sent-end review 1: a note the pass cannot"],
   [SOL, [["    if (h.signal?.aborted) return null;\n    // quiet", "    // quiet"]], "pool-deposit-sent-end review 4: the end's reads stop"],
   // E1: the follower's round read before U's finalized nonce
   [EVM, [['  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n  const round = await h.round();\n', '  const round = await h.round();\n  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n']], "review 8 E1:"],
@@ -63,6 +66,28 @@ export const MUTANTS = [
   [EVM, [["    if (kick) h.settle?.();\n", ""]], "pool-deposit-sent-end review 1 (EVM)"],
   // review 3 (EVM)
   [EVM, [['(a.stage === "part_filled" && (l === null || l.notes.length === 0))', 'a.stage === "part_filled"']], "pool-deposit-sent-end review 3 (EVM)"],
+  // fold review 1: a rung's landing posted as "filled" (an end) again; X12 / X13: the run's own end never posted
+  [SOL, [['          h.landed?.(done);\n          return "landed";', '          h.landed?.(done);\n          if (own) h.progress?.("filled");\n          return "landed";']], "pool-deposit-sent-end fold review 1: a two-rung"],
+  [EVM, [["          // no stage per note: \"filled\" ends the trade in the app, so the ask's one end goes from the kind (review 1)\n          continue;", '          h.progress?.("filled");\n          continue;']], "pool-deposit-sent-end fold review 1 (EVM)"],
+  [SOL, [["              } else if (ended) ctx?.progress((a as { stage: TradeStage }).stage);\n", "              } else if (ended) {\n              }\n"]], "M5:"],
+  [EVM, [["            else if (ended) ctx?.progress((a as { stage: TradeStage }).stage);\n", "            else if (ended) {\n            }\n"]], "pool-deposit-sent-end fold review 1 (EVM)"],
+  // fold review 4: X1, the EVM record restored at another value read as landed; X7, the EVM follower ignores the sign out;
+  // X14, a failed read counted as a send that may land (no backoff)
+  [EVM, [['return rec.state === "PLANNED" ? null : rec.leaf?.value === n.value ? "landed" : "dead";', 'return rec.state === "PLANNED" ? null : "landed";']], "pool-deposit-sent-end fold review 4 X1 (EVM)"],
+  [EVM, [["    if (h.signal?.aborted) return null;\n    let quiet = true;", "    let quiet = true;"]], "pool-deposit-sent-end review 4 (EVM)"],
+  [SOL, [['      const e = await noteEnd(h, sync, scope, n, wait).catch(() => "fault" as const);', "      const e = await noteEnd(h, sync, scope, n, wait).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14:"],
+  [EVM, [['      const e = await noteEndEvm(h, n).catch(() => "fault" as const);', "      const e = await noteEndEvm(h, n).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14 (EVM)"],
+  // fold review 5 (EVM): the give-up back in
+  [EVM, [["  let gap = POOL_DEPOSIT_EVM_FOLLOW_MS;\n  for (;;) {", "  let gap = POOL_DEPOSIT_EVM_FOLLOW_MS;\n  let spent = 0;\n  for (;;) {"], ["    await wait(gap);\n    if (quiet)", "    if (spent + gap > 3_600_000) return null;\n    await wait(gap);\n    spent += gap;\n    if (quiet)"]], "pool-deposit-sent-end review 4 (EVM)"],
+  // fold review 6: the follower opens the note store (whose open and list settle, and may write) again
+  [SOL, [["  const rec = (await h.records()).find(", "  const rec = (await (await h.notes()).list()).find("]], "pool-deposit-sent-end fold review 6:"],
+  [EVM, [["  const rec = (await h.records()).find(", "  const rec = (await (await h.notes()).list()).find("]], "pool-deposit-sent-end fold review 6 (EVM)"],
+  // fold review 3 (W1-W5): the page's wiring, each follow's pass and sign-out signal, and the sign out's abort
+  [TESTNET, [["      settle: () => void settleSolana(),\n", ""]], "pool-deposit-sent-end fold review 3"],
+  [TESTNET, [["        settle: () => void settleEvm(chain),\n", ""]], "pool-deposit-sent-end fold review 3"],
+  [TESTNET, [["      settle: () => void settleSolana(),\n      signal: follows.signal,\n", "      settle: () => void settleSolana(),\n"]], "pool-deposit-sent-end fold review 3"],
+  [TESTNET, [["        settle: () => void settleEvm(chain),\n        signal: follows.signal,\n", "        settle: () => void settleEvm(chain),\n"]], "pool-deposit-sent-end fold review 3"],
+  [TESTNET, [["    follows.abort();\n", ""]], "pool-deposit-sent-end fold review 3"],
 ];
 
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };

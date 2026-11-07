@@ -684,16 +684,19 @@ test("pool-deposit-sent-end review 4 (EVM): the end's reads back off (10 s doubl
   assert.deepEqual(waits.slice(0, 5), [10_000, 20_000, 40_000, 60_000, 60_000]);
   assert.deepEqual(stages, ["filled"], "the late landing told");
   assert.equal(ch.c.sent.length, 2);
-  // a sign out stops a follow at once
+  // a sign out stops a follow at once: no RPC call after it (fold review 4 X7: no landing planted, so only the stop ends it)
   const { ch: ch2, ns: ns2 } = await funded(RUNG + FEE);
-  const f = followedEvm(ch2, ns2, { signal: stop.signal });
+  let calls = 0;
+  const counted = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>) => async (m: string, p: readonly unknown[]) => (calls++, rpc(m, p));
+  const f = followedEvm(ch2, ns2, { signal: stop.signal, rpcs: [counted(ch2.rpcs[0]), counted(ch2.rpcs[1])] as const });
   await f.r.after;
   await f.runEnd;
   assert.equal(await f.parked(), true);
+  const before = calls;
   stop.abort();
-  ch2.land(ch2.c.sent[0]!);
   f.go();
   assert.equal(await f.parked(), false, "no read after the sign out");
+  assert.equal(calls, before, "no RPC call after the sign out");
   assert.deepEqual(f.stages, []);
 });
 
@@ -773,6 +776,36 @@ test("review 8 E4 and E5: a Deposited at another value is no end while its block
   f.go();
   assert.equal(await f.staged(1), true);
   assert.deepEqual(f.stages, ["not_landed"]);
+});
+
+test("pool-deposit-sent-end fold review 4 X1 (EVM): a note the pass restored at another value (a take read from the store) is not_landed, never filled", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const f = followedEvm(ch, ns);
+  await f.r.after;
+  await f.runEnd;
+  assert.equal(await f.parked(), true);
+  ch.deposit(planned.precommitment, EVM_POOL_MIN_DEPOSIT); // a front-runner's, final
+  await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), null); // the page's pass restores it before the end's read
+  const n = await ns.get(planned.id);
+  assert.deepEqual([n!.state, n!.leaf!.value], ["UNSPENT", EVM_POOL_MIN_DEPOSIT], "restored at the take's value");
+  f.go();
+  assert.equal(await f.staged(1), true);
+  assert.deepEqual(f.stages, ["not_landed"], "restored at another value: never filled");
+});
+
+test("pool-deposit-sent-end fold review 4 X14 (EVM): a read that fails (a provider down) backs the end's reads off, 10 s doubling to 60 s, never read as a send that may land", async () => {
+  const { ch, ns } = await funded(RUNG + FEE);
+  const waits: number[] = [];
+  let ended = false;
+  let cut = false;
+  const kind = poolDepositEvmKind(() => ({ ...hostOf(ch, ns), wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (ended) waits.push(ms);
+    }, end: () => void ((ch.c.down = "eth_getTransactionCount"), (ended = true)) }));
+  await (kind(ASK, { id: "e4", sha: "00", progress: () => {} }) as { after: Promise<void> }).after;
+  for (const t0 = Date.now(); waits.length < 5 && Date.now() - t0 < 10_000; ) await new Promise((ok) => setTimeout(ok, 20));
+  cut = true;
+  assert.deepEqual(waits.slice(0, 5), [10_000, 20_000, 40_000, 60_000, 60_000]);
 });
 
 test("review 8 E7: an ask whose run ended before all of it was sent ends part_filled when its sent note lands, never filled", async () => {

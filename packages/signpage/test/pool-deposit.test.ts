@@ -1837,6 +1837,32 @@ test("pool-deposit-sent-end fold review 6: the end's reads read each note's reco
   assert.equal(opens, atEnd, "the note store is never opened by the end's reads");
 });
 
+test("pool-deposit-sent-end fold review 4 X14: a read that fails (a provider down) backs the end's reads off, 2 s doubling to 60 s, never read as a send that may land", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  c.lands = false;
+  const waits: number[] = [];
+  let ended = false;
+  let cut = false;
+  const downed = (rpc: SolanaRpc): SolanaRpc => async (m, p) => {
+    if (ended) throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "provider.down.example");
+    return rpc(m, p);
+  };
+  const kind = poolDepositKind(() => ({
+    ...host(c, ns, { rpcs: [downed(c.rpc()), c.rpc()] }),
+    wait: async (ms: number) => {
+      if (cut) throw new Error("cut");
+      if (ended) waits.push(ms);
+    },
+    end: () => void (ended = true),
+  }));
+  await (kind(ask(RUNG), { id: "e5", sha: "00", progress: () => {} }) as { after: Promise<void> }).after;
+  for (const t0 = Date.now(); waits.length < 7 && Date.now() - t0 < 10_000; ) await new Promise((ok) => setTimeout(ok, 20));
+  cut = true;
+  assert.deepEqual(waits.slice(0, 7), [2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]);
+});
+
 test("pool-deposit-sent-end review 4: the end's reads stop when the page leaves the deposit (signal aborted at sign out): no read, no stage", async () => {
   const c = chain();
   const ns = await notes();
@@ -1944,13 +1970,13 @@ test("pool-deposit-sent-end review 3: rung 1 landed, rung 2 sent, then a provide
   await f.runEnd;
   down2 = false;
   assert.equal(c.sent.length, 2);
-  assert.deepEqual(f.stages, ["filled", "sent"], "rung 1's landing and rung 2's send only: never part_filled while rung 2 may land");
+  assert.deepEqual(f.stages, ["sent"], "rung 2's send only: rung 1's landing is no end (fold review 1), and never part_filled while rung 2 may land");
   assert.equal(await f.parked(), true, "rung 2's send is read on");
   c.lands = true;
   c.apply(base64.decode(kept[0]!));
   f.go();
-  assert.equal(await f.staged(3), true);
-  assert.deepEqual(f.stages, ["filled", "sent", "filled"], "the whole ask went in: filled");
+  assert.equal(await f.staged(2), true);
+  assert.deepEqual(f.stages, ["sent", "filled"], "the whole ask went in: filled, once");
 });
 
 test("pool-deposit-sent-end review 5: the only send taken, then a raw store error past it: the run's throw still hands the kind its end (not_landed), never left at sent", async () => {

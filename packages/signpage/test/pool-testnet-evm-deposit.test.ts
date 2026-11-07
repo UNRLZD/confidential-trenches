@@ -130,3 +130,40 @@ test("a load's EVM pass that meets a take not final yet (EvmNotFinalError) ends 
   assert.equal((await back.get(n.id))!.state, "INCOMING", "left open for the next load");
   back.close();
 });
+
+test("pool-deposit-sent-end fold review 3: the page wires each deposit kind's host to its sign-out signal and its pass: a sign out aborts every follow's signal (a host made after it gets a live one), and a follow's settle starts the chain's pass", async () => {
+  type SolHost = import("../src/pool-deposit.ts").PoolDepositHost;
+  type EvmHost = import("../src/pool-deposit-evm.ts").PoolDepositEvmHost;
+  const sol: { host: () => SolHost; ask: unknown }[] = [];
+  const evm: { host: () => EvmHost; ask: unknown }[] = [];
+  const refuse = { error: "not_allowed" } as const;
+  const r = rpcs();
+  const t = testnetPool(page(), {
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: () => r.pair,
+    evmRound: () => async () => ({ events: [], finalBlock: 100n }),
+    depositKinds: {
+      solana: (host) => (ask) => (sol.push({ host, ask }), refuse),
+      evm: (host) => (ask) => (evm.push({ host, ask }), refuse),
+    },
+  });
+  t.flow({ ...ASK, chain: "solana", decimals: 9, amount: 10_000_000n }, ctx);
+  t.flow(ASK, ctx);
+  assert.equal(sol.length, 1, "the Solana ask reached its kind");
+  assert.equal(evm.length, 1, "the Base ask reached its kind");
+  const hs = sol[0]!.host();
+  const he = evm[0]!.host();
+  // the pass: each follow's settle starts its chain's pass (a run of the kind with no ask)
+  hs.settle?.();
+  he.settle?.();
+  assert.deepEqual(sol.slice(1).map((x) => x.ask), [null], "the Solana follow's settle started the Solana pass");
+  assert.deepEqual(evm.slice(1).map((x) => x.ask), [null], "the Base follow's settle started the Base pass");
+  // the sign out: every follow's signal aborted
+  assert.equal(hs.signal?.aborted, false);
+  assert.equal(he.signal?.aborted, false);
+  await t.signedOut();
+  assert.equal(hs.signal?.aborted, true, "the Solana follow stops at sign out");
+  assert.equal(he.signal?.aborted, true, "the Base follow stops at sign out");
+  assert.equal(sol[0]!.host().signal?.aborted, false, "a follow after the next sign in reads on");
+  assert.equal(evm[0]!.host().signal?.aborted, false);
+});
