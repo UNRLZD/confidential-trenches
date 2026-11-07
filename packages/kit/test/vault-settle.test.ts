@@ -87,15 +87,16 @@ function vault(first: Snap) {
 }
 
 /** The wallet's note store, as far as settle writes through it: add refuses a second note on one precommitment. */
-function store(held: bigint[] = []) {
+function store() {
   const notes: { ref: unknown; scope: bigint; precommitment: bigint; state: string; parent: string; leaf: Kit.VaultSettleLeaf }[] = [];
   return {
     notes,
     async list() {
-      return [...held.map((precommitment) => ({ precommitment })), ...notes];
+      return notes;
     },
     async add(n: (typeof notes)[number]) {
-      if (held.includes(n.precommitment) || notes.some((x) => x.precommitment === n.precommitment)) throw new Error("that precommitment is already in the store");
+      await Promise.resolve(); // the wallet's add is a write under its lock: another call can run between list and add
+      if (notes.some((x) => x.precommitment === n.precommitment)) throw new Error("that precommitment is already in the store");
       notes.push(n);
       return n;
     },
@@ -163,24 +164,31 @@ test("in_flight, paid, settled with no refund and unknown spends: nothing sent, 
   assert.equal(st.notes.length, 0);
 });
 
-test("a spend whose callback runs while the call waits is sent once it turns refund_pending", async () => {
-  const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "in_flight", 0n)] });
+test("a spend whose callback runs while the call waits for its own settle is sent once it turns refund_pending", async () => {
+  const OTHER = { nullifierHash: 333n, refundPrecommitment: 444n, ref: { kind: "refund", l: 32n, j: 0 }, parent: "note-2" };
+  const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "refund_pending", REFUND), row(1, 333n, 444n, "in_flight", 0n)] });
   const st = store();
-  const rpcs = v.rpcs;
-  let reads = 0;
-  const watched: Kit.VaultSyncRpc = {
-    name: "rpc-a",
-    async query(p) {
-      if (p.method_name === "state_tree" && p.finality === "final" && ++reads === 1)
-        v.bump((s) => Object.assign(s.spends[0]!, { status: "in_flight" })); // a block passes, still in flight
-      if (p.method_name === "state_tree" && p.finality === "final" && reads === 2) v.bump((s) => Object.assign(s.spends[0]!, { status: "refund_pending", refund_value: String(REFUND) }));
-      return rpcs[0].query(p);
-    },
+  // the settle of NF lands only at the second read; by then the other's callback has run
+  const late: Kit.VaultSettleSend = async (c) => {
+    v.calls.push(c);
+    const nf = BigInt(JSON.parse(c.args).nullifier_hash);
+    if (nf === NF) v.bump((s) => Object.assign(s.spends[1]!, { status: "refund_pending", refund_value: "2000000" }));
+    v.settle(nf);
+    return `tx-${v.calls.length}`;
   };
-  const r = await vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: [watched, rpcs[1]], spends: [ME], send: v.send, store: st, waitsMs: NOOP_WAITS });
-  assert.equal(v.calls.length, 1);
-  assert.equal(r.outcomes[0]!.state, "refund_note");
-  assert.equal(st.notes[0]!.leaf.value, REFUND);
+  const r = await vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME, OTHER], send: late, store: st, waitsMs: NOOP_WAITS });
+  assert.equal(v.calls.length, 2);
+  assert.deepEqual(r.outcomes.map((o) => o.state), ["refund_note", "refund_note"]);
+  assert.deepEqual(st.notes.map((n) => n.leaf.value), [REFUND, 2_000_000n]);
+});
+
+test("a spend in flight (a callback that failed stays so) is read once and reported, never waited on", async () => {
+  const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "in_flight", 0n)] });
+  const t0 = Date.now();
+  const r = await vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: store(), waitsMs: [60_000] });
+  assert.ok(Date.now() - t0 < 5_000, "the call waited on a spend in flight");
+  assert.deepEqual(r.outcomes, [{ nullifierHash: NF, state: "in_flight" }]);
+  assert.equal(v.calls.length, 0);
 });
 
 test("a sent settle not read settled within the waits is reported sent, with nothing written", async () => {
@@ -251,4 +259,92 @@ test("hostile arguments are refused before any read", async () => {
 test("a sender that answers no transaction hash stops the call", async () => {
   const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "refund_pending", REFUND)] });
   await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: async () => "", store: store(), waitsMs: NOOP_WAITS }), /no transaction hash/);
+});
+
+// ---- the review of 3da33a6b (F3-F6 and its surviving mutants) ----
+
+test("refund by leaf: a store holding another note on R is not taken as the refund note (F3)", async () => {
+  const v = vault({ leaves: deposits(5), labels: deposits(5), spends: [row(0, NF, R, "refund_pending", REFUND)] });
+  const wrong = { value: 1n, label: 10_002n, commitment: vaultCommitment(1n, 10_002n, R), leafIndex: 2n };
+  const st = store();
+  st.notes.push({ ref: ME.ref, scope: SCOPE, precommitment: R, state: "UNSPENT", parent: "note-1", leaf: wrong });
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: st, waitsMs: NOOP_WAITS }), /holds another note on its refund precommitment/);
+  assert.deepEqual(st.notes.map((n) => n.leaf), [wrong], "the store was changed");
+});
+
+test("two calls at once on one store: one writes the note, the other reports it held (F6)", async () => {
+  const v = vault({ leaves: deposits(5), labels: deposits(5), spends: [row(0, NF, R, "refund_pending", REFUND)] });
+  v.settle(NF);
+  const st = store();
+  const call = () => vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: st, waitsMs: NOOP_WAITS });
+  const rs = await Promise.all([call(), call()]);
+  assert.deepEqual(rs.map((r) => (r.outcomes[0] as { written: boolean }).written).sort(), [false, true]);
+  assert.equal(st.notes.length, 1);
+});
+
+test("a settled refund's leaf that moves below the leaves read stops the call (F4)", async () => {
+  const OTHER = { nullifierHash: 333n, refundPrecommitment: 444n, ref: { kind: "refund", l: 32n, j: 0 }, parent: "note-2" };
+  const v = vault({ leaves: deposits(4), labels: deposits(4), spends: [row(0, NF, R, "refund_pending", REFUND), row(1, 333n, 444n, "refund_pending", 2_000_000n)] });
+  v.settle(NF); // leaf 4
+  v.settle(333n); // leaf 5
+  // after the first sync's two final reads, both RPCs move the second refund's leaf below the first's
+  let reads = 0;
+  const rpc = (r: Kit.VaultSyncRpc): Kit.VaultSyncRpc => ({
+    name: r.name,
+    async query(p) {
+      if (p.method_name === "state_tree" && p.finality === "final" && reads++ === 1)
+        v.bump((s) => {
+          s.spends[1]!.refund_leaf_index = 3;
+        });
+      return r.query(p);
+    },
+  });
+  await assert.rejects(
+    vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: [rpc(v.rpcs[0]), rpc(v.rpcs[1])], spends: [ME, OTHER], send: v.send, store: store(), waitsMs: NOOP_WAITS }),
+    /leaf 3 moved below the leaves read from 4/,
+  );
+});
+
+test("the vault holding one nullifier hash twice stops the call", async () => {
+  const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "refund_pending", REFUND), row(1, NF, R, "refund_pending", REFUND)] });
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: store(), waitsMs: NOOP_WAITS }), /holds nullifier hash 111 twice/);
+  assert.equal(v.calls.length, 0);
+});
+
+test("an abort after one send stops the next send", async () => {
+  const OTHER = { nullifierHash: 333n, refundPrecommitment: 444n, ref: { kind: "refund", l: 32n, j: 0 }, parent: "note-2" };
+  const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "refund_pending", REFUND), row(1, 333n, 444n, "refund_pending", 2_000_000n)] });
+  const ac = new AbortController();
+  const send: Kit.VaultSettleSend = async (c) => {
+    const tx = await v.send(c);
+    ac.abort(new Error("stopped by the caller"));
+    return tx;
+  };
+  await assert.rejects(vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME, OTHER], send, store: store(), waitsMs: NOOP_WAITS, signal: ac.signal }), /stopped by the caller/);
+  assert.equal(v.calls.length, 1, "a send after the abort");
+});
+
+test("the leaves are read from the lowest settled refund's leaf, never from 0", async () => {
+  const v = vault({ leaves: deposits(9), labels: deposits(9), spends: [row(0, NF, R, "refund_pending", REFUND)] });
+  const froms: number[] = [];
+  const rpc = (r: Kit.VaultSyncRpc): Kit.VaultSyncRpc => ({
+    name: r.name,
+    async query(p) {
+      if (p.method_name === "leaves") froms.push(JSON.parse(atob(p.args_base64 as string)).from);
+      return r.query(p);
+    },
+  });
+  await vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: [rpc(v.rpcs[0]), rpc(v.rpcs[1])], spends: [ME], send: v.send, store: store(), waitsMs: NOOP_WAITS });
+  assert.deepEqual([...new Set(froms)], [9]);
+});
+
+test("a settle that lands by the leaves read is taken with it, not reported sent", async () => {
+  const OTHER = { nullifierHash: 333n, refundPrecommitment: 444n, ref: { kind: "refund", l: 32n, j: 0 }, parent: "note-2" };
+  const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "refund_pending", REFUND), row(1, 333n, 444n, "refund_pending", 2_000_000n)] });
+  v.settle(NF); // settled by anyone before the call
+  const st = store();
+  // no wait at all: the device's own settle of OTHER is read only by the leaves read
+  const r = await vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME, OTHER], send: v.send, store: st, waitsMs: [] });
+  assert.deepEqual(r.outcomes.map((o) => o.state), ["refund_note", "refund_note"]);
+  assert.equal(st.notes.length, 2);
 });

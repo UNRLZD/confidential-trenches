@@ -26,11 +26,13 @@
 //! Prints the gas of each settle (the vault's receipt, with the trees' depths) and the gas table.
 //!
 //! kit_settle_mock (card vault-kit-settle): the kit's own settle, `vaultSettleOwn`, driven through its CLI
-//! (`node packages/kit/test/vault-settle-cli.mjs`, one process per run) on the mock token. fee_bounces as in 1 above:
-//! the fee part fails the one payout receipt, so all 7,000,000 is refund_pending. The device's own account ("device")
-//! runs the kit's settle: the kit reads the spend refund_pending, sends settle with its 150 Tgas and 148 B x 1e19, reads
-//! it settled and writes the refund note of exactly 7,000,000 (the fixture's refunds[0], leaf 8, its label) into the
-//! store. A second settle by hand is refused AlreadySettled with nothing changed; the kit's second run sends nothing
+//! (`node packages/kit/test/vault-settle-cli.mjs`, one process per run) on the mock token. fee_bounces and
+//! recipient_bounces as in 1 and 2 above, so the state tree holds 8 leaves at depth 3 and fee_bounces' 7,000,000 is
+//! refund_pending on a reserve of exactly 389 B. The device's own account ("device") runs the kit's settle: the kit reads
+//! the spend refund_pending, sends settle with its 150 Tgas and 148 B x 1e19, reads it settled and writes the refund
+//! note of exactly 7,000,000 (the fixture's refunds[0], leaf 8, its label) into the store. That note is the 9th leaf,
+//! so the tree grows a level: settle uses 74 B of the 148 B attached and the other 74 B come back to the device, the
+//! payer (the relayer) getting nothing. A second settle by hand is refused AlreadySettled with nothing changed; the kit's second run sends nothing
 //! and writes nothing. Every outcome is read on chain through the harness's RPC, never taken from the CLI's answer
 //! alone.
 #![cfg(feature = "sandbox")]
@@ -357,7 +359,7 @@ async fn kit_cli(input: Value) -> R<Value> {
 
 #[tokio::test]
 async fn kit_settle_mock() -> R<()> {
-    let (h, relayer, _alice) = deposited(TokenKind::Mock).await?;
+    let (h, relayer, alice) = deposited(TokenKind::Mock).await?;
     let f = json_of(SPENDS);
     let newcomer = h.account("newcomer", 5).await?;
     let device = h.account("device", 50).await?;
@@ -367,7 +369,16 @@ async fn kit_settle_mock() -> R<()> {
     let o = withdraw(&h, &relayer, "fee_bounces", need).await?;
     paid_out(&h, &o, "fee_bounces", 0, 7_000_000)?;
     let r = spend_row(&h, "fee_bounces").await?;
-    assert_eq!((r["status"].as_str(), r["refund_value"].as_str()), (Some("refund_pending"), Some("7000000")), "{r}");
+    let reserve = REFUND_RESERVE_BYTES * YOCTO_PER_BYTE;
+    assert_eq!((r["status"].as_str(), r["refund_value"].as_str(), r["reserve"].clone()), (Some("refund_pending"), Some("7000000"), json!(reserve.to_string())), "{r}");
+    // recipient_bounces as in vt_s08 2, so fee_bounces' refund note is the 9th state leaf and the tree grows a level
+    let _ = h.storage_deposit(&h.root, relayer.id()).await?;
+    let need_rb = row14_need(relayer.id().as_str(), alice.id().as_str(), 0, 2);
+    let o = withdraw(&h, &relayer, "recipient_bounces", need_rb + SURPLUS).await?;
+    paid_out(&h, &o, "recipient_bounces", 0, 2_000_000)?;
+    let st = h.view(&h.vault, "state_tree", json!({})).await?;
+    assert_eq!((st["size"].as_u64(), st["depth"].as_u64()), (Some(8), Some(3)), "{st}");
+    let (used, payer0) = (storage_usage(&h).await?, h.near_balance(relayer.id()).await?);
 
     let rpc = h.worker.rpc_addr();
     let r_p = args("fee_bounces")["withdrawal"]["refund_precommitment"].clone();
@@ -396,6 +407,13 @@ async fn kit_settle_mock() -> R<()> {
     assert_eq!(vault_rc.len(), 1, "{t}");
     assert!(vault_rc[0]["outcome"]["status"]["SuccessValue"].is_string(), "{t}");
     println!("kit settle fee_bounces: gas burnt {:.3} Tgas", vault_rc[0]["outcome"]["gas_burnt"].as_u64().unwrap_or(0) as f64 / 1e12);
+    // the tree grew a level: 389 + 74 B written, 74 B of the 148 B back to the device, nothing to the payer
+    let st = h.view(&h.vault, "state_tree", json!({})).await?;
+    assert_eq!((st["size"].as_u64(), st["depth"].as_u64()), (Some(9), Some(4)), "{st}");
+    assert_eq!(storage_usage(&h).await? - used, REFUND_RESERVE_BYTES + LEVEL_BYTES, "settle's bytes when the state tree grows a level");
+    let to_device = transferred(&h, sent[0].as_str().ok_or("sent[0]")?, device.id().as_str(), h.vault.as_str(), device.id().as_str()).await?;
+    assert_eq!(to_device, LEVEL_BYTES * YOCTO_PER_BYTE, "74 B of the 148 B back to the device");
+    assert_eq!(h.near_balance(relayer.id()).await?, payer0, "the reserve was all used: nothing to the payer");
     let r = spend_row(&h, "fee_bounces").await?;
     assert_eq!(
         (r["status"].as_str(), r["reserve"].as_str(), r["refund_value"].as_str(), &r["refund_label"], r["refund_leaf_index"].as_u64()),

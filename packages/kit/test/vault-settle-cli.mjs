@@ -35,7 +35,9 @@ async function send(c) {
   sent.push(hash);
   return hash;
 }
-const notes = (input.notes ?? []).map((n) => ({ ...n, precommitment: BigInt(n.precommitment) }));
+// every number back to a BigInt, the leaf's too: the kit compares a held leaf with the spend row's (review F3)
+const leafOf = (l) => (l === undefined ? undefined : { value: BigInt(l.value), label: BigInt(l.label), commitment: BigInt(l.commitment), leafIndex: BigInt(l.leafIndex) });
+const notes = (input.notes ?? []).map((n) => ({ ...n, scope: BigInt(n.scope), precommitment: BigInt(n.precommitment), leaf: leafOf(n.leaf) }));
 const store = {
   async list() {
     return notes;
