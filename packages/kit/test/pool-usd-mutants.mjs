@@ -120,6 +120,10 @@ export const MUTANTS = [
   // puts wSOL in `mine`, so a `mine` of one is [wSOL].
   [FLOW, "&& sameAccounts([hint[0]], [read[0][wi] ?? null]) && sameAccounts([hint[1]], [read[1][wi] ?? null]);", "&& sameAccounts([hint[0]], [read[0][wi] ?? null]);", "card solana-quote-under-1s review M4", FLOW_TEST],
   [FLOW, "&& mine.length === 1 && mine[0] === wsol &&", "&& mine[0] === wsol &&", "card solana-quote-under-1s review M5", FLOW_TEST],
+  // a dropped leg asks no build more (M6) and aborts the one in flight (M7). M1 (fitOn assembling a dropped leg's build)
+  // is held only with M6: its next build is what the fetch guard refuses, and an assembly alone changes nothing outside
+  [FLOW, "(closed ? Promise.reject(new LegGateClosed()) : doFetch(", "(false ? Promise.reject(new LegGateClosed()) : doFetch(", "card solana-quote-under-1s review: no reference pool while every build answers no route", FLOW_TEST],
+  [FLOW, "    abort.abort(new LegGateClosed());\n", "", "card solana-quote-under-1s review: no reference pool while every build is in flight", FLOW_TEST],
   // the same review's survivors of the last one, each now killed by its own test: the program compared after the tx on
   // each of the three kinds (N5a), the providers' agreement on the program (N5b), an agreed account of the token kept as
   // read (N15); and no baseline from provider A alone (N4b, PROBE-5 in RVW-7's shape)

@@ -386,7 +386,12 @@ async function prepareLeg(
   const closing = new Promise<never>((_ok, no) => { close = () => no(new LegGateClosed()); });
   closing.catch(() => undefined);
   const wait = { ...roomWait, get until() { return closed ? -Infinity : roomWait.until; }, sleep: (ms: number) => Promise.race([(roomWait.sleep ?? ((d: number) => new Promise<void>((ok) => setTimeout(ok, d))))(ms), closing]) };
-  const opts = { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.now ? { now: deps.now } : {}), wait };
+  // and asks no build more: its fetch refuses once the leg is closed, and the build in flight is aborted (the helper's
+  // Jupiter allows 10 calls in 10 s for every device together; a dropped leg's no-route search would spend 3)
+  const abort = new AbortController();
+  const doFetch: SolanaFetch = deps.fetch ?? ((u, i) => fetch(u, i));
+  const legFetch: SolanaFetch = (url, init) => (closed ? Promise.reject(new LegGateClosed()) : doFetch(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal }));
+  const opts = { fetch: legFetch, ...(deps.now ? { now: deps.now } : {}), wait };
   const tb0 = now();
   // A build's tables, read on both providers (assembly uses provider A's, S2 holds B's to the same bytes), and the
   // device's own assembly on them, which refuses (too_large) a tx over 1,232 bytes: the cap search's judge. The build
@@ -420,6 +425,7 @@ async function prepareLeg(
   const mintA = gate?.mint[0];
   const drop = async (why?: string): Promise<null> => {
     closed = true;
+    abort.abort(new LegGateClosed());
     close();
     if (why) rec.refused = why;
     await search.catch(() => undefined);
