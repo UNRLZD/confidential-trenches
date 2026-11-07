@@ -15,6 +15,7 @@ const TEST = "rules-pool.test.ts";
 const ONWARD = "rules-pool-onward.test.ts";
 const ATTACKS = "rules-pool-attacks.test.ts";
 const DEPEVM = "rules-pool-deposit-evm.test.ts";
+const DROOM = "EVM deposit: the headroom is G(depth)";
 const testOf = (file) => fileURLToPath(new URL(`./${file}`, import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/rules/.pool-mutant-${process.pid}.ts`, import.meta.url));
 const mutantTestOf = (file) => fileURLToPath(new URL(`./.${file.replace(/\.test\.ts$/, "")}-mutant-${process.pid}.test.ts`, import.meta.url));
@@ -260,7 +261,7 @@ export const MUTANTS = [
   ['if (d.value !== rung) return refuse("value");', "", DREF, DEPEVM],
   ['if (typeof pre !== "bigint" || pre <= 0n || pre >= EVM_DEPOSIT_FIELD_P) return refuse("precommitment");', "", DREF, DEPEVM],
   [' || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");', ') return refuse("data");', DREF, DEPEVM],
-  [" || data.slice(0, 10) !== EVM_DEPOSIT_SELECTOR", "", DREF, DEPEVM],
+  [' || data.slice(0, 10) !== "0xe2bbb158"', "", DREF, DEPEVM],
   ['if (lower(d.data) !== data) return refuse("data");', "", DREF, DEPEVM],
   ['if (d.nonce !== uNonce) return refuse("nonce");', "", DREF, DEPEVM],
   ['if (d.accessList.length > 0) return refuse("access_list");', "", DREF, DEPEVM],
@@ -269,7 +270,7 @@ export const MUTANTS = [
   ['if (d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)) return refuse("gas_estimate");', "", DREF, DEPEVM],
   ["d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)", "d.gasLimit > estimate + evmDepositHeadroom(stateDepth, labelDepth)", DREF, DEPEVM],
   ["d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)", "d.gasLimit < estimate", DREF, DEPEVM],
-  ["return (stateDepth + 1n + labelDepth + 1n) * EVM_DEPOSIT_GAS_PER_LEVEL;", "return (stateDepth + labelDepth) * EVM_DEPOSIT_GAS_PER_LEVEL;", DREF, DEPEVM],
+  ["return (stateDepth + 1n + labelDepth + 1n) * EVM_DEPOSIT_GAS_PER_LEVEL;", "return (stateDepth + labelDepth) * EVM_DEPOSIT_GAS_PER_LEVEL;", DROOM, DEPEVM],
   ['|| d > EVM_DEPOSIT_MAX_DEPTH) throw new PoolRuleRefused("depth");', ') throw new PoolRuleRefused("depth");', DREF, DEPEVM],
   ["if (d.maxPriorityFeePerGas > tipCap || ", "if (", DREF, DEPEVM],
   [' || d.maxPriorityFeePerGas > d.maxFeePerGas) return refuse("priority_fee");', ') return refuse("priority_fee");', DREF, DEPEVM],

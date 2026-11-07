@@ -513,11 +513,11 @@ test("an ask below the ladder's smallest rung is refused with nothing planned, a
   const a = await runPoolDepositEvm(hostOf(ch, ns, { short: (u, w) => void shorts.push([u, w]) }), { ...ASK, amount: EVM_LADDER.one });
   assert.deepEqual(a, { error: "not_allowed" });
   assert.equal((await ours(ns)).length, 0, "nothing planned");
-  assert.deepEqual(shorts, []);
+  assert.equal(shorts.length, 0);
   // an ask of the smallest rung: named at that rung, and U funded with exactly that deposits it
   const b = await runPoolDepositEvm(hostOf(ch, ns, { short: (u, w) => void shorts.push([u, w]) }), { ...ASK, amount: EVM_LADDER.min });
   assert.deepEqual(b, { error: "not_funded" });
-  assert.deepEqual(shorts.map((x) => x[1]), [EVM_LADDER.min + capBound(ch.c)]);
+  assert.deepEqual(shorts.map((x) => x[1]), [EVM_LADDER.min + capBound(ch.c)] as bigint[]);
   ch.c.balance = [shorts[0]![1], shorts[0]![1]];
   ch.c.onSend = (raw) => ch.land(raw);
   const c = await runPoolDepositEvm(hostOf(ch, ns), { ...ASK, amount: EVM_LADDER.min });

@@ -14,7 +14,7 @@ import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import type { NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { VAULT_FIELD_P } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_GAS_PER_LEVEL, EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
-import { checkEvmDeposit, EVM_DEPOSIT_FIELD_P, EVM_DEPOSIT_GAS_MAX, EVM_DEPOSIT_GAS_PER_LEVEL, EVM_DEPOSIT_SELECTOR, evmDepositHeadroom, evmOnwardSendDigest, PoolRuleRefused, signEvmDeposit, type EvmDepositContext, type EvmDepositReads, type EvmOnwardSend, type PoolAsk } from "../src/rules/pool.ts";
+import { checkEvmDeposit, EVM_DEPOSIT_FIELD_P, EVM_DEPOSIT_GAS_MAX, EVM_DEPOSIT_GAS_PER_LEVEL, evmDepositHeadroom, evmOnwardSendDigest, PoolRuleRefused, signEvmDeposit, type EvmDepositContext, type EvmDepositReads, type EvmOnwardSend, type PoolAsk } from "../src/rules/pool.ts";
 
 const refusedAs = (rule: string) => (e: unknown) => e instanceof PoolRuleRefused && e.code === "not_allowed" && e.rule === rule;
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -151,8 +151,7 @@ test("EVM deposit: the headroom is G(depth)'s per-level gas for d + 1 levels of 
   // measured on the live Base Sepolia pool (state 7 deep at size 66, label 5 at 27): our deposit after 0 to 36 others in
   // its block used at most 64,543 gas over its estimate of 372,596 (eth_simulateV1, 2026-11-07); the headroom covers it
   assert.ok(evmDepositHeadroom(7n, 5n) >= 64_543n);
-  assert.equal(EVM_DEPOSIT_SELECTOR, "0x" + Buffer.from(keccak_256(new TextEncoder().encode("deposit(uint256,uint256)"))).toString("hex").slice(0, 8));
-  assert.equal(CALL.data.slice(0, 10), EVM_DEPOSIT_SELECTOR);
+  assert.equal(CALL.data.slice(0, 10), "0x" + Buffer.from(keccak_256(new TextEncoder().encode("deposit(uint256,uint256)"))).toString("hex").slice(0, 8), "the wallet's call: the selector the rule holds it to");
 });
 
 test("EVM deposit: the rule's own bounds are the kit's: the field's order and the pool's MIN_DEPOSIT (its ladder's one)", () => {

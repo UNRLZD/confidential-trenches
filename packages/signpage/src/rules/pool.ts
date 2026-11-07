@@ -1073,8 +1073,7 @@ export function evmDepositHeadroom(stateDepth: bigint, labelDepth: bigint): bigi
   for (const d of [stateDepth, labelDepth]) if (typeof d !== "bigint" || d < 0n || d > EVM_DEPOSIT_MAX_DEPTH) throw new PoolRuleRefused("depth");
   return (stateDepth + 1n + labelDepth + 1n) * EVM_DEPOSIT_GAS_PER_LEVEL;
 }
-/** The pool's deposit(uint256,uint256) selector (PrivacyPool.sol:82). */
-export const EVM_DEPOSIT_SELECTOR = "0xe2bbb158";
+
 const DEPOSIT_CHECKED = new WeakMap<object, OnwardRead>();
 /** The pool's least deposit: its ladder's one, PrivacyPool.sol:53 MIN_DEPOSIT (the kit's EVM_POOL_MIN_DEPOSIT, held equal
  *  by test/rules-pool-deposit-evm.test.ts; this file imports no kit module beside its checks and builders). */
@@ -1117,11 +1116,12 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   const rung = call.value;
   if (rung < EVM_DEPOSIT_MIN || rung >= (1n << 128n) - 1n || rung > ask.amount) return refuse("amount");
   if (d.value !== rung) return refuse("value");
-  // the note's own precommitment, below p, and the call's bytes exactly: selector, value, precommitment, nothing else
+  // the note's own precommitment, below p, and the call's bytes exactly: the pool's deposit(uint256,uint256) selector
+  // (PrivacyPool.sol:82), value, precommitment, nothing else
   const pre = ctx.precommitment;
   if (typeof pre !== "bigint" || pre <= 0n || pre >= EVM_DEPOSIT_FIELD_P) return refuse("precommitment");
   const data = lower(call.data);
-  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(0, 10) !== EVM_DEPOSIT_SELECTOR || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");
+  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(0, 10) !== "0xe2bbb158" || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");
   if (lower(d.data) !== data) return refuse("data");
   // U's nonce on two RPCs: no replacing a send of U's, no queueing behind one
   if (d.nonce !== uNonce) return refuse("nonce");

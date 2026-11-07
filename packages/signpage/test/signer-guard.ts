@@ -14,7 +14,9 @@
 // - A pool deposit or sell encoded: a string built of literals that holds deposit(uint256,uint256), its selector
 //   e2bbb158, the EIP-712 Sell type or its hash (the kit's and the helper's), the selector or a hash as a number or as
 //   an array of byte literals, functionName "deposit" (viem), the ABI entry { type: "function", name: "deposit" }, or an
-//   ethers-style encoder called on "deposit". It needs a pick, as a call does.
+//   ethers-style encoder called on "deposit". It needs a pick, as a call does. One literal is a check, never an
+//   encoding: the selector "0xe2bbb158" alone as one side of a === or !== (a rule comparing a call's first four bytes);
+//   a comparison gives a boolean, never bytes, and the same literal anywhere else (held, joined, handed on) needs a pick.
 // - A module that exports a signer, seen by its symbol or by its type (a namespace import, an import()'s value): only
 //   `ns.x`, `ns["x"]` or `{ x, y: z } = ns` of it is read; any other use, a computed key or a `...rest` refuses. An
 //   import() of such a module, an import() the program cannot bind to a module, and import.meta.glob refuse.
@@ -68,7 +70,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "signEvmBuy", "evmWithdrawDigest", "signEvmWithdraw", "checkEvmOnwardSend", "evmOnwardSendDigest", "signEvmOnwardSend", "poolUnits", "drawPool", "POOL_KINDS", "POOL_CHAINS",
     "SOLANA_POOL_TAG_DEPOSIT", "SOLANA_POOL_DEPOSIT_LEN", "POOL_MAX_SLIPPAGE_BPS", "SOLANA_POOL_CU_LIMIT_MAX", "SOLANA_POOL_TX_FEE_MAX", "SOLANA_RENT_PER_BYTE_MAX", "SOLANA_POOL_SELL_RESERVE_MAX",
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor",
-    "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "checkEvmDeposit", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P",
+    "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "checkEvmDeposit", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`
@@ -684,7 +686,9 @@ export function signerGuard(entry: string, roots: readonly string[], defs: reado
         if (s !== null && top) {
           const t = norm(s);
           const e = encoding(t);
-          if (e) needsPick(n, `encodes ${e}: ${JSON.stringify(s)}`);
+          const compared = ts.isStringLiteralLike(n) && t === `0x${DEPOSIT_SELECTOR}` && n.parent !== undefined && ts.isBinaryExpression(n.parent) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(n.parent.operatorToken.kind);
+          if (e && compared) at(n, "compares a call's selector to the deposit's (a check: a boolean, no bytes)", true);
+          else if (e) needsPick(n, `encodes ${e}: ${JSON.stringify(s)}`);
           if (t.includes(SELL_TYPE)) {
             const fn = topName(n) ?? "";
             if (ex.sellType?.includes(fn)) at(n, `holds the EIP-712 Sell type in ${fn} (exempt)`, true);
