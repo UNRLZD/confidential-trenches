@@ -13,7 +13,7 @@ import type { HelperTokenStatusAnswer } from "../../../../packages/kit/src/index
 import { start } from "../server.ts";
 import { HEIGHT_SPREAD_MAX as FEE_SPREAD } from "../withdraw/fee.ts";
 import { MAX_FINAL_AGE_MS } from "../withdraw/index.ts";
-import { A, B, hashOf, nearChain, nearPair, PAUSED, type Views } from "../../test/token-status/near.ts";
+import { A, B, hashOf, nearChain, nearPair, NO_REQUEST, PAUSED, STORED, type Views } from "../../test/token-status/near.ts";
 import {
   backoffOf,
   BACKOFF_429_MS,
@@ -23,6 +23,8 @@ import {
   H_WAIT_MS,
   haltOf,
   HEIGHT_SPREAD_MAX,
+  nextIdOf,
+  storedOutcome,
   readUrls,
   statusesOf,
   statusFrom,
@@ -128,7 +130,7 @@ test("the display: one read per CACHE_MS of the monotonic clock however many cal
   await Promise.all([w.status(), w.status(), w.status()]);
   await w.status();
   const once = p.seen.length;
-  assert.equal(once, 8, "two finals, then three views at H on each");
+  assert.equal(once, 10, "two finals, then four views at H on each (the halt, the block, the code hash, the next request id)");
   t += CACHE_MS;
   await w.status();
   assert.equal(p.seen.length, once + 2, "the finals again; H unchanged, its status kept by block");
@@ -379,7 +381,7 @@ test("(r1) the status at one H is read once (kept by block); a status not caught
 });
 
 test("(r1) statusFrom: both reads of one block (height and hash), and each read's is_blocklisted of the halt's own block, else not caught up", () => {
-  const read = (h: number, over: Partial<Read> = {}): Read => ({ block_height: h, block_hash: hashOf(h), halt: { at: h, answer: '"5"' }, blocked: { at: h, answer: "false" }, code_hash: USDC_CODE_HASH, ...over });
+  const read = (h: number, over: Partial<Read> = {}): Read => ({ block_height: h, block_hash: hashOf(h), halt: { at: h, answer: '"5"' }, blocked: { at: h, answer: "false" }, code_hash: USDC_CODE_HASH, next: { at: h, answer: "218" }, ...over });
   assert.equal(statusFrom(read(10), read(10), USDC).caught_up, true);
   const off: [string, Read, Read][] = [
     ["is_blocklisted of another block", read(10, { blocked: { at: 9, answer: "false" } }), read(10)],
@@ -478,7 +480,7 @@ test("(r2) one read of H's block at a time whichever rule names it: a lower and 
   const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: p.fetch });
   const [l, h] = await Promise.all([w.statusAt("lower"), w.statusAt("higher")]);
   assert.deepEqual([l.caught_up, h.caught_up, l.block_height, h.block_height], [true, true, 500, 500]);
-  assert.equal(p.seen.filter((c) => c.method === "query").length, 6, "three views on each provider, once");
+  assert.equal(p.seen.filter((c) => c.method === "query").length, 8, "four views on each provider, once");
 });
 
 test("(r2) PROBE: both providers frozen 60 s with the wall clock stepped back 60 s (the block time looks fresh): not caught up, held", async () => {
@@ -516,4 +518,18 @@ test("(r2) pausedAt: the two providers must name one block h and one parent; a h
   assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair(v, { ...v, fork: "x" }).fetch }).pausedAt(100n), null, "B on another chain");
   assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair({ ...v, shift: 1 }).fetch }).pausedAt(100n), null, "both answer block 101 for 100");
   assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch: nearPair(v).fetch }).pausedAt(101n), true, "the same chain, asked right");
+});
+
+test("(p) the exact text: storedOutcome takes only the two recorded answers, at a block; nextIdOf only a u32's digits", () => {
+  const at = (error: string) => ({ result: { block_height: 7, block_hash: hashOf(7), logs: [], error } });
+  assert.deepEqual(storedOutcome(at(STORED)), { at: 7, stored: true });
+  assert.deepEqual(storedOutcome(at(NO_REQUEST)), { at: 7, stored: false });
+  for (const off of [STORED + " ", " " + STORED, NO_REQUEST.replace("627:87", "647:87"), PAUSED, STORED.replace("predecessor_account_id", "signer_account_id")]) assert.deepEqual(storedOutcome(at(off)), { other: true }, off);
+  assert.deepEqual(storedOutcome({ result: { error: STORED } }), { other: true }, "no block");
+  assert.deepEqual(storedOutcome({ result: { block_height: 7, result: [] } }), { other: true }, "a value");
+  assert.equal(nextIdOf({ at: 1, answer: "218" }), 218);
+  assert.equal(nextIdOf({ at: 1, answer: "0" }), 0);
+  for (const off of ['"218"', "0218", "-1", "2.5", "4294967296", " 218", ""]) assert.equal(nextIdOf({ at: 1, answer: off }), null, off);
+  assert.equal(nextIdOf({ at: 1, panic: "x" }), null);
+  assert.equal(nextIdOf(undefined), null);
 });

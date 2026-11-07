@@ -5,11 +5,16 @@
 // block; 222745349's parent is 222745347).
 import { createHash } from "node:crypto";
 import { base58 } from "../../src/bind/checks.ts";
-import { USDC_CODE_HASH } from "../../src/token-status/status.ts";
+import { TESTNET_TOKEN, USDC, USDC_CODE_HASH } from "../../src/token-status/status.ts";
 
 export const A = "https://a.example";
 export const B = "https://b.example";
 export const PAUSED = 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })';
+/** approve_multisig_request run as a view, as both mainnet providers answer it (id 46 stored, id 86 not, 2026-11-07). */
+export const STORED = 'wasm execution failed with error: HostError(ProhibitedInView { method_name: "predecessor_account_id" })';
+export const NO_REQUEST = "wasm execution failed with error: HostError(GuestPanic { panic_msg: \"panicked at 'called `Option::unwrap()` on a `None` value', src/fiat_token.rs:627:87\" })";
+/** get_next_multisig_request_id as both providers read it on 2026-11-07: mainnet USDC 218, the testnet token 4. */
+export const NEXT_ID: Record<string, number> = { [USDC]: 218, [TESTNET_TOKEN]: 4 };
 
 const heights = new Map<string, number>();
 /** Block h's hash: base58 of 32 bytes, one per height, on every fake chain alike (so two providers name one block); a fork names its own. */
@@ -23,6 +28,10 @@ export type Views = {
   /** ft_balance_of's answer at block h: a value's text, or { error } for a panic. */
   balance?: (h: number) => unknown;
   blocked?: (h: number) => unknown;
+  /** get_next_multisig_request_id's answer at block h (the token's pin by default). */
+  next?: (h: number) => unknown;
+  /** approve_multisig_request's answer for `id` at block h (no request by default): true for a stored one, or any answer. */
+  request?: (id: number, h: number) => unknown;
   /** view_account's fields at block h (merged over the defaults). */
   code?: (h: number) => Record<string, unknown> | undefined;
   /** This provider's final height (500 by default), read at each call. */
@@ -67,6 +76,12 @@ export function nearChain(v: Views) {
       result = c === undefined ? undefined : { amount: "0", locked: "0", code_hash: USDC_CODE_HASH, storage_usage: 1, ...at, ...c };
     } else if (p.method_name === "ft_balance_of") result = value((v.balance ?? (() => '"5"'))(h));
     else if (p.method_name === "is_blocklisted") result = value((v.blocked ?? (() => "false"))(h));
+    else if (p.method_name === "get_next_multisig_request_id") result = value((v.next ?? (() => String(NEXT_ID[String(p.account_id)])))(h));
+    else if (p.method_name === "approve_multisig_request") {
+      const { request_id } = JSON.parse(Buffer.from(String(p.args_base64), "base64").toString("utf8")) as { request_id: number };
+      const r = (v.request ?? (() => false))(request_id, h);
+      result = value(r === true ? { error: STORED } : r === false ? { error: NO_REQUEST } : r);
+    }
     return json({ jsonrpc: "2.0", id: 1, result });
   };
 }
