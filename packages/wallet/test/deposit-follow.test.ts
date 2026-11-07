@@ -1371,12 +1371,15 @@ test("D1: a stranger's dust under U after the move lands never holds the move op
   const move = mover((_u, m) => void (sends++, t.chain.used.add(m.nonce), (t.chain.a.held = t.chain.b.held = 1n)));
   // the quote's floor refuses 1 base unit (SIGN_HOST's refundMover answers under_min below MIN_DEPOSIT)
   const refundMove = async (ask: FollowMoveAsk): Promise<RefundMoveResult> => (ask.reads[0].held < VAULT_MIN ? (unders++, { kind: "under_min" }) : move(ask));
-  t.onTick.fn = (n) => n === 4 && t.chain.credit(CREDIT);
-  const out = await followDeposit(t.args, { ...t.deps, refundMove, signal: stop(t, 30) });
+  // SIGN_HOST's follow (untilFinal): the dust left under U never keeps the op from its final
+  t.onTick.fn = (n) => ((t.chain.a.timeMs = t.chain.b.timeMs = t.chain.a.timeMs + 600_000), n === 4 && t.chain.credit(CREDIT));
+  const out = await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 30) });
   assert.equal(out.kind, "done");
   assert.equal(sends, 1);
-  assert.ok(unders <= 1, `the dust is asked about once at that balance, not every round (${unders})`);
-  assert.equal((await opOf(t.w)).follow.moved, true);
+  assert.equal(unders, 1, "the dust is asked about once at that balance, not every round");
+  const op = await opOf(t.w);
+  assert.equal(op.follow.moved, true);
+  assert.equal(op.follow.final, true);
 });
 
 test("finding 5: is_nonce_used, the block time and the balance are read at one block on both RPCs: a lagging state read never re-signs a move that landed", async () => {
