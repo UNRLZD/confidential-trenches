@@ -15,7 +15,9 @@
 //   sizes name, else read again at the higher slot either answered, minContextSlot); every other read of a build at
 //   confirmed too. The deposit must go on each RPC's reading: U after it holds 0 or at least the rent of an empty
 //   account (the runtime refuses less) on both, so neither RPC's word prices it. Short of that: not_funded, nothing
-//   written, `short` naming the least top-up that makes both go.
+//   written, `short` naming the least top-up that leaves U at least that rent on both (the rent as margin, so a
+//   stranger's lamport sent after the top-up never stalls it). A simulation that fails with no mark is read and
+//   simulated once more before the ask answers (the pool may have moved between the read and the simulation).
 // - Before anything is written: the blockhash is read on one RPC and must be valid on the other; the tx is checked by
 //   the rule (rules/pool.ts checkSolanaDeposit: one tag 1 into the pinned pool, by U, of the rung, with the note's own
 //   precommitment) and its unsigned bytes simulated on both RPCs (sigVerify off, so neither can send it), which must
@@ -420,12 +422,14 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       const [fa, fb] = await both(h, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
       if (fa !== fb) throw new Refused("failed");
       // what U keeps on each RPC's reading: 0 or at least an empty account's rent on both (the runtime refuses less), so
-      // the true one, whichever it is, goes; short of that, the least top-up that makes both go
+      // the true one, whichever it is, goes. Short of that, the least top-up that leaves at least that rent on both: the
+      // rent is the quote's margin, never a top-up to exactly 0, so a stranger's lamport sent after it (0 < left < rent)
+      // never stalls the deposit; the margin stays in U for its next deposit (M350 (4); slice-2 review Low 4)
       const costs = st.views.map((v) => solanaPoolDepositCost(fa, st.rent, st.sizes, v.have));
       const lefts = st.views.map((v, k) => v.balance - value - costs[k]!);
       const floor = solanaRentMin(st.rent, 0);
       const goes = (top: bigint): boolean => lefts.every((l) => l + top === 0n || l + top >= floor);
-      const tops = [0n, ...lefts.map((l) => -l), ...lefts.map((l) => floor - l)].filter((x) => x >= 0n).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+      const tops = [0n, ...lefts.map((l) => floor - l)].filter((x) => x >= 0n).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
       const top = tops.find(goes)!;
       if (top > 0n) return { short: top };
       // unsigned: an RPC cannot send what it simulates
@@ -617,7 +621,10 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
       const planned = held ?? (await store.add({ ref, scope, precommitment, state: "PLANNED" }));
       if (planned.state !== "PLANNED" || planned.precommitment !== precommitment) throw new Refused("failed");
       const from = uKey(source);
-      const b = await build(from, precommitment, value, true);
+      let b = await build(from, precommitment, value, true);
+      // a simulation that fails with no mark on either RPC may be the pool moving between the read and the simulation:
+      // read and simulate once more before answering (a second failure, or a mark, is answered below)
+      if ("simulation" in b && (await markOf(h, precommitment)) === null) b = await build(from, precommitment, value, true);
       if (!("tx" in b)) {
         // another deposit took this precommitment while it was planned: that deposit is restored as the user's note,
         // and the same rung goes on U's next note, in this run (nothing was signed or paid for this one)

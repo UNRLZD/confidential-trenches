@@ -3,10 +3,17 @@
 // read on two devnet RPCs, and SIGN_HOST's /app.js with no testnet pin: PASS. bad: the same reads with another
 // precommitment in the run's place, whose mark does not exist: FAIL. Planted on the good one: the deposit tx failed, the
 // mark's value another, a state leaf another, U not emptied (the cost priced above what the program took): FAIL.
+// Slice 3 (the EVM same-chain deposit): good.evm is the release-83 build's index.html and app.js, which pin each other
+// and carry the EVM deposit's marks: PASS; bad.evm is SIGN_HOST's release-72 page, which carries none: FAIL. Planted on
+// the good one: an index.html that pins another bundle, and a bundle with one mark gone: FAIL. The review fold:
+// planted.unrouted is a real build of the fold with the flow's EVM deposit route removed (it still carries every mark,
+// since the load's settle pass calls the runner): FAIL, as no release list names it.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { RUN, check } from "./pool-deposits.mjs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { EVM_MARKS, ROUTED_FROM, RUN, check, routedReleases } from "./pool-deposits.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-deposits.answers.json", import.meta.url), "utf8"));
 const R = JSON.parse(readFileSync(RUN, "utf8"));
@@ -24,7 +31,7 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign });
+const run = (rec, plant, sign = rec.sign, evm = rec.evm) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign, evm });
 const bad = (r, start) => {
   assert.equal(r.ok, false);
   assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${start}`)), r.lines.join("\n"));
@@ -37,12 +44,47 @@ test("recorded good answer: the slice 2 deposit, its mark and both leaves on two
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(new Set(A.good.answers.map((a) => a.url)).size, 2, "two RPCs");
   for (const s of ["deposit ", "mark ", "label page ", "state page ", "U "]) assert.equal(r.lines.filter((l) => l.startsWith(`ok   ${s}`)).length, 2, s);
+  assert.equal(r.lines.filter((l) => l.startsWith("ok   EVM: ")).length, 2 + Object.keys(EVM_MARKS).length, "the pin, every EVM mark and the released build");
 });
 
 test("recorded bad answer: another precommitment in the run's place: FAIL", async () => {
   const r = await run(A.bad);
   bad(r, "the precommitment read is the run's");
   bad(r, "mark ");
+  for (const k of Object.keys(EVM_MARKS)) bad(r, `EVM: SIGN_HOST's bundle carries the EVM deposit's ${k}`);
+});
+
+test("recorded bad EVM answer alone: SIGN_HOST's release-72 page, before the EVM deposit, with the good Solana reads: FAIL", async () => {
+  const r = await run(A.good, undefined, A.good.sign, A.bad.evm);
+  assert.equal(r.ok, false);
+  assert.ok(!r.lines.some((l) => l.startsWith("BAD ") && !l.startsWith("BAD  EVM: ")), r.lines.join("\n"));
+  bad(r, "EVM: SIGN_HOST's bundle carries the EVM deposit's U^evm derivation");
+});
+
+test("planted on the good EVM answer: an index.html that pins another bundle, or a bundle with one mark gone: FAIL", async () => {
+  bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: A.bad.evm.pin }), "EVM: SIGN_HOST's served /app.js is the one index.html pins");
+  bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: null }), "EVM: SIGN_HOST's served /app.js is the one index.html pins");
+  for (const k of Object.keys(EVM_MARKS)) bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, marks: { ...A.good.evm.marks, [k]: false } }), `EVM: SIGN_HOST's bundle carries the EVM deposit's ${k}`);
+});
+
+test("planted: a real build with pool.deposit on Base and Robinhood no longer routed to the runner, every mark still in it: FAIL", async () => {
+  const u = A.planted.unrouted;
+  assert.equal(u.pin, u.sha384, "it pins itself");
+  assert.ok(Object.keys(EVM_MARKS).every((k) => u.marks[k] === true), "every mark present");
+  const r = await run(A.good, undefined, A.good.sign, u);
+  bad(r, "EVM: SIGN_HOST's /app.js is a release-83-or-later build");
+  assert.ok(!r.lines.some((l) => l.startsWith("BAD ") && !l.includes("release-83-or-later")), r.lines.join("\n"));
+});
+
+test("a release cut in parallel on a tree without the route is never read as routed: release-78 (page-evm-rpc-csp) is below ROUTED_FROM", async () => {
+  const dir = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
+  const r78 = JSON.parse(readFileSync(path.join(dir, "release-78.json"), "utf8"));
+  const js = r78.hosts.SIGN_HOST.files.find((f) => f.path === "/app.js").sha384;
+  assert.ok(ROUTED_FROM > 78);
+  assert.equal(routedReleases(dir).has(js), false, "release-78's bundle has no EVM deposit route");
+  assert.ok(routedReleases(dir).has(A.good.evm.sha384), "the good answer's bundle is a routed release's");
+  const r = await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: js, sha384: js });
+  bad(r, `EVM: SIGN_HOST's /app.js is a release-${ROUTED_FROM}-or-later build`);
 });
 
 test("planted on the good answer: the deposit failed, the mark another value, a state leaf another, U not emptied: FAIL", async () => {
