@@ -9,20 +9,20 @@
       "immutables": []
     },
     "PrivacyPoolSimple": {
-      "length": 9441,
-      "masked": "0x0d28ad57bfa889d772433fc15f3492c60366387b296b2773743a6e24e6973bd0",
+      "length": 10255,
+      "masked": "0xeb7693bad3eed4fc5cf903e6119710fa4a03f5742a7a401ca5343bf1d6246c48",
       "immutables": [
         [
-          569
+          631
         ],
         [
-          431,
-          3161,
-          5438
+          509,
+          3726,
+          5973
         ],
         [
-          754,
-          5979
+          816,
+          6514
         ]
       ]
     },
