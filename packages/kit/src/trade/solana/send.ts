@@ -247,6 +247,29 @@ export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KE
   bareOf.set(out, bare);
   return out;
 }
+/** The provider with each call timed out `ms` after it goes out, never counting its wait for a turn (card
+ *  solana-release-reads-paced): when a caller holds the provider under a limit (a paced wrapper made, a set or trade
+ *  started), every call takes its turn in the provider's shared queue under the limits named there, naming none of its
+ *  own; a provider no caller paces is called as given. The provider is called synchronously inside its turn, so a paced
+ *  wrapper given here is that turn's own call, never queued twice. `ms` as a function is asked when the turn comes (a
+ *  throw there ends the call unsent, its error the call's); `late` makes the timeout's error (the caller's own type). */
+export function solanaTimedRpc(rpc: SolanaRpc, ms: number | (() => number), late?: (ms: number) => Error): SolanaRpc {
+  const timed = solanaWrappedRpc(rpc, (method, params) => {
+    let p: Promise<unknown>;
+    let bound: number;
+    try {
+      bound = typeof ms === "function" ? ms() : ms;
+      p = Promise.resolve(rpc(method, params));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return withTimeout(p, bound, late);
+  });
+  const bare = bareOf.get(rpc) ?? rpc;
+  const queue = bare.url === undefined ? queueOfFn.get(bare) : queueOfUrl.get(urlKey(bare.url));
+  const named = queue?.limits.values().next().value;
+  return named ? solanaPacedRpc(timed, named) : timed;
+}
 
 export type SolanaFetch = (url: string, init: RequestInit) => Promise<Response>;
 /** One JSON-RPC call on one Solana provider: resolves the call's `result`, rejects on any other answer. `url`, when
@@ -299,9 +322,9 @@ export type SolanaSetOptions = {
 
 const errText = (e: unknown): string => String(e instanceof Error ? e.message : e).slice(0, 200);
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number, late?: (ms: number) => Error): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
+  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(late ? late(ms) : new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
 }
 
 async function readBounded(r: Response): Promise<string> {
@@ -743,7 +766,9 @@ export async function readSolanaTxEnd(
 ): Promise<"filled" | "failed" | "expired" | "unknown"> {
   const one = async (rpc: SolanaRpc): Promise<{ read: StatusRead | null; dead: boolean }> => {
     try {
-      const call = (method: string, params: readonly unknown[]) => withTimeout(Promise.resolve().then(() => rpc(method, params)), callTimeoutMs);
+      // each call timed from when it goes out, in the provider's queue when a caller paces it (solanaTimedRpc)
+      const timed = solanaTimedRpc(rpc, callTimeoutMs);
+      const call = (method: string, params: readonly unknown[]) => Promise.resolve().then(() => timed(method, params));
       const anchor = readAnchor(await call("getLatestBlockhash", [{ commitment: "finalized" }]));
       const v = readValid(await call("isBlockhashValid", [tx.blockhash, { commitment: "processed" }]));
       const st = readStatuses(await call("getSignatureStatuses", [[tx.signature], { searchTransactionHistory: true }]), 1);

@@ -74,7 +74,7 @@ import {
   type SolanaPoolVenue,
   type SolanaReference,
 } from "./pool.ts";
-import { solanaSameProvider, type SolanaRpc } from "./send.ts";
+import { solanaSameProvider, solanaTimedRpc, type SolanaRpc } from "./send.ts";
 import { deepFreeze } from "../../freeze.ts";
 
 export const SOLANA_POOL_TAG_RELEASE = 2;
@@ -439,7 +439,7 @@ export const solanaRentMin = (rent: SolanaRent, size: number): bigint => (RENT_O
 export async function readSolanaRent(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaRent> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   const rents = await Promise.all(providers.map(async (rpc) => {
-    const r = await withTimeout(Promise.resolve().then(() => rpc("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }])), READ_TIMEOUT_MS);
+    const r = await Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getAccountInfo", [SOLANA_RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }]));
     const value = (r as { value?: { owner?: unknown; data?: unknown } } | null)?.value;
     const d = value?.data;
     if (!value || typeof value.owner !== "string" || !Array.isArray(d) || typeof d[0] !== "string" || d[1] !== "base64") throw new Error("a provider's answer is not an account read");
@@ -789,10 +789,6 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
 // ------------------------------------------------------------------------------------------------- the reads
 
 const READ_TIMEOUT_MS = 5_000;
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let t: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(new Error(`no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
-}
 
 /** pump Global and PumpSwap GlobalConfig sizes, read on mainnet-beta and publicnode 2026-11-02 21:00Z; the offsets above
  * hold only on these layouts, so any other size is refused. */
@@ -862,7 +858,7 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   const addr = solanaPoolAddresses(mint);
   const list = kind === "pump-curve" ? [mint, addr.curve, PUMP_GLOBAL] : [mint, addr.pool, AMM_GLOBAL_CONFIG];
-  const reads = await Promise.all(providers.map((rpc) => withTimeout(Promise.resolve().then(() => rpc("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])), READ_TIMEOUT_MS)));
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
   const i = pick(8); // one buyback recipient for both reads, so they compare equal
   const venues = reads.map((r) => {
     const parsed = solanaParseAccountsAnswer(r, list.length);
@@ -880,7 +876,7 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
  */
 export async function readSolanaPumpCurveTableVenue(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaPoolTableVenue> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
-  const reads = await Promise.all(providers.map((rpc) => withTimeout(Promise.resolve().then(() => rpc("getMultipleAccounts", [[PUMP_GLOBAL], { encoding: "base64", commitment: "finalized" }])), READ_TIMEOUT_MS)));
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [[PUMP_GLOBAL], { encoding: "base64", commitment: "finalized" }]))));
   const globals = reads.map((r) => {
     const g = solanaParseAccountsAnswer(r, 1)?.accounts[0];
     if (!g) throw new Error("a provider's answer is not pump Global");

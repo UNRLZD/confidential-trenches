@@ -10,12 +10,22 @@
 // spend by the kit's own rule (solanaPoolBuyMaxSpend at the worst venue, the 0.001 SOL tip cap, rent 5,080/1:
 // 1,736,080 lamports) and SOL at Pyth's 4 Nov 07:40Z read; base-ready the Base Sepolia pool's 0.001 ETH chunks
 // (scripts/live-checks/pool-evm-testnet-run.base-sepolia.json), ETH at a planted $3,500.12345678. ?amt= sets the
-// amount in the box. Test only.
+// amount in the box. ?sheet=1 (card app-phone-trade-sheet) draws the same box in the phone trade sheet with the safety
+// grid under it, from the recorded token read (test/token-source/helper-token-2026-11-03.json), behind an open button, as
+// the token page's phone bar opens it. ?page=1 draws the token page itself (TokenPage, both widths, one trade state) on
+// the recorded read, its candle reads answered by the run. Every set preview asked is counted in window.__previews.
+// Test only.
 import type { BuyRoute, SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { centsToDecimal, ladderSplit, parseUsd } from "../../src/screens/trade/model.ts";
 import { TradeBox } from "../../src/screens/trade/TradeBox.tsx";
+import { TradeSheet, useTradeSheet } from "../../src/screens/trade/TradeSheet.tsx";
+import { SafetyGrid } from "../../src/screens/trade/SafetyGrid.tsx";
+import { TokenPage } from "../../src/screens/token/TokenPage.tsx";
+import type { RiskRead } from "../../src/screens/trade/safety.ts";
+import type { MarketRow } from "../../src/screens/discover/fields.ts";
+import READ from "../token-source/helper-token-2026-11-03.json";
 import { TradeSourceProvider } from "../../src/screens/trade/source.tsx";
 import { liveRoute } from "../../src/screens/trade/route.ts";
 import type { SetPreviewAnswer, TradeKit, TradeSource } from "../../src/screens/trade/source.tsx";
@@ -32,9 +42,11 @@ const PER_CENT = 480_000_000n;
 declare global {
   interface Window {
     __calls: unknown[];
+    __previews: number;
   }
 }
 window.__calls = [];
+window.__previews = 0;
 
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "ready";
@@ -65,6 +77,7 @@ let n = 0;
 
 const kit: TradeKit = {
   setPreview: async (req) => {
+    window.__previews++;
     const amount = parseUsd(req.amount)!;
     const { sizes, rest } = ladderSplit(amount);
     const set = sizes.length ? sizes.map((s, i) => (i === 0 ? s + rest : s)) : [amount];
@@ -134,7 +147,33 @@ let t0 = 0;
 const now = q.get("plant") === "clock" ? () => ((t0 ||= Date.now()), t0 + Math.round((Date.now() - t0) * 1.25)) : Date.now;
 const src: TradeSource = { snapshot, moneyOn: true, kit, now };
 
+/** The recorded token read's row and risk, for the safety grid under the box in the sheet. */
+const ROW = Object.fromEntries(READ.fields.map((k, i) => [k, READ.row[i]])) as unknown as MarketRow;
+const RISK = READ.rest.risk as unknown as RiskRead;
+
+function SheetPage() {
+  const sheet = useTradeSheet();
+  return (
+    <TradeSourceProvider value={src}>
+      <button type="button" className="trb-fxopen" data-testid="open-sheet" onClick={sheet.open}>Open</button>
+      <TradeSheet state={sheet.state} onClose={sheet.close} label="Buy TORCH" closeLabel="Close" head={<div className="trb-fxhead">TORCH</div>}>
+        <TradeBox chain="solana" token={MINT} symbol="TORCH" initialAmount={q.get("amt") ?? "25"} footer={<SafetyGrid row={ROW} risk={RISK} nowMs={Date.now()} filling={false} />} />
+      </TradeSheet>
+    </TradeSourceProvider>
+  );
+}
+
+function TokenPageFx() {
+  return (
+    <TradeSourceProvider value={src}>
+      <TokenPage data={{ status: "ready", row: ROW, risk: RISK }} nowMs={Date.now()} onRetry={() => {}} />
+    </TradeSourceProvider>
+  );
+}
+
 function Page() {
+  if (q.get("sheet") === "1") return <SheetPage />;
+  if (q.get("page") === "1") return <TokenPageFx />;
   return (
     <TradeSourceProvider value={src}>
       <div className="trb-fx">
@@ -146,7 +185,9 @@ function Page() {
 
 const style = document.createElement("style");
 style.textContent = `.trb-fx { box-sizing: border-box; width: 400px; margin: 8px 8px 8px auto; }
-@media (max-width: 767.98px) { .trb-fx { width: auto; margin: 0; padding: 12px 16px; } }`;
+@media (max-width: 767.98px) { .trb-fx { width: auto; margin: 0; padding: 12px 16px; } }
+.trb-fxopen { display: block; width: calc(100% - 32px); height: 50px; margin: 16px; border: 0; border-radius: 14px; background: #50e397; color: #04140b; font: 600 16px var(--font-ui); }
+.trb-fxhead { padding: 0 16px 8px; font-size: 18px; font-weight: 600; }`;
 document.head.append(style);
 
 fontsReady().then(() =>

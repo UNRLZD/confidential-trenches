@@ -12,6 +12,7 @@ export {
   EVM_QUOTE_MAX_AGE_MS,
   EVM_QUOTE_MAX_HINTS,
   EVM_SELL_PROBE_CODE,
+  evmBuyRevertedPools,
   evmIsDeviceQuote,
   evmIsDeviceSellQuote,
   evmPoolBuyQuote,
