@@ -1787,14 +1787,16 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
     },
     // the page's pass, one at a time (pool-testnet.ts settleSolana), as the kick starts it
     settle: () => void (passing ??= settlePoolDeposits(host(c, ns, { short: (_, l) => void shorts.push(l) })).finally(() => (passing = null))),
-    end: () => void (ended = true),
+    // at the run's end, before the end's first read (fold review 2: set here, never raced by a poll): dead on both, and
+    // U below the rung and its costs, so the pass's send again is short (fees and rent rose)
+    end: () => {
+      c.height += 1_000;
+      c.accounts.get(u.address)!.lamports = 1_000_000;
+      ended = true;
+    },
   }));
   const r = kind(ask(RUNG), { id: "e2", sha: "00", progress: (s) => void stages.push(String(s)) }) as { after: Promise<void> };
   await r.after;
-  while (!ended) await new Promise((ok) => setTimeout(ok, 5));
-  // dead on both, and U below the rung and its costs: the pass's send again is short (fees and rent rose)
-  c.height += 1_000;
-  c.accounts.get(u.address)!.lamports = 1_000_000;
   open();
   // until the reads stop (a follow that never gives up is cut at 10 s, and fails below)
   for (let n = -1, t0 = Date.now(); n !== waits.length && Date.now() - t0 < 10_000; ) {
@@ -1805,7 +1807,7 @@ test("pool-deposit-sent-end review 1: a note the pass cannot build again (U shor
   await passing;
   assert.deepEqual(stages, [], "nothing told: the note may still land once U is topped up");
   assert.ok(shorts.length > 0, "the pass was started and named the top-up");
-  assert.deepEqual(waits.slice(1, 8), [2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000], "doubling from 2 s to 60 s once every send is dead");
+  assert.deepEqual(waits.slice(0, 7), [2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000], "doubling from 2 s to 60 s, every send dead from the first read");
   const total = waits.reduce((a, b) => a + b, 0);
   assert.ok(total <= POOL_DEPOSIT_FOLLOW_FOR_MS && total > POOL_DEPOSIT_FOLLOW_FOR_MS - 60_000, `gives up at its bound: ${total}`);
   assert.equal(c.sent.length, 1, "nothing sent while U is short");
