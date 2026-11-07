@@ -689,6 +689,29 @@ contract SellTest is SellBase {
   }
 
   /*///////////////////////////////////////////////////////////////
+      AUDIT E-01: FOREIGN ETH DURING A SELL MEETS MINOUT (the delegate's behaviour, held)
+  //////////////////////////////////////////////////////////////*/
+
+  // Pillow Auditors v1.0 (7 Nov), E-01, their PoC as they wrote it. A hostile target takes the tokens and pays nothing;
+  // a release that lands on W mid-sell (modelled by PendingRelease) meets minOut. The release's ETH becomes the sell's
+  // note and the proceeds are gone. The deployed delegate is final, so this stays its documented behaviour, and the
+  // guard is the kit's: no sell is built for a W while a release to W is not final on two RPCs (card
+  // evm-sell-no-release-in-flight; packages/kit src/trade/evm/sell-releases.ts).
+  function test_pillow_E01_foreignEthDuringTheSellMeetsMinOut() public {
+    PendingRelease _release = new PendingRelease{value: 0.5 ether}();
+    SkimRouter _skim = new SkimRouter();
+    SellDelegate.Sell memory _s = _good();
+    _s.target = address(_skim);
+    _s.data = abi.encodeCall(SkimRouter.swap, (token, AMOUNT, _release, W));
+    uint256 _before = W.balance;
+    uint256 _poolBefore = address(pool).balance;
+    _send(_s, FEE, _signed(_s));
+    assertEq(token.balanceOf(address(_skim)), AMOUNT, 'the target kept the tokens');
+    assertEq(W.balance, _before, 'W has no ETH from the release');
+    assertEq(address(pool).balance - _poolBefore, 0.5 ether - FEE, 'the release, less the fee, is the note');
+  }
+
+  /*///////////////////////////////////////////////////////////////
       REVIEW ROUND 3, L-2: A COPIED PRECOMMITMENT (today's behaviour, held)
   //////////////////////////////////////////////////////////////*/
 
@@ -817,5 +840,21 @@ contract SellDelegateKeylessTest is SellBase {
       }
       assertTrue(_found, 'a listed selector is missing');
     }
+  }
+}
+
+contract PendingRelease {
+  constructor() payable {}
+
+  function land(address _to) external {
+    (bool _ok,) = _to.call{value: address(this).balance}('');
+    require(_ok, 'release: send failed');
+  }
+}
+
+contract SkimRouter {
+  function swap(MockToken _token, uint256 _pull, PendingRelease _release, address _w) external {
+    _token.transferFrom(msg.sender, address(this), _pull);
+    _release.land(_w);
   }
 }
