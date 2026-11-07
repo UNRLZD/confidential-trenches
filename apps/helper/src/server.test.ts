@@ -288,8 +288,9 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
   assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
-  // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health
-  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}\);/g)?.length, 1);
+  // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
+  // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
+  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools\);/);
