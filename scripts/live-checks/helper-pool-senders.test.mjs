@@ -4,9 +4,11 @@
 // carried, two callers given two fees, a fee other than the kit's for the rent read (2,000,000 for both callers, M362
 // (2)), rent reads missing or disagreeing, another pool answered: each FAIL.
 // The planted transactions are checked against the helper's own checks, so the check plants what the route reads.
-// EVM pools (card helper-evm-sender-2): evm_bad, the deployed helper before the card on both testnet pools: FAIL; each
-// plant carried, refused with another code or missing, and the code reads wrong: each FAIL; the encoder and W's
-// signatures equal cast's (helper-pool-senders.cast.json); read() posts each plant as its line says.
+// EVM pools (card helper-evm-sender-2): evm_good, apps/helper at the card (51fb5eb6, started locally with throwaway
+// sender keys and the two testnet pools) on both testnet pools: PASS; evm_bad, the deployed helper before the card
+// (63c90229): FAIL; made from the good runs, each plant carried, refused with another code or missing, and the code
+// reads wrong: each FAIL; the encoder and W's signatures equal cast's (helper-pool-senders.cast.json); read() posts each
+// plant as its line says.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -165,6 +167,8 @@ test("M369 (M2): read() plants tip_low on a mainnet pool (replayed helper)", asy
 });
 
 // ---- card helper-evm-sender-2: the EVM pools (POST /v1/pool/evm/send) ----
+// evm_good: apps/helper at 51fb5eb6 (card/helper-evm-sender-2), run locally with a throwaway sender key per testnet,
+// the two testnet pools and the kit's fee pair, recorded on both pools: PASS (every plant refused on its bytes, none sent).
 // evm_bad: the deployed helper before this card (it does not check W's signature or decode a buy), recorded live
 // against both testnet pools: FAIL. The encoder and W's signatures are held to cast (helper-pool-senders.cast.json,
 // made by helper-pool-senders.cast.mjs from the contracts' type strings), never to the helper's code.
@@ -201,6 +205,15 @@ test("EVM: the encoder's RelayData, withdraw and buy calldata and W's Withdraw a
   assert.equal(EVM.recover(EVM.withdrawDigest(at), ws), CAST.w);
 });
 
+test("EVM: recorded good runs, the helper at this card on both testnet pools: each plant refused with its own code: PASS", () => {
+  assert.equal(A.evm_good.length, 2);
+  for (const run of A.evm_good) {
+    const r = judge(run);
+    assert.equal(r.ok, true, r.lines.join("\n"));
+  }
+  assert.deepEqual(A.evm_good.map((x) => x.pool), A.evm_bad.map((x) => x.pool), "both testnet pools, as the bad runs");
+});
+
 test("EVM: recorded bad run, the deployed helper before this card (no W signature check, no buy decode): FAIL", () => {
   for (const run of A.evm_bad) {
     const r = judge(run);
@@ -220,15 +233,15 @@ test("EVM: each recorded run is stripped to what the judge reads (no full answer
   }
 });
 
-// Made from the good runs (from the bad ones while no good run is recorded: each mutation is held to its own BAD line,
-// so it shows the judge catches that defect whatever else the run has wrong).
-const evmBase = () => A.evm_good ?? A.evm_bad;
+// Made from the good runs: each mutation of a run that passes is held to its own BAD line.
+const evmBase = () => A.evm_good;
 const badLine = (run, re) => {
   const r = judge(run);
   return !r.ok && bad(r).some((l) => re.test(l));
 };
 test("EVM made from the recorded runs: each plant carried, refused with another code, or missing; the code reads missing, one, reordered, empty or an error; a fee off; a header wrong: each FAIL on its own line", () => {
   for (const g of evmBase()) {
+    assert.equal(judge(g).ok, true, "the run each mutation is made from passes");
     for (const [asked, code] of EVM_PLANTS) {
       const want = new RegExp(`^BAD planted ${asked}: .*want 422 ${code}`);
       assert.ok(badLine(edit(g, asked, (x) => ({ ...x, status: 200, body: '{"hash":"0x01"}' })), want), `${asked} carried`);
