@@ -700,7 +700,7 @@ test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, 
   const c = virtualTime();
   const j = windowJupiter(c);
   const lines: string[] = [];
-  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, sleep: c.sleep, log: (l) => lines.push(l) });
+  const p = createProxy(ENV, { fetch: j.fetch, now: c.now, mono: c.now, sleep: c.sleep, log: (l) => lines.push(l) });
   const t0 = c.now();
   const at = (ms: number) => c.sleep(ms);
   const legs = [0, 1, 2, 3, 4, 5].map((i) => p.handle("jupiter", "/swap/v2/build", `leg=${i}`, "", "198.51.100.1"));
@@ -729,13 +729,33 @@ test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, 
   void t0;
 });
 test("card helper-page-jup-429: a turn's log line keeps only whole numbers of the vendor's own count (hostile headers)", async () => {
+  // card helper-jup-log-clock: the turn's elapsed times come from an injected monotonic clock, never the machine's speed; the
+  // vendor's answer takes 37 injected ms while the real clock spins 3 ms (a busy runner), and the line says 37, waited 0
   const lines: string[] = [];
   const t = 1_800_000_000_000;
-  const f = async () => json([], 200, { "x-ratelimit-remaining": "7", "x-ratelimit-reset": String(t / 1000 + 4) });
-  const p = createProxy(ENV, { fetch: f, now: () => t, sleep: async () => {}, log: (l) => lines.push(l) });
+  let m = 0;
+  const mono = () => m;
+  const slow = (headers: Record<string, string>) => async () => {
+    m += 37;
+    const end = performance.now() + 3;
+    while (performance.now() < end);
+    return json([], 200, headers);
+  };
+  const f = slow({ "x-ratelimit-remaining": "7", "x-ratelimit-reset": String(t / 1000 + 4) });
+  const p = createProxy(ENV, { fetch: f, now: () => t, mono, sleep: async () => {}, log: (l) => lines.push(l) });
   await search(p, "x");
-  const g = async () => json([], 200, { "x-ratelimit-remaining": "7; drop", "x-ratelimit-reset": "soon helper: forged" });
-  const q = createProxy(ENV, { fetch: g, now: () => t, sleep: async () => {}, log: (l) => lines.push(l) });
+  const g = slow({ "x-ratelimit-remaining": "7; drop", "x-ratelimit-reset": "soon helper: forged" });
+  const q = createProxy(ENV, { fetch: g, now: () => t, mono, sleep: async () => {}, log: (l) => lines.push(l) });
   await search(q, "y");
-  assert.deepEqual(lines, ["jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 0 ms, vendor remaining 7, reset in 4 s", "jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 0 ms"]);
+  assert.deepEqual(lines, ["jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 37 ms, vendor remaining 7, reset in 4 s", "jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 37 ms"]);
+});
+test("card helper-jup-log-clock: a turn's wait and the send's time are the injected clock's, and Server-Timing reads the same clock", async () => {
+  const lines: string[] = [];
+  const t = 1_800_000_000_000;
+  let m = 1_000;
+  const f = async () => ((m += 250), json([], 200));
+  const p = createProxy(ENV, { fetch: f, now: () => t, mono: () => m, sleep: async () => {}, log: (l) => lines.push(l) });
+  const a = await search(p, "z");
+  assert.deepEqual(lines, ["jupiter turn: caller, waited 0 ms, 1 of 10 sent in 10 s, answered 200 in 250 ms"]);
+  assert.ok(a.timing?.includes("send;dur=250"), String(a.timing));
 });
