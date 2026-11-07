@@ -10,6 +10,7 @@
 
 /** RPC_A, RPC_B, RPC_C (M306 (5)): mainnet. */
 export const NEAR_RPC_URLS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org", "https://near.drpc.org"] as const;
+Object.freeze(NEAR_RPC_URLS);
 /**
  * One USDC contract and two operators per network. Its code must be VAULT_TOKEN_CODE_HASH on both: the testnet token
  * (contracts/vault/deployments/testnet-usdc.json, account_id) was deployed from mainnet USDC's own wasm (its wasm_from:

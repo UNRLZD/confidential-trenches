@@ -34,6 +34,7 @@ import { base58, base64 } from "@scure/base";
 import { HELPER_FETCH_INIT, HELPER_V1_PREFIX } from "../../helper/v1.ts";
 import { SOLANA_MAX_TX_BYTES, solanaDecodeTransaction } from "../../checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
+import { deepFreeze } from "../../freeze.ts";
 
 // Helius Sender, the global HTTPS endpoint with the SWQoS-only route: https://www.helius.dev/docs/sending-transactions/sender.md
 // ("https://sender.helius-rpc.com/fast # Global HTTPS endpoint", which "resolves CORS preflight failures ... with
@@ -75,6 +76,7 @@ export type SolanaRpcLimit = { readonly windowMs: number; readonly total: number
 /** A keyless provider's limit: Solana's public RPC allows 100 requests per 10 s per IP, and 40 per 10 s for one method
  * (solana.com/docs/references/clusters.md, read 2026-10-25); PublicNode publishes no number and is held to the same. */
 export const SOLANA_KEYLESS_RPC_LIMIT: SolanaRpcLimit = { windowMs: 10_000, total: 100, perMethod: 40 };
+deepFreeze(SOLANA_KEYLESS_RPC_LIMIT);
 /** A keyed provider named by its requests a second: that many in any second, of all methods. */
 export const solanaRpsLimit = (rps: number): SolanaRpcLimit => ({ windowMs: 1_000, total: rps, perMethod: rps });
 

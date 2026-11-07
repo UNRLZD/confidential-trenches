@@ -7,17 +7,18 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, read, PATH, ROUTES } from "./oneclick-partner-fee-live.mjs";
-import { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_SIGNING_KEYS } from "../../packages/kit/src/index.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // The recorded bodies carry no signature (the check's --record leaves it out: an "ed25519:" signature has a NEAR secret
 // key's shape). Each answer is signed again here, as 1Click signs (bs58(sha256(stable-json)) as UTF-8, built with
-// node:crypto apart from the kit), with a throwaway key this test process alone adds to the kit's pinned set.
+// node:crypto apart from the kit), with a throwaway key this test process alone trusts. The kit's pins are frozen (card
+// kit-oneclick-pins-frozen), so the key is never pushed into them: a load hook gives this process its own key-set module
+// in place of the kit's (the pinned keys and this one, frozen), before the check is loaded with await import().
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const b58 = (b) => {
   let n = 0n, s = "";
@@ -32,7 +33,20 @@ const stable = (v) => {
   return `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(",")}}`;
 };
 const KEY = generateKeyPairSync("ed25519");
-ONECLICK_SIGNING_KEYS.push(`ed25519:${b58(Buffer.from(KEY.publicKey.export({ format: "jwk" }).x, "base64url"))}`);
+const HARNESS_KEY = `ed25519:${b58(Buffer.from(KEY.publicKey.export({ format: "jwk" }).x, "base64url"))}`;
+registerHooks({
+  load(url, context, next) {
+    if (!url.endsWith("/checks/oneclick-keys.ts")) return next(url, context);
+    const source = `import { ONECLICK_SIGNING_KEYS as PINNED } from ${JSON.stringify(`${url}?pinned`)};
+export const ONECLICK_SIGNING_KEYS = Object.freeze([...PINNED, ${JSON.stringify(HARNESS_KEY)}]);
+`;
+    return { format: "module", source, shortCircuit: true };
+  },
+});
+const { judge, read, PATH, ROUTES } = await import("./oneclick-partner-fee-live.mjs");
+const { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_SIGNING_KEYS } = await import("../../packages/kit/src/index.ts");
+// the hook took: the check trusts the harness key, and the key set is still frozen
+assert.ok(ONECLICK_SIGNING_KEYS.includes(HARNESS_KEY) && Object.isFrozen(ONECLICK_SIGNING_KEYS));
 const u = (x) => (x ? x : undefined);
 function signBody(text) {
   const a = JSON.parse(text);

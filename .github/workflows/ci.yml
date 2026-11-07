@@ -404,14 +404,25 @@ jobs:
   # job's plain cargo test builds empty. It runs when a change touches a file the suite reads (scripts/ci/vault-sandbox.mjs,
   # whose planted tests fail on a file the suite reads and the rule misses), on every push to main that does, nightly
   # and by hand; otherwise vault-sandbox passes with a printed skip. vault-sandbox-build builds the four wasm once
-  # (run.sh --build-only) and hands them, with the pinned two, to the four shards as one artifact; the targets run on
-  # the shards (vault-sandbox.mjs SHARDS, each target in exactly one), which build no wasm. vault-sandbox is the one
-  # check to require.
+  # (run.sh --reproducible --build-only) and hands them, with the pinned two, to the four shards as one artifact; the
+  # targets run on the shards (vault-sandbox.mjs SHARDS, each target in exactly one), which build no wasm. vault-sandbox
+  # is the one check to require.
+  #
+  # The bytes (card vault-sandbox-shipped-bytes): the vault the shards test is the one the mainnet deploy ships, built
+  # by contracts/vault/scripts/deploy.mjs --build-only --flavor mainnet as vault-build.yml builds it (two clean
+  # `cargo near build reproducible-wasm` builds in the image contracts/vault/Cargo.toml pins by digest, compared). The
+  # build job prints its sha256 and passes it to the shards as a job output; each shard's run.sh prints the size and
+  # sha256 of the vault wasm it loaded and refuses, before any test, one that is not that sha256 or whose NEP-330
+  # metadata is not a reproducible mainnet build of this commit (contracts/vault/scripts/shipped.mjs). That wasm names
+  # its own commit, so it is built on every run and never cached: a key that names its inputs would name the commit.
+  # Its cost, read in vault-build run 42318217392: 93 s for the first build (29 s of it pulling the image) and 64 s for
+  # the second, about 2.6 min on the build job. A cache of the image would save at most the 29 s pull and costs a save
+  # and a load of the image's tarball each time, so the image is pulled.
   #
   # Caches. Every key names its inputs and never the commit, so a key is saved once and read until an input changes
   # (each per-commit key once took 4 x 790 MB a push and the repo's 10 GB evicted them, so main ran cold: 641-691 s a
-  # shard in run 41732950792, against 404-427 s warm in run 41786418173). The wasm: keyed on every file under
-  # contracts/vault/ (run.sh's build recipe, the sources, the locks, the pinned wasm's fixture), rustc and cargo-near.
+  # shard in run 41732950792, against 404-427 s warm in run 41786418173). No cache of the wasm (the shipped vault's
+  # bytes name the commit, above; the three test builds took 24-26 s, runs 42313947891 and 42308584159).
   # cargo's registry and the dependencies built in the three target dirs: one Swatinem/rust-cache (keyed on rustc, the
   # CARGO_*/RUST* env and the locks, falling back to the newest entry for the same rustc and env), saved only by
   # vault-sandbox-build, which also builds every test target's dependencies when its key had no exact entry, so a shard
@@ -455,6 +466,8 @@ jobs:
     if: needs.vault-sandbox-plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      vault_sha256: ${{ steps.shipped.outputs.sha256 }}
     # rust-cache hashes every CARGO_*/RUST* variable into its key, so the build and the shards hold the same env
     # (vault-sandbox.test.mjs fails otherwise): smaller target dirs to cache, and neither changes what a test does
     env:
@@ -464,12 +477,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # the four built wasm and the pinned two; hashed before anything is built, so no target dir is in the hash
-      - id: wasm
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/vault-wasm
-          key: vault-wasm-rustc-1.96.0-cargo-near-0.22.0-${{ hashFiles('contracts/vault/**') }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -478,20 +485,18 @@ jobs:
         run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
       - id: cargo-near-tgz
-        if: steps.wasm.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
           key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
       - name: install cargo-near
-        if: steps.wasm.outputs.cache-hit != 'true'
         run: |
           bash scripts/ci/fetch.sh ~/.cache/ci-downloads/cargo-near-0.22.0.tgz 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a \
             https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf ~/.cache/ci-downloads/cargo-near-0.22.0.tgz -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
           cargo +1.96.0 near --version
-      - if: steps.wasm.outputs.cache-hit != 'true' && steps.cargo-near-tgz.outputs.cache-hit != 'true'
+      - if: steps.cargo-near-tgz.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
@@ -513,9 +518,17 @@ jobs:
           bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml
           bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/mock-token/Cargo.toml
           bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/harness/probe/Cargo.toml
+      # the shipped vault (deploy.mjs's two clean reproducible builds, in cargo-near's container, where no fetch from
+      # the runner reaches: 3 tries, each into an emptied dir, never again after deploy.mjs's exit 3 for two builds that
+      # differ, as vault-build.yml runs it), the three test builds and the pinned two
       - name: the four wasm, built once for every shard, and the pinned two
-        if: steps.wasm.outputs.cache-hit != 'true'
-        run: contracts/vault/tests/harness/run.sh --build-only "$RUNNER_TEMP/vault-wasm"
+        run: RETRY_FINAL=3 bash scripts/ci/retry.sh bash scripts/ci/fresh-dir.sh "$RUNNER_TEMP/vault-wasm" contracts/vault/tests/harness/run.sh --reproducible --build-only "$RUNNER_TEMP/vault-wasm"
+      # the shards refuse any vault wasm but this one
+      - name: the shipped vault's sha256, for the shards
+        id: shipped
+        run: |
+          node contracts/vault/scripts/shipped.mjs "$RUNNER_TEMP/vault-wasm/blindfill_vault.wasm"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/vault-wasm/blindfill_vault.wasm" | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
       # the shards' dependencies, built here when the cache had no exact entry, so no shard builds them cold: the lib's
       # test build takes every dev-dependency with the sandbox feature, as each test target does, and links one binary
       # (every target's took 7m23s in run 41792397381, most of it linking the vault's own targets, which no cache keeps)
@@ -595,9 +608,11 @@ jobs:
         with:
           name: vault-wasm
           path: ${{ runner.temp }}/vault-wasm
+      # run.sh prints the vault wasm's size and sha256 and refuses one that is not the build job's shipped vault
       - name: the shard's sandbox tests, on the wasm vault-sandbox-build built
         env:
           SHARD: ${{ matrix.shard }}
+          VAULT_WASM_SHA256: ${{ needs.vault-sandbox-build.outputs.vault_sha256 }}
         run: |
           read -ra ARGS <<<"$(node scripts/ci/vault-sandbox.mjs shard "$SHARD")"
           VAULT_WASM_DIR="$RUNNER_TEMP/vault-wasm" contracts/vault/tests/harness/run.sh "${ARGS[@]}"
