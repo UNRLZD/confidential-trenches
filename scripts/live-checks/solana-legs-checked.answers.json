@@ -1,8 +1,8 @@
 {
-  "_note": "good: card solana-written-accounts-whole's SIGN_HOST build (packages/signpage/index.html and public/app.js as committed on card/solana-written-accounts-whole), 7 Nov: S6's walk over every route account with both its refusals live, and S11's two: PASS. bad: SIGN_HOST read 2026-11-07T07:26:49Z (main deployed, before card solana-legs-checked): none: FAIL. planted: the good bundle with one change each, its pin rewritten to match (the review's probes A, B, C of 7 Nov 06:35Z on this bundle): each FAIL.",
+  "_note": "good: the SIGN_HOST build of cards solana-legs-checked and solana-written-accounts-whole (packages/signpage/index.html and public/app.js as committed with release-84 on card/solana-legs-checked), 7 Nov: S6's walk over every route account with both its refusals live, and S11's two: PASS. bad: SIGN_HOST read 2026-11-07T07:26:49Z (main deployed, before card solana-legs-checked): none: FAIL. planted: the good bundle with one change each, its pin rewritten to match (the review's probes A, B, C of 7 Nov 06:35Z on this bundle): each FAIL.",
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-k8ZEg9DDQkK/L1knqm2PvHDYALxTaZ6W64E+fIwI/RU2FM97/6DJ2drngQH4AbkQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-k8ZEg9DDQkK/L1knqm2PvHDYALxTaZ6W64E+fIwI/RU2FM97/6DJ2drngQH4AbkQ",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-YmMhSstuPT1BWuDdBa/Jr9rDdNloYJ/wiN3bcaYLRw1sGSwY8kS5cB0kjoJs/hG9\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-YmMhSstuPT1BWuDdBa/Jr9rDdNloYJ/wiN3bcaYLRw1sGSwY8kS5cB0kjoJs/hG9",
     "carries": {
       "S6 the walk over every account the route names": true,
       "S6 a leg that is the wallet's token account": true,
@@ -24,8 +24,8 @@
   },
   "planted": {
     "A the walk starts past every account": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-nj6KXUeRZur6RATIoy2ex1Pedofhb+u36pVTGi4OkZb6RTxsSCTVfg4db88QAVqq\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-nj6KXUeRZur6RATIoy2ex1Pedofhb+u36pVTGi4OkZb6RTxsSCTVfg4db88QAVqq",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-h8HydNROOPHBJnw+8KMZoFgVADYc2ZQSv+Aep4xrtI0wJOVJImhp7LXXxH4TxMRZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-h8HydNROOPHBJnw+8KMZoFgVADYc2ZQSv+Aep4xrtI0wJOVJImhp7LXXxH4TxMRZ",
       "carries": {
         "S6 the walk over every account the route names": false,
         "S6 a leg that is the wallet's token account": true,
@@ -35,8 +35,8 @@
       }
     },
     "B the wallet-account refusal dead": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-O5/YGslbEDIQL4jIRflZCj+K2uo8S+REk41Kq+t9plSY5apRUfeAes/BM8KqGl/q\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-O5/YGslbEDIQL4jIRflZCj+K2uo8S+REk41Kq+t9plSY5apRUfeAes/BM8KqGl/q",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-QvgMuDv2cVGE/q6M3IWR0nEnajywJ0eb+mGlHitH47A3yQ6TxSwQX4fDT7Jtrw4A\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-QvgMuDv2cVGE/q6M3IWR0nEnajywJ0eb+mGlHitH47A3yQ6TxSwQX4fDT7Jtrw4A",
       "carries": {
         "S6 the walk over every account the route names": true,
         "S6 a leg that is the wallet's token account": false,
@@ -46,8 +46,8 @@
       }
     },
     "C the walk removed": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-eqGHt+tBf+dKN+Y2cBD4YKrQvCuB5DV2Q1ktLnpJqI599kAqiSerTVtI8d559BQ3\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-eqGHt+tBf+dKN+Y2cBD4YKrQvCuB5DV2Q1ktLnpJqI599kAqiSerTVtI8d559BQ3",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-z46Fqnd4KH/N9++wvtWCAeVF36ldK7LIvwPNVvyae0SFJlguDCbftKfTi0/kFptB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-z46Fqnd4KH/N9++wvtWCAeVF36ldK7LIvwPNVvyae0SFJlguDCbftKfTi0/kFptB",
       "carries": {
         "S6 the walk over every account the route names": false,
         "S6 a leg that is the wallet's token account": false,

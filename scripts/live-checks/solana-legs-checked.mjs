@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 // Live check of card solana-legs-checked on SIGN_HOST (https://sign.confidential.unrealized.trade). The signing page
 // bundles the kit's Solana checks, so the device that signs a Jupiter build runs the ones SIGN_HOST serves. What it
-// holds, and only that: the served /app.js is the one index.html pins (its sha384), and it carries the card's refusals
-// as live code, each read by a mark of the bundle's own shape (the minifier renames, never restructures these lines;
+// proves, and only that: the served /app.js is the one index.html pins (its sha384), and its text carries these lines,
+// each found by a mark of the bundle's shape (the minifier renames, never restructures them;
 // packages/kit/src/checks/solana/checks.ts):
-//   - S6's walk over the legs: a loop over every account the route instruction names (no slice: a walk that starts
-//     past any of them, or none, has no such loop), whose refusal of a token account of the wallet's is reached (a
-//     dead `0&&` before it breaks the mark) and whose refusal of a leg the device has not read is there; each mark holds
-//     "leg account ", which only S6 writes (card solana-written-accounts-whole: "is not read`" alone also came from
-//     S11's "which the tx writes, is not read", so a page with no legs check passed);
-//   - S11's on the wallet's other token accounts the tx writes: one the simulation moves ("moves: ") or does not read
-//     back ("is not read back").
-// That each refusal refuses is the kit's tests' (test/solana-shared-route.test.ts, test/solana-quote.test.ts); this
-// check holds that the page serving the signer is a build that has them. The recorded planted bundles A (the walk
-// starts past every account), B (its wallet-account refusal dead) and C (the walk removed) each FAIL.
+//   - S6's walk: a loop over every account the route instruction names (a walk that starts past any of them, or none,
+//     has no such loop), with its refusal of a token account of the wallet's at a leg, no `0&&` before it, and its
+//     refusal of a leg the device has not read; each mark holds "leg account ", which only S6 writes;
+//   - S11's refusals of the wallet's other token accounts the tx writes: one the simulation moves ("moves: ") or does
+//     not read back ("is not read back").
+// It does not prove those lines run or refuse: a bundle edited so S6 or S11 does nothing, with every mark kept, passes
+// it (the independent review planted eight such bundles, 7 Nov). That the refusals refuse is the kit's unit and flow
+// tests' at the released commit (test/solana-shared-route.test.ts, test/solana-quote.test.ts), and that the served files
+// are that commit's build is signpage-release's (the release list against a fresh build); no sha of one release is
+// pinned here, since every later release changes app.js. The recorded planted bundles A (the walk starts past every
+// account), B (its wallet-account refusal behind `0&&`) and C (the walk removed) each FAIL.
 //   node scripts/live-checks/solana-legs-checked.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
