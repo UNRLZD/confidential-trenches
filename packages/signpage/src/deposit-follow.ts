@@ -16,11 +16,23 @@
 // - One follower per U across tabs: the lock below, held while any op of U is followed; another tab's follow of U waits
 //   for it. One follower per U (the money is U's: two quotes before a payment name one U): one lock per U across tabs,
 //   FOLLOW_LOCK/<network>/<U>, and in the tab every op of U attaches to U's one follower. The wallet's seed lock is taken
-//   shared only around a bind phase, while the seed is open (followDeposit's seedLock and seed64); a sign out aborts
-//   every follow first (signedOut()).
+//   shared only around a bind phase, or the refund move's signature, while the seed is open (followDeposit's seedLock
+//   and seed64); a sign out aborts every follow first (signedOut()).
+// - The refund move (card wallet-refund-move; wallet.md §2.4 point 8): a deposit 1Click refunded to U inside
+//   intents.near is moved on into the vault with no tap (refundMove below, the wallet's runRefundMove), signed only under
+//   this page's rules for it (rules/refund.ts: checkRefundMoveQuote, checkIdTransferIntent, signIdIntent). Only a USDC
+//   refund is moved, the one asset deposit.quote quotes; one under MIN_DEPOSIT, or one the quote's MIN_DEPOSIT floor
+//   refuses, waits under U for withdraw.open.
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { DepositFacts, DepositStage, SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { type DepositOp, followDeposit, DepositFollowRefused, followEnded, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
+import { type DepositOp, followDeposit, DepositFollowRefused, followEnded, type FollowMoveAsk, type FollowRecord, followRpc, type FollowRpc, usdcUnits } from "../../wallet/src/deposit/follow.ts";
+import { RefundMoveUnderMin, type RefundMoveResult, runRefundMove } from "../../wallet/src/deposit/refund.ts";
+import { ONECLICK_USDC_ASSETS, type OneClickCheckOptions } from "../../kit/src/checks/oneclick.ts";
+import type { HelperSignedIntent } from "../../kit/src/helper/v1.ts";
+import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
+import { DEPOSIT_QUOTE_PATH, shortOnlyOfMinimum } from "./rules/deposit-dry.ts";
+import { USDC_DECIMALS } from "./rules/deposit-quote.ts";
+import { checkIdTransferIntent, checkRefundMoveQuote, signIdIntent, type IdIntent, type RefundQuote } from "./rules/refund.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../wallet/src/deposit/account.ts";
 import { type NoteStore, openNoteStore } from "../../wallet/src/notes/store.ts";
 import type { ApiHost, Deferred, KindContext } from "./api.ts";
@@ -47,6 +59,44 @@ export interface FollowHost {
   sleep?: (ms: number) => Promise<void>;
   locks?: () => LockManager | null;
   now?: () => number;
+}
+
+/**
+ * SIGN_HOST's refund move on `network` (followDeposit's deps.refundMove): the wallet's runRefundMove, every step checked
+ * by this page's rules (rules/refund.ts) with U as the signer; a USDC refund only (the asset deposit.quote quotes, at 6
+ * decimals on every chain); under MIN_DEPOSIT, or short only of the vault's least deposit at the quote's floor, it is
+ * not moved (under_min).
+ */
+export function refundMover(network: NearNetwork, opts: { fetch?: typeof fetch; now?: () => number } = {}) {
+  const now = opts.now ?? Date.now;
+  return async (ask: FollowMoveAsk, signal?: AbortSignal): Promise<RefundMoveResult> => {
+    if (!ONECLICK_USDC_ASSETS.includes(ask.asset)) return { kind: "refused", why: "asset" };
+    if (ask.reads[0].held < VAULT_CONSTANTS.MIN_DEPOSIT || ask.reads[1].held < VAULT_CONSTANTS.MIN_DEPOSIT) return { kind: "under_min" };
+    const signer = { role: "U" as const, id: ask.u, publicKey: Uint8Array.from(ask.u.match(/../g) ?? [], (h) => parseInt(h, 16)) };
+    return await runRefundMove<RefundQuote, IdIntent>(ask, {
+      check: {
+        quote(request, answer) {
+          // checked at the time the answer came back
+          const check: Omit<OneClickCheckOptions, "intoVault"> = { path: DEPOSIT_QUOTE_PATH, pricing: "usdc", decimalsIn: USDC_DECIMALS, decimalsOut: USDC_DECIMALS, now: now() };
+          try {
+            return checkRefundMoveQuote(request, answer, { network, signer, origin: ask.asset, check });
+          } catch (e) {
+            if (shortOnlyOfMinimum(e, request, answer, check)) throw new RefundMoveUnderMin();
+            throw e;
+          }
+        },
+        read: (q) => ({ depositAddress: q.depositAddress as string, amountIn: q.amountIn, deadlineMs: Date.parse(q.deadline as string) }),
+        intent: (payload, q, reads, priorDeadline) => checkIdTransferIntent(payload, q, { network, signer, reads, priorDeadline }),
+        // signIdIntent writes both as "ed25519:" and base58 (rules/refund.ts)
+        sign: (secretKey, intent) => signIdIntent(secretKey, intent) as HelperSignedIntent,
+      },
+      openKey: ask.openKey,
+      record: ask.record,
+      now,
+      ...(opts.fetch ? { fetchFn: opts.fetch } : {}),
+      ...(signal ? { signal } : {}),
+    });
+  };
 }
 
 const isDepositOp = (v: unknown): v is DepositOp =>
@@ -146,6 +196,7 @@ export function depositFollows(h: FollowHost) {
             seedLock,
             signal,
             untilFinal: true,
+            refundMove: refundMover(f.network, { ...(h.fetch ? { fetch: h.fetch } : {}), ...(h.now ? { now: h.now } : {}) }),
             ...(h.fetch ? { fetchFn: h.fetch } : {}),
             ...(h.sleep ? { sleep: h.sleep } : {}),
             ...(h.now ? { now: h.now } : {}),
