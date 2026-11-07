@@ -92,12 +92,14 @@ test("MUTABLE names only RegExps the kit exports, each frozen, and no source fil
 
 /** The MUTABLE names `text` uses other than as allowed above. An import or export list is allowed only when it names
  *  each one as itself: `import { SIGNPAGE_ROUTE_OUT as ROUTE_BOUND }` would let ROUTE_BOUND.test(...) through the
- *  strip below, so an alias is a use (card oneclick-fee-path-own-key, from the delta review of kit-oneclick-pins-frozen). */
+ *  strip below, so an alias is a use, the name quoted as a string literal too (card oneclick-fee-path-own-key, from the
+ *  delta review of kit-oneclick-pins-frozen). A text scan reads names as written: a computed access such as
+ *  KIT["SIGNPAGE_" + "ROUTE_OUT"] or a namespace passed along and read elsewhere is outside what it can see. */
 function mutableReads(source: string): string[] {
   const code = source.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, "$1");
   const text = code.replace(/\b(?:import|export)\s+(?:type\s+)?\{[^}]*\}(?:\s*from\s*["'][^"']+["'])?/g, "");
   return Object.keys(MUTABLE).filter((k) => {
-    if (new RegExp(`\\b${k}\\s+as\\b`).test(code)) return true;
+    if (new RegExp(`["'\\x60]?\\b${k}\\b["'\\x60]?\\s+as\\b`).test(code)) return true;
     const rest = text.replace(new RegExp(`export const ${k} =|deepFreeze\\(${k}\\);|\\b${k}\\.(?:source|flags)\\b`, "g"), "");
     return new RegExp(`\\b${k}\\b`).test(rest);
   });
@@ -108,6 +110,9 @@ test("planted: an aliased import or export of a MUTABLE name is a use, so a test
   assert.deepEqual(mutableReads(aliased), ["SIGNPAGE_ROUTE_OUT"]);
   assert.deepEqual(mutableReads('export { HELPER_SALT_PATTERN as SALT } from "./v1.ts";\n'), ["HELPER_SALT_PATTERN"]);
   assert.deepEqual(mutableReads('import {\n  HELPER_TOKEN_HASH_PATTERN as H,\n} from "@blindfill/kit";\n'), ["HELPER_TOKEN_HASH_PATTERN"]);
+  // an import or export name may be a string literal (ES2022): quoted, it is the same binding under another name
+  assert.deepEqual(mutableReads('import { "SIGNPAGE_ROUTE_OUT" as R } from "@blindfill/kit";\nR.test(u);\n'), ["SIGNPAGE_ROUTE_OUT"]);
+  assert.deepEqual(mutableReads("export { 'HELPER_SALT_PATTERN' as S } from './v1.ts';\n"), ["HELPER_SALT_PATTERN"]);
   // what stays allowed: a plain list, the definition and its freeze line, and a copy from .source and .flags
   const allowed = 'import { SIGNPAGE_ROUTE_OUT, type X } from "@blindfill/kit";\nconst own = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags);\n' +
     'export const HELPER_SALT_PATTERN = /^x$/;\ndeepFreeze(HELPER_SALT_PATTERN);\n// SIGNPAGE_ROUTE_OUT as a word in a comment\n';
