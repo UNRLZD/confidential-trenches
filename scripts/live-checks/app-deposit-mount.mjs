@@ -160,6 +160,23 @@ async function runOne(browser, w, scheme, shots, route) {
       const name = (e) => (e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === "string" ? `.${e.className.trim().split(/\s+/).join(".")}` : ""}` : null);
       return { box: r ? [r.x, r.y, r.width, r.height].map(Math.round) : null, view: [innerWidth, innerHeight], disabled: b?.disabled ?? null, hit: at === b || (b && b.contains(at)) ? "the button" : name(at) };
     });
+    // and whether it holds still (the tap waits for one box over two frames): its box on each of eight frames, the
+    // frames counted in 500 ms, and the document's scroll box against the viewport (a scrollbar that comes and goes
+    // moves everything)
+    Object.assign(run.tapGet, await f.evaluate(async () => {
+      const b = document.querySelector("[data-sheet='deposit'] [data-control='deposit-get']");
+      const frames = [];
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        const r = b?.getBoundingClientRect();
+        const d = document.documentElement;
+        frames.push(r ? `${r.x.toFixed(2)},${r.y.toFixed(2)},${r.width.toFixed(2)},${r.height.toFixed(2)} doc ${d.clientWidth}x${d.clientHeight}/${d.scrollWidth}x${d.scrollHeight} vv ${visualViewport?.width}x${visualViewport?.height}` : null);
+      }
+      let n = 0;
+      const t0 = performance.now();
+      await new Promise((done) => { const step = () => (performance.now() - t0 < 500 ? (n++, requestAnimationFrame(step)) : done()); requestAnimationFrame(step); });
+      return { frames: [...new Set(frames)], framesIn500ms: n, active: document.activeElement?.tagName.toLowerCase() ?? null };
+    }).catch((e) => ({ frames: `unread: ${String(e?.message ?? e).split("\n")[0]}` })));
     run.tapGet.error = await f.locator("[data-control='deposit-get']").filter({ visible: true }).first().click({ timeout: 3_000 }).then(() => null, (e) => String(e?.message ?? e).split("\n").filter((l) => l.trim()).slice(0, 6).join(" | "));
     await waitState(f, "S4.13");
     run.quote = (await asked(page)).filter((m) => m.type === "deposit.quote").map(fieldsOf)[0] ?? null;
