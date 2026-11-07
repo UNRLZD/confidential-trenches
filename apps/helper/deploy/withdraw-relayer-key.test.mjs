@@ -75,6 +75,15 @@ test("writes the four mainnet names once, the vault the deploy record's, the key
   assert.ok(!out.includes(secret.slice(8)), "the secret is not printed");
   assert.ok(!out.includes(seed.toString("hex")) && !out.includes(seed.toString("base64")), "the seed is not printed");
   assert.match(out, new RegExp(`relayer account ${relayer}\\n`));
+  // the order after the key: redeploy, the owner funds the relayer and registers it on USDC (the fee recipient by default,
+  // and fee quotes hold until it is registered: fee.ts readFeeAccount), then the live checks
+  const usdc = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"; // gitleaks:allow (a public account id)
+  const order = r.stdout.split("\n").filter((l) => /^withdraw-relayer-key: [1-4]\. /.test(l));
+  assert.equal(order.length, 4, r.stdout);
+  assert.equal(order[0], "withdraw-relayer-key: 1. apps/helper/deploy/redeploy.sh <this commit>, so the helper starts with the four lines");
+  assert.equal(order[1], `withdraw-relayer-key: 2. the owner sends 1 NEAR to ${relayer}`);
+  assert.equal(order[2], `withdraw-relayer-key: 3. the owner calls storage_deposit on ${usdc} with {"account_id":"${relayer}","registration_only":true}, attaching 0.00125 NEAR`);
+  assert.equal(order[3], "withdraw-relayer-key: 4. once both have landed: the helper's live checks, helper-mainnet-vault-env among them");
   assert.match(out, /public key ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}\n/);
   const printed = out.match(/public key ed25519:([1-9A-HJ-NP-Za-km-z]+)/)[1];
   assert.equal(Buffer.from(base58decode(printed)).toString("hex"), relayer, "the printed public key is the relayer's");
@@ -84,7 +93,9 @@ test("writes the four mainnet names once, the vault the deploy record's, the key
   assert.deepEqual(readdirSync(s.deploy).sort(), [".env", "withdraw-relayer-key.sh"]);
   // the image is the deployed one, with no network, read-only
   const call = readFileSync(s.log, "utf8").trim();
-  assert.match(call, /^run --rm -i --pull never --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint node ct-helper:a{40} --input-type=module$/);
+  // --log-driver none: the container's stdout carries the secret line, and docker's default json-file driver would keep
+  // a copy of it on the server's disk under /var/lib/docker/containers
+  assert.match(call, /^run --rm -i --log-driver none --pull never --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --entrypoint node ct-helper:a{40} --input-type=module$/);
 });
 
 test("two runs make two different keys (each from the system's randomness), and the second is refused with nothing changed", () => {
@@ -117,7 +128,7 @@ test("--fee-recipient names the fee account; one that is not a NEAR account id, 
   const s = server();
   assert.equal(s.run("--fee-recipient", "fees.confidential.unrlzd.near").status, 0);
   assert.equal(valueOf(s.envText(), "WITHDRAW_FEE_RECIPIENT_MAINNET"), "fees.confidential.unrlzd.near");
-  for (const args of [["--fee-recipient", "Bad.Near"], ["--fee-recipient", "a"], ["--fee-recipient", "x.near\nWITHDRAW_VAULT_MAINNET=evil.near"], ["--fee-recipient"], ["--other"], ["--fee-recipient", "x.near", "y"]]) {
+  for (const args of [["--fee-recipient", "Bad.Near"], ["--fee-recipient", "a"], ["--fee-recipient", "x.near\nWITHDRAW_VAULT_MAINNET=evil.near"], ["--fee-recipient"], ["--other"], ["--fee-recipient", "x.near", "y"], ["--fee-recipient", "intents.near"], ["--fee-recipient", MAINNET_VAULT]]) {
     const t = server();
     const before = t.envText();
     const r = t.run(...args);
