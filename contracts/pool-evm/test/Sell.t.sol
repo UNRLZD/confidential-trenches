@@ -713,29 +713,16 @@ contract SellTest is SellBase {
 
   // Review 181fd050 of the card, R2-3: a Bought in W's tail can land again as ETH. A replayed buy is the same proof and
   // the same signature, and whether it lands as Bought or as Withdrawn is decided when it runs: a route that moves the
-  // buy's pool first makes buySwap fail MinOutNotMet, and the pool's fallback pushes the chunk to W in ETH
-  // (PrivacyPoolSimple.sol buy: `_push(_data.recipient, ...)`, then Withdrawn) mid-sell. That ETH meets minOut, the
-  // target keeps the tokens and the chunk becomes the sell's note, E-01 again. The fallback's push is a plain ETH send
-  // to W, which PendingRelease models. So the kit holds the sell for every Bought to W in the tail but the sale's own
-  // funding buy (the quote's token at its boughtBlock; packages/kit src/trade/evm/sell-releases.ts).
-  function test_aBoughtReplayedIntoItsFallbackMidSellMeetsMinOut() public {
-    PendingRelease _fallback = new PendingRelease{value: 0.5 ether}();
-    SkimRouter _skim = new SkimRouter();
-    SellDelegate.Sell memory _s = _good();
-    _s.target = address(_skim);
-    _s.data = abi.encodeCall(SkimRouter.swap, (token, AMOUNT, _fallback, W));
-    uint256 _before = W.balance;
-    uint256 _poolBefore = address(pool).balance;
-    _send(_s, FEE, _signed(_s));
-    assertEq(token.balanceOf(address(_skim)), AMOUNT, 'the target kept the tokens');
-    assertEq(W.balance, _before, 'W has no ETH from the replayed buy');
-    assertEq(address(pool).balance - _poolBefore, 0.5 ether - FEE, 'the replayed buy, less the fee, is the note');
-  }
+  // buy's pool first makes buySwap fail MinOutNotMet, and the pool's fallback pays the chunk to W in ETH and logs
+  // Withdrawn (Buy.t.sol test_minOutNotMetPaysOut, through _paysOut). ETH that lands on W mid-sell meets minOut, the
+  // target keeps the tokens and the ETH becomes the sell's note (test_pillow_E01_foreignEthDuringTheSellMeetsMinOut
+  // above). The two together are E-01 through a replayed buy, so the kit holds the sell for every Bought to W in the tail
+  // but the sale's own funding buy (packages/kit src/trade/evm/sell-releases.ts).
 
   // Review a5956de3 of the card, item 1: a Bought that lands again as Bought pays W the bought token and no ETH, so it
   // meets no minOut. Where the bought token is the one W sells, W's balance of it no longer falls by exactly the amount,
   // and the whole sell reverts at the exact-debit check: DebitNotExact where the buy pays less than the amount, an
-  // underflow (Panic 0x11) where it pays as much or more. Its fallback is the test above.
+  // underflow (Panic 0x11) where it pays as much or more. Its fallback is the note above.
   function test_aBoughtReplayedMidSellRevertsAtTheExactDebit() public {
     uint256[2] memory _paid = [AMOUNT / 2, AMOUNT * 2];
     for (uint256 _k; _k < 2; ++_k) {

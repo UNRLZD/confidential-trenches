@@ -20,8 +20,9 @@
 //   quote's boughtBlock: review of 982a19bd, F2, which held W's own buy until its block was final, ~15 min). A replayed
 //   buy is the same proof and signature, and whether it lands as Bought or as Withdrawn is decided as it runs
 //   (PrivacyPoolSimple.sol buy): a route that moves the buy's pool first fails its swap, and the pool's fallback pays the
-//   chunk to W in ETH mid-sell, E-01 again (review of 181fd050, R2-3; test/Sell.t.sol
-//   test_aBoughtReplayedIntoItsFallbackMidSellMeetsMinOut). The funding buy is the exception because, reorged out, it
+//   chunk to W in ETH mid-sell, E-01 again (review of 181fd050, R2-3; contracts/pool-evm test/Buy.t.sol `_paysOut`: a
+//   failed swap pays W in ETH and logs Withdrawn, and test/Sell.t.sol's E-01 PoC: ETH landing mid-sell meets minOut).
+//   The funding buy is the exception because, reorged out, it
 //   leaves W without the token the sale sells, so the sale cannot land at all; replayed whole, it reverts the sale at
 //   the exact-debit check (test_aBoughtReplayedMidSellRevertsAtTheExactDebit). Either kind counts as landed, so a
 //   release the device sent that landed clears its own wait;
@@ -32,7 +33,10 @@
 //   (review of 181fd050, info: one above every provider's "latest" dropped out of both): such a one is pending until
 //   the read finds it. That list can only add waits, never clear one the read found;
 // - a release to W above the quote's agreed block is pending too (review of 982a19bd, F3), once a second provider holds
-//   its block with it (checks/evm/quote.ts: one provider's word alone held every sale, review of 181fd050, R2-1).
+//   its block with it (checks/evm/quote.ts releasesConfirmed: one provider's word alone held every sale, review of
+//   181fd050, R2-1). It is dropped only where every other provider that answers holds its block without it or is more
+//   than maxLag below it; a low head or an error is no answer, and the quote waits or is refused, never built over it
+//   (review of 9c2a87d5, R3-1).
 import type { EvmPoolChain } from "./buy-unpinned.ts";
 import { EvmPoolSellError } from "./sell-unpinned.ts";
 

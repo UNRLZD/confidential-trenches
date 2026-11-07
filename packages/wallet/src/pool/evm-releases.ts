@@ -24,7 +24,9 @@ import { jOf } from "./queue.ts";
 export type EvmSellRound = { fin: Pick<EvmBlock, "number">; events: readonly EvmPoolEvent[] };
 
 /** Every release the device sent to W_{evm, l, j} on the pool of `scope` that has not landed final as far as the store
- *  `notes` (its list) and the pool's `round` know: the kit sell quote's `sent` for that W. */
+ *  `notes` (its list) and the pool's `round` know: the kit sell quote's `sent` for that W. `round` is one read for this
+ *  quote: an older one can list a SPENT note the kit's finalized block is already past, which holds the sale until a
+ *  new round is read (review of 9c2a87d5, I-4; no production caller yet). */
 export function evmSellSent(seed64: Uint8Array, scope: bigint, l: bigint, j: number, notes: readonly NoteRecord[], round: EvmSellRound): EvmSellSent[] {
   const released = new Map(round.events.filter((e) => e.kind !== "deposit").map((e) => [e.nullifier, e.block]));
   const sent: EvmSellSent[] = [];

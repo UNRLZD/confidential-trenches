@@ -755,16 +755,33 @@ export const MUTANTS = [
   [QUOTE, "if (keys.size !== out.length) return refuse(", "if (false) return refuse(", S, NR],
   // a log above the quote's block one provider alone gave counts only once a second confirms it (review of 181fd050,
   // R2-1, R2-2); the funding buy is the quote's token at its boughtBlock (R2-3)
-  [QUOTE, "if ((inA.has(key) && inB.has(key)) || (await releaseConfirmed(", "if (true || (await releaseConfirmed(", S, NR],
-  [QUOTE, "if ((inA.has(key) && inB.has(key)) || (await releaseConfirmed(", "if ((await releaseConfirmed(", S, NR],
-  [QUOTE, "if (e.block > head + maxLag) denied = true;", "if (false) denied = true;", S, NR],
-  [QUOTE, "r.some((l) => releaseLogOf(l, who, pool, wTopic).key === e.key)) return true;", "r.some((l) => releaseLogOf(l, who, pool, wTopic).key === e.key)) return false;", S, NR],
-  [QUOTE, "    if (denied) {\n      HOLD.get(list[claimant]!)?.();\n      return false;", "    if (false) {\n      HOLD.get(list[claimant]!)?.();\n      return false;", S, NR],
+  [QUOTE, "const above = [...inA.values()].filter((e) => inB.has(e.key));", "const above: ReleaseLog[] = [];", S, NR],
+  [QUOTE, "above.push(...confirmed);", "above.push(...at);", S, NR],
+  [QUOTE, "for (const x of at) if (keys.has(x.key)) confirmed.add(x.key);", "for (const x of at) if (false) confirmed.add(x.key);", S, NR],
+  // review of 9c2a87d5, I-1: m1, the claimant asked to confirm its own log, and m3, a denial that holds no one
+  [QUOTE, "const others = list.map((_, k) => k).filter((k) => k !== claimant);", "const others = list.map((_, k) => k).filter(() => true);", S, NR],
+  [QUOTE, "    if (answered > 0 && behind === 0) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (answered > 0 && behind === 0) {\n", S, NR],
+  // R3-1: a low head within maxLag, a block of another hash, an error to the logs by hash; a denial only where no
+  // provider is behind
+  [QUOTE, "if (e.block > head + maxLag) continue;", "if (false) continue;", S, NR],
+  [QUOTE, "behind++;\n          if (head > best", "\n          if (head > best", S, NR],
+  [QUOTE, "if (h.hash !== e.hash) answered++;", "if (h.hash !== e.hash) {}", S, NR],
+  [QUOTE, "else if (Array.isArray(r)) {\n          const keys = new Set(r.map(", "else {\n          const keys = new Set((Array.isArray(r) ? r : []).map(", S, NR],
+  [QUOTE, "if (answered > 0 && behind === 0) {", "if (answered > 0) {", S, NR],
   [QUOTE, "if (monotonic() >= until) return refuse(", "if (false) return refuse(", S, NR],
   // the wait runs as long as another provider's head moves toward the block (base-sepolia's maxLag is about 20 s)
-  [QUOTE, "else if (head > best && head < e.block) [best, until]", "else if (false) [best, until]", S, NR],
+  [QUOTE, "if (head > best && head < e.block) [best, until]", "if (false) [best, until]", S, NR],
+  // R3-2: by EVM_SELL_CONFIRM_BY_MS after the quote's block, a refusal that holds the claimant
+  [QUOTE, "    if (clock() >= byMs) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (clock() >= byMs) {\n", S, NR],
+  [QUOTE, "    if (clock() >= byMs) {", "    if (false) {", S, NR],
+  // R3-3: the cap, and nothing past a claimant's first denial
+  [QUOTE, "if (out.filter((e) => e.block > n).length > EVM_SELL_ABOVE_MAX) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "if (out.filter((e) => e.block > n).length > EVM_SELL_ABOVE_MAX) return refuse(", "if (out.filter((e) => e.block > n).length >= EVM_SELL_ABOVE_MAX) return refuse(", S, NR],
+  [QUOTE, "      if (denied) break;", "      if (false) break;", S, NR],
   [QUOTE, "{ token: t, block: boughtBlock }", "{ token: t, block: 0n }", S, NR],
   [QUOTE, "data.slice(2 + 64 * 5 + 24, 2 + 64 * 6)", "data.slice(2 + 64 * 4 + 24, 2 + 64 * 5)", S, NR],
+  // I-3: the Bought token in lower case, whatever the provider's hex
+  [QUOTE, 'lower("0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6))', '("0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6))', S, NR],
   [QUOTE, "poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2)", "rpcs", S, NR],
 ];
 
