@@ -16,9 +16,12 @@
 #   1. refuses (exit 3) when any line of deploy/.env sets one of the four names below (redeploy.sh's lines_of matcher),
 #      or when deploy/.env names no image (HELPER_COMMIT, exit 6);
 #   2. makes one ed25519 key inside the helper's own image (ct-helper:<HELPER_COMMIT>, node:crypto, no network, a
-#      read-only container) and reads the vault from the mainnet deploy record
-#      (the kit's rule: contracts/vault/deployments/mainnet-v1.json once it exists, else mainnet-test.json; its
-#      account_id, the one vault the helper takes, send.ts MAINNET_VAULT);
+#      read-only container) and reads the vault from the mainnet deploy record by the helper's pin rule
+#      (src/withdraw/send.ts MAINNET_VAULT, held by send.test.ts: contracts/vault/deployments/mainnet-v1.json once it
+#      exists, else mainnet-test.json; its account_id, the one vault the helper takes). The kit's rule differs: it
+#      names mainnet-v1.json's vault or none (null), never mainnet-test.json's (packages/wallet/test/
+#      deposit-delegate.test.ts); the test vault is the helper's alone, until the record commit moves the pin, when
+#      vault-lines.sh moves this line;
 #   3. writes deploy/.env again whole (a mode 600 temporary file beside it, then one rename), every line kept and these
 #      four added:
 #        WITHDRAW_VAULT_MAINNET=<the record's account_id>
@@ -139,7 +142,7 @@ main() {
   mv -f "$tmp" "$env"
   trap - EXIT
   echo "withdraw-relayer-key: wrote ${NAMES[*]} to deploy/.env. Next, in this order:"
-  echo "withdraw-relayer-key: 1. apps/helper/deploy/redeploy.sh <this commit>, so the helper starts with the four lines"
+  echo "withdraw-relayer-key: 1. apps/helper/deploy/redeploy.sh $(git -C "$root" rev-parse HEAD 2>/dev/null || echo '<this commit>'), so the helper starts with the four lines"
   echo "withdraw-relayer-key: 2. the owner sends 1 NEAR to $relayer"
   echo "withdraw-relayer-key: 3. the owner calls storage_deposit on $USDC with {\"account_id\":\"$feeto\",\"registration_only\":true}, attaching 0.00125 NEAR"
   echo "withdraw-relayer-key: 4. once both have landed: the helper's live checks, helper-mainnet-vault-env among them"

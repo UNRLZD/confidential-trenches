@@ -16,9 +16,11 @@
 #      for byte, the file is replaced in one rename and stays mode 600. A HELPER_COMMIT or HELPER_RELEASE line not in
 #      the plain NAME=value form, or written twice, is refused with nothing changed;
 #   3. swaps the helper with no gap, with those two values: builds the image (docker compose build helper) and runs its
-#      pool senders' settings check (src/env-check.ts, the start's own readers) in a one-off container with the
-#      environment compose gives the helper: a network set only in part, or a value the start would refuse, stops here,
-#      with no helper started or stopped; with no helper
+#      senders' settings check (src/env-check.ts, the start's own readers: the pool senders, the withdrawal relayer and
+#      the deposit carry, with the new image's mainnet vault pin) in a one-off container with the environment compose
+#      gives the helper: a network set only in part, a value the start would refuse, or a WITHDRAW_VAULT_MAINNET or
+#      BIND_VAULT_MAINNET left on the vault before (deploy/vault-lines.sh moves them), stops here, with no helper
+#      started or stopped, not after the bound below; with no helper
 #      running (a first deploy) docker compose up -d --wait brings the stack up; otherwise starts the new helper beside the
 #      old one (docker compose up --no-deps --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck
 #      (compose.yaml: /v1/health says ready), and only then stops (30 s) and removes each old container. Past the bound
@@ -77,7 +79,7 @@ swap_helper() {
   # the new image's own readers, with the environment compose passes it (the reader names variables, never values)
   echo "redeploy: docker compose run --rm --no-deps -T helper node src/env-check.ts"
   if ! docker compose run --rm --no-deps -T helper node src/env-check.ts; then
-    echo "redeploy: the new helper refuses its pool senders' settings (above); no helper was started or stopped" >&2
+    echo "redeploy: the new helper refuses its senders' settings (above; a vault line on the vault before: apps/helper/deploy/vault-lines.sh); no helper was started or stopped" >&2
     exit 1
   fi
   # a stopped container of the service (a start that failed, a crash) is counted by --scale and started again in place

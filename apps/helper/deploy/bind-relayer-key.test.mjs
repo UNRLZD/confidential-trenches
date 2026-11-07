@@ -294,6 +294,20 @@ test("a .env whose last line has no newline keeps it whole: the three lines star
   assert.ok(lines[2].startsWith("BIND_VAULT_MAINNET="));
 });
 
+// card helper-v1-cutover: on the server the checkout is a git checkout, and the printed step 1 names its commit, the
+// one to redeploy, never a placeholder to fill in
+test("in a git checkout, the printed step 1 names the checkout's commit", () => {
+  const s = server();
+  const git = (...a) => spawnSync("git", ["-C", s.dir, "-c", "core.hooksPath=/dev/null", "-c", "user.email=t@example.com", "-c", "user.name=t", ...a], { encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  assert.equal(git("commit", "-q", "--allow-empty", "-m", "t").status, 0);
+  const sha = git("rev-parse", "HEAD").stdout.trim();
+  assert.match(sha, /^[0-9a-f]{40}$/);
+  const r = s.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(`bind-relayer-key: 1. apps/helper/deploy/redeploy.sh ${sha}, so the helper starts with the three lines\n`), r.stdout);
+});
+
 test("two runs make two different keys, each from the system's randomness", () => {
   const a = server();
   const b = server();

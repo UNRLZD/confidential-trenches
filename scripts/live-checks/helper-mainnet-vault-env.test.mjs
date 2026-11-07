@@ -122,7 +122,7 @@ test("the probes: the record's vault is the helper's pin, and the two bodies dif
   for (const a of asks(rec)) for (const [s] of a.want) assert.ok(s === 200 ? a.method === "GET" : s >= 400 && s < 500, a.name);
 });
 
-test("the record by the kit's rule: mainnet-v1.json's once it exists, else mainnet-test.json's", () => {
+test("the record by the helper's pin rule: mainnet-v1.json's once it exists, else mainnet-test.json's", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "hmve-rec-"));
   const rec = (id) => JSON.stringify({ network: "mainnet", account_id: id, scope: "7" });
   writeFileSync(path.join(dir, "mainnet-test.json"), rec("vault-test.confidential.unrlzd.near"));
@@ -133,7 +133,7 @@ test("the record by the kit's rule: mainnet-v1.json's once it exists, else mainn
   assert.equal(loadRecord(recordFile(dir)).account_id, "vault.confidential.unrlzd.near");
 });
 
-test("the decoy is chosen at run time to differ from the record's vault, and the judge refuses a run whose two probes name one vault", () => {
+test("the decoy is chosen at run time to differ from the record's vault, its probe's vault signal differs from the record's, and the recorded good run's other-vault line names it", () => {
   for (const id of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "other.near"]) {
     const record = { account_id: id, scope: "7" };
     assert.notEqual(decoyFor(record), id, id);

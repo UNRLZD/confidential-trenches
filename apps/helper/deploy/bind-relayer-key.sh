@@ -4,19 +4,11 @@
 # is at a commit that has this file and contracts/vault/deployments/mainnet-v1.json (git fetch and checkout, as
 # redeploy.sh's step 1 does):
 #   apps/helper/deploy/bind-relayer-key.sh
-# The order on the first deploy of mainnet-v1.json (review FIX 2). The key is checked against the deployed image's
-# MAINNET_VAULT (exit 5 below), and the commit R that adds the record is the one that moves that pin
-# (src/withdraw/send.ts, held by its test), so R must be running before this step can pass:
-#   1. apps/helper/deploy/redeploy.sh R, holding the helper's live checks: from R on, helper-bind-relayer-mainnet is
-#      listed (scripts/ci/helper-live-checks.mjs bindMainnetPlan) and fails until step 3, and a failing check undoes a
-#      deploy;
-#   2. this step, on R's checkout;
-#   3. apps/helper/deploy/redeploy.sh R again, so the helper starts with the three lines below;
-#   4. the owner sends 1 NEAR to the gas account (the carry's floor for one more deposit is 0.3302526 NEAR,
-#      src/bind/send.ts RELAYER_FLOOR_YOCTO; below it every deposit answers relayer_low);
-#   5. once it has landed: the helper's live checks, helper-bind-relayer-mainnet among them.
-# Later runs (a new server, a lost .env) start at step 2 on a running commit that has the record. At the end the script
-# prints the steps after it (3 to 5, numbered 1 to 3 there) with the account filled in.
+# The first deploy of mainnet-v1.json: the order is in vault-lines.sh's header, its one place (this step is its step 3:
+# the key is checked against the running image's MAINNET_VAULT, exit 5 below, and the record commit R moves that pin,
+# so R must be running first, with its vault lines moved). A later run (a new server, a lost .env) on a running commit
+# that has the record needs only this step and the ones it prints at the end (redeploy, fund, live checks), where step
+# 1 names the checkout's commit.
 # In order, stopping at the first failure with deploy/.env unchanged:
 #   1. refuses (exit 3) when any line of deploy/.env sets one of the three names below (redeploy.sh's lines_of
 #      matcher), so a second run never replaces a key the gas account already holds; when deploy/.env names no image
@@ -196,7 +188,7 @@ main() {
   mv -f "$tmp" "$env"
   trap - EXIT
   echo "bind-relayer-key: wrote ${NAMES[*]} to deploy/.env (vault $vault). Next, in this order:"
-  echo "bind-relayer-key: 1. apps/helper/deploy/redeploy.sh <this commit>, so the helper starts with the three lines"
+  echo "bind-relayer-key: 1. apps/helper/deploy/redeploy.sh $(git -C "$root" rev-parse HEAD 2>/dev/null || echo '<this commit>'), so the helper starts with the three lines"
   echo "bind-relayer-key: 2. the owner sends 1 NEAR to $account"
   echo "bind-relayer-key: 3. once it has landed: the helper's live checks, helper-bind-relayer-mainnet among them"
 }
