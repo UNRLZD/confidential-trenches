@@ -1217,16 +1217,15 @@ fn payout_of(receipts: &[Receipt], vault: &str, index: u64, s: &Spend) -> Pendin
         })
         .collect();
     assert_eq!(got, want, "I3: the payout of {} is not the request its proof binds", s.name);
-    let (mut to_recipient, mut fee) = (0u128, 0u128);
-    match &receipts[1].actions[..] {
+    let (to_recipient, fee): (u128, u128) = match &receipts[1].actions[..] {
         [MockAction::FunctionCallWeight { method_name, args, .. }] => {
             assert_eq!(method_name, b"on_payout");
             let a: Value = serde_json::from_slice(args).unwrap();
             assert_eq!(a["spend_index"], index, "the callback names the spend");
-            (to_recipient, fee) = (a["to_recipient"].as_str().unwrap().parse().unwrap(), a["fee"].as_str().unwrap().parse().unwrap());
+            (a["to_recipient"].as_str().unwrap().parse().unwrap(), a["fee"].as_str().unwrap().parse().unwrap())
         }
         other => panic!("the callback receipt holds {other:?}"),
-    }
+    };
     let mut out = Vec::new();
     if s.register > 0 {
         out.push(Part::Register { yocto: s.register });
