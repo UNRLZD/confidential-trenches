@@ -72,8 +72,10 @@ export function matches(file, paths = PATHS) {
 // s13 (VT-S13, both tokens) ran 35 s on the box (2026-11-06) and joins shard 1, then the lightest at 337.
 // s12 (VT-S12, four sandboxes in parallel) joins shard 3, then the lightest at 339.
 // s19 (VT-S19, two sandboxes in turn, as settle's 41 s) joins shard 4, then the lightest at 345.
+// p02 (VT-P02, 24 cases of 48 steps, real proofs in the mocked VM) ran 118 s on the box (4 threads, 2026-11-07) and
+// joins shard 1, the lightest at 430 s wall (run 42313947891), for about 556 s with its 8 s of compile and link.
 export const SHARDS = [
-  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
+  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "p02"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
