@@ -16,6 +16,7 @@
 // It passes when at least 3 transactions were read and every read and replay holds.
 //   node scripts/live-checks/evm-sell-hook-intrablock.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. Reads only.
+// Runs: once, the two trace providers' answers the kit's Robinhood replay reads; no host deploy changes them
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
