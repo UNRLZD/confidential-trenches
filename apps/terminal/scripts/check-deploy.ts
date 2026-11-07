@@ -17,10 +17,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { evmOrigins } from "../../../scripts/live-checks/page-evm-rpc-csp.mjs";
 
 export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
 export const HELPER_HOST = "api.confidential.unrealized.trade";
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org", "https://near.drpc.org"];
+// the origin of every provider in the kit's EVM venue lists, read from the kit (card page-evm-rpc-csp)
+export const EVM_RPCS: string[] = evmOrigins();
 
 const HELPER = [`https://${HELPER_HOST}`, `wss://${HELPER_HOST}`];
 
@@ -31,7 +34,7 @@ const ALLOWED: Record<string, string[]> = {
   "style-src": ["'self'"],
   "img-src": ["'self'", "data:", HELPER[0]!],
   "font-src": ["'self'"],
-  "connect-src": ["'self'", ...HELPER, SIGN_HOST, ...RPCS],
+  "connect-src": ["'self'", ...HELPER, SIGN_HOST, ...EVM_RPCS, ...RPCS],
   "manifest-src": ["'self'"],
   "worker-src": ["'none'"],
   "frame-src": ["'none'"],
