@@ -1,0 +1,502 @@
+{
+ "good": {
+  "trace": [
+   "https://robinhood.drpc.org",
+   "https://robinhood.api.pocket.network"
+  ],
+  "quote": [
+   "https://rpc.mainnet.chain.robinhood.com",
+   "https://robinhood.drpc.org"
+  ],
+  "txs": [
+   {
+    "hash": "0x4f531c483b9b47cf095b3b0bcdc24b870c096964b8f44315663ea6a88fde9800",
+    "block": "0x6785df6",
+    "readAt": "2026-11-07T16:40:09.458Z",
+    "traces": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "digest": {
+       "ok": true,
+       "pre": "801aa3669c7bdcc7b9fb901d4fed4de35e257268ff3fa39c0535765917758cc9",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x10fcf104c40ee4bc7648269f77fe1fdd4354554c",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x225a431611de100d438477627a616b0e1c1701b5",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "digest": {
+       "ok": true,
+       "pre": "801aa3669c7bdcc7b9fb901d4fed4de35e257268ff3fa39c0535765917758cc9",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x10fcf104c40ee4bc7648269f77fe1fdd4354554c",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x225a431611de100d438477627a616b0e1c1701b5",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     }
+    ],
+    "replays": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "answer": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "result": "0x"
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "answer": {
+       "id": 1,
+       "jsonrpc": "2.0",
+       "result": "0x"
+      }
+     }
+    ]
+   },
+   {
+    "hash": "0xf09bf96f6de1744de8c3ed34b0af1fc9e08df37926007814a44a7337d6ace46e",
+    "block": "0x6785df6",
+    "readAt": "2026-11-07T16:40:11.442Z",
+    "traces": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "digest": {
+       "ok": true,
+       "pre": "6674c51e8b2856ffc6f0d4df6b15965a289afca4bef5b93fd2e8f7035f8002c5",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x2efc4931f2e64b38d6ae3d714466840fbc951f56",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x77058091a6a1cf0ea6862467db88c44cf04fdd86",
+        "0x777974c073f7dce627e2a6c9f05afd3a9a7fa8d5",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "digest": {
+       "ok": true,
+       "pre": "6674c51e8b2856ffc6f0d4df6b15965a289afca4bef5b93fd2e8f7035f8002c5",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x2efc4931f2e64b38d6ae3d714466840fbc951f56",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x77058091a6a1cf0ea6862467db88c44cf04fdd86",
+        "0x777974c073f7dce627e2a6c9f05afd3a9a7fa8d5",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     }
+    ],
+    "replays": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "answer": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "result": "0x"
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "answer": {
+       "id": 1,
+       "jsonrpc": "2.0",
+       "result": "0x"
+      }
+     }
+    ]
+   },
+   {
+    "hash": "0x3de53004e0aebe5562228a761a701b97614b4059a1d910e8d3bbb7d968d89179",
+    "block": "0x6785df6",
+    "readAt": "2026-11-07T16:40:13.083Z",
+    "traces": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "digest": {
+       "ok": true,
+       "pre": "53f262eee62431b86888a544c1f6210908f98ee96d75e091c4fd0a0a9b82ffe4",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x11725976bf1f38c4ab78d1f480bc5883d70d9dc3",
+        "0x38951689db00942d82f85d04f70988bfbb5f67d8",
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd3002b41e3760d1a911a51ed6fd3920b87e897dc",
+        "0xddd9c09829ad8aeff18afd17422a5d3cfde77d9b"
+       ],
+       "error": "execution reverted",
+       "output": "0x9270fab1"
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "digest": {
+       "ok": true,
+       "pre": "53f262eee62431b86888a544c1f6210908f98ee96d75e091c4fd0a0a9b82ffe4",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x11725976bf1f38c4ab78d1f480bc5883d70d9dc3",
+        "0x38951689db00942d82f85d04f70988bfbb5f67d8",
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd3002b41e3760d1a911a51ed6fd3920b87e897dc",
+        "0xddd9c09829ad8aeff18afd17422a5d3cfde77d9b"
+       ],
+       "error": "execution reverted",
+       "output": "0x9270fab1"
+      }
+     }
+    ],
+    "replays": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "answer": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "error": {
+        "code": 3,
+        "message": "execution reverted",
+        "data": "0x9270fab1"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "answer": {
+       "id": 1,
+       "jsonrpc": "2.0",
+       "error": {
+        "code": 3,
+        "message": "execution reverted",
+        "data": "0x9270fab1"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "trace": [
+   "https://robinhood.drpc.org",
+   "https://robinhood.api.pocket.network"
+  ],
+  "quote": [
+   "https://rpc.mainnet.chain.robinhood.com",
+   "https://robinhood.drpc.org"
+  ],
+  "txs": [
+   {
+    "hash": "0x3ec391a60a4f970a8fcc95cfb4194c140281a3ce6e73197e26794d1d072247c9",
+    "block": "0x6785ebd",
+    "readAt": "2026-11-07T16:40:30.456Z",
+    "traces": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "digest": {
+       "ok": true,
+       "pre": "95f39c536443a8eac39adaf32321ecaee9f7380094ee0034500bdf92ed0daf14",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x4868485386a308a2d96001d5d9f1ebdee9ce2b2a",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x7f40882d3bc43948798e1e3acbb9508c38994ce4",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xb540e378e04fb147013675b1ef359bb249ef629b",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "digest": {
+       "ok": true,
+       "pre": "95f39c536443a8eac39adaf32321ecaee9f7380094ee0034500bdf92ed0daf14",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x4868485386a308a2d96001d5d9f1ebdee9ce2b2a",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x7f40882d3bc43948798e1e3acbb9508c38994ce4",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xb540e378e04fb147013675b1ef359bb249ef629b",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     }
+    ],
+    "replays": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "answer": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "error": {
+        "code": -32000,
+        "message": "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "answer": {
+       "id": 1,
+       "jsonrpc": "2.0",
+       "error": {
+        "code": -32000,
+        "message": "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "hash": "0x32afaef1d9d25f8a6b504e9fa54be5b5bc1fb6cc932c05d240b3ac753343b064",
+    "block": "0x6785ebd",
+    "readAt": "2026-11-07T16:40:32.572Z",
+    "traces": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "digest": {
+       "ok": true,
+       "pre": "0b6c41b173fce366409e6919cde633fdbf35f0c014d4081caa7dcd21a664b1cc",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x4868485386a308a2d96001d5d9f1ebdee9ce2b2a",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xb540e378e04fb147013675b1ef359bb249ef629b",
+        "0xd72a0a4606ad0f97ddda743d2432b227deac2816",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "digest": {
+       "ok": true,
+       "pre": "0b6c41b173fce366409e6919cde633fdbf35f0c014d4081caa7dcd21a664b1cc",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x4868485386a308a2d96001d5d9f1ebdee9ce2b2a",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xb540e378e04fb147013675b1ef359bb249ef629b",
+        "0xd72a0a4606ad0f97ddda743d2432b227deac2816",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": null,
+       "output": null
+      }
+     }
+    ],
+    "replays": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "answer": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "error": {
+        "code": -32000,
+        "message": "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "answer": {
+       "id": 1,
+       "jsonrpc": "2.0",
+       "error": {
+        "code": -32000,
+        "message": "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "hash": "0x492a60cab095134e57d9da9295a2ffac747a5ef7d7de27929cc7215d8fc22457",
+    "block": "0x6785ebd",
+    "readAt": "2026-11-07T16:40:34.879Z",
+    "traces": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "digest": {
+       "ok": true,
+       "pre": "495bd2c46b224bd78533f53f987370bd223c7c227f2f13547c02e2eedcea843b",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x1d573aed80f2cc06fce2e6e6002476763e59fc0a",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x96dc90c3770a052e23669456bcff1b77a119140c",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": "execution reverted",
+       "output": "0x5b8d31b6"
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "digest": {
+       "ok": true,
+       "pre": "495bd2c46b224bd78533f53f987370bd223c7c227f2f13547c02e2eedcea843b",
+       "accounts": [
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000071",
+        "0x0000000000000000000000000000000000000072",
+        "0x0000f90827f1c53a10cb7a02335b175320002935",
+        "0x1642634c8cb1c9f1b84c9a1a08534f8c3f4e89f8",
+        "0x1d573aed80f2cc06fce2e6e6002476763e59fc0a",
+        "0x7615926023bb149f36095645c2a81dc367d39750",
+        "0x96dc90c3770a052e23669456bcff1b77a119140c",
+        "0xa4b00000000000000000000000000000000000f6",
+        "0xa4b000000000000000000073657175656e636572",
+        "0xa4b05fffffffffffffffffffffffffffffffffff",
+        "0xd78480cafef722d75519e13b9f516e5704d0d659",
+        "0xdcd2043ffb830072a10c692b38e1eb0a2ce45f8f"
+       ],
+       "error": "execution reverted",
+       "output": "0x5b8d31b6"
+      }
+     }
+    ],
+    "replays": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "answer": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "error": {
+        "code": -32000,
+        "message": "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "answer": {
+       "id": 1,
+       "jsonrpc": "2.0",
+       "error": {
+        "code": -32000,
+        "message": "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
