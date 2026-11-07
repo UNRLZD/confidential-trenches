@@ -32,8 +32,11 @@
 //!   status, the totals, and every leaf and label in order; after every step the invariants run on the vault's own views
 //!   and the token's balances, then the model's leaves, labels, totals and counts are compared exactly.
 //!
-//! Each named branch is counted (`Branch`); the run fails when any of `BRANCHES` counts 0, so a run that never drew a
-//! failing part of a payout cannot pass for a refund test. The seed and the case count are fixed (`SEED`, `CASES`); a failure names
+//! Each named branch is counted (`Branch`); the long run fails when any of `BRANCHES` counts 0, so a run that never
+//! drew a failing part of a payout cannot pass for a refund test. The long run (24 cases) is `#[ignore]`d, as
+//! tests/tree_prop.rs's is: CI's vault-sandbox job runs it (tests/harness/run.sh passes `--include-ignored`) on every
+//! pull request that touches the vault; a plain `cargo test` runs its first 2 cases as a smoke run, and the mutant tests.
+//!   cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml --test p02 -- --ignored The seed and the case count are fixed (`SEED`, `CASES`); a failure names
 //! the seed, the case and the step, and `P02_SEED`, `P02_CASES` and `P02_MUTANT` replay or plant.
 //!
 //! The mutants are the harness's only, never the vault's code: `misread` tells `on_payout` Successful when the token
@@ -64,7 +67,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 const FIXTURE: &str = include_str!("fixtures/withdraw-spends.json");
 /// The fixed run: `P02_SEED` and `P02_CASES` replace them.
 const SEED: u64 = 0x5602_0000_0000_0001;
+/// The long run's cases (`#[ignore]`d; tests/harness/run.sh runs it) and the smoke run's (every plain `cargo test`).
 const CASES: u64 = 24;
+const SMOKE_CASES: u64 = 2;
 const STEPS: u64 = 48;
 /// The chance the token fails a payout receipt at one of its parts, in percent.
 const FAIL_PCT: u64 = 45;
@@ -1234,9 +1239,9 @@ fn payout_of(receipts: &[Receipt], vault: &str, index: u64, s: &Spend) -> Pendin
 }
 
 /// The run: `cases` fresh vaults of `STEPS` random steps each, every invariant checked after every step. Returns the
-/// branch counts; panics with the seed, the case and the step on the first broken invariant or wrong prediction, and
-/// when a branch was never hit.
-fn run(seed: u64, cases: u64, mutant: Mutant) -> BTreeMap<Branch, u64> {
+/// branch counts; panics with the seed, the case and the step on the first broken invariant or wrong prediction, and,
+/// when `gate`, when a branch of `BRANCHES` was never hit.
+fn run(seed: u64, cases: u64, mutant: Mutant, gate: bool) -> BTreeMap<Branch, u64> {
     let mut total: BTreeMap<Branch, u64> = BRANCHES.iter().map(|b| (*b, 0)).collect();
     // the scope the fixture's proofs and labels were made with
     let fx = fixture();
@@ -1271,20 +1276,31 @@ fn run(seed: u64, cases: u64, mutant: Mutant) -> BTreeMap<Branch, u64> {
     let never: Vec<String> = BRANCHES.iter().filter(|b| total[b] == 0).map(|b| format!("{b:?}")).collect();
     let counts = total.iter().map(|(b, n)| format!("{b:?} {n}")).collect::<Vec<_>>().join(", ");
     println!("VT-P02 seed {seed:#x}, {cases} cases x {STEPS} steps, mutant {mutant:?}: {counts}");
-    assert!(never.is_empty(), "VT-P02 FAILED: seed {seed:#x}, {cases} cases: the run never drew {}; counts: {counts}", never.join(", "));
+    assert!(!gate || never.is_empty(), "VT-P02 FAILED: seed {seed:#x}, {cases} cases: the run never drew {}; counts: {counts}", never.join(", "));
     total
 }
 
+/// The long run: 24 cases of 48 steps with the branch gate (118 s on the box). A plain `cargo test` skips it; CI's
+/// vault-sandbox job runs it in shard 1 (scripts/ci/vault-sandbox.mjs; tests/harness/run.sh passes
+/// `--include-ignored`) on every pull request that touches the vault.
 #[test]
+#[ignore = "the long run (24 x 48, 118 s on the box): cargo test --test p02 -- --ignored; run.sh runs it"]
 fn vt_p02_i1_to_i6_hold_after_every_step() {
-    let counts = run(env_u64("P02_SEED", SEED), env_u64("P02_CASES", CASES), Mutant::from_env());
+    let counts = run(env_u64("P02_SEED", SEED), env_u64("P02_CASES", CASES), Mutant::from_env(), true);
     for b in [Branch::PayoutStorageDepositFailed, Branch::PayoutRecipientFailed, Branch::PayoutFeeFailed, Branch::SettleRefundNote] {
         assert!(counts[&b] > 0, "{b:?}");
     }
 }
 
-fn red(mutant: Mutant, cases: u64) -> String {
-    match catch_unwind(|| run(SEED, cases, mutant)) {
+/// The smoke run on every plain `cargo test`: the long run's first cases, every invariant after every step, no gate
+/// (too few cases to draw every branch).
+#[test]
+fn vt_p02_smoke_i1_to_i6_hold_on_the_first_cases() {
+    run(SEED, SMOKE_CASES, Mutant::None, false);
+}
+
+fn red(mutant: Mutant, cases: u64, gate: bool) -> String {
+    match catch_unwind(|| run(SEED, cases, mutant, gate)) {
         Ok(_) => panic!("the run passed with the {mutant:?} mutant planted"),
         Err(e) => panic_text(e),
     }
@@ -1292,18 +1308,19 @@ fn red(mutant: Mutant, cases: u64) -> String {
 
 #[test]
 fn vt_p02_a_failed_payout_read_as_delivered_breaks_i1() {
-    let e = red(Mutant::Misread, CASES);
+    let e = red(Mutant::Misread, CASES, true);
     assert!(e.contains("I1:"), "{e}");
 }
 
 #[test]
 fn vt_p02_a_forgotten_nullifier_breaks_i2() {
-    let e = red(Mutant::DropSpent, CASES);
+    let e = red(Mutant::DropSpent, CASES, true);
     assert!(e.contains("I2:"), "{e}");
 }
 
 #[test]
 fn vt_p02_a_token_that_never_fails_fails_the_branch_count() {
-    let e = red(Mutant::TokenNeverFails, 8);
+    // two cases: a token that never fails leaves both branches at 0 however many cases run
+    let e = red(Mutant::TokenNeverFails, 2, true);
     assert!(e.contains("never drew") && e.contains("PayoutRecipientFailed") && e.contains("PayoutFeeFailed"), "{e}");
 }
