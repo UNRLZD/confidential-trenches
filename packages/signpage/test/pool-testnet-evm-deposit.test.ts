@@ -65,3 +65,35 @@ test("without the chain's EVM pin (the page's EVM_POOLS today), an EVM pool.depo
   // the other EVM kinds stay refused
   assert.deepEqual(flow({ ...ASK, kind: "pool.buy", token: "0xF111111111111111111111111111111111111111", slippageBps: 100 }, ctx), { error: "not_allowed" });
 });
+
+test("an EVM note left INCOMING settles with no request: on the signed-in load (settle) and on a state read (stateRead), never waiting for an ask", async () => {
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
+  const { noteCommitment, noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
+  const { evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const { vaultLabelOf } = await import("../../kit/src/vault/shapes.ts");
+  const scope = evmPoolScopeOf(PIN.pool, 84532n);
+  for (const pass of ["settle", "stateRead"] as const) {
+    const idb = new IDBFactory();
+    const store = async () => {
+      const w = await openWalletStore({ indexedDB: idb });
+      stores.push(w);
+      return w;
+    };
+    const ns = await openNoteStore(await store());
+    const n = await ns.planDeposit(scope, (ref) => noteSecrets(SEED, ref).precommitment);
+    await ns.move(n.id, "PLANNED", "INCOMING", { evmSend: { hash: "0x" + "ab".repeat(32), nonce: 0n, value: ASK.amount, sentMs: 1n } });
+    ns.close();
+    // its Deposited, final on both RPCs
+    const label = vaultLabelOf(keccak_256, scope, 1n);
+    const events = [{ block: 50n, blockHash: `0x${"ab".repeat(32)}`, logIndex: 0n, bytes: "", kind: "deposit", state: noteCommitment(ASK.amount, label, n.precommitment), label, value: ASK.amount, precommitment: n.precommitment, nullifier: null, recipient: null, token: null }];
+    const r = rpcs();
+    const t = testnetPool({ store, seed64: async () => SEED.slice() }, { evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: () => r.pair, evmRound: () => async () => ({ events: events as never, finalBlock: 100n }) });
+    await t[pass]();
+    const back = await openNoteStore(await store());
+    const now = await back.get(n.id);
+    back.close();
+    assert.equal(now!.state, "UNSPENT", `${pass}: settled`);
+    assert.equal(now!.leaf!.value, ASK.amount, pass);
+  }
+});

@@ -4,8 +4,8 @@
 // (src/pool-testnet.ts TESTNET_RPCS.base), its tree read by the wallet's evmTreeSync as the page reads it.
 //   node packages/signpage/scripts/pool-deposit-evm-testnet.mjs <out.json>
 // - A seed made in this run only (16 random bytes), never printed or kept: its note's secrets end with the run, so the
-//   0.0001 ETH stays in the pool as a test deposit.
-// - The ask, one pool.deposit of 0.0001 ETH: its first run names U and the wei U is short (`short`), and this run waits
+//   0.001 ETH stays in the pool as a test deposit.
+// - The ask, one pool.deposit of 0.001 ETH: its first run names U and the wei U is short (`short`), and this run waits
 //   until U holds that on both RPCs. Someone else funds U.
 // - Then the ask again: it signs and sends U's deposit and answers "sent" (a Deposited is final only after ~22 min on
 //   Base Sepolia). Then, every 60 s, the page load's pass (runPoolDepositEvm with no ask, what settle runs on each load
@@ -29,7 +29,7 @@ if (!OUT) throw new Error("usage: pool-deposit-evm-testnet.mjs <out.json>");
 const POOL = "0xb239a38af69b68e6c5c305df64985f283b5d5fe5";
 const DEPLOY_TX = "0x388b62ddca5ba87084edb814e5290f097be2ff9b4ecb1dec69b5f2c567cb163a";
 const RPCS = ["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"];
-const RUNG = EVM_LADDER.one; // 0.0001 ETH, the pool's MIN_DEPOSIT
+const RUNG = EVM_LADDER.min; // 0.001 ETH, the ladder's smallest rung
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let id = 0;
@@ -48,7 +48,18 @@ const rpcOf = (url) => async (method, params) => {
     }
   }
 };
-const rpcs = [rpcOf(RPCS[0]), rpcOf(RPCS[1])];
+// U's estimate and simulation on each RPC, logged (public reads: U's address, the pool, the call)
+const traced = (k, rpc) => async (method, params) => {
+  try {
+    const r = await rpc(method, params);
+    if (method === "eth_estimateGas" || method === "eth_sendRawTransaction") log(`rpc ${k} ${method} -> ${r}`);
+    return r;
+  } catch (e) {
+    if (method === "eth_estimateGas" || method === "eth_call" || method === "eth_sendRawTransaction") log(`rpc ${k} ${method} failed: ${e.message}`);
+    throw e;
+  }
+};
+const rpcs = [traced(0, rpcOf(RPCS[0])), traced(1, rpcOf(RPCS[1]))];
 for (const r of rpcs) if (BigInt(await r("eth_chainId", [])) !== EVM_CHAIN_IDS["base-sepolia"]) throw new Error("not Base Sepolia");
 const receipt = await rpcs[0]("eth_getTransactionReceipt", [DEPLOY_TX]);
 if (receipt?.contractAddress?.toLowerCase() !== POOL) throw new Error("the deploy tx does not create the pool");
@@ -67,7 +78,7 @@ const round = async () => {
   return { events: r.events, finalBlock: r.fin.number };
 };
 const shorts = [];
-const host = () => ({ pin: PIN, rpcs, round, notes: async () => ns, seed64: async () => seed64.slice(), short: (u, wei) => void shorts.push([u, wei]), progress: (s) => log(`stage ${s}`), wait: sleep });
+const host = () => ({ pin: PIN, rpcs, round, notes: async () => ns, seed64: async () => seed64.slice(), short: (u, wei) => (shorts.push([u, wei]), log(`short: U ${u} needs ${wei} wei more`)), progress: (s) => log(`stage ${s}`), wait: sleep });
 const ASK = { kind: "pool.deposit", chain: "base", token: null, amount: RUNG, slippageBps: 0, decimals: 18 };
 
 const first = await runPoolDepositEvm(host(), ASK);

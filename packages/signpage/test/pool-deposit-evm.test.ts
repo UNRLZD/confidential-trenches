@@ -505,3 +505,21 @@ test("the gas limit is the two-RPC estimate plus the tree's headroom from the po
   assert.deepEqual(await runPoolDepositEvm(hostOf(f.ch, f.ns, { rpcs }), ASK), { error: "failed" });
   assert.equal(f.ch.c.sent.length, 0);
 });
+
+test("an ask below the ladder's smallest rung is refused with nothing planned, and a top-up is always named at a rung the ladder deposits (found by the Base Sepolia run: an ask of MIN_DEPOSIT was told to top up 0.0001 ETH, then kept it)", async () => {
+  const ch = chain();
+  const { ns } = await notes();
+  const shorts: [string, bigint][] = [];
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { short: (u, w) => void shorts.push([u, w]) }), { ...ASK, amount: EVM_LADDER.one });
+  assert.deepEqual(a, { error: "not_allowed" });
+  assert.equal((await ours(ns)).length, 0, "nothing planned");
+  assert.deepEqual(shorts, []);
+  // an ask of the smallest rung: named at that rung, and U funded with exactly that deposits it
+  const b = await runPoolDepositEvm(hostOf(ch, ns, { short: (u, w) => void shorts.push([u, w]) }), { ...ASK, amount: EVM_LADDER.min });
+  assert.deepEqual(b, { error: "not_funded" });
+  assert.deepEqual(shorts.map((x) => x[1]), [EVM_LADDER.min + capBound(ch.c)]);
+  ch.c.balance = [shorts[0]![1], shorts[0]![1]];
+  ch.c.onSend = (raw) => ch.land(raw);
+  const c = await runPoolDepositEvm(hostOf(ch, ns), { ...ASK, amount: EVM_LADDER.min });
+  assert.equal("stage" in c && c.stage, "filled");
+});

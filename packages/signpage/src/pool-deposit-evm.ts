@@ -250,7 +250,7 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   if (step.kind === "claim") return { kind: "claimed" };
   // short: the rung this ask goes in at first (the ladder's split of what is left of it, or the open note's recorded
   // value) and the fee bound, less U's lower reading
-  const need = sentValue ?? (want > 0n ? ladderSplit(EVM_LADDER, want).notes[0] : undefined) ?? EVM_LADDER.one;
+  const need = sentValue ?? (want > 0n ? ladderSplit(EVM_LADDER, want).notes[0] : undefined) ?? EVM_LADDER.min;
   if (step.kind !== "deposit" || step.call === undefined) return { kind: "keep", short: need + bound > low ? need + bound - low : 0n, u };
   if (sentValue !== undefined && (step.value !== sentValue || !sameRef(step.ref, again!.ref))) return { kind: "keep", short: sentValue + bound > low ? sentValue + bound - low : 0n, u };
   const estimateOf = async (call: { to: string; value: bigint; data: string }) =>
@@ -430,6 +430,8 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
       return false;
     };
 
+    // an ask below the ladder's smallest rung has no note to deposit (the Solana runner's rule): refused, nothing planned
+    if (ladderSplit(EVM_LADDER, ask.amount).notes.length === 0) return { error: "not_allowed" };
     let left = ask.amount;
     let simAgain = false;
     for (let steps = 0; steps < STEPS_MAX; steps++) {
@@ -484,7 +486,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
       if (landed) return { stage: left >= EVM_POOL_MIN_DEPOSIT ? "part_filled" : "filled", txs: landedTxs };
       // an earlier note still landing on a U that covers this rung once it lands: try again then; else the ask's own U
       // is short, and the top-up names it
-      if (await coversOnceLanded(ladderSplit(EVM_LADDER, left).notes[0] ?? EVM_LADDER.one)) return { stage: "not_landed", txs: [] };
+      if (await coversOnceLanded(ladderSplit(EVM_LADDER, left).notes[0] ?? EVM_LADDER.min)) return { stage: "not_landed", txs: [] };
       h.short?.(t.u, t.short);
       return { error: "not_funded" };
     }
