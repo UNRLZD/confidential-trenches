@@ -3,11 +3,13 @@
 // records. Each exit sells from the fresh wallet W, its output goes to W itself, and min_out is fixed inside the signed
 // bytes, so a server that holds this record can only send the order early, at the user's price or better
 // (wallet.md §2.6).
+import { deepFreeze } from "../freeze.ts";
 
 /** The chains a fresh wallet trades on. */
 export type Chain = "solana" | "base" | "robinhood" | "near";
 
 export const CHAINS = ["solana", "base", "robinhood", "near"] as const satisfies readonly Chain[];
+deepFreeze(CHAINS);
 
 /** What fires an order. */
 export interface OrderTrigger {
@@ -83,6 +85,7 @@ export const ORDER_RECORD_FIELDS = [
   "variants",
   "expires_at",
 ] as const satisfies readonly (keyof OrderRecord)[];
+deepFreeze(ORDER_RECORD_FIELDS);
 
 /** At most this many signed variants per order. */
 export const ORDER_VARIANTS_MAX = 3;

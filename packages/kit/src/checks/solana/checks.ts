@@ -25,6 +25,7 @@ import {
   type SolanaLookupTable,
   type SolanaTransaction,
 } from "./message.ts";
+import { deepFreeze } from "../../freeze.ts";
 
 export const SOLANA_SOL_MINT = "So11111111111111111111111111111111111111112";
 export const SOLANA_SYSTEM_PROGRAM = "11111111111111111111111111111111";
@@ -42,6 +43,7 @@ export const SOLANA_ALLOWED_PROGRAMS: readonly string[] = [
   SOLANA_ATA_PROGRAM,
   SOLANA_JUPITER_PROGRAM,
 ];
+deepFreeze(SOLANA_ALLOWED_PROGRAMS);
 // S5: the baked tip accounts and amounts (research proofs/p4-speed/solana/run.mjs:68-84: Helius Sender's list read
 // 2026-10-19 from helius.dev/docs/sending-transactions/sender; Jito's getTipAccounts list read 2026-10-19).
 export const SOLANA_SENDER_TIP_ACCOUNTS: readonly string[] = [
@@ -51,12 +53,14 @@ export const SOLANA_SENDER_TIP_ACCOUNTS: readonly string[] = [
   "wyvPkWjVZz1M8fHQnMMCDTQDbkManefNNhweYk5WkcF", "3KCKozbAaF75qEU33jtzozcJ29yJuaLJTy2jFdzUY8bT",
   "4vieeGHPYPG2MmyPRcYjdiDmmhN3ww7hsFNap8pVN3Ey", "4TQLFNWK8AovT1gFvda5jfw2oJeRMKEmw7aH6MGBJ3or",
 ];
+deepFreeze(SOLANA_SENDER_TIP_ACCOUNTS);
 export const SOLANA_JITO_TIP_ACCOUNTS: readonly string[] = [
   "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49", "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
   "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh", "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
   "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt", "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
   "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY", "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
 ];
+deepFreeze(SOLANA_JITO_TIP_ACCOUNTS);
 export const SOLANA_SENDER_TIP = 5_000n;
 export const SOLANA_JITO_TIP = 10_000n;
 /** The least tip a Jito bundle carries: "Jito enforces a minimum tip of 1000 lamports for bundles"
@@ -65,6 +69,7 @@ export const SOLANA_JITO_TIP_MIN = 1_000n;
 // S8 (P4S "Slippage and priority"; run.mjs:85-91).
 export const SOLANA_CU_PRICE_MAX = 1_000_000n;
 export const SOLANA_CU_LIMIT = { pumpBuy: 200_000, pumpSell: 150_000, other: 600_000 } as const;
+deepFreeze(SOLANA_CU_LIMIT);
 export const SOLANA_LAMPORTS_PER_SIGNATURE = 5_000n;
 // S12's tolerance between the simulated out and E: the paper's band, POOL_READ_TOL_BPS = 200 (§2.0 LD1; the G1 proof saw
 // about 1.1 % per reserve between a processed and a confirmed read).
@@ -913,7 +918,9 @@ export const SOLANA_PUMP_AMM_PROGRAM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMf
 // api.mainnet-beta.solana.com): no args; accounts user (writable, signer), user_volume_accumulator (writable, PDA of
 // "user_volume_accumulator" and the user), event_authority (PDA of "__event_authority"), program.
 export const SOLANA_CLOSE_VOLUME_ACCUMULATOR: readonly number[] = [249, 69, 164, 218, 150, 103, 84, 138];
+deepFreeze(SOLANA_CLOSE_VOLUME_ACCUMULATOR);
 export const SOLANA_VOLUME_PROGRAMS: readonly string[] = [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM];
+deepFreeze(SOLANA_VOLUME_PROGRAMS);
 /** The wallet's volume account under one pump program. */
 export const solanaVolumeAccumulator = (wallet: string, program: string): string =>
   solanaProgramAddress([new TextEncoder().encode("user_volume_accumulator"), base58.decode(wallet)], program);
@@ -929,6 +936,7 @@ const EXT_CONFIDENTIAL_FEE_AMOUNT = 17;
  * 13,396 per volume close.
  */
 export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000 } as const;
+deepFreeze(SOLANA_TEARDOWN_CU);
 const TOKEN_ACCOUNT_LEN = 165;
 
 /** One account as a provider answered it (getMultipleAccounts, base64). */

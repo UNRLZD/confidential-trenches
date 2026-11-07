@@ -1,0 +1,79 @@
+{
+  "_note": "good: card kit-oneclick-pins-frozen's SIGN_HOST build (packages/signpage/index.html and public/app.js as committed on the card branch at 204e7808 with main 63c90229 merged, every kit export frozen in place), 7 Nov: every pin frozen, the one pinned key: PASS. bad: SIGN_HOST read 2026-11-06T23:16:39Z (release-66, /app.js sha384-u/2uPkjr..., main ddb1a606, before this card): the four pins in plain literals: FAIL. badHarnessKey: the good build planted with a made-up key (ed25519:5Mbn3Ajg8a4x3tgXqLqgdx2GvnyLRB3exyzi9apAYVt8, no secret) beside the pinned one in the frozen key set, the page re-pinned to it: FAIL.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-09FwH003b7rvqH9xG6FrbJUL2Z9uolMoNzdJ7f9BuwUXkbErB/UyK/TOqf4y65oC\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-09FwH003b7rvqH9xG6FrbJUL2Z9uolMoNzdJ7f9BuwUXkbErB/UyK/TOqf4y65oC",
+    "keys": [
+      "ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc"
+    ],
+    "pins": {
+      "ONECLICK_SIGNING_KEYS": {
+        "copies": 1,
+        "frozen": 1
+      },
+      "ONECLICK_USDC_ASSETS": {
+        "copies": 1,
+        "frozen": 1
+      },
+      "ONECLICK_FEE_BPS": {
+        "copies": 1,
+        "frozen": 1
+      },
+      "ONECLICK_PAIR_FEE_BPS": {
+        "copies": 1,
+        "frozen": 1
+      }
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-u/2uPkjrMqoDl7YcqbxjLX2PyufVZ7Ld8qnauuuNhJZwcsihY6tApvrRDcg+yARb\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-u/2uPkjrMqoDl7YcqbxjLX2PyufVZ7Ld8qnauuuNhJZwcsihY6tApvrRDcg+yARb",
+    "keys": [
+      "ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc"
+    ],
+    "pins": {
+      "ONECLICK_SIGNING_KEYS": {
+        "copies": 1,
+        "frozen": 0
+      },
+      "ONECLICK_USDC_ASSETS": {
+        "copies": 1,
+        "frozen": 0
+      },
+      "ONECLICK_FEE_BPS": {
+        "copies": 1,
+        "frozen": 0
+      },
+      "ONECLICK_PAIR_FEE_BPS": {
+        "copies": 1,
+        "frozen": 0
+      }
+    }
+  },
+  "badHarnessKey": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-jlPTkwP1E5fcjbXYxKTud2s651xoaNWfuj8SyxOWLCpKTtZrZ09/J5OUkQGOchvs\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-jlPTkwP1E5fcjbXYxKTud2s651xoaNWfuj8SyxOWLCpKTtZrZ09/J5OUkQGOchvs",
+    "keys": [
+      "ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc",
+      "ed25519:5Mbn3Ajg8a4x3tgXqLqgdx2GvnyLRB3exyzi9apAYVt8"
+    ],
+    "pins": {
+      "ONECLICK_SIGNING_KEYS": {
+        "copies": 0,
+        "frozen": 0
+      },
+      "ONECLICK_USDC_ASSETS": {
+        "copies": 1,
+        "frozen": 1
+      },
+      "ONECLICK_FEE_BPS": {
+        "copies": 1,
+        "frozen": 1
+      },
+      "ONECLICK_PAIR_FEE_BPS": {
+        "copies": 1,
+        "frozen": 1
+      }
+    }
+  }
+}
