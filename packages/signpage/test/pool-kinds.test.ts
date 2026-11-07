@@ -56,12 +56,13 @@ test("no pool pinned (the page's mainnet today): every pool kind is refused not_
   assert.equal(flows.length, 0);
 });
 
-test("Base and Robinhood refuse a pool.deposit even with their pool pinned, and hand a pool.withdraw to the flow (its onward send has its check, rules/pool.ts checkEvmOnwardSend); Solana's go to the flow", async () => {
+test("Base and Robinhood hand a pinned pool's pool.deposit (its check, rules/pool.ts checkEvmDeposit, card pool-deposits) and pool.withdraw (checkEvmOnwardSend) to the flow; Solana's go to the flow", async () => {
   const flows: PoolAsk[] = [];
   const deps: PoolKindsDeps = { pinned: () => true, rpcs: () => null, flow: (ask) => (flows.push(ask), { error: "busy" }) };
   const k = poolKinds(deps);
-  for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.deposit"]({ chain, amount: "1" }, ctx), { error: "not_allowed" });
-  assert.equal(flows.length, 0);
+  for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.deposit"]({ chain, amount: "0.001" }, ctx), { error: "busy" });
+  assert.deepEqual(flows.map((a) => [a.kind, a.chain, a.amount, a.decimals]), [["pool.deposit", "base", 10n ** 15n, 18], ["pool.deposit", "robinhood", 10n ** 15n, 18]]);
+  flows.length = 0;
   for (const chain of ["base", "robinhood"] as const) assert.deepEqual(k["pool.withdraw"]({ chain }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.deposit"]({ chain: "solana", amount: "1.5" }, ctx), { error: "busy" });
   assert.deepEqual(k["pool.withdraw"]({ chain: "solana" }, ctx), { error: "busy" });
@@ -252,8 +253,8 @@ test("card pool-restore-wired: a flow that fails with EvmNotFinalError is answer
 // card precommit-taken-recover: an EVM pool deposit or sell signs on a precommitment anyone who sees it pending can take
 // first with MIN_DEPOSIT. Every device file that builds or signs one (the kit's evmPoolBuildSell or the rule's
 // signEvmSell called, or the pool's deposit(uint256,uint256) encoded) must pick its note through the wallet's
-// evmNextNote, which restores a taken note and names the next one to sign. Today none does: EVM pool.deposit is refused
-// (EVM_REFUSED) and the flow answers only Solana, so the list below is empty; the first flow that lands is held to it.
+// evmNextNote, which restores a taken note and names the next one to sign. The first that does is the EVM deposit
+// runner (src/pool-deposit-evm.ts, card pool-deposits), whose signEvmDeposit call follows its own evmNextNote pick.
 // card signer-guard-parser (reviewer L3 of pool-restore-wired, the review of 1a8a42f0 and the re-review of 40115c3d): the
 // guard reads code, not names (test/signer-guard.ts has the rules, and what they do not prove): every name is bound to
 // its declaration by the TypeScript compiler; a signer is only called, after an evmNextNote that runs first, or
@@ -276,7 +277,7 @@ const SIGNER_LIST = [
   ...["evmPoolBuildSell", "evmPoolSignSell", "evmPoolSignSellAuthorization", "evmPoolSignSimSell"].map((n) => `packages/kit/src/trade/evm/sell.ts#${n}`),
   ...["evmPoolBuildSellUnpinned", "evmPoolSignSellUnpinned", "evmPoolSignSellAuthorizationUnpinned", "evmPoolBuildSimSellUnpinned", "evmPoolSignSimSellUnpinned", "evmSellCallData", "pinnedBuildSell", "pinnedSignSell", "pinnedSignSimSell", "pinnedSignSellAuthorization"].map((n) => `packages/kit/src/trade/evm/sell-unpinned.ts#${n}`),
   "packages/kit/src/trade/evm/quoted.ts#evmQuotedSell",
-  ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
+  ...["signEvmSell", "signEvmSellSim", "signEvmAuthorization", "signEvmDeposit"].map((n) => `packages/signpage/src/rules/pool.ts#${n}`),
 ];
 const FIXTURE_SIGNERS = ["packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureSignSell", "packages/signpage/test/fixtures/signer-guard/defs.ts#fixtureBuildSell", "packages/signpage/test/fixtures/signer-guard/d01-defs.ts#fastPath", "packages/signpage/test/fixtures/signer-guard/bad/m1-define-leak.ts#leakSign"];
 // carried from precommit-taken-recover: each signer called with no evmNextNote is refused, and with it (by its own
@@ -400,6 +401,9 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
     "b21d-typehash-bytes.ts": r(`encodes the Sell type hash: "0x7964e18e.*${no}`, `encodes the Sell type hash as a number${no}`, `encodes the Sell type hash as bytes${no}`, `encodes the deposit as bytes${no}`), // H1
     "b30-eval.ts": r("imports node:vm", "runs code from text: eval", "runs code from text: Function", "runs code from text: a callee of the type Function", "runs code from text: eval", "runs code from text: setTimeout given a string"), // L2
     "b31-helper-signer.ts": r("imports the helper \\(a server file\\) on the device"), // M1
+    "b40-selector-held.ts": r(`encodes the deposit: "0xe2bbb158"${no}`), // the selector held, then compared: still an encoding
+    "b41-selector-joined.ts": r(`encodes the deposit: "0xe2bbb158"${no}`), // joined to arguments inside a ===
+    "b42-selector-narrowed.ts": r(`encodes the deposit: "0xe2bbb158"${no}`), // compared to a name the compare narrows, then joined (review L1)
     // the re-review of c00a169d: each passes at c00a169d, and is refused here (k4, k6 and p9 were refused there too)
     "p1-point-ecdsa.ts": r("uses @noble/curves: \\.Fn of its WeierstrassPointCons", "uses @noble/curves: \\.multiply of its WeierstrassPoint", "uses @noble/curves: \\.BASE of its WeierstrassPointCons", "uses @noble/curves: \\.multiply of its WeierstrassPoint"), // H1b
     "p2-dynimport-pinned.ts": r("imports at run time a module that exports @scure/bip32", "uses whole, or by a computed key, a module that exports @scure/bip32", "imports at run time a module that exports @noble/curves", "uses whole, or by a computed key, a module that exports @noble/curves"), // H1
@@ -425,7 +429,9 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
   // read and passes; a re-export (named, `export *`, a default), types, a predicate, a comment, a local that shares a
   // signer's name, and names destructured one by one from a namespace are no refusal
   const good = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "good")));
-  assert.equal(good.length, 6);
+  assert.equal(good.length, 7);
+  // a rule comparing a call's selector to the deposit's (rules/pool.ts checkEvmDeposit): a check, read and passed
+  assert.deepEqual(GUARD.sites(join(FIXTURES, "good/g-selector-compare.ts")).map((s) => [s.line, s.ok]), [[3, true], [4, true]], "a selector compared is a check");
   assert.deepEqual(names(GUARD.unguarded(good)), []);
   assert.ok(GUARD.sites(join(FIXTURES, "good/guarded-alias.ts")).some((s) => s.ok && /^calls .*#signEvmSell$/.test(s.what)), "the aliased signer is read");
   // M2 (the re-review of 40115c3d): a pick before a callback that signs, as pool-sell.ts's Solana flow signs in a .map

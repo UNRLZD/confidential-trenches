@@ -147,8 +147,8 @@ export interface SignpageParams {
 }
 
 export interface TxRef {
-  chain: Chain;
-  hash: string;
+  readonly chain: Chain;
+  readonly hash: string;
 }
 
 /** A top-level flow is set up: the page wrote its one-use pending-flow record. Its outcome comes back in `state`. */
@@ -362,11 +362,11 @@ export const DEPOSIT_HELD_STAGES: readonly DepositStage[] = Object.freeze(["refu
  * States and amounts only: never a key, the 12 words or which note is whose.
  */
 export interface DepositFacts {
-  refunded?: boolean;
-  hold?: DepositHold;
-  held_id?: string;
-  since_ms?: number;
-  amount_usd?: string;
+  readonly refunded?: boolean;
+  readonly hold?: DepositHold;
+  readonly held_id?: string;
+  readonly since_ms?: number;
+  readonly amount_usd?: string;
 }
 export type WithdrawStage = "proving" | "submitted" | "in_transit" | "sent" | "refunded" | "stopped";
 export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
@@ -391,29 +391,29 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op).
  */
 export type Operation =
-  | ({ id: string; kind: "deposit"; stage: DepositStage; txs: TxRef[] } & DepositFacts)
-  | { id: string; kind: "withdraw"; stage: WithdrawStage; txs: TxRef[] }
-  | { id: string; kind: "buy" | "sell"; stage: TradeStage; txs: TxRef[]; code?: ErrorCode }
-  | { id: string; kind: "hop"; stage: HopStage; txs: TxRef[] }
-  | { id: string; kind: "return"; stage: ReturnStage; txs: TxRef[] }
-  | { id: string; kind: "restore"; stage: RestoreStage; txs: TxRef[] };
+  | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
+  | { readonly id: string; readonly kind: "withdraw"; readonly stage: WithdrawStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "buy" | "sell"; readonly stage: TradeStage; readonly txs: readonly TxRef[]; readonly code?: ErrorCode }
+  | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "return"; readonly stage: ReturnStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "restore"; readonly stage: RestoreStage; readonly txs: readonly TxRef[] };
 
 /** A pool asset's USD price in SignpageState.pools, as the signing page read it (card signpage-pool-price). */
-export type PoolStatePrice = { price: string; expo: number; published_s: number; read_ms: number };
+export type PoolStatePrice = { readonly price: string; readonly expo: number; readonly published_s: number; readonly read_ms: number };
 
 /** What the page tells the app: addresses, balances, tx hashes and states only. */
 export interface SignpageState {
   /** The signing page's release tag. */
-  release: string;
-  api: 1;
-  signed_in: boolean;
-  way?: SigninWay;
+  readonly release: string;
+  readonly api: 1;
+  readonly signed_in: boolean;
+  readonly way?: SigninWay;
   /** False while the 12 words are the only copy and not saved: the backup comes before the first deposit. */
-  code_saved: boolean;
+  readonly code_saved: boolean;
   /** The last way in that failed on SIGN_HOST, and why (for example "no_prf", "no_passkey"). */
-  signin_failed?: { way: SigninWay; reason: string };
+  readonly signin_failed?: { readonly way: SigninWay; readonly reason: string };
   /** USDC in the vault. */
-  vault_balance: string;
+  readonly vault_balance: string;
   /**
    * The private balance held in each chain's pool, read from the device's own notes (never from a server): one entry
    * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC (12.5 SOL
@@ -434,28 +434,28 @@ export interface SignpageState {
    * the page could not price, and once the read is older than the feed's bound (POOL_USD_FEEDS maxAgeS); an app checks
    * that bound again on its own clock, since the state it holds ages.
    */
-  pools?: { chain: Chain; asset: PoolAsset; balance: string; ready?: string; tap_max?: string; price?: PoolStatePrice }[];
-  wallets: { chain: Chain; address: string; role: "fresh" | "hop"; size: string; state: WalletState }[];
-  positions: { chain: Chain; token: string; amount: string; cost: string; wallets: string[] }[];
-  orders: {
-    order_id: string;
-    chain: Chain;
-    wallet: string;
-    token: string;
-    group_id: string;
-    trigger: OrderTrigger;
-    state: OrderState;
+  readonly pools?: readonly { readonly chain: Chain; readonly asset: PoolAsset; readonly balance: string; readonly ready?: string; readonly tap_max?: string; readonly price?: PoolStatePrice }[];
+  readonly wallets: readonly { readonly chain: Chain; readonly address: string; readonly role: "fresh" | "hop"; readonly size: string; readonly state: WalletState }[];
+  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[] }[];
+  readonly orders: readonly {
+    readonly order_id: string;
+    readonly chain: Chain;
+    readonly wallet: string;
+    readonly token: string;
+    readonly group_id: string;
+    readonly trigger: OrderTrigger;
+    readonly state: OrderState;
     /** Unix ms of the last check of its nonce. */
-    last_check?: number;
+    readonly last_check?: number;
   }[];
   /** Money held under a one-time id or an arming account whose arm has stopped; withdraw.open with the id moves it. */
-  held: { id: string; asset: string; amount: string }[];
+  readonly held: readonly { readonly id: string; readonly asset: string; readonly amount: string }[];
   /**
    * The device's deposit wallets that still hold money (card app-export-every-wallet): a deposit wallet of this seed
    * with a balance not yet moved into its chain's pool or the vault, a remainder or dust included. `asset` is the
    * chain's pool asset (POOL_ASSET_DECIMALS), `amount` its balance in whole units of it, as pools' `balance` is.
    * Addresses and amounts only. Absent from a page of an earlier release; moneyWallets names the ones above 0.
    */
-  deposit_wallets?: { chain: Chain; address: string; asset: PoolAsset; amount: string }[];
-  ops: Operation[];
+  readonly deposit_wallets?: readonly { readonly chain: Chain; readonly address: string; readonly asset: PoolAsset; readonly amount: string }[];
+  readonly ops: readonly Operation[];
 }

@@ -119,10 +119,11 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's thirty-eight checks (signpage-shell runs four ways, pool-answer-unknown and page-evm-rpc-csp the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's thirty-nine checks (signpage-shell runs four ways, pool-deposits, oneclick-fee-path-own-key, pool-answer-unknown and page-evm-rpc-csp the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 38);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 39);
   assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "oneclick-fee-path-own-key" && !e.chrome && e.args === ""), "oneclick-fee-path-own-key runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
