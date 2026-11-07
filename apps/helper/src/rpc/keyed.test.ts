@@ -36,7 +36,8 @@ const LISTS = {
   solana: [["SOLANA_RPC_URL", `https://mainnet.helius-rpc.test/?api-key=${K.solOwn}`], ["SOLANA_RPC_URL_QUICKNODE", `https://name-one.solana-mainnet.quiknode.test/${K.solQn}/`], ["SOLANA_RPC_URL_DRPC", `https://lb.drpc.test/ogrpc?network=solana&dkey=${K.solDr}`]],
   base: [["BASE_RPC_URL", `https://base-mainnet.alchemy.test/v2/${K.baseOwn}`], ["BASE_RPC_URL_QUICKNODE", `https://name-two.base-mainnet.quiknode.test/${K.baseQn}/`], ["BASE_RPC_URL_DRPC", `https://lb.drpc.test/ogrpc?network=base&dkey=${K.baseDr}`]],
   robinhood: [["ROBINHOOD_RPC_URL", `https://robinhood.own.test/${K.rhOwn}`], ["ROBINHOOD_RPC_URL_QUICKNODE", `https://name-three.robinhood-mainnet.quiknode.test/${K.rhQn}/`], ["ROBINHOOD_RPC_URL_DRPC", `https://lb.drpc.test/ogrpc?network=robinhood&dkey=${K.rhDr}`]],
-  near: [["NEAR_RPC_URL_FASTNEAR", `https://rpc.mainnet.fastnear.test?apiKey=${K.nearFn}`], ["NEAR_RPC_URL", `https://near.own.test/${K.nearOwn}`], ["NEAR_RPC_URL_B", `https://near.b.test/?key=${K.nearB}`]],
+  // FastNear's own host (scripts/ci/near-rpc-operators.mjs holds it); the other two made-up hosts no NEAR RPC scan reads
+  near: [["NEAR_RPC_URL_FASTNEAR", `https://rpc.mainnet.fastnear.com?apiKey=${K.nearFn}`], ["NEAR_RPC_URL", `https://keyed-own.test/${K.nearOwn}`], ["NEAR_RPC_URL_B", `https://keyed-b.test/?key=${K.nearB}`]],
 } as const;
 type Chain = keyof typeof LISTS;
 const ENV: Record<string, string> = Object.fromEntries(Object.values(LISTS).flatMap((l) => l.map(([n, u]) => [n, u])));
@@ -211,7 +212,7 @@ test("card rpc-keyed-lists: /v1/health's rpc lists each chain's keyed companies 
     solana: ["helius-rpc.test answers", "quiknode.test answers", "drpc.test answers"],
     base: ["alchemy.test answers", "quiknode.test answers", "drpc.test answers"],
     robinhood: ["own.test answers", "quiknode.test answers", "drpc.test down"],
-    near: ["fastnear.test answers", "own.test answers", "b.test wrong chain"],
+    near: ["fastnear.com answers", "keyed-own.test answers", "keyed-b.test wrong chain"],
   });
   // a host with none set: an empty list, never the public fallback
   assert.deepEqual((createRpc({}) as Rpc).keyed?.(), { solana: [], base: [], robinhood: [], near: [] });
@@ -220,9 +221,9 @@ test("card rpc-keyed-lists: /v1/health's rpc lists each chain's keyed companies 
 test("card rpc-keyed-lists: /v1/health stays within its 1 KB (the kit's HELPER_V1_PATHS row) with every keyed slot set, every Solana slot named and the longest states", () => {
   const limit = HELPER_V1_PATHS.find((p) => p.path === "/v1/health")?.limitBytes ?? 0;
   assert.equal(limit, 1024);
-  const real = { SOLANA_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=x", BASE_RPC_URL: "https://base-mainnet.g.alchemy.com/v2/x", ROBINHOOD_RPC_URL: "https://robinhood-mainnet.g.alchemy.com/v2/x", NEAR_RPC_URL: "https://free.rpc.fastnear.com", NEAR_RPC_URL_B: "https://near.lava.build" };
+  const real = { SOLANA_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=x", BASE_RPC_URL: "https://base-mainnet.g.alchemy.com/v2/x", ROBINHOOD_RPC_URL: "https://robinhood-mainnet.g.alchemy.com/v2/x", NEAR_RPC_URL: "https://free.rpc.fastnear.com", NEAR_RPC_URL_B: "https://lava-endpoint.example" };
   const env: Record<string, string> = { ...real };
-  for (const [n, u] of Object.values(LISTS).flat()) if (!(n in real)) env[n] = u.replace(/[a-z-]+\.quiknode\.test/, "sparkling-quiet-sunset-wave.base-mainnet.quiknode.pro").replace("drpc.test", "drpc.org").replace("fastnear.test", "fastnear.com");
+  for (const [n, u] of Object.values(LISTS).flat()) if (!(n in real)) env[n] = u.replace(/[a-z-]+\.quiknode\.test/, "sparkling-quiet-sunset-wave.base-mainnet.quiknode.pro").replace("drpc.test", "drpc.org");
   const listed = (createRpc(env) as Rpc).keyed?.() ?? {};
   const worst = Object.fromEntries(Object.entries(listed).map(([c, l]) => [c, l.map((e) => e.replace(/ \S+$/, " wrong chain"))]));
   assert.equal(Object.values(worst).flat().length, 12);
