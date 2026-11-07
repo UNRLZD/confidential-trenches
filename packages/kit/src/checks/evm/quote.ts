@@ -2864,7 +2864,18 @@ export const evmIsDeviceSellQuote = (q: unknown): q is EvmPoolSellQuote => typeo
 //    Still open: an honest hook whose fee every no-op removes (a fee through a delta, or a dynamic pool's beforeSwap
 //    override over a stored fee of 0) is itself a smallest set beside a hostile hook that skims the trade by less than
 //    that fee, so both pools are banned (review of d6d055bf, info, case 7f8; its own card): the rule cannot tell an
-//    honest fee removed from a skim removed.
+//    honest fee removed from a skim removed. On the same card, each costing an honest pool banned and the hostile hooks
+//    left for a later failed try, since step 4's reads are the same as in a case the yield exists for:
+//    - M (2 hooks, the mirror of review of 2fccaa67, 1): a hostile hook whose own no-op cannot rescue (an earlier
+//      transaction of the block moved its pool's price) skims the trade by less than an honest hook's stored dynamic
+//      fee beside it; only the pair rescues at the stored fee and the honest hook alone at fee 0, so the pair yields to
+//      the honest hook (review of 6e8d18ad, M; the same reads as the bait it exists for, there E3);
+//    - Y (3 hops): two hostile hooks around an honest one each need its fee; the stored-fee sets are the two pairs that
+//      hold the honest hook, the fee-0 sets the honest hook alone and the hostile pair, which lies outside every
+//      stored-fee set and so is dropped: the honest hook alone is banned (review of 6e8d18ad, Y; the same reads as X);
+//    - C (at every version): a hostile hook that checks another hook's code (EXTCODEHASH under the replay's state
+//      override) pays the trade whole once that honest hook is replaced, and its own no-op cannot rescue (a price an
+//      earlier transaction moved): the honest hook is the only smallest set (review of 6e8d18ad, info).
 // The evidence rule covers any set of the route's hooks; each ban is the route the device itself picked, on providers
 // that agree, after the replay as it ran failed at the trade's own gas and the market held, and every ban expires. Anything
 // else bans nothing: providers that disagree, a trade that did not fail, a replay that does not fail, a failure that no

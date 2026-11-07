@@ -6705,3 +6705,26 @@ test("review of 2fccaa67, 1 rule: the stored-fee pass's sets, or the fee-0 pass'
   assert.deepEqual(f([["a", "b"], ["b", "c"]], [["b"]]), [["b"]], "each set once");
   assert.deepEqual(f([], []), []);
 });
+
+// ------------------------------------------------------------------------------------- review of 6e8d18ad
+// nit (case E2): a stored-fee set yields to every smaller fee-0 set inside it, not the first one found. h1 honest (a 3%
+// stored dynamic fee, quoted); h2 hostile, second in route order: an earlier transaction of the block raised its stored
+// fee to 3%, and it skims 2% of the real buy through a delta (the quoter sees the normal price). At the stored fee only
+// {h1, h2} rescues; at fee 0 {h1} and {h2} each. "First" would yield to {h1} alone, banning the honest pool and leaving
+// the hostile one in; "every" keeps the hostile pool banned (beside h1, as d6d055bf and 2fccaa67 did: case E1/E2, the
+// reads cannot tell which of the two is honest).
+test("review of 6e8d18ad, nit (buy, Robinhood) a stored-fee pair yields to every fee-0 set inside it, so the hostile hook second in route order stays banned (case E2)", async () => {
+  const n = 0x7c4;
+  const [token, x] = ["0x" + (0xc1f00 + n).toString(16).padStart(40, "0"), xAt(n)];
+  const armed = (ctx: SimCtx) => later(ctx) && ctx.sees?.earlier === true;
+  const pools: ModelPool[] = [
+    seeded(token),
+    { key: keyOf(x, NATIVE, 3000, 60, N1_H1), give: (a) => 2n * a, lie: (a) => (2n * a * 9409n) / 10000n, state: pricedAt(2n), neutral: (a, ctx) => (feeOverridden(ctx, N1_H1) ? 2n * a : (2n * a * 97n) / 100n) },
+    { key: keyOf(token, x, 3000, 60, N1_H2), give: (a) => a, lie: (a) => a, deltaFee: true, exec: (a, ctx) => (armed(ctx) ? (a * 9506n) / 10000n : a), neutral: (a, ctx) => (armed(ctx) && !feeOverridden(ctx, N1_H2) ? (a * 97n) / 100n : a) },
+  ];
+  const logs = [{ key: pools[2]!.key, at: 4_500_000 }, { key: pools[1]!.key, at: 4_100_001 }];
+  const q = await hbQuote(pools, token, logs, n1BuyRoute(token, x), undefined, RH_NET);
+  assert.ok(!("code" in q), show(q));
+  const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
+  assert.deepEqual([...(await buyProved(pools, q, h, undefined, RH_NET))].sort(), [hcPid(pools[1]!.key), hcPid(pools[2]!.key)].sort(), "the hostile pool banned, beside the honest one the reads cannot tell apart");
+});

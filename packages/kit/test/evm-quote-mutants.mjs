@@ -704,8 +704,11 @@ export const MUTANTS = [
   [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under: string[][] = [];", R, "review of 2fccaa67, 1 "],
   [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under: string[][] = [];", R, "review of 2fccaa67, 1 rule"],
   [QUOTE, "    const under = atZero.filter((t) => t.length < s.length && t.every((h) => s.includes(h)));", "    const under = atZero.filter((t) => t.length < s.length);", R, "review of 2fccaa67, 1 rule"],
-  // ("<=" for "<" in that filter is equivalent: a set yielding to an equal fee-0 set is the same set)
+  // ("<=" for "<" in that filter is equivalent on every input step 4 makes: the hooks are distinct (new Set), so a set
+  // inside s as large as s is s; and atZero holds no set inside another (pass skips every superset of one it found,
+  // subsetsOf smallest first), so s in atZero has no smaller fee-0 set inside it: either way the output is [s])
   [QUOTE, "    for (const x of under.length > 0 ? under : [s]) if (", "    for (const x of under.length > 0 ? under.slice(0, 1) : [s]) if (", R, "review of 2fccaa67, 1 rule"],
+  [QUOTE, "    for (const x of under.length > 0 ? under : [s]) if (", "    for (const x of under.length > 0 ? under.slice(0, 1) : [s]) if (", R, "review of 6e8d18ad, nit"],
   [QUOTE, "if (!out.some((r) => r.length === x.length && r.every((h) => x.includes(h)))) out.push([...x]);", "out.push([...x]);", R, "review of 2fccaa67, 1 rule"],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1 "],
   [QUOTE, "5b6240000060405260606000f3\";", "5b6200000060405260606000f3\";", R, "review of 1ee73a00, 1d"],
