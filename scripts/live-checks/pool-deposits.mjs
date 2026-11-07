@@ -14,10 +14,15 @@
 // that bundle carries the EVM deposit, as minified: U^evm's HKDF label (derive/keys.ts depositIdEvm), the rule's own
 // refusals (rules/pool.ts checkEvmDeposit) and the runner's reads (src/pool-deposit-evm.ts). What each does is held by
 // the card's tests; the recorded answers are evmFacts() over a tree's packages/signpage/index.html and public/app.js.
-// The Base Sepolia run of the EVM path is slice 4's.
+// Slice 3's review fold: the served /app.js is a released build from release-77 on (a releases/release-<N>.json, N >= 77,
+// names its sha384 for SIGN_HOST): a tree whose tests route pool.deposit on Base and Robinhood to the runner
+// (test/pool-testnet-evm-deposit.test.ts). A build with that route removed still carries the runner (the load's settle
+// pass calls it), so no string in the bundle tells the two apart; the release ledger does. The Base Sepolia run of the
+// EVM path is in pool-deposits.md (its Tx lines), read back by the money gate.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DEVNET_PROVIDERS, recorder } from "./pool-sol-deploy.mjs";
 import { check as checkRun, readSignFlow } from "./signpage-pool-notes.mjs";
@@ -34,8 +39,10 @@ export const EVM_MARKS = Object.freeze({
   "deposit rule": "evm_not_pinned",
   // the note store's EVM send record (notes/store.ts evmSends)
   "send record": "evmSends",
-  // src/pool-deposit-evm.ts: the head block a send went out at, which gates a rebuild at its nonce
-  "rebuild gate": "sentBlock",
+  // src/pool-deposit-evm.ts, the runner itself: a read only it makes
+  "runner": "the deposit's gas estimate",
+  // src/pool-deposit-evm.ts: the pool's label tree depth, read for the tree's gas headroom over the estimate
+  "tree headroom": "currentLabelTreeDepth()",
 });
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 /** What the check keeps of SIGN_HOST's page: the /app.js pin in index.html, the served bundle's sha384, and which marks it holds. */
@@ -50,12 +57,26 @@ export async function readSignEvm(fetchFn = fetch) {
   };
   return evmFacts(await get("/"), await get("/app.js"));
 }
-/** The EVM lines on SIGN_HOST's facts `e`. */
-export function judgeEvm(e) {
+/** The first release whose tree routes pool.deposit on Base and Robinhood to the runner with this fold. */
+export const ROUTED_FROM = 77;
+/** SIGN_HOST's /app.js sha384 in every release list from ROUTED_FROM on (packages/signpage/releases/). */
+export function routedReleases(dir = new URL("../../packages/signpage/releases/", import.meta.url)) {
+  const out = new Set();
+  for (const f of readdirSync(dir)) {
+    const n = /^release-(\d+)\.json$/.exec(f)?.[1];
+    if (n === undefined || Number(n) < ROUTED_FROM) continue;
+    const list = JSON.parse(readFileSync(new URL(f, dir), "utf8"));
+    for (const x of list.hosts?.SIGN_HOST?.files ?? []) if (x.path === "/app.js") out.add(x.sha384);
+  }
+  return out;
+}
+/** The EVM lines on SIGN_HOST's facts `e`, against the release lists' SIGN_HOST bundles `routed`. */
+export function judgeEvm(e, routed = routedReleases()) {
   const lines = [];
   const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
   say(typeof e?.pin === "string" && e.pin === e.sha384, `EVM: SIGN_HOST's served /app.js is the one index.html pins: ${e?.pin ?? "no pin"} / ${e?.sha384 ?? "not read"}`);
   for (const k of Object.keys(EVM_MARKS)) say(e?.marks?.[k] === true, `EVM: SIGN_HOST's bundle carries the EVM deposit's ${k} (${EVM_MARKS[k]})`);
+  say(routed.has(e?.sha384), `EVM: SIGN_HOST's /app.js is a release-${ROUTED_FROM}-or-later build, whose flow routes pool.deposit on Base and Robinhood to the runner: ${e?.sha384 ?? "not read"}`);
   return lines;
 }
 

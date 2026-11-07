@@ -1,5 +1,5 @@
 {
- "note": "Recorded 2026-11-07 on Solana devnet (card pool-deposits, slice 2): good, the live check on the run's deposit 4CGASPeY2... (PASS); bad, the same reads with another precommitment (last byte +1) in the run's place, whose mark does not exist (FAIL). Slice 3: good.evm is evmFacts() of the release-77 build, which SIGN_HOST serves once deployed; bad.evm is SIGN_HOST's release-72 page, with no EVM deposit.",
+ "note": "Recorded 2026-11-07 on Solana devnet (card pool-deposits, slice 2): good, the live check on the run's deposit 4CGASPeY2... (PASS); bad, the same reads with another precommitment (last byte +1) in the run's place, whose mark does not exist (FAIL). Slice 3: good.evm is evmFacts() of the release-77 build, which SIGN_HOST serves once deployed; bad.evm is SIGN_HOST's release-72 page, with no EVM deposit. Slice 3's review fold: good.evm is the release-77 re-cut build (its five marks, and its sha384 in releases/release-77.json); planted.unrouted is a real build of the fold with the flow's EVM deposit route removed, every mark still in it, named by no release list.",
  "good": {
   "precommitment": "28b9cd55909a30598226c8431f75d6ace086163d841ca9cff55a5deb20dce9d4",
   "rpcs": [
@@ -561,14 +561,15 @@
    }
   ],
   "evm": {
-   "from": "packages/signpage/index.html and public/app.js of the release-77 build (build-app at e6125947)",
-   "pin": "sha384-tJH7CPZP6IuM/+BL/NWPhev+YU6CguiskvVfcfe6ASafTUf57LbbrTKc2zV+d9Pf",
-   "sha384": "sha384-tJH7CPZP6IuM/+BL/NWPhev+YU6CguiskvVfcfe6ASafTUf57LbbrTKc2zV+d9Pf",
+   "from": "packages/signpage/index.html and public/app.js of the release-77 build (build-app at ee538c67, the slice 3 review fold)",
+   "pin": "sha384-F01NlD0MRFmJ/EXSYL5GpLAqDgMIYPOzEkSkP/1WAkytExHIHnfZAs+VLYbb7Zwx",
+   "sha384": "sha384-F01NlD0MRFmJ/EXSYL5GpLAqDgMIYPOzEkSkP/1WAkytExHIHnfZAs+VLYbb7Zwx",
    "marks": {
     "U^evm derivation": true,
     "deposit rule": true,
     "send record": true,
-    "rebuild gate": true
+    "runner": true,
+    "tree headroom": true
    }
   }
  },
@@ -1120,7 +1121,22 @@
     "U^evm derivation": false,
     "deposit rule": false,
     "send record": false,
-    "rebuild gate": false
+    "runner": false,
+    "tree headroom": false
+   }
+  }
+ },
+ "planted": {
+  "unrouted": {
+   "from": "build-app at 0bb02b23 with src/pool-testnet.ts's flow answering an EVM pool.deposit not_allowed in place of routing it to the runner (built 2026-11-07 about 07:07Z, never committed)",
+   "pin": "sha384-5yftQBTWxD1p3F5DAnwvmtcx0xzTX6ysrwzYU/QEYcCufbab3vrss/IDWPKhb0TJ",
+   "sha384": "sha384-5yftQBTWxD1p3F5DAnwvmtcx0xzTX6ysrwzYU/QEYcCufbab3vrss/IDWPKhb0TJ",
+   "marks": {
+    "U^evm derivation": true,
+    "deposit rule": true,
+    "send record": true,
+    "runner": true,
+    "tree headroom": true
    }
   }
  }

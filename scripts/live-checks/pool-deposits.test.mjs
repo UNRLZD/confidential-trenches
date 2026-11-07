@@ -5,7 +5,9 @@
 // mark's value another, a state leaf another, U not emptied (the cost priced above what the program took): FAIL.
 // Slice 3 (the EVM same-chain deposit): good.evm is the release-77 build's index.html and app.js, which pin each other
 // and carry the EVM deposit's marks: PASS; bad.evm is SIGN_HOST's release-72 page, which carries none: FAIL. Planted on
-// the good one: an index.html that pins another bundle, and a bundle with one mark gone: FAIL.
+// the good one: an index.html that pins another bundle, and a bundle with one mark gone: FAIL. The review fold:
+// planted.unrouted is a real build of the fold with the flow's EVM deposit route removed (it still carries every mark,
+// since the load's settle pass calls the runner): FAIL, as no release list names it.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -40,7 +42,7 @@ test("recorded good answer: the slice 2 deposit, its mark and both leaves on two
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(new Set(A.good.answers.map((a) => a.url)).size, 2, "two RPCs");
   for (const s of ["deposit ", "mark ", "label page ", "state page ", "U "]) assert.equal(r.lines.filter((l) => l.startsWith(`ok   ${s}`)).length, 2, s);
-  assert.equal(r.lines.filter((l) => l.startsWith("ok   EVM: ")).length, 1 + Object.keys(EVM_MARKS).length, "the pin and every EVM mark");
+  assert.equal(r.lines.filter((l) => l.startsWith("ok   EVM: ")).length, 2 + Object.keys(EVM_MARKS).length, "the pin, every EVM mark and the released build");
 });
 
 test("recorded bad answer: another precommitment in the run's place: FAIL", async () => {
@@ -61,6 +63,15 @@ test("planted on the good EVM answer: an index.html that pins another bundle, or
   bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: A.bad.evm.pin }), "EVM: SIGN_HOST's served /app.js is the one index.html pins");
   bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, pin: null }), "EVM: SIGN_HOST's served /app.js is the one index.html pins");
   for (const k of Object.keys(EVM_MARKS)) bad(await run(A.good, undefined, A.good.sign, { ...A.good.evm, marks: { ...A.good.evm.marks, [k]: false } }), `EVM: SIGN_HOST's bundle carries the EVM deposit's ${k}`);
+});
+
+test("planted: a real build with pool.deposit on Base and Robinhood no longer routed to the runner, every mark still in it: FAIL", async () => {
+  const u = A.planted.unrouted;
+  assert.equal(u.pin, u.sha384, "it pins itself");
+  assert.ok(Object.keys(EVM_MARKS).every((k) => u.marks[k] === true), "every mark present");
+  const r = await run(A.good, undefined, A.good.sign, u);
+  bad(r, "EVM: SIGN_HOST's /app.js is a release-77-or-later build");
+  assert.ok(!r.lines.some((l) => l.startsWith("BAD ") && !l.includes("release-77-or-later")), r.lines.join("\n"));
 });
 
 test("planted on the good answer: the deposit failed, the mark another value, a state leaf another, U not emptied: FAIL", async () => {
