@@ -8,21 +8,27 @@ import { test } from "node:test";
 import { NOW, ATTACKER, ADDRESS, H72, COLLECTOR, signAnswer, mockKey, type Answer } from "./oneclick-mock.ts";
 
 const { OneClickQuoteError, oneClickFloors } = await import("../../kit/src/checks/oneclick.ts");
-const { poolDepositQuoteRequest, poolRefundId } = await import("../../wallet/src/deposit/quote.ts");
+const { poolDepositQuoteRequest } = await import("../../wallet/src/deposit/quote.ts");
+const { depositId, depositIdEvm } = await import("../../wallet/src/derive/keys.ts");
+const { base58: b58 } = await import("@scure/base");
 const { DepositRuleRefused } = await import("../src/rules/deposit.ts");
 const { checkPoolDepositQuote } = await import("../src/pool-deposit-quote.ts");
 type Req = ReturnType<typeof poolDepositQuoteRequest>;
 
 const BASE_USDC = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
 const SOL_USDC = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";
-const SOL_U = "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T"; // a 32-byte base58 key; no secret of it is used
-const EVM_U = "0x52908400098527886E0F7030069857D2E4169EE7"; // EIP-55's own vector
-const OTHER_SOL = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+// U_{s,i} and U^evm_{s,i} of the all-zero seed (a published test seed, no user's): each secret zeroed at once
+const SEED64 = new Uint8Array(64);
+const k0 = depositId(SEED64, 777n, 0), k1 = depositId(SEED64, 777n, 1), ke = depositIdEvm(SEED64, 777n, 0);
+const SOL_U = b58.encode(k0.publicKey), SOL_ID = k0.id;
+const OTHER_SOL = b58.encode(k1.publicKey), OTHER_ID = k1.id;
+const EVM_U = ke.address, EVM_ID = k0.id;
+for (const k of [k0, k1, ke]) k.secretKey.fill(0);
 const SEED = { source: "words", code_saved: true };
 const PRICING = { in: ["1", "1"], out: ["150", "150.1"] } as const; // USDC in, the pool's coin out: two reads each
 
-const ctxOf = (chain: "solana" | "base", wallet: string, decimalsOut: number) => ({
-  seed: SEED, chain, wallet, check: { path: "keyless" as const, pricing: PRICING, decimalsIn: 6, decimalsOut, now: NOW },
+const ctxOf = (chain: "solana" | "base", wallet: string, decimalsOut: number, refundId = chain === "solana" ? SOL_ID : EVM_ID) => ({
+  seed: SEED, chain, wallet, refundId, check: { path: "keyless" as const, pricing: PRICING, decimalsIn: 6, decimalsOut, now: NOW },
 });
 
 /** 1Click's signed answer to `req`, at its own floor plus `extra`, with the pair's fee entry. */
@@ -53,19 +59,22 @@ const refusedAnswer = (check: string, f: () => unknown) =>
   assert.throws(f, (e: unknown) => e instanceof OneClickQuoteError && (e as { check?: string }).check === check, check);
 
 test("a quote of money from Base into the Solana pool, to U_X, passes; its signed address comes back", () => {
-  const req = poolDepositQuoteRequest("solana", SOL_U, BASE_USDC, 25_000_000n, NOW);
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
   const c = checkPoolDepositQuote(req, answerOf(req, 9), ctxOf("solana", SOL_U, 9));
   assert.equal(c.depositAddress, ADDRESS);
   assert.equal(c.amountIn, 25_000_000n);
 });
 
-test("a quote of money from Solana into the Base pool, to U_X, passes", () => {
-  const req = poolDepositQuoteRequest("base", EVM_U, SOL_USDC, 25_000_000n, NOW);
+test("a quote of money from Solana into the Base pool, to U_X, its refund under U_{s,i}'s ed25519 id, passes", () => {
+  const req = poolDepositQuoteRequest("base", EVM_U, EVM_ID, SOL_USDC, 25_000_000n, NOW);
   assert.equal(checkPoolDepositQuote(req, answerOf(req, 18, 10n ** 9n), ctxOf("base", EVM_U, 18)).depositAddress, ADDRESS);
+  // an answer that refunds to the 0x (an ERC-191 account the device never signs for) fails the echo
+  refusedAnswer("echo", () => checkPoolDepositQuote(req, answerOf(req, 18, 10n ** 9n, (a) => { a.quoteRequest.refundTo = EVM_U.toLowerCase(); }), ctxOf("base", EVM_U, 18)));
+  refusedRule("refundTo", () => checkPoolDepositQuote({ ...req, refundTo: EVM_U.toLowerCase() }, answerOf(req, 18, 10n ** 9n), ctxOf("base", EVM_U, 18)));
 });
 
 test("an answer whose recipient is not U_X is refused, even signed by 1Click", () => {
-  const req = poolDepositQuoteRequest("solana", SOL_U, BASE_USDC, 25_000_000n, NOW);
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
   refusedAnswer("echo", () => checkPoolDepositQuote(req, answerOf(req, 9, 1_000n, (a) => { a.quoteRequest.recipient = OTHER_SOL; }), ctxOf("solana", SOL_U, 9)));
   refusedAnswer("echo", () => checkPoolDepositQuote(req, answerOf(req, 9, 1_000n, (a) => { a.quoteRequest.refundTo = ATTACKER; }), ctxOf("solana", SOL_U, 9)));
   refusedAnswer("echo", () => checkPoolDepositQuote(req, answerOf(req, 9, 1_000n, (a) => { a.quoteRequest.refundType = "ORIGIN_CHAIN"; }), ctxOf("solana", SOL_U, 9)));
@@ -73,35 +82,37 @@ test("an answer whose recipient is not U_X is refused, even signed by 1Click", (
 });
 
 test("a request whose recipient or refund is not U_X is refused before its answer is read", () => {
-  const req = poolDepositQuoteRequest("solana", SOL_U, BASE_USDC, 25_000_000n, NOW);
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
   const ans = answerOf(req, 9);
   const ctx = ctxOf("solana", SOL_U, 9);
   refusedRule("recipient", () => checkPoolDepositQuote({ ...req, recipient: OTHER_SOL }, ans, ctx));
   refusedRule("recipientType", () => checkPoolDepositQuote({ ...req, recipientType: "INTENTS" }, ans, ctx));
   refusedRule("refundTo", () => checkPoolDepositQuote({ ...req, refundTo: ATTACKER }, ans, ctx));
   refusedRule("refundTo", () => checkPoolDepositQuote({ ...req, refundTo: SOL_U }, ans, ctx)); // the base58 form is no intents id
+  refusedRule("refundTo", () => checkPoolDepositQuote({ ...req, refundTo: OTHER_ID }, ans, ctx)); // another index's id
   refusedRule("refundType", () => checkPoolDepositQuote({ ...req, refundType: "ORIGIN_CHAIN" }, ans, ctx));
   refusedRule("destinationAsset", () => checkPoolDepositQuote({ ...req, destinationAsset: "nep141:base.omft.near" }, ans, ctx));
   refusedRule("dry", () => checkPoolDepositQuote({ ...req, dry: true }, ans, ctx));
   refusedRule("request", () => checkPoolDepositQuote({ ...req, customRecipientMsg: "x" } as Req, ans, ctx));
   // the request of another wallet passes only that wallet's own context
-  const other = poolDepositQuoteRequest("solana", OTHER_SOL, BASE_USDC, 25_000_000n, NOW);
+  const other = poolDepositQuoteRequest("solana", OTHER_SOL, OTHER_ID, BASE_USDC, 25_000_000n, NOW);
   refusedRule("recipient", () => checkPoolDepositQuote(other, answerOf(other, 9), ctx));
 });
 
 test("the context must name a wallet of its chain, and a seed past its backup gate", () => {
-  const req = poolDepositQuoteRequest("solana", SOL_U, BASE_USDC, 25_000_000n, NOW);
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
   const ans = answerOf(req, 9);
   refusedRule("deposit_wallet", () => checkPoolDepositQuote(req, ans, ctxOf("solana", EVM_U, 9)));
   refusedRule("deposit_wallet", () => checkPoolDepositQuote(req, ans, ctxOf("base", SOL_U, 9)));
+  refusedRule("deposit_wallet", () => checkPoolDepositQuote(req, ans, ctxOf("solana", SOL_U, 9, OTHER_ID))); // a Solana U_X is its id's own key
+  refusedRule("deposit_wallet", () => checkPoolDepositQuote(req, ans, ctxOf("base", EVM_U, 9, EVM_U.toLowerCase()))); // never the 0x: one signer
   refusedRule("chain", () => checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), chain: "near" as "solana" }));
   refusedRule("backup", () => checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), seed: { source: "words", code_saved: false } }));
 });
 
 test("an answer below the device's own floor, or priced past its two reads, is refused", () => {
-  const req = poolDepositQuoteRequest("solana", SOL_U, BASE_USDC, 25_000_000n, NOW);
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
   refusedAnswer("floor", () => checkPoolDepositQuote(req, answerOf(req, 9, -10_000n), ctxOf("solana", SOL_U, 9)));
   const wide = { ...ctxOf("solana", SOL_U, 9), check: { ...ctxOf("solana", SOL_U, 9).check, pricing: { in: ["1", "1"], out: ["150", "160"] } as const } };
   refusedAnswer("price", () => checkPoolDepositQuote(req, answerOf(req, 9), wide));
-  assert.equal(poolRefundId("solana", SOL_U).length, 64);
 });

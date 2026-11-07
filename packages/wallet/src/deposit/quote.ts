@@ -70,41 +70,42 @@ export const POOL_DEPOSIT_DESTINATION: Readonly<Record<PoolDepositChain, string>
 });
 
 /**
- * U_X's own account inside intents.near, where a refund of its quote lands (refundType INTENTS): one key, U_X's, moves
- * it. A Solana U_X is an ed25519 key, so its account is the 64-hex NEAR implicit id of the same public key; an EVM U_X
- * is a secp256k1 key, so its account is the lowercase 0x address, NEAR's eth-implicit id. Throws on a wallet that is not
- * of `chain`: a Solana address of 32 bytes in base58, an EVM address in the EIP-55 case it is derived in.
+ * The pair a pool deposit quote names (card pool-deposit-address): `wallet` is U_X, the recipient on `chain`, and
+ * `refundId` the 64-hex NEAR implicit id a refund lands under inside intents.near (refundType INTENTS). The refund id is
+ * U_{s,i}, the scope's own ed25519 one-time id (derive/keys.ts depositId, HKDF info "onetime/in" || s || i), the key the
+ * refund move already opens and signs with (follow.ts openKey), so one signer moves a refund on every chain and none
+ * signs ERC-191. On Solana U_X is that very key, so the wallet must be the base58 of the id's 32 bytes; on Base and
+ * Robinhood U_X is U^evm_{s,i} of the same scope and index (EIP-55, as derived), beside the id. Throws on any other pair.
  */
-export function poolRefundId(chain: PoolDepositChain, u: string): string {
-  if (typeof u !== "string") throw new Error("pool deposit quote: no wallet");
+export function checkPoolDepositWallet(chain: PoolDepositChain, wallet: string, refundId: string): void {
+  if (!Object.hasOwn(POOL_DEPOSIT_DESTINATION, chain)) throw new Error("pool deposit quote: no pool on this chain");
+  if (typeof refundId !== "string" || !IMPLICIT.test(refundId)) throw new Error("pool deposit quote: the refund id must be a 64-hex implicit account id");
+  if (typeof wallet !== "string") throw new Error("pool deposit quote: no wallet");
   if (chain === "solana") {
     let key: Uint8Array;
     try {
-      key = base58.decode(u);
+      key = base58.decode(wallet);
     } catch {
       throw new Error("pool deposit quote: U_X is not a Solana address");
     }
-    if (key.length !== 32 || base58.encode(key) !== u) throw new Error("pool deposit quote: U_X is not a Solana address");
-    return hex.encode(key);
+    if (key.length !== 32 || base58.encode(key) !== wallet) throw new Error("pool deposit quote: U_X is not a Solana address");
+    if (hex.encode(key) !== refundId) throw new Error("pool deposit quote: a Solana U_X's refund id is its own key");
+    return;
   }
-  if (chain === "base" || chain === "robinhood") {
-    if (!/^0x[0-9a-fA-F]{40}$/.test(u) || toChecksum(u) !== u) throw new Error("pool deposit quote: U_X is not an EIP-55 address");
-    return u.toLowerCase();
-  }
-  throw new Error("pool deposit quote: no pool on this chain");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet) || toChecksum(wallet) !== wallet) throw new Error("pool deposit quote: U_X is not an EIP-55 address");
 }
 
 /**
  * The request for money from another chain into chain X's pool (card pool-deposit-address): `amount` base units of
- * `originAsset` to U_X, the chain's one-time deposit wallet the note store plans, at `now` (ms). It is the vault's
- * request (depositQuoteRequest) but for the ends: the pool's native coin on X as the destination, U_X the recipient on
- * X (DESTINATION_CHAIN: 1Click sends the coin to U_X's own address there), and a refund under U_X's own key inside
- * intents.near (poolRefundId, INTENTS), so the request names U_X alone and no other wallet of the user. Money already
- * on X is pool.deposit's own: an origin that is X's coin is refused. Throws on input that is not that.
+ * `originAsset` to U_X (`wallet`), the chain's one-time deposit wallet the note store plans, at `now` (ms). It is the
+ * vault's request (depositQuoteRequest) but for the ends: the pool's native coin on X as the destination, U_X the
+ * recipient on X (DESTINATION_CHAIN: 1Click sends the coin to U_X's own address there), and the refund under the scope's
+ * own one-time id U_{s,i} (`refundId`, INTENTS; checkPoolDepositWallet), so the request names that one deposit's keys
+ * and no other wallet of the user. Money already on X is pool.deposit's own: an origin that is X's coin is refused.
+ * Throws on input that is not that.
  */
-export function poolDepositQuoteRequest(chain: PoolDepositChain, u: string, originAsset: string, amount: bigint, now: number): OneClickRequest {
-  if (!Object.hasOwn(POOL_DEPOSIT_DESTINATION, chain)) throw new Error("pool deposit quote: no pool on this chain");
-  const refundTo = poolRefundId(chain, u);
+export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string, refundId: string, originAsset: string, amount: bigint, now: number): OneClickRequest {
+  checkPoolDepositWallet(chain, wallet, refundId);
   const destinationAsset = POOL_DEPOSIT_DESTINATION[chain];
   if (typeof originAsset !== "string" || originAsset === "") throw new Error("pool deposit quote: no origin asset");
   if (originAsset === destinationAsset) throw new Error("pool deposit quote: the pool's own coin needs no quote");
@@ -118,9 +119,9 @@ export function poolDepositQuoteRequest(chain: PoolDepositChain, u: string, orig
     depositType: "ORIGIN_CHAIN",
     destinationAsset,
     amount: amount.toString(),
-    refundTo,
+    refundTo: refundId,
     refundType: "INTENTS",
-    recipient: u,
+    recipient: wallet,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(now + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
   };
