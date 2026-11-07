@@ -7,7 +7,9 @@
 //   - the 165-byte base compared field by field, to its last byte, and the account's size with it;
 //   - the providers' agreement on every byte, the lamports and the program of each such account before;
 //   - the refusal of a wSOL account, of the account of the token and of any other such account left changed;
-//   - the refusal of a close of the account of the token the providers disagreed on before.
+//   - the refusal of a close of the account of the token the providers disagreed on before;
+//   - a closed account of the token's rent counted as the wallet's lamports, and the account a buy creates held to the
+//     size the associated token program gives it.
 // It does not prove those lines run or refuse: a bundle edited so S11 or one of its rules does nothing, with every mark
 // kept, passes it (the independent review planted eight such bundles, 7 Nov). That the rules refuse is the kit's unit
 // and flow tests' at the released commit (test/solana-quote.test.ts, test/solana-flow-replay.test.ts), and that the
@@ -35,6 +37,8 @@ export const MARKS = Object.freeze({
   "S11 the account of the token left with any field but its amount changed is refused": new RegExp(`${I}\\.length&&${I}\\.push\\(\`the wallet's account of the token \\$\\{${I}\\.key\\} is left with its `),
   "S11 any other account of the wallet's held to its lamports too": new RegExp(`${I}\\.lamports!==${I}\\.lamports\\)&&${I}\\.push\\(\`the wallet's account \\$\\{${I}\\.key\\} moves: `),
   "S11 a close of the account of the token the providers disagreed on is refused": new RegExp(`${I}\\.push\\(\`the providers disagree on the wallet's account of the token \\$\\{${I}\\.key\\}, which the tx closes\``),
+  "S11 a closed account of the token's rent counted as the wallet's": new RegExp(`(${I})\\.pre\\?${I}\\+=\\1\\.pre\\.lamports:`),
+  "S11 the account of the token a buy creates held to its size": new RegExp(`\\.\\.\\.${I}\\.data\\.length===${I}\\?\\[\\]:\\[\`size\`\\]`),
 });
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which refusals the bundle carries. */
