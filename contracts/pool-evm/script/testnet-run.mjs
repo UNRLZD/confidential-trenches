@@ -120,9 +120,13 @@ export const NETS = Object.freeze({
   }),
 });
 
-// Gas bounds per transaction, above every measured run (kit pool-fee.ts: a one-hop buy 686,812 at depth 2,
-// 1,332,356 at depth 32; contracts/pool-evm NOTICE's gas table), and the bytes each one's L1 fee is bounded for.
-export const GAS = Object.freeze({ deposit: 300_000n, buy: 1_600_000n, sell: 1_000_000n, withdraw: 1_500_000n, sweep: 30_000n });
+// Gas bounds per transaction, above every measured run (contracts/pool-evm NOTICE's gas table), and the bytes each one's
+// L1 fee is bounded for. A buy's is the kit's own G(depth) (pool-fee.ts evmPoolGas): G holds the helper's limit, a buy's
+// estimate x 12/10, so the estimate is at most G x 10/12 and this run's limit (send: the estimate x 13/10) at most
+// ceil(G x 13/12). The run funds before its tree sync, so it funds at the deepest tree, G(32): 2,377,227 a buy, above the
+// heaviest estimate the kit measures at 32 (1,819,223, x 13/10 = 2,364,989); the rest is swept back.
+export const buyGas = (depth) => (kit.evmPoolGas(depth) * 13n + 11n) / 12n;
+export const GAS = Object.freeze({ deposit: 300_000n, buy: buyGas(kit.EVM_POOL_MAX_DEPTH), sell: 1_000_000n, withdraw: 1_500_000n, sweep: 30_000n });
 const TX_BYTES = 2_600n;
 /** The chunk each release takes: the wallet's ladder's smallest (EVM_LADDER.min, 0.001 ETH). */
 export const CHUNK = 1_000_000_000_000_000n;

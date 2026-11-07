@@ -1,11 +1,12 @@
 // Removes or weakens each of the EVM pool sender's withdraw and buy checks (src/pool/evm.ts, POST /v1/pool/evm/send,
 // card helper-evm-sender-2: the strict decode and W's EIP-712 signature), one at a time, and runs the test named for it
 // in src/pool/evm-release.test.ts (or evm.test.ts): each named test passes on the code as it is and fails on every
-// mutant. The mutants are made in a copy of the helper's src in a fresh temporary folder inside the helper (so the copy
-// resolves the same installed modules), removed at the end; the tree's own files are never changed. Exits 1 when a named
-// test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
-// once (the style of sell-mutants.mjs).
-//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 69 test runs, one per mutant)
+// mutant. The mutants are made in a copy of the helper's src in a fresh temporary folder beside the helper (apps/, so
+// the tests' own ../../../../ paths still reach the repository root), with the helper's node_modules linked in so the
+// copy resolves the same installed modules, removed at the end; the tree's own files are never changed. Exits 1 when a
+// named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file
+// exactly once (the style of sell-mutants.mjs).
+//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 75 test runs, one per mutant)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check, as the pool's own
 // ecrecover makes it): the v test (a v but 27 or 28 gives a recovery id below 0 or above 1, which recovers no key or
@@ -13,7 +14,7 @@
 // signer), evmReadBuy's selector test (evmReadRelease calls it only on buy's selector), evmReleaseDigest's method/Buy
 // agreement throw (both readers always set them alike), and the 65-byte length test in evmReleaseSigner (both readers
 // slice exactly 65 bytes).
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../../scripts/group-run.mjs";
@@ -22,6 +23,7 @@ const HELPER = fileURLToPath(new URL("../..", import.meta.url));
 const EVM = "src/pool/evm.ts";
 const T = "src/pool/evm-release.test.ts";
 const T2 = "src/pool/evm.test.ts";
+const T3 = "src/pool/evm-buy-gas-depth.test.ts";
 
 const EVM_TEXT = readFileSync(join(HELPER, EVM), "utf8");
 /** [the text from `line` through `after` in evm.ts, the same with `line` moved to just after `after`]: a check moved later. */
@@ -51,6 +53,7 @@ const RETRY = "a device's retry of its own in-flight buy";
 const PROOF = "evmBuyUnpaid: a proven buy whose receipt cost";
 const PAYS_OUT = "evmBuyLanded: a buy whose swap failed lands on the pool's Withdrawn";
 const SIM_TRUE = "a buy whose own simulation answers false";
+const DEPTH_32 = "depth 32: the heaviest route's limit";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -139,6 +142,8 @@ export const MUTANTS = [
   // a buy goes out only where its eth_call answers exactly true (review of 68b0930a, M1)
   [EVM, "if (w.buy !== undefined && sim !== BUY_TRUE) return", "if (false) return", T, SIM_TRUE],
   [EVM, "const BUY_TRUE = `0x${\"0\".repeat(63)}1`;", "const BUY_TRUE = `0x${\"0\".repeat(64)}`;", T, SIM_TRUE],
+  // card evm-buy-gas-depth (review of f7f4631a, L2): a buy whose limit is exactly the cap G(32) goes out
+  [EVM, "    if (gas > gasMax) return no(422", "    if (gas >= gasMax) return no(422", T3, DEPTH_32],
   // review a2ff5521 L2: a revert is held against its method, so the same proof still withdraws in its epoch
   [EVM, "        if (was === epoch && how === w.method) return no(422, \"reverted\");", "        if (was === epoch) return no(422, \"reverted\");", T, HOLD],
   // a withdraw's request read as before (evm.test.ts's signed requests)
@@ -159,10 +164,11 @@ function run(dir, file, name) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const dir = mkdtempSync(join(HELPER, ".release-mutants-"));
+  const dir = mkdtempSync(join(HELPER, "..", ".release-mutants-"));
   let bad = 0;
   try {
     for (const p of ["src", "test", "package.json"]) cpSync(join(HELPER, p), join(dir, p), { recursive: true });
+    symlinkSync(join(HELPER, "node_modules"), join(dir, "node_modules"), "dir");
     const src = new Map([EVM].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
     for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
       const r = run(dir, file, t);

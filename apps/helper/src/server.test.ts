@@ -824,7 +824,9 @@ test("re-check 4 finding 4: a start with a vendor's key unset and no PROXY_BUDGE
   for (const [key, budget] of [["JUPITER_API_KEY", "PROXY_BUDGET_JUPITER"], ["LIFI_API_KEY", "PROXY_BUDGET_LIFI"]] as const) {
     const env: Record<string, string | undefined> = { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: "0", ...TEST_VENDOR_KEYS };
     delete env[key];
-    const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "ignore", "pipe"] });
+    // Node's own ExperimentalWarning is not the helper's output (node:sqlite warns on Node 24.12.0, which engines >=24
+    // allows, and not on 24.22.1): the check reads the helper's stderr alone
+    const c = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", join(import.meta.dirname, "server.ts")], { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     c.stderr!.on("data", (d) => (err += d));
     const code = await Promise.race([new Promise<number | null>((ok) => c.on("exit", ok)), new Promise<string>((ok) => setTimeout(() => ok("still running"), 10_000))]);
