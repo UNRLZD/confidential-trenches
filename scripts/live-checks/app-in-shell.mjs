@@ -48,8 +48,8 @@ const KEY = "app-in-shell";
 // what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
 const BROWSER_NAMES = { chromium: "Chrome", firefox: "Firefox (Playwright's build)", webkit: "WebKit (Playwright's build)" };
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
 /** The path and query the check opens: a route of the app with a query, so both must survive the move. */
 export const PATH = "/discover?ref=app-in-shell";
 export const ENGINES = ["chromium", "firefox", "webkit"];
@@ -453,7 +453,7 @@ export function shellHeaders(signHeadersFile) {
  *  (card app-no-test-token): GET /v1/market/lists?chain=solana as read on 1 Nov, and GET /v1/market/token for the top of
  *  its Trending column as read on 3 Nov (apps/terminal/test/discover-data, test/token-source). A token read for any
  *  other mint answers 404, as the helper answers a mint it does not know, never an aborted load. */
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 const RECORDED = (f) => JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test", f), "utf8"));
 const unzipRows = (fields, rows) => rows.map((v) => Object.fromEntries(fields.map((k, i) => [k, v[i]])));
 const LISTS_READ = RECORDED("discover-data/helper-lists-2026-11-01.json");

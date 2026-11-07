@@ -25,7 +25,7 @@ import { isGecko, toCandleData } from "../../apps/terminal/src/screens/token/can
 import { HELPER_HOST, LISTS_URL, pickOf } from "./app-token-route.mjs";
 
 const KEY = "app-token-chart";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 export { HELPER_HOST, LISTS_URL };
 export const CANDLES_PATH = "/v1/market/candles";
 export const CANDLES_URL = (mint) => `${HELPER_HOST}${CANDLES_PATH}?chain=solana&token=${encodeURIComponent(mint)}&tf=15m&limit=500`;

@@ -27,9 +27,9 @@ import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 
 const KEY = "trade-box-pool";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The devnet Solana pool after the recorded 0.01 SOL deposit, with the proof ready ("ready") or still making ("making"). */
 export const POOL = {
   ready: { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" },

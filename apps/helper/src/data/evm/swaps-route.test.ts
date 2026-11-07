@@ -10,7 +10,7 @@ import { start } from "../../server.ts";
 import { fakeChain, ICNT, KNOWN, open, REC, timeOf, VVV } from "../../../test/evm-swaps/base.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 const chain = fakeChain();
 chain.st.head = REC.firstHead + 400;
 const swaps = open(chain, { t: 1_000_000 }, { listed: async (t) => t === ICNT, pools: new Map([[ICNT, KNOWN.get(ICNT)!]]) });

@@ -56,6 +56,9 @@ function server() {
   // that when STUB_READY=0 (compose does the same when --wait times out). `compose run` (the settings check) exits 2 when
 // STUB_ENV=1. STUB_ADD=0 makes it add none and STUB_IMAGE
   // names the image it adds. `inspect -f <fmt> <id>` prints the id's image; `stop -t <s> <id>` leaves it exited;
+  // caddy is modelled apart, in "<state>.caddy" as "<id> <HELPER_SITE>": `compose config caddy` prints the HELPER_SITE
+  // compose resolves (the shell's, else compose.yaml's default ct-api.unrealized.trade), `compose ps -q caddy` its id, a
+  // caddy id's `inspect -f` its environment, and an up that names caddy (or a whole-stack up) makes caddy-<k> with it;
   // `rm [-f] <id>` takes it out. Every call is logged as "<cwd>|<args>|<HELPER_COMMIT>|<HELPER_RELEASE>".
   const state = path.join(dir, "containers");
   writeFileSync(state, "");
@@ -66,6 +69,14 @@ echo "$PWD|$*|$HELPER_COMMIT|$HELPER_RELEASE" >> "${log}"
 S="${state}"
 drop() { awk -v id="$1" '$1 != id' "$S" > "$S.tmp"; mv "$S.tmp" "$S"; }
 mark() { awk -v id="$1" -v st="$2" '$1 == id { $2 = st } { print }' "$S" > "$S.tmp"; mv "$S.tmp" "$S"; }
+SITE="\${HELPER_SITE:-ct-api.unrealized.trade}"
+newcaddy() { k=$(cat "$S.ck" 2>/dev/null || echo 0); k=$((k + 1)); echo "$k" > "$S.ck"; echo "caddy-$k $SITE" > "$S.caddy"; }
+case " $* " in
+  *" compose ps "*" caddy "*) [ -s "$S.caddy" ] && awk '{ print $1 }' "$S.caddy"; exit 0 ;;
+  *" compose config caddy "*) printf 'name: deploy\nservices:\n  caddy:\n    environment:\n      HELPER_SITE: %s\n' "$SITE"; exit 0 ;;
+  *" compose up "*" caddy "*) newcaddy; exit 0 ;;
+  *" inspect -f "*" caddy-"*) printf 'PATH=/usr/bin\nHELPER_SITE=%s\n' "$(cut -d' ' -f2- "$S.caddy")"; exit 0 ;;
+esac
 case "$1 $2" in
   "compose ps")
     all=0; want=""
@@ -83,7 +94,7 @@ case "$1 $2" in
     want=$(echo "$*" | sed -n 's/.*--scale helper=\\([0-9]*\\).*/\\1/p')
     if [ -n "$want" ]; then
       for id in $(awk '$2 != "running" { print $1 }' "$S"); do mark "$id" running; done
-    else want=$(( $(wc -l < "$S") + 1 )); fi
+    else want=$(( $(wc -l < "$S") + 1 )); newcaddy; fi
     while [ "\${STUB_ADD:-1}" = 1 ] && [ "$(wc -l < "$S")" -lt "$want" ]; do
       n=$(cat "$S.n" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$S.n"
       echo "new-$n running \${STUB_IMAGE:-ct-helper:$HELPER_COMMIT}" >> "$S"
@@ -123,7 +134,9 @@ exit 0
     const t = readFileSync(env, "utf8");
     return { commit: /^HELPER_COMMIT=(.*)$/m.exec(t)?.[1], release: /^HELPER_RELEASE=(.*)$/m.exec(t)?.[1] };
   };
-  return { dir, root, A, B, env, git, run, runWith, docker, running, all, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
+  const seedCaddy = (site) => writeFileSync(`${state}.caddy`, `caddy-0 ${site}\n`);
+  const caddy = () => (existsSync(`${state}.caddy`) ? readFileSync(`${state}.caddy`, "utf8").trim() : null);
+  return { dir, root, A, B, env, git, run, runWith, docker, running, all, seed, seedCaddy, caddy, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const mode = (f) => statSync(f).mode & 0o777;
@@ -577,4 +590,57 @@ test("compose.yaml's helper healthcheck passes only on ready === true; a copy th
   assert.match(healthcheckProblem(yml.replace(/^ {4}healthcheck:\n(?: {6}.*\n)+/m, "")), /no healthcheck/);
   assert.match(healthcheckProblem(yml.replace("start_period: 300s", "start_period: 5s")), /start_period/);
   assert.match(healthcheckProblem(yml.replaceAll("/v1/health", "/v1/other")), /\/v1\/health/);
+});
+
+// card hosts-main-on-top: caddy reads HELPER_SITE only when its container is made, and the helper's swap never makes it
+// again (--no-deps --no-recreate; the Caddyfile turns the admin endpoint off). So a redeploy that changes HELPER_SITE
+// (the helper's move to ct-api, served beside the old name through the switch) recreates caddy, and one that does not
+// leaves the running caddy alone.
+const RECREATE = "compose up -d --no-deps --force-recreate --wait --wait-timeout 300 caddy";
+const OLD_SITE = ["api", "confidential", "unrealized", "trade"].join(".");
+
+test("a changed HELPER_SITE recreates caddy after the helper's swap; caddy then runs with the new names", () => {
+  const s = server();
+  try {
+    s.seed("old-1");
+    s.seedCaddy(OLD_SITE);
+    const site = `ct-api.unrealized.trade, ${OLD_SITE}`;
+    const r = s.runWith({ HELPER_SITE: site }, s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    assert.ok(calls.includes(RECREATE), calls.join("\n"));
+    assert.ok(calls.indexOf(RECREATE) > calls.indexOf("rm old-1"), "after the helper's swap");
+    assert.equal(s.caddy(), `caddy-1 ${site}`);
+    assert.match(r.out, /redeploy: caddy's HELPER_SITE changed; docker compose up -d --no-deps --force-recreate --wait caddy/);
+    assert.ok(!r.out.includes(OLD_SITE), "the names are not printed");
+    // the default after the switch (no HELPER_SITE in the shell): compose.yaml's ct-api alone, so caddy is made again
+    const r2 = s.runWith({ HELPER_SITE: null }, s.A);
+    assert.equal(r2.status, 0, r2.out);
+    assert.equal(s.caddy(), "caddy-2 ct-api.unrealized.trade");
+  } finally {
+    s.done();
+  }
+});
+
+test("an unchanged HELPER_SITE leaves the running caddy alone", () => {
+  const s = server();
+  try {
+    s.seed("old-1");
+    s.seedCaddy("ct-api.unrealized.trade");
+    const r = s.runWith({ HELPER_SITE: null }, s.B);
+    assert.equal(r.status, 0, r.out);
+    const calls = lines(s);
+    assert.ok(!calls.some((c) => c.startsWith("compose up") && c.endsWith(" caddy")), calls.join("\n"));
+    assert.equal(s.caddy(), "caddy-0 ct-api.unrealized.trade");
+    assert.match(r.out, /redeploy: caddy's HELPER_SITE is unchanged; caddy left running/);
+  } finally {
+    s.done();
+  }
+});
+
+test("caddy's certificates are in a named volume, so a recreate keeps them", () => {
+  const compose = readFileSync(path.join(path.dirname(SCRIPT), "compose.yaml"), "utf8");
+  const caddy = compose.slice(compose.indexOf("\n  caddy:\n"), compose.indexOf("\nvolumes:\n"));
+  assert.match(caddy, /^ {6}- caddy_data:\/data$/m);
+  assert.match(compose.slice(compose.indexOf("\nvolumes:\n")), /^ {2}caddy_data: \{\}$/m);
 });

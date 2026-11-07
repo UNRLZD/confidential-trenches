@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const MARKERS = ["pool request not allowed: ", "PoolRuleRefused", "0x313ce567"];
 
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;

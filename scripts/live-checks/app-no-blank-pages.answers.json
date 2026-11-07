@@ -8,7 +8,7 @@
    {
     "width": "phone",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/",
+    "top": "https://confidential.unrealized.trade/",
     "header": "S1.1",
     "links": [
      {
@@ -72,7 +72,7 @@
    {
     "width": "desktop",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/",
+    "top": "https://confidential.unrealized.trade/",
     "header": "S1.1",
     "links": [
      {
@@ -162,13 +162,13 @@
  "bad": {
   "check": "app-no-blank-pages",
   "at": "2026-11-03T20:47:40.571Z",
-  "source": "live https://confidential.unrealized.trade",
+  "source": "live https://ct-app.unrealized.trade",
   "browser": "156.0.8078.80",
   "runs": [
    {
     "width": "phone",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/",
+    "top": "https://confidential.unrealized.trade/",
     "header": "S1.1",
     "links": [
      {
@@ -232,7 +232,7 @@
    {
     "width": "desktop",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/",
+    "top": "https://confidential.unrealized.trade/",
     "header": "S1.1",
     "links": [
      {

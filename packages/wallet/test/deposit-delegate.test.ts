@@ -394,7 +394,7 @@ test("send: only to the release's /v1/bind, the signed call alone, no cookies, n
   const calls: Call[] = [];
   assert.deepEqual(await sendDepositDelegate(OUT, answer(200, { tx_hash: HASH }, calls)), { ok: true, tx_hash: HASH });
   assert.equal(calls[0]!.url, RELEASE_BIND_URL);
-  assert.equal(RELEASE_BIND_URL, "https://api.confidential.unrealized.trade/v1/bind");
+  assert.equal(RELEASE_BIND_URL, "https://ct-api.unrealized.trade/v1/bind");
   assert.equal(calls[0]!.init.method, "POST");
   assert.equal(calls[0]!.init.credentials, "omit");
   assert.equal(calls[0]!.init.referrerPolicy, "no-referrer");

@@ -88,7 +88,7 @@ function deps(i: number, o: { edit?: Edit; scale?: bigint; urls?: string[]; keep
   const ref = fx.references[i]!.answer!;
   const k = o.scale ?? 10_000n;
   return {
-    helper: "https://api.confidential.unrealized.trade",
+    helper: "https://ct-api.unrealized.trade",
     providers: [replay("A", o.edit, o.valid), replay("B", o.edit, o.valid)],
     reference: async () => ({ expectedOut: (BigInt(ref.expectedOut) * k) / 10_000n, expectedOuts: ref.expectedOuts.map((x) => (BigInt(x) * k) / 10_000n) }),
     fetch: builds(o.urls, o.keepSlippage),

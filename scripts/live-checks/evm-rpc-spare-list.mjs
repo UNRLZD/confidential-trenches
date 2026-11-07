@@ -38,8 +38,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
-export const HELPER = "https://api.confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 // a W as topic 2: any address reads the same way (an empty list is a list)
 const W_TOPIC = "0x" + "0".repeat(24) + "809286a10000000000000000000000000000078e";

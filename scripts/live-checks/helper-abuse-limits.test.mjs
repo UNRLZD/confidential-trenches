@@ -23,7 +23,7 @@ function replay(a) {
   const fetchFn = async (url, init) => {
     const at = new URL(url).pathname + new URL(url).search;
     const b = at === PROBE ? a.pool : at === HEALTH ? a.api : assert.fail(`unexpected ${at}`);
-    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+    assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
     const i = n[at]++;
     if (i < b.statuses.length) {
       const s = b.statuses[i];
@@ -38,7 +38,7 @@ function replay(a) {
 
 test("recorded good answer (the card's helper): PASS on both bursts, and the check waits each Retry-After it was told", async () => {
   const r = replay(A.good);
-  const got = await read("https://api.confidential.unrealized.trade", r.fetchFn, r.sleep);
+  const got = await read("https://ct-api.unrealized.trade", r.fetchFn, r.sleep);
   const v = judge(got);
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.deepEqual(r.waits, [A.good.pool, A.good.api].map((b) => Number(b.throttle.headers["retry-after"]) * 1000 + 250));
@@ -50,7 +50,7 @@ test("recorded good answer (the card's helper): PASS on both bursts, and the che
 for (const name of ["bad_pre_card", "bad_no_expose", "bad_no_retry_after", "bad_upstream_text", "bad_never_429", "bad_still_throttled", "bad_503", "bad_api_never_429", "bad_api_no_expose", "bad_api_503"]) {
   test(`recorded ${name}: FAIL`, async () => {
     const r = replay(A[name]);
-    const v = judge(await read("https://api.confidential.unrealized.trade", r.fetchFn, r.sleep));
+    const v = judge(await read("https://ct-api.unrealized.trade", r.fetchFn, r.sleep));
     assert.equal(v.ok, false, v.lines.join("\n"));
   });
 }
@@ -63,11 +63,11 @@ test("recorded bad_api_missing (no health burst read): FAIL", () => {
 
 test("each burst stops at its most with no 429", async () => {
   const r = replay(A.bad_never_429);
-  const got = await read("https://api.confidential.unrealized.trade", r.fetchFn, r.sleep);
+  const got = await read("https://ct-api.unrealized.trade", r.fetchFn, r.sleep);
   assert.equal(got.pool.statuses.length, BURST_MAX);
   assert.equal(got.pool.after, null);
   const q = replay(A.bad_api_never_429);
-  const api = (await read("https://api.confidential.unrealized.trade", q.fetchFn, q.sleep)).api;
+  const api = (await read("https://ct-api.unrealized.trade", q.fetchFn, q.sleep)).api;
   assert.equal(api.statuses.length, API_BURST_MAX);
   assert.equal(api.after, null);
 });
@@ -87,7 +87,7 @@ function slowHelper(rttMs) {
     let r;
     if (w.length >= cap[at]) {
       const wait = Math.max(1, Math.ceil((w[0] + 10_000 - arrived) / 1000));
-      r = new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": String(wait), "access-control-allow-origin": "https://confidential.unrealized.trade", "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After", vary: "Origin", "content-type": "application/json" } });
+      r = new Response('{"error":{"code":"rate_limited"}}', { status: 429, headers: { "retry-after": String(wait), "access-control-allow-origin": "https://ct-app.unrealized.trade", "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After", vary: "Origin", "content-type": "application/json" } });
     } else {
       w.push(arrived);
       r = new Response(at === PROBE ? '{"error":{"code":"not_found"}}' : "{}", { status: at === PROBE ? 404 : 200, headers: { "content-type": "application/json" } });
@@ -102,7 +102,7 @@ function slowHelper(rttMs) {
 test("a helper 250 ms and 1 s a round trip away: each burst still meets its 429 in its first batch, and the contract holds (one request at a time at 250 ms never meets the api's 120 in a window)", async () => {
   for (const rtt of [250, 1_000]) {
     const h = slowHelper(rtt);
-    const got = await read("https://api.confidential.unrealized.trade", h.fetchFn, h.sleep);
+    const got = await read("https://ct-api.unrealized.trade", h.fetchFn, h.sleep);
     const v = judge(got);
     assert.equal(v.ok, true, `${rtt} ms:\n${v.lines.join("\n")}`);
     assert.deepEqual([got.pool.statuses.length, got.api.statuses.length], [POOL_BATCH, API_BATCH], `${rtt} ms: one batch each`);
@@ -112,7 +112,7 @@ test("a helper 250 ms and 1 s a round trip away: each burst still meets its 429 
 
 test("recorded good_deployed (the deployed helper at 3bf53c0, about 250 ms a round trip from the Mac, read with parallel batches): PASS", async () => {
   const r = replay(A.good_deployed);
-  const v = judge(await read("https://api.confidential.unrealized.trade", r.fetchFn, r.sleep));
+  const v = judge(await read("https://ct-api.unrealized.trade", r.fetchFn, r.sleep));
   assert.equal(v.ok, true, v.lines.join("\n"));
 });
 

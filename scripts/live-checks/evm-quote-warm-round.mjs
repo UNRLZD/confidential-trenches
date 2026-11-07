@@ -21,7 +21,7 @@ import { writeFileSync } from "node:fs";
 import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
 export const P95_MS = 1000;
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const N_MIN = 20;
 const ZERO = "0x0000000000000000000000000000000000000000";
 const BASE_WETH = "0x4200000000000000000000000000000000000006";

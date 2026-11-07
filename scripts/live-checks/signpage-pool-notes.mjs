@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Live check of card signpage-pool-notes: the signing page's pool.deposit landed a note on the devnet pool its testnet
-// build pins, and SIGN_HOST (https://sign.confidential.unrealized.trade) still serves the mainnet build, which carries no
+// build pins, and SIGN_HOST (https://confidential.unrealized.trade) still serves the mainnet build, which carries no
 // testnet pin. Since card signpage-pool-mainnet that build carries the same deposit flow (it runs on the page's own
 // network, and refuses every pool kind while mainnet pins no pool: signpage-pool-mainnet's check), so the flow's
 // presence is recorded here and no longer judged. The run is signpage-pool-notes.run.json, written by

@@ -27,7 +27,7 @@ test("the good answer (fc7f1b1, the box) passes: every preflight allows the app,
 test("the bad answer (db834f9) fails: base-hook's slow p95, its rpc_errors, its short count, the missing case, the Nodies preflight", () => {
   const r = check(A.bad, A.bad.venues);
   assert.equal(r.ok, false);
-  has(r.lines, /^FAIL base base-public\.nodies\.app preflight from https:\/\/confidential\.unrealized\.trade: 200, allow-origin none/);
+  has(r.lines, /^FAIL base base-public\.nodies\.app preflight from https:\/\/ct-app\.unrealized\.trade: 200, allow-origin none/);
   has(r.lines, /^PASS base base-rpc\.publicnode\.com preflight/);
   has(r.lines, /^FAIL base-hook: warm p50 \d+ ms, p95 20986 ms over 19/);
   has(r.lines, /^FAIL base-hook: 18 of 20 quotes end ok \(others: rpc_error\)$/);
@@ -69,7 +69,7 @@ test("a refused quote's line names its code, its place, its time and the kit's m
 
 test("card base-rpc-list-fix: no Base provider of the kit's list is one whose POST answered no allow-origin on GitHub's runner", () => {
   // run 42114981904 (2026-11-05 21:42-21:50Z), its job log: "FAIL base base.rpc.blxrbdn.com preflight from
-  // https://confidential.unrealized.trade: 204, allow-origin *, allow-headers Content-Type, Authorization, User-Agent;
+  // https://ct-app.unrealized.trade: 204, allow-origin *, allow-headers Content-Type, Authorization, User-Agent;
   // POST allow-origin none". A browser quote that reaches it fails, so the list must not hold it.
   const run = structuredClone(A.good);
   run.preflight["https://base.rpc.blxrbdn.com"] = { status: 204, allow: "*", headers: "Content-Type, Authorization, User-Agent", post: null };

@@ -18,11 +18,11 @@ import { writeFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-skeleton";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const URL_ = `${SIGN}/`;
-export const APP = "https://confidential.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const STRANGER = "https://example.com";
-const HELPER = "api.confidential.unrealized.trade";
+const HELPER = "ct-api.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
 // the Solana trade's own (card signpage-solana-trade): provider A of LD1 and the kit's three device-direct send paths
 // (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps

@@ -147,7 +147,7 @@ export interface SignpageClientHost {
 export type SignpageClientMode = "iframe" | "parent";
 
 export interface SignpageClientOptions {
-  /** SIGN_HOST's release URL, for example "https://sign.confidential.unrealized.trade/": https, no query, no fragment. */
+  /** SIGN_HOST's release URL, for example "https://confidential.unrealized.trade/": https, no query, no fragment. */
   url: string;
   host: SignpageClientHost;
   /** 0 turns the retry off. */

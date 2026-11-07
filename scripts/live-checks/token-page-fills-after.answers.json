@@ -121,7 +121,7 @@
  "bad": {
   "check": "token-page-fills-after",
   "at": "2026-11-06T06:03:14.409Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell, the token reads answered by the check",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell, the token reads answered by the check",
   "browser": "156.0.8078.79",
   "runs": [
    {

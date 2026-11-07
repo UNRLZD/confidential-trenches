@@ -37,9 +37,9 @@ import { headersOf } from "./signpage-postmessage.mjs";
 
 const KEY = "signpage-pool-mainnet";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
-export const APP_HOST = "https://confidential.unrealized.trade";
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const SIGN_URL = "https://confidential.unrealized.trade/";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The page's mainnet Solana pair (packages/signpage/src/trade.ts SOLANA_PROVIDER_A and TRADE_HELPER's route). */
 export const PAGE_PAIR = ["https://solana-rpc.publicnode.com", `${HELPER_HOST}/v1/rpc/solana`];
 /** What only the pool flow and its queue carry, written out here: src/pool-deposit.ts POOL_DEPOSIT_LOCK, src/pool-sell.ts

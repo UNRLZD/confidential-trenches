@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card signpage-prover-threads: SIGN_HOST's prover proves on its own threads, each started from one pinned
 // same-origin file, and SIGN_HOST's CSP still refuses every other worker. It reads, on SIGN_HOST =
-// https://sign.confidential.unrealized.trade (signpage-skeleton's SIGN), against pins written out here, not read from
+// https://confidential.unrealized.trade (signpage-skeleton's SIGN), against pins written out here, not read from
 // the kit:
 //   - the thread file at https://SIGN_HOST/prover-thread.js: 200, a script, its size and sha256 THREAD_PIN's (snarkjs
 //     0.7.5's own thread code byte for byte after a licence header; the kit's build.mjs refuses any other), under two

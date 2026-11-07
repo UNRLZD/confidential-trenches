@@ -304,7 +304,7 @@
  },
  "bad_deployed_before": {
   "readAt": "2026-11-02T15:53:11.432Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "helper": {
    "mainnet": {
     "status": 200,

@@ -1,7 +1,15 @@
 # HELPER_HOST behind Caddy's automatic HTTPS (an ACME certificate for the name, no CA sign-up). Nothing here writes a
 # client IP: no access log (Caddy writes one only when a site has a `log` directive), and the loggers that print a
 # request (http.log.error with its remote_ip, http.stdlib's TLS handshake lines) are left out of the default log.
-# HELPER_SITE is set only by the local proof, which serves plain http on a local port.
+# HELPER_SITE is set by the local proof, which serves plain http on a local port, and by the redeploy that moves the
+# helper's name (card hosts-main-on-top), which serves both names until the old one's record is deleted:
+#   HELPER_SITE="ct-api.unrealized.trade, <the old name>" apps/helper/deploy/redeploy.sh ...
+# Caddy puts the value in before it parses this file, so a list of names is one site with a certificate for each. It
+# reads it only when its container is made (admin is off below, so nothing reloads it), and the helper's swap leaves
+# caddy running: redeploy.sh's last step makes caddy again when the HELPER_SITE compose resolves differs from the
+# running caddy's, keeping its certificates in the caddy_data volume (compose.yaml).
+# HELPER_HOST is a sibling of SIGN_HOST, never under it: a host under SIGN_HOST could claim its passkeys
+# (scripts/ci/host-children.mjs refuses one in this tree).
 {
 	admin off
 	log default {
@@ -10,7 +18,7 @@
 	}
 }
 
-{$HELPER_SITE:api.confidential.unrealized.trade} {
+{$HELPER_SITE:ct-api.unrealized.trade} {
 	reverse_proxy helper:8080 {
 		transport http {
 			keepalive 30s

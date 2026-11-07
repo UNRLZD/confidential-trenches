@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, checkV1, FREEZE, V1 } from "./kit-freeze-helper-api.mjs";
+import { check, checkV1, FREEZE, HEALTH, MOVED_SINCE_KIT_V1, ORIGINS, V1 } from "./kit-freeze-helper-api.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REC = JSON.parse(readFileSync(path.join(HERE, "kit-freeze-helper-api.answers.json"), "utf8"));
@@ -60,7 +60,7 @@ test("recorded good answer, main and the tag, the helper not up yet: PASS", asyn
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.filter((l) => l.startsWith("ok ")).length, 2 * 12 + 1, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  main's v1.ts equals the tag ${TAG}'s byte for byte`));
-  assert.match(r.lines.at(-1), /^-- {2}https:\/\/api\.confidential\.unrealized\.trade\/v1\/health does not answer yet \(TimeoutError\)/);
+  assert.match(r.lines.at(-1), /^-- {2}https:\/\/ct-api\.unrealized\.trade\/v1\/health does not answer yet \(TimeoutError\)/);
 });
 
 test("recorded good answer with the helper up: the health parts and CORS headers match: PASS", async () => {
@@ -70,10 +70,20 @@ test("recorded good answer with the helper up: the health parts and CORS headers
   assert.ok(r.lines.includes("ok  from a stranger's Origin, Access-Control-Allow-Origin is absent"));
 });
 
+// main as read then still names the origins before card hosts-main-on-top, which main is now held past (kit-v1 keeps
+// them: MOVED_SINCE_KIT_V1), and the run read the helper's health at its name before that card
 test("recorded real run on GitHub main and kit-v1, before the cap was added: the cap and its code missing: FAIL", async () => {
   const r = await check({ fetchFn: replay(REC.live_kit_v1), now: Date.parse("2026-11-01T08:32:10Z"), tag: "kit-v1", requireHealth: true });
   assert.equal(r.ok, false);
-  assert.deepEqual(failed(r), ["main", "kit-v1"].flatMap((ref) => [`BAD ${ref}: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES`, `BAD ${ref}: every frozen value equals its pin: differs: HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS`]));
+  const before = JSON.stringify(MOVED_SINCE_KIT_V1.HELPER_CORS_ORIGINS.value);
+  assert.deepEqual(failed(r), [
+    "BAD main: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES",
+    `BAD main: cross-origin reads for exactly APP_HOST and SIGN_HOST, never *, no credentials: origins ${before}`,
+    "BAD main: every frozen value equals its pin: differs: HELPER_CORS, HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS",
+    "BAD kit-v1: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES",
+    "BAD kit-v1: every frozen value equals its pin: differs: HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS",
+    `BAD ${HEALTH} does not answer (Error)`,
+  ]);
   assert.ok(r.lines.includes("ok  main's v1.ts equals the tag kit-v1's byte for byte"));
 });
 
@@ -81,7 +91,10 @@ test("a tag cut before isBlockhashValid (kit-v1.2 as GitHub serves it): the tag'
   const old = "kit-v1.2";
   const answers = REC.good.map((a) => {
     if (!a.url.includes(`/${TAG}/`)) return a;
-    const text = a.text.replace('    // the set send\'s dead check (trade/solana/send.ts): is the tx\'s blockhash still valid at processed\n    "isBlockhashValid",\n', "");
+    // kit-v1.2 also holds the origins before card hosts-main-on-top
+    const text = a.text
+      .replace('    // the set send\'s dead check (trade/solana/send.ts): is the tx\'s blockhash still valid at processed\n    "isBlockhashValid",\n', "")
+      .replace(JSON.stringify(ORIGINS).replaceAll(",", ", "), JSON.stringify(MOVED_SINCE_KIT_V1.HELPER_CORS_ORIGINS.value).replaceAll(",", ", "));
     if (a.url.endsWith(V1)) assert.notEqual(text, a.text, "the edit changed nothing");
     return { ...a, url: a.url.replace(`/${TAG}/`, `/${old}/`), text };
   });
@@ -109,7 +122,7 @@ test("recorded bad answer: a /v1/intents type that carries a msg (a move into th
 });
 
 test("recorded bad answer: a CORS list holding \"*\": FAIL", async () => {
-  const bad = withV1((t) => t.replace('origins: ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"],', 'origins: ["*"],'));
+  const bad = withV1((t) => t.replace('origins: ["https://ct-app.unrealized.trade", "https://confidential.unrealized.trade"],', 'origins: ["*"],'));
   const r = await check({ fetchFn: replay(bad), now: AFTER, tag: TAG });
   assert.equal(r.ok, false);
   assert.deepEqual(failed(r), both(['cross-origin reads for exactly APP_HOST and SIGN_HOST, never *, no credentials: HELPER_CORS holds "*": ' + JSON.stringify({ origins: ["*"], allowMethods: ["GET", "POST", "PUT", "DELETE"], allowHeaders: ["content-type"], exposeHeaders: ["X-Helper-Commit", "X-Helper-Source", "X-Fetched-At"], maxAgeSeconds: 600, vary: "Origin", allowCredentialsHeader: "absent" }), VALUE("HELPER_CORS")]));
@@ -161,7 +174,7 @@ test("more bad answers, each caught by exactly the lines named", () => {
     ["token_halted not 503", (t) => t.replace("  token_halted: 503,", "  token_halted: 400,"), [/HTTP status wrong for token_halted \(400, not 503\)/, /^every frozen value equals its pin: differs: HELPER_CODE_STATUS$/]],
     ["the credentials header allowed", (t) => t.replace('  allowCredentialsHeader: "absent",', "  allowCredentialsHeader: true,"), [/allowCredentialsHeader true/, /^every frozen value equals its pin: differs: HELPER_CORS$/]],
     ["a longer preflight cache", (t) => t.replace("  maxAgeSeconds: 600,", "  maxAgeSeconds: 86400,"), [/^every frozen value equals its pin: differs: HELPER_CORS$/]],
-    ["a computed origin", (t) => t.replace('origins: ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"],', "origins: [process.env.ORIGIN],"), [/not a literal: process\.env\.ORIGIN/, /^every frozen value equals its pin: differs: HELPER_CORS$/]],
+    ["a computed origin", (t) => t.replace('origins: ["https://ct-app.unrealized.trade", "https://confidential.unrealized.trade"],', "origins: [process.env.ORIGIN],"), [/not a literal: process\.env\.ORIGIN/, /^every frozen value equals its pin: differs: HELPER_CORS$/]],
   ];
   const record = REC.good.find((a) => a.url.endsWith("/main/packages/kit/src/orders/record.ts")).text;
   for (const [what, edit, wants] of cases) {
@@ -192,5 +205,18 @@ test("health that answers \"*\" or the wrong parts: FAIL", async () => {
   assert.equal(r2.ok, false);
   assert.match(failed(r2)[0], /^BAD health parts \[delegate,intents,orders,proxy,relay\] equal the file's/);
   const r3 = await check({ fetchFn: replay(REC.good), now: AFTER, tag: TAG, requireHealth: true });
-  assert.deepEqual(failed(r3), ["BAD https://api.confidential.unrealized.trade/v1/health does not answer (TimeoutError)"]);
+  assert.deepEqual(failed(r3), ["BAD https://ct-api.unrealized.trade/v1/health does not answer (TimeoutError)"]);
+});
+
+// card hosts-main-on-top: a tag cut before the host move is held to the origins it froze, a later one to the new two
+test("kit-v1.4 served with the moved origins fails its origin pin; the stand-in tag after the move passes", async () => {
+  const old = "kit-v1.4";
+  const answers = REC.good.map((a) => (a.url.includes(`/${TAG}/`) ? { ...a, url: a.url.replace(`/${TAG}/`, `/${old}/`) } : a));
+  const r = await check({ fetchFn: replay(answers), now: AFTER, tag: old });
+  assert.equal(r.ok, false);
+  assert.deepEqual(failed(r), [
+    `BAD ${old}: cross-origin reads for exactly APP_HOST and SIGN_HOST, never *, no credentials: origins ${JSON.stringify(ORIGINS)}`,
+    `BAD ${old}: every frozen value equals its pin: differs: HELPER_CORS`,
+  ]);
+  assert.equal(ORIGINS.some((o) => /\.confidential\.unrealized\.trade$/.test(new URL(o).hostname)), false, "no origin is a child of SIGN_HOST");
 });

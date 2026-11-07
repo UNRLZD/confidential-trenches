@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card kit-deposit-assets-dry on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds:
+// Live check of card kit-deposit-assets-dry on SIGN_HOST (https://confidential.unrealized.trade). What it holds:
 // an app can ask the signing page which assets it takes for a deposit (request kind deposit.assets, params {}) and what
 // a deposit of an amount would cost (deposit.dry, params { origin_asset, amount }), before it has any account, and the
 // page answers both from 1Click alone, with nothing of the user's in the request:
@@ -47,9 +47,9 @@ import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const KEY = "kit-deposit-assets-dry";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
-export const HELPER_1CLICK = "https://api.confidential.unrealized.trade/v1/proxy/oneclick";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_URL = "https://confidential.unrealized.trade/";
+export const HELPER_1CLICK = "https://ct-api.unrealized.trade/v1/proxy/oneclick";
 export const ONECLICK = "https://1click.chaindefuser.com";
 /** The fixed public id the page names as recipient and refundTo: never anything of the user's. */
 export const PLACEHOLDER = "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0";

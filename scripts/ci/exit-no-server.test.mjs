@@ -62,13 +62,13 @@ test("a package with only public RPCs, the kit's non-helper names and the mirror
 });
 
 const PLANTED = {
-  "packages/exit/src/a1-helper-url.ts": [`export const H = "https://api.confidential.${OURS}/v1/relay";\n`, /a1-helper-url\.ts:1: our server's address/],
-  "packages/exit/src/a2-app-url.ts": [`export const x = 1;\nexport const A = "https://confidential.${OURS}";\n`, /a2-app-url\.ts:2: our server's address/],
-  "packages/exit/src/a3-comment.ts": [`// fall back to api.confidential.${OURS.toUpperCase()} if both RPCs fail\nexport const x = 1;\n`, /a3-comment\.ts:1: our server's address/],
-  "packages/exit/src/a4-sign-not-mirror.ts": [`export const S = "https://sign.confidential.${OURS}/assets/";\n`, /a4-sign-not-mirror\.ts:1: our server's address/],
-  "packages/exit/src/a5-mirror-on-http.ts": [`export const S = "http://sign.confidential.${OURS}/assets/zk/";\n`, /a5-mirror-on-http\.ts:1: our server's address/],
-  "packages/exit/test/fixtures/a6-data.json": [`{ "rpc": "https://api.confidential.${OURS}/v1/rpc/near" }\n`, /a6-data\.json:1: our server's address/],
-  "packages/exit/README.md": [`Run it against https://api.confidential.${OURS}.\n`, /README\.md:1: our server's address/],
+  "packages/exit/src/a1-helper-url.ts": [`export const H = "https://ct-api.${OURS}/v1/relay";\n`, /a1-helper-url\.ts:1: our server's address/],
+  "packages/exit/src/a2-app-url.ts": [`export const x = 1;\nexport const A = "https://ct-app.${OURS}";\n`, /a2-app-url\.ts:2: our server's address/],
+  "packages/exit/src/a3-comment.ts": [`// fall back to ct-api.${OURS.toUpperCase()} if both RPCs fail\nexport const x = 1;\n`, /a3-comment\.ts:1: our server's address/],
+  "packages/exit/src/a4-sign-not-mirror.ts": [`export const S = "https://confidential.${OURS}/assets/";\n`, /a4-sign-not-mirror\.ts:1: our server's address/],
+  "packages/exit/src/a5-mirror-on-http.ts": [`export const S = "http://confidential.${OURS}/assets/zk/";\n`, /a5-mirror-on-http\.ts:1: our server's address/],
+  "packages/exit/test/fixtures/a6-data.json": [`{ "rpc": "https://ct-api.${OURS}/v1/rpc/near" }\n`, /a6-data\.json:1: our server's address/],
+  "packages/exit/README.md": [`Run it against https://ct-api.${OURS}.\n`, /README\.md:1: our server's address/],
   "packages/exit/src/b1-named.ts": ['import { HELPER_V1_PREFIX } from "@blindfill/kit";\nexport const p = HELPER_V1_PREFIX;\n', /b1-named\.ts:1: imports HELPER_V1_PREFIX from @blindfill\/kit/],
   "packages/exit/src/b2-renamed.ts": ['import { helperBase as base } from "@blindfill/kit";\nexport const b = base;\n', /b2-renamed\.ts:1: imports helperBase from @blindfill\/kit/],
   "packages/exit/src/b3-type.ts": ['import type { HelperWithdrawRequest } from "@blindfill/kit";\nexport type W = HelperWithdrawRequest;\n', /b3-type\.ts:1: imports HelperWithdrawRequest from @blindfill\/kit/],

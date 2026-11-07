@@ -20,8 +20,8 @@ test("link icons only where data exists: Search on X by the address and the chai
 });
 
 test("share names the token's public address on the shell's host", () => {
-  assert.equal(shareHref("https://sign.confidential.unrealized.trade/", "solana", "Mint1"), "https://sign.confidential.unrealized.trade/token/solana/Mint1");
-  assert.equal(shareHref("https://sign.confidential.unrealized.trade/", "near", "a/b"), "https://sign.confidential.unrealized.trade/token/near/a%2Fb");
+  assert.equal(shareHref("https://confidential.unrealized.trade/", "solana", "Mint1"), "https://confidential.unrealized.trade/token/solana/Mint1");
+  assert.equal(shareHref("https://confidential.unrealized.trade/", "near", "a/b"), "https://confidential.unrealized.trade/token/near/a%2Fb");
 });
 
 test("copy: the async clipboard first; refused (a framed page), the page's own copy; neither, false", async () => {

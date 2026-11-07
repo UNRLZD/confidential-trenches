@@ -40,7 +40,7 @@ export const NEP366_PREFIX = 2 ** 30 + 366;
 /** nearcore's ACCESS_KEY_NONCE_RANGE_MULTIPLIER: a delegate nonce at or above the block height x this is refused. */
 export const NONCE_RANGE_MULTIPLIER = 1_000_000n;
 /** The release's relayer: POST /v1/bind on HELPER_HOST, the one helper SIGN_HOST's CSP connects to. */
-export const RELEASE_BIND_URL = "https://api.confidential.unrealized.trade/v1/bind";
+export const RELEASE_BIND_URL = "https://ct-api.unrealized.trade/v1/bind";
 /** POST /v1/bind's body limit (HELPER_V1_PATHS), which also caps the decoded SignedDelegateAction. */
 export const BIND_MAX_BYTES = 4_096;
 /**

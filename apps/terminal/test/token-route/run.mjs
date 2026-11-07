@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 
-const HELPER = "https://api.confidential.unrealized.trade";
+const HELPER = "https://ct-api.unrealized.trade";
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
 const shotsAt = args.indexOf("--shots");

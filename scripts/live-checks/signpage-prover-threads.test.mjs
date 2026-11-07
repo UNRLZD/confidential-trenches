@@ -88,7 +88,7 @@ test("planted: a planted worker that ran, one thread, a proof that does not veri
   bad(await judge(planted((a) => (a.page.loadError = "Error: /prover-thread.js: sha256 00, pinned d2"))), "the worker loads the withdraw setup files");
   bad(await judge(planted((a) => (a.page.proofs[1].publicSignals[7] = "1"))), "public signals are withdraw.public.json's");
   bad(await judge(planted((a) => (a.page.proofs[0].proof.pi_a[0] = String(BigInt(a.page.proofs[0].proof.pi_a[0]) + 1n)))), "snarkjs groth16.verify with the pinned withdraw.vkey");
-  bad(await judge(planted((a) => a.page.workerScripts.push("https://sign.confidential.unrealized.trade/evil.js"))), "worker scripts fetched");
+  bad(await judge(planted((a) => a.page.workerScripts.push("https://confidential.unrealized.trade/evil.js"))), "worker scripts fetched");
   bad(await judge(planted((a) => a.page.workerScripts.push("data:text/javascript,postMessage('ran')"))), "worker scripts fetched");
   bad(await judge(planted((a) => a.page.violations.push({ where: "worker", directive: "worker-src", blocked: "blob" }))), "CSP and Trusted Types violations");
   bad(await judge(planted((a) => (a.page.violations = []))), "CSP and Trusted Types violations");
@@ -100,16 +100,16 @@ test("planted: a planted worker that ran, one thread, a proof that does not veri
 test("a console line the run keeps names its resource's origin and path, never the query; one with no location is its text", () => {
   const msg = (type, t, location) => ({ type: () => type, text: () => t, location: () => location });
   const text = "Failed to load resource: the server responded with a status of 429 ()";
-  assert.equal(consoleLineOf(msg("error", text, { url: "https://sign.confidential.unrealized.trade/zk/withdraw.zkey?x=1" })), `error ${text} (https://sign.confidential.unrealized.trade/zk/withdraw.zkey)`);
-  assert.equal(consoleLineOf(msg("error", "Refused to create a worker", { url: "blob:https://sign.confidential.unrealized.trade/9a7e" })), "error Refused to create a worker (blob:https://sign.confidential.unrealized.trade)");
+  assert.equal(consoleLineOf(msg("error", text, { url: "https://confidential.unrealized.trade/zk/withdraw.zkey?x=1" })), `error ${text} (https://confidential.unrealized.trade/zk/withdraw.zkey)`);
+  assert.equal(consoleLineOf(msg("error", "Refused to create a worker", { url: "blob:https://confidential.unrealized.trade/9a7e" })), "error Refused to create a worker (blob:https://confidential.unrealized.trade)");
   assert.equal(consoleLineOf(msg("log", "x".repeat(400), { url: "" })), `log ${"x".repeat(296)}`);
 });
 
 // card pool-buy-send-fast (live run 42137740517's red job printed no console line): a FAIL prints the run's console
 // lines and the worker scripts asked for, so a red run's log is its own reproduction
 test("a FAIL's extra lines: each console line kept, then the worker scripts; none kept says so", () => {
-  const rec = { page: { console: ["worker https://sign.confidential.unrealized.trade/prover-worker.js", "in /prover-worker.js: error x"], workerScripts: ["https://sign.confidential.unrealized.trade/prover-worker.js"] } };
-  assert.deepEqual(failLines(rec), ["CONSOLE worker https://sign.confidential.unrealized.trade/prover-worker.js", "CONSOLE in /prover-worker.js: error x", 'WORKER SCRIPTS ["https://sign.confidential.unrealized.trade/prover-worker.js"]']);
+  const rec = { page: { console: ["worker https://confidential.unrealized.trade/prover-worker.js", "in /prover-worker.js: error x"], workerScripts: ["https://confidential.unrealized.trade/prover-worker.js"] } };
+  assert.deepEqual(failLines(rec), ["CONSOLE worker https://confidential.unrealized.trade/prover-worker.js", "CONSOLE in /prover-worker.js: error x", 'WORKER SCRIPTS ["https://confidential.unrealized.trade/prover-worker.js"]']);
   assert.deepEqual(failLines({ page: {} }), ["CONSOLE none kept", "WORKER SCRIPTS []"]);
   assert.deepEqual(failLines(null), ["CONSOLE none kept", "WORKER SCRIPTS []"]);
 });

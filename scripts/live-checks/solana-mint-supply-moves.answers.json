@@ -1,6 +1,6 @@
 {
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "readAt": "2026-11-06T08:21:59.148Z",
   "mint": "Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
   "build": {

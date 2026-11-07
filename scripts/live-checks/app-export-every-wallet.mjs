@@ -29,9 +29,9 @@ import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 
 const KEY = "app-export-every-wallet";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 
 const SO_A = "Fixture1Wa11etSo1ana1111111111111111111111";
 const SO_B = "Fixture2Wa11etSo1ana2222222222222222222222";

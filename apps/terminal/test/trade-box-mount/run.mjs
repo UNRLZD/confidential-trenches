@@ -26,7 +26,7 @@ import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, "../..");
-const HELPER = "https://api.confidential.unrealized.trade";
+const HELPER = "https://ct-api.unrealized.trade";
 const args = process.argv.slice(2);
 const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : null;

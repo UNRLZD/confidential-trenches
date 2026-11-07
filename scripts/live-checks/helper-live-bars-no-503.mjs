@@ -18,8 +18,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-live-bars-no-503";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 8;
 /** Fewer held tokens than this is no test of the live reads: a FAIL, not a pass on little. */
 export const HELD_MIN = 4;
