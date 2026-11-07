@@ -37,6 +37,7 @@ import { evmAgreedBlock, EvmLagError, evmPoolScopeOf, evmRetryLag, EvmUnanswered
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
+import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
 import { POOL_DEPOSIT_LOCK, type PoolDepositAnswer } from "./pool-deposit.ts";
@@ -194,7 +195,10 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
   let step = priced(bound);
   if (step.kind === "wait") return { kind: "wait" };
   if (step.kind === "claim") return { kind: "claimed" };
-  if (step.kind !== "deposit" || step.call === undefined) return { kind: "keep", short: EVM_POOL_MIN_DEPOSIT + bound > low ? EVM_POOL_MIN_DEPOSIT + bound - low : 0n, u };
+  // short: the rung this ask goes in at first (the ladder's split of what is left of it, or the open note's recorded
+  // value) and the fee bound, less U's lower reading
+  const need = sentValue ?? (want > 0n ? ladderSplit(EVM_LADDER, want).notes[0] : undefined) ?? EVM_LADDER.one;
+  if (step.kind !== "deposit" || step.call === undefined) return { kind: "keep", short: need + bound > low ? need + bound - low : 0n, u };
   if (sentValue !== undefined && (step.value !== sentValue || !sameRef(step.ref, again!.ref))) return { kind: "keep", short: sentValue + bound > low ? sentValue + bound - low : 0n, u };
   const estimateOf = async (call: { to: string; value: bigint; data: string }) =>
     both(r.h.rpcs, async (rpc, k) => quantity(await rpc("eth_estimateGas", [{ from: u, to: call.to, value: qty(call.value), data: call.data }, acct.tag]), `rpc ${k} estimate`));

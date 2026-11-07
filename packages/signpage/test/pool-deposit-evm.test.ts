@@ -16,6 +16,9 @@ import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src
 import { evmPoolScopeOf, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
+import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
+import { EVM_DEPOSIT_GAS_MAX } from "../src/rules/pool.ts";
+import { EVM_DEPOSIT_PRIORITY_CAP } from "../src/pool-deposit-evm.ts";
 import { poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -314,4 +317,17 @@ test("before a send, two RPCs that read apart (U's nonce, the estimate, the chai
     assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns), ASK), { error: "down" }, m);
     assert.equal(ch.c.sent.length, 0, m);
   }
+});
+
+test("not_funded names the ask's first rung and the fee bound less U's lower balance as U's shortfall", async () => {
+  const want = 35n * 10n ** 14n; // 0.0035 ETH
+  const first = ladderSplit(EVM_LADDER, want).notes[0]!;
+  const { ch, ns, u } = await funded(0n);
+  ch.c.balance = [6n * 10n ** 14n, 5n * 10n ** 14n]; // the lower is RPC 1's
+  const shorts: [string, bigint][] = [];
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { short: (x, w) => void shorts.push([x, w]) }), { ...ASK, amount: want });
+  assert.deepEqual(a, { error: "not_funded" });
+  const bound = EVM_DEPOSIT_GAS_MAX * (2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP) + 7_000n; // the cap's gas at the max fee, and the L1 fee bound
+  assert.deepEqual(shorts, [[u, first + bound - 5n * 10n ** 14n]]);
+  assert.ok(first > EVM_POOL_MIN_DEPOSIT, "the ask's rung, not the pool's least deposit");
 });
