@@ -400,6 +400,8 @@ test("card evm-sell-no-release-in-flight: a release to W not final on two RPCs r
   // the verdict is the kit's own, for this chain and this W: none, a copy, another W's or chain's is refused
   const ok = read({});
   assert.equal(why(ok), "built");
+  // W named in any case by the read
+  assert.equal(why(read({ w: q.w.toUpperCase().replace("0X", "0x") })), "built");
   assert.match(why(undefined), /^release_in_flight: /);
   assert.match(why({ ...ok }), /^release_in_flight: /);
   assert.match(why(Object.freeze({ chain: q.chain, w: q.w, finalBlock: 100n, pending: [] })), /^release_in_flight: /);

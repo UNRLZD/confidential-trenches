@@ -30,6 +30,9 @@ const S = "test/evm-sell-quote.test.ts";
 const SELLU = "src/trade/evm/sell-unpinned.ts";
 const QD = "src/trade/evm/quoted.ts";
 const PF = "src/trade/evm/pool-fee.ts";
+// W's releases at a sell (card evm-sell-no-release-in-flight, audit E-01): the verdict and the builder's guard
+const SR = "src/trade/evm/sell-releases.ts";
+const NR = "card evm-sell-no-release-in-flight";
 const E = "test/evm-pool-fee.test.ts";
 
 // [file, text, replacement, test file, the test that must fail]
@@ -707,6 +710,24 @@ export const MUTANTS = [
   [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],
   // the sim signer's signature recovers to W over SellDelegate's own digest (review of the exec sim, LOW 3)
   [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
+  // no sell while a release to W is not final on two RPCs (card evm-sell-no-release-in-flight, audit E-01): the
+  // builder's guard, the verdict's record, its chain and W, and each rule of what is pending
+  [QD, "  evmSellReleasesClear(chain, w, releases);\n", "", S, NR],
+  [SR, "!MADE.has(releases as EvmSellReleases)", "false", S, NR],
+  [SR, "  MADE.add(v);\n", "", S, NR],
+  [SR, "if (v.chain !== chain || ", "if (", S, NR],
+  [SR, " || v.w !== w.toLowerCase()) throw", ") throw", S, NR],
+  [SR, "if (v.pending.length > 0) {", "if (false) {", S, NR],
+  [SR, "const me = w.toLowerCase();", "const me = w;", S, NR],
+  [SR, "if (recipient.toLowerCase() === me) paidW.push", "if (true) paidW.push", S, NR],
+  [SR, "if (recipient.toLowerCase() === me) paidW.push", "if (recipient === me) paidW.push", S, NR],
+  [SR, "if (p.block > finalBlock) pending.push(", "if (p.block > finalBlock + 1n) pending.push(", S, NR],
+  [SR, "if (p.block > finalBlock) pending.push(", "if (p.block >= finalBlock) pending.push(", S, NR],
+  [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (finalMs <= s.deadlineMs)", S, NR],
+  [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (!landed.has(s.nullifier) && finalMs < s.deadlineMs)", S, NR],
+  [SR, "if (!landed.has(s.nullifier) && finalMs <= s.deadlineMs)", "if (!landed.has(s.nullifier))", S, NR],
+  [SR, "const finalMs = fin.timestamp * 1000n;", "const finalMs = fin.timestamp;", S, NR],
+  [SR, 'if (landed.has(nullifier)) return bad("a nullifier released twice");', "", S, NR],
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
@@ -760,7 +781,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       dirs.push(dir);
       for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
     }
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF, SR].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
     const byFile = new Map();
     for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
     const tb = performance.now();
