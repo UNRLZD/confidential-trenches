@@ -249,6 +249,10 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   let tries = 0;
   let destroyed = false;
 
+  /** Every snapshot handed out is the caller's own copy, state included, from snapshot() and to each listener (card
+   *  oneclick-fee-path-own-key): a caller's write changes neither another caller's nor `snap`, which the client reads
+   *  to decide whether a request may go. */
+  const own = (): SignpageClientSnapshot => structuredClone(snap);
   const set = (patch: Partial<SignpageClientSnapshot>) => {
     snap = { ...snap, ...patch };
     if (snap.status !== "connecting") {
@@ -256,7 +260,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       waiters = [];
       for (const f of w) f();
     }
-    for (const f of listeners) f(snap);
+    for (const f of listeners) f(own());
   };
 
   const clearTimer = (t: Timer | null) => {
@@ -478,7 +482,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   };
 
   const client: SignpageClient = {
-    snapshot: () => snap,
+    snapshot: own,
     subscribe(fn) {
       listeners.add(fn);
       return () => void listeners.delete(fn);

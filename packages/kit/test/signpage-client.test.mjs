@@ -86,6 +86,17 @@ const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
 
+
+/** "No state change" now that every snapshot is a copy (card oneclick-fee-path-own-key): no listener has heard a change
+ *  since this call, which is what one object kept the same meant (the client's set() always calls every listener), and
+ *  the snapshot reads the same. */
+function unchanged(c) {
+  let changes = 0;
+  c.subscribe(() => void changes++);
+  const snap = c.snapshot();
+  return { check(msg = "no state change") { assert.equal(changes, 0, msg); assert.deepEqual(c.snapshot(), snap, msg); } };
+}
+
 const answer = (id, result) => ({ v: 1, id, ok: true, result });
 const READY = { v: 1, type: "ready", release: "sp-1", api: 1 };
 
@@ -479,9 +490,9 @@ for (const kind of SIGNPAGE_KINDS) {
     h.post(answer(id, FIXTURES[kind].result));
     assert.deepEqual(await p, { ok: true, result: FIXTURES[kind].result });
     // a second answer to the same id is dropped
-    const before = c.snapshot();
+    const before = unchanged(c);
     h.post(answer(id, FIXTURES[kind].result));
-    assert.equal(c.snapshot(), before);
+    before.check();
     assert.equal(c.dropped().id, 1);
   });
 
@@ -496,14 +507,14 @@ for (const kind of SIGNPAGE_KINDS) {
   test(`${kind}: an answer whose result is not ${kind}'s shape is dropped`, async () => {
     const { h, c } = await readyClient();
     const { id, p, settled } = await open(h, c, kind);
-    const before = c.snapshot();
+    const before = unchanged(c);
     h.post(answer(id, { ...FIXTURES[kind].result, extra: "x" }));
     // {} is nav's and reload's own result: for them only the extra field is another shape
     const empty = Object.keys(FIXTURES[kind].result).length === 0;
     if (!empty) h.post(answer(id, {}));
     await flush();
     assert.equal(settled(), false);
-    assert.equal(c.snapshot(), before);
+    before.check();
     assert.equal(c.dropped().shape, empty ? 1 : 2);
     h.post(answer(id, FIXTURES[kind].result));
     assert.equal((await p).ok, true);
@@ -722,7 +733,7 @@ test("answers dropped with no state change: wrong origin, wrong source, wrong id
   const { h, c } = await readyClient();
   const { id, p, settled } = await open(h, c, "buy");
   const good = answer(id, FIXTURES.buy.result);
-  const before = c.snapshot();
+  const before = unchanged(c);
   const win = h.frame().contentWindow;
   const txsWith = (f) => {
     const txs = [{ chain: "solana", hash: "5ig" }];
@@ -761,7 +772,7 @@ test("answers dropped with no state change: wrong origin, wrong source, wrong id
     await flush();
     assert.ok(performance.now() - t0 < 1_000, `${name}: refused at once`);
     assert.equal(c.dropped()[reason], d0 + 1, `${name}: dropped as ${reason}`);
-    assert.equal(c.snapshot(), before, `${name}: no state change`);
+    before.check(`${name}: no state change`);
     assert.equal(settled(), false, `${name}: the request is still open`);
   }
   // just under the cap is read
@@ -811,6 +822,36 @@ test("state and progress events from the frame update the state and reach the li
   assert.deepEqual(seen, [["x", "filled"]]);
 });
 
+// card oneclick-fee-path-own-key (the delta review of kit-oneclick-pins-frozen): every snapshot is the caller's own copy,
+// from snapshot() and to each listener; red before, when each got the client's one object, so a caller's write changed
+// the next caller's snapshot and the client's own status (a write of "ready" let a request through while connecting)
+test("a caller that writes into its snapshot changes no other caller's, no listener's and not the client's own", async () => {
+  const forge = (s) => { s.status = "ready"; s.stale = true; s.release = "forged"; s.state.vault_balance = "999999"; s.state.orders.push({ forged: 1 }); };
+  const { h, c } = await readyClient();
+  const want = structuredClone(c.snapshot());
+  forge(c.snapshot());
+  assert.deepEqual(c.snapshot(), want, "snapshot() after a write into an earlier one");
+  const heard = [];
+  c.subscribe((s) => { heard.push(structuredClone(s)); forge(s); });
+  c.subscribe((s) => heard.push(structuredClone(s)));
+  h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "1" } });
+  assert.equal(heard.length, 2);
+  assert.deepEqual(heard[1], heard[0], "the second listener reads what the first was given, not its write");
+  assert.equal(heard[1].state.vault_balance, "1");
+  assert.equal(c.snapshot().state.vault_balance, "1");
+  assert.equal(c.snapshot().state.orders.length, STATE.orders.length);
+  // a client still connecting stays connecting after a caller writes "ready" into its snapshot: the request waits
+  const h2 = makeHost();
+  const c2 = C.createSignpageClient({ url: URL_, host: h2.host });
+  c2.snapshot().status = "ready";
+  assert.equal(c2.snapshot().status, "connecting");
+  let settled = false;
+  void c2.request("state", {}).outcome.then(() => (settled = true));
+  await flush();
+  assert.equal(settled, false);
+  assert.equal(h2.sent().length, 0, "nothing posted before the handshake");
+});
+
 // Card signpage-buy-route-events: a running pool.buy's route (messages.ts BuyRoute) comes as progress events with no
 // stage, one fact each. A client reads them through onRoute; a client of an earlier kit (an older app) checks progress
 // with exact keys, so it drops them and still reads every stage.
@@ -827,7 +868,7 @@ test("route events reach onRoute by the buy's id, in order, never onProgress; a 
   const stages = [];
   c.onRoute((id, r) => routes.push([id, r]));
   c.onProgress((id, stage) => stages.push([id, stage]));
-  const state = c.snapshot();
+  const state = unchanged(c);
   for (const m of ROUTE) h.post(m);
   h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
   assert.deepEqual(routes, [["x", { wallet: W_ADDR }], ["x", { venue: "pump-curve", pool: W_ADDR }], ["x", { out: "1234.5" }]]);
@@ -849,7 +890,7 @@ test("route events reach onRoute by the buy's id, in order, never onProgress; a 
   assert.equal(c.dropped().shape, d0 + bad.length);
   assert.equal(routes.length, 3);
   assert.equal(stages.length, 1);
-  assert.equal(c.snapshot(), state);
+  state.check();
   // unsubscribed and destroyed: no more calls
   const off = c.onRoute(() => assert.fail("unsubscribed"));
   off();
@@ -919,12 +960,12 @@ test("an app of an earlier kit drops every route event and still reads every sta
   const { h, c } = await readyClient();
   const stages = [];
   c.onProgress((id, stage) => stages.push([id, stage]));
-  const state = c.snapshot();
+  const state = unchanged(c);
   h.post({ v: 1, type: "progress", id: "x", stage: "signed" });
   for (const m of ROUTE) h.post(m);
   h.post({ v: 1, type: "progress", id: "x", stage: "filled" });
   assert.deepEqual(stages, [["x", "signed"], ["x", "filled"]]);
-  assert.equal(c.snapshot(), state);
+  state.check();
 });
 
 test("state and progress events before READY are dropped", async () => {
@@ -972,12 +1013,12 @@ test("a state of 10,000 orders is read; 10,001 orders, or a state over 4 MiB, is
   const { h, c } = await readyClient();
   h.post({ v: 1, type: "state", state: bigState(10_000) });
   assert.equal(c.snapshot().state.orders.length, 10_000);
-  const before = c.snapshot();
+  const before = unchanged(c);
   h.post({ v: 1, type: "state", state: bigState(10_001) });
   const over = { ...bigState(9_000), held: Array.from({ length: 3_000 }, (_, i) => ({ id: `h${i}`, asset: "a".repeat(400), amount: "1" })) };
   assert.ok(bytes({ v: 1, type: "state", state: over }) > 4_194_304);
   h.post({ v: 1, type: "state", state: over });
-  assert.equal(c.snapshot(), before);
+  before.check();
   assert.equal(c.dropped().shape, 2);
 });
 
@@ -1051,13 +1092,13 @@ test("a shared-array bomb is dropped by the client, at depth 1 and depth 2: the 
     let t0 = performance.now();
     assert.equal(S.signpageIsPlainMessage(msg), false, name);
     assert.ok(performance.now() - t0 < 10_000, `${name}: the walk took over 10 s`);
-    const before = c.snapshot();
+    const before = unchanged(c);
     const d0 = c.dropped().shape;
     t0 = performance.now();
     h.post(msg);
     assert.ok(performance.now() - t0 < 10_000, `${name}: the client took over 10 s`);
     assert.equal(c.dropped().shape, d0 + 1, name);
-    assert.equal(c.snapshot(), before, name);
+    before.check(name);
   }
 });
 
@@ -1355,9 +1396,9 @@ test("kit-frame-version: a state with one op this kit cannot read keeps the rest
   h.post(answer(r.id, { ...s, ops: [other] }));
   assert.deepEqual(await r.p, { ok: true, result: { ...s, ops: [] } });
   // the rest is still checked whole: an unknown field, or ops that are not an array, refuses the state
-  const before = c.snapshot();
+  const before = unchanged(c);
   for (const bad of [{ ...s, teleport: 1 }, { ...s, ops: { 0: good } }, { ...s, ops: [good], vault_balance: "x" }]) {
     h.post({ v: 1, type: "state", state: bad });
-    assert.equal(c.snapshot(), before, JSON.stringify(bad));
+    before.check(JSON.stringify(bad));
   }
 });
