@@ -460,9 +460,11 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
     for (let i = 0; i < list.length; i++) if (free(k, i) && !rested(i) && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
     return best;
   };
-  // a page of `span` blocks on provider i (ms): its rest left, then its pages for the span at its last call's time
+  // a page of `span` blocks on provider i (ms): its rest left, then its pages for the span at its last call's time, a
+  // page never under 1 ms (a call answered within the clock's millisecond took 0, which made 10,000 pages cost as
+  // little as one and the walk's choice the clock's: the 50 cap or the 10, PR #369's fresh run)
   const costOf = (i: number, span: bigint): number =>
-    Math.max(0, restUntil[i]! - Date.now()) + (capOf[i] === null || capOf[i]! >= span ? 1 : Number((span + capOf[i]! - 1n) / capOf[i]!)) * took[i]!;
+    Math.max(0, restUntil[i]! - Date.now()) + (capOf[i] === null || capOf[i]! >= span ? 1 : Number((span + capOf[i]! - 1n) / capOf[i]!)) * Math.max(1, took[i]!);
   // with no provider free, rested and wide enough: the one free for seat k where a page of `span` ends first, a rested
   // one of a known cap under it (more pages) or a resting one that answered a page (its rest, then its pages); its own
   // first on a tie

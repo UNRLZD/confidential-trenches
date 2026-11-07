@@ -860,15 +860,19 @@ test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a
  *  recorded it, Pocket 6 Nov 07:31Z, sepolia.base.org 6 Nov 18:51Z, nodies 6 Nov 15:19Z), every eth_getLogs counted;
  *  past CALLS_GUARD in all the read answers no list, so a pager that never moves on fails its test instead of hanging. */
 const CALLS_GUARD = 5_000;
-const capped = (url: string, cap: number | null, words: (size: number) => string, count: { n: number }, log: string[], extra?: () => void): Over => ({
+const capped = (url: string, cap: number | null, words: (size: number) => string, count: { n: number }, log: string[], extra?: () => void | number): Over => ({
   url,
   log,
   getLogs: ({ from, to }) => {
     if (++count.n > CALLS_GUARD) throw new Error("RPC error -32603: the test's call guard");
-    extra?.();
+    const ms = extra?.();
     if (cap !== null && to - from + 1 > cap) throw new Error(words(to - from + 1));
+    return ms;
   },
 });
+/** An answer's delay of 0 to 3 ms from a seeded stream: which seat's answer comes first, and a call's time in whole ms
+ *  (0 or more), vary from run to run, as on a busy machine (PR #369's fresh run). */
+const jitter = (seed: number) => () => ((seed = (seed * 48_271) % 2_147_483_647), seed % 4);
 const PUBLICNODE_WORDS = () => "HTTP 400: RPC error -32701: exceed maximum block range: 50000";
 const BLAST_WORDS = () => "HTTP 400: RPC error -32600: You can make eth_getLogs requests with up to a 10 block range. Based on your parameters, this block range should work: [0x33437f9, 0x3343802]";
 const POCKET_WORDS = () => "HTTP 400: RPC error -32602: query exceeds max block range 100000";
@@ -917,10 +921,12 @@ test("card helper-evm-range-cap-walk: with every provider of the list capping, t
   const count = { n: 0 };
   const la: string[] = [], lb: string[] = [], lc: string[] = [];
   const nodies = (cap: number) => () => `RPC error -32001: Block range too large: maximum allowed is ${cap} blocks on your current plan`;
+  // each answer 0 to 3 ms late: the seats' first refusals come in either order, and a refusal within the clock's
+  // millisecond took 0 ms (PR #369's fresh run walked a seat by that 0: the 50 cap paged 10, the 10 cap was asked twice)
   const list = [
-    rpc(c, capped("https://a.example", 10, nodies(10), count, la)),
-    rpc(c, capped("https://b.example", 200, () => "HTTP 413: RPC error -32614: eth_getLogs is limited to a 200 range", count, lb)),
-    rpc(c, capped("https://c.example", 50, nodies(50), count, lc)),
+    rpc(c, capped("https://a.example", 10, nodies(10), count, la, jitter(1))),
+    rpc(c, capped("https://b.example", 200, () => "HTTP 413: RPC error -32614: eth_getLogs is limited to a 200 range", count, lb, jitter(2))),
+    rpc(c, capped("https://c.example", 50, nodies(50), count, lc, jitter(3))),
   ];
   const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
   assert.equal(r.events.length, 3);
