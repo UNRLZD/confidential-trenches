@@ -19,6 +19,11 @@ const M = [
   // the resend
   ["a stranger's note counted", F, "      else theirs.add(note.id);", "      else ours.set(note.id, p.value);", V, "a stranger takes P after the relayer's prepay"],
   ["the refund bound on the taken note", F, "let note = mine.find((x) => x.note.leaf === undefined)?.note;", "let note = mine[0]!.note;", V, "a stranger takes P after the relayer's prepay"],
+  // a landed note's calls still out (the review's M1, L2, L3)
+  ["no wait for a call still out", F, "else if (low <= live.reduce((m, c) => (c.max_block_height > m ? c.max_block_height : m), 0n) + LAPSE_MARGIN) out = true;", "else if (false) out = true;", V, "answer lost"],
+  ["calls out never read", F, "const calls = out === undefined ? await callsOut() :", "const calls = false ? await callsOut() :", V, "answer lost"],
+  ["the slow refund at the slow pace", F, "    if (calls.due) fast = true;", "    if (calls.out) fast = true;", V, "refund slow"],
+  ["final before the refund window", F, "const idle = out === undefined && !calls.late &&", "const idle = out === undefined && !calls.due &&", V, "refund slow"],
   ["no resend of U's refund", F, "if (amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {", "if (amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT && out !== undefined) {", V, "a stranger takes P after the relayer's prepay"],
 ];
 const src = { [B]: readFileSync(B, "utf8"), [F]: readFileSync(F, "utf8") };

@@ -20,7 +20,7 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { DepositAccountRefused, depositAccount, HEIGHT_SPREAD_MAX, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src/deposit/bind.ts";
 import { encodeDelegateAction, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
-import { DEPOSIT_STATUS_URL, type DepositOp, followEnded, REFUND_MOVE_MS, type FollowArgs, type FollowDeps, followDeposit, type FollowRpc, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
+import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, followEnded, REFUND_MOVE_MS, type FollowArgs, type FollowDeps, followDeposit, type FollowRpc, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
@@ -1223,7 +1223,8 @@ test("D4b: with untilFinal, final is never written while a note's call is out (U
       t.chain.a.timeMs = t.chain.b.timeMs = DEADLINE + 1;
     }
   };
-  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40) });
+  // the call landed with the late note: final waits REFUND_FINAL_BLOCKS past its run (a refund to U cannot be ruled out)
+  const out = await followDeposit(t.args, { ...t.deps, bind, untilFinal: true, signal: stop(t, 40 + Number(REFUND_FINAL_BLOCKS)) });
   const op = await opOf(t.w);
   const notes = await t.store.list();
   assert.equal(out.kind, "done");

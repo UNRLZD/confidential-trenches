@@ -52,12 +52,38 @@ export class V01World {
   stranger: Stranger | null;
   /** The stranger's own USDC that went into the vault. */
   strangerPaid = 0n;
+  /** Blocks from U's refused call to its refund reaching U (the token's ft_resolve_transfer, receipts after the vault's
+   *  panic): the call takes U's USDC at once, the refund brings it back this many blocks later. */
+  refundBlocks = 3n;
+  /** Lose the relayer's answer to U's first call (a timeout, a closed tab) and carry that call this many blocks later. */
+  loseFirst: bigint | null = null;
+  private refunds: { at: bigint; amount: bigint }[] = [];
+  private carries: { at: bigint; nonce: bigint; p: bigint; amount: bigint }[] = [];
+  /** Rows the second RPC does not show yet, from the pages' end (a provider behind on the vault's pages). */
+  hideOnB = 0;
+  /** Every answer the relayer gave, in order. */
+  answers: string[] = [];
   constructor(u: string, stranger: Stranger | null) {
     this.u = u;
     this.stranger = stranger;
   }
   tick() {
     this.height++;
+    for (const c of this.carries.filter((c) => c.at <= this.height)) (this.carries.splice(this.carries.indexOf(c), 1), this.run(c.nonce, c.p, c.amount));
+    for (const r of this.refunds.filter((r) => r.at <= this.height)) (this.refunds.splice(this.refunds.indexOf(r), 1), (this.balance += r.amount));
+  }
+  /** U's call runs: its nonce used, its USDC taken; the vault refuses a used P, and USDC refunds U refundBlocks later. */
+  private run(nonce: bigint, p: bigint, amount: bigint) {
+    this.nonce = nonce;
+    this.balance -= amount;
+    if (this.used(p)) {
+      this.carried.push({ nonce, p, amount, fate: "refunded" });
+      this.refunds.push({ at: this.height + this.refundBlocks, amount });
+    } else {
+      this.addRow(p, this.u, amount);
+      this.prepaid.delete(p.toString());
+      this.carried.push({ nonce, p, amount, fate: "landed" });
+    }
   }
   private addRow(p: bigint, depositor: string, value: bigint) {
     const index = this.rows.length;
@@ -73,9 +99,13 @@ export class V01World {
     const p = BigInt(JSON.parse(args.msg).precommitment);
     const amount = BigInt(args.amount);
     this.height++; // the hop to the relayer and back takes a block
+    // the relayer's checks: a nonce U's key has used, or a call of U it is still carrying (the helper's one slot per U)
+    if (dl.nonce <= this.nonce) return (this.answers.push("bad_nonce"), Response.json({ error: { code: "bad_nonce" } }, { status: 400 }));
+    if (this.carries.length > 0) return (this.answers.push("in_flight"), Response.json({ error: { code: "in_flight" } }, { status: 409 }));
     // R2: one prepay per U that no deposit has used (the helper's prepay_open)
     if ([...this.prepaid].some((k) => k !== p.toString())) {
       this.carried.push({ nonce: dl.nonce, p, amount, fate: "prepay_open" });
+      this.answers.push("prepay_open");
       return Response.json({ error: { code: "prepay_open" } }, { status: 409 });
     }
     if (!this.used(p) && !this.prepaid.has(p.toString())) (this.prepaid.add(p.toString()), this.prepays.push(p));
@@ -86,15 +116,15 @@ export class V01World {
       this.strangerPaid += this.stranger.value;
       this.stranger = null;
     }
-    // U's call: the Delegate runs (U's nonce used); the vault refuses a used P and USDC refunds U in full
-    this.nonce = dl.nonce;
-    if (this.used(p)) this.carried.push({ nonce: dl.nonce, p, amount, fate: "refunded" });
-    else {
-      this.addRow(p, this.u, amount);
-      this.prepaid.delete(p.toString());
-      this.balance -= amount;
-      this.carried.push({ nonce: dl.nonce, p, amount, fate: "landed" });
+    if (this.loseFirst !== null) {
+      this.carries.push({ at: this.height + this.loseFirst, nonce: dl.nonce, p, amount });
+      this.loseFirst = null;
+      this.answers.push("lost");
+      throw new TypeError("fetch failed");
     }
+    // U's call: the Delegate runs (U's nonce used); the vault refuses a used P and USDC refunds U in full, later
+    this.run(dl.nonce, p, amount);
+    this.answers.push("tx");
     return Response.json({ tx_hash: base58.encode(new Uint8Array(32).fill(this.carried.length)) });
   }
 
@@ -126,8 +156,9 @@ export class V01World {
           const j = structuredClone(PAGES.answers[k === 0 ? "a" : "b"].json);
           if (params.method_name === "deposits") {
             const { from, limit } = JSON.parse(Buffer.from(params.args_base64 as string, "base64").toString());
-            j.result.result = [...Buffer.from(JSON.stringify(this.rows.slice(from, from + limit)))];
-          } else j.result.result = [...Buffer.from(JSON.stringify({ size: this.rows.length, depth: 20, root: "0" }))];
+            const rows = k === 1 && this.hideOnB > 0 ? this.rows.slice(0, -this.hideOnB) : this.rows;
+            j.result.result = [...Buffer.from(JSON.stringify(rows.slice(from, from + limit)))];
+          } else j.result.result = [...Buffer.from(JSON.stringify({ size: this.rows.length - (k === 1 ? this.hideOnB : 0), depth: 20, root: "0" }))];
           return stamp(j);
         }
         if (params.method_name === "mt_balance_of") return stamp({ jsonrpc: "2.0", id: "x", result: { result: [...Buffer.from(JSON.stringify("0"))], logs: [] } });

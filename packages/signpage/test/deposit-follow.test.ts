@@ -507,7 +507,8 @@ test("G2c: a note store that never opens is retried at a pace that doubles acros
 });
 
 // ---------- audit V-01 (card wallet-near-prepay-taken): a stranger takes P after the relayer's prepay ----------
-test("V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min; U's refund lands on P' with no tap, both notes the user's, the op only U's own", async () => {
+for (const [what, lose] of [["", null], [", the first call's answer lost and the call carried 3 blocks later", 3n]] as const)
+test(`V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min${what}; U's refund lands on P' with no tap, both notes the user's, the op only U's own`, async () => {
   const { V01World, CREDIT, MIN_OUT } = await import("../../wallet/test/prepay-taken-world.ts");
   const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
   const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
@@ -521,6 +522,7 @@ test("V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min; U's ref
   const u = depositAccount(SEED, 1n, i).account;
   const v01 = new V01World(u, { depositor: u, value: BigInt(MIN_OUT) });
   v01.balance = CREDIT;
+  v01.loseFirst = lose;
   const sleeps: number[] = [];
   const f = depositFollows({
     network: () => "testnet",
@@ -543,6 +545,7 @@ test("V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min; U's ref
   assert.equal(op.follow.final, true);
   assert.deepEqual(v01.carried.map((c) => [c.fate, c.p]), [["refunded", note.precommitment], ["landed", P2]], "U's call on P refunded, then landed on P'");
   assert.deepEqual(v01.prepays, [note.precommitment, P2]);
+  assert.ok(!v01.answers.some((a) => a === "bad_nonce" || a === "in_flight"), `nothing signed while U's call on P was out: ${v01.answers.join()}`);
   assert.equal(v01.balance, 0n, "nothing waits in U");
   assert.equal(op.amount_usd, usdOf(CREDIT), "the op shows U's own deposit, never the stranger's");
   const all = await notes.list();
