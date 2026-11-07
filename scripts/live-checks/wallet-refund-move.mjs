@@ -6,7 +6,7 @@
 //     /v1/intents address on HELPER_HOST;
 //   - the helper's 1Click proxy answers a refund move's quote (depositType INTENTS, the vault's USDC to a fresh U on the
 //     token, refunds to U inside intents.near) that SIGN_HOST's own rule passes (checkRefundMoveQuote, 1Click's pinned
-//     keys, the deposit path's floors with MIN_DEPOSIT): a live quote moves nothing until something is sent to it;
+//     keys, the deposit path's floors with MIN_DEPOSIT, read through the kit's entry): a live quote moves nothing until something is sent to it;
 //   - intents.near on two RPCs (FastNear and dRPC) at one block: its current_salt agrees (the nonce the device builds
 //     carries it) and is_nonce_used answers false for a fresh nonce of a fresh id (the read the move's end rests on);
 //   - the helper carries an id's intents: POST /v1/intents with an empty body answers one of the route's own refusals
@@ -24,9 +24,7 @@ import "../net-window.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { checkRefundMoveQuote } from "../../packages/signpage/src/rules/refund.ts";
-import { DEPOSIT_QUOTE_PATH } from "../../packages/signpage/src/rules/deposit-dry.ts";
-import { HELPER_INTENTS_CODES } from "../../packages/kit/src/helper/v1.ts";
+import { HELPER_INTENTS_CODES, checkOneClickQuote } from "../../packages/kit/src/index.ts";
 
 const KEY = "wallet-refund-move";
 export const SIGN = "https://sign.confidential.unrealized.trade";
@@ -45,12 +43,20 @@ export function refundRequest(u, now, amount = "2000000") {
   return { dry: false, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: ORIGIN, depositType: "INTENTS", destinationAsset: VAULT_USDC, amount, refundTo: u, refundType: "INTENTS", recipient: u, recipientType: "DESTINATION_CHAIN", deadline: new Date(now + 30 * 60_000).toISOString() };
 }
 
-/** SIGN_HOST's rule on a recorded quote: "pass", or the refusal's message. */
+/** The deposit path SIGN_HOST quotes a refund move on (signpage rules/deposit-dry.ts DEPOSIT_QUOTE_PATH). */
+export const QUOTE_PATH = "partner";
+
+/** SIGN_HOST's refund move rule on a recorded quote (signpage rules/refund.ts checkRefundMoveQuote), read through the
+ *  kit's entry: the request's own refund-kind fields, then the kit's 1Click check into the vault (pinned keys, the echo,
+ *  the deposit path's floors), then a live deposit address and deadline. "pass", or the refusal's message. */
 export function ruleVerdict(request, answer) {
   try {
     const u = request.recipient;
+    const want = { originAsset: ORIGIN, depositType: "INTENTS", destinationAsset: VAULT_USDC, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS" };
+    for (const [k, v] of Object.entries(want)) if (request[k] !== v) throw new Error(`refund-kind request not allowed: ${k}`);
     const now = Date.parse(answer?.timestamp ?? "") + 1_000;
-    checkRefundMoveQuote(request, answer, { network: "mainnet", signer: { role: "U", id: u, publicKey: Uint8Array.from(Buffer.from(u, "hex")) }, origin: ORIGIN, check: { path: DEPOSIT_QUOTE_PATH, pricing: "usdc", decimalsIn: 6, decimalsOut: 6, now } });
+    const checked = checkOneClickQuote(request, answer, { path: QUOTE_PATH, pricing: "usdc", decimalsIn: 6, decimalsOut: 6, now, intoVault: true });
+    if (typeof checked.depositAddress !== "string" || typeof checked.deadline !== "string") throw new Error("refund-kind request not allowed: live");
     return "pass";
   } catch (e) {
     return String(e?.message ?? e);
