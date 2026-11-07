@@ -12,7 +12,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { vaultWithdrawYocto } from "../../packages/kit/src/index.ts";
 import { withdrawFloor, MAINNET_VAULT } from "../../apps/helper/src/withdraw/send.ts";
-import { asks, implicitKey, judge, loadRecord, probe, DECOY_VAULT, RELAYER_FLOOR_YOCTO } from "./helper-mainnet-vault-env.mjs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { asks, decoyFor, implicitKey, judge, loadRecord, probe, recordFile, RELAYER_FLOOR_YOCTO } from "./helper-mainnet-vault-env.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-mainnet-vault-env.answers.json"), "utf8"));
@@ -110,7 +112,7 @@ test("the floor is the helper's: send.ts withdrawFloor at USDC's minimum registe
 test("the probes: the record's vault is the helper's pin, and the two bodies differ only in the context", () => {
   const rec = loadRecord();
   assert.equal(rec.account_id, MAINNET_VAULT);
-  assert.notEqual(DECOY_VAULT, rec.account_id);
+  assert.notEqual(decoyFor(rec), rec.account_id);
   const [, mine, other] = asks(rec).map((a) => (a.body === undefined ? null : JSON.parse(a.body)));
   assert.deepEqual(mine.withdrawal, other.withdrawal);
   assert.equal(mine.withdrawal.fee_recipient, rec.account_id, "a fee recipient the helper never carries (check 8)");
@@ -118,4 +120,27 @@ test("the probes: the record's vault is the helper's pin, and the two bodies dif
   assert.notEqual(mine.public_signals[7], other.public_signals[7]);
   assert.equal(JSON.stringify(probe(rec.account_id, rec.scope, undefined, rec.account_id)), JSON.stringify(mine));
   for (const a of asks(rec)) for (const [s] of a.want) assert.ok(s === 200 ? a.method === "GET" : s >= 400 && s < 500, a.name);
+});
+
+test("the record by the kit's rule: mainnet-v1.json's once it exists, else mainnet-test.json's", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "hmve-rec-"));
+  const rec = (id) => JSON.stringify({ network: "mainnet", account_id: id, scope: "7" });
+  writeFileSync(path.join(dir, "mainnet-test.json"), rec("vault-test.confidential.unrlzd.near"));
+  assert.equal(path.basename(recordFile(dir)), "mainnet-test.json");
+  assert.equal(loadRecord(recordFile(dir)).account_id, "vault-test.confidential.unrlzd.near");
+  writeFileSync(path.join(dir, "mainnet-v1.json"), rec("vault.confidential.unrlzd.near"));
+  assert.equal(path.basename(recordFile(dir)), "mainnet-v1.json");
+  assert.equal(loadRecord(recordFile(dir)).account_id, "vault.confidential.unrlzd.near");
+});
+
+test("the decoy is chosen at run time to differ from the record's vault, and the judge refuses a run whose two probes name one vault", () => {
+  for (const id of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "other.near"]) {
+    const record = { account_id: id, scope: "7" };
+    assert.notEqual(decoyFor(record), id, id);
+    const [, mine, other] = asks(record).map((a) => (a.body === undefined ? null : JSON.parse(a.body)));
+    assert.notEqual(mine.public_signals[7], other.public_signals[7], id);
+  }
+  const g = A.good;
+  const r = judge(g);
+  assert.ok(r.lines.some((l) => l.startsWith("ok ") && l.includes(`another vault ${decoyFor(g.record)}: not the record's`)), r.lines.join("\n"));
 });

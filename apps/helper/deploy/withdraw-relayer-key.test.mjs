@@ -166,3 +166,11 @@ test("a .env whose last line has no newline keeps it whole: the four lines start
   assert.equal(lines[1], "JUPITER_API_KEY=test-jupiter-0001");
   assert.ok(lines[2].startsWith("WITHDRAW_VAULT_MAINNET="));
 });
+
+test("once mainnet-v1.json exists the vault is its account_id (the kit's rule, as send.ts MAINNET_VAULT follows it)", () => {
+  const s = server();
+  const v1 = JSON.stringify({ ...JSON.parse(readFileSync(RECORD, "utf8")), account_id: "vault.confidential.unrlzd.near" });
+  writeFileSync(path.join(s.dir, "contracts/vault/deployments/mainnet-v1.json"), v1);
+  assert.equal(s.run().status, 0);
+  assert.equal(valueOf(s.envText(), "WITHDRAW_VAULT_MAINNET"), "vault.confidential.unrlzd.near");
+});

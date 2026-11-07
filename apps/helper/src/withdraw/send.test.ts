@@ -5,7 +5,7 @@
 //   node --test apps/helper/src/withdraw/send.test.ts
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -890,11 +890,27 @@ test("the host's configuration: nothing set carries nothing (bad_shape); a netwo
   assert.equal(code(await withdrawSenderFromEnv(good, quoter, {}).carry({ ...req(), token: VAULT_CONSTANTS.TOKEN })), "bad_shape");
 });
 
-test("mainnet carries only the vault its deploy record names: any other WITHDRAW_VAULT_MAINNET stops the helper at start", async () => {
-  // the record the owner's deploy wrote (vault-mainnet-test); the pin is its account_id, never a typed copy of the brief
-  const record = JSON.parse(readFileSync(join(import.meta.dirname, "../../../../contracts/vault/deployments/mainnet-test.json"), "utf8")) as { network: string; account_id: string };
+// The pin follows the kit's rule (packages/wallet/test/deposit-delegate.test.ts): mainnet-v1.json's account_id once the
+// mainnet deploy writes that file, else mainnet-test.json's; one case for each, the other skipped.
+const DEPLOYMENTS = join(import.meta.dirname, "../../../../contracts/vault/deployments");
+const recordOf = (name: string) => JSON.parse(readFileSync(join(DEPLOYMENTS, `${name}.json`), "utf8")) as { network: string; account_id: string };
+const HAS_V1 = existsSync(join(DEPLOYMENTS, "mainnet-v1.json"));
+
+test("while mainnet-v1.json is absent, MAINNET_VAULT is mainnet-test.json's account_id", { skip: HAS_V1 && "mainnet-v1.json exists" }, () => {
+  const record = recordOf("mainnet-test");
   assert.equal(record.network, "mainnet");
   assert.equal(MAINNET_VAULT, record.account_id);
+});
+
+test("once mainnet-v1.json exists, MAINNET_VAULT is its account_id, never the test vault's", { skip: !HAS_V1 && "mainnet-v1.json does not exist yet" }, () => {
+  const record = recordOf("mainnet-v1");
+  assert.equal(record.network, "mainnet");
+  assert.equal(MAINNET_VAULT, record.account_id);
+  assert.notEqual(MAINNET_VAULT, recordOf("mainnet-test").account_id);
+});
+
+test("mainnet carries only the vault its deploy record names: any other WITHDRAW_VAULT_MAINNET stops the helper at start", async () => {
+  const record = { account_id: MAINNET_VAULT };
   const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
   const seed = Buffer.alloc(32, 5);
   const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
@@ -908,8 +924,9 @@ test("mainnet carries only the vault its deploy record names: any other WITHDRAW
     WITHDRAW_RELAYER_KEYS_MAINNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`,
   };
   assert.doesNotThrow(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: record.account_id }, quoter, {}).stop());
-  for (const other of ["vault.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", "vault-test.confidential.unrlzd.near.evil.near", "vault.bf-vt-20261102t071444.testnet"]) {
-    assert.throws(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: other }, quoter, {}), /WITHDRAW_VAULT_MAINNET must be vault-test\.confidential\.unrlzd\.near/, other);
+  const pin = MAINNET_VAULT.replaceAll(".", "\\.");
+  for (const other of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", `${MAINNET_VAULT}.evil.near`, `x.${MAINNET_VAULT}`, "vault.bf-vt-20261102t071444.testnet"].filter((v) => v !== MAINNET_VAULT)) {
+    assert.throws(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: other }, quoter, {}), new RegExp(`WITHDRAW_VAULT_MAINNET must be ${pin},`), other);
   }
   // testnet is not pinned here: its vault is the testnet deploy's (VT-T02), read from config() as before
   assert.doesNotThrow(() => withdrawSenderFromEnv({ ...env, WITHDRAW_VAULT_MAINNET: "", WITHDRAW_RELAYER_KEYS_MAINNET: "", WITHDRAW_RELAYER_TESTNET: "relay.test.testnet", WITHDRAW_FEE_RECIPIENT_TESTNET: "relay.test.testnet", WITHDRAW_VAULT_TESTNET: "vault.test.testnet", WITHDRAW_RELAYER_KEYS_TESTNET: env.WITHDRAW_RELAYER_KEYS_MAINNET }, quoter, {}).stop());

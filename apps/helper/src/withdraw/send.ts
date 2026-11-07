@@ -505,10 +505,11 @@ export const SEND_ENV = {
 /** A network's relayer keys: at most this many lanes (four full-access keys on the server, M:1044-1047). */
 export const KEYS_MAX = 8;
 /**
- * The one vault mainnet withdrawals are carried for: the account_id of the owner's mainnet deploy record
- * (contracts/vault/deployments/mainnet-test.json, card vault-mainnet-test; send.test.ts holds the two equal). Any other
- * WITHDRAW_VAULT_MAINNET stops the helper at start, so a host's .env cannot point the mainnet sender at a vault the
- * release does not name. The production vault's deploy record replaces it here, in the same commit as its record.
+ * The one vault mainnet withdrawals and deposits are carried for, by the kit's rule (packages/wallet/test/
+ * deposit-delegate.test.ts): the account_id of contracts/vault/deployments/mainnet-v1.json once the mainnet deploy writes
+ * it, else mainnet-test.json's (card vault-mainnet-test); send.test.ts holds each case. Any other WITHDRAW_VAULT_MAINNET
+ * or BIND_VAULT_MAINNET stops the helper at start, so a host's .env cannot point a mainnet sender at a vault the release
+ * does not name. The commit that adds mainnet-v1.json changes it here, or its test fails.
  */
 export const MAINNET_VAULT = "vault-test.confidential.unrlzd.near";
 

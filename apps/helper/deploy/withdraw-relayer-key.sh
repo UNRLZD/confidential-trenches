@@ -17,8 +17,8 @@
 #      or when deploy/.env names no image (HELPER_COMMIT, exit 6);
 #   2. makes one ed25519 key inside the helper's own image (ct-helper:<HELPER_COMMIT>, node:crypto, no network, a
 #      read-only container) and reads the vault from the mainnet deploy record
-#      (contracts/vault/deployments/mainnet-test.json, its account_id; the helper refuses any other, send.ts
-#      MAINNET_VAULT);
+#      (the kit's rule: contracts/vault/deployments/mainnet-v1.json once it exists, else mainnet-test.json; its
+#      account_id, the one vault the helper takes, send.ts MAINNET_VAULT);
 #   3. writes deploy/.env again whole (a mode 600 temporary file beside it, then one rename), every line kept and these
 #      four added:
 #        WITHDRAW_VAULT_MAINNET=<the record's account_id>
@@ -89,7 +89,8 @@ main() {
   deploy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   root="$(cd "$deploy/../../.." && pwd)"
   env="$deploy/.env"
-  record="$root/contracts/vault/deployments/mainnet-test.json"
+  record="$root/contracts/vault/deployments/mainnet-v1.json"
+  [[ -e "$record" ]] || record="$root/contracts/vault/deployments/mainnet-test.json"
 
   for name in "${NAMES[@]}"; do
     if [[ -e "$env" ]] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${name}[[:space:]]*[=:]" "$env"; then
@@ -103,7 +104,7 @@ main() {
     exit 6
   fi
   if [[ ! -f "$record" ]]; then
-    echo "withdraw-relayer-key: no mainnet deploy record at contracts/vault/deployments/mainnet-test.json; nothing changed" >&2
+    echo "withdraw-relayer-key: no mainnet deploy record (contracts/vault/deployments/mainnet-v1.json or mainnet-test.json); nothing changed" >&2
     exit 4
   fi
 

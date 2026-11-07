@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Live check of card helper-mainnet-vault-env: HELPER_HOST carries mainnet withdrawals for the vault of the mainnet
-// deploy record (contracts/vault/deployments/mainnet-test.json) and no other, with a relayer account that exists on
+// deploy record and no other (the kit's rule: contracts/vault/deployments/mainnet-v1.json once it exists, else
+// mainnet-test.json; apps/helper/src/withdraw/send.ts MAINNET_VAULT follows the same), with a relayer account that exists on
 // mainnet. It sends nothing that could be carried and moves no money. With Origin APP_HOST it reads:
 //   - GET /v1/withdraw/fee for mainnet USDC: 200, naming the relayer account and the fee recipient;
 //   - POST /v1/withdraw, the recorded real proof's withdrawal (apps/helper/src/withdraw/fixtures/withdraw-request.json)
@@ -9,8 +10,8 @@
 //     recomputes the context with its own vault and scope (check 2) before it reads the fee recipient (check 3), so only
 //     a helper whose mainnet vault is the record's gets past check 2; one carrying another vault answers bad_proof, one
 //     not carrying mainnet bad_shape;
-//   - the same withdrawal with its context computed for another vault (DECOY_VAULT, its scope from the kit's
-//     vaultScopeOf): 400 bad_proof, so the answer above is the vault's doing;
+//   - the same withdrawal with its context computed for another vault (decoyFor: chosen at run time to differ from the
+//     record's, its scope from the kit's vaultScopeOf): 400 bad_proof, so the answer above is the vault's doing;
 // then, at one final block both of two mainnet RPCs of two operators hold (the same height and hash), the relayer
 // account the fee answer names: it exists on both with the same amount and key list, holds a full-access key (an
 // implicit account: the key its id names) and at least RELAYER_FLOOR_YOCTO, one withdrawal's floor (send.ts
@@ -19,7 +20,7 @@
 //   node scripts/live-checks/helper-mainnet-vault-env.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { VAULT_CONSTANTS, vaultContextInput, vaultContextOf, vaultScopeOf } from "../../packages/kit/src/index.ts";
@@ -30,8 +31,9 @@ export const APP = "https://confidential.unrealized.trade";
 export const USDC = VAULT_CONSTANTS.TOKEN;
 /** Two mainnet RPCs of two operators (relayer-withdraw-fee's mainnet pair). */
 export const PAIR = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
-/** The vault the recorded proof was made for: another vault than the record's. */
-export const DECOY_VAULT = "vault.confidential.unrlzd.near";
+/** The decoy vault: the first of these that is not the record's (any account id works: its scope is computed). */
+export const DECOYS = ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near"];
+export const decoyFor = (record) => DECOYS.find((v) => v !== record.account_id);
 /**
  * One withdrawal's floor on the relayer account (apps/helper/src/withdraw/send.ts withdrawFloor, at USDC's
  * storage_balance_bounds().min of 0.00125 NEAR and a fee above 0): 0.4652 NEAR and 2 yocto. The test holds it to send.ts.
@@ -39,7 +41,9 @@ export const DECOY_VAULT = "vault.confidential.unrlzd.near";
 export const RELAYER_FLOOR_YOCTO = 465_200_000_000_000_000_000_002n;
 export const SPREAD = 30;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const RECORD = path.join(HERE, "../../contracts/vault/deployments/mainnet-test.json");
+export const DEPLOYMENTS = path.join(HERE, "../../contracts/vault/deployments");
+/** The kit's rule (packages/wallet/test/deposit-delegate.test.ts): mainnet-v1.json once it exists, else mainnet-test.json. */
+export const recordFile = (dir = DEPLOYMENTS) => (existsSync(path.join(dir, "mainnet-v1.json")) ? path.join(dir, "mainnet-v1.json") : path.join(dir, "mainnet-test.json"));
 const FIXTURE = path.join(HERE, "../../apps/helper/src/withdraw/fixtures/withdraw-request.json");
 const SHA = /^[0-9a-f]{40}$/;
 const ACCOUNT = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
@@ -67,7 +71,7 @@ export function implicitKey(id) {
 }
 
 /** The mainnet deploy record's vault and scope. */
-export function loadRecord(file = RECORD) {
+export function loadRecord(file = recordFile()) {
   const r = JSON.parse(readFileSync(file, "utf8"));
   if (r.network !== "mainnet" || !isAccount(r.account_id) || typeof r.scope !== "string") throw new Error("the deploy record names no mainnet vault");
   return { account_id: r.account_id, scope: r.scope };
@@ -85,11 +89,12 @@ export function probe(vault, scope, fixture = JSON.parse(readFileSync(FIXTURE, "
 
 /** The asks, each with the answers that pass. */
 export function asks(record) {
-  const decoyScope = vaultScopeOf((b) => keccak_256(b), DECOY_VAULT, USDC).toString();
+  const decoy = decoyFor(record);
+  const decoyScope = vaultScopeOf((b) => keccak_256(b), decoy, USDC).toString();
   return [
     { name: "fee", method: "GET", path: `/v1/withdraw/fee?token=${USDC}`, want: [[200, null]] },
     { name: "the record's vault", method: "POST", path: "/v1/withdraw", body: JSON.stringify(probe(record.account_id, record.scope, undefined, record.account_id)), want: [[400, "bad_fee_recipient"]] },
-    { name: "another vault", method: "POST", path: "/v1/withdraw", body: JSON.stringify(probe(DECOY_VAULT, decoyScope, undefined, record.account_id)), want: [[400, "bad_proof"]] },
+    { name: "another vault", method: "POST", path: "/v1/withdraw", body: JSON.stringify(probe(decoy, decoyScope, undefined, record.account_id)), want: [[400, "bad_proof"]] },
   ];
 }
 
@@ -156,6 +161,8 @@ export function judge(run, record = run.record) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(isAccount(record?.account_id) && record.account_id === run.record?.account_id && record.scope === run.record?.scope, `the deploy record's vault: ${record?.account_id} (scope ${String(record?.scope).slice(0, 12)}...)`);
+  const decoy = decoyFor(record ?? {});
+  say(isAccount(decoy) && decoy !== record?.account_id, `another vault ${decoy}: not the record's`);
   for (const a of asks(record)) {
     const r = run.reads.find((x) => x.asked === a.name);
     if (!r) {

@@ -37,14 +37,14 @@ test("the names: per network a vault, a gas account and its one key, then the ma
 });
 
 test("mainnet deposits are carried only for the vault of the mainnet deploy record: bind set alone with any other vault stops the helper at start", () => {
-  const record = JSON.parse(readFileSync(join(import.meta.dirname, "../../../../contracts/vault/deployments/mainnet-test.json"), "utf8")) as { network: string; account_id: string };
-  assert.equal(record.network, "mainnet");
-  assert.equal(MAINNET_VAULT, record.account_id);
+  // MAINNET_VAULT is the record's by the kit's rule (withdraw/send.test.ts holds it to mainnet-v1.json or mainnet-test.json)
+  const record = { account_id: MAINNET_VAULT };
   // bind alone: no WITHDRAW_VAULT_MAINNET, so the same-vault rule has nothing to compare with
   const env = { BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "bpin-")) };
   assert.doesNotThrow(() => bindSenderFromEnv({ ...env, BIND_VAULT_MAINNET: record.account_id }, {}).stop());
-  for (const other of ["vault.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", "vault-test.confidential.unrlzd.near.evil.near", "vault.bf-vt-20261102t071444.testnet"]) {
-    assert.throws(() => bindSenderFromEnv({ ...env, BIND_VAULT_MAINNET: other }, {}), /BIND_VAULT_MAINNET must be vault-test\.confidential\.unrlzd\.near/, other);
+  const pin = MAINNET_VAULT.replaceAll(".", "\\.");
+  for (const other of ["vault.confidential.unrlzd.near", "vault-test.confidential.unrlzd.near", "vault-test2.confidential.unrlzd.near", "evil.near", `${MAINNET_VAULT}.evil.near`, `x.${MAINNET_VAULT}`, "vault.bf-vt-20261102t071444.testnet"].filter((v) => v !== MAINNET_VAULT)) {
+    assert.throws(() => bindSenderFromEnv({ ...env, BIND_VAULT_MAINNET: other }, {}), new RegExp(`BIND_VAULT_MAINNET must be ${pin},`), other);
   }
   // testnet is not pinned here (its vault is the testnet deploy's)
   assert.doesNotThrow(() => bindSenderFromEnv(good(), {}).stop());
