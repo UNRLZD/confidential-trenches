@@ -194,11 +194,19 @@ export function bindSenderFromEnv(
     if (intentsStore === null) intentsStore = createIntentsStore(join(storeDir, "intents-mainnet"));
     return intentsStore;
   };
-  let intentsCarry: Promise<IntentsCarry> | null = null;
-  const intentsOf = (net: Net): Promise<IntentsCarry> => {
+  // the carry's relayer is mainnet's bind relayer, started only at the first send: the gate and the checks before the
+  // simulation answer with no start and no chain read (intents/carry.ts)
+  let intentsCarry: IntentsCarry | null = null;
+  const intentsOf = (net: Net): IntentsCarry => {
     if (intentsCarry === null) {
-      intentsCarry = started(net).then((deps) => createIntentsCarry({ vault: net.vault, usdc: WATCHED.mainnet.token, store: openIntents()!, reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]), relayer: deps.relayer }));
-      intentsCarry.catch(() => (intentsCarry = null));
+      const relayer = async () => (await started(net)).relayer;
+      intentsCarry = createIntentsCarry({
+        vault: net.vault,
+        usdc: WATCHED.mainnet.token,
+        store: openIntents()!,
+        reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]),
+        relayer: { send: async (...a) => (await relayer()).send(...a), resolve: async (...a) => (await relayer()).resolve(...a), balance: async () => (await relayer()).balance() },
+      });
     }
     return intentsCarry;
   };
@@ -229,7 +237,7 @@ export function bindSenderFromEnv(
       }
       let c: IntentsCarry;
       try {
-        c = await intentsOf(mainnet);
+        c = intentsOf(mainnet); // opens the store (no chain read); a store another process holds answers upstream
       } catch {
         return { status: STATUS.upstream ?? 503, body: { error: { code: "upstream" } } };
       }
