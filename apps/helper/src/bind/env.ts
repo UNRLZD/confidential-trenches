@@ -19,6 +19,9 @@ import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWa
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
 import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
+import { createIntentsCarry, parseBody, type IntentsAnswer, type IntentsCarry } from "../intents/carry.ts";
+import { intentsReads } from "../intents/reads.ts";
+import { createIntentsStore, onQuoteAnswer, onStatusAnswer as onIntentsStatus, type IntentsStore } from "../intents/records.ts";
 
 /** Per network: the release's vault, the gas account that sends deposits (bind.<ours>) and its one full-access key. */
 export const BIND_ENV = {
@@ -34,6 +37,14 @@ export type BindSender = {
   /** At the helper's start: every carried network started, so a restart reads and resends its open records at once. */
   warm(): void;
   stop(): void;
+  /**
+   * POST /v1/intents for a parsed body (card helper-id-intents, intents/carry.ts): mainnet's carry (intents.near is a
+   * mainnet contract), sent by mainnet's bind relayer with its key and nonce counter. With mainnet not carried, nothing
+   * is recorded, so every signer answers id_not_ours.
+   */
+  intents?(body: unknown): Promise<IntentsAnswer>;
+  /** A 1Click /v0/quote answer the proxy carried, after it was answered: a live quote recorded (intents/records.ts). */
+  quoted?(body: string): void;
   /**
    * A 1Click /v0/status answer the proxy carried, after it was answered (create.ts onStatusAnswer): a delivery to a
    * one-time id on a carried network's token creates that id once. Returns at once; nothing it does reaches the
@@ -175,6 +186,22 @@ export function bindSenderFromEnv(
     }
     return p;
   };
+  // card helper-id-intents: POST /v1/intents on mainnet's bind relayer, and its records under HELPER_STORE_DIR/intents-mainnet
+  const mainnet = carried.get(WATCHED.mainnet.token);
+  let intentsStore: IntentsStore | null = null;
+  const openIntents = (): IntentsStore | null => {
+    if (mainnet === undefined) return null;
+    if (intentsStore === null) intentsStore = createIntentsStore(join(storeDir, "intents-mainnet"));
+    return intentsStore;
+  };
+  let intentsCarry: Promise<IntentsCarry> | null = null;
+  const intentsOf = (net: Net): Promise<IntentsCarry> => {
+    if (intentsCarry === null) {
+      intentsCarry = started(net).then((deps) => createIntentsCarry({ vault: net.vault, usdc: WATCHED.mainnet.token, store: openIntents()!, reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]), relayer: deps.relayer }));
+      intentsCarry.catch(() => (intentsCarry = null));
+    }
+    return intentsCarry;
+  };
   let stopped = false;
   const warmNet = (net: Net) =>
     started(net).catch(() => {
@@ -195,7 +222,34 @@ export function bindSenderFromEnv(
       return carryDeposit(body, deps);
     },
     warm: () => carried.forEach((net) => void warmNet(net)),
+    async intents(body) {
+      if (mainnet === undefined) {
+        const code = parseBody(body) === null ? "bad_shape" : "id_not_ours";
+        return { status: STATUS[code] ?? 400, body: { error: { code } } };
+      }
+      let c: IntentsCarry;
+      try {
+        c = await intentsOf(mainnet);
+      } catch {
+        return { status: STATUS.upstream ?? 503, body: { error: { code: "upstream" } } };
+      }
+      return c.carry(body);
+    },
+    quoted(body) {
+      try {
+        const s = openIntents();
+        if (s !== null) onQuoteAnswer(body, s);
+      } catch {
+        console.error("helper: intents quote_record_failed");
+      }
+    },
     delivered(body) {
+      try {
+        const s = openIntents();
+        if (s !== null) onIntentsStatus(body, s);
+      } catch {
+        console.error("helper: intents status_record_failed");
+      }
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
       void onStatusAnswer(body, nets).then(
         (a) => ((l) => l !== null && console.log(l))(createLine(a)),

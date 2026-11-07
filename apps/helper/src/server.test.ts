@@ -51,13 +51,13 @@ function call(method: string, path: string, headers: Record<string, string> = {}
   });
 }
 
-test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status), delegate up (/v1/bind) and the other three down, the commit in the body and in X-Helper-Commit", async () => {
+test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay up (/v1/token-status), delegate up (/v1/bind), intents up (/v1/intents) and the other two down, the commit in the body and in X-Helper-Commit", async () => {
   const r = await call("GET", "/v1/health");
   assert.equal(r.status, 200);
   const b = JSON.parse(r.body);
   // release: null, as this test's environment sets no HELPER_RELEASE
   // solana: this environment sets no SOLANA_RPC_URL, so the RPC slot is the public endpoint (card helper-solana-failover)
-  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" ? "up" : "down"])), solana: { rpc: "public" }, rpc: { solana: [], base: [], robinhood: [], near: [] } });
+  assert.deepEqual(b, { ok: true, commit: COMMIT, release: null, ready: true, parts: Object.fromEntries(PARTS.map((p) => [p, p === "proxy" || p === "relay" || p === "delegate" || p === "intents" ? "up" : "down"])), solana: { rpc: "public" }, rpc: { solana: [], base: [], robinhood: [], near: [] } });
   assert.deepEqual(Object.keys(b.parts), ["proxy", "relay", "intents", "delegate", "orders", "log"]);
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["vary"], "Origin");
@@ -338,6 +338,22 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
   }
+});
+
+test("POST /v1/intents (card helper-id-intents): mounted, never 404; with no network set a signer the helper never saw is 403 id_not_ours, a body that is not one signed intent 400 bad_shape (the device's probe), over 8 KB 413; GET 405", async () => {
+  const payload = JSON.stringify({ signer_id: "a".repeat(64), verifying_contract: "intents.near", deadline: "2026-11-07T18:02:00.000Z", nonce: Buffer.alloc(32).toString("base64"), intents: [{ intent: "ft_withdraw", token: "usdc.near", receiver_id: "vault.confidential.unrlzd.near", amount: "1" }] });
+  const body = JSON.stringify({ signed_intent: { standard: "raw_ed25519", payload, public_key: `ed25519:${b58encode(new Uint8Array(32))}`, signature: `ed25519:${b58encode(new Uint8Array(64))}` } });
+  const a = await call("POST", "/v1/intents", { ...JSON_H, origin: SIGN }, body);
+  assert.deepEqual([a.status, JSON.parse(a.body)], [403, { error: { code: "id_not_ours" } }]);
+  assert.equal(a.headers["x-helper-commit"], COMMIT);
+  const p = await call("POST", "/v1/intents", JSON_H, "{}");
+  assert.deepEqual([p.status, JSON.parse(p.body)], [400, { error: { code: "bad_shape" } }]);
+  const n = await call("POST", "/v1/intents", JSON_H, "{not json");
+  assert.deepEqual([n.status, JSON.parse(n.body)], [400, { error: { code: "bad_shape" } }]);
+  const big = await call("POST", "/v1/intents", JSON_H, JSON.stringify({ signed_intent: "A".repeat(8_192) }));
+  assert.deepEqual([big.status, JSON.parse(big.body)], [413, { error: { code: "too_large" } }]);
+  const g = await call("GET", "/v1/intents");
+  assert.deepEqual([g.status, g.headers["allow"]], [405, "POST, OPTIONS"]);
 });
 
 test("POST /v1/bind: mounted; with no network set the helper starts and a body that does not decode is 400 bad_shape (networks.test.ts: a delegate on no carried token is token_not_accepted); over 4 KB 413; GET 405", async (t) => {
