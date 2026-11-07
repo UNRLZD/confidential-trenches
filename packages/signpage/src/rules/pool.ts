@@ -1067,68 +1067,73 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   // the pin of the ask's chain on the page's network: no deposit into a pool of another chain or network
   if (!pin || typeof pin.pool !== "string" || !EVM_ADDRESS.test(pin.pool) || pin.network !== EVM_NETWORK_OF[ask.chain][testnet ? 1 : 0]) return refuse("evm_not_pinned");
   const chainId = EVM_CHAIN_IDS[pin.network];
-  if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");
-  const t = onwardCopy(tx);
-  const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
-  const nonce = agreed(reads.nonce, uint);
-  const baseFee = agreed(reads.baseFee, uint);
-  const estimate = agreed(reads.estimate, uint);
-  const l1Fee = agreed(reads.l1Fee, uint);
-  if (!Array.isArray(reads.balance) || reads.balance.length !== 2 || !reads.balance.every(uint)) return refuse("reads");
-  if (!uint(reads.priorityCap)) return refuse("reads");
+  const u = ctx.wallet;
+  if (typeof u !== "string" || !EVM_ADDRESS.test(u)) return refuse("wallet");
+  const d = onwardCopy(tx);
+  const isUint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
+  // two providers' answers that differ are no read at all; U's balance is each one's own reading
+  const uNonce = agreed(reads.nonce, isUint);
+  const base = agreed(reads.baseFee, isUint);
+  const estimate = agreed(reads.estimate, isUint);
+  const l1 = agreed(reads.l1Fee, isUint);
+  const tipCap = reads.priorityCap;
+  if (!Array.isArray(reads.balance) || reads.balance.length !== 2 || !reads.balance.every(isUint) || !isUint(tipCap)) return refuse("reads");
   // Nitro charges its L1 data as gas, inside the estimate: no L1 fee beside it
-  if (ask.chain === "robinhood" && l1Fee !== 0n) return refuse("l1_fee");
+  if (ask.chain === "robinhood" && l1 !== 0n) return refuse("l1_fee");
   // the pinned chain's id: no replay of U's deposit on another chain
-  if (t.chainId !== chainId) return refuse("chain_id");
+  if (d.chainId !== chainId) return refuse("chain_id");
   // the pinned pool, and the call the wallet built for it
   const call = ctx.call;
   if (call === null || typeof call !== "object" || !Object.isFrozen(call) || typeof call.to !== "string" || typeof call.data !== "string" || typeof call.value !== "bigint") return refuse("call");
-  if (lower(call.to) !== lower(pin.pool) || lower(t.to) !== lower(pin.pool)) return refuse("to");
+  if (lower(call.to) !== lower(pin.pool) || lower(d.to) !== lower(pin.pool)) return refuse("to");
   // the rung: the pool's own bounds (PrivacyPool.sol:86-90), never more than asked, msg.value the call's value
-  const value = call.value;
-  if (value < EVM_POOL_MIN_DEPOSIT || value >= (1n << 128n) - 1n || value > ask.amount) return refuse("amount");
-  if (t.value !== value) return refuse("value");
+  const rung = call.value;
+  if (rung < EVM_POOL_MIN_DEPOSIT || rung >= (1n << 128n) - 1n || rung > ask.amount) return refuse("amount");
+  if (d.value !== rung) return refuse("value");
   // the note's own precommitment, below p, and the call's bytes exactly: selector, value, precommitment, nothing else
   const pre = ctx.precommitment;
   if (typeof pre !== "bigint" || pre <= 0n || pre >= VAULT_FIELD_P) return refuse("precommitment");
   const data = lower(call.data);
-  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(10) !== evmWord(value) + evmWord(pre)) return refuse("data");
-  if (lower(t.data) !== data) return refuse("data");
+  if (!/^0x[0-9a-f]{136}$/.test(data) || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");
+  if (lower(d.data) !== data) return refuse("data");
   // U's nonce on two RPCs: no replacing a send of U's, no queueing behind one
-  if (t.nonce !== nonce) return refuse("nonce");
+  if (d.nonce !== uNonce) return refuse("nonce");
   // no access list: nothing beside the call
-  if (t.accessList.length !== 0) return refuse("access_list");
+  if (d.accessList.length > 0) return refuse("access_list");
   // the two-RPC estimate, no padding past it, and never past the cap
-  if (t.gasLimit !== estimate || t.gasLimit === 0n) return refuse("gas_estimate");
-  if (t.gasLimit > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");
-  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");
-  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
+  if (d.gasLimit !== estimate || d.gasLimit === 0n) return refuse("gas_estimate");
+  if (d.gasLimit > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");
+  // no tip past the device's cap nor above the max fee; no max fee past two base fees and the tip, nor under the base fee
+  if (d.maxPriorityFeePerGas > tipCap || d.maxPriorityFeePerGas > d.maxFeePerGas) return refuse("priority_fee");
+  if (d.maxFeePerGas > 2n * base + tipCap || d.maxFeePerGas < base) return refuse("max_fee");
   // the rung and its fee bound within U's balance on each RPC's reading: neither RPC's word prices it
-  const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
-  if (reads.balance.some((b) => value + feeBound > b)) return refuse("balance");
-  DEPOSIT_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));
-  return { chain: ask.chain, op: "pool.deposit", token: null, amount: value, feeCap: feeBound, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };
+  const bound = d.gasLimit * d.maxFeePerGas + l1;
+  if (reads.balance.some((b) => rung + bound > b)) return refuse("balance");
+  DEPOSIT_CHECKED.set(tx, Object.freeze({ ...d, wallet: lower(u) }));
+  return { chain: ask.chain, op: "pool.deposit", token: null, amount: rung, feeCap: bound, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };
 }
 
 /** U's signed deposit, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very send
  *  checkEvmDeposit passed, while it reads as the check read it, and only with U's own key. */
 export function signEvmDeposit(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
-  const read = typeof tx === "object" && tx !== null ? DEPOSIT_CHECKED.get(tx) : undefined;
-  if (!read) return refuse("unchecked");
-  let now: EvmOnwardSend;
+  const passed = typeof tx === "object" && tx !== null ? DEPOSIT_CHECKED.get(tx) : undefined;
+  if (passed === undefined) return refuse("unchecked");
+  let again: EvmOnwardSend;
   try {
-    now = onwardCopy(tx);
+    again = onwardCopy(tx);
   } catch {
     return refuse("unchecked");
   }
-  const fields = ["type", "chainId", "nonce", "maxPriorityFeePerGas", "maxFeePerGas", "gasLimit", "to", "value", "data"] as const;
-  if (fields.some((k) => now[k] !== read[k]) || now.accessList.length !== 0) return refuse("unchecked");
-  if (lower(hex(keccak_256(secp256k1.getPublicKey(secretKey, false).subarray(1)).subarray(12))) !== read.wallet) return refuse("wallet");
-  const rec = secp256k1.sign(evmOnwardSendDigest(read), secretKey, { prehash: false, lowS: true, format: "recovered" });
-  const sig = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
-  return cat(Uint8Array.of(2), rlpList([...onwardFields(read), ...sig]));
+  // the send as the check read it, field for field
+  const keys = ["type", "chainId", "nonce", "maxPriorityFeePerGas", "maxFeePerGas", "gasLimit", "to", "value", "data"] as const;
+  if (keys.some((k) => again[k] !== passed[k]) || again.accessList.length > 0) return refuse("unchecked");
+  // U's own key: its address is the one the check held the send to
+  const signer = lower(hex(keccak_256(secp256k1.getPublicKey(secretKey, false).subarray(1)).subarray(12)));
+  if (signer !== passed.wallet) return refuse("wallet");
+  const rec = secp256k1.sign(evmOnwardSendDigest(passed), secretKey, { prehash: false, lowS: true, format: "recovered" });
+  const vrs = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
+  return cat(Uint8Array.of(2), rlpList([...onwardFields(passed), ...vrs]));
 }
-
 // ---------- the draw ----------
 
 /** An amount in base units as a decimal at `decimals`, trailing zeros dropped (12.5, not 12.500000000). */

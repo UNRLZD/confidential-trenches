@@ -70,6 +70,7 @@ test("EVM deposit: one refusal per field", () => {
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ nonce: [7n, 8n] }))], // the RPCs disagree
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ baseFee: [BASE_FEE, BASE_FEE + 1n] }))],
     ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ estimate: [GAS, GAS + 1n] }))],
+    ["reads", () => checkEvmDeposit(txOf(), ASK, ctxOf(), readsOf({ l1Fee: [L1, L1 + 1n] }))],
     ["access_list", () => checkEvmDeposit(txOf({ accessList: [[POOL, []]] }), ASK, ctxOf(), readsOf())],
     ["gas_estimate", () => checkEvmDeposit(txOf({ gasLimit: GAS + 1n }), ASK, ctxOf(), readsOf())],
     ["gas_over_cap", () => checkEvmDeposit(txOf({ gasLimit: EVM_DEPOSIT_GAS_MAX + 1n }), ASK, ctxOf(), readsOf({ estimate: [EVM_DEPOSIT_GAS_MAX + 1n, EVM_DEPOSIT_GAS_MAX + 1n], balance: [10n ** 18n, 10n ** 18n] }))],
