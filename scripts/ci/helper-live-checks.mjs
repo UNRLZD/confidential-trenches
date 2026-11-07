@@ -17,6 +17,7 @@ export const LIVE_CHECKS = [
   "helper-pool-senders",
   "helper-evm-sender",
   "helper-evm-sender-2",
+  "evm-sell-hook-converge",
   "helper-sell-fee-recipient",
   "helper-sender-fee-proof",
   "helper-abuse-limits",
