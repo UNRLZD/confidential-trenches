@@ -207,6 +207,10 @@ test("id intent: the deadline is the lower final-block time + 120 s, the nonce V
   // a fresh intent for the same money: only once the old one's deadline has passed on both RPCs
   bad("prior_deadline", transferPayload(), ictx({ priorDeadline: new Date(BLOCK_MS).toISOString() }));
   bad("prior_deadline", transferPayload(), ictx({ priorDeadline: "soon" }));
+  // the prior deadline in the intent deadline's own spelling only, even one long past: no other form Date.parse takes
+  bad("prior_deadline", transferPayload(), ictx({ priorDeadline: new Date(BLOCK_MS - 1000).toUTCString() }));
+  bad("prior_deadline", transferPayload(), ictx({ priorDeadline: new Date(BLOCK_MS - 1000).toISOString().replace(".000Z", "Z") }));
+  bad("prior_deadline", transferPayload(), ictx({ priorDeadline: new Date(BLOCK_MS - 1000).toISOString().replace("Z", "+00:00") }));
   assert.equal(R.checkIdTransferIntent(transferPayload(), q, ictx({ priorDeadline: new Date(BLOCK_MS - 1).toISOString() })).amount, AMOUNT);
 });
 
@@ -220,6 +224,8 @@ test("id intent: only a quote a check returned, for this id, and only the checke
   const it = R.checkIdTransferIntent(transferPayload(), q, ictx());
   refused("unchecked", () => R.signIdIntent(ID_SECRET, { ...it }));
   refused("key", () => R.signIdIntent(OTHER_SECRET, it));
+  // a wrong key spends nothing: the checked intent still signs with the id's own key (its quote is spent already)
+  assert.ok(R.signIdIntent(ID_SECRET, it).signature);
 });
 
 // ---------- the withdraw from an id ----------
@@ -596,6 +602,12 @@ test("ft_withdraw out of intents.near: every USDC the deposit path takes, each t
   bad("token", ft({ token: "sol.omft.near" }), { asset: "nep141:sol.omft.near" });
   // a listed token as the receiver
   for (const t of [SOL_TOKEN, BASE_TOKEN]) bad("receiver_id", ft({ token: SOL_TOKEN, receiver_id: t }), { asset: SOL_USDC, codeHash: [solHash, solHash] }, t);
+  // the id itself (its money would stay on the token under the id), and each native coin's omft token, read from the
+  // code's own table (RETURN_NATIVE): a token contract as the receiver would hold the money on its own account
+  bad("receiver_id", ft({ receiver_id: ID }), {}, ID);
+  const natives = Object.values(R.RETURN_NATIVE).map((a) => a.slice("nep141:".length));
+  assert.deepEqual(natives, ["sol.omft.near", "base.omft.near", "hood.omft.near"]);
+  for (const t of natives) bad("receiver_id", ft({ receiver_id: t }), { receiverExists: [true, true] }, t);
 });
 
 test("one ask, one signature: a checked quote passes one intent or send, a checked payload signs once, and priorDeadline is always said", () => {
@@ -626,6 +638,15 @@ test("one ask, one signature: a checked quote passes one intent or send, a check
   refused("unchecked", () => R.checkReturnEvm(evmTx(), eq, evmReads()));
   R.signReturnEvm(EVM_SECRET, tx);
   refused("unchecked", () => R.signReturnEvm(EVM_SECRET, tx));
+  // a withdraw quote passes one intent, with the money for two
+  const wq = withdrawQuote();
+  const wrich = wctx({ reads: reads({ held: 2n * AMOUNT + 1n }, { held: 2n * AMOUNT + 1n }) });
+  R.checkIdTransferIntent(wPayload(), wq, wrich);
+  refused("unchecked", () => R.checkIdTransferIntent(transferPayload({ tokens: { [NEAR_USDC]: AMOUNT.toString() } }, { nonce: base64.encode(salt) }), wq, wrich));
+  // a Robinhood return quote passes one send
+  const rq = returnQuote("robinhood");
+  R.checkReturnEvm(rhTx(), rq, rhReads());
+  refused("unchecked", () => R.checkReturnEvm(rhTx(), rq, rhReads()));
   const wire = wireOf(solMessage());
   R.checkReturnSolana(wire, returnQuote(), solReads());
   R.signReturnSolana(W_SECRET, wire);

@@ -65,6 +65,9 @@ export const VERSIONED_NONCE_V1 = Uint8Array.of(0x56, 0x28, 0xf6, 0xc6, 0);
  *  docs/research/chains-bnb-robinhood-tron.md:158 and :427). */
 export const RETURN_NATIVE: Readonly<Record<ReturnChain, string>> = Object.freeze({ solana: "nep141:sol.omft.near", base: "nep141:base.omft.near", robinhood: "nep141:hood.omft.near" });
 export type ReturnChain = "solana" | "base" | "robinhood";
+/** RETURN_NATIVE's omft accounts (sol.omft.near, base.omft.near, hood.omft.near): token contracts, so never a typed
+ *  ft_withdraw receiver, where the money would sit on the token's own account. */
+const RETURN_NATIVE_TOKENS: ReadonlySet<string> = new Set(Object.values(RETURN_NATIVE).map((a) => a.slice("nep141:".length)));
 /**
  * The tokens an id can hold inside intents.near and take out by ft_withdraw (W:930: "token = the asset it holds
  * there"): every USDC the deposit path takes (rules/deposit-dry.ts DEPOSIT_ASSET_CHAINS, the kit's ONECLICK_USDC_ASSETS),
@@ -325,8 +328,9 @@ function intentFrame(payload: string, ctx: IdIntentContext, s: Readonly<OneTimeI
   if (deadlineMs !== lowMs + ID_INTENT_WINDOW_MS || deadlineMs <= highMs) return refuse("deadline");
   // a fresh intent for the same money only once the earlier one's deadline has passed on both RPCs
   if (ctx.priorDeadline !== null) {
-    const prior = typeof ctx.priorDeadline === "string" ? Date.parse(ctx.priorDeadline) : Number.NaN;
-    if (Number.isNaN(prior) || !(lowMs > prior)) return refuse("prior_deadline");
+    // the same one spelling as the intent's own deadline: ISO 8601 UTC to the millisecond, and only a real instant
+    const prior = typeof ctx.priorDeadline === "string" && ISO_MS.test(ctx.priorDeadline) ? Date.parse(ctx.priorDeadline) : Number.NaN;
+    if (Number.isNaN(prior) || new Date(prior).toISOString() !== ctx.priorDeadline || !(lowMs > prior)) return refuse("prior_deadline");
   }
   // the nonce: base64 of 32 bytes, a V1 versioned nonce whose own deadline is the intent's (intents.near refuses an
   // intent whose deadline is after its nonce's)
@@ -397,10 +401,11 @@ export function checkIdFtWithdrawIntent(payload: string, typed: string, ctx: IdI
   const token = it.token;
   if (typeof token !== "string" || !Object.hasOwn(FT_WITHDRAW_TOKENS, token) || ft.asset !== `nep141:${token}`) return refuse("token");
   if (agreed(ft.codeHash, (x) => typeof x === "string") !== FT_WITHDRAW_TOKENS[token]) return refuse("code_hash");
-  // the typed account, as typed: a NEAR account id, never the vault, intents.near or a listed token
+  // the typed account, as typed: a NEAR account id, never the vault, intents.near, the id itself, a listed token or a
+  // native coin's omft token (withdrawn to a token contract, the money would sit on the token's own account)
   const form = addressForm(typed);
   if (form === null || form.account !== typed || it.receiver_id !== typed) return refuse("receiver_id");
-  if (typed === INTENTS || Object.hasOwn(FT_WITHDRAW_TOKENS, typed) || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");
+  if (typed === INTENTS || typed === s.id || Object.hasOwn(FT_WITHDRAW_TOKENS, typed) || RETURN_NATIVE_TOKENS.has(typed) || (net.vault !== null && typed === net.vault)) return refuse("receiver_id");
   // a named account must exist on two RPCs; an implicit id, which no stranger can create, passes unread
   if (form.kind === "named" && agreed(ft.receiverExists, (x) => typeof x === "boolean", "receiver") !== true) return refuse("receiver");
   // registered or not, the two reads must agree: the relayer registers a null one before it sends (card
