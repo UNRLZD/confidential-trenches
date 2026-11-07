@@ -1,5 +1,28 @@
 {
  "good": {
+  "url": "http://127.0.0.1:8789/",
+  "status": 200,
+  "headers": {
+   "access-control-allow-origin": "*",
+   "cache-control": "public, max-age=0, must-revalidate",
+   "content-encoding": "gzip",
+   "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+   "content-type": "text/html; charset=utf-8",
+   "cross-origin-opener-policy": "same-origin",
+   "cross-origin-resource-policy": "same-origin",
+   "date": "Sat, 07 Nov 2026 05:38:07 GMT",
+   "etag": "\"9d245b3b33251dcb2f32b49c98674128\"",
+   "integrity-policy": "blocked-destinations=(script)",
+   "origin-agent-cluster": "?1",
+   "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+   "referrer-policy": "no-referrer",
+   "strict-transport-security": "max-age=63072000; includeSubDomains",
+   "transfer-encoding": "chunked",
+   "x-content-type-options": "nosniff",
+   "x-server-env": "dev"
+  }
+ },
+ "beforeEvm": {
   "note": "packages/signpage on card/signpage-solana-trade (connect-src adds the Solana trade's provider A and the kit's three device-direct send paths), built by deploy.mjs --dry-run and served by wrangler 4.151.1 pages dev on a Linux build machine, read 2026-11-02T10:42Z",
   "url": "http://127.0.0.1:8791/",
   "status": 200,
