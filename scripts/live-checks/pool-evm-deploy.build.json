@@ -180,6 +180,30 @@
         "base-sepolia": "0xe39f1b9934810792c090d8ab8f555b9955527260",
         "robinhood-testnet": "0x9909a660c8a55829335dd4d894c8375bfcfcd65b"
       }
+    },
+    "PrivacyPoolSimple.v1": {
+      "contract": "PrivacyPoolSimple",
+      "note": "The pool as this file pinned it before card pool-evm-buy-pays-revert (a buy whose swap fails pays out, NOTICE change 18): the 3 Nov testnet pools. Deployed with no upgrade path, so their code stays this build; it is checked only at the addresses in `at`, the testnet records (scripts/live-checks/pool-evm-deploy.<chain>.json). A kit pin is held to the current build (`contracts`), never to a frozen one (evm-venues-pin), so the kit's testnet pool pins fail until the testnet pools are redeployed at the current build. deploy.mjs --write-build keeps this map as it is.",
+      "length": 9441,
+      "masked": "0x0d28ad57bfa889d772433fc15f3492c60366387b296b2773743a6e24e6973bd0",
+      "immutables": [
+        [
+          569
+        ],
+        [
+          431,
+          3161,
+          5438
+        ],
+        [
+          754,
+          5979
+        ]
+      ],
+      "at": {
+        "base-sepolia": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
+        "robinhood-testnet": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"
+      }
     }
   }
 }

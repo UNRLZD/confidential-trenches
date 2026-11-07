@@ -69,7 +69,8 @@ contract PrivacyPoolSimple is PrivacyPool, IPrivacyPoolSimple {
     // chunk goes to W as a withdraw would send it. The call is encoded first and given all the gas but BUY_FAIL_GAS,
     // read at the call, so the failure path keeps BUY_FAIL_GAS whatever the route's length; its return data is never
     // copied but on success (32 bytes, from this code). It gets at least BUY_SWAP_GAS, or the buy reverts here: a
-    // sender cannot pick a gas limit that fails a swap the floor would carry, and an estimate finds the floor.
+    // sender cannot pick a gas limit that fails a swap the floor would carry, and an estimate finds the floor. The
+    // 1,000 covers the few steps between this read and the call.
     bytes memory _call = abi.encodeCall(this.buySwap, (_buy, _data.recipient, _withdrawn - _fee));
     if (gasleft() < BUY_SWAP_GAS + BUY_FAIL_GAS + 1000) revert SwapGasTooLow();
     uint256 _out;
