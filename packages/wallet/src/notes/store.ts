@@ -149,10 +149,10 @@ export type NewBindCall = Omit<BindCall, "tx_hashes">;
  *  to, as the device read it. */
 export type PoolSend = { signature: string; value: bigint; last_valid_block_height: bigint };
 /** A deposit tx U signed on an EVM pool (card pool-deposits, slice 3): its hash (0x, 32 bytes, lowercase), U's account
- *  nonce it was signed at, the value it deposits, and the device's clock (ms) when it was written, which dates a send
- *  that reached neither RPC before one at the same nonce is built again. A note's sends are all of one shape: sends or
- *  evmSends. */
-export type EvmPoolSend = { hash: string; nonce: bigint; value: bigint; sentMs?: bigint };
+ *  nonce it was signed at, the value it deposits, and the head block both RPCs agreed on when it was priced and sent,
+ *  which dates a send that reached neither RPC before one at the same nonce is built again (chain blocks, never the
+ *  device's clock). A note's sends are all of one shape: sends or evmSends. */
+export type EvmPoolSend = { hash: string; nonce: bigint; value: bigint; sentBlock?: bigint };
 
 /** A note born PLANNED (a return, move or second-arrival note) or UNSPENT (a change or refund note, or one restore found). */
 export type NewNote = {
@@ -390,13 +390,13 @@ function checkSends(sends: unknown, id: string): PoolSend[] {
 const TX_HASH = /^0x[0-9a-f]{64}$/;
 function checkEvmSend(x: unknown, what: string): EvmPoolSend {
   if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error(`${what} is not a send`);
-  onlyKeys(x, ["hash", "nonce", "value", "sentMs"], what);
+  onlyKeys(x, ["hash", "nonce", "value", "sentBlock"], what);
   const s = x as EvmPoolSend;
   if (typeof s.hash !== "string" || !TX_HASH.test(s.hash)) throw new Error(`${what}: hash is a 0x 32-byte lowercase hex tx hash`);
   // U's first tx is at nonce 0
   if (typeof s.nonce !== "bigint" || s.nonce < 0n || s.nonce >= 1n << 64n) throw new Error(`${what}: nonce is a u64 bigint`);
   if (typeof s.value !== "bigint" || s.value <= 0n || s.value >= 1n << 128n) throw new Error(`${what}: value is above 0 and below 2^128`);
-  if (s.sentMs !== undefined) u64(s.sentMs, `${what}: sentMs`);
+  if (s.sentBlock !== undefined) u64(s.sentBlock, `${what}: sentBlock`);
   return s;
 }
 // The EVM sends of a note: one value, each hash once, U's nonce never going back.

@@ -88,14 +88,14 @@ test("an EVM send's fields: a 0x 32-byte lowercase hash, a u64 nonce, a value ab
   }
 });
 
-test("an EVM send may carry sentMs (the device's clock when it was written, a u64 above 0); two sends at one nonce are kept, each hash once", async () => {
+test("an EVM send may carry sentBlock (the head block both RPCs agreed on at its send, a u64 above 0); two sends at one nonce are kept, each hash once", async () => {
   const t = await tab();
   const a = await t.ns.planDeposit(990n, pc);
-  const inc = await t.ns.move(a.id, "PLANNED", "INCOMING", { evmSend: { ...E(1), sentMs: 1_000n } });
-  assert.deepEqual(inc.evmSends, [{ ...E(1), sentMs: 1_000n }]);
+  const inc = await t.ns.move(a.id, "PLANNED", "INCOMING", { evmSend: { ...E(1), sentBlock: 1_000n } });
+  assert.deepEqual(inc.evmSends, [{ ...E(1), sentBlock: 1_000n }]);
   // the same nonce again (a send that reached neither RPC, built again): kept beside the first
-  const two = await t.ns.addEvmSend(a.id, { ...E(2), nonce: E(1).nonce, sentMs: 2_000n }, 1);
-  assert.deepEqual(two.evmSends!.map((x) => [x.hash, x.nonce, x.sentMs]), [[H(1), 0n, 1_000n], [H(2), 0n, 2_000n]]);
+  const two = await t.ns.addEvmSend(a.id, { ...E(2), nonce: E(1).nonce, sentBlock: 2_000n }, 1);
+  assert.deepEqual(two.evmSends!.map((x) => [x.hash, x.nonce, x.sentBlock]), [[H(1), 0n, 1_000n], [H(2), 0n, 2_000n]]);
   t.ns.close();
   const back = await (await tab(t.idb)).ns.get(a.id);
   assert.deepEqual(back!.evmSends, two.evmSends, "read back as written");
@@ -103,6 +103,6 @@ test("an EVM send may carry sentMs (the device's clock when it was written, a u6
   let scope = 991n;
   for (const bad of [0n, -1n, 1, 1n << 64n]) {
     const n = await t2.ns.planDeposit(scope++, pc);
-    await assert.rejects(t2.ns.move(n.id, "PLANNED", "INCOMING", { evmSend: { ...E(1), sentMs: bad as bigint } }), /sentMs/);
+    await assert.rejects(t2.ns.move(n.id, "PLANNED", "INCOMING", { evmSend: { ...E(1), sentBlock: bad as bigint } }), /sentBlock/);
   }
 });
