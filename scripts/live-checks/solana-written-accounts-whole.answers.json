@@ -1,8 +1,8 @@
 {
   "_note": "good: card solana-written-accounts-whole's SIGN_HOST build (packages/signpage/index.html and public/app.js as committed on card/solana-written-accounts-whole), 7 Nov: every S11 whole-base rule: PASS. bad: SIGN_HOST read 2026-11-07T07:27Z (main deployed, before this card): none: FAIL. planted: the good bundle with one change each, its pin rewritten to match: each FAIL.",
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-aQ5U2b+4Xv2xqdylTvEefqJHJ/pM8gbuF3/D0pS4ISweYMTqM6PtayDphVzkbKCN\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-aQ5U2b+4Xv2xqdylTvEefqJHJ/pM8gbuF3/D0pS4ISweYMTqM6PtayDphVzkbKCN",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-k8ZEg9DDQkK/L1knqm2PvHDYALxTaZ6W64E+fIwI/RU2FM97/6DJ2drngQH4AbkQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-k8ZEg9DDQkK/L1knqm2PvHDYALxTaZ6W64E+fIwI/RU2FM97/6DJ2drngQH4AbkQ",
     "carries": {
       "S11 the base read by field, to its last byte (165)": true,
       "S11 the providers agree on the whole base, lamports and program": true,
@@ -24,8 +24,8 @@
   },
   "planted": {
     "P1 the field list cut to owner and amount": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-j8GYYPjqfN03k2jj+B4ssQK5sLmsknYtZnyDO09jTHQILizzDTl/Rb+w87EQna1v\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-j8GYYPjqfN03k2jj+B4ssQK5sLmsknYtZnyDO09jTHQILizzDTl/Rb+w87EQna1v",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-SqWGYyJ38vJpOtUMOxnvthryeS/y4OlrYMLrCvspyFDRPqMrGmkEtqgpKDG1DtDR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-SqWGYyJ38vJpOtUMOxnvthryeS/y4OlrYMLrCvspyFDRPqMrGmkEtqgpKDG1DtDR",
       "carries": {
         "S11 the base read by field, to its last byte (165)": false,
         "S11 the providers agree on the whole base, lamports and program": true,
@@ -35,8 +35,8 @@
       }
     },
     "P2 the providers agree on amount alone": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-JhlfkiFeG+ytSvAiIDXf0yThB4hWlA9Ym6vfJJtrb8z/jLPH0kcTPX1uPsMNt63n\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-JhlfkiFeG+ytSvAiIDXf0yThB4hWlA9Ym6vfJJtrb8z/jLPH0kcTPX1uPsMNt63n",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7R0WSXNfd4uSJupmqui8ro4npV/kLwlQm8WN8uUiP1YJMmvwz+mO15/SpjMuICwB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-7R0WSXNfd4uSJupmqui8ro4npV/kLwlQm8WN8uUiP1YJMmvwz+mO15/SpjMuICwB",
       "carries": {
         "S11 the base read by field, to its last byte (165)": true,
         "S11 the providers agree on the whole base, lamports and program": false,
@@ -46,8 +46,8 @@
       }
     },
     "P3 the wSOL refusal dead": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+0Z1mwyXQ1TP6OP5wNAgJ44Emr3wm6eVtjPnHa7BRzWj9QBHCOlDiTXJorckZUQ+\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-+0Z1mwyXQ1TP6OP5wNAgJ44Emr3wm6eVtjPnHa7BRzWj9QBHCOlDiTXJorckZUQ+",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-kyECQoKyOK9+86m6NkdMqT3ChkdLc7/MYE16QxNFkhHSXLxPpesEnVctSY2//z7e\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-kyECQoKyOK9+86m6NkdMqT3ChkdLc7/MYE16QxNFkhHSXLxPpesEnVctSY2//z7e",
       "carries": {
         "S11 the base read by field, to its last byte (165)": true,
         "S11 the providers agree on the whole base, lamports and program": true,
