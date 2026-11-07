@@ -72,6 +72,8 @@ type Chain = {
   spendStatus: string;
   /** The spends row's refund_value (the vault's on_payout: the withdrawn amount when the payout bounced), "0" unless set. */
   spendRefund?: string;
+  /** Per provider, the spends row's status and refund_value in place of spendStatus and spendRefund (two providers apart). */
+  spendOn?: [{ status?: string; refund?: string }?, { status?: string; refund?: string }?];
   spendIndex: number;
   /** The nullifier the spends row at spendIndex names (NF unless a test plants another). */
   spendNf?: bigint;
@@ -151,7 +153,7 @@ function provider(c: Chain, i: 0 | 1): Rpc {
       else if (p.method_name === "is_blocklisted" && args.account_id === W.recipient) v = c.recipientListed[i];
       else if (p.method_name === "storage_balance_of") v = c.balanceAnswer !== undefined ? c.balanceAnswer : c.registered[i] ? { total: MIN.toString(), available: "0" } : null;
       else if (p.method_name === "storage_balance_bounds") v = { min: c.min.toString(), max: c.min.toString() };
-      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendStatus, refund_value: c.spendRefund ?? "0" }] : [];
+      else if (p.method_name === "spends") v = args.from === c.spendIndex ? [{ index: c.spendIndex, nullifier_hash: (c.spendNf ?? NF).toString(), status: c.spendOn?.[i]?.status ?? c.spendStatus, refund_value: c.spendOn?.[i]?.refund ?? c.spendRefund ?? "0" }] : [];
       else if (p.method_name === "is_known_state_root") v = c.stateKnown;
       else if (p.method_name === "is_known_label_root") v = c.labelKnown;
       else if (p.method_name === "totals") v = { deposited: c.totals[0].toString(), spent: c.totals[1].toString(), returned: c.totals[2].toString() };
@@ -490,6 +492,34 @@ test("onLanded hears a withdrawal's signed recipient only once its spends row re
   assert.deepEqual(await run("in_flight"), [], "the payout's callback has not run");
   assert.deepEqual(await run("paid", "0", false), [], "a withdraw that failed on chain is never settled");
   assert.equal(recipientOfSigned(Buffer.from("not a transaction").toString("base64")), null);
+});
+
+test("onLanded fires only when both providers read the payout delivered: one in_flight and one settled with no refund, one refund_pending, or a refund on one side only fire nothing; delivered on both fires once (helper-id-intents review L1)", async () => {
+  type Side = { status?: string; refund?: string };
+  const run = async (a: Side, b: Side) => {
+    const s = setup();
+    const heard: string[] = [];
+    s.deps.onLanded = (to) => void heard.push(to);
+    assert.equal(code(await carryWithdraw(req(), s.deps)), "ok");
+    const tx = s.relayer.sent[0]!.tx;
+    s.outcomes.set(tx.tx_hash, final(tx.tx_hash, true, DEADLINE - 1n));
+    await outcomeRound(s.deps);
+    s.c.spendOn = [a, b];
+    await outcomeRound(s.deps);
+    await outcomeRound(s.deps);
+    return heard;
+  };
+  for (const [a, b, why] of [
+    [{ status: "in_flight" }, { status: "settled", refund: "0" }, "one in_flight, the other settled with refund_value 0"],
+    [{ status: "settled", refund: "0" }, { status: "in_flight" }, "the same, the other way round"],
+    [{ status: "paid" }, { status: "refund_pending", refund: "1000000" }, "one paid, the other refund_pending"],
+    [{ status: "refund_pending", refund: "1000000" }, { status: "paid" }, "the same, the other way round"],
+    [{ status: "settled", refund: "0" }, { status: "settled", refund: "1000000" }, "settled on both, a refund on one side only"],
+    [{ status: "settled", refund: "1000000" }, { status: "settled", refund: "0" }, "the same, the other way round"],
+  ] as [Side, Side, string][])
+    assert.deepEqual(await run(a, b), [], why);
+  assert.deepEqual(await run({ status: "paid" }, { status: "paid" }), [W.recipient], "paid on both: heard once");
+  assert.deepEqual(await run({ status: "settled", refund: "0" }, { status: "settled", refund: "0" }), [W.recipient], "settled with no refund on both: heard once");
 });
 
 // ---- Check 7b: the fee account (card vault-review-fixes-1, review F-1) ----
