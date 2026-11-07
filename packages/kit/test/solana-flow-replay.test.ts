@@ -27,6 +27,7 @@ import {
   type SolanaTradeDeps,
   type SolanaTradeRequest,
 } from "../src/index.ts";
+import { SOLANA_BUILD_TIMEOUT_MS } from "../src/trade/solana/build.ts";
 
 type Fixture = {
   requests: { side: "buy" | "sell"; mint: string; slippageBps: number; wallets: string[]; legs: { wallet: string; amount: string; arm: { own: boolean } }[] }[];
@@ -192,9 +193,12 @@ test("a rebuild whose floor is still under minOut is refused, never sent", async
   assert.equal(r.legs[0]?.dry, undefined);
 });
 
-// Every build over 1,232 bytes once assembled (the recorded route with 40 accounts no table holds): a dropped leg whose
-// build were assembled would find it too_large and ask the next cap, so one build ask holds it dropped unassembled
-// (card solana-quote-under-1s review: mutant M1 assembled the floor-0 build).
+// A dropped leg's build is run in two worlds (card solana-quote-under-1s, reviews of b614d3ce and 5e81420d). In the
+// recorded world the build fits once assembled, so a dropped leg whose build went on to a simulation would send one:
+// "nothing simulated" holds there (mutants M1sim and M1simD). In this world every build is over 1,232 bytes once
+// assembled (the recorded route with 40 accounts no table holds), so it can never be simulated, and a dropped leg that
+// asked the next cap would show a second build ask: "no build asked again" holds here (M6). An assembly alone, its next
+// ask refused inside the leg, reaches nothing outside the device (M1).
 function tooLargeWorld() {
   const extra = Array.from({ length: 40 }, (_, i) => ({ pubkey: base58.encode(new Uint8Array(32).fill(100 + i)), isSigner: false, isWritable: false }));
   return capWorld((_cap, body) => {
@@ -203,14 +207,20 @@ function tooLargeWorld() {
     return new Response(JSON.stringify(body), { status: 200 });
   });
 }
-test("a floor that rounds to 0 is refused: its build, out with the first reads, is dropped unassembled, nothing simulated or signed", async () => {
+test("a floor that rounds to 0 is refused: its build, out with the first reads, is dropped, no build asked again, nothing simulated or signed", async () => {
+  const urls: string[] = [];
+  const d0 = deps(BUY, { urls });
+  const r0 = await runSolanaTrade(request(BUY), { ...d0, reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
+  assert.equal(r0.legs[0]?.refused, "the floor rounds to 0");
+  assert.ok(urls.length <= 1, `${urls.length} builds`);
+  for (const p of d0.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.equal(r0.legs[0]?.signature, undefined);
   const w = tooLargeWorld();
   const d = deps(BUY);
   const r = await runSolanaTrade(request(BUY), { ...d, fetch: w.fetch, reference: async () => ({ expectedOut: 1n, expectedOuts: [1n] }) });
   assert.equal(r.legs[0]?.minOut, 0n);
   assert.equal(r.legs[0]?.refused, "the floor rounds to 0");
-  assert.equal(w.urls.length, 1, `${w.urls.length} builds: the too_large build was assembled`);
-  for (const p of d.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.equal(w.urls.length, 1, `${w.urls.length} builds: the dropped leg asked the next cap`);
   assert.equal(r.legs[0]?.signature, undefined);
 });
 
@@ -243,12 +253,15 @@ test("card solana-quote-under-1s: no reference pool while a build waits out the 
 });
 
 test("card solana-quote-under-1s: no reference pool refuses every leg; the builds already out are dropped, nothing simulated or signed", async () => {
+  const d0 = deps(SELL);
+  const r0 = await runSolanaTrade(request(SELL), { ...d0, reference: async () => null });
+  for (const l of r0.legs) { assert.equal(l.refused, "no reference pool"); assert.equal(l.signature, undefined); assert.equal(l.verdict, undefined); }
+  for (const p of d0.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
   const d = deps(SELL);
   const w = tooLargeWorld();
   const r = await runSolanaTrade(request(SELL), { ...d, fetch: w.fetch, reference: async () => null });
   for (const l of r.legs) { assert.equal(l.refused, "no reference pool"); assert.equal(l.signature, undefined); assert.equal(l.verdict, undefined); }
-  assert.equal(w.urls.length, r.legs.length, `${w.urls.length} builds: a too_large build was assembled`);
-  for (const p of d.providers) assert.ok(!p.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.equal(w.urls.length, r.legs.length, `${w.urls.length} builds: a dropped leg asked the next cap`);
 });
 
 // A dropped leg asks no build more and holds none open (card solana-quote-under-1s review): the helper's Jupiter allows
@@ -278,6 +291,37 @@ test("card solana-quote-under-1s review: no reference pool while every build is 
   assert.ok(r, "the refused trade waited on its builds in flight");
   for (const l of r.legs) assert.equal(l.refused, "no reference pool");
   assert.equal(aborted.length, r.legs.length);
+});
+// The leg's fetch hands the build a signal of its own (the leg's abort joined in), so the build's 5 s timeout
+// (build.ts askOnce) bounds an open leg only through that join (card solana-quote-under-1s, review of 5e81420d, R3).
+// The build's AbortSignal.timeout is mocked, and fired once the build is out: no real 5 s wait.
+test("card solana-quote-under-1s review: an open leg's build that never answers ends at the build's own timeout", async () => {
+  const real = AbortSignal.timeout;
+  const timers: { ms: number; c: AbortController }[] = [];
+  AbortSignal.timeout = (ms: number) => {
+    if (ms !== SOLANA_BUILD_TIMEOUT_MS) return real.call(AbortSignal, ms);
+    const c = new AbortController();
+    timers.push({ ms, c });
+    return c.signal;
+  };
+  try {
+    let asked = 0;
+    const fetch = (_url: string, init: RequestInit) => new Promise<Response>((_ok, no) => {
+      asked++;
+      const s = init.signal!;
+      s.addEventListener("abort", () => no(s.reason));
+      // the build's 5 s, run out once the leg's gate has opened (the reference answers at once)
+      setTimeout(() => { for (const t of timers) t.c.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")); }, 100);
+    });
+    const run = runSolanaTrade(request(BUY), { ...deps(BUY), fetch });
+    const r = await Promise.race([run, new Promise<null>((ok) => setTimeout(() => ok(null), 2_000))]);
+    assert.ok(r, `the open leg's build was never timed out (${asked} asked)`);
+    assert.equal(asked, 1);
+    assert.deepEqual(timers.map((t) => t.ms), [5_000]);
+    assert.match(r.legs[0]?.refused ?? "", /^build upstream: .*the helper did not answer: The operation was aborted due to timeout$/);
+  } finally {
+    AbortSignal.timeout = real;
+  }
 });
 
 test("one wallet a request: every read and simulation of a buy and a three-wallet sell names one of the user's wallets", async () => {
@@ -1374,17 +1418,25 @@ function mintWith(type: number, body: Uint8Array, urls: string[]) {
   }, { asks: p.asks, times: p.times });
   return { d: { ...d, providers: [wrap(d.providers[0]), wrap(d.providers[1])] as const }, asked };
 }
-test("card solana-written-accounts-whole review RVW-3: the rent of the account of the token is read for the one rule's size, 174 for a Pausable mint; a mint the rule refuses is refused, its build (out with the first reads, card solana-quote-under-1s) dropped unassembled, no rent read", async () => {
+test("card solana-written-accounts-whole review RVW-3: the rent of the account of the token is read for the one rule's size, 174 for a Pausable mint; a mint the rule refuses is refused, its build (out with the first reads, card solana-quote-under-1s) dropped, no build asked again, nothing simulated, no rent read", async () => {
   const urls: string[] = [];
   const p = mintWith(26, new Uint8Array(33), urls);
   await runSolanaTrade(request(BUY), p.d);
   assert.deepEqual([...new Set(p.asked)].sort(), [137, 174], `rent asked for ${p.asked.join(", ")}`);
   assert.ok(urls.length > 0, "built");
+  // the recorded world, then the too_large one (tooLargeWorld above)
+  const none: string[] = [];
+  const u0 = mintWith(29, new Uint8Array(4), none);
+  const r0 = await runSolanaTrade(request(BUY), u0.d);
+  assert.equal(r0.legs[0]?.refused, "the mint on provider A: Token-2022 extension 29 not known");
+  assert.ok(none.length <= 1, `${none.length} builds`);
+  for (const q of u0.d.providers) assert.ok(!q.asks.some((a) => a.startsWith('["simulateTransaction"')), "a refused leg was simulated");
+  assert.deepEqual(u0.asked, [], "no rent read");
   const u = mintWith(29, new Uint8Array(4), []);
   const w = tooLargeWorld();
   const r = await runSolanaTrade(request(BUY), { ...u.d, fetch: w.fetch });
   assert.equal(r.legs[0]?.refused, "the mint on provider A: Token-2022 extension 29 not known");
-  assert.equal(w.urls.length, 1, `${w.urls.length} builds: the too_large build was assembled`);
+  assert.equal(w.urls.length, 1, `${w.urls.length} builds: the dropped leg asked the next cap`);
   assert.deepEqual(u.asked, [], "no rent read");
 });
 

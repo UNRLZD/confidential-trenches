@@ -8,7 +8,7 @@
 // test/solana-quote.test.ts "S10", card solana-mint-supply-moves) and the reference read's (src/trade/solana/pool.ts,
 // test/solana-pool.test.ts), and S10's and the size rule's one Token-2022 walk, S11's hold on the wallet's token accounts
 // and the flow's rent read by that size (test/solana-quote.test.ts "S11 review", test/solana-flow-replay.test.ts, card
-// solana-written-accounts-whole), and the guard on the flow's early [wallet, wSOL] simulation (card solana-quote-under-1s): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
+// solana-written-accounts-whole), and the guard on the flow's early [wallet, wSOL] simulation, a dropped leg's build never simulated and an open leg's build held to its own timeout (card solana-quote-under-1s): each named test passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
 // mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
 // it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/pool-usd-mutants.mjs
@@ -31,6 +31,12 @@ const POOL_TEST = path.join(BASE, "test/solana-pool.test.ts");
 const FLOW = path.join(BASE, "src/trade/solana/flow.ts");
 const FLOW_TEST = path.join(BASE, "test/solana-flow-replay.test.ts");
 const RVW1 = "S11 review RVW-1";
+
+// fitOn's guard on a leg's build (src/trade/solana/flow.ts), and that guard with the dropped leg let through: its build
+// assembled on its tables and simulated on provider A, as an open leg's would be (card solana-quote-under-1s review)
+const GUARD = "if (!g || rec.refused || !m || (m.owner !== SOLANA_TOKEN_PROGRAM && m.owner !== SOLANA_TOKEN_2022_PROGRAM)) throw new LegGateClosed();";
+const GUARD_OPEN = GUARD.replace("rec.refused || ", "");
+const SIM_DROPPED = "const decX = Object.fromEntries(tableKeys.flatMap((k, i) => (ta[i]?.owner === SOLANA_ALT_PROGRAM ? [[k, solanaDecodeLookupTable(ta[i]!.data)]] : []))); const asmX = assembleSolanaSwap(breq, b, { blockhash: g.blockhash.blockhash, lastValidBlockHeight: g.blockhash.lastValidBlockHeight, tables: decX, tokenProgram: m.owner }, mintHasTransferFee(m) ? { transferFeeMints: [req.token] } : {}); await pa(\"simulateTransaction\", [btoa(String.fromCharCode(...asmX.wire)), { encoding: \"base64\", sigVerify: false, replaceRecentBlockhash: true, commitment: \"confirmed\", accounts: { addresses: [w], encoding: \"base64\" } }]).catch(() => null);";
 
 const AGREE = "agreement";
 const STALE = "staleness";
@@ -124,6 +130,13 @@ export const MUTANTS = [
   // is held only with M6: its next build is what the fetch guard refuses, and an assembly alone changes nothing outside
   [FLOW, "(closed ? Promise.reject(new LegGateClosed()) : doFetch(", "(false ? Promise.reject(new LegGateClosed()) : doFetch(", "card solana-quote-under-1s review: no reference pool while every build answers no route", FLOW_TEST],
   [FLOW, "    abort.abort(new LegGateClosed());\n", "", "card solana-quote-under-1s review: no reference pool while every build is in flight", FLOW_TEST],
+  // the review of 5e81420d: a build that fitOn takes on to a simulation is seen in the recorded world, where it fits
+  // once assembled: every build simulated (M1sim), only a dropped leg's (M1simD); and the build's own 5 s timeout, which
+  // reaches its fetch only through the leg's joined signal (R3)
+  [FLOW, GUARD, `${GUARD_OPEN} ${SIM_DROPPED}`, "a floor that rounds to 0", FLOW_TEST],
+  [FLOW, GUARD, `${GUARD_OPEN} if (rec.refused) { ${SIM_DROPPED} throw new LegGateClosed(); }`, "a floor that rounds to 0", FLOW_TEST],
+  [FLOW, GUARD, `${GUARD_OPEN} if (rec.refused) { ${SIM_DROPPED} throw new LegGateClosed(); }`, "card solana-written-accounts-whole review RVW-3", FLOW_TEST],
+  [FLOW, "signal: init.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal", "signal: abort.signal", "card solana-quote-under-1s review: an open leg's build that never answers", FLOW_TEST],
   // the same review's survivors of the last one, each now killed by its own test: the program compared after the tx on
   // each of the three kinds (N5a), the providers' agreement on the program (N5b), an agreed account of the token kept as
   // read (N15); and no baseline from provider A alone (N4b, PROBE-5 in RVW-7's shape)
