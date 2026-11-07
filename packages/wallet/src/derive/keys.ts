@@ -124,7 +124,7 @@ export const refundId = (seed64: Uint8Array, l: bigint, j: number) => oneTime(se
 export const armAccount = (seed64: Uint8Array, l: bigint, j: number) => oneTime(seed64, info.arm(l, j));
 export const profileKey = (seed64: Uint8Array, k: number) => oneTime(seed64, info.profile(k));
 
-// ---------- the one-time EVM deposit wallet U^evm_{s,i} (card pool-deposits slice 3, CO's call 7 Nov) ----------
+// ---------- the one-time EVM deposit wallet U^evm_{s,i} (card pool-deposits slice 3, 7 Nov) ----------
 // U on Base and Robinhood needs a secp256k1 key. Its private key is HKDF-SHA512(seed64, salt "blindfill/v1", info
 // "onetime/in/evm" ‖ s (32 B) ‖ i (4 B big-endian), 32 B), read as a big-endian integer. A value of 0 or at least the
 // curve order n is no key: try k takes bytes [32k, 32k + 32) of the same HKDF output stream (RFC 5869 output of length
