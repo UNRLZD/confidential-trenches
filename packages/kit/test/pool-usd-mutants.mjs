@@ -101,7 +101,10 @@ export const MUTANTS = [
   [PRICE, '(e instanceof SolanaRpcTransportError && e.fault === "timeout")', '(e instanceof SolanaRpcTransportError && e.fault !== "http_429")', RETRY],
   // a read that has ended asks no provider again
   [PRICE, "    bound.stopped = true;\n", "", RETRY],
-  [PRICE, "if (bound.stopped) return fail(", "if (false) return fail(", RETRY],
+  // a try that waited for its turn in its provider's queue (card solana-release-reads-paced): none sent once the read
+  // has ended or its bound has passed, and its try's bound taken at the turn, not before the wait
+  [PRICE, "if (bound.stopped) throw new Error(", "if (false) throw new Error(", RETRY],
+  [PRICE, "if (left <= 0) throw new NoAnswer(", "if (false) throw new NoAnswer(", RETRY],
   // a Token-2022 mint that lists one extension type twice
   [S6, "if (seen.has(type)) return", "if (false) return", T22, BUY_TEST],
   [S6, "    seen.add(type);\n", "", T22, BUY_TEST],
