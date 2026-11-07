@@ -62,4 +62,9 @@ test("the facts read from a bundle", () => {
   assert.equal(facts("", js.replace(/throw Error\([^)]*\);/, "")).references, 1);
   assert.equal(facts("", js.replace("if(c.length)return{stage:`sent`,txs:c};", "")).sent, false);
   assert.equal(facts("", js.replace("g&&!_?`down`:oT(f)", "oT(f)")).trade, 1);
+  // card pool-answer-unknown's forms: the sends of notes still open (a call), and down only in place of the kit's failed
+  const next = js.replace("if(c.length)return{stage:`sent`,txs:c};", "if(u().length)return{stage:`sent`,txs:u()};").replace("g&&!_?`down`:oT(f)", "g&&!_&&w===`failed`?`down`:w");
+  assert.deepEqual([facts("", next).sent, facts("", next).trade], [true, 2]);
+  assert.equal(facts("", next.replace("if(u().length)return{stage:`sent`,txs:u()};", "")).sent, false);
+  assert.equal(facts("", next.replace("g&&!_&&w===`failed`?`down`:w", "w")).trade, 1);
 });
