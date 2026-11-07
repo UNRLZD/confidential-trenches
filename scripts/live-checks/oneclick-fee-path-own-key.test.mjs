@@ -9,7 +9,8 @@
 // parentheses, the key shadowed (for-let, catch, a block's let) or assigned, a guard in a dead inner arrow, unused, with
 // the wrong polarity or after the read: each FAIL; (the r4 delta review of 15750e7c) the key redeclared by a var or a
 // for-var, a second table of the same name in another scope, a read in a parameter default, and a hasOwnProperty taken
-// from an object the caller passes in: each FAIL; and the text scan's false FAILs (a typeof or an arrow between, a
+// from an object the caller passes in: each FAIL; (the r5 delta review of 388efb26) Object bound locally, as a parameter, a
+// const in the body or an outer arrow's parameter: each FAIL; and the text scan's false FAILs (a typeof or an arrow between, a
 // ternary guard, "function" in the message, a block after a call, the guard split over two ifs): each PASS. facts() reads a minified bundle of either shape. And the check's tables are the kit's exports, so neither can change alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -111,6 +112,16 @@ test("facts reads a minified bundle: either table's literal in any spacing or qu
     N9_any_hasOwnProperty_call: `function f(e,t,n){return typeof e==\`string\`&&n.hasOwnProperty.call(a,e)&&n.hasOwnProperty.call(b,e)||W(\`${REFUSAL}\`),t?a[e]:b[e]}`,
   };
   assert.deepEqual(Object.keys(FAILS_R4).filter((name) => verdict(tables + FAILS_R4[name]).ok), []);
+  // planted (the r5 delta review of 388efb26): Object bound locally, as a parameter, a const in the body or an enclosing
+  // arrow's parameter, is not the realm's Object, so its hasOwn or prototype guards nothing: each FAILs
+  const OWN = (o) => `typeof e==\`string\`&&${o("a")}&&${o("b")}||W(\`${REFUSAL}\`),t?a[e]:b[e]`;
+  const FAILS_R5 = {
+    F1_Object_param_hasOwn: `function f(e,t,Object){return ${OWN((T) => `Object.hasOwn(${T},e)`)}}`,
+    F2_Object_param_prototype: `function f(e,t,Object){return ${OWN((T) => `Object.prototype.hasOwnProperty.call(${T},e)`)}}`,
+    F3_Object_const_in_body: `function f(e,t,n){const Object=n;return ${OWN((T) => `Object.hasOwn(${T},e)`)}}`,
+    F4_Object_outer_arrow: `var f=(Object=>function(e,t,n){return ${OWN((T) => `Object.prototype.hasOwnProperty.call(${T},e)`)}})(Zf);`,
+  };
+  assert.deepEqual(Object.keys(FAILS_R5).filter((name) => verdict(tables + FAILS_R5[name]).ok), []);
   // and correct bundles PASS, the false FAILs of the text scan among them
   const PASSES = {
     typeof_function_between: `function f(e,t,n){${GUARD};return typeof n==\`function\`&&n(),t?a[e]:b[e]}`,

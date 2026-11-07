@@ -9,7 +9,8 @@
 //     a declaration, an expression, an arrow, a class or object method, private, quoted or computed) whose own body,
 //     before the read on every path to it, holds a guard with its refusal: `G || refuse(...)`, `if (!G) refuse(...)` (one
 //     if or several) or `!G ? refuse(...) : <the read>`, where G holds typeof k == "string" and Object.hasOwn(T, k) (or
-//     Object.prototype.hasOwnProperty.call(T, k), or {}.hasOwnProperty.call(T, k); no other object's hasOwnProperty) and
+//     Object.prototype.hasOwnProperty.call(T, k), or {}.hasOwnProperty.call(T, k); no other object's hasOwnProperty, and
+//     no Object bound in the code around the read: a parameter, a const or an outer arrow's Object is not the realm's) and
 //     the refusal's text names "no such 1Click path"; and k is that function's own parameter, never shadowed (a for-let,
 //     a catch, a block's let), redeclared (a var, a for-var, a function) or assigned in it, so the key read is the key
 //     checked. A guard in a nested function, a guard whose result is unused, one with the wrong polarity, or a read in a
@@ -264,7 +265,8 @@ export function facts(index, js) {
       const k = p.type === "Identifier" ? p.name : null;
       const scoped = fn !== null && k !== null && bindingScope(k, p, [...up, n]) === fn &&
         fn.params.some((q) => patternNames(q).includes(k)) && !assigned(fn, k) && !(fn.body.type === "BlockStatement" && hoisted(fn.body).has(k));
-      const guards = fn === null || k === null ? [] : guardsAt(fn, n);
+      const globalObject = bindingScope("Object", n.object, [...up, n]) === null;
+      const guards = fn === null || k === null || !globalObject ? [] : guardsAt(fn, n);
       const owns = guards.filter((g) => g.holds.has(`own:${d.name}:${k}`));
       const typed = guards.filter((g) => g.holds.has(`typeof:${k}`));
       reads.push({ table, name: d.name, key, owns: owns.length > 0, typed: typed.length > 0, scoped,
