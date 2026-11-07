@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { fingerprintOf, recipientProblems, recordProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { fingerprintOf, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
@@ -211,6 +211,36 @@ test("H2: a sweep sends U's whole USDC to the named account, refused when the ac
   const paste = readFileSync(path.join(HERE, "mainnet-money", "4-sweep-u.sh"), "utf8");
   assert.match(paste, /mainnet-money\.ts sweep-u --state /);
   assert.match(readFileSync(path.join(HERE, "mainnet-money", "1-run.sh"), "utf8"), /one transfer/);
+});
+
+// a transaction as EXPERIMENTAL_tx_status returns it (result.transaction)
+const b64 = (x: unknown) => Buffer.from(JSON.stringify(x)).toString("base64");
+const RUN = { U: "c".repeat(64), G: "g.near", R: "r.near", vault: VAULT, token: TOKEN, P: "123", value: "5000000", nf: "456" };
+const depTx = (o: Record<string, unknown> = {}, fc: Record<string, unknown> = {}, args: Record<string, unknown> = {}) => ({
+  signer_id: RUN.G, receiver_id: RUN.U,
+  actions: [{ Delegate: { delegate_action: { sender_id: RUN.U, receiver_id: RUN.token, actions: [{ FunctionCall: { method_name: "ft_transfer_call", args: b64({ receiver_id: RUN.vault, amount: RUN.value, msg: JSON.stringify({ precommitment: RUN.P, depositor: RUN.U }), ...args }), gas: 1, deposit: "1", ...fc } }] }, signature: "ed25519:x" } }],
+  ...o,
+});
+const wdTx = (o: Record<string, unknown> = {}, signals = ["9", RUN.nf, RUN.value, "1", "1", "1", "1", "1"], method = "withdraw") => ({
+  signer_id: RUN.R, receiver_id: RUN.vault, actions: [{ FunctionCall: { method_name: method, args: b64({ withdrawal: {}, proof: {}, public_signals: signals }), gas: 1, deposit: "0" } }], ...o,
+});
+
+test("M1: a deposit or withdrawal tx named for the record must be the run's: signer, receiver, method, amount, P or nullifier", () => {
+  assert.deepEqual(relayerTxProblems("deposit", depTx(), RUN), []);
+  assert.deepEqual(relayerTxProblems("withdraw", wdTx(), RUN), []);
+  for (const t of [depTx({ signer_id: "x.near" }), depTx({ receiver_id: "d".repeat(64) }), depTx({}, { method_name: "ft_transfer" }), depTx({}, {}, { amount: "4000000" }), depTx({}, {}, { receiver_id: "other.near" }), depTx({}, {}, { msg: JSON.stringify({ precommitment: "9", depositor: RUN.U }) }), { ...depTx(), actions: [] }])
+    assert.ok(relayerTxProblems("deposit", t, RUN).length > 0, JSON.stringify(t).slice(0, 120));
+  for (const t of [wdTx({ signer_id: "x.near" }), wdTx({ receiver_id: "v.near" }), wdTx({}, undefined, "ragequit"), wdTx({}, ["9", "457", RUN.value, "1", "1", "1", "1", "1"]), wdTx({}, ["9", RUN.nf, "4700000", "1", "1", "1", "1", "1"]), { ...wdTx(), actions: [{ Transfer: { deposit: "1" } }] }])
+    assert.ok(relayerTxProblems("withdraw", t, RUN).length > 0, JSON.stringify(t).slice(0, 120));
+  assert.ok(relayerTxProblems("deposit", null, RUN).length > 0);
+});
+
+test("M1: record takes --deposit-tx and --withdraw-tx, checks every relayer tx against the run, and open-u keeps its hash before the send", () => {
+  assert.match(SRC, /a === "--fund-tx" \|\| a === "--settle-tx" \|\| a === "--deposit-tx" \|\| a === "--withdraw-tx"/);
+  assert.match(SRC, /relayerTxProblems\("deposit", t, want\)/);
+  assert.match(SRC, /relayerTxProblems\("withdraw", t, want\)/);
+  assert.doesNotMatch(SRC, /\(\) => \{\}\)/, "no send drops its hash");
+  assert.match(SRC, /keep\(hash\); \/\/ the hash is kept before it is sent/);
 });
 
 test("the usage line names every command", () => {

@@ -7,6 +7,8 @@
 # named here: the USDC send to U (its hash and signer, from the sending wallet or exchange), and the settle when the
 # spends row reads settled:
 #   sh contracts/vault/scripts/mainnet-money/3-record.sh --fund-tx <hash> <signer> [--settle-tx <hash> <signer>]
+# and, for a relayer tx the device did not hear (its answer came after the device stopped waiting), from the
+# account's tx list on any explorer: [--deposit-tx <hash> <signer>] [--withdraw-tx <hash> <signer>], each held to the run.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"

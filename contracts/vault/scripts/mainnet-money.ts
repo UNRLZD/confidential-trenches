@@ -49,7 +49,7 @@
 //        account: the way out for USDC at U that was not deposited (a second transfer, a refused or struck bind, a
 //        front-run's refund, USDC sent after the deposit); kept in <dir>/sweep.json for the record
 //   node contracts/vault/scripts/mainnet-money.ts record --state <dir> --fund-tx <hash> <signer> [--fund-tx ...]
-//        [--settle-tx <hash> <signer>]   writes scripts/live-checks/vault-mainnet-money.run.json and .md
+//        [--settle-tx <hash> <signer>] [--deposit-tx <hash> <signer>] [--withdraw-tx <hash> <signer>]   writes scripts/live-checks/vault-mainnet-money.run.json and .md
 import "../../../scripts/net-window.mjs";
 import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
@@ -592,9 +592,10 @@ async function sendTx(o: Opened, signer: string, key: any, receiver: string, act
   return hash;
 }
 
-/** Every receipt of `hash` FINAL and a success on both RPCs (asked again for up to a minute while unknown); else throws. */
-async function readBackBoth(urls: readonly string[], hash: string, signer: string) {
+/** Every receipt of `hash` FINAL and a success on both RPCs (asked again for up to a minute while unknown); else throws. Returns the transaction as read. */
+async function readBackBoth(urls: readonly string[], hash: string, signer: string): Promise<unknown> {
   const { successProblems } = await import("./testnet-t04.mjs");
+  let tx: unknown = null;
   for (const url of urls) {
     let p: string[] = ["not read"];
     for (let t = 0; t < 20; t++) {
@@ -603,6 +604,8 @@ async function readBackBoth(urls: readonly string[], hash: string, signer: strin
       if (j?.result) {
         p = successProblems(j.result);
         if (j.result.final_execution_status !== "FINAL") p.push("not FINAL");
+        if (tx === null) tx = j.result.transaction ?? null;
+        else if (json(tx) !== json(j.result.transaction ?? null)) p.push("the two RPCs return different transactions");
         break;
       }
       p = [`not read: ${JSON.stringify(j?.error ?? null).slice(0, 160)}`];
@@ -610,11 +613,53 @@ async function readBackBoth(urls: readonly string[], hash: string, signer: strin
     }
     if (p.length) throw new Error(`${hash} (${signer}) on ${url}: ${p.join("; ")}`);
   }
+  return tx;
+}
+
+type RunTxs = { U: string; G: string; R: string; vault: string; token: string; P: string; value: string; nf: string };
+const argsOf = (fc: any): any => {
+  try {
+    return JSON.parse(Buffer.from(String(fc?.args ?? ""), "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
+};
+/**
+ * [] when a relayer's transaction (EXPERIMENTAL_tx_status's `transaction`) is the run's own: the deposit is the
+ * deposit relayer G carrying U's one signed ft_transfer_call of the note's value to the vault with the run's P; the
+ * withdrawal is the withdrawal relayer R calling the vault's withdraw with the note's nullifier hash and its whole value.
+ */
+export function relayerTxProblems(kind: "deposit" | "withdraw", t: any, want: RunTxs): string[] {
+  if (t === null || typeof t !== "object" || !Array.isArray(t.actions) || t.actions.length !== 1) return [`the ${kind} tx is not one action`];
+  const p: string[] = [];
+  if (kind === "deposit") {
+    if (t.signer_id !== want.G) p.push(`signed by ${t.signer_id}, not the deposit relayer ${want.G}`);
+    if (t.receiver_id !== want.U) p.push(`sent to ${t.receiver_id}, not U ${want.U}`);
+    const da = t.actions[0]?.Delegate?.delegate_action;
+    const fc = Array.isArray(da?.actions) && da.actions.length === 1 ? da.actions[0]?.FunctionCall : undefined;
+    const args = argsOf(fc);
+    let msg: any = null;
+    try {
+      msg = JSON.parse(String(args?.msg));
+    } catch {}
+    if (da?.sender_id !== want.U || da?.receiver_id !== want.token) p.push("not U's delegate to the token");
+    if (fc?.method_name !== "ft_transfer_call") p.push(`calls ${fc?.method_name}, not ft_transfer_call`);
+    if (args?.receiver_id !== want.vault || String(args?.amount) !== want.value) p.push(`moves ${args?.amount} to ${args?.receiver_id}, not ${want.value} to the vault`);
+    if (String(msg?.precommitment) !== want.P || msg?.depositor !== want.U) p.push("not the run's precommitment by U");
+  } else {
+    if (t.signer_id !== want.R) p.push(`signed by ${t.signer_id}, not the withdrawal relayer ${want.R}`);
+    if (t.receiver_id !== want.vault) p.push(`sent to ${t.receiver_id}, not the vault`);
+    const fc = t.actions[0]?.FunctionCall;
+    const sig = argsOf(fc)?.public_signals;
+    if (fc?.method_name !== "withdraw") p.push(`calls ${fc?.method_name}, not withdraw`);
+    if (!Array.isArray(sig) || String(sig[1]) !== want.nf || String(sig[2]) !== want.value) p.push("not the note's nullifier hash and whole value");
+  }
+  return p;
 }
 
 async function openU(argv: string[]) {
-  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network"]);
-  const o = await opened(networkOf(v));
+  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network", "--bind-relayer"]);
+  const o = await opened(networkOf(v), v["--bind-relayer"]);
   const { repoRoots, loadKey } = await import("./deploy.mjs");
   const { act } = await import("./testnet-usdc.mjs");
   const st = stateDir(v["--state"]!, repoRoots(), { create: false });
@@ -624,18 +669,19 @@ async function openU(argv: string[]) {
   const payer = v["--payer"]!;
   const key = loadKey(v["--key-file"], payer, repoRoots());
   const kept = st.read("open-u") ?? { txs: [] as { hash: string; signer: string; what: string }[] };
-  const keep = (hash: string, what: string) => {
+  // each hash is kept before its tx is sent (sendTx), so a stop between the send and the read-back loses none
+  const keep = (what: string) => (hash: string) => {
     kept.txs.push({ hash, signer: payer, what });
     st.write("open-u", kept);
-    log(`${what}: ${hash} read back FINAL on both RPCs, every receipt a success`);
   };
+  const done = (hash: string, what: string) => log(`${what}: ${hash} read back FINAL on both RPCs, every receipt a success`);
   const acct = await accountOn(o.rpcs, U);
-  if (acct.every((x) => x === "absent")) keep(await sendTx(o, payer, key, U, [act.transfer(U_OPEN_YOCTO)], () => {}), `Transfer 0.01 NEAR to U ${U}`);
+  if (acct.every((x) => x === "absent")) done(await sendTx(o, payer, key, U, [act.transfer(U_OPEN_YOCTO)], keep(`Transfer 0.01 NEAR to U ${U}`)), `Transfer 0.01 NEAR to U ${U}`);
   else if (acct.some((x) => x === "absent")) throw new Error(`U ${U} exists on one RPC only: nothing sent; run this again in a minute`);
   if ((await view2(o.rpcs, o.token, "storage_balance_of", { account_id: U })) === null) {
     const b = await view2(o.rpcs, o.token, "storage_balance_bounds", {});
     if (b?.min !== b?.max) throw new Error(`the token's storage_balance_bounds ${json(b)} is not min = max: nothing sent`);
-    keep(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: U, registration_only: true }, 30n * TGAS, BigInt(b.min))], () => {}), `storage_deposit of U on ${o.token}`);
+    done(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: U, registration_only: true }, 30n * TGAS, BigInt(b.min))], keep(`storage_deposit of U on ${o.token}`)), `storage_deposit of U on ${o.token}`);
   }
   log(`U ${U} exists and is registered on both RPCs: send at least ${o.minDeposit} USDC (base units) to it from any wallet or exchange`);
   process.exit(0);
@@ -695,12 +741,13 @@ export function recordProblems(a: { fund: number; deposit: number; withdraw: num
   return p;
 }
 
-/** The relayers' heard txs that read back a success on both RPCs; the rest (a resend the vault refused) are left out. */
-async function landedOf(urls: readonly string[], hashes: string[], signer: string) {
+/** The relayers' heard txs that read back a success on both RPCs and are the run's; the rest (a resend the vault refused) are left out. */
+async function landedOf(urls: readonly string[], hashes: string[], signer: string, mine: (t: unknown) => string[]) {
   const ok: { hash: string; signer: string }[] = [];
   for (const hash of [...new Set(hashes)]) {
     try {
-      await readBackBoth(urls, hash, signer);
+      const p = mine(await readBackBoth(urls, hash, signer));
+      if (p.length) throw new Error(`not the run's: ${p.join("; ")}`);
       ok.push({ hash, signer });
     } catch (e) {
       log(`${hash} (${signer}) left out: ${(e as Error).message}`);
@@ -710,31 +757,44 @@ async function landedOf(urls: readonly string[], hashes: string[], signer: strin
 }
 
 async function record(argv: string[]) {
-  const named: Record<"--fund-tx" | "--settle-tx", { hash: string; signer: string }[]> = { "--fund-tx": [], "--settle-tx": [] };
+  type Named = "--fund-tx" | "--settle-tx" | "--deposit-tx" | "--withdraw-tx";
+  const named: Record<Named, { hash: string; signer: string }[]> = { "--fund-tx": [], "--settle-tx": [], "--deposit-tx": [], "--withdraw-tx": [] };
   const rest: string[] = [];
   for (let k = 0; k < argv.length; k++) {
     const a = argv[k]!;
-    if (a === "--fund-tx" || a === "--settle-tx") {
+    if (a === "--fund-tx" || a === "--settle-tx" || a === "--deposit-tx" || a === "--withdraw-tx") {
       if (!/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(argv[k + 1] ?? "") || !ACCOUNT_ID.test(argv[k + 2] ?? "")) throw new Error(`${a} takes a tx hash and its signer`);
       named[a].push({ hash: argv[k + 1]!, signer: argv[k + 2]! });
       k += 2;
     } else rest.push(a);
   }
-  const v = flags(rest, ["--state"], ["--network"]);
-  const o = await opened(networkOf(v));
+  const v = flags(rest, ["--state"], ["--network", "--bind-relayer"]);
+  const o = await opened(networkOf(v), v["--bind-relayer"]);
   const { repoRoots } = await import("./deploy.mjs");
   const st = stateDir(v["--state"]!, repoRoots(), { create: false });
   const run = st.read("run"), d = st.read("deposit"), w = st.read("withdraw"), u = st.read("open-u") ?? { txs: [] };
   const heard = st.read("heard") ?? { bind: [], withdraw: [] };
-  const sweeps = (st.read("sweep") ?? { txs: [] }).txs.map((t: any) => ({ hash: t.hash, signer: t.signer }));
+  const sweepTxs: { hash: string; signer: string }[] = (st.read("sweep") ?? { txs: [] }).txs;
   if (run?.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network || d === undefined || w?.done !== true) throw new Error("record: the run has not landed both legs");
-  const owners = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...sweeps, ...named["--settle-tx"]];
-  for (const t of owners) await readBackBoth(o.urls, t.hash, t.signer); // each must read back a success, or nothing is written
-  const deposits = await landedOf(o.urls, [...d.txs, ...heard.bind], d.relayer);
-  const withdraws = await landedOf(o.urls, heard.withdraw, o.relayers.withdraw.relayer_account);
+  // the owner's named txs must each read back a success, or nothing is written; open-u's and sweep-u's are kept before
+  // they are sent, so one whose send never reached the chain is left out (logged), as a relayer's resend is
+  for (const t of [...named["--fund-tx"], ...named["--settle-tx"]]) await readBackBoth(o.urls, t.hash, t.signer);
+  const opens = (await Promise.all([...new Set(u.txs.map((t: any) => t.signer))].map((sg) => landedOf(o.urls, u.txs.filter((t: any) => t.signer === sg).map((t: any) => t.hash), sg as string, () => [])))).flat();
+  const sweeps = await landedOf(o.urls, sweepTxs.map((t) => t.hash), run.U, () => []);
+  // each relayer tx, heard or named (a hash the device never heard: the relayer's answer came after its timeout), is
+  // read back and held to the run: signer, receiver, method, amount, P or nullifier hash; a named one that is not refuses
+  const want: RunTxs = { U: run.U, G: d.relayer, R: o.relayers.withdraw.relayer_account, vault: o.vault, token: o.token, P: run.precommitment, value: d.leaf.value, nf: w.nullifier_hash };
+  for (const [flag, kind, signer] of [["--deposit-tx", "deposit", want.G], ["--withdraw-tx", "withdraw", want.R]] as const)
+    for (const t of named[flag]) {
+      if (t.signer !== signer) throw new Error(`record: ${flag} ${t.hash} names ${t.signer}, not the ${kind} relayer ${signer}`);
+      const p = relayerTxProblems(kind, await readBackBoth(o.urls, t.hash, t.signer), want);
+      if (p.length) throw new Error(`record: ${flag} ${t.hash} is not the run's ${kind}: ${p.join("; ")}`);
+    }
+  const deposits = await landedOf(o.urls, [...d.txs, ...heard.bind, ...named["--deposit-tx"].map((t) => t.hash)], want.G, (t) => relayerTxProblems("deposit", t, want));
+  const withdraws = await landedOf(o.urls, [...heard.withdraw, ...named["--withdraw-tx"].map((t) => t.hash)], want.R, (t) => relayerTxProblems("withdraw", t, want));
   const rp = recordProblems({ fund: named["--fund-tx"].length, deposit: deposits.length, withdraw: withdraws.length, status: w.row.status, settle: named["--settle-tx"].length });
   if (rp.length) throw new Error(`record: ${rp.join("; ")}`);
-  const txs = [...u.txs.map((t: any) => ({ hash: t.hash, signer: t.signer })), ...named["--fund-tx"], ...deposits, ...withdraws, ...sweeps, ...named["--settle-tx"]];
+  const txs = [...opens, ...named["--fund-tx"], ...deposits, ...withdraws, ...sweeps, ...named["--settle-tx"]];
   for (const t of txs) log(`${t.hash} (${t.signer}) read back FINAL on both operators, every receipt a success`);
   const runRec = {
     card: CARD, network: o.network, vault: o.vault, asset: o.token,
