@@ -85,7 +85,10 @@ services:
       POOL_SOLANA_RPCS_DEVNET: ${POOL_SOLANA_RPCS_DEVNET:-}
       # POST /v1/pool/evm/send per network (src/pool/evm.ts; empty: that network's pool is not carried): the pool, the
       # sender's key (0x + 64 hex, gas only), the fee in the asset's base units, its recipient (empty: the sender) and
-      # two RPC URLs, comma-separated
+      # two RPC URLs of two operators, comma-separated (empty: the kit's fee pair). The first takes every read one
+      # provider answers and every send, so it is the faster pace: Robinhood's is
+      # https://robinhood.drpc.org,https://rpc.mainnet.chain.robinhood.com (dRPC 15 a second first, Robinhood's own at 1
+      # a second second; the kit's order, card robinhood-mainnet-rpcs)
       POOL_EVM_ADDRESS_BASE: ${POOL_EVM_ADDRESS_BASE:-}
       POOL_EVM_SENDER_KEY_BASE: ${POOL_EVM_SENDER_KEY_BASE:-}
       POOL_EVM_FEE_BASE: ${POOL_EVM_FEE_BASE:-}

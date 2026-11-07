@@ -40,6 +40,7 @@ function refuse(options) {
   }
   for (const a of options.args ?? []) {
     if (SANDBOX_OFF.test(String(a))) throw new Error(`browsers: launch arg ${a} is refused (it weakens the sandbox)`);
+    if (/^--force-device-scale-factor\b/.test(String(a))) throw new Error(`browsers: launch arg ${a} is refused (the launcher sets the screen's ratio from each context's deviceScaleFactor)`);
   }
 }
 
@@ -80,9 +81,15 @@ export async function launchBrowser(engine = "chromium", options = {}) {
     }
     return browser;
   }
+  const browser = await startChrome(options);
+  scaleByContext(browser, options);
+  return browser;
+}
+
+async function startChrome(options) {
   let browser;
   try {
-    browser = await type.launch(chromeOptions(options));
+    browser = await playwright().chromium.launch(chromeOptions(options));
   } catch (e) {
     throw launchFailure(e);
   }
@@ -93,6 +100,31 @@ export async function launchBrowser(engine = "chromium", options = {}) {
   }
   labels.set(browser, `Chrome ${browser.version()}, sandbox on`);
   return browser;
+}
+
+// A context whose deviceScaleFactor is not 1 (every phone run) opens in a second Chrome, started the same way with
+// --force-device-scale-factor at that factor, so the screen's ratio is the one the context emulates. On a Linux host
+// at 1, a cross-site frame (the terminal inside SIGN_HOST's shell, in a process of its own) kept devicePixelRatio 1
+// while the emulated top window was 2, and input reached the frame at half its point: on the Linux box (Chrome 156) a
+// tap at 195,796 arrived at 98,398, on the deposit sheet's amount field, and on CI (Linux Chrome 157) Playwright's
+// click on Get address was refused with the amount field "intercepts pointer events" (run 42338709153, job
+// 128301399307). A Mac's screen is already 2, which is why it never showed there. Contexts at 1 (every desktop run)
+// stay in the first Chrome, so no desktop screenshot or measurement changes. Every caller is routed here, none opts in.
+function scaleByContext(browser, options) {
+  const scaled = new Map();
+  const forScale = (o) => {
+    const f = o?.deviceScaleFactor;
+    if (!f || f === 1) return null;
+    if (!scaled.has(f)) scaled.set(f, startChrome({ ...options, args: [...(options.args ?? []), `--force-device-scale-factor=${f}`] }));
+    return scaled.get(f);
+  };
+  const own = { newContext: browser.newContext.bind(browser), newPage: browser.newPage.bind(browser), close: browser.close.bind(browser) };
+  browser.newContext = async (o = {}) => { const b = forScale(o); return b ? (await b).newContext(o) : own.newContext(o); };
+  browser.newPage = async (o = {}) => { const b = forScale(o); return b ? (await b).newPage(o) : own.newPage(o); };
+  browser.close = async (...a) => {
+    await Promise.all([...scaled.values()].map((b) => b.then((x) => x.close(), () => {})));
+    return own.close(...a);
+  };
 }
 
 /**

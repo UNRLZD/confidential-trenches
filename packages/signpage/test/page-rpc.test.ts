@@ -7,7 +7,7 @@ import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
 import { testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
 
 /** globalThis.fetch for one test: each URL answers 429 (Retry-After 0) on its first call, then the call's result. */
@@ -41,23 +41,67 @@ test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): 
   });
 });
 
-// The Solana pool path's files: every read it makes goes to both of the page's providers, and the second is the
-// helper's /v1/rpc/solana (main.ts) or /v1/rpc/solana-devnet (TESTNET_RPCS), which forwards only HELPER_RPC_METHODS.solana
-const POOL_PATH = [
-  "../src/pool-buy.ts", "../src/pool-deposit.ts", "../src/pool-sell.ts", "../src/pool-spend.ts", "../src/pool-withdraw.ts", "../src/pool-price.ts", "../src/pool-kinds.ts", "../src/pool-testnet.ts",
-  "../../wallet/src/pool/solana.ts", "../../wallet/src/pool/solana-restore.ts", "../../wallet/src/pool/buy-wallets.ts", "../../wallet/src/pool/queue.ts", "../../wallet/src/pool/pool.ts", "../../wallet/src/pool/balances.ts",
-  "../../kit/src/trade/solana/pool.ts", "../../kit/src/trade/solana/pool-buy.ts", "../../kit/src/trade/solana/send.ts",
-];
-/** Every Solana JSON-RPC method named in a file: a quoted get*, is*, simulate*, send* or request* name. */
+// The page's Solana reads and sends (pool buy, sell, deposit, withdraw, restore and the trade path) each go to both of
+// its providers, and the second is the helper's /v1/rpc/solana (main.ts, trade.ts) or /v1/rpc/solana-devnet
+// (TESTNET_RPCS), which forwards only HELPER_RPC_METHODS.solana. Card helper-rpc-sell-methods: the files scanned are
+// every file the page's source reaches by import, never a hand list (one missed trade.ts and the kit's
+// trade/solana/flow.ts and build.ts), and a quoted name of an RPC method's shape is either on the helper's list or on
+// NOT_RPC below, never passed over (a filter of known methods passed over any method it did not name).
+const SRC = new URL("../src/", import.meta.url);
+const PACKAGES = new URL("../../", import.meta.url);
+/** A bare @blindfill/<package>[/<entry>] import, through that package's exports map. */
+function bareEntry(spec: string): URL | undefined {
+  const m = /^@blindfill\/([a-z-]+)(\/.+)?$/.exec(spec);
+  if (!m) return undefined;
+  const pkg = new URL(`${m[1]}/`, PACKAGES);
+  const exp = (JSON.parse(readFileSync(new URL("package.json", pkg), "utf8")) as { exports: Record<string, { default: string }> }).exports[`.${m[2] ?? ""}`];
+  assert.ok(exp, `${spec}: on its package's exports map`);
+  return new URL(exp.default, pkg);
+}
+/** Every .ts file the page's src/ reaches by import, export-from or dynamic import, src/ itself included. */
+function pageFiles(): Map<string, string> {
+  const files = new Map<string, string>();
+  const todo = readdirSync(SRC, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts")).map((f) => new URL(f, SRC));
+  for (let u = todo.pop(); u; u = todo.pop()) {
+    if (files.has(u.href)) continue;
+    const src = readFileSync(u, "utf8");
+    files.set(u.href, src);
+    for (const [, spec] of src.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*["']([^"']+)["']/g)) {
+      const next = spec!.startsWith(".") ? new URL(spec!, u) : bareEntry(spec!);
+      if (next && next.pathname.endsWith(".ts")) todo.push(next);
+    }
+  }
+  return files;
+}
+/** Every name of a Solana JSON-RPC method's shape quoted in a file: a get*, is*, simulate*, send* or request* name. */
 const solanaMethodsIn = (src: string): string[] => [...src.matchAll(/["'`]((?:get|is|simulate|send|request)[A-Z][A-Za-z]+)["'`]/g)].map((m) => m[1]!);
-const SOLANA_RPC = /^(get(AccountInfo|Balance|Block|BlockHeight|BlockTime|FeeForMessage|LatestBlockhash|MinimumBalanceForRentExemption|MultipleAccounts|ProgramAccounts|SignatureStatuses|SignaturesForAddress|Slot|TokenAccountsByOwner|TokenLargestAccounts|Transaction|Health|Version|GenesisHash|EpochInfo|RecentPrioritizationFees)|isBlockhashValid|simulateTransaction|sendTransaction|requestAirdrop)$/;
+/** The quoted names of that shape in the page's files that are not RPC methods, each with where it is. */
+const NOT_RPC: ReadonlySet<string> = new Set([
+  "sendMarginMs", // wallet pool/pool.ts: a field of the pool's timing
+]);
 
-test("card pool-buy-send-fast: every Solana read the pool path makes is on the helper's list, so the page's second provider never refuses one (getSlot, getSignaturesForAddress, getFeeForMessage, getBlockTime, getProgramAccounts were refused 400)", () => {
+/** The methods the files name, each with a file naming it, and those of them off the helper's list. */
+function scan(files: ReadonlyMap<string, string>): { used: Map<string, string>; off: string[] } {
   const used = new Map<string, string>();
-  for (const f of POOL_PATH) for (const m of solanaMethodsIn(readFileSync(new URL(f, import.meta.url), "utf8"))) if (SOLANA_RPC.test(m)) used.set(m, f);
-  for (const m of ["getSlot", "getSignaturesForAddress", "getFeeForMessage", "getBlockTime", "getProgramAccounts", "getAccountInfo", "getTransaction"]) assert.ok(used.has(m), `the scan finds ${m}`);
-  const off = [...used].filter(([m]) => !(HELPER_RPC_METHODS.solana as readonly string[]).includes(m));
-  assert.deepEqual(off, [], `read by the pool path, refused by the helper: ${off.map(([m, f]) => `${m} (${f})`).join(", ")}`);
+  for (const [f, src] of files) for (const m of solanaMethodsIn(src)) if (!NOT_RPC.has(m)) used.set(m, f.slice(PACKAGES.href.length));
+  return { used, off: [...used].filter(([m]) => !(HELPER_RPC_METHODS.solana as readonly string[]).includes(m)).map(([m, f]) => `${m} (${f})`) };
+}
+
+test("card helper-rpc-sell-methods: every Solana method the page's files name is on the helper's list, so its second provider never refuses a read or send of a pool buy, sell, deposit, withdraw or the trade path", () => {
+  const files = pageFiles();
+  const { used, off } = scan(files);
+  for (const f of ["signpage/src/trade.ts", "signpage/src/pool-sell.ts", "signpage/src/pool-buy.ts", "signpage/src/pool-deposit.ts", "kit/src/trade/solana/flow.ts", "kit/src/trade/solana/build.ts", "kit/src/trade/solana/send.ts", "wallet/src/pool/solana.ts", "wallet/src/pool/solana-restore.ts"]) assert.ok(files.has(new URL(f, PACKAGES).href), `the scan reaches ${f}`);
+  for (const m of ["getSlot", "getEpochInfo", "getFeeForMessage", "getSignaturesForAddress", "getBlockTime", "getProgramAccounts", "getMultipleAccounts", "simulateTransaction", "getBlockHeight", "sendTransaction"]) assert.ok(used.has(m), `the scan finds ${m}`);
+  assert.deepEqual(off, [], `named by the page, refused by the helper (or add a name that is no RPC method to NOT_RPC): ${off.join(", ")}`);
+});
+
+test("card helper-rpc-sell-methods: a planted call the hand list and its filter passed over goes red (a file it did not name, a method it did not know)", () => {
+  const files = pageFiles();
+  for (const [f, m] of [["signpage/src/trade.ts", "getTokenAccountBalance"], ["kit/src/trade/solana/flow.ts", "getRecentPrioritizationFees"], ["signpage/src/pool-sell.ts", "getTokenSupply"]] as const) {
+    const href = new URL(f, PACKAGES).href;
+    const planted = new Map(files).set(href, `${files.get(href)}\nawait rpc("${m}", []);\n`);
+    assert.deepEqual(scan(planted).off, [`${m} (${f})`]);
+  }
 });
 
 test("the page's direct and helper RPCs (the mainnet pool reads) read through a 429 once", async () => {
