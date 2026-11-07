@@ -18,7 +18,7 @@ import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { VaultTree, vaultContextInput, vaultContextOf, vaultLabelOf, ZK_SETUP_FILES, type VaultProver, type VaultSnarkjsProof } from "@blindfill/kit";
 import { checkWithdraw } from "../../../apps/helper/src/withdraw/checks.ts";
-import { armingRegisterDepositOf } from "../src/arming/accounts.ts";
+import { armingRegisterDepositOf, typedRegisterDepositOf } from "../src/arming/accounts.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../src/deposit/account.ts";
 import { armAccount } from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
@@ -396,4 +396,70 @@ test("A's registration is read on the withdrawal's own token: another network's 
   assert.equal(seen.length, 4);
   for (const q of seen as { account_id: string }[]) assert.equal(q.account_id, TOKEN);
   assert.equal(r.body.withdrawal.register_deposit, "1250000000000000000000");
+});
+
+// ---- card wallet-withdraw-move-out: a withdrawal to the NEAR account the user typed is paid there by the vault ----
+
+const TYPED = "bob.near";
+const registration = (registered: boolean, net: NearNetwork = "mainnet", seen: unknown[] = []): readonly [NearRpc, NearRpc] => {
+  const t = net === "testnet" ? "_testnet" : "";
+  const side = (s: "a" | "b", name: string): NearRpc => ({
+    name,
+    async query(params) {
+      seen.push(params);
+      const reg = (params as { method_name: string }).method_name === "storage_balance_of";
+      return structuredClone(ARMING.answers[reg ? (registered ? "reg_set" : "reg_null" + t) : "bounds" + t]![s].json);
+    },
+  });
+  return [side("a", NEAR_NETWORKS[net].fastnear[0]), side("b", NEAR_NETWORKS[net].drpc)];
+};
+
+test("to a typed account: the proof's recipient is exactly that account, register_deposit is its own, fund_recipient is false", async () => {
+  for (const registered of [false, true]) {
+    const v = await vaultWith();
+    const seen: { account_id: string; args_base64: string }[] = [];
+    const r = await withdrawRequest(argsFor(v, signalsProver(), { to: TYPED, registerDepositOf: typedRegisterDepositOf("mainnet", registration(registered, "mainnet", seen)) }));
+    assert.equal(r.recipient, TYPED, `registered ${registered}`);
+    assert.equal(r.body.withdrawal.recipient, TYPED);
+    assert.equal(r.body.fund_recipient, false);
+    assert.equal(r.body.withdrawal.register_deposit, registered ? "0" : "1250000000000000000000");
+    // the registration read names the typed account on the token, never the note's A
+    const asked = seen.filter((q) => JSON.parse(Buffer.from(q.args_base64, "base64").toString()).account_id !== undefined);
+    assert.deepEqual([...new Set(asked.map((q) => JSON.parse(Buffer.from(q.args_base64, "base64").toString()).account_id))], [TYPED]);
+    // the context the proof binds is over the typed recipient
+    assert.equal(r.body.public_signals[7], vaultContextOf(keccak_256, vaultContextInput(VAULT, r.body.withdrawal), SCOPE).toString());
+    const a = armAccount(SEED, v.notes[1]!.leaf!.label, 0);
+    a.secretKey.fill(0);
+    assert.notEqual(r.body.withdrawal.recipient, a.id);
+  }
+});
+
+test("to a typed account: the vault, intents.near, the token or a name that is not a NEAR account is refused before any read, write or proof", async () => {
+  for (const bad of [VAULT, "intents.near", TOKEN, "Bob.near", "a", "bob..near", ""]) {
+    const v = await vaultWith();
+    const seen: unknown[] = [];
+    let writes = 0;
+    v.failPut.on = () => (writes++, false);
+    const p = signalsProver();
+    await assert.rejects(withdrawRequest(argsFor(v, p, { to: bad, registerDepositOf: typedRegisterDepositOf("mainnet", registration(false, "mainnet", seen)) })), /to:/, bad);
+    assert.equal(seen.length, 0, `${bad}: no read`);
+    assert.equal(writes, 0, `${bad}: no write`);
+    assert.deepEqual(p.log, [], `${bad}: no proof`);
+  }
+});
+
+test("the arming path is unchanged: with no typed account the request still pays the note's own A, fund_recipient true", async () => {
+  const v = await vaultWith();
+  const r = await withdrawRequest(argsFor(v, signalsProver()));
+  const a = armAccount(SEED, v.notes[1]!.leaf!.label, 0);
+  a.secretKey.fill(0);
+  assert.equal(r.body.withdrawal.recipient, a.id);
+  assert.equal(r.body.fund_recipient, true);
+});
+
+test("typedRegisterDepositOf reads a named account's registration on the withdrawal's own token, refusing another token", async () => {
+  assert.equal(await typedRegisterDepositOf("mainnet", registration(false))(TYPED, TOKEN), 1_250_000_000_000_000_000_000n);
+  assert.equal(await typedRegisterDepositOf("mainnet", registration(true))(TYPED, TOKEN), 0n);
+  await assert.rejects(typedRegisterDepositOf("testnet", registration(false, "testnet"))(TYPED, TOKEN), /token/);
+  await assert.rejects(typedRegisterDepositOf("mainnet", registration(false))("Bob.near", TOKEN), /NEAR account/);
 });

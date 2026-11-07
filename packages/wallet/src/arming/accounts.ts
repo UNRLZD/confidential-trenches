@@ -68,6 +68,22 @@ export async function readArmingRegistration(
   account: string, network: NearNetwork, rpcs: readonly [NearRpc, NearRpc],
 ): Promise<ArmingRegistration> {
   if (typeof account !== "string" || !HEX64.test(account)) throw new ArmingRegistrationRefused("input", "A must be a lowercase 64-hex implicit account id");
+  return readRegistration(account, network, rpcs);
+}
+
+/** nearcore's account id rule: 2-64 characters, lowercase letters and digits in parts joined by "-" or "_", those joined by ".". */
+const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+
+/**
+ * The registration of the NEAR account the user typed (card wallet-withdraw-move-out: the vault pays it straight, so
+ * register_deposit is its own), read exactly as A's is: both RPCs of the release pair, at final, equal.
+ */
+export async function readTypedRegistration(account: string, network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): Promise<ArmingRegistration> {
+  if (typeof account !== "string" || !ACCOUNT_ID.test(account)) throw new ArmingRegistrationRefused("input", "the typed account is not a NEAR account id");
+  return readRegistration(account, network, rpcs);
+}
+
+async function readRegistration(account: string, network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): Promise<ArmingRegistration> {
   if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new ArmingRegistrationRefused("input", `unknown network ${String(network)}`);
   const net = NEAR_NETWORKS[network];
   if (nearPairNetwork(rpcs) !== network) throw new ArmingRegistrationRefused("input", nearPairRule(network));
@@ -184,5 +200,14 @@ export function armingRegisterDepositOf(network: NearNetwork, rpcs: readonly [Ne
     if (typeof network === "string" && Object.hasOwn(NEAR_NETWORKS, network) && token !== NEAR_NETWORKS[network].usdc)
       throw new ArmingRegistrationRefused("input", `the withdrawal's token ${String(token)} is not the ${network} token the read is made on`);
     return (await readArmingRegistration(account, network, rpcs)).registerDeposit;
+  };
+}
+
+/** armingRegisterDepositOf for the typed account a withdrawal pays straight (readTypedRegistration), on the same token rule. */
+export function typedRegisterDepositOf(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): (account: string, token: string) => Promise<bigint> {
+  return async (account, token) => {
+    if (typeof network === "string" && Object.hasOwn(NEAR_NETWORKS, network) && token !== NEAR_NETWORKS[network].usdc)
+      throw new ArmingRegistrationRefused("input", `the withdrawal's token ${String(token)} is not the ${network} token the read is made on`);
+    return (await readTypedRegistration(account, network, rpcs)).registerDeposit;
   };
 }

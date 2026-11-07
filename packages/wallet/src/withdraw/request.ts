@@ -9,7 +9,11 @@
 // - The change note is change note j of the spent note's label l, with j fixed by the spent note (keys.ts
 //   changeIndex: a label's first note, any kind but change, makes change 0; change note k makes k + 1); its secrets
 //   come from the seed (l.177-179). The refund note of the same (l, j) gives refund_precommitment (l.186-188).
-// - The recipient is this note's own arming account A_{l,j} (markets.md l.989 and l.1534, "The kit makes every
+// - The recipient is the NEAR account the user typed when the caller names one (`to`, card wallet-withdraw-move-out):
+//   the vault pays it straight, as the exit tool's vault withdraw row does (wallet.md:931) and as Privacy Pools v1
+//   does; fund_recipient is false (no A to fund) and register_deposit is the typed account's own two-RPC read. A
+//   ties nothing more (wallet.md:1021), so the hop it would add hides nothing. With no `to` (the arming path):
+// - the recipient is this note's own arming account A_{l,j} (markets.md l.989 and l.1534, "The kit makes every
 //   withdrawal's `recipient` this note's `A_{l,j}` (W:671)"; wallet.md l.645 step 5, the l.907 row), derived here after the pick, never taken
 //   from the caller, so no caller can pay another note's A or any other account. A's secret key is zeroed at once:
 //   only its id is used. register_deposit is the caller's two-RPC read of A's registration (registerDepositOf,
@@ -46,6 +50,7 @@
 // notes (WM-06, l.716-760).
 import {
   type HelperWithdrawRequest,
+  VAULT_CONSTANTS,
   vaultProof,
   type VaultProver,
   vaultProveWithdraw,
@@ -59,6 +64,9 @@ import { armAccount, changeIndex } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../notes/store.ts";
 import { type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
+
+/** nearcore's account id rule (as arming/accounts.ts readTypedRegistration reads it). */
+const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
 /** A change note's ref: change note j of label l. */
 export type NoteRefChange = Extract<NoteRef, { kind: "change" }>;
@@ -100,6 +108,12 @@ export type WithdrawRequestArgs = {
   priceRpcs: readonly [FeeRpc, FeeRpc];
   /** What the recipient gets, in the token's base units. */
   amount: bigint;
+  /**
+   * The NEAR account the user typed on SIGN_HOST's withdraw form: the vault pays it straight (card
+   * wallet-withdraw-move-out), with fund_recipient false and registerDepositOf asked for it. Absent: the note's own
+   * A_{l,j}, the arming path's recipient.
+   */
+  to?: string;
   /** The withdrawal's deadline, in block time, ms (withdrawDeadlineMs). */
   deadlineMs: number;
   /** The newest final block's header.timestamp_nanosec, a decimal string: the lower of two RPCs'. */
@@ -111,7 +125,7 @@ export type WithdrawRequest = {
   body: HelperWithdrawRequest;
   /** The spent note, now RESERVED in the store. */
   noteId: string;
-  /** The withdrawal's recipient: A_{l,j} of the spent note's (l, j), a lowercase 64-hex implicit id. */
+  /** The withdrawal's recipient: the typed account (`to`), else A_{l,j} of the spent note's (l, j), a lowercase 64-hex implicit id. */
   recipient: string;
   /** The change note this withdrawal makes (value: the note's less amount and fee) and its refund note's ref. */
   change: NoteRefChange;
@@ -153,6 +167,12 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     if (amount <= 0n) throw new Error("amount: 0 or less");
     if (relayFee < 0n) throw new Error("relayFee: below 0");
     if (relayFee >= amount) throw new Error("relayFee: at or above the amount"); // the §2.8 arming row, l.907
+    const to = a.to;
+    if (to !== undefined) {
+      // the form checked it (exists on two RPCs, or implicit); here only what the vault or the token would lose
+      if (typeof to !== "string" || !ACCOUNT_ID.test(to)) throw new Error("to: not a NEAR account id");
+      if (to === vaultId || to === VAULT_CONSTANTS.INTENTS || to === token) throw new Error("to: the vault, intents.near or the token");
+    }
     if (!Number.isSafeInteger(deadlineMs)) throw new Error("deadlineMs: not a whole number");
     if (deadlineMs <= blockTimeMs + WITHDRAW_SEND_MARGIN_MS) throw new Error("deadlineMs: passed, or too close to send");
     if (deadlineMs > blockTimeMs + WITHDRAW_DEADLINE_MAX_MS) throw new Error("deadlineMs: more than 10 minutes out");
@@ -164,9 +184,13 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
     const j = note.ref.kind === "change" ? changeIndex({ kind: "change", j: note.ref.j }) : changeIndex({ kind: "deposit" });
     const change: NoteRefChange = { kind: "change", l: leaf.label, j };
     const refund: NoteRef = { kind: "refund", l: leaf.label, j };
-    const arm = armAccount(seed, leaf.label, j);
-    const recipient = arm.id;
-    arm.secretKey.fill(0);
+    let recipient: string;
+    if (to !== undefined) recipient = to;
+    else {
+      const arm = armAccount(seed, leaf.label, j);
+      recipient = arm.id;
+      arm.secretKey.fill(0);
+    }
     const registerDeposit = await registerDepositOf(recipient, token);
     if (typeof registerDeposit !== "bigint") throw new Error("registerDepositOf: not a bigint");
     const feeMax = await readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit });
@@ -208,7 +232,7 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
         nowMs: blockTimeMs,
       });
       if (p.publicSignals[7] !== req.context) throw new Error("proof: its context is not the request's");
-      body = { withdrawal: req.withdrawal, proof: vaultProof(p.proof), public_signals: p.publicSignals, fund_recipient: true, token };
+      body = { withdrawal: req.withdrawal, proof: vaultProof(p.proof), public_signals: p.publicSignals, fund_recipient: to === undefined, token };
       // WU-06: RESERVED, with the spent note's ref and so the change index, before the request leaves this function.
       // its body with it, so a later page sends the same bytes again (card signpage-withdraw-handoff: the settle pass)
       await notes.move(note.id, "HELD", "RESERVED", { attempt, request: JSON.stringify(body) });
