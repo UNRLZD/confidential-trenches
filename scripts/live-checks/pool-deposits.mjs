@@ -10,11 +10,11 @@
 //   node scripts/live-checks/pool-deposits.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
 // error exit 2.
-// Slice 3 (the EVM same-chain deposit, release-77): SIGN_HOST's index.html pins the /app.js it serves (its sha384), and
+// Slice 3 (the EVM same-chain deposit, release-79): SIGN_HOST's index.html pins the /app.js it serves (its sha384), and
 // that bundle carries the EVM deposit, as minified: U^evm's HKDF label (derive/keys.ts depositIdEvm), the rule's own
 // refusals (rules/pool.ts checkEvmDeposit) and the runner's reads (src/pool-deposit-evm.ts). What each does is held by
 // the card's tests; the recorded answers are evmFacts() over a tree's packages/signpage/index.html and public/app.js.
-// Slice 3's review fold: the served /app.js is a released build from release-77 on (a releases/release-<N>.json, N >= 77,
+// Slice 3's review fold: the served /app.js is a released build from release-79 on (a releases/release-<N>.json, N >= 79,
 // names its sha384 for SIGN_HOST): a tree whose tests route pool.deposit on Base and Robinhood to the runner
 // (test/pool-testnet-evm-deposit.test.ts). A build with that route removed still carries the runner (the load's settle
 // pass calls it), so no string in the bundle tells the two apart; the release ledger does. The Base Sepolia run of the
@@ -58,7 +58,7 @@ export async function readSignEvm(fetchFn = fetch) {
   return evmFacts(await get("/"), await get("/app.js"));
 }
 /** The first release whose tree routes pool.deposit on Base and Robinhood to the runner with this fold. */
-export const ROUTED_FROM = 77;
+export const ROUTED_FROM = 79;
 /** SIGN_HOST's /app.js sha384 in every release list from ROUTED_FROM on (packages/signpage/releases/). */
 export function routedReleases(dir = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases")) {
   const out = new Set();
