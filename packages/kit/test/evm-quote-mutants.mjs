@@ -503,14 +503,21 @@ export const MUTANTS = [
   [QUOTE, "  const rpcs = [...rpcsIn];\n  try {\n    // 1. the sale", "  const rpcs = [...rpcsIn];\n  if (h !== \"\") return quote.hooked;\n  try {\n    // 1. the sale", R, "RV5 "],
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV4 "],
   [QUOTE, "    if (done(await replay(Object.fromEntries(set.map((hk) => [hk, { code: EVM_NOOP_HOOK_CODE }]))))) rescued.push(set);", "    rescued.push(set);", R, "RV7 "],
-  [QUOTE, "params: [call, parent, { ...asW, ...pays, ...extra }, env] }]", "params: [call, parent, { ...asW, ...pays, ...extra }] }]", R, "HC1 "],
+  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }] }]", R, "HC1 "],
   [QUOTE, "  if (held!.kind !== \"out\" || held!.amountOut < quote.minOut) return [];\n", "", R, "RV9 "],
   [QUOTE, "  if (!failed(await replay({}))) return [];\n", "", R, "HC2 "],
-  // review of 72e28658, M3: the replay runs with ample gas (the sender's is not signed), the sender's balance covering it
-  [QUOTE, "const gas = own > EVM_REPLAY_GAS ? own : EVM_REPLAY_GAS;", "const gas = own;", R, "review of 72e28658, M3 (buy)"],
-  [QUOTE, "const gas = own > EVM_REPLAY_GAS ? own : EVM_REPLAY_GAS;", "const gas = own;", R, "review of 72e28658, M3 (sell)"],
-  [QUOTE, "export const EVM_REPLAY_GAS = 2n * evmPoolGas(EVM_POOL_MAX_DEPTH);", "export const EVM_REPLAY_GAS = 30_000_000n;", R, "review of 72e28658, M3 (buy)"],
-  [QUOTE, "params: [call, parent, { ...asW, ...pays, ...extra }, env] }]", "params: [call, parent, { ...asW, ...extra }, env] }]", R, "review of 72e28658, M3 (buy)"],
+  // review of a2d82dc6, F1: the replay runs at the trade's own gas less its authorizations (more gas, or the sender's
+  // balance overridden, tells a hook it is replayed), and a sale is evidence only at the gas the device pins
+  [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of a2d82dc6, F1 (buy)"],
+  [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of a2d82dc6, F1 (sell)"],
+  [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of a2d82dc6, F3"],
+  [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths) + 2_000_000n;\n", R, "review of 72e28658, M3 (buy)"],
+  [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas);\n", R, "review of a2d82dc6, F3"],
+  [QUOTE, "  const gas = BigInt(sale.gas) - EVM_7702_AUTH_GAS * BigInt(sale.auths);\n", "  const gas = BigInt(sale.gas);\n", R, "review of a2d82dc6, F1 (sell)"],
+  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) }, ...extra }, env] }]", R, "review of a2d82dc6, F1 (buy)"],
+  [QUOTE, "params: [call, parent, { ...asW, ...extra }, env] }]", "params: [call, parent, { ...asW, [sale.from]: { balance: \"0x\" + (10n ** 30n).toString(16) }, ...extra }, env] }]", R, "review of a2d82dc6, F1 (sell)"],
+  [QUOTE, "    if (BigInt(sale.gas) !== EVM_POOL_SELL_GAS) return [];\n", "", R, "review of 72e28658, M3 (sell)"],
+  [QUOTE, "    if (BigInt(sale.gas) !== EVM_POOL_SELL_GAS) return [];\n", "    if (BigInt(sale.gas) < EVM_POOL_SELL_GAS) return [];\n", R, "review of 72e28658, M3 (sell)"],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || sale.to !== lower(w)) return [];", R, "RV8 "],
   [QUOTE, " || BigInt(sale.status) !== 0n || sale.to !== lower(w)) return [];", " || BigInt(sale.status) !== 0n) return [];", R, "RV8 "],
   [QUOTE, "(r) => r.ok, (r) => !r.ok);\n  } catch (e) {\n    if (e instanceof EvmQuoteError && e.code === \"rpc_disagree\") return [];\n", "(r) => r.ok, (r) => !r.ok);\n  } catch (e) {\n", R, "RV8 "],
@@ -544,14 +551,16 @@ export const MUTANTS = [
   [QUOTE, "if (keys.some((k) => banned.has(\"0x\" + poolId(k)))) return refuse(", "if (false) return refuse(", R, "HB5 "],
   [QUOTE, "    banned,\n    hints: req.pools,", "    hints: req.pools,", R, "HB1 "],
   [QUOTE, "const hooked = Object.freeze(hookedKeys.map(", "const hooked = Object.freeze([].map(", R, "HB1 "],
-  [QUOTE, "    if (x !== null && x > 0n && x < value) value = x;\n", "", R, "N1B (buy"],
+  [QUOTE, "    if (x < value) value = x;\n", "", R, "N1B (buy"],
   [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === unlisted.length).map(", R, "N1B (buy"],
   // review of 72e28658, M1: every set of the unlisted hooks, never only each alone and all together
   [QUOTE, "const lows = subsetsOf(unlisted).map(", "const lows = subsetsOf(unlisted).filter((hs) => hs.length === 1 || hs.length === unlisted.length).map(", R, "review of 72e28658, M1 (buy)"],
   [QUOTE, "c.alone = subsetsOf(hs).filter((s) => s.length < hs.length).map(", "c.alone = subsetsOf(hs).filter((s) => s.length === 1).map(", R, "review of 72e28658, M1 (sell)"],
-  // a proper set's read that reverts adds nothing; the read with every unlisted hook replaced still must answer
-  [QUOTE, "    if ((x === null || x === 0n) && all) return refuse(", "    if (x === null || x === 0n) return refuse(", R, "review of 72e28658, L2 (RV4)"],
-  [QUOTE, "    if ((x === null || x === 0n) && all) return refuse(", "    if (false) return refuse(", R, "review of 72e28658, M1 (full set)"],
+  // review of a2d82dc6, F2: every read of the route with a set of its unlisted hooks replaced must answer above 0, or the
+  // route is refused (the buy's own) or counts for nothing (routeSet's); never only the read with every hook replaced
+  [QUOTE, "  for (const i of lows) {\n    const x = out(i);\n    if (x === null || x === 0n) return refuse(", "  for (const [n, i] of lows.entries()) {\n    const x = out(i);\n    if ((x === null || x === 0n) && n === lows.length - 1) return refuse(", R, "review of a2d82dc6, F2"],
+  [QUOTE, "    if (x === null || x === 0n) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", "    if (false) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", R, "review of 72e28658, M1 (full set)"],
+  [QUOTE, "      if (x === null || x === 0n) return null;\n", "      if (x === null || x === 0n) continue;\n", R, "review of a2d82dc6, F2 (sell)"],
   [QUOTE, "if (hs.length > 1) c.alone = ", "if (false) c.alone = ", R, "N1B (sell"],
   [QUOTE, "    for (const i of c.alone ?? []) {", "    for (const i of []) {", R, "N1C (sell"],
   [QUOTE, "const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;", "const exits = evmSellExits(chain, t, bought) ? bought : undefined;", R, "PC "],
@@ -567,6 +576,8 @@ export const MUTANTS = [
   [QUOTE, "if (!buy.logs.includes(`${v.pool}:${TOPIC_WITHDRAWN}`) || buy.logs", "if (buy.logs", R, "HB6 "],
   [QUOTE, " || buy.logs.includes(`${v.pool}:${TOPIC_BOUGHT}`)) return [];", ") return [];", R, "HB6 "],
   [QUOTE, "    if (withdrawn < 0n || fee < 0n || withdrawn - fee !== quote.amountIn) return [];\n", "", R, "HB6 "],
+  // review of a2d82dc6, L3: a sender that takes a bigger fee, so the pool swaps less than the quote's amount
+  [QUOTE, "withdrawn - fee !== quote.amountIn", "withdrawn - fee > quote.amountIn", R, "review of a2d82dc6, L3"],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => r.ok, (r) => boughtOf(r) === false);", R, "N1D "],
   [QUOTE, "(r) => boughtOf(r) === true, (r) => boughtOf(r) === false);", "(r) => boughtOf(r) === true, (r) => !r.ok);", R, "HB1 "],
   [QUOTE, "if (bAdapter !== BigInt(v.adapterV4) || bToken", "if (bToken", R, "HB6 "],

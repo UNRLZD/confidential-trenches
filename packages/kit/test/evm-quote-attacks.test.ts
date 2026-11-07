@@ -383,7 +383,10 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         const block = { hash: s.blockHash, number: "0x" + s.block.toString(16), timestamp: "0x" + (BigInt(T) + 2n).toString(16), parentHash: "0x" + "9a".repeat(32) };
         if (c.method === "eth_getBlockByHash") return { jsonrpc: "2.0", id, result: block };
         if (c.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id, result: { transactionHash: s.hash, blockHash: s.blockHash, blockNumber: block.number, status: who === 1 && s.status1 !== undefined ? s.status1 : s.status, logs: s.logs ?? [] } };
-        return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x4", from: SENDER, to: s.to ?? SELL_W, input: s.input, gas: "0x" + SALE_GAS.toString(16), value: "0x0", maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240", authorizationList: [{ chainId: "0x2105", address: DELEGATED.base!.sellDelegate, nonce: "0x0", yParity: "0x0", r: "0x1", s: "0x1" }], blockHash: s.blockHash, blockNumber: block.number } };
+        // a buy is the helper's type 2 transaction with no authorizations (signEvmTx), a sale W's type 4 with one
+        const fees = { value: "0x0", maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" };
+        if (s.bought !== undefined) return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x2", from: SENDER, to: s.to ?? SALE_POOL, input: s.input, gas: "0x" + (s.gas ?? BUY_GAS).toString(16), ...fees, blockHash: s.blockHash, blockNumber: block.number } };
+        return { jsonrpc: "2.0", id, result: { hash: s.hash, type: "0x4", from: SENDER, to: s.to ?? SELL_W, input: s.input, gas: "0x" + (s.gas ?? SALE_GAS).toString(16), ...fees, authorizationList: [{ chainId: "0x2105", address: DELEGATED.base!.sellDelegate, nonce: "0x0", yParity: "0x0", r: "0x1", s: "0x1" }], blockHash: s.blockHash, blockNumber: block.number } };
       }
       const { to, data } = c.params[0] as { to: string; data: string };
       const overridden = new Set(Object.keys((c.params[2] as Record<string, unknown> | undefined) ?? {}).map((x) => x.toLowerCase()));
@@ -418,14 +421,20 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       // SellDelegate's and the pool's MinOutNotMet() (0x81efc143) as the revert's data of W's sell or the pool's buy, so a
       // replay's two answers can be held equal
       // the pool's buy lands a failed swap (status 1, the chunk back to W) and returns `_bought` (card pool-evm-buy-pays-revert)
-      if (isBuy) return { jsonrpc: "2.0", id, result: "0x" + W(o === null ? 0n : 1n) };
-      return o === null || o === RAN_OUT || o === OVERFLOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", ...(isSim ? { data: "0x81efc143" } : {}) } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
+      if (isBuy) return o === SWAP_GAS_TOO_LOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", data: SEL_SWAP_GAS_TOO_LOW } } : { jsonrpc: "2.0", id, result: "0x" + W(o === null ? 0n : 1n) };
+      return o === null || o === RAN_OUT || o === OVERFLOW || o === SWAP_GAS_TOO_LOW ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted", ...(isSim ? { data: "0x81efc143" } : {}) } } : { jsonrpc: "2.0", id, result: "0x" + W(o) + W(0n) };
     });
   // PrivacyPoolSimple.buy (card evm-buy-hook-converge): the Buy at head word 18 through the pinned v4 adapter, its data
   // abi.encode(currencyIn, PathKey[]), swapped hop by hop from the proof's withdrawn value (head word 11) less the fee
   // (word 17) at each pool's `exec`, the token checked; null where the swap fails (below minOut), which the pool lands
-  // as a withdraw and answers `_bought` false (card pool-evm-buy-pays-revert)
-  function buyRun(d: string, ctx: SimCtx, overridden: Set<string>): bigint | null {
+  // as a withdraw and answers `_bought` false (card pool-evm-buy-pays-revert). The gas as main's pool spends it
+  // (PrivacyPoolSimple.buy; review of a2d82dc6, L5): past the model's release (BUY_RELEASE_GAS), below BUY_SWAP_GAS +
+  // BUY_FAIL_GAS + 1,000 the buy reverts SwapGasTooLow; the swap's call is given all the gas but BUY_FAIL_GAS, at most
+  // all but one 64th (EIP-150), and each hook sees that gas, never the transaction's
+  function buyRun(d: string, ctx0: SimCtx, overridden: Set<string>): bigint | null | typeof SWAP_GAS_TOO_LOW {
+    const left = ctx0.gas - BUY_RELEASE_GAS;
+    if (left < BUY_SWAP_GAS + BUY_FAIL_GAS + 1000n) return SWAP_GAS_TOO_LOW;
+    const ctx = { ...ctx0, gas: left - BUY_FAIL_GAS < left - left / 64n ? left - BUY_FAIL_GAS : left - left / 64n };
     const w = (i: number) => BigInt("0x" + d.slice(8 + 64 * i, 72 + 64 * i));
     const b = Number(w(18)) / 32;
     const [adapter, minOut, token] = ["0x" + W(w(b)).slice(24), w(b + 2), "0x" + W(w(b + 3)).slice(24)];
@@ -4721,7 +4730,8 @@ const SALE_RUN = "the model's real sale";
 const [SALE_POOL, SALE_COLLECTOR] = ["0x00000000000000000000000000000000000b0011", "0x00000000000000000000000000000000000fee11"];
 const SALE_VENUES = Object.freeze({ ...DELEGATED, base: Object.freeze({ ...DELEGATED.base, pool: SALE_POOL, feeCollector: SALE_COLLECTOR }) }) as builder.EvmPoolVenueList;
 // a buy's `bought`: what the pool's call returned (its swap done), with its log, Bought or Withdrawn, in `logs`
-type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string; bought?: boolean; logs?: { address: string; topics: string[] }[] };
+// `gas`: its gas limit, where it is not the model's (SALE_GAS for a sale, BUY_GAS for a buy)
+type ModelSale = { hash: string; input: string; block: number; blockHash: string; status: string; status1?: string; to?: string; bought?: boolean; gas?: bigint; logs?: { address: string; topics: string[] }[] };
 const SALES = new Map<string, ModelSale>();
 let saleNo = 0;
 /** The sale of quote `q` as the device builds and W signs it (the signature is the model's: the modelled delegate takes any). */
@@ -4739,7 +4749,7 @@ const saleInput = (q: HookedQuote): string => {
  *  where it reverts), unless `status` says; returns its hash. */
 const land = async (pools: ModelPool[], q: HookedQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}, edit: (input: string) => string = (x) => x): Promise<string> => {
   const input = edit(saleInput(q));
-  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + (SALE_GAS - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
+  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SELL_W, data: input, gas: "0x" + ((extra.gas ?? SALE_GAS) - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", { [SELL_W]: { code: "0xef0100" + DELEGATED.base!.sellDelegate!.slice(2) } }, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
   const hash = "0x" + (0x5a1e0000 + ++saleNo).toString(16).padStart(64, "0");
   SALES.set(hash, { hash, input, block, blockHash: "0x" + (0xb10c0000 + saleNo).toString(16).padStart(64, "0"), status: run.result !== undefined ? "0x1" : "0x0", ...extra });
   return hash;
@@ -5005,9 +5015,9 @@ test("RV8 providers that disagree on the sale or on a replay ban nothing; a sale
   // the second provider answers the replay as the sale ran with another revert, or the no-op replay with a revert
   const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
   const hash = await land(pools, q1);
-  // (each replay overrides W's code and the sender's balance, then the hooks it replaces: review of 72e28658, M3)
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 2 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0xdeadbeef" } } : undefined))]), []);
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length > 2 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), []);
+  // (each replay overrides W's code, then the hooks it replaces, never the sender's balance: review of a2d82dc6, F1)
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0xdeadbeef" } } : undefined))]), []);
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length > 1 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), []);
   // a sale that landed, or one sent to another account than the quote's W
   assert.deepEqual(await proved(pools, q1, await land(pools, q1, HEAD_NO + 1, { status: "0x1" })), []);
   assert.deepEqual(await proved(pools, q1, await land(pools, q1, HEAD_NO + 1, { to: "0x000000000000000000000000000000000000beef" })), []);
@@ -5108,10 +5118,9 @@ test("RVX two distinct unlisted hooks on one picked route, each reverting the re
   assert.ok(!("code" in q1) && q1.hooked.length === 2, show(q1));
   const hash = await land(pools, q1);
   assert.equal(SALES.get(hash)!.status, "0x0");
-  // the second provider answers the replay with both hooks a no-op (asW, the sender's balance and two hooks: four
-  // overrides) with a revert
+  // the second provider answers the replay with both hooks a no-op (asW and two hooks: three overrides) with a revert
   const replays = (inner: EvmRpc, answer: (c: EvmRpcCall) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((a, i) => (calls[i]!.params[3] !== undefined ? answer(calls[i]!) ?? a : a));
-  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 4 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
+  assert.deepEqual(await proved(pools, q1, hash, [chain(pools, 0), replays(chain(pools, 1), (c) => (Object.keys(c.params[2] as object).length === 3 ? { jsonrpc: "2.0", id: 0, error: { code: 3, message: "execution reverted", data: "0x81efc143" } } : undefined))]), [], "providers that disagree ban nothing");
   // the device's loop: one failed try, both pools banned, then the seeded pool
   const r = await hcConverge(pools, token, logs, 4);
   assert.deepEqual({ failed: r.failed, got: r.got, banned: [...r.banned].sort() }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(market.key), hcPid(pool.key)].sort() }, show(r));
@@ -5135,6 +5144,12 @@ const SEL_BUY_T = Buffer.from(keccak_256(new TextEncoder().encode("buy((address,
 const BUY_ADAPTER = "0x00000000000000000000000000000000000ad4a4";
 // the relayer's fee the model's buys pay out of the withdrawn value (the pool swaps the rest)
 const BUY_FEE = 3n * 10n ** 15n;
+// main's pool's gas (contracts/pool-evm/src/PrivacyPoolSimple.sol BUY_SWAP_GAS, BUY_FAIL_GAS and SwapGasTooLow); the
+// model's intrinsic cost and release before the swap's call (the measured Privacy Pools withdrawal is 611,391, M349);
+// the model's buy gas limit, the helper's estimate x 1.2 under its EVM_GAS_MAX of 1,500,000 (apps/helper/src/pool/evm.ts)
+const [BUY_SWAP_GAS, BUY_FAIL_GAS, BUY_RELEASE_GAS, BUY_GAS] = [500_000n, 150_000n, 600_000n, 1_400_000n];
+const SWAP_GAS_TOO_LOW = Symbol("SwapGasTooLow");
+const SEL_SWAP_GAS_TOO_LOW = "0x" + Buffer.from(keccak_256(new TextEncoder().encode("SwapGasTooLow()"))).toString("hex").slice(0, 8);
 // the pool's events (IPrivacyPool.sol), hashed here: the kit holds them as literals
 const topicOf = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex");
 const TOPIC_WITHDRAWN_T = topicOf("Withdrawn(address,address,uint256,uint256,uint256,uint256)");
@@ -5153,9 +5168,12 @@ const hbQuote = async (pools: ModelPool[], token: string, logs: { key: EvmPoolKe
 /** The pool's buy of quote `q` as the helper sends it: PrivacyPoolSimple.buy(withdrawal, proof, fee, Buy, signature),
  *  the Buy the device's build of the quote (evmQuotedBuy through Base's pinned adapter); the model's withdrawn value is
  *  the proof's last word (head word 16), the quote's amount. */
-const buyInput = (q: EvmPoolBuyQuote, edit: Partial<{ adapter: string; data: string; minOut: bigint; token: string; fee: bigint }> = {}): string => {
-  const { fee: _fee, ...fields } = edit;
+// `fee` sets the proof's withdrawn value to the amount and that fee, the fee word left BUY_FEE; `feeWord` sets the fee
+// word, the withdrawn value left the amount and BUY_FEE (a sender that takes more, so the pool swaps less)
+const buyInput = (q: EvmPoolBuyQuote, edit: Partial<{ adapter: string; data: string; minOut: bigint; token: string; fee: bigint; feeWord: bigint }> = {}): string => {
+  const { fee: _fee, feeWord: _feeWord, ...fields } = edit;
   void _fee;
+  void _feeWord;
   const built = { ...evmQuotedBuy(BUY_VENUES, BUY_ADAPTER, q, NOW), ...fields };
   const data = built.data.slice(2);
   const padded = data.padEnd(Math.ceil(data.length / 64) * 64, "0");
@@ -5164,14 +5182,14 @@ const buyInput = (q: EvmPoolBuyQuote, edit: Partial<{ adapter: string; data: str
   const head = 20 * 32;
   // the proof's third public signal (head word 11) is its withdrawn value: the quote's amount and the relayer's fee
   const proof = Array.from({ length: 16 }, (_, i) => W(i === 10 ? q.amountIn + (edit.fee ?? BUY_FEE) : 0n)).join("");
-  return "0x" + SEL_BUY_T + W(BigInt(head)) + proof + W(BUY_FEE) + W(BigInt(head + withdrawal.length / 2)) + W(BigInt(head + withdrawal.length / 2 + buyTail.length / 2)) + withdrawal + buyTail + W(65n) + "00".repeat(96);
+  return "0x" + SEL_BUY_T + W(BigInt(head)) + proof + W(edit.feeWord ?? BUY_FEE) + W(BigInt(head + withdrawal.length / 2)) + W(BigInt(head + withdrawal.length / 2 + buyTail.length / 2)) + withdrawal + buyTail + W(65n) + "00".repeat(96);
 };
 /** Lands quote `q`'s buy on the modelled chain of `pools` at `block`, from the pinned sender to the pool, as main's pool
  *  lands it (card pool-evm-buy-pays-revert): status 1, its swap done (`bought`, the pool's Bought) or undone (the
  *  pool's Withdrawn, the chunk paid back to W); returns its hash. */
 const landBuy = async (pools: ModelPool[], q: EvmPoolBuyQuote, block = HEAD_NO + 1, extra: Partial<ModelSale> = {}, edit: Parameters<typeof buyInput>[1] = {}): Promise<string> => {
   const input = buyInput(q, edit);
-  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SALE_POOL, data: input, gas: "0x" + (SALE_GAS - 25_000n).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", {}, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
+  const run = (await chain(pools, 0)([{ method: "eth_call", params: [{ from: SENDER, to: SALE_POOL, data: input, gas: "0x" + (extra.gas ?? BUY_GAS).toString(16), maxFeePerGas: "0x" + (BASE_FEE + 1_000_000n).toString(16), maxPriorityFeePerGas: "0xf4240" }, "latest", {}, { number: "0x" + block.toString(16) }, SALE_RUN] }]))[0] as { result?: string };
   const hash = "0x" + (0x5a1e0000 + ++saleNo).toString(16).padStart(64, "0");
   const bought = run.result !== undefined && BigInt(run.result) === 1n;
   const logs = [{ address: SALE_POOL, topics: [bought ? TOPIC_BOUGHT_T : TOPIC_WITHDRAWN_T, "0x" + "00".repeat(32)] }];
@@ -5533,38 +5551,42 @@ test("review of 72e28658, M2 (sell) the same on a sale: a hooked reference at th
   assert.equal(q.minOut, ((2n * AMOUNT - (2n * AMOUNT) / 200n) * 9900n) / 10000n, show(q));
 });
 
-test("review of 72e28658, M3 (buy) a buy sent with too little gas for an honest hook's work (the gas is the sender's, not signed): the replay runs with ample gas, the buy is done there, and nothing is banned", async () => {
+test("review of 72e28658, M3 (buy) a buy runs at its own gas, which only main's pool bounds: below its floor it reverts SwapGasTooLow and bans nothing; above it, an honest hook a hostile sender gave too little swap gas is banned, a ban that expires (the helper sends a buy only after its eth_call at that gas answers true; review of a2d82dc6, F1)", async () => {
   const token = "0x00000000000000000000000000000000000d1d0b";
-  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(11)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 990_000n ? null : (a * 95n) / 100n) };
+  // an honest hook whose work needs 600,000 of the swap's gas: the model's buy (BUY_GAS) gives the swap 650,000
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(11)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 600_000n ? null : (a * 95n) / 100n) };
   const pools = [seeded(token), honest];
   const q = await hbQuote(pools, token, [{ key: honest.key, at: 4_500_001 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: RH(11) }]));
   assert.ok(!("code" in q), show(q));
-  const hash = await landBuy(pools, q); // the model lands it at SALE_GAS - 25,000
-  assert.equal(SALES.get(hash)!.bought, false);
-  assert.deepEqual(await buyProved(pools, q, hash), []);
-  // a sender that holds only what its own gas cost: the replay sets its balance to cover the ample gas, so a node still
-  // runs it (one that cannot pay its gas is refused, never a revert)
-  const thin = { [SENDER]: SALE_GAS * (BASE_FEE + 1_000_000n) };
-  assert.deepEqual(await buyProved(pools, q, hash, [chain(pools, 0, undefined, undefined, thin), chain(pools, 1, undefined, undefined, thin)]), []);
-  // a hook whose work needs more gas than any send the device's fee pays for (EVM_REPLAY_GAS, twice a release at the
-  // deepest tree) fails at every honest sender's gas: its no-op's success blames it
-  const t2 = "0x00000000000000000000000000000000000d1d2b";
-  const greedy: ModelPool = { key: keyOf(t2, NATIVE, 3000, 60, RH(21)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 3_000_000n ? null : (a * 95n) / 100n) };
-  const gp = [seeded(t2), greedy];
-  const g = await hbQuote(gp, t2, [{ key: greedy.key, at: 4_500_001 }], v4Route([{ currency: t2, fee: 3000, tickSpacing: 60, hooks: RH(21) }]));
-  assert.ok(!("code" in g), show(g));
-  assert.deepEqual(await buyProved(gp, g, await landBuy(gp, g)), [hcPid(greedy.key)]);
+  assert.equal(SALES.get(await landBuy(pools, q))!.bought, true, "at the helper's gas the buy lands");
+  // below the pool's floor (the release and BUY_SWAP_GAS + BUY_FAIL_GAS + 1,000) the buy reverts: no evidence
+  const low = await landBuy(pools, q, HEAD_NO + 1, { gas: BUY_RELEASE_GAS + BUY_SWAP_GAS + BUY_FAIL_GAS });
+  assert.equal(SALES.get(low)!.status, "0x0", "SwapGasTooLow");
+  assert.deepEqual(await buyProved(pools, q, low), []);
+  // above the floor with too little for the hook: the swap fails, its replay at the same gas fails, the no-op's succeeds
+  const thin = await landBuy(pools, q, HEAD_NO + 1, { gas: 1_300_000n });
+  assert.deepEqual({ status: SALES.get(thin)!.status, bought: SALES.get(thin)!.bought }, { status: "0x1", bought: false });
+  assert.deepEqual(await buyProved(pools, q, thin), [hcPid(honest.key)]);
 });
 
-test("review of 72e28658, M3 (sell) the same on a sale: the replay runs with ample gas, the sale is done there, and nothing is banned", async () => {
+test("review of 72e28658, M3 (sell) a sale is evidence only at the gas the device pins and its sim ran at (EVM_POOL_SELL_GAS): one sent with less, whose honest hook ran out, bans nothing (review of a2d82dc6, F1)", async () => {
   const token = "0x00000000000000000000000000000000000d1d1b";
-  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(18)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 990_000n ? null : 2n * a) };
+  // an honest hook whose work needs 900,000: the device's sim at EVM_POOL_SELL_GAS less the authorization passes it
+  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(18)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (ctx.gas < 900_000n ? null : 2n * a) };
   const pools = [seeded(token), honest];
   const q = await hcQuote(pools, token, [{ key: honest.key, at: 4_500_001 }]);
   assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
-  const hash = await land(pools, q);
-  assert.equal(SALES.get(hash)!.status, "0x0");
-  assert.deepEqual(await proved(pools, q, hash), []);
+  assert.equal(SALES.get(await land(pools, q))!.status, "0x1", "at the pinned gas the sale lands");
+  const short = await land(pools, q, HEAD_NO + 1, { gas: 800_000n });
+  assert.equal(SALES.get(short)!.status, "0x0");
+  assert.deepEqual(await proved(pools, q, short), []);
+  // more gas than the pin is no sale the device's fee rule sends either
+  const hostile: ModelPool = { ...honest, exec: (a, ctx) => (later(ctx) ? null : 2n * a) };
+  const hp = [seeded(token), hostile];
+  const hq = await hcQuote(hp, token, [{ key: hostile.key, at: 4_500_001 }]);
+  assert.ok(!("code" in hq), show(hq));
+  assert.deepEqual(await proved(hp, hq, await land(hp, hq, HEAD_NO + 1, { gas: 1_200_000n })), []);
+  assert.deepEqual(await proved(hp, hq, await land(hp, hq)), [hcPid(hostile.key)], "control: at the pinned gas");
 });
 
 test("review of 72e28658, L2 (RV4) one hostile hook, one with a visible 5% fee and an honest anti-whale hook on the last hop: the hostile hook alone rescues the buy, so a set holding it is never asked and the capped hook is never banned", async () => {
@@ -5572,7 +5594,9 @@ test("review of 72e28658, L2 (RV4) one hostile hook, one with a visible 5% fee a
   const CAP = (AMOUNT * 97n) / 100n;
   const capped = (a: bigint) => (a <= CAP ? a : null);
   const h1: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, RH(12)), give: (a) => a, lie: (a) => (a * 90n) / 100n, exec: (a, ctx) => (later(ctx) ? null : (a * 90n) / 100n) };
-  const fee: ModelPool = { key: keyOf(x, y, 3000, 60, RH(13)), give: (a) => a, lie: (a) => (a * 95n) / 100n };
+  // the 5% pool takes its fee with its hook replaced too, so no read of the route trips the honest cap (a read that
+  // does refuses the route: review of a2d82dc6, F2)
+  const fee: ModelPool = { key: keyOf(x, y, 3000, 60, RH(13)), give: (a) => (a * 95n) / 100n, lie: (a) => (a * 95n) / 100n };
   const hc: ModelPool = { key: keyOf(t2, x, 3000, 60, RH(19)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
   const pools = [seeded(t2), h1, fee, hc];
   const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: RH(12) }, { currency: x, fee: 3000, tickSpacing: 60, hooks: RH(13) }, { currency: t2, fee: 3000, tickSpacing: 60, hooks: RH(19) }]);
@@ -5595,4 +5619,103 @@ test("review of 72e28658, L2 (PC) a sale whose `bought` route passes the native 
 test("review of 72e28658, the pool's event topics the kit holds as literals are Withdrawn's and Bought's", () => {
   const src = readFileSync(new URL("../src/checks/evm/quote.ts", import.meta.url), "utf8");
   assert.ok(src.includes(`const TOPIC_WITHDRAWN = "${TOPIC_WITHDRAWN_T}";`) && src.includes(`const TOPIC_BOUGHT = "${TOPIC_BOUGHT_T}";`));
+});
+
+// ------------------------------------------------------------------------------------- review of a2d82dc6
+// F1 the replay runs at the trade's own gas with no balance override, so a hook keyed on its gas or the sender's balance
+// sees the real trade's; F2 a read with only some unlisted hooks replaced that reverts or answers 0 refuses the route;
+// L3 a sender that takes a bigger fee, so the pool swaps less than the quote's amount, bans nothing.
+const PH = (n: number) => "0x" + (0x7a1e00 + n).toString(16).padStart(40, "0");
+/** Each eth_call `rpc` is asked that carries a block override (a replay), as its gas and its overridden accounts. */
+const replaysOf = (rpc: EvmRpc, seen: { gas: bigint; over: string[] }[]): EvmRpc => async (calls) => {
+  for (const c of calls) if (c.method === "eth_call" && c.params[3] !== undefined && c.params[4] === undefined) seen.push({ gas: BigInt((c.params[0] as { gas: string }).gas), over: Object.keys((c.params[2] ?? {}) as object).map((k) => k.toLowerCase()) });
+  return rpc(calls);
+};
+
+test("review of a2d82dc6, F1 (buy) a hook that fails the real buy at a later block only below 1,000,000 of the swap's gas: the replay runs at the buy's own gas, never the sender's balance overridden, so one failed try bans its pool, then the market", async () => {
+  const token = "0x00000000000000000000000000000000000e1e01";
+  const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(1)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedAt(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 1_000_000n ? null : 2n * a) };
+  const pools = [market, hostile];
+  const logs = [{ key: market.key, at: 4_500_000 }, { key: hostile.key, at: 4_500_001 }];
+  const r = await hbConverge(pools, token, logs, marketRoute(token), 6);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT, banned: [hcPid(hostile.key)] }, show(r));
+  // each replay: the buy's own gas (no authorizations), and no account overridden but a no-op's hooks
+  const q = await hbQuote(pools, token, logs, marketRoute(token));
+  const q2 = "code" in q && q.reference !== null ? await hbQuote(pools, token, logs, q.reference.route) : q;
+  assert.ok(!("code" in q2) && q2.hooked.length === 1, show(q2));
+  const seen: { gas: bigint; over: string[] }[] = [];
+  const hash = await landBuy(pools, q2);
+  assert.deepEqual(await buyProved(pools, q2, hash, [replaysOf(chain(pools, 0), seen), replaysOf(chain(pools, 1), seen)]), [hcPid(hostile.key)]);
+  assert.ok(seen.length >= 4, show(seen));
+  for (const x of seen) {
+    assert.equal(x.gas, BUY_GAS, "the buy's own gas");
+    assert.ok(!x.over.includes(SENDER) && x.over.every((k) => k === PH(1)), show(x));
+  }
+  // a sender that holds only its own gas at its fees: the replay runs as the buy did
+  const thin = { [SENDER]: BUY_GAS * (BASE_FEE + 1_000_000n) };
+  assert.deepEqual(await buyProved(pools, q2, hash, [chain(pools, 0, undefined, undefined, thin), chain(pools, 1, undefined, undefined, thin)]), [hcPid(hostile.key)]);
+});
+
+test("review of a2d82dc6, F1 (sell) the same hook on a sale, below 2,000,000 of its gas: the replay runs at the sale's own gas less its authorization, only W's code overridden, so one failed try bans its pool", async () => {
+  const token = "0x00000000000000000000000000000000000e1e02";
+  const hostile: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(2)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 2_000_000n ? null : 2n * a) };
+  const pools = [seeded(token), hostile];
+  const r = await hcConverge(pools, token, [{ key: hostile.key, at: 4_500_001 }], 6);
+  assert.deepEqual({ failed: r.failed, banned: r.banned }, { failed: 1, banned: [hcPid(hostile.key)] }, show(r));
+  const q = await hcQuote(pools, token, [{ key: hostile.key, at: 4_500_001 }]);
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const seen: { gas: bigint; over: string[] }[] = [];
+  assert.deepEqual(await proved(pools, q, await land(pools, q), [replaysOf(chain(pools, 0), seen), replaysOf(chain(pools, 1), seen)]), [hcPid(hostile.key)]);
+  assert.ok(seen.length >= 4, show(seen));
+  for (const x of seen) {
+    assert.equal(x.gas, SALE_GAS - 25_000n, "the sale's own gas less its authorization");
+    assert.ok(!x.over.includes(SENDER) && x.over.every((k) => k === SELL_W || k === PH(2)), show(x));
+  }
+});
+
+test("review of a2d82dc6, F3 the fold's own M3 (sell) hook (it fails a sale at a later block below 990,000 gas) is a hostile hook keyed on the block: the device's sale loop converges after one failed try, its pool banned", async () => {
+  const token = "0x00000000000000000000000000000000000e1e04";
+  const h: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(5)), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a, ctx) => (later(ctx) && ctx.gas < 990_000n ? null : 2n * a) };
+  const r = await hcConverge([seeded(token), h], token, [{ key: h.key, at: 4_500_001 }], 6);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 1, got: AMOUNT / 10n, banned: [hcPid(h.key)] }, show(r));
+});
+
+test("review of a2d82dc6, F2 a hostile hook (quotes 95%, pays 90% at a later block) upstream of an honest hook capped at 97%: the read with the hostile hook alone replaced trips the cap, so the route is refused no_quote, never bought, and the honest capped pool is never banned", async () => {
+  const [token, y] = ["0x00000000000000000000000000000000000e1e03", xAt(0xe13)];
+  const CAP = (AMOUNT * 97n) / 100n;
+  const capped = (a: bigint) => (a <= CAP ? a : null);
+  const B: ModelPool = { key: keyOf(y, NATIVE, 3000, 60, PH(3)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (later(ctx) ? (a * 90n) / 100n : (a * 95n) / 100n) };
+  const A: ModelPool = { key: keyOf(token, y, 3000, 60, PH(4)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
+  const pools = [seeded(token), B, A];
+  const route = v4Route([{ currency: y, fee: 3000, tickSpacing: 60, hooks: PH(3) }, { currency: token, fee: 3000, tickSpacing: 60, hooks: PH(4) }]);
+  const q = await hbQuote(pools, token, [], route);
+  assert.equal("code" in q ? q.code : show(q), "no_quote");
+  // the device's loop never buys through it: it ends at the seeded pool with no failed try and nothing banned
+  const r = await hbConverge(pools, token, [], route, 4);
+  assert.deepEqual({ failed: r.failed, code: r.code, banned: r.banned }, { failed: 0, code: "no_quote", banned: [] }, show(r));
+});
+
+test("review of a2d82dc6, F2 (sell) the same two hooks on a sale the scan finds (the hostile hook on the token's pool, the honest cap on X's market): the route counts for nothing, so the sale leaves through the seeded pool with no failed try and nothing banned", async () => {
+  const [token, x] = ["0x00000000000000000000000000000000000e1e06", xAt(0xe16)];
+  const CAP = (AMOUNT * 97n) / 100n;
+  const capped = (a: bigint) => (a <= CAP ? a : null);
+  const B: ModelPool = { key: keyOf(token, x, 3000, 60, PH(7)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (later(ctx) ? (a * 90n) / 100n : (a * 95n) / 100n) };
+  const A: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, PH(8)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
+  const logs = [{ key: B.key, at: 4_500_000 }, { key: A.key, at: 4_100_001 }];
+  const r = await hcConverge([seeded(token), B, A], token, logs, 4);
+  assert.deepEqual({ failed: r.failed, got: r.got, banned: r.banned }, { failed: 0, got: AMOUNT / 10n, banned: [] }, show(r));
+});
+
+test("review of a2d82dc6, L3 a sender that takes a bigger fee than the proof's withdrawn value leaves, so the pool swaps less than the quote's amount and the buy misses minOut, bans nothing (an honest 5% fee hook whose no-op would make up the gap)", async () => {
+  const token = "0x00000000000000000000000000000000000e1e05";
+  const fee: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, PH(6)), give: (a) => a, lie: (a) => (a * 95n) / 100n };
+  const pools = [seeded(token), fee];
+  const q = await hbQuote(pools, token, [{ key: fee.key, at: 4_500_001 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: PH(6) }]));
+  assert.ok(!("code" in q) && q.hooked.length === 1, show(q));
+  const hash = await landBuy(pools, q, HEAD_NO + 1, {}, { feeWord: BUY_FEE + (AMOUNT * 2n) / 100n });
+  assert.equal(SALES.get(hash)!.bought, false, "the pool swaps 98% of the amount: 93.1% out, under minOut");
+  assert.deepEqual(await buyProved(pools, q, hash), []);
+  // control: the quote's own fee lands
+  assert.equal(SALES.get(await landBuy(pools, q))!.bought, true);
 });

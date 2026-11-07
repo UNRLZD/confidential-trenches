@@ -3,7 +3,7 @@
 // and no route through listed pools is within the slippage of it, and names that route's unlisted-hook pools in the
 // quote's `hooked`. A hook can honour the quote and the sim and still revert the real sale. Where the real sale
 // reverts, the caller asks the kit's evmSellRevertedPools(quote, txHash) which pools the device's own reads blame (the
-// sale's replay with ample gas reverts, the quoter still prices the route at minOut, and the replay with a smallest set
+// sale's replay at its own gas reverts, the quoter still prices the route at minOut, and the replay with a smallest set
 // of the route's hooks made a no-op succeeds, on both providers), bans those here, and passes evmSellBanned's list as
 // the next quote's `banned`.
 // A revert with no such evidence (a price that moved, providers that disagree) bans nothing.
