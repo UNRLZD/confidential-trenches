@@ -267,7 +267,7 @@ export function oneClickFloors(x: OneClickFloorInput): { amountOut: bigint; minA
  *  route, same-asset included, even when a polluted page's prototype names a fee for it. */
 export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinationAsset: string): number {
   if (typeof path !== "string" || !Object.hasOwn(ONECLICK_FEE_BPS, path) || !Object.hasOwn(ONECLICK_PAIR_FEE_BPS, path))
-    fail("request", `no such 1Click path ${show(path)}`);
+    fail("request", `no such 1Click path ${typeof path === "string" ? show(path) : `(a ${path === null ? "null" : typeof path})`}`);
   if (originAsset === destinationAsset) return 0;
   const stable = ONECLICK_USDC_ASSETS.includes(originAsset) && ONECLICK_USDC_ASSETS.includes(destinationAsset);
   return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path];
