@@ -16,7 +16,7 @@ import { armKey, type ArmRecord } from "@blindfill/wallet/arming/records";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { SOLANA_TOKEN_PROGRAM, solanaAta } from "../../kit/src/checks/solana/index.ts";
 import type { SolanaTradeDeps, SolanaTradeRecord, SolanaTradeRequest } from "../../kit/src/trade/solana/flow.ts";
-import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SolanaRpcTransportError, solanaSameProvider, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
@@ -863,4 +863,16 @@ test("card pool-answer-unknown: the providers the kit gets keep their URLs, so i
   let seen: readonly SolanaRpc[] = [];
   await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { final: "filled", onDeps: (d) => (seen = d.providers) }, given).ask(buy("10"));
   assert.deepEqual(seen.map((r) => r.url), ["https://a.example/", "https://b.example/"]);
+});
+
+test("card pool-answer-unknown (review): the watch is no new provider to the kit: one URL-less provider given twice stays one (solanaSameProvider), two stay two", async () => {
+  const one: SolanaRpc = async () => ({ value: null });
+  const other: SolanaRpc = async () => ({ value: null });
+  let seen: readonly SolanaRpc[] = [];
+  await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { final: "filled", onDeps: (d) => (seen = d.providers) }, [one, one]).ask(buy("10"));
+  assert.equal(seen.length, 2);
+  assert.notEqual(seen[0], one, "the kit gets the watch");
+  assert.equal(solanaSameProvider(seen[0]!, seen[1]!), true, "one provider given twice is one to the kit");
+  await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { final: "filled", onDeps: (d) => (seen = d.providers) }, [one, other]).ask(buy("10"));
+  assert.equal(solanaSameProvider(seen[0]!, seen[1]!), false);
 });

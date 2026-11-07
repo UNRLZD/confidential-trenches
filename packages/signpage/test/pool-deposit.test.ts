@@ -29,6 +29,7 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { POOL_DEPOSIT_READS, POOL_DEPOSIT_REBUILDS, POOL_DEPOSIT_WAIT_MS, poolDepositKind, runPoolDeposit, settlePoolDeposits, type PoolDepositHost } from "../src/pool-deposit.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { pairDown } from "./outage.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 
 type Acc = { owner: string; lamports: number; data: Uint8Array };
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/pool-devnet.json", import.meta.url), "utf8")) as {
@@ -1381,4 +1382,140 @@ test("F6: a send built again whose simulation fails on an RPC (the pool moving u
   c.lands = true;
   assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [{ chain: "solana", hash: c.sent[1] }] });
   assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "filled", txs: [{ chain: "solana", hash: c.sent[1] }] });
+});
+
+// card pool-answer-unknown, its independent review (FIX, 91056543): the probes P1, P5 and P6 and the mutants G and J,
+// each a test here with the answer the device must give.
+const down = () => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "provider.down.example");
+const RENT_SYSVAR = FIX.addresses.rent;
+/** A two-rung ask's RPCs: rung 1's tx lands though both RPCs reject its sendTransaction (h.sent never fires) and both
+ *  history reads fail (no tx named for it); then rung 2's state read is down, or RPC 1 refuses its blockhash. */
+function p1Rpcs(c: ReturnType<typeof chain>, rung2: "transport" | "refused"): readonly [SolanaRpc, SolanaRpc] {
+  const w = (rpc: SolanaRpc, k: number): SolanaRpc => async (m, p) => {
+    if (m === "sendTransaction") {
+      await rpc(m, p);
+      throw down();
+    }
+    if (m === "getSignatureStatuses" && optsOf(p)?.searchTransactionHistory === true && c.sent.length >= 1) throw down();
+    if (rung2 === "transport" && c.sent.length >= 1 && m === "getMultipleAccounts" && (p[0] as string[]).includes(RENT_SYSVAR)) throw down();
+    if (rung2 === "refused" && k === 1 && c.sent.length >= 1 && m === "isBlockhashValid") return { context: { slot: 1 }, value: false };
+    return rpc(m, p);
+  };
+  return [w(c.rpc(), 0), w(c.rpc(), 1)] as const;
+}
+
+for (const rung2 of ["transport", "refused"] as const) {
+  test(`review P1 (${rung2}): a rung that landed with no tx named is always in the answer: rung 2 ${rung2 === "transport" ? "down" : "refused"} before it signs answers part_filled, never failed or down`, async () => {
+    const c = chain();
+    const ns = await notes();
+    c.fund((await plannedU(ns)).address, 100_000_000);
+    const a = await runPoolDeposit(host(c, ns, { rpcs: p1Rpcs(c, rung2) }), ask(3n * RUNG));
+    assert.deepEqual(a, { stage: "part_filled", txs: [] });
+    assert.equal(c.sent.length, 1);
+    assert.deepEqual((await ours(ns)).map((n) => n.state).sort(), ["PLANNED", "UNSPENT"]);
+  });
+}
+
+test("review P1 via the kind: the app is answered part_filled for a landed rung with no tx named, never failed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 100_000_000);
+  let ended!: () => void;
+  const done = new Promise<void>((r) => (ended = r));
+  const kind = poolDepositKind(() => ({ ...host(c, ns, { rpcs: p1Rpcs(c, "transport") }), end: ended }));
+  const r = kind(ask(3n * RUNG), { id: "p1", sha: "00", progress: () => {} });
+  assert.ok("running" in r);
+  await r.after;
+  await done;
+  assert.deepEqual(r.answer(), { result: { stage: "part_filled", txs: [] } });
+});
+
+test("review P5: a page-load pass that sends an earlier note again never makes the ask's own read fault answer failed: nothing of the ask was signed, down", async () => {
+  const c = chain();
+  const ns = await notes();
+  const u1 = await plannedU(ns);
+  c.fund(u1.address, Number(RUNG) + COST + EMPTY_RENT + 50 * FEE);
+  c.failNext = 1_000;
+  assert.equal(((await runPoolDeposit(host(c, ns, { reads: 1 }), ask(RUNG))) as { stage: string }).stage, "not_landed");
+  c.failNext = 0;
+  const before = c.sent.length;
+  // the ask's own state read (not U1's) is down
+  const w = (rpc: SolanaRpc): SolanaRpc => async (m, p) => {
+    if (m === "getMultipleAccounts" && (p[0] as string[]).includes(RENT_SYSVAR) && !(p[0] as string[]).includes(u1.address)) throw down();
+    return rpc(m, p);
+  };
+  let ended!: () => void;
+  const done = new Promise<void>((r) => (ended = r));
+  const kind = poolDepositKind(() => ({ ...host(c, ns, { rpcs: [w(c.rpc()), w(c.rpc())] }), end: ended }));
+  const r = kind(ask(RUNG), { id: "p5", sha: "00", progress: () => {} });
+  assert.ok("running" in r);
+  await r.after;
+  await done;
+  assert.equal(c.sent.length - before, 1, "the pass sent the earlier note again");
+  assert.deepEqual(r.answer(), { error: "down" });
+});
+
+test("review P6: one RPC's low last valid height never reads a live send expired: no send again while its blockhash has blocks left on either RPC", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, Number(RUNG) + COST + EMPTY_RENT + 10 * FEE);
+  const r0 = c.rpc();
+  const low: SolanaRpc = async (m, p) => {
+    const a = (await r0(m, p)) as { value?: { lastValidBlockHeight?: number } };
+    return m === "getLatestBlockhash" ? { ...a, value: { ...a.value, lastValidBlockHeight: c.height + 2 } } : a;
+  };
+  c.lands = false;
+  await runPoolDeposit(host(c, ns, { rpcs: [low, c.rpc()], reads: 1 }), ask(RUNG));
+  c.height += 10; // past RPC 0's word, 140 blocks inside the blockhash's life
+  assert.deepEqual(await settlePoolDeposits(host(c, ns)), { stage: "not_landed", txs: [] });
+  assert.equal(c.sent.length, 1, "never built again while the first send's blockhash lives");
+  c.height += 200; // past it on both
+  c.lands = true;
+  assert.equal(((await settlePoolDeposits(host(c, ns))) as { stage: string }).stage, "not_landed");
+  assert.equal(c.sent.length, 2, "built again once expired on both");
+});
+
+test("review G: a send built again on its blockhash's expiry never counts toward POOL_DEPOSIT_REBUILDS: after one, the run still builds again on each failure up to the cap and lands", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, Number(RUNG) + COST + EMPTY_RENT + 50 * FEE);
+  c.lands = false; // the first send is dropped
+  let bumped = false;
+  const wait = async () => {
+    if (bumped) return;
+    bumped = true;
+    c.height += 1_000; // the first send's blockhash expires: built again on expiry
+    c.lands = true;
+    c.failNext = POOL_DEPOSIT_REBUILDS; // that send and the first failure rebuild fail on chain
+  };
+  const got = await runPoolDeposit(host(c, ns, { reads: POOL_DEPOSIT_READS, wait }), ask(RUNG));
+  assert.equal(c.sent.length, 2 + POOL_DEPOSIT_REBUILDS, "the dropped send, its expiry rebuild, then POOL_DEPOSIT_REBUILDS failure rebuilds");
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: c.sent.at(-1) }] });
+});
+
+test("review J: once the ask's own deposit is signed, a provider fault is never down, even when that note was taken (the module's rule since pool-read-down): the run throws and the kind answers failed", async () => {
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 50_000_000);
+  const base = c.rpc();
+  let raced = false;
+  const racing: SolanaRpc = async (m, p) => {
+    if (m === "sendTransaction" && !raced) {
+      raced = true;
+      c.apply(attackerTx(c, preOf(base64.decode(p[0] as string)), MIN_DEPOSIT)); // lands first: the note is taken
+    }
+    if (raced && m === "getMultipleAccounts" && (p[0] as string[]).includes(RENT_SYSVAR)) throw down(); // the next note's read
+    return base(m, p);
+  };
+  const other = c.rpc();
+  const both: SolanaRpc = async (m, p) => {
+    if (raced && m === "getMultipleAccounts" && (p[0] as string[]).includes(RENT_SYSVAR)) throw down();
+    return other(m, p);
+  };
+  await assert.rejects(runPoolDeposit(host(c, ns, { rpcs: [racing, both] }), ask(RUNG)), SolanaRpcTransportError);
+  assert.equal(c.sent.length, 1);
+  assert.deepEqual(await shape(ns), [
+    ["deposit", "UNSPENT", MIN_DEPOSIT],
+    ["second", "PLANNED", undefined],
+  ]);
 });

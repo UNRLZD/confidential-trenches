@@ -217,6 +217,14 @@ export function solanaProviderLimits(providerRps?: SolanaProviderRps): readonly 
 export function solanaSameProvider(a: SolanaRpc, b: SolanaRpc): boolean {
   return (bareOf.get(a) ?? a) === (bareOf.get(b) ?? b) || (a.url !== undefined && b.url !== undefined && urlKey(a.url) === urlKey(b.url));
 }
+/** `call` as the provider `rpc` under a wrapper of the caller's (a fault watch): the same provider to
+ *  solanaSameProvider and in the same shared queue, its URL carried. */
+export function solanaWrappedRpc(rpc: SolanaRpc, call: (method: string, params: readonly unknown[]) => Promise<unknown>): SolanaRpc {
+  const bare = bareOf.get(rpc) ?? rpc;
+  const out: SolanaRpc = rpc.url === undefined ? call : Object.assign(call, { url: rpc.url });
+  bareOf.set(out, bare);
+  return out;
+}
 /** The provider with every call in its shared queue (SOLANA_KEYLESS_RPC_LIMIT when no limit is named). */
 export function solanaPacedRpc(rpc: SolanaRpc, limit: SolanaRpcLimit = SOLANA_KEYLESS_RPC_LIMIT): SolanaRpc {
   const bare = bareOf.get(rpc) ?? rpc;

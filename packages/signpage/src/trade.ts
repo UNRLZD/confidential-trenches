@@ -36,7 +36,7 @@
 import { base58 } from "@scure/base";
 import { solanaAta, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/index.ts";
 import { runSolanaTrade, type SolanaTradeDeps, type SolanaTradeLeg, type SolanaTradeRecord, type SolanaTradeRequest, type SolanaTradeStage } from "../../kit/src/trade/solana/flow.ts";
-import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { readSolanaTxEnd, solanaHelperRpc, solanaSendPaths, solanaWrappedRpc, SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageReference, pageRpc } from "./page-rpc.ts";
 import type { ErrorCode, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit } from "@blindfill/wallet/arming/ladder";
@@ -364,11 +364,8 @@ export function tradeKind(host: TradeHost): TradeKind {
         if (e instanceof SolanaRpcTransportError) readDown = true;
         throw e;
       };
-      // each provider keeps its URL, so the kit still refuses two that are one and paces each in its one queue
-      const watched = (rpc: SolanaRpc): SolanaRpc => {
-        const w = (method: string, params: readonly unknown[]): Promise<unknown> => rpc(method, params).catch(noteDown);
-        return rpc.url === undefined ? w : Object.assign(w, { url: rpc.url });
-      };
+      // each provider stays itself to the kit (solanaWrappedRpc): its refusal of two that are one, its URL and its one queue
+      const watched = (rpc: SolanaRpc): SolanaRpc => solanaWrappedRpc(rpc, (method, params) => rpc(method, params).catch(noteDown));
       // each stage as it comes: the answer at "sent", the fill stages to the frame at once (before any teardown)
       const onProgress = (stage: SolanaTradeStage): void => {
         if (stage === "signed") write({ stage, txs: signed.slice() });
