@@ -209,8 +209,20 @@ for (const x of [U, R, V]) {
   });
 }
 
-test("no deposit call is signed on a network whose release names no vault", () => {
-  refused("vault", () => checkDepositCall(good(U), ctx(U, { network: "mainnet" })));
+// Mainnet's release names the v1 record's vault, so a mainnet deposit call is signed to it on mainnet USDC, and only to
+// it; a network whose release names no vault refuses every call (test/rules-deposit-no-vault.test.ts, a hooked networks.ts).
+test("a mainnet deposit call is signed to the v1 record's vault on mainnet USDC, and to no other vault", () => {
+  const record = JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/mainnet-v1.json", import.meta.url), "utf8")) as { account_id: string };
+  const main = NEAR_NETWORKS.mainnet;
+  assert.equal(main.vault, record.account_id);
+  const mainCall = (vault: string, token: string = main.usdc) => good(U, { receiver_id: token, args: new TextEncoder().encode(argsOf(U, AMOUNT, undefined, vault)) });
+  const d = checkDepositCall(mainCall(record.account_id), ctx(U, { network: "mainnet" }));
+  assert.equal(d.receiver_id, main.usdc);
+  assert.equal(JSON.parse(d.args).receiver_id, record.account_id);
+  // the testnet call, another vault on mainnet USDC, the record's vault on testnet's token: each refused
+  refused("receiver_id", () => checkDepositCall(good(U), ctx(U, { network: "mainnet" })));
+  refused("args.receiver_id", () => checkDepositCall(mainCall(VAULT), ctx(U, { network: "mainnet" })));
+  refused("receiver_id", () => checkDepositCall(mainCall(record.account_id, TOKEN), ctx(U, { network: "mainnet" })));
   refused("network", () => checkDepositCall(good(U), ctx(U, { network: "betanet" as "testnet" })));
 });
 
