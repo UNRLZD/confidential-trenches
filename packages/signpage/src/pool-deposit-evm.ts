@@ -363,7 +363,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
         simAgain = false; // a new note: its own simulation, and its own second try
         continue;
       }
-      if (t.kind === "wait") return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: [] };
+      if (t.kind === "wait" || t.kind === "moved") return landedTxs.length ? { stage: "part_filled", txs: landedTxs } : { stage: "not_landed", txs: [] };
       if (t.kind === "sim_failed") {
         // the pool may have moved: read and simulate once more, then not_funded
         if (!simAgain) {
