@@ -105,7 +105,7 @@ function chain() {
     async (method: string, params: readonly unknown[]): Promise<unknown> => {
       const p = params as unknown[];
       const off = (v: bigint, d: bigint) => (k === 1 ? v + d : v);
-      if (k === 1 && c.down === method) throw new SolanaRpcTransportError("http", "HTTP 503", 4, "rpc1.example");
+      if (k === 1 && c.down === method) throw new SolanaRpcTransportError("http_5xx", "HTTP 503", 4, "rpc1.example");
       switch (method) {
         case "eth_getBlockByNumber":
           return { number: q(c.block), hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(off(c.baseFee, c.off.baseFee)) };
