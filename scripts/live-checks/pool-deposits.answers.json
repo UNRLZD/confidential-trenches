@@ -1,5 +1,5 @@
 {
- "note": "Recorded 2026-11-07 on Solana devnet (card pool-deposits, slice 2): good, the live check on the run's deposit 4CGASPeY2... (PASS); bad, the same reads with another precommitment (last byte +1) in the run's place, whose mark does not exist (FAIL). Slice 3: good.evm is evmFacts() of the release-77 build, which SIGN_HOST serves once deployed; bad.evm is SIGN_HOST's release-72 page, with no EVM deposit. Slice 3's review fold: good.evm is the release-77 re-cut build (its five marks, and its sha384 in releases/release-77.json); planted.unrouted is a real build of the fold with the flow's EVM deposit route removed, every mark still in it, named by no release list.",
+ "note": "Recorded 2026-11-07 on Solana devnet (card pool-deposits, slice 2): good, the live check on the run's deposit 4CGASPeY2... (PASS); bad, the same reads with another precommitment (last byte +1) in the run's place, whose mark does not exist (FAIL). Slice 3: good.evm is evmFacts() of the release-79 build, which SIGN_HOST serves once deployed; bad.evm is SIGN_HOST's release-72 page, with no EVM deposit. Slice 3's review fold: good.evm is the release-79 re-cut build (its five marks, and its sha384 in releases/release-79.json); planted.unrouted is a real build of the fold with the flow's EVM deposit route removed, every mark still in it, named by no release list.",
  "good": {
   "precommitment": "28b9cd55909a30598226c8431f75d6ace086163d841ca9cff55a5deb20dce9d4",
   "rpcs": [
@@ -561,7 +561,7 @@
    }
   ],
   "evm": {
-   "from": "packages/signpage/index.html and public/app.js of the release-77 build (build-app at b29b4148, the slice 3 review fold on main 4bc11280)",
+   "from": "packages/signpage/index.html and public/app.js of the release-79 build (build-app at 999d9c7d, the slice 3 review fold on main 4693503e; the bundle is byte-identical to b29b4148's)",
    "pin": "sha384-Y1WfqpguVdGY13sIf62WxKU4DEw5Y/z1acuyDeu9PXXaVp9LY00RfcYHEVqgD2BO",
    "sha384": "sha384-Y1WfqpguVdGY13sIf62WxKU4DEw5Y/z1acuyDeu9PXXaVp9LY00RfcYHEVqgD2BO",
    "marks": {
