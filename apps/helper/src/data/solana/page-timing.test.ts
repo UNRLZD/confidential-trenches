@@ -89,9 +89,10 @@ test("card helper-ready-page-warm: a keyed Solana provider's 429 names its time 
   const rpcK = R.createRpc({ SOLANA_RPC_URL: KEYED }, { fetch, log: () => undefined });
   const a = (await rpcK.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [[PUMP]] }))) as { status: number; timing?: string[] };
   assert.equal(a.status, 200);
-  assert.deepEqual((a.timing ?? []).map((e) => e.split(";")[0]), ["rpc-keyed", "rpc"], String(a.timing));
+  // card solana-quote-under-1s: rpc-wait on every answer, 0 included
+  assert.deepEqual((a.timing ?? []).map((e) => e.split(";")[0]), ["rpc-keyed", "rpc-wait", "rpc"], String(a.timing));
   assert.match(a.timing![0]!, /desc="fell back"/);
-  assert.match(a.timing![1]!, /desc="public"/);
+  assert.match(a.timing![2]!, /desc="public"/);
 });
 
 test("card helper-rpc-wait-timing: rpc-wait is the time the read waited out a hold or the provider's pace, never the fallback's own work (red at 9ceba84: 2 ms of work between the keyed 429 and the public send read rpc-wait;dur=20)", async () => {
@@ -111,8 +112,9 @@ test("card helper-rpc-wait-timing: rpc-wait is the time the read waited out a ho
   const rpcK = R.createRpc({ SOLANA_RPC_URL: KEYED }, { fetch, now, log: () => undefined });
   const a = (await rpcK.handle("solana", "application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [[PUMP]] }))) as { status: number; timing?: string[] };
   assert.equal(a.status, 200);
-  assert.deepEqual((a.timing ?? []).map((e) => e.split(";")[0]), ["rpc-keyed", "rpc"], String(a.timing));
+  assert.deepEqual((a.timing ?? []).map((e) => e.split(";")[0]), ["rpc-keyed", "rpc-wait", "rpc"], String(a.timing));
   assert.ok(Number(/dur=(\d+)/.exec(a.timing![0]!)![1]) >= 2, `the fall's own time is rpc-keyed's: ${a.timing}`);
+  assert.equal(a.timing![1], "rpc-wait;dur=0", `no wait: ${a.timing}`);
 });
 
 /**
@@ -133,7 +135,8 @@ async function heldRead(early: number) {
   assert.equal(a.status, 200, JSON.stringify(a));
   assert.equal(calls, 2);
   // the hold's 1 s from the 429 and the 5 ms margin past its end (rpc.ts HOLD_MARGIN_MS), all of it waited
-  assert.deepEqual(a.timing, ["rpc-wait;dur=1005", 'rpc;dur=0;desc="solana"']);
+  // card solana-quote-under-1s: the provider by its environment name; the public endpoint, set under none, is "public"
+  assert.deepEqual(a.timing, ["rpc-wait;dur=1005", 'rpc;dur=0;desc="public"']);
 }
 
 test("card helper-rpc-wait-timing: a read that waited out the provider's hold names that wait as rpc-wait, and its send as rpc", () => heldRead(0));

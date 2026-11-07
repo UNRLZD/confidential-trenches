@@ -38,6 +38,8 @@ export const PATHS = [
   // the relayer's withdraw send, which sandbox tests will drive as bind-send is driven
   "apps/helper/src/withdraw/",
   "apps/helper/test/withdraw-send/",
+  // settle.rs's kit_settle_mock: the kit's settle CLI (it imports the kit's src/ and contracts/vault/scripts/near-tx.mjs)
+  "packages/kit/test/vault-settle-cli.mjs",
   "scripts/live-checks/vault-",
   "scripts/ci/near-rpc-operators.mjs",
   // the shared read that waits out a rate limit, which vault-skeleton.mjs and vault-testnet-t01.mjs read through
