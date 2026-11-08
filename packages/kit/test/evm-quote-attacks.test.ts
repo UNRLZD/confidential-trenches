@@ -7726,3 +7726,21 @@ test("GS12 a read that needed fewer a call is sent that many a call in the next 
     quoteMod.evmReadsPerCall();
   }
 });
+
+test("GS13 a route above the hidden two-hop whose swap does not fit hides it from no verdict: the buy is refused by name", async () => {
+  // delta review of 7904e159 (RV1): the two-hop through USDC gives 3 a wei and its read at twice runs out of gas alone;
+  // a direct 1% pool gives 4 but its swap does not run (a free seeded pool behind a hook that lets only the quoter
+  // through); the bought 0.3% route gives 1. Measured against the raw best (the 1%), the two-hop hid, and the 0.3% was
+  // bought at 1e18; the best route that fits is the two-hop, which may be a partial fill
+  const price = (p: Pool) => (p.venue === "v3" && p.hops === 2 ? 3n * p.amount : p.venue === "v3" && p.hops === 1 && p.fees[0] === 10000 ? 4n * p.amount : p.venue === "v3" && p.hops === 1 && p.fees[0] === 3000 ? p.amount : null);
+  const twoHop = (p: Pool) => p.venue === "v3" && p.hops === 2 && p.amount === 2n * AMOUNT;
+  // the 1% pool's swap reverts: its buySwap read is the one with fee 10000 (0x002710) in its path
+  const noFit = (rpc: EvmRpc): EvmRpc => async (calls) =>
+    ((await rpc(calls)) as unknown[]).map((a, i) => {
+      const d = String((calls[i]!.params[0] as { data?: string }).data);
+      return d.startsWith("0x" + SEL_BUY_SWAP) && d.includes("002710") ? { jsonrpc: "2.0", id: i, error: { code: 3, message: "execution reverted" } } : a;
+    });
+  assert.deepEqual(await buy(v3at(3000), noFit(spammed(price, twoHop)), noFit(spammed(price, twoHop))), { accepted: false, code: "out_of_gas" });
+  // control: the two-hop's twice answered, it fills and is the best that fits, so the 0.3% is held below it
+  assert.deepEqual(await buy(v3at(3000), noFit(spammed(price, () => false)), noFit(spammed(price, () => false))), below);
+});

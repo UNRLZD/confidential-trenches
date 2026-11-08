@@ -2044,11 +2044,17 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   });
   const { block, out, fills, filled } = set;
   const q = out(main)!;
-  // a route of more than one v3 hop dropped because its twice ran out of a read's gas alone, whose 1x beats every route
-  // that fills: the device cannot tell the best route, and refuses by name (review of fe9f5ec3, finding 1)
-  const top = filled.reduce((m, c) => (c.amountOut > m ? c.amountOut : m), q);
-  const hidden = set.outOfGas.find((c) => c.amountOut > top);
-  if (hidden !== undefined) return refuse("out_of_gas", `a route of ${hidden.route.venue === "uniswap-v3" ? hidden.route.tokens.length - 1 : 1} v3 hops quoting ${hidden.amountOut}, more than the best that fills (${top}), runs out of a read's gas alone at twice the amount`);
+  // The routes of more than one v3 hop dropped because a read at twice ran out of its gas alone (`outOfGas`) may be
+  // partial fills, so none prices the buy: each stands in every list a verdict is priced against, at its 1x, and a
+  // verdict that one of them decides, as the best route that fits (bestFits), is refused by name (review of fe9f5ec3,
+  // finding 1; delta review of 7904e159: against the raw best, a route above it that does not fit hid one that does)
+  const hidden = new Set<Filled>(set.outOfGas);
+  const ranOut = (c: Filled | null, what: string): void => {
+    if (c !== null && [...hidden].some((h) => h.amountOut === c.amountOut && JSON.stringify(h.route) === JSON.stringify(c.route))) {
+      return refuse("out_of_gas", `${what}, a route of ${c.route.venue === "uniswap-v3" ? c.route.tokens.length - 1 : 1} v3 hops quoting ${c.amountOut}, runs out of a read's gas alone at twice the amount: its quote may be a partial fill`);
+    }
+  };
+  const priced = [...filled, ...hidden];
   // what the route counts for: Q, or through a hook the venue does not list the lowest of its reads, each with a set of
   // such hooks replaced (review of 72e28658, M1). Each must answer above 0, or the route is refused: one with every such
   // hook replaced that does not is a pool whose liquidity is in such a hook alone, priced by nothing the device can
@@ -2099,12 +2105,12 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // the native routes count only where a WETH start must beat them (native_first below); a route that does not fit is
   // refused whatever they are
   const ownFits = fits(route) === true;
-  const natives = ownFits && v.nativeFirst && wethStart ? filled.filter((c) => startsNative(c.route)) : [];
-  const exits = ownFits && unlisted.length > 0 ? filled.filter((r) => evmSellExits(chain, token, r.route)) : [];
+  const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];
+  const exits = ownFits && unlisted.length > 0 ? priced.filter((r) => evmSellExits(chain, token, r.route)) : [];
   const all = () => true;
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },
-    { l: filled, band: ownFits ? (c) => c.amountOut >= value : all },
+    { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },
     { l: natives, band: (c) => c.amountOut >= value },
     { l: exits, band: (c) => c.amountOut * 10000n >= value * BigInt(10000 - slippageBps) },
   ]);
@@ -2123,6 +2129,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // more than the best native route (native when at least as good); the native_first refusal names that native route.
   // A native pool of the first hop alone, with no native route to the token quoted, still refuses: nothing shows the
   // WETH start beats starting that hop native
+  if (nativeExists && wethStart && nativeBest !== null && value <= nativeBest.amountOut) ranOut(nativeBest, "the best native route");
   if (nativeExists && wethStart && (nativeBest === null || value <= nativeBest.amountOut)) {
     return refuse("native_first", `${chain}'s WETH is behind an upgradeable proxy and a native route quotes at least as much`, nativeBest);
   }
@@ -2138,10 +2145,12 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const near = (x: bigint, r: bigint) => x * 10000n >= r * BigInt(10000 - slippageBps);
   const hookedRef = hookedRoute(chain, reference.route);
   const underHooked = value < reference.amountOut && hookedRef && unlisted.length === 0 && near(value, reference.amountOut);
+  if (value < reference.amountOut) ranOut(reference, "the best route that fits");
   if (value < reference.amountOut && !underHooked) {
     return refuse("below_reference", `the route quotes ${value}, below the standard pool's ${reference.amountOut}`, reference);
   }
   if (unlisted.length > 0) {
+    if (listed !== null && near(listed.amountOut, value)) ranOut(listed, "the best route through listed pools within the slippage");
     if (listed !== null && near(listed.amountOut, value)) return refuse("below_reference", `a route through listed pools quotes ${listed.amountOut}, within the slippage of the route's ${value} through a hook the venue does not list`, listed);
   }
 
