@@ -89,6 +89,16 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
     };
   }, [chart, schedule]);
 
+  // the plot's size: the chart follows it on its own (the shell's fit zoom, a window resize), so the marks are placed
+  // again from the chart's new pixels; a placement made before the plot had its size drew none (seen at 1280)
+  useEffect(() => {
+    const el = layer.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => schedule());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [schedule]);
+
   // a tap outside the marks closes a phone's card
   useEffect(() => {
     if (!phone || open === null) return;

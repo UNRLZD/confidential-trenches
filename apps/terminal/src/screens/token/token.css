@@ -90,6 +90,8 @@
 .tkp-tog { flex: none; height: 28px; display: inline-flex; align-items: center; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: 13px var(--font-ui); color: var(--text-3); cursor: pointer; white-space: nowrap; }
 .tkp-tog:disabled { cursor: default; }
 .tkp-tog [data-on="true"] { color: var(--paper, #f4f4f2); }
+/* the slash between a toggle's two units, spaced as R5's text (a flex item's own spaces are dropped) */
+.tkp-slash { padding: 0 0.3em; }
 .tkp-toglbl { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 .tkp-tog[aria-expanded="true"] .tkp-toglbl, .tkp-tog:hover .tkp-toglbl { color: var(--text-1); }
 .tkp-mwrap { position: relative; flex: none; display: inline-flex; }
