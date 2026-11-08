@@ -26,9 +26,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { ACCOUNT, CASH } from "./app-portfolio-mount.mjs";
 
 const KEY = "trade-box-bal-cash";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 export { CASH };
 /** The account the stand-in shell sends: app-portfolio-mount's, with its Solana pool ("pool") or without it ("cash"). */
 export const account = (kind) => ({ ...ACCOUNT, pools: ACCOUNT.pools.filter((p) => kind === "pool" || p.chain !== "solana") });

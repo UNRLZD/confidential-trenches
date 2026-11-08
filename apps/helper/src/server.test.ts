@@ -26,8 +26,8 @@ import type { WithdrawSender } from "./withdraw/send.ts";
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 /** Test values for the vendor keys a start requires (proxy.ts checkVendorPlans); no real key. */
 const TEST_VENDOR_KEYS = { JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001" };
-const APP = "https://confidential.unrealized.trade";
-const SIGN = "https://sign.confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 let port = 0;
 const server = start(COMMIT, 0);
 before(() => new Promise<void>((ok) => server.on("listening", () => ((port = (server.address() as AddressInfo).port), ok()))));
@@ -159,8 +159,8 @@ test("each of the two origins is echoed byte for byte, with Vary: Origin and no 
 });
 
 test("any other origin gets no Access-Control-Allow-Origin, never *", async () => {
-  const others = ["https://example.com", "null", "http://confidential.unrealized.trade", "https://confidential.unrealized.trade:443",
-    "https://confidential.unrealized.trade/", "https://CONFIDENTIAL.unrealized.trade", "https://evil.confidential.unrealized.trade",
+  const others = ["https://example.com", "null", "http://ct-app.unrealized.trade", "https://ct-app.unrealized.trade:443",
+    "https://ct-app.unrealized.trade/", "https://CONFIDENTIAL.unrealized.trade", "https://evil.confidential.unrealized.trade",
     `${APP}, ${SIGN}`, "*"];
   for (const o of others) {
     const r = await call("GET", "/v1/health", { origin: o });

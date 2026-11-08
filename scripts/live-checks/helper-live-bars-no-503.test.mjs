@@ -83,7 +83,7 @@ test("read() asks the lists with the app's Origin, reads each token once in full
   };
   const run = await read("https://helper.test", fetchFn, 0);
   assert.equal(asked.length, 1 + 5 + READS);
-  assert.ok(asked.every(([, o]) => o === "https://confidential.unrealized.trade"));
+  assert.ok(asked.every(([, o]) => o === "https://ct-app.unrealized.trade"));
   assert.ok(asked.slice(6).every(([u]) => u.endsWith("&tf=15m&limit=2") && !u.includes(a(5))), "live reads of held tokens only");
   assert.ok(run.live.every((x) => !("body" in x) && x.bars === 2));
   assert.equal(run.first.find((f) => f.address === a(5)).status, 503);

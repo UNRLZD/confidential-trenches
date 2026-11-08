@@ -33,7 +33,7 @@ test("a hand-edited bundle or a stale integrity is caught", async () => {
   const d = mkdtempSync(join(tmpdir(), "ct-signpage-build-test-"));
   mkdirSync(join(d, "public"));
   const js = readFileSync(join(PKG, "public/app.js"), "utf8");
-  writeFileSync(join(d, "public/app.js"), js.replace("sign.confidential.unrealized.trade", "sign.evil.test"));
+  writeFileSync(join(d, "public/app.js"), js.replace("confidential.unrealized.trade", "sign.evil.test"));
   cpSync(join(PKG, "index.html"), join(d, "index.html"));
   cpSync(join(PKG, "public/prover-worker.js"), join(d, "public/prover-worker.js"));
   cpSync(join(PKG, "public/prover-thread.js"), join(d, "public/prover-thread.js"));

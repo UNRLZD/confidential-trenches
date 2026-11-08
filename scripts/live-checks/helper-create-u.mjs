@@ -26,8 +26,8 @@ import { operatorOf } from "../ci/near-rpc-operators.mjs";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"; // gitleaks:allow (a public account id)
 export const ADDRESS = "a998c6585100ca4bccbc0e0bcceb9abd66e59666e87bd03b1d83bb9544f7ce2f";
 export const RECIPIENT = "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8";

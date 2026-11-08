@@ -23,8 +23,8 @@ import { fileURLToPath } from "node:url";
 import { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_USDC_ASSETS } from "../../packages/kit/src/index.ts";
 
 const KEY = "deposit-sheet-oneclick-budget";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const TOKENS = "/v1/proxy/oneclick/v0/tokens";
 export const QUOTE = "/v1/proxy/oneclick/v0/quote";
 /** One sheet open's 1Click calls (proxy.ts DEPOSIT_SHEET_CALLS). */

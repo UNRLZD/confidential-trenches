@@ -52,7 +52,7 @@ async function world(handover?: unknown) {
   const port = (server.address() as AddressInfo).port;
   const get = (path: string) =>
     new Promise<{ status: number; body: string }>((ok, fail) => {
-      const r = request({ host: "127.0.0.1", port, path, headers: { origin: "https://confidential.unrealized.trade" } }, (res) => {
+      const r = request({ host: "127.0.0.1", port, path, headers: { origin: "https://ct-app.unrealized.trade" } }, (res) => {
         let b = "";
         res.on("data", (d) => (b += d)).on("end", () => ok({ status: res.statusCode ?? 0, body: b }));
       });

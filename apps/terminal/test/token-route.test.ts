@@ -61,14 +61,14 @@ test("loadToken: reads /v1/market/token for that chain and id (and nothing else)
   const d = await source.loadToken!("solana", MINT, fetchFn);
   assert.equal(d.status, "ready");
   assert.equal(d.status === "ready" && d.row.token, MINT);
-  assert.deepEqual(calls.map((c) => c.url), [`https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${MINT}`]);
+  assert.deepEqual(calls.map((c) => c.url), [`https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=${MINT}`]);
   assert.equal(calls[0]!.init?.credentials, HELPER_FETCH_INIT.credentials);
   assert.equal(calls[0]!.init?.referrerPolicy, HELPER_FETCH_INIT.referrerPolicy);
 });
 
 test("TOKEN_URL: the chain and the id are the query, both encoded; the chain defaults to solana", () => {
-  assert.equal(source.TOKEN_URL(MINT), `https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${MINT}`);
-  assert.equal(source.TOKEN_URL("0xab", "robinhood"), "https://api.confidential.unrealized.trade/v1/market/token?chain=robinhood&token=0xab");
+  assert.equal(source.TOKEN_URL(MINT), `https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=${MINT}`);
+  assert.equal(source.TOKEN_URL("0xab", "robinhood"), "https://ct-api.unrealized.trade/v1/market/token?chain=robinhood&token=0xab");
 });
 
 test("loadToken: an unknown id (the helper answers 404) is the not-found state, not the error state", async () => {

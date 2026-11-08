@@ -25,7 +25,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { evmPoolGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { evmPools } from "../ci/helper-live-checks.mjs";
 
-export const BASE = "https://api.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
 /** currentTreeDepth() (State.sol), as evm-buy-hookdata-fee.mjs reads it */
 const TREE_DEPTH = "0x4a2b75c8";
 const HEX = /^0x[0-9a-f]+$/;

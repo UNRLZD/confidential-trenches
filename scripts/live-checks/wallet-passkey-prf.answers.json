@@ -2,7 +2,7 @@
  "note": "Recorded 2026-11-01T06:08Z on a Mac, all on the browser harness (--harness: SIGN_HOST's and APP_HOST's real names mapped to a local https server, SIGN_HOST under the shipped public/_headers). good: SIGN_HOST's own build at this commit (re-recorded 2026-11-01T07:59Z in round 5 on Linux x86_64, with the guard, trigger, burst, repeated Enter and phone steps). bad: a planted copy of src/main.ts whose no-PRF branch stores a random seed and signs in without notice (the brief's bad answer). badC6a2fbe: the page as committed at c6a2fbe. badNoGuard: a planted copy without the 'seed already stored' guard. badC46a6fc: the page as committed at c46a6fc (round 3's reds: Sign out armed with no real input, and drawn for a seed whose 12 words are the only copy). bad23f373f (2026-11-01T06:38Z): the page as committed at 23f373f (round 4's reds: Sign out armed by a pointer move, so a moving press, Tab then Enter and a finger's tap with drift sign out within 500 ms of the page shown, and a still tap never does). badNoListeners (2026-11-01T07:02Z): a planted copy of src/main.ts without the guard's pageshow, focus and visibilitychange listeners. Records before round 4 hold no prf.protect or phone steps; records before badNoListeners hold no prf.triggers. Each planted page is built the same way (Vite, sha384 in index.html). Public values only: states, the throwaway accounts' T_0 ids, rp ids, the stored seed's AES-GCM iv; no PRF output, entropy, words or key. bad265ad22 (2026-11-01T08:00Z, on Linux x86_64): the page as committed at 265ad22 (round 5 reds: a burst's second click 560 ms after the draw and 260 ms after the first, and a repeated Enter on a focused Sign out, sign out; its guard had only the 500 ms after drawn, shown or focused). Records before bad265ad22 hold no prf.burst or prf.repeat. Card wallet-typed-words (2026-11-01T09:41Z, on Linux x86_64): good re-recorded at the card's page, with the no-PRF run's backup, early Saved press, Saved and typed-words steps; bad18cd57a (2026-11-01T09:41Z): the page as committed at 18cd57a, whose no-PRF Create stores nothing and opens no backup and which has no typed words; bad3fd742b (2026-11-01T09:42Z): the card's page as committed at 3fd742b, whose Saved had no activation guard. Records before bad18cd57a hold no noPrf.savedEarly, noPrf.saved, noPrf.invalid or noPrf.typed. Review round (2026-11-01T10:32Z, Linux x86_64): good re-recorded with the early and late Copy and Backup presses; bada50f04a (2026-11-01T10:32Z): the page as committed at a50f04a, whose Backup and Copy had no activation guard. Records before bada50f04a hold no noPrf.copyEarly, copyLate, backupEarly or backupLate. Card app-in-shell-tab (2026-11-02): good re-recorded on the harness on the shell page with the layer held as the shell open() shows it; badShellTab, the same harness run with the old hold (the layer over a live APP_HOST frame); liveShellTab, the one live record here: the deploy run of the old check on SIGN_HOST e0b1cd69 and APP_HOST 48008988.",
  "good": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T00:58:31.906Z",
   "prf": {
@@ -283,7 +283,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -592,7 +592,7 @@
  },
  "bad": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T06:10:17.123Z",
   "prf": {
@@ -735,7 +735,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -840,7 +840,7 @@
  },
  "badC6a2fbe": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T06:09:10.306Z",
   "prf": {
@@ -980,7 +980,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -1085,7 +1085,7 @@
  },
  "badNoGuard": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T06:10:13.747Z",
   "prf": {
@@ -1228,7 +1228,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -1333,7 +1333,7 @@
  },
  "badC46a6fc": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T06:08:21.542Z",
   "prf": {
@@ -1473,7 +1473,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -1578,7 +1578,7 @@
  },
  "bad23f373f": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T06:38:51.569Z",
   "prf": {
@@ -1736,7 +1736,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -1909,7 +1909,7 @@
  },
  "badNoListeners": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T07:02:16.087Z",
   "prf": {
@@ -2131,7 +2131,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -2304,7 +2304,7 @@
  },
  "bad265ad22": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T08:00:10.183Z",
   "prf": {
@@ -2576,7 +2576,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -2749,7 +2749,7 @@
  },
  "bad18cd57a": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T09:41:22.799Z",
   "prf": {
@@ -3029,7 +3029,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -3274,7 +3274,7 @@
  },
  "bad3fd742b": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T09:42:38.059Z",
   "prf": {
@@ -3554,7 +3554,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -3797,7 +3797,7 @@
  },
  "bada50f04a": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-01T10:32:58.924Z",
   "prf": {
@@ -4077,7 +4077,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -4387,7 +4387,7 @@
  },
  "badShellTab": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T00:58:14.216Z",
   "prf": {
@@ -4668,7 +4668,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,
@@ -4977,7 +4977,7 @@
  },
  "liveShellTab": {
   "key": "wallet-passkey-prf",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "live",
   "at": "2026-11-02T00:49:53.482Z",
   "prf": {
@@ -5257,7 +5257,7 @@
    },
    "credentials": [
     {
-     "rpId": "sign.confidential.unrealized.trade"
+     "rpId": "confidential.unrealized.trade"
     }
    ],
    "prfOk": true,

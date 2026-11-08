@@ -16,7 +16,7 @@
 // kept legs alone; the margin's two sides; the sign point's blockhash on the wires) and packages/signpage/test/
 // trade.test.ts (a dropped leg is in no answer, no later pick and no repeated id); no real trade runs here.
 //   node scripts/live-checks/kit-renewal-read-bounded.mjs [--record <file>]
-//     SIGN_HOST as deployed: https://sign.confidential.unrealized.trade/
+//     SIGN_HOST as deployed: https://confidential.unrealized.trade/
 //   node scripts/live-checks/kit-renewal-read-bounded.mjs --local [--record <file>]
 //     the same read on this checkout: packages/signpage (index.html, public/app.js as committed)
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 
 const KEY = "kit-renewal-read-bounded";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SIGN = { url: "https://sign.confidential.unrealized.trade/", local: path.join(ROOT, "packages/signpage") };
+const SIGN = { url: "https://confidential.unrealized.trade/", local: path.join(ROOT, "packages/signpage") };
 const ID = "[\\w$]+";
 /** The rule's parts in the signing page's bundle, by name. */
 export const MARKERS = {

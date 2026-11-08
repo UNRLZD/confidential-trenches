@@ -1,11 +1,11 @@
 {
  "notes": [
-  "bad_deployed: HELPER_HOST (https://api.confidential.unrealized.trade) read 2026-11-06T14:35:52.731Z by node scripts/live-checks/helper-sender-fee-proof.mjs --record, at commit acdb5470a2739237c927daf2f311dab306dfbf95 (this card with card evm-fee-collector at de75d5f2 merged, before its merge and redeploy): its fee answers name no fee_collector and X-Helper-Commit f21d4be2cd160f6971170913178961f5674fd38e; each collector's RPC answers (rpc) are that run's real reads on both RPCs of each testnet, the sink's code among them, every one of evm-fee-collector's check lines ok.",
+  "bad_deployed: HELPER_HOST (https://ct-api.unrealized.trade) read 2026-11-06T14:35:52.731Z by node scripts/live-checks/helper-sender-fee-proof.mjs --record, at commit acdb5470a2739237c927daf2f311dab306dfbf95 (this card with card evm-fee-collector at de75d5f2 merged, before its merge and redeploy): its fee answers name no fee_collector and X-Helper-Commit f21d4be2cd160f6971170913178961f5674fd38e; each collector's RPC answers (rpc) are that run's real reads on both RPCs of each testnet, the sink's code among them, every one of evm-fee-collector's check lines ok.",
   "made: NOT a read. bad_deployed with each fee answer's fee_collector set to the kit's pin and X-Helper-Commit set to the run's commit, the base the planted cases are made from (each plant breaks one thing). The good answer is recorded on HELPER_HOST after this card's merge is redeployed with POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA and POOL_EVM_FEE_COLLECTOR_ROBINHOOD_TESTNET set to the pins."
  ],
  "bad_deployed": {
   "commit": "acdb5470a2739237c927daf2f311dab306dfbf95",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pools": [
    {
     "network": "base-sepolia",
@@ -907,7 +907,7 @@
  },
  "made": {
   "commit": "acdb5470a2739237c927daf2f311dab306dfbf95",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pools": [
    {
     "network": "base-sepolia",

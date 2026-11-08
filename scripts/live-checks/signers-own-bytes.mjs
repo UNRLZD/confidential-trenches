@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card signers-own-bytes on SIGN_HOST (https://sign.confidential.unrealized.trade). The signing page
+// Live check of card signers-own-bytes on SIGN_HOST (https://confidential.unrealized.trade). The signing page
 // bundles the kit's Solana trade flow, so the device that signs a trade runs the signer SIGN_HOST serves. What it
 // proves, and only that: the served /app.js is the one index.html pins (its sha384), and its text carries these lines,
 // each found by a mark of the bundle's shape (the minifier renames, never restructures them;
@@ -23,7 +23,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signers-own-bytes";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name

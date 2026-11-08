@@ -35,7 +35,11 @@
 #      unix//config/caddy-admin.sock): Caddy swaps to the new config with no gap and skips a config that is unchanged. The
 #      file goes in on stdin, since compose mounts the one file and a checkout writes a new one, which the running
 #      container's mount never sees. A Caddy that step 3 started (none ran before) read this checkout's file at its start
-#      and is not reloaded. A refused reload (a bad Caddyfile) leaves Caddy on the config it had and exits 1.
+#      and is not reloaded. A refused reload (a bad Caddyfile) leaves Caddy on the config it had and exits 1. When the
+#      HELPER_SITE compose resolves differs from the running Caddy's (card hosts-main-on-top: the helper's move to ct-api,
+#      served beside the old name through the switch), Caddy is made again instead (--force-recreate), since a reload
+#      adapts the file with the container's own environment, set when it was made; the new container reads this
+#      checkout's Caddyfile and keeps its certificates in the caddy_data volume.
 #   Before step 1, once the commit is found on main (objects only: no checkout, no .env), the socket is read: a running Caddy
 #   with no socket (one started from a Caddyfile with `admin off`), or a helper running with no Caddy, is refused, naming
 #   the one command that fixes it, with nothing changed, so a redeploy never ends with a new helper behind the old Caddy.
@@ -89,7 +93,7 @@ main() {
   write_env "$env" "$sha" "$release"
   swap_helper "$wait_s" "$sha"
   if [[ "$caddy_ran" == yes ]]; then
-    reload_caddy
+    caddy_site "$wait_s" || reload_caddy
   else
     echo "redeploy: Caddy started with this checkout's Caddyfile (none ran before); no reload"
   fi
@@ -204,6 +208,36 @@ swap_helper() {
     docker rm "$id" >/dev/null
   done
   echo "redeploy: swapped: the new helper $(printf '%s' "$new" | tr '\n' ' ' | sed 's/ $//') is ready; stopped and removed the old $(printf '%s' "$old" | tr '\n' ' ' | sed 's/ $//')"
+}
+
+# Step 4, when Caddy's names change (card hosts-main-on-top). Caddy adapts the Caddyfile's {$HELPER_SITE} with the
+# environment of the process that reads it: at its start, the container's, and on a reload through `docker compose
+# exec`, the container's too, set when the container was made. So a new HELPER_SITE reaches Caddy only in a new
+# container. The value compose resolves now (this shell's HELPER_SITE, else deploy/.env's, else compose.yaml's default,
+# read with `docker compose config caddy`) is compared with the running container's (its Config.Env): when they differ,
+# Caddy is made again from the same image and this checkout's Caddyfile; its certificates live in the named volume
+# caddy_data (compose.yaml: caddy_data:/data, and caddy_data under volumes:), so a recreate keeps them and asks the CA
+# only for a name it has none for. Returns 1 when they are the same (the caller reloads). Prints that it changed, never
+# the names.
+caddy_site() {
+  local wait_s="$1" id want have
+  # compose prints the value plain, or quoted when YAML needs it: the quotes are taken off
+  want="$(docker compose config caddy | sed -n 's/^[[:space:]]*HELPER_SITE:[[:space:]]*//p' | head -n 1 | sed -E "s/^[\"']//; s/[\"']\$//")"
+  if [[ -z "$want" ]]; then
+    echo "redeploy: compose resolves no HELPER_SITE for caddy; caddy left as it is" >&2
+    exit 1
+  fi
+  id="$(docker compose ps -q caddy | head -n 1)"
+  have="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$id" | sed -n 's/^HELPER_SITE=//p' | head -n 1)"
+  if [[ "$have" == "$want" ]]; then
+    echo "redeploy: caddy's HELPER_SITE is unchanged"
+    return 1
+  fi
+  echo "redeploy: caddy's HELPER_SITE changed; docker compose up -d --no-deps --force-recreate --wait caddy"
+  if ! docker compose up -d --no-deps --force-recreate --wait --wait-timeout "$wait_s" caddy; then
+    echo "redeploy: caddy was not running within $wait_s s" >&2
+    exit 1
+  fi
 }
 
 # Whether $2 names at least one container and every one runs image $1.

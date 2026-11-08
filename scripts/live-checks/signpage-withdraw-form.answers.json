@@ -1,5 +1,5 @@
 {
- "note": "Every record is a real run of this check. good: the card's build (packages/signpage index.html and public/app.js at card/signpage-withdraw-form 1a0c8ef, 168,416 B, the build release-2 lists) served at / and /app.js on 127.0.0.1, before its deploy. bad: the live SIGN_HOST, https://sign.confidential.unrealized.trade, 2026-11-02, serving main's page without the form. badIntegrity: the card's app.js served under the base page's index.html (7f496cb), whose integrity names the old script.",
+ "note": "Every record is a real run of this check. good: the card's build (packages/signpage index.html and public/app.js at card/signpage-withdraw-form 1a0c8ef, 168,416 B, the build release-2 lists) served at / and /app.js on 127.0.0.1, before its deploy. bad: the live SIGN_HOST, https://confidential.unrealized.trade, 2026-11-02, serving main's page without the form. badIntegrity: the card's app.js served under the base page's index.html (7f496cb), whose integrity names the old script.",
  "good": {
   "key": "signpage-withdraw-form",
   "url": "http://127.0.0.1:60971",
@@ -28,7 +28,7 @@
  },
  "bad": {
   "key": "signpage-withdraw-form",
-  "url": "https://sign.confidential.unrealized.trade",
+  "url": "https://confidential.unrealized.trade",
   "at": "2026-11-02T08:57:12.559Z",
   "index": {
    "status": 200,

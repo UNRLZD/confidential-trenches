@@ -56,8 +56,8 @@ import { named } from "./record-names.mjs";
 
 const KEY = "signpage-shell";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_HOST = "sign.confidential.unrealized.trade";
-export const APP_HOST = "confidential.unrealized.trade";
+export const SIGN_HOST = "confidential.unrealized.trade";
+export const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const APP = `https://${APP_HOST}`;
 const STRANGER = "https://example.com/";

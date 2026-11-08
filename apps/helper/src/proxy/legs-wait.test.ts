@@ -63,7 +63,7 @@ async function trade(legs: number) {
   const req = (i: number) => ({ side: "sell" as const, wallet: GOOD.wallet, token: GOOD.mint, amount: BigInt(1_000_000 + i), slippageBps: 1000 });
   const out = await v.run(Promise.all(Array.from({ length: legs }, async (_, i) => {
     try {
-      const f = await fetchSolanaJupiterBuildThatFits("https://api.confidential.unrealized.trade", req(i), () => "fits", { fetch, now: v.now, wait: room.wait });
+      const f = await fetchSolanaJupiterBuildThatFits("https://ct-api.unrealized.trade", req(i), () => "fits", { fetch, now: v.now, wait: room.wait });
       room.fitted(f.maxAccounts);
       return { steps: f.steps, calls: f.calls.length };
     } catch (e) {

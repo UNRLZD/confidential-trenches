@@ -64,8 +64,8 @@ import { consoleError } from "./console-errors.mjs";
 
 const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_HOST = "sign.confidential.unrealized.trade";
-export const APP_HOST = "confidential.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
+export const SIGN_HOST = "confidential.unrealized.trade";
+export const APP_HOST = "ct-app.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
 /** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
 export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
@@ -86,7 +86,7 @@ export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector defau
 // is a state the shell never has: the frame comes first in the document, so Tab went into the terminal and Tab then
 // Enter never reached Sign out. In a frame (none: the CSP's frame-ancestors 'none') there is no layer.
 const HOLD_LAYER = () => {
-  if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  if (location.hostname !== "confidential.unrealized.trade" || window.top !== window) return;
   const inert = () => {
     const f = document.getElementById("app");
     if (f && !f.inert) f.inert = true;

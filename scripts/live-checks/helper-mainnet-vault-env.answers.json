@@ -13,7 +13,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "5733a9ff6655ac2626039a298e91743fd322d4d0",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"relayer_account\":\"9747fa11a4de38cecc3b9086239633a2164a81c8e7b03a39bd3f1522438717d6\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"182893\",\"gp\":\"100000000\",\"px\":\"3.643406344946\",\"g_w\":\"92505000000000\",\"valid_until_block\":223495394}"
    },
@@ -23,7 +23,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "5733a9ff6655ac2626039a298e91743fd322d4d0",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_fee_recipient\"}}"
    },
@@ -33,7 +33,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "5733a9ff6655ac2626039a298e91743fd322d4d0",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_proof\"}}"
    }
@@ -121,7 +121,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "dee733dbd115c9b0ef1190f3eb683d897540dab2",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"relayer_account\":\"confidential.unrlzd.near\",\"fee_recipient\":\"v2.ref-finance.near\",\"relay_fee\":\"187691\",\"gp\":\"100000000\",\"px\":\"3.739002172297\",\"g_w\":\"92505000000000\",\"valid_until_block\":223428838}"
    },
@@ -131,7 +131,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "dee733dbd115c9b0ef1190f3eb683d897540dab2",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_fee_recipient\"}}"
    },
@@ -141,7 +141,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "dee733dbd115c9b0ef1190f3eb683d897540dab2",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_proof\"}}"
    }
@@ -217,7 +217,7 @@
  },
  "bad_deployed": {
   "note": "the deployed helper (X-Helper-Commit af75100a, main with the vault-mainnet-deploy merge, before the cutover) read 2026-11-07T17:32Z against the v1 record: mainnet not carried, the fee route 404 and both probes bad_shape",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "record": {
    "account_id": "vault.confidential.unrlzd.near",
    "scope": "2696045386038969515385069783440640732471742599039067451316404212202914210601"
@@ -229,7 +229,7 @@
     "status": 404,
     "headers": {
      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"not_found\"}}"
    },
@@ -239,7 +239,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_shape\"}}"
    },
@@ -249,7 +249,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_shape\"}}"
    }
@@ -272,7 +272,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"relayer_account\":\"9747fa11a4de38cecc3b9086239633a2164a81c8e7b03a39bd3f1522438717d6\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"183104\",\"gp\":\"100000000\",\"px\":\"3.647615771817\",\"g_w\":\"92505000000000\",\"valid_until_block\":223498045}"
    },
@@ -282,7 +282,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_proof\"}}"
    },
@@ -292,7 +292,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39",
-     "access-control-allow-origin": "https://confidential.unrealized.trade"
+     "access-control-allow-origin": "https://ct-app.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"bad_fee_recipient\"}}"
    }

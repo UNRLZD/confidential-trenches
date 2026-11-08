@@ -13,8 +13,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "app-console-429";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const CROWD = 25;
 export const CHAINS = ["solana", "base", "robinhood"];
 export const ROUTES = (mint) => [

@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-buy-route-strip";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 export const JS_MARKERS = ["route-strip", "route-balance", "route-wallet", "route-pool", "route-token", "data-steps", "fill-toast", "New one-time wallet"];
 export const CSS_MARKERS = [".rs-grp", ".rs-ld", "rs-glow", "rs-pop"];
 

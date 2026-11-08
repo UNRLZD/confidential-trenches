@@ -50,7 +50,7 @@ const req = createRequire(new URL("../../apps/helper/package.json", import.meta.
 const { secp256k1 } = req("@noble/curves/secp256k1.js");
 const { keccak_256 } = req("@noble/hashes/sha3.js");
 
-export const BASE = "https://api.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The EVM testnets a pool is deployed on, each with its deploy record. */
 export const NETWORKS = ["base-sepolia", "robinhood-testnet"];

@@ -32,7 +32,7 @@ const WORLD = await import("./pool-withdraw-world.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
-// GET https://api.confidential.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef,
+// GET https://ct-api.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef,
 // read 3 Nov 21:07Z: fee_payer 9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb (the helper's devnet key, which the new pool keeps)
 const FEE_PAYER = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
 const SOL_TOKEN = "So11111111111111111111111111111111111111112";
@@ -53,7 +53,7 @@ test("the testnet build's providers: two devnet RPCs, and each EVM testnet's two
   const deps = testnetPoolDeps();
   const urls = (c: "solana" | "base" | "robinhood") => deps.rpcs(c)!.map((r) => (r as unknown as { url: string }).url);
   // card pool-buy-send-fast: the second is the helper's devnet route, as mainnet's second is its /v1/rpc/solana
-  assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet"]);
+  assert.deepEqual(urls("solana"), ["https://api.devnet.solana.com/", "https://ct-api.unrealized.trade/v1/rpc/solana-devnet"]);
   // card notes-per-pool-evm-base-hang: the kit's pool pair, never sepolia.base.org's 200-block log pages
   assert.deepEqual(urls("base"), ["https://base-sepolia-rpc.publicnode.com/", "https://base-testnet.api.pocket.network/"]);
   assert.deepEqual(TESTNET_RPCS.base, evmPoolVenues()["base-sepolia"].providers);
@@ -262,7 +262,7 @@ test("the testnet build's pool RPCs, every chain and both providers, read throug
 test("card pool-buy-send-fast: the testnet build's second Solana provider is the helper's /v1/rpc/solana-devnet, as mainnet's is its /v1/rpc/solana, read with the kit's HELPER_FETCH_INIT; no 1-request-a-second public provider", async () => {
   // onfinality's public devnet endpoint (x-ratelimit-limit-sec 1, limit-day 1000, read 5 Nov 15:03Z) held the 5 Nov
   // 13:50:55Z buy 11.2 s in the page's reads: 26 of its answers were 429
-  const HELPER = "https://api.confidential.unrealized.trade";
+  const HELPER = "https://ct-api.unrealized.trade";
   assert.deepEqual([...TESTNET_RPCS.solana], ["https://api.devnet.solana.com", `${HELPER}/v1/rpc/solana-devnet`]);
   const real = globalThis.fetch;
   const inits = new Map<string, RequestInit | undefined>();
@@ -286,14 +286,14 @@ test("card pool-buy-send-fast: the testnet build's second Solana provider is the
 });
 
 test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool and the epoch; another status or an oversized answer is refused", async () => {
-  // GET https://api.confidential.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef, 3 Nov 21:07Z, its
+  // GET https://ct-api.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef, 3 Nov 21:07Z, its
   // shape (apps/helper/src/pool/fee.ts PoolFeeAnswer), here for the pinned pool
   const pool = solanaPoolOf(SOL_POOLS.devnet!.program).pool;
   const answer = { chain: "solana", cluster: "devnet", program: SOL_POOLS.devnet!.program, pool, fee_payer: FEE_PAYER, epoch_ms: 60000, epoch_start_ms: 1800000000000, fee: "1300000", step: "100000" };
   const asked: { url: string; init: RequestInit | undefined }[] = [];
   const fetchOf = (status: number, body: string) => (async (url: string | URL | Request, init?: RequestInit) => (asked.push({ url: String(url), init }), new Response(body, { status }))) as typeof fetch;
   assert.deepEqual(await poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify(answer))), answer);
-  assert.equal(asked[0]!.url, `https://api.confidential.unrealized.trade/v1/pool/fee?cluster=devnet&pool=${pool}&epoch=1800000000000`);
+  assert.equal(asked[0]!.url, `https://ct-api.unrealized.trade/v1/pool/fee?cluster=devnet&pool=${pool}&epoch=1800000000000`);
   assert.equal(asked[0]!.init?.credentials, "omit");
   assert.equal(asked[0]!.init?.redirect, "error");
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(404, `{"error":{"code":"not_found"}}`)), /HTTP 404/);

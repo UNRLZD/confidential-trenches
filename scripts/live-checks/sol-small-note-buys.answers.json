@@ -2,11 +2,11 @@
  "good": {
   "check": "sol-small-note-buys",
   "at": "2026-11-05T19:32:12.876Z",
-  "source": "live: the page's Solana pair and https://api.confidential.unrealized.trade",
+  "source": "live: the page's Solana pair and https://ct-api.unrealized.trade",
   "rent": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
-    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+    "https://ct-api.unrealized.trade/v1/rpc/solana"
    ],
    "lamportsPerByte": "5080",
    "factor": "1"
@@ -21,7 +21,7 @@
   "rent": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
-    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+    "https://ct-api.unrealized.trade/v1/rpc/solana"
    ],
    "lamportsPerByte": "3480",
    "factor": "2"
@@ -32,11 +32,11 @@
  "pinned": {
   "check": "sol-small-note-buys",
   "at": "2026-11-05T19:32:13.789Z",
-  "source": "live: the page's Solana pair and https://api.confidential.unrealized.trade",
+  "source": "live: the page's Solana pair and https://ct-api.unrealized.trade",
   "rent": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
-    "https://api.confidential.unrealized.trade/v1/rpc/solana"
+    "https://ct-api.unrealized.trade/v1/rpc/solana"
    ],
    "lamportsPerByte": "5080",
    "factor": "1"

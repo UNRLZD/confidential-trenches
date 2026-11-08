@@ -55,8 +55,8 @@ const req = createRequire(new URL("../../apps/helper/package.json", import.meta.
 const { secp256k1 } = req("@noble/curves/secp256k1.js");
 const { keccak_256 } = req("@noble/hashes/sha3.js");
 
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 const FIELDS = ["chain", "cluster", "program", "pool", "fee_payer", "epoch_ms", "epoch_start_ms", "fee", "step"];
 /** Two keyless RPCs per cluster the Rent sysvar is read on (both answered 2026-11-03 02:22Z). */
 export const RENT_RPCS = {

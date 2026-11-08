@@ -11,7 +11,7 @@ import type { DiscoverData } from "./Discover.tsx";
 import type { MarketRow, MarketSnapshot } from "./fields.ts";
 
 /** HELPER_HOST: the helper the CSP's connect-src names (public/_headers). */
-export const HELPER_URL = "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana";
+export const HELPER_URL = "https://ct-api.unrealized.trade/v1/market/lists?chain=solana";
 export const REFRESH_MS = 12_000;
 export const STALE_MS = 60_000;
 const TIMEOUT_MS = 10_000;

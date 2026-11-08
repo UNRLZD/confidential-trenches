@@ -39,7 +39,7 @@ test("recorded bad answer: today's APP_HOST stays top-level, not inside SIGN_HOS
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
   for (const w of WIDTHS) {
-    for (const [id, p] of ROUTES) assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} ${p} (${id}): not inside SIGN_HOST's shell (top window at https://confidential.unrealized.trade${p})`)), `${w.name} ${p}`);
+    for (const [id, p] of ROUTES) assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} ${p} (${id}): not inside SIGN_HOST's shell (top window at https://ct-app.unrealized.trade${p})`)), `${w.name} ${p}`);
     assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD ${w.name} inside the shell, `) && l.includes("not inside SIGN_HOST's shell")), w.name);
   }
 });
@@ -101,14 +101,14 @@ test("planted on the good answer: served bytes that differ from the integrity, a
 });
 
 test("scripts: only APP_HOST's documents' count; the shell's are left to SIGN_HOST's own checks", () => {
-  const frame = (rec, url, app) => ({ url, frame: app ? `${rec.url}/` : "https://sign.confidential.unrealized.trade/", app });
+  const frame = (rec, url, app) => ({ url, frame: app ? `${rec.url}/` : "https://confidential.unrealized.trade/", app });
   const mut = (f) => {
     const rec = structuredClone(ANSWERS.good);
     f(rec);
     return judge(rec);
   };
   // the shell's own script is not a tag of APP_HOST's page: PASS
-  let r = mut((rec) => rec.loadedScripts.push(frame(rec, "https://sign.confidential.unrealized.trade/shell.js", false)));
+  let r = mut((rec) => rec.loadedScripts.push(frame(rec, "https://confidential.unrealized.trade/shell.js", false)));
   assert.equal(r.ok, true, r.lines.join("\n"));
   // an untagged script of an APP_HOST document still FAILs
   r = mut((rec) => rec.loadedScripts.push(frame(rec, `${rec.url}/assets/late.js`, true)));
@@ -125,13 +125,13 @@ test("scripts: only APP_HOST's documents' count; the shell's are left to SIGN_HO
 });
 
 test("planted on the good answer: a console error names the resource that failed, its origin and path with no query (cards app-console-429, live-console-url: run 41816576115 said only 'a status of 429')", () => {
-  const url = "https://api.confidential.unrealized.trade/v1/market/candles?chain=solana&token=6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN&tf=15m&limit=500";
-  const at = "https://api.confidential.unrealized.trade/v1/market/candles";
+  const url = "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN&tf=15m&limit=500";
+  const at = "https://ct-api.unrealized.trade/v1/market/candles";
   const msg = (text, location) => ({ type: () => "error", text: () => text, location: () => location });
   const kept = [];
   const hook = onConsole(kept);
   hook(msg("Failed to load resource: the server responded with a status of 429 ()", { url }));
-  hook(msg("from the shell", { url: "https://sign.confidential.unrealized.trade/assets/shell.js" }));
+  hook(msg("from the shell", { url: "https://confidential.unrealized.trade/assets/shell.js" }));
   hook({ type: () => "warning", text: () => "a warning", location: () => ({ url }) });
   hook(msg("Uncaught boom", { url: "" }));
   hook(msg("Uncaught bang", undefined));

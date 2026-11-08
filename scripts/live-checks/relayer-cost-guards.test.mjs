@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/relayer-cost-guards.test.mjs: the live check replays recorded runs
-// (relayer-cost-guards.answers.json). good: api.confidential.unrealized.trade read 2026-11-07, the token minimum equal
+// (relayer-cost-guards.answers.json). good: ct-api.unrealized.trade read 2026-11-07, the token minimum equal
 // to the pin on FastNEAR and dRPC on both networks, mainnet withdrawals not carried, the testnet token quoted, the
 // devnet pool refusing a zero-fee release and a release whose program fails in the simulation, neither signed: PASS.
 // bad_cap: the same run with the testnet minimum one yocto above the pin: FAIL. bad_signed: the same run with the
@@ -64,8 +64,8 @@ test("read() asks both quotes with Origin APP_HOST and posts the two releases fo
   const pool = A.good.solana[0].pool;
   const fetchFn = async (url, init) => {
     const u = new URL(url);
-    if (u.hostname === "api.confidential.unrealized.trade") {
-      assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+    if (u.hostname === "ct-api.unrealized.trade") {
+      assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
       if (u.pathname === "/v1/withdraw/fee") {
         asked.push(`fee ${u.searchParams.get("token").slice(0, 6)}`);
         const n = u.searchParams.get("token").endsWith(".testnet") ? "testnet" : "mainnet";
@@ -89,7 +89,7 @@ test("read() asks both quotes with Origin APP_HOST and posts the two releases fo
     if (body.method === "block") return Response.json({ result: { header: { height: b.block_height } } });
     return Response.json({ result: { block_height: b.block_height, block_hash: b.block_hash, result: [...Buffer.from(b.result)] } });
   };
-  const run = await read("https://api.confidential.unrealized.trade", { fetchFn, pools: { devnet: pool, mainnet: null } });
+  const run = await read("https://ct-api.unrealized.trade", { fetchFn, pools: { devnet: pool, mainnet: null } });
   assert.deepEqual(asked, ["fee 172086", "fee bf-usd", "blockhash", "send 0", "send 1300000"]);
   assert.equal(judge(run).ok, true, judge(run).lines.join("\n"));
 });

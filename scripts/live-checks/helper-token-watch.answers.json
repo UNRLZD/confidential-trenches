@@ -1,6 +1,6 @@
 {
  "good": {
-  "note": "apps/helper at cdf50e0 (card/helper-token-watch) run with node src/server.ts on a Mac, no NEAR URL set, so the watch read rpc.mainnet.fastnear.com and near.drpc.org; read 2026-11-01T06:29:11.203Z (api.confidential.unrealized.trade does not run this commit yet)",
+  "note": "apps/helper at cdf50e0 (card/helper-token-watch) run with node src/server.ts on a Mac, no NEAR URL set, so the watch read rpc.mainnet.fastnear.com and near.drpc.org; read 2026-11-01T06:29:11.203Z (ct-api.unrealized.trade does not run this commit yet)",
   "base": "http://127.0.0.1:18093",
   "reads": [
    {
@@ -8,7 +8,7 @@
     "readAt": "2026-11-01T06:29:11.203Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -27,7 +27,7 @@
     "readAt": "2026-11-01T06:29:11.628Z",
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -52,7 +52,7 @@
     "readAt": "2026-11-01T06:29:11.706Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -71,7 +71,7 @@
     "readAt": "2026-11-01T06:29:11.745Z",
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",

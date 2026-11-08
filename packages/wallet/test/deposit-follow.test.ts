@@ -252,7 +252,7 @@ test("the status is read through the helper's keyed proxy, naming the address on
     const oc = oneClick(u, [st]);
     assert.deepEqual(await readDepositStatus(ADDR, u, oc.fetchFn), { status: st, delivered: null });
     assert.deepEqual(oc.urls, [`${DEPOSIT_STATUS_URL}?depositAddress=${ADDR}`]);
-    assert.ok(DEPOSIT_STATUS_URL.startsWith("https://api.confidential.unrealized.trade/v1/proxy/oneclick/"));
+    assert.ok(DEPOSIT_STATUS_URL.startsWith("https://ct-api.unrealized.trade/v1/proxy/oneclick/"));
   }
   const bad: [string, unknown, number?][] = [
     ["another address", statusAnswer("SUCCESS", u, "b".repeat(64))],
