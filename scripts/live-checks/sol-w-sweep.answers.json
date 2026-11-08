@@ -1,0 +1,38 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet) on card/solana-teardown-cashback 4dbf5e77 (release-95, main b967c938): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+  "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ePIMSRNqsjLV+EjISTdA8Z+CSJFFHAZVEg6d9PbQ7NrZTXBfSOR6W8ruzB4fgNp3\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ePIMSRNqsjLV+EjISTdA8Z+CSJFFHAZVEg6d9PbQ7NrZTXBfSOR6W8ruzB4fgNp3",
+  "carries": {
+   "a full sell deposits W's surplus": true,
+   "a full sell keeps what lifts the sweep to the floor, and a cashback coin's later claim": true,
+   "the full sell's keep named by the coin's cashback": true,
+   "rent(0) only when the reserve cap refuses a full sell's keep": true,
+   "the sell's rule bounds a reserve under 0 by W's lamports": true,
+   "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
+   "the sweep's rule leaves exactly that, for at most two": true,
+   "the sweep goes on when only owed-cashback accounts are kept": true,
+   "W owed, not dropped, when the rest is under the floor": true,
+   "the plan marks a volume account owed only cashback": true
+  }
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-saSv8HpKQxrQ3iZFIu5Po3tIyj9g4i3Cc3/efGxj5JmFdD0cDr0Uh9zCzZGE+Pcg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-saSv8HpKQxrQ3iZFIu5Po3tIyj9g4i3Cc3/efGxj5JmFdD0cDr0Uh9zCzZGE+Pcg",
+  "carries": {
+   "a full sell deposits W's surplus": false,
+   "a full sell keeps what lifts the sweep to the floor, and a cashback coin's later claim": false,
+   "the full sell's keep named by the coin's cashback": false,
+   "rent(0) only when the reserve cap refuses a full sell's keep": false,
+   "the sell's rule bounds a reserve under 0 by W's lamports": false,
+   "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": false,
+   "the sweep's rule leaves exactly that, for at most two": false,
+   "the sweep goes on when only owed-cashback accounts are kept": false,
+   "W owed, not dropped, when the rest is under the floor": false,
+   "the plan marks a volume account owed only cashback": false
+  }
+ }
+}
