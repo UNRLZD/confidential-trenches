@@ -398,19 +398,19 @@ const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 // 50M caps, answered a starved read with data where blastapi, 550M, answered it empty, Base block 54,819,255). So
 // every aggregate3 call runs this code at Multicall3's address (eth_call's state override), with the call's gas set to
 // EVM_READ_CALL_GAS, under every pinned provider's cap: aggregate3's calldata and answer as Multicall3 has them, each
-// read run with its own gas, L = (gas left - r x S/2 - 130,000) x 63/64 where S = (gas at the start - 100,000) / n
-// and r the reads after it: all the call's gas but half a share kept for each read after it, so a read is given about
-// (S/2 - 30,000) x 63/64 at least whatever the reads before it took, and as much as the call has where they took little
+// read run with its own gas, L = (gas left - r x S/4 - 130,000) x 63/64 where S = (gas at the start - 100,000) / n
+// and r the reads after it: all the call's gas but a quarter share kept for each read after it, so a read is given about
+// S/4 at least whatever the reads before it took (1.66M at 6 a call: 1,660,745 for the last of six behind five loops,
+// measured on anvil, review of baac0ecb; about 156,000 at 64), and as much as the call has where they took little
 // (a hookless route's reads at 100 ETH on Base take 4.1M to 9.0M gas, more than half the even share of 6 a call,
 // 6.6M, so the even share answered 20 of their 90 reads 2 and they were read again alone on every quote: the warm
 // p95 went from 683 ms to 1,440 ms, live check evm-quote-warm-round, run 42521476520; 2026-11-08 21:2xZ), and its
 // success word:
 //   1  the read returned;
 //   0  it reverted having used less than L/2;
-//   2  it failed having used L/2 or more, or was not run because less than L + L/63 + 10,000 gas was left (a provider
-//      that gave the call less gas than it was sent with, or reads before it that took it): a read that may have run out
-//      of gas. An out-of-gas frame
-//      inside the read, given all but 1/64 of its caller's gas as the quoters and the PoolManager give it, leaves the
+//   2  it failed having used L/2 or more: a read that may have run out of gas (the code also answers 2, the read not
+//      run, where less than T + 100 or L + L/63 + 10,000 gas is left; the reserve keeps both out of reach below about
+//      740 reads a call, review of baac0ecb). An out-of-gas frame inside the read, given all but 1/64 of its caller's gas as the quoters and the PoolManager give it, leaves the
 //      read d/64 of L at most at depth d, so it uses L/2 or more down to a depth of 44 (measured on the nine
 //      pinned providers, review of fe9f5ec3);
 // and its return data cut to 96 bytes (a quote's first word, and NotEnoughLiquidity or SafeCastOverflow inside
@@ -419,13 +419,13 @@ const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 // no answer without it (unaggregate): a provider that stopped applying code overrides is refused by name, never read
 // as Multicall3's shared gas (review of fe9f5ec3, finding 3). Multicall3.getEthBalance(address) answers as
 // Multicall3's (BALANCE), any other selector reverts. A read answered 2 in a call of more than READ_AGAIN_PER_CALL is
-// read again in calls of that many (L 3.2M at least), and one still 2 in a call of several alone, at the same block
+// read again in calls of that many (each given 1.66M at least), and one still 2 in a call of several alone, at the same block
 // (readBoth); one answered 2 alone prices nothing (`gas`). Assembled (two-pass, labels as PUSH2) from:
 //   dispatch    selector 4d2301cc: mstore(0, balance(calldataload(4))), return 32; 82ad56cb: aggregate; else revert
 //   aggregate   m[0] = n (1 to 1,024, else revert); revert unless gas >= 100,000 and S = (gas - 100,000) / n >= 30,000;
-//               m[0xa0] = S/2; the answer at 0x100: 0x20, n, n offsets (32n + 192i), n elements of 192 bytes each
+//               m[0xa0] = S/4; the answer at 0x100: 0x20, n, n offsets (32n + 192i), n elements of 192 bytes each
 //               (success, 0x40, length, three words); m[0x80] = the read's calldata at 0x140 + 224n
-//   each read   calldatacopy its data to m[0x80]; r = n - i - 1, T = r S/2 + 140,000; if gas < T + 100: success 2,
+//   each read   calldatacopy its data to m[0x80]; r = n - i - 1, T = r S/4 + 140,000; if gas < T + 100: success 2,
 //               length 0; else m[0x20] = L = (gas - T + 10,000) x 63/64; if gas < L + L/63 + 10,000: success 2,
 //               length 0; else
 //               g = gas, ok = call(L, target, 0, data), used = g - gas; success = ok ? 1 : used >= L/2 ? 2 : 0;
@@ -436,9 +436,10 @@ const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 // base.api.pocket.network, robinhood-rpc.publicnode.com, robinhood.drpc.org, rpc.mainnet.chain.robinhood.com,
 // robinhood.rpc.blxrbdn.com and rpc-robinhood.globalstake.io, the same answers on all nine at 40,000,000 gas: [returns 7, loops forever, returns 7, reverts 0xaa, calls the loop with all its gas then reverts 0xee,
 // returns 7] answered [1 7, 2 empty, 1 7, 0 0xaa, 2 0xee, 1 7] (through Multicall3 itself the loop and the 0xee read
-// answered 0); 64 reads, the loop first, answered 2 then 63 of 1; six reads, the first a revert after 5M gas, answered
-// [0 0xbb, then five of 1 7] (2026-11-08 21:30Z; the even share before it answered the first 2); each answer ending in
-// READ_MARKER; before the
+// answered 0); 64 reads, the loop first, answered 2 then 63 of 1; six reads, the first a revert after 14M gas, answered
+// [0 0xbb, then five of 1 7] (the even share and half a share kept answer the first 2); the loop then five reads of 1.5M
+// answered [2, then five of 1 7] (a code keeping nothing for later reads answers six 2s; 2026-11-08 22:28Z, review of
+// baac0ecb); each answer ending in READ_MARKER; before the
 // marker (2026-11-08 16:4xZ) the loop alone answered 2, getEthBalance(0x…dEaD) as Multicall3's, selector 12345678
 // reverted.
 export const EVM_READ_GAS_CODE =
@@ -451,10 +452,18 @@ const READ_AGAIN_PER_CALL = 6;
 // A plain read (no override) that answered 2 in a call and was answered at fewer a call, kept with that many, at most
 // READ_SIZES_KEPT of them, oldest out first: the next quote sends it in calls of that many at once, so a warm quote does
 // not pay the re-read's round trips again (review of fe9f5ec3, finding 2: rh-cold-quote's warm median went from 1.34 s to
-// 2.17 s). It only sends a read with more gas, so it never changes an answer
+// 2.17 s). A read whose 2 came behind an earlier read of its call that also answered 2 is not kept, unless it answers 2
+// alone too (review of baac0ecb, P2-2): a pool built to burn gas leaves the reads after it in its call S/4 each, and kept
+// alone they made every warm quote send them alone (16 to 33 eth_calls); the burner's reads are kept alone, so the next
+// quote's call holds the others without them.
+// The cost left is one more round in the cold quote for each such call. It sends a read in fewer a call, where its first
+// answer can be another (a read kept at 6 may be the last of its call, at 1.66M), never its final one
 const readSizes = new Map<string, number>();
 const READ_SIZES_KEPT = 4_096;
 const sizeKey = (r: Read) => lower(r.to) + r.data;
+/** The reads a call a plain read to `to` with calldata `data` is kept at (readSizes), or undefined: for the tests that pin
+ *  what the next quote sends it in (review of baac0ecb, P3-2; not in the index). */
+export const evmReadSizeKept = (to: string, data: string): number | undefined => readSizes.get(lower(to) + data);
 /** The gas every aggregate3 call is sent with: under the 50,000,000 cap of base-rpc.publicnode.com and the Pocket
  *  gateways (geth and reth cut a call's gas to their cap without an error, review of 2c02f7df). */
 export const EVM_READ_CALL_GAS = 40_000_000n;
@@ -670,6 +679,9 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   // One answered 2 alone keeps `gas` and prices nothing; each pass sends fewer reads a call, so it ends
   const size = new Map(parts.flatMap((part) => part.map((i): [number, number] => [i, part.length])));
   const sent = new Map(size);
+  // the reads answered 2 behind an earlier read of their call answered 2: kept at a smaller size (readSizes) only where
+  // they still answer 2 alone (a burner's own reads)
+  const behind = new Set(parts.flatMap((part) => part.filter((i, k) => (all[i] as { gas?: true }).gas === true && part.slice(0, k).some((j) => (all[j] as { gas?: true }).gas === true))));
   // each pass is this read's own: a pass reads its reads again in calls of `per`, never again itself
   for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {
     const more = reads.flatMap((_, i) => ((size.get(i) ?? 1) > per && (per === 1 || (size.get(i) ?? 1) > READ_AGAIN_PER_CALL) && (all[i] as { gas?: true }).gas === true ? [i] : []));
@@ -682,6 +694,7 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   }
   // a plain read read again keeps the size it was last read at; one kept and not read again keeps its size, newest
   for (const i of again === undefined ? plain : []) {
+    if (behind.has(i) && (all[i] as { gas?: true }).gas !== true) continue;
     const key = sizeKey(reads[i]!);
     const n = size.get(i) === sent.get(i) ? readSizes.get(key) : size.get(i);
     if (n === undefined) continue;

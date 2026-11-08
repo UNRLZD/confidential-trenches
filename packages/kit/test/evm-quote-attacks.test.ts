@@ -484,11 +484,15 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         const S = Math.floor((left - 100_000) / ds.length);
         const even = Object.entries(over).some(([a, o]) => a.toLowerCase() === MC3 && o.code === EVEN_SHARE_CODE);
         const evenL = Math.floor((S - 30_000) * 63 / 64);
+        // the share the code keeps for each read after the one it runs, as its bytes say (PUSH1 k SHR PUSH1 0xa0 MSTORE:
+        // S >> k), so a change of it in the kit's code shows here (review of baac0ecb, P2-1)
+        const keep = /60(0[0-9a-f])1c60a052/.exec(quoteMod.EVM_READ_GAS_CODE);
+        const keepShift = keep === null ? 0 : parseInt(keep[1]!, 16);
         return { jsonrpc: "2.0", id, result: encodeAggregate(ds.map((d, i) => {
           const need = readGasOf(d, overridden);
           if (bounded || even) {
             // the read's own gas: an even share (206d625f), or all that is left but a quarter share for each read after it
-            const T = (ds.length - 1 - i) * Math.floor(S / 4) + 140_000;
+            const T = (ds.length - 1 - i) * Math.floor(S / 2 ** keepShift) + 140_000;
             if (!even && left < T + 100) return STARVED as typeof STARVED;
             const L = even ? evenL : Math.floor((left - T + 10_000) * 63 / 64);
             if (need > L) {
@@ -7579,10 +7583,10 @@ const spamAt = (token: string): ModelPool => ({ key: keyOf(token, NATIVE, 500, 1
 const stdQuote = (pools: ModelPool[], token: string, rpcs?: [EvmRpc, EvmRpc]) =>
   verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, rpcs ?? [chain(pools, 0), chain(pools, 1)], NOW));
 
-test("GS1 a standard pool built to burn gas, quoted before the token's better standard pool in one call, starves none of its reads: the seeded route is held to the better one", async () => {
+test("GS1 a standard pool built to burn gas, quoted before the token's better standard pool in one call, starves none of its reads: the seeded route is held to the better one; its cost is one more round in the cold quote, the reads it starved read again", async () => {
   const token = "0x00000000000000000000000000000000000a5a51";
   // the better pool's quote takes 1M gas (a v4 quote crossing ticks): more than the 1/64 of a 50M call the burner
-  // leaves the reads after it in Multicall3's aggregate3, far inside a read's own share of a call of 6
+  // leaves the reads after it in Multicall3's aggregate3, inside the 1.66M (S/4) the code keeps for each read after it
   assert.deepEqual(await stdQuote([seeded(token), betterAt(token, 1_000_000)], token), below, "control: no burner");
   const pools = [seeded(token), betterAt(token, 1_000_000), spamAt(token)];
   const n: number[] = [];
@@ -7593,7 +7597,8 @@ test("GS1 a standard pool built to burn gas, quoted before the token's better st
 
 test("GS2 two providers with the same 50M cap that agree on a starved read: the read is read again alone and the better pool still holds the seeded route", async () => {
   const token = "0x00000000000000000000000000000000000a5a52";
-  // the better pool's quote takes 10M gas: more than a read's share of a call of 6 (about 6.5M), inside a read's alone
+  // the better pool's quote takes 10M gas: more than a call of 6 gives a read behind the burner (1.66M, S/4), inside a
+  // read's alone
   const pools = [seeded(token), betterAt(token, 10_000_000), spamAt(token)];
   const n: number[] = [];
   assert.deepEqual(await stdQuote(pools, token, [readsPerAsk(chain(pools, 0), n), chain(pools, 1)]), below);
@@ -7726,9 +7731,44 @@ test("GS8 a provider that drops the per-read gas code's override is refused by n
   );
 });
 
+// each aggregate3 call's success words, as `rpc` answers them (GS16)
+const wordsOf = (rpc: EvmRpc, into: number[][]): EvmRpc => async (calls) => {
+  const out = (await rpc(calls)) as { result?: string }[];
+  calls.forEach((c, i) => {
+    const r = out[i]?.result;
+    if (c.method !== "eth_call" || (c.params[0] as { to?: string }).to?.toLowerCase() !== MC3 || typeof r !== "string") return;
+    const h = r.slice(2);
+    const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+    into.push(Array.from({ length: at(32) }, (_, k) => at(64 + at(64 + 32 * k))));
+  });
+  return out;
+};
+
+// Review of baac0ecb, P2-2: a pool built to burn gas first in its call leaves each read after it a quarter share (1.66M
+// at 6 a call), so honest reads of 2.5M behind it answer 2 and are read again alone; kept alone, every warm quote sent
+// them alone (cold [6 x 15, 1, 1, 1, 1], warm [6 x 14, 2, 1, 1, 1, 1]). The burner alone is kept alone, so the next quote
+// sends them in a call without it, where they fit.
+test("GS16 the honest reads a pool built to burn gas starved in its call are not kept alone: the warm quote sends only the burner's reads alone", async () => {
+  const token = TOKEN16;
+  const pools = [seeded(token), spamAt(token), betterAt(token, 2_500_000), { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a: bigint) => a / 2n, readGas: 2_500_000 }];
+  const cold: number[][] = [];
+  const rpcs: [EvmRpc, EvmRpc] = [wordsOf(chain(pools, 0), cold), chain(pools, 1)];
+  assert.deepEqual(await stdQuote(pools, token, rpcs), below);
+  // control: the burner's two reads answer 2 in calls of several, and honest reads behind them in their calls do too
+  const many = cold.filter((w) => w.length > 1);
+  const twos = many.flat().filter((x) => x === 2).length;
+  assert.ok(twos > 2, `cold calls ${JSON.stringify(cold)}: more 2s than the burner's two reads`);
+  const warm: number[][] = [];
+  assert.deepEqual(await stdQuote(pools, token, [wordsOf(chain(pools, 0), warm), chain(pools, 1)]), below);
+  // the burner's two reads alone, each answered 2 (it burns all it is given), and no other read alone
+  const alone = warm.filter((w) => w.length === 1);
+  assert.deepEqual(alone, [[2], [2]], `cold calls ${JSON.stringify(cold)} warm calls ${JSON.stringify(warm)}`);
+});
+
 // the token's four hookless pools, the seeded one among them, each quote through them taking 7M gas (GS11)
+const TOKEN16 = "0x00000000000000000000000000000000000a5a67";
 const heavyFour = (token: string): ModelPool[] => [{ ...seeded(token), readGas: 7_000_000 }, betterAt(token, 7_000_000), { ...spamAt(token), give: (a) => a / 2n, readGas: 7_000_000 }, { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a) => a / 2n, readGas: 7_000_000 }];
-test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 6 first, none alone where 6 a call fits them", async () => {
+test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 6 first, none alone where 6 a call fits them, and each is kept at 6 for the next quote", async () => {
   // review of fe9f5ec3, finding 2: at Robinhood's 64 a call (L about 583,000) every heavy read was read again alone on
   // each provider. Four hookless pools whose quotes take 7M gas each: their eight reads, 56M, are more than a call of 8
   // to 16 (cut by bytes) has, so the last of them in a call run out; in calls of 6 they fit
@@ -7737,9 +7777,27 @@ test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 
   quoteMod.evmReadsPerCall(64);
   try {
     const n: number[] = [];
-    assert.deepEqual(await stdQuote(pools, token, [readsPerAsk(chain(pools, 0), n), chain(pools, 1)]), below);
+    // the reads of the calls of 2 to 6 (the second pass), each to and calldata
+    const again: { to: string; data: string }[] = [];
+    const rereads = (rpc: EvmRpc): EvmRpc => async (calls) => {
+      for (const c of calls) {
+        const p = c.params[0] as { to?: string; data?: string };
+        if (c.method !== "eth_call" || p.to?.toLowerCase() !== MC3) continue;
+        const h = p.data!.slice(10);
+        const w = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+        const k = w(32);
+        if (k < 2 || k > 6) continue;
+        const ds = decodeAggregate(p.data!);
+        for (let i = 0; i < k; i++) again.push({ to: "0x" + h.slice(2 * (64 + w(64 + 32 * i)) + 24, 2 * (64 + w(64 + 32 * i)) + 64), data: "0x" + ds[i]! });
+      }
+      return rpc(calls);
+    };
+    assert.deepEqual(await stdQuote(pools, token, [rereads(readsPerAsk(chain(pools, 0), n)), chain(pools, 1)]), below);
     assert.ok(n.some((x) => x > 6), `calls of ${n.join(",")} reads: a call of more than 6`);
     assert.ok(n.some((x) => x > 1 && x <= 6) && !n.includes(1), `calls of ${n.join(",")} reads: read again 6 a call, none alone`);
+    // each read read again 6 a call is kept at 6 for the next quote, never alone (review of baac0ecb, P3-2)
+    const kept = again.map((r) => quoteMod.evmReadSizeKept(r.to, r.data));
+    assert.ok(kept.includes(6) && kept.every((k) => k === undefined || k === 6), `kept at ${kept.join(",")}`);
   } finally {
     quoteMod.evmReadsPerCall();
   }

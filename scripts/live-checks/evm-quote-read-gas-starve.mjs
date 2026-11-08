@@ -11,12 +11,14 @@
 //   [returns 7, loops forever, returns 7, reverts 0xaa, calls the loop with all its gas then reverts 0xee, returns 7]
 //   -> [1 7, 2 empty, 1 7, 0 0xaa, 2 0xee, 1 7]
 // so the loop starves none of the reads after it, a real revert stays a revert, and a read that caught a frame running
-// out of gas (as a quoter does) is told apart from it; 64 reads with the loop first answer 2 then 63 of 1; and six reads,
-// the first an honest revert after 5,000,000 gas (a hookless quote's revert at 100 ETH on Base, PoolNotInitialized
-// after its first hop, takes 4.1M to 4.8M), answer [0 0xbb, then five of 1 7]:
-// a read is given the gas the reads before it left, never an even share it uses more than half of (the even share of
-// 6 a call, 6.6M, answered it 2, and every such read was read again alone on every quote: warm p95 1,440 ms, live check
-// evm-quote-warm-round, run 42521476520). That
+// out of gas (as a quoter does) is told apart from it; 64 reads with the loop first answer 2 then 63 of 1; six reads,
+// the first an honest revert after 14,000,000 gas, answer [0 0xbb, then five of 1 7]: the first read of a call of 6 is
+// given all but a quarter share for each read after it, 31M (the even share of 206d625f, 6.6M, answered it 2, as half a
+// share kept, 23M, would: hookless quotes at 100 ETH on Base revert after 4.1M to 9.0M, and read again alone on every
+// quote they made the warm p95 1,440 ms, live check evm-quote-warm-round, run 42521476520); and the loop then five
+// reads that each take 1,500,000 gas and return 7 answer [2, then five of 1 7]: each read behind the loop is still given
+// a quarter share, 1.66M (a code that kept nothing for the reads after the one it runs answered all six 2; review of
+// baac0ecb, P3-1). That
 // the kit reads a 2 again alone, agrees on it and prices nothing on one answered alone is its test
 // (test/evm-quote-attacks.test.ts GS1-GS11, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
 // test/evm-quote-mutants.mjs).
@@ -38,16 +40,20 @@ const SEVEN = "0x00000000000000000000000000000000000b0b02";
 const REV = "0x00000000000000000000000000000000000b0b03";
 const CATCH = "0x00000000000000000000000000000000000b0b04";
 const HEAVY = "0x00000000000000000000000000000000000b0b05";
+const MID = "0x00000000000000000000000000000000000b0b06";
 /** The planted code: a loop until out of gas, a return of the word 7, a revert of the word 0xaa, a call of the loop
- *  with all its gas followed by a revert of the word 0xee (a quoter catching an inner out of gas), and 192,000 rounds of
- *  a 26-gas loop (4,992,000 gas) followed by a revert of the word 0xbb (an honest heavy revert). */
+ *  with all its gas followed by a revert of the word 0xee (a quoter catching an inner out of gas), 538,461 rounds of a
+ *  26-gas loop (14,000,000 gas) followed by a revert of the word 0xbb (an honest heavy revert), and 57,692 rounds of it
+ *  (1,500,000 gas) followed by a return of the word 7. */
 export const PLANTED = Object.freeze({
   [LOOP]: "0x5b600056",
   [SEVEN]: "0x600760005260206000f3",
   [REV]: "0x60aa60005260206000fd",
   [CATCH]: "0x60006000600060006000" + "73" + LOOP.slice(2) + "5af150" + "60ee60005260206000fd",
-  // PUSH3 192000; 4: JUMPDEST PUSH1 1 SWAP1 SUB DUP1 PUSH1 4 JUMPI; POP, revert 0xbb
-  [HEAVY]: "0x6202ee00" + "5b600190038060045750" + "60bb60005260206000fd",
+  // PUSH3 538461; 4: JUMPDEST PUSH1 1 SWAP1 SUB DUP1 PUSH1 4 JUMPI; POP, revert 0xbb
+  [HEAVY]: "0x6208376d" + "5b600190038060045750" + "60bb60005260206000fd",
+  // PUSH3 57692; the same loop; POP, return 7
+  [MID]: "0x6200e15c" + "5b600190038060045750" + "600760005260206000f3",
 });
 const SIX = [SEVEN, LOOP, SEVEN, REV, CATCH, SEVEN];
 const SIX_WANT = [[1, "7"], [2, ""], [1, "7"], [0, "aa"], [2, "ee"], [1, "7"]];
@@ -55,6 +61,8 @@ const SIXTY_FOUR = [LOOP, ...Array(63).fill(SEVEN)];
 const SIXTY_FOUR_WANT = "2" + "1".repeat(63);
 const HEAVY_SIX = [HEAVY, SEVEN, SEVEN, SEVEN, SEVEN, SEVEN];
 const HEAVY_SIX_WANT = [[0, "bb"], [1, "7"], [1, "7"], [1, "7"], [1, "7"], [1, "7"]];
+const FLOOR_SIX = [LOOP, MID, MID, MID, MID, MID];
+const FLOOR_SIX_WANT = [[2, ""], [1, "7"], [1, "7"], [1, "7"], [1, "7"], [1, "7"]];
 
 /** aggregate3((address,bool,bytes)[]) of empty calldata to each of `tos`, every read with allowFailure */
 function aggregate(tos) {
@@ -110,6 +118,7 @@ export async function collect(own = false) {
         six: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(SIX), gas }, at, state]),
         sixtyFour: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(SIXTY_FOUR), gas }, at, state]),
         heavy: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(HEAVY_SIX), gas }, at, state]),
+        floor: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(FLOOR_SIX), gas }, at, state]),
       });
     }
     out.push({ chain, reads });
@@ -142,7 +151,9 @@ export function judge(a) {
       const many = results(r.sixtyFour);
       line(many !== null && many.map((x) => x[0]).join("") === SIXTY_FOUR_WANT, `${chain} ${r.provider}: 64 reads, the loop first, answer ${many === null ? cut(r.sixtyFour) : many.map((x) => x[0]).join("")}`);
       const heavy = results(r.heavy);
-      line(heavy !== null && JSON.stringify(heavy) === JSON.stringify(HEAVY_SIX_WANT), `${chain} ${r.provider}: six reads, the first a revert after 5M gas, answer ${heavy === null ? cut(r.heavy) : JSON.stringify(heavy)}`);
+      line(heavy !== null && JSON.stringify(heavy) === JSON.stringify(HEAVY_SIX_WANT), `${chain} ${r.provider}: six reads, the first a revert after 14M gas, answer ${heavy === null ? cut(r.heavy) : JSON.stringify(heavy)}`);
+      const floor = results(r.floor);
+      line(floor !== null && JSON.stringify(floor) === JSON.stringify(FLOOR_SIX_WANT), `${chain} ${r.provider}: the loop then five reads of 1.5M gas answer ${floor === null ? cut(r.floor) : JSON.stringify(floor)}`);
     }
   }
   return { ok, lines };
