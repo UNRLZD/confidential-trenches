@@ -71,7 +71,7 @@
     "sha384": "sha384-T4JS5ZGdyqZ3fgraPytTlSUplld9goGzYSe+hD6evSD4kfwvHUgoyFZgytQ7dMwL"
    }
   },
-  "source": "harness, /Users/mackubucku/Downloads/confidential-trenches-public/.claude/worktrees/app-in-shell/apps/terminal/dist"
+  "source": "harness, apps/terminal/dist"
  },
  "bad": {
   "url": "https://confidential.unrealized.trade/",
@@ -104,6 +104,6 @@
     "sha384": "sha384-T4JS5ZGdyqZ3fgraPytTlSUplld9goGzYSe+hD6evSD4kfwvHUgoyFZgytQ7dMwL"
    }
   },
-  "source": "harness, /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/ais/sri-bad"
+  "source": "harness, sri-bad"
  }
 }

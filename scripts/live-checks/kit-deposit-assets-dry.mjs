@@ -44,6 +44,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
+import { named } from "./record-names.mjs";
 
 const KEY = "kit-deposit-assets-dry";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -375,7 +376,7 @@ async function main() {
     const browser = await launchBrowser("chromium");
     try {
       answer = local
-        ? await collect({ browser, signUrl: SIGN_URL, dir, source: `local, SIGN_HOST answered from ${given ?? "packages/signpage's build (index.html and public/ copied)"}` })
+        ? await collect({ browser, signUrl: SIGN_URL, dir, source: `local, SIGN_HOST answered from ${given ? named(given) : "packages/signpage's build (index.html and public/ copied)"}` })
         : await collect({ browser, signUrl: opt("--url") ?? SIGN_URL, source: "live" });
     } finally {
       await browser.close();

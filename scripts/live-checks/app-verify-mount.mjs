@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { watchErrors } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-verify-mount";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -348,15 +349,22 @@ async function main() {
   if (!release) throw new Error(`--network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const route = harness ? await harnessRoute(build, release.rpcs) : null;
-  const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
+  const source = harness ? `harness, terminal build ${named(build)}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
   const rec = await collect({ shots, route, network, source });
   const record = opt("--record");
-  if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
+  if (record) writeFileSync(record, recorded(rec));
   const r = judge(rec);
   for (const l of r.lines) console.log(l);
   console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chrome ${rec.browser}, shots ${shots})`);
   process.exit(r.ok ? 0 : 1);
 }
+
+/**
+ * A run as --record writes it: each URL's token query (the page's market reads, e.g. /v1/market/token?token=<mint>) is
+ * written as <mint>, as app-console-429 records it, since a long base58 there reads to a secret scan as a key. judge()
+ * reads NEAR RPC posts only, which carry no query.
+ */
+export const recorded = (rec) => `${JSON.stringify(rec, null, 2).replace(/([?&]token=)(?!<)[^&"\\\s]+/g, "$1<mint>")}\n`;
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((e) => {

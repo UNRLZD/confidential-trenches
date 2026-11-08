@@ -109,6 +109,25 @@ test("every tracked test file in this tree is run by CI", () => {
   assert.deepEqual(unrun(ROOT), [], "a test file no CI command runs: name it by a glob in ci.yml or in its package's test script");
 });
 
+// cards helper-sell-sweep-in-ci and helper-release-sweep-in-ci: the helper's EVM sell and release sweeps
+// (apps/helper/test/pool-evm/sell-mutants.mjs, release-mutants.mjs) are no test files, so the check above cannot see
+// them; each runs in CI only while a ci.yml line runs the mutant split and the helper's test:mutants gives the split
+// every one of its parts (scripts/ci/test-shards.test.mjs holds that the split's parts together run each command)
+for (const sweep of ["sell-mutants.mjs", "release-mutants.mjs"]) {
+  test(`the helper's ${sweep} is a command of the mutant split that ci.yml's test-mutants runs, every part of it`, () => {
+    const lines = runLines(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8"));
+    assert.ok(lines.some((l) => /^node scripts\/ci\/test-shards\.mjs mutants "\$INDEX" "\$TOTAL"$/.test(l.trim())), "no ci.yml line runs the mutant split");
+    // its parts, one command each (node test/pool-evm/<sweep> <k>/<n>, or the sweep whole as 1/1): every k from 1 to n,
+    // each once
+    const cmd = `node test/pool-evm/${sweep}`;
+    const parts = mutantCommands(ROOT).filter((c) => c.dir === "apps/helper" && (c.command === cmd || c.command.startsWith(`${cmd} `)))
+      .map((c) => (c.command === cmd ? "1/1" : /^ ([1-9]\d*)\/([1-9]\d*)$/.exec(c.command.slice(cmd.length))?.slice(1).join("/") ?? c.command));
+    assert.ok(parts.length > 0, `the mutant split has no apps/helper command running test/pool-evm/${sweep}`);
+    const n = Number(parts[0].split("/")[1]);
+    assert.deepEqual(parts.toSorted(), Array.from({ length: n }, (_, k) => `${k + 1}/${n}`).toSorted(), `the sweep's parts: ${parts.join(", ")}`);
+  });
+}
+
 // a small tree: ci.yml runs a root script, a live-check glob and every package's test script; one package names its
 // test files one by one, as packages/wallet did on main bb4eafd
 test("a planted test file that no command names fails; the same tree without it passes", () => {

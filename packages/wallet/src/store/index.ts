@@ -34,6 +34,8 @@
 // - restore step 7 (wallet.md:319-322) moves a counter up with raiseDepositIndex, under the same lock and
 //   compare-and-set; nothing ever lowers a counter.
 
+import { keccak_256 } from "@noble/hashes/sha3.js";
+
 export const WALLET_DB = "ct-wallet"; // 06b:538
 export const WALLET_LOCK = "ct-wallet/counters"; // the store's own; 06b:743 named "ct-wallet"
 export const WALLET_SEED_LOCK = "ct-wallet/seed"; // the store's own: sign out and every seed write
@@ -105,13 +107,14 @@ export interface WalletStore {
   // insertSeed and setCodeSaved write it themselves, in the seed's own transaction.
   syncStatus(): Promise<void>;
   // The public copy of the deposit source's one unfunded index (wallet.md §2.3 "The deposit index rule"):
-  // meta/"deposit/<scope>" { v, scope, index, id }, which the frame and the API read in place of the seed. The index is
-  // the note store's PLANNED deposit note's (../notes/store.ts planDeposit, the one place an index is picked); this
-  // reserves nothing. `id` is U_{scope,index}'s, derived by the caller from the seed `shown`. Written under the seed
+  // meta/"deposit/<scope>" { v, scope, index, id, evm? }, which the frame and the API read in place of the seed. The
+  // index is the note store's PLANNED deposit note's (../notes/store.ts planDeposit, the one place an index is picked);
+  // this reserves nothing. `id` is U_{scope,index}'s, derived by the caller from the seed `shown`; `evm`, on an EVM
+  // pool's scope only, is U^evm_{scope,index}'s EIP-55 address (card pool-deposit-address), where 1Click sends the coin. Written under the seed
   // lock in one transaction with a compare on the seed record this call read and checked, only while the stored seed
   // is the one `shown` (else SeedChanged), so no U is named for a seed that is not stored; a record already equal is
   // left as it is (nothing written). The store's copy of the entropy and the seed it decrypts are zeroed.
-  nameDeposit(shown: { entropy: Uint8Array }, rec: { scope: bigint; index: number; id: string }): Promise<DepositRecord>;
+  nameDeposit(shown: { entropy: Uint8Array }, rec: { scope: bigint; index: number; id: string; evm?: string }): Promise<DepositRecord>;
   // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
   signOut(): Promise<void>;
   close(): void;
@@ -243,25 +246,43 @@ function statusOf(seed: unknown): { v: 1; source: string | null; code_saved: boo
   return { v: 1, source: typeof s?.source === "string" ? s.source : null, code_saved: s?.code_saved === true };
 }
 
-/** meta/"deposit/<scope>": the deposit source's one unfunded index of `scope` (a decimal field element) and U's id. */
+/** meta/"deposit/<scope>": the deposit source's one unfunded index of `scope` (a decimal field element) and U's id;
+ *  on an EVM pool's scope also U^evm's EIP-55 address (card pool-deposit-address). */
 export interface DepositRecord {
   v: 1;
   scope: string;
   index: number;
   id: string;
+  evm?: string;
 }
 /** The meta key of `scope`'s deposit record. */
 export const depositKey = (scope: bigint | string): string => `deposit/${scope.toString()}`;
 const SCOPE = /^(0|[1-9][0-9]{0,77})$/;
 const IMPLICIT = /^[0-9a-f]{64}$/;
+/** True for a 20-byte address in its EIP-55 case (lower-case hex hashed by keccak-256, a letter upper where its nibble is
+ *  8 or more), the case U^evm is derived in (../derive/keys.ts toChecksum). */
+function isEip55(v: unknown): v is string {
+  if (typeof v !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(v)) return false;
+  const lower = v.slice(2).toLowerCase();
+  const h = keccak_256(new TextEncoder().encode(lower));
+  for (let i = 0; i < 40; i++) {
+    const nibble = ((h[i >> 1] as number) >> (i % 2 === 0 ? 4 : 0)) & 15;
+    const ch = lower[i] as string;
+    if (v[i + 2] !== (nibble >= 8 ? ch.toUpperCase() : ch)) return false;
+  }
+  return true;
+}
 /** The deposit record read back, or undefined when there is none or it is not one. */
 export function depositRecordOf(rec: unknown): DepositRecord | undefined {
   if (typeof rec !== "object" || rec === null || Array.isArray(rec)) return undefined;
   const r = rec as Record<string, unknown>;
-  if (Object.keys(r).length !== 4 || r.v !== 1 || typeof r.scope !== "string" || !SCOPE.test(r.scope)) return undefined;
+  const keys = Object.keys(r);
+  const evm = keys.length === 5 && Object.hasOwn(r, "evm");
+  if (!(keys.length === 4 || evm) || r.v !== 1 || typeof r.scope !== "string" || !SCOPE.test(r.scope)) return undefined;
   if (!Number.isSafeInteger(r.index) || (r.index as number) < 0 || (r.index as number) > MAX_INDEX) return undefined;
   if (typeof r.id !== "string" || !IMPLICIT.test(r.id)) return undefined;
-  return { v: 1, scope: r.scope, index: r.index as number, id: r.id };
+  if (evm && !isEip55(r.evm)) return undefined;
+  return evm ? { v: 1, scope: r.scope, index: r.index as number, id: r.id, evm: r.evm as string } : { v: 1, scope: r.scope, index: r.index as number, id: r.id };
 }
 
 // zeroes a decrypted seed's entropy once it has been read (the store's own copy; a caller's copy is the caller's)
@@ -493,8 +514,8 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
     nameDeposit(shown, r) {
       if (!(shown?.entropy instanceof Uint8Array) || shown.entropy.length !== 16) return Promise.reject(new Error("nameDeposit needs the seed shown"));
       if (typeof r?.scope !== "bigint" || r.scope < 0n) return Promise.reject(new Error("a scope is a field element"));
-      const rec = depositRecordOf({ v: 1, scope: r.scope.toString(), index: r.index, id: r.id });
-      if (!rec) return Promise.reject(new Error("a deposit record is an index in [0, 2^32) and a 64-hex id"));
+      const rec = depositRecordOf({ v: 1, scope: r.scope.toString(), index: r.index, id: r.id, ...(r.evm === undefined ? {} : { evm: r.evm }) });
+      if (!rec) return Promise.reject(new Error("a deposit record is an index in [0, 2^32), a 64-hex id and, on an EVM pool, an EIP-55 address"));
       const key = depositKey(r.scope);
       const want = shown.entropy.slice();
       return seedLocked(async () => {
@@ -506,7 +527,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
           wipe(seed);
           if (!same) throw new SeedChanged("the stored seed is not the seed shown");
           const had = depositRecordOf(await unwrap("meta", key, await getRaw("meta", key)).catch(() => undefined));
-          if (had && had.scope === rec.scope && had.index === rec.index && had.id === rec.id) return had;
+          if (had && had.scope === rec.scope && had.index === rec.index && had.id === rec.id && had.evm === rec.evm) return had;
           // planned indices only grow (planDeposit): a lower one is a naming that planned before money reached its
           // index, and never replaces the newer one another tab named since (wallet.md W:355-358)
           if (had && had.scope === rec.scope && had.index > rec.index) return had;

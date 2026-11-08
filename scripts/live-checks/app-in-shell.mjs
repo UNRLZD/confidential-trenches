@@ -43,6 +43,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-in-shell";
 // what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
@@ -475,6 +476,21 @@ const LISTS_READ = RECORDED("discover-data/helper-lists-2026-11-01.json");
 const LISTS = { chain: LISTS_READ.chain, as_of_ms: LISTS_READ.as_of_ms, lists: Object.fromEntries(Object.entries(LISTS_READ.lists).map(([k, rows]) => [k, unzipRows(LISTS_READ.fields, rows)])) };
 const TOKEN_READ = RECORDED("token-source/helper-token-2026-11-03.json");
 const TOKEN_ANSWER = { ...TOKEN_READ.rest, row: unzipRows(TOKEN_READ.fields, [TOKEN_READ.row])[0] };
+/** Verify's NEAR reads on mainnet (the release's pair, apps/terminal/src/screens/verify/release.ts), answered from a
+ *  recorded real read of the mainnet vault (apps/terminal/test/verify-mount/answers-mainnet.json, made by its record.ts
+ *  with `mainnet`: only what the two RPCs answered) by RPC and params, so /verify draws its true mainnet state. A request
+ *  the recording does not hold, like every other origin, is aborted. */
+const VERIFY_READ = RECORDED("verify-mount/answers-mainnet.json");
+const VERIFY_ORIGINS = new Set(VERIFY_READ.rpcs.map((u) => new URL(u).origin));
+const verifyAnswer = (origin, body) => {
+  let params;
+  try {
+    params = JSON.stringify(JSON.parse(body ?? "").params);
+  } catch {
+    return null;
+  }
+  return VERIFY_READ.answers.find((a) => new URL(a.url).origin === origin && JSON.stringify(a.params) === params) ?? null;
+};
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
 
@@ -505,6 +521,10 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
       const known = u.searchParams.get("chain") === "solana" && u.searchParams.get("token") === TOKEN_ANSWER.row.token;
       return route.fulfill({ status: known ? 200 : 404, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(known ? TOKEN_ANSWER : { error: "unknown token" }) });
     }
+    if (VERIFY_ORIGINS.has(u.origin)) {
+      const hit = verifyAnswer(u.origin, route.request().postData?.());
+      if (hit) return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(hit.answer) });
+    }
     if (u.origin === APP_HOST) {
       let file = path.join(appBuild, decodeURIComponent(u.pathname));
       if (!file.startsWith(appBuild + path.sep) || !existsSync(file) || statSync(file).isDirectory()) file = path.join(appBuild, "index.html");
@@ -529,7 +549,7 @@ async function main() {
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const routes = harness ? Object.fromEntries(await Promise.all(KINDS.map(async (k) => [k, await harnessRoute(build, k)]))) : null;
   const expect = opt("--expect") ?? (harness ? "in" : "out");
-  const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, the stand-in shell` : "live";
+  const source = harness ? `harness, terminal build ${named(build)}, the stand-in shell` : "live";
   const rec = await collect({ launchers, shots, source, expect, routes });
   const record = opt("--record");
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);

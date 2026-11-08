@@ -1155,6 +1155,11 @@ test("at a steady base fee, a stuck sale priced under 2 x base + tip is replaced
   // the sale's watch ended when the replacement took its nonce: its hash is read only by the lane's tends (a send it
   // replaced may yet be the one mined), at most once per EVM_SELL_DROP_MARGIN_MS on each provider
   assert.ok(saleReads() - readsThen <= 2 * Math.ceil(200_000 / 60_000), `the sale's hash read ${saleReads() - readsThen} times in 200 s`);
+  // and with the clock standing still nothing reads it: a tend reads it at most once per margin, and the sale's own
+  // watch, ended, reads it no more (one that read on past the replacement read it at every poll, about 5 times here)
+  const readsNow = saleReads();
+  await r.step({ atMs: deadlineMs + 400_000 });
+  assert.equal(saleReads(), readsNow, "the sale's own watch ended when the replacement took its nonce");
   const [sale, repl] = r.raws as [ReturnType<typeof fieldsOf>, ReturnType<typeof fieldsOf>];
   // the providers' tip now the replacement's own: 2 x base + tip is exactly its maxFeePerGas, which it covers
   await r.step({ atMs: deadlineMs + 500_000, tip: repl.tip });
@@ -2037,15 +2042,30 @@ test("the receipt watch backs off: from the poll interval, doubling, to 15 times
 async function untilHeld(make: (calls: Calls) => [Opts, Opts], label: string) {
   const x: Calls = [];
   const [oa, ob] = make(x);
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => NOW);
+  // card fresh-run-margin: the clock stands at NOW while the sales go, then moves past every watch's bound, as a live
+  // helper's does, so a watch that never gets both receipts ends instead of reading on for the rest of the file
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, [rpc(x, oa), rpc([], ob)], () => clock);
   let sent = 0;
   let last: Awaited<ReturnType<typeof s.sell>> | undefined;
   for (let i = 0; i < 60 && last?.status !== 429; i++) {
     last = await s.sell(freshBody(`W-${label}-${i}`, { sell: { token: `0x${(0xe000 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.77");
-    if (last.status === 200) sent++;
-    await settle(() => false, 4);
+    if (last.status === 200) {
+      sent++;
+      await readBack(x);
+    }
   }
+  clock = PAST_EVERY_WATCH;
   return { sent, last: last! };
+}
+/** Past every bound a watch started at NOW can hold: its send's margin and EVM_LANE_WATCH_MS, a day over. */
+const PAST_EVERY_WATCH = NOW + 86_400_000;
+/** Until the sale just sent has had its first receipt read on both providers and what that read decides has run (its
+ *  `landed`, when both answered): the watch's own first read, never a fixed wait (card fresh-run-margin). */
+async function readBack(x: Calls) {
+  const hash = `0x${hex(keccak_256(unhex(sends(x).at(-1)!)))}`;
+  while (!x.some((c) => c.method === "eth_getTransactionReceipt" && c.params[0] === hash)) await new Promise((ok) => setTimeout(ok, 1));
+  await new Promise((ok) => setImmediate(ok));
 }
 const WORST = EVM_POOL_SELL_GAS * (2n * BASE + TIP) + L1; // the receipts' cost here too: gas 1,000,000 at 2 x base + tip
 

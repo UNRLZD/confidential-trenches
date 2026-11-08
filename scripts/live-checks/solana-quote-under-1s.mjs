@@ -9,7 +9,11 @@
 // It passes only when, on every run: the leg is not refused and S1-S13 each ran and passed; both providers answered a
 // blockhash and a simulation; the second simulation ([wallet, wSOL]) ran on both; the build went out before the reference
 // answered (the card's first lever); the second simulation went out before the first answered, on each provider (its
-// second); and over the runs the quote is complete at p50 < 1,000 ms and p95 < 1,300 ms.
+// second); provider B's first simulation did not wait for B's read of the build's lookup tables: it went out before that
+// read answered, or within SIM_AFTER_A_MS of the last read it does wait for (the reference, provider A's table read,
+// and each provider's rents and pre-state read, which go out on A's mint read) (its third: the assembly and the simulations run
+// on A's tables, B's are awaited before the checks); and over the runs the
+// quote is complete at p50 < 1,000 ms and p95 < 1,300 ms. Each run's stage times (stages()) print as p50/p95 lines.
 //   node scripts/live-checks/solana-quote-under-1s.mjs [--base <helper origin>] [--runs <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, which judge() reads as the test replays it.
 // Runs: pending solana-quote-under-1s, its recorded head run misses the time bound from a host about 200 ms from the helper; it joins the helper's runs once a run passes
@@ -24,17 +28,40 @@ export const WALLET = "9UnZnrFJ1CXCmCorgGU9NvYkX5np1h4v4ympx3Nrdw3v";
 export const WSOL = "FVee2JCpMd9k17iP1LLCSP28wwLt5N172pULCqUo8qQi";
 export const BUY_LAMPORTS = 10_000_000n;
 export const SLIPPAGE_BPS = 500;
-export const RUNS = 5;
+export const RUNS = 20;
 /** The helper's /v1/rpc takes 16 calls of one caller in 10 s (apps/helper/src/rpc/rpc.ts RPC_CLIENT_MAX); a quote and its
  * dry send ask about 14 of provider B, so runs go 10 s apart. */
 export const GAP_MS = 10_000;
 export const P50_MS = 1_000;
 export const P95_MS = 1_300;
+/** How soon after provider A's table read answers its simulations go out when nothing else holds them: the device's
+ * assembly and one tick. [design: 30 ms, ten times the p95 of `checks`, the device's own work, in the head's runs.] */
+export const SIM_AFTER_A_MS = 30;
 export const CHECKS = Array.from({ length: 13 }, (_, i) => `S${i + 1}`);
 const PROVIDER_A = "https://solana-rpc.publicnode.com";
 
 const args = (k) => process.argv.flatMap((v, i) => (process.argv[i - 1] === k ? [v] : []));
 const pct = (xs, p) => [...xs].sort((x, y) => x - y)[Math.min(xs.length - 1, Math.ceil((p / 100) * xs.length) - 1)];
+
+const sameKeys = (a, b) => Array.isArray(a) && a.length === b.length && a.every((k, i) => k === b[i]);
+
+/** One run's stage times in ms from the run's start, from its record alone: when the reference and the build answered,
+ * each provider's read of the build's tables and its first simulation answered, its last read before the quote
+ * answered, and the quote; `checks` is the quote less the last call it waited on (the device's own work). */
+export function stages(r) {
+  const calls = r.calls ?? [];
+  const build = calls.find((c) => c.method === "build");
+  const end = (f) => calls.find(f)?.end ?? NaN;
+  const out = { reference: end((c) => c.method === "reference"), build: build?.end ?? NaN };
+  for (const at of ["A", "B"]) {
+    out[`tables${at}`] = build && Array.isArray(build.tables) && build.tables.length ? end((c) => c.at === at && c.method === "getMultipleAccounts" && c.start >= build.end && sameKeys(c.keys, build.tables)) : NaN;
+    out[`simulation${at}`] = end((c) => c.at === at && c.method === "simulateTransaction" && c.keys?.length === 4 && c.keys[0] === WALLET);
+    out[`reread${at}`] = Math.max(...calls.filter((c) => c.at === at && c.method === "getMultipleAccounts" && c.end <= r.quote).map((c) => c.end));
+  }
+  out.checks = r.quote - Math.max(...calls.filter((c) => c.end <= r.quote).map((c) => c.end));
+  out.quote = r.quote;
+  return out;
+}
 
 /** One run's verdict lines and its quote time, from its record alone (no network). */
 function judgeRun(r, i) {
@@ -56,6 +83,21 @@ function judgeRun(r, i) {
   const build = calls.find((c) => c.method === "build");
   if (!ref || !build) bad("no reference read or no build");
   else if (!(build.start < ref.end)) bad(`the build went out at ${build.start} ms, after the reference answered at ${ref.end} ms`);
+  if (build && !Array.isArray(build.tables)) bad("the build's lookup tables were not recorded");
+  else if (build?.tables.length) {
+    const tablesOn = (at) => calls.find((c) => c.at === at && c.method === "getMultipleAccounts" && c.start >= build.end && sameKeys(c.keys, build.tables));
+    const tablesA = tablesOn("A");
+    const tablesB = tablesOn("B");
+    const simB = calls.find((c) => c.at === "B" && isSim(c) && c.keys?.length === 4 && c.keys[0] === WALLET);
+    if (!tablesA || !tablesB) bad(`provider ${tablesA ? "B" : "A"} read no lookup table of the build`);
+    else if (simB) {
+      // what the simulations do wait for: A's tables, and each provider's rents and pre-state read (begun with the build)
+      const side = calls.filter((c) => c.start < build.end && (c.method === "getMinimumBalanceForRentExemption" || (c.method === "getMultipleAccounts" && c.keys?.[0] === WALLET && c.keys.length <= 5)));
+      const ref = calls.find((c) => c.method === "reference");
+      const ready = Math.max(tablesA.end, ref?.end ?? 0, ...side.map((c) => c.end));
+      if (!(simB.start < tablesB.end) && !(simB.start - ready <= SIM_AFTER_A_MS)) bad(`provider B's simulation went out at ${simB.start} ms, after its table read answered at ${tablesB.end} ms and ${simB.start - ready} ms after what it waits for`);
+    }
+  }
   for (const at of ["A", "B"]) {
     const first = calls.find((c) => c.at === at && isSim(c) && done(c) && c.keys?.length === 4 && c.keys[0] === WALLET);
     const second = calls.find((c) => c.at === at && isSim(c) && done(c) && c.keys?.length === 2 && c.keys[0] === WALLET && c.keys[1] === WSOL);
@@ -120,7 +162,9 @@ async function once(base) {
         const start = rel();
         const r = await fetch(url, init);
         const body = await r.text();
-        calls.push({ at: "helper", method: "build", start: Math.round(start), end: Math.round(rel()), status: r.status });
+        let tables;
+        try { tables = Object.keys(JSON.parse(body)?.addressesByLookupTableAddress ?? {}); } catch { tables = undefined; }
+        calls.push({ at: "helper", method: "build", start: Math.round(start), end: Math.round(rel()), status: r.status, ...(tables ? { tables } : {}) });
         return new Response(body, { status: r.status, headers: r.headers });
       },
       paths: solanaSendPaths({ helper: solanaHelperRpc(base) }),
@@ -159,6 +203,11 @@ async function main() {
   if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
   const v = judge(rec);
   for (const r of runs) console.log(`    run quote ${r.quote} ms${r.refused ? ` refused: ${r.refused}` : ""}`);
+  const st = runs.map(stages);
+  for (const k of Object.keys(st[0] ?? {})) {
+    const xs = st.map((x) => x[k]).filter(Number.isFinite);
+    if (xs.length) console.log(`    stage ${k.padEnd(11)} p50 ${Math.round(pct(xs, 50))} ms, p95 ${Math.round(pct(xs, 95))} ms (n=${xs.length})`);
+  }
   for (const l of v.lines) console.log(l);
   console.log(`live-check ${KEY}: ${v.ok ? "PASS" : "FAIL"} (${base}, ${runs.length} runs)`);
   return v.ok ? 0 : 1;

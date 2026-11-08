@@ -119,7 +119,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = () => sleep(CHECK_IDLE_MS + 60);
 
 /** A drawn form whose RPCs answer from `exists` (an account's name -> it exists) and may be held by `gate`. */
-function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bigint>; handoff?: boolean; end?: () => { kind: string; fee?: bigint } | void } = {}) {
+function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bigint>; handoff?: boolean; end?: () => { kind: string; fee?: bigint } | void; unmatched?: () => number } = {}) {
   const exists = new Set(["alice.near", "bob.near"]);
   let gate: Promise<void> | null = null;
   const view = (name: string): NearRpc => ({
@@ -147,6 +147,7 @@ function drawn(over: { available?: () => Promise<bigint>; fee?: () => Promise<bi
     available: over.available ?? (async () => 10_000_000n),
     fee: over.fee ?? (async () => 120_000n),
     ...(over.handoff === false ? {} : { handoff: async (w: unknown, fee: bigint) => (handed.push(w), fees.push(fee), over.end?.()) }),
+    ...(over.unmatched ? { unmatched: over.unmatched } : {}),
   };
   const form = drawWithdrawForm(doc, deps, button, (step) => void steps.push(step())) as unknown as El;
   const input = (k: string) => form.find((e) => e.dataset.input === k)!;
@@ -281,7 +282,7 @@ test("a stale answer is never drawn: a check that answers after a newer keystrok
   assert.equal(f.go.disabled, true);
 });
 
-test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet relayer, no hand-off and no settle pass", async () => {
+test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet relayer, no hand-off, and a settle pass with nothing RESERVED opens no seed", async () => {
   assert.equal(PAGE_NETWORK, "mainnet");
   assert.equal(RELEASE_WITHDRAW_RELAYER.testnet, null, "the testnet relayer is the testnet build's only");
   let opened = 0;
@@ -289,7 +290,19 @@ test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet rel
     opened += 1;
     throw new Error("not opened");
   };
-  const page = { store: no, notes: no, seed64: no, prover: { load: no, prove: no } };
+  // mainnet names the vault of contracts/vault/deployments/mainnet-v1.json (card vault-mainnet-deploy), so the settle
+  // pass reads the note store (handoff.ts withdrawSettle: nothing only where the network names no vault); with no
+  // RESERVED note in it, the seed is never opened
+  let listed = 0;
+  const store = {
+    list: async () => {
+      listed += 1;
+      return [];
+    },
+  };
+  const notes = async () => store as unknown as Awaited<ReturnType<Parameters<typeof withdrawSettle>[0]["notes"]>>;
+  assert.equal(MAIN.vault, JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/mainnet-v1.json", import.meta.url), "utf8")).account_id);
+  const page = { store: no, notes, seed64: no, prover: { load: no, prove: no } };
   const d = withdrawFormDeps(page);
   assert.equal(d.network, "mainnet");
   assert.deepEqual(d.rpcs.map((r) => r.name), [MAIN.fastnear[0], MAIN.drpc]);
@@ -299,5 +312,26 @@ test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet rel
   // the testnet release on this build names no relayer: nothing offered there either
   assert.equal(withdrawHandoff(page, { network: "testnet" }), null);
   assert.deepEqual(await withdrawSettle(page), { outcomes: {} });
+  assert.equal(listed, 1, "the settle pass lists the mainnet notes once");
   assert.equal(opened, 0, "neither the store nor the seed is opened");
+});
+
+// card wallet-withdraw-move-out: the settle pass's "unmatched" (a drift note left RESERVED) is shown on the form, in
+// draft words, and drawn again at each tap's read
+test("the settle pass's unmatched withdrawals are shown on the form; none, nothing shown", async () => {
+  let n = 1;
+  const f = drawn({ unmatched: () => n });
+  const notice = () => f.form.find((e) => e.dataset.notice === "unmatched");
+  assert.ok(notice(), "one unmatched withdrawal: the notice is drawn");
+  assert.equal(notice()!.hidden, false);
+  assert.equal(notice()!.dataset.draftCopy, "unmatched");
+  assert.equal(notice()!.textContent, WITHDRAW_WORDS.unmatched);
+  n = 0;
+  f.type("to", "alice.near");
+  f.type("amount", "5");
+  await settle();
+  await f.tap();
+  assert.equal(notice()!.hidden, true, "read again at the tap: none now");
+  const none = drawn();
+  assert.equal(none.form.find((e) => e.dataset.notice === "unmatched")?.hidden ?? true, true);
 });

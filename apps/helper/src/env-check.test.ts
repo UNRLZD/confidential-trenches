@@ -71,6 +71,19 @@ test("a Solana cluster with only some of its names set is refused, with no value
   }
 });
 
+/**
+ * card vault-lines-record-read: vault-lines.sh reads the record with node in the running helper's image
+ * (ct-helper:<HELPER_COMMIT>); this stub `docker` in `dir`/bin runs this machine's node with what follows the image
+ * name, as the image's node would. The PATH to spawn the script with.
+ */
+async function dockerStub(dir: string): Promise<string> {
+  const fs = await import("node:fs");
+  const bin = path.join(dir, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "docker"), `#!/usr/bin/env bash\nwhile [[ $# -gt 0 && "$1" != ct-helper:* ]]; do shift; done\n[[ "$1" == "ct-helper:${"a".repeat(40)}" ]] || exit 125\nshift\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 });
+  return `${bin}:${process.env.PATH ?? ""}`;
+}
+
 // card helper-v1-cutover: the record commit moves MAINNET_VAULT, and the host's .env still names the vault before it.
 // The settings check redeploy.sh runs before the swap refuses those lines at once (not after the 300 s wait), and
 // deploy/vault-lines.sh moves them to mainnet-v1.json's vault, after which the check takes them.
@@ -135,7 +148,8 @@ test("MAINNET_VAULT moves: env-check refuses the old WITHDRAW_VAULT_MAINNET and 
   const envFile = path.join(deploy, ".env");
   fs.writeFileSync(envFile, `${lines.join("\n")}\n`, { mode: 0o600 });
   const inode = fs.statSync(envFile).ino;
-  const r = spawnSync("bash", [path.join(deploy, "vault-lines.sh")], { encoding: "utf8" });
+  const PATH = await dockerStub(dir);
+  const r = spawnSync("bash", [path.join(deploy, "vault-lines.sh")], { encoding: "utf8", env: { ...process.env, PATH } });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /moved WITHDRAW_VAULT_MAINNET BIND_VAULT_MAINNET to mainnet-v1\.json's vault/);
   for (const v of [OLD, NEXT, w.key.slice(8), b.key.slice(8)]) assert.ok(!(r.stdout + r.stderr).includes(v), "no value printed");
@@ -146,7 +160,7 @@ test("MAINNET_VAULT moves: env-check refuses the old WITHDRAW_VAULT_MAINNET and 
   assert.deepEqual(fs.readdirSync(deploy).sort(), [".env", "vault-lines.sh"], "no temporary file left");
   assert.equal(refusal(parse(after), NEXT), null, "the moved lines are taken under the new pin");
   // a second run changes nothing
-  const again = spawnSync("bash", [path.join(deploy, "vault-lines.sh")], { encoding: "utf8" });
+  const again = spawnSync("bash", [path.join(deploy, "vault-lines.sh")], { encoding: "utf8", env: { ...process.env, PATH } });
   assert.equal(again.status, 0);
   assert.equal(fs.readFileSync(envFile, "utf8"), after);
 });
@@ -155,7 +169,7 @@ test("MAINNET_VAULT moves: env-check refuses the old WITHDRAW_VAULT_MAINNET and 
 test("vault-lines.sh: no mainnet-v1.json (only mainnet-test.json), a record that names no mainnet vault, or a vault line not in the plain form is refused with deploy/.env unchanged; a name not set stays unset", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");
-  const server = (env: string, record: string | null) => {
+  const server = async (env: string, record: string | null) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vault-lines-"));
     const deploy = path.join(dir, "apps/helper/deploy");
     fs.mkdirSync(deploy, { recursive: true });
@@ -164,25 +178,36 @@ test("vault-lines.sh: no mainnet-v1.json (only mainnet-test.json), a record that
     fs.writeFileSync(path.join(dir, "contracts/vault/deployments/mainnet-test.json"), JSON.stringify({ network: "mainnet", account_id: "vault-test.confidential.unrlzd.near" }));
     if (record !== null) fs.writeFileSync(path.join(dir, "contracts/vault/deployments/mainnet-v1.json"), record);
     fs.writeFileSync(path.join(deploy, ".env"), env, { mode: 0o600 });
-    const r = spawnSync("bash", [path.join(deploy, "vault-lines.sh")], { encoding: "utf8" });
+    const r = spawnSync("bash", [path.join(deploy, "vault-lines.sh")], { encoding: "utf8", env: { ...process.env, PATH: await dockerStub(dir) } });
     return { r, text: fs.readFileSync(path.join(deploy, ".env"), "utf8"), files: fs.readdirSync(deploy).sort() };
   };
+  // the running image's line, which the record reader needs (vault-lines.sh exit 6 without it)
+  const IMAGE = `HELPER_COMMIT=${"a".repeat(40)}\n`;
   const OLD = "WITHDRAW_VAULT_MAINNET=vault-test.confidential.unrlzd.near\n";
   const rec = (o: object) => JSON.stringify(o);
-  for (const [record, code] of [[null, 4], [rec({ network: "testnet", account_id: "vault.x.testnet" }), 4], [rec({ network: "mainnet", account_id: "Evil Vault" }), 4], [rec({ network: "mainnet" }), 4], ["{not json", 4], [rec({ network: "mainnet", account_id: "a.near", x: { account_id: "b.near" } }), 4]] as const) {
-    const s = server(OLD, record);
+  for (const [record, code] of [[null, 4], [rec({ network: "testnet", account_id: "vault.x.testnet" }), 4], [rec({ network: "mainnet", account_id: "Evil Vault" }), 4], [rec({ network: "mainnet" }), 4], ["{not json", 4], [rec({ network: "mainnet", x: { account_id: "b.near" } }), 4]] as const) {
+    const s = await server(IMAGE + OLD, record);
     assert.equal(s.r.status, code, `${record}: ${s.r.stderr}`);
-    assert.equal(s.text, OLD);
+    assert.equal(s.text, IMAGE + OLD);
   }
+  // card vault-lines-record-read: the top level's account_id is the vault, a nested one (the real record's
+  // sources.account_id) is never read for it
+  const nested = await server(IMAGE + OLD, rec({ network: "mainnet", account_id: "a.near", x: { account_id: "b.near" } }));
+  assert.equal(nested.r.status, 0, nested.r.stderr);
+  assert.equal(nested.text, `${IMAGE}WITHDRAW_VAULT_MAINNET=a.near\n`);
+  // no image line: refused before the record is read, deploy/.env unchanged
+  const noImage = await server(OLD, rec({ network: "mainnet", account_id: "vault.confidential.unrlzd.near" }));
+  assert.equal(noImage.r.status, 6, noImage.r.stderr);
+  assert.equal(noImage.text, OLD);
   const good = rec({ network: "mainnet", account_id: "vault.confidential.unrlzd.near" });
   for (const env of ["export WITHDRAW_VAULT_MAINNET=vault-test.confidential.unrlzd.near\n", "WITHDRAW_VAULT_MAINNET = vault-test.confidential.unrlzd.near\n", `${OLD}${OLD}`, "BIND_VAULT_MAINNET: vault-test.confidential.unrlzd.near\n"]) {
-    const s = server(env, good);
+    const s = await server(IMAGE + env, good);
     assert.equal(s.r.status, 1, `${env}: ${s.r.stderr}`);
-    assert.equal(s.text, env);
+    assert.equal(s.text, IMAGE + env);
     assert.deepEqual(s.files, [".env", "vault-lines.sh"]);
   }
   // only the withdrawal's line set: it moves, and BIND_VAULT_MAINNET stays unset
-  const s = server(`HELPER_COMMIT=${"a".repeat(40)}\n${OLD}`, good);
+  const s = await server(`HELPER_COMMIT=${"a".repeat(40)}\n${OLD}`, good);
   assert.equal(s.r.status, 0, s.r.stderr);
   assert.equal(s.text, `HELPER_COMMIT=${"a".repeat(40)}\nWITHDRAW_VAULT_MAINNET=vault.confidential.unrlzd.near\n`);
   const usage = spawnSync("bash", [path.join(import.meta.dirname, "../deploy/vault-lines.sh"), "--force"], { encoding: "utf8" });

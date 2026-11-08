@@ -1,11 +1,11 @@
 // Removes or weakens each of the EVM pool sender's sell checks (src/pool/evm.ts, POST /v1/pool/evm/sell, card
 // helper-evm-sender), one at a time, and runs the test named for it in src/pool/evm-sell.test.ts: each named test
-// passes on the code as it is and fails on every mutant. The mutants are made in a copy of the helper's src in a fresh
-// temporary folder inside the helper (so the copy resolves the same installed modules, @blindfill/kit included),
-// removed at the end; the tree's own files are never changed. Exits 1 when a named test passes on its mutant, fails or
-// runs no test on the code as it is, or a mutant's text is not in its file exactly once (the style of
-// packages/kit/test/evm-quote-mutants.mjs).
-//   node apps/helper/test/pool-evm/sell-mutants.mjs
+// passes on the code as it is and fails on every mutant; mutant-sweep.mjs runs the list (each entry's text in its file
+// exactly once, read before any test runs; the mutants made in a copy of the helper, never in the tree) and exits 1 on
+// any problem. CI runs it as apps/helper's test:mutants, in parts, each one command of ci.yml's test-mutants split
+// (scripts/ci/test-shards.mjs); test/pool-evm/mutant-sweep.test.mjs holds the list and the sweep's refusals.
+//   node apps/helper/test/pool-evm/sell-mutants.mjs [<k>/<n>]   (part k of n only; test:mutants runs the parts, one
+//   command each, so ci.yml's split can share them out)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check): the chainId === 0
 // test (the venue's id is never 0, so the venue check refuses it), the explicit "no delegate pinned" test (an
@@ -16,11 +16,14 @@
 // replacement's "a base fee of 0 prices no poster gas" test on Robinhood (without it the poster gas's division by that 0
 // throws all the same, failing the tend), and a tend's return at a nonce whose replacement would be over
 // EVM_SELL_MAX_FEE_PER_GAS against going on to the next nonce (a send above a nonce left unreplaced is never mined before
-// it, so what lands is the same either way, and the lane is tended again at its next read).
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// it, so what lands is the same either way, and the lane is tended again at its next read), and, while a block is
+// EVM_LANE_SENT_RETRY_S = 1 s, a held answer's one-block wait counted from the last held send instead of now and a
+// failed hold read's rest of its block rounded down instead of up (each wait is then a block or less, at least 1 s, so
+// 1 s either way; both survived the sweep's first whole run, card helper-sell-sweep-in-ci).
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../../scripts/group-run.mjs";
+import { sweepMain } from "./mutant-sweep.mjs";
 
 const HELPER = fileURLToPath(new URL("../..", import.meta.url));
 const EVM = "src/pool/evm.ts";
@@ -38,6 +41,8 @@ function movedAfter(line, after) {
   return [find, find.slice(line.length) + line];
 }
 const FEE_TO_CHECK = '    // the fee goes only to the Sell\'s feeRecipient (SellDelegate.sol, L-1): this network\'s fee collector, whose Paid log\n    // is the one proof of the fee (card helper-sender-fee-proof)\n    if (s.feeRecipient !== collector) return no(422, "fee_recipient", `the Sell pays ${s.feeRecipient}, not the fee collector ${collector}`);\n';
+/** the sale's proof, where evmSaleUnpaid reads both receipts (evmBuyUnpaid's line differs only from evmBuyLanded on) */
+const SALE_OK = "const ok = [ra, rb].every((r) => evmRpcHex(r.status) === \"0x1\" && evmSalePaid(";
 
 // [file, text, replacement, test file, the test whose name starts so, which must fail]
 export const MUTANTS = [
@@ -92,10 +97,11 @@ export const MUTANTS = [
   [EVM, '    if (s.feeRecipient !== collector) return no(422, "fee_recipient"', '    if (s.feeRecipient !== feeRecipient) return no(422, "fee_recipient"', T, "fee_recipient:"],
   // no collector set: every sell refused (fail closed); a collector at the pool's or a sender's address refused at start
   [EVM, '    if (feeCollector === undefined) return no(503, "not_configured", `no fee collector is set for ${cfg.network}`);\n', "", T, "no fee collector set"],
-  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
-  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sellSender)", T, "no fee collector set"],
-  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender)", T, "no fee collector set"],
-  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", "(feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", "(!ADDRESS.test(feeCollector) || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sellSender || feeCollector === feeRecipient)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === feeRecipient)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender)", T, "no fee collector set"],
+  [EVM, "(!ADDRESS.test(feeCollector) || feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", "(feeCollector === pool || feeCollector === sender || feeCollector === sellSender || feeCollector === feeRecipient)", T, "no fee collector set"],
   // its place: before the fee cap and before W's signature, so a sell paying another is refused as that whatever else
   [EVM, ...movedAfter(FEE_TO_CHECK, '    if (s.feeCap >= s.minOut) return no(422, "fee_over_cap", `feeCap ${s.feeCap} is not under minOut ${s.minOut}`);\n'), T, "fee_recipient:"],
   [EVM, ...movedAfter(FEE_TO_CHECK, '    if (signer !== w) return no(422, "bad_signature", `signed by ${signer ?? "no key"}, not W`);\n'), T, "fee_recipient:"],
@@ -170,7 +176,8 @@ export const MUTANTS = [
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `w:${w}`, ...(client', T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '["all", `t:${token}`, ...(client', T, "unpaid sell gas:"],
   [EVM, '["all", `w:${w}`, `t:${token}`, ...(client', '[`w:${w}`, `t:${token}`, ...(client', T, "withdraws still go while sales answer 429:"],
-  [EVM, 'const cap = k === "all" ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;', "const cap = EVM_SELL_UNPAID_CAP_WEI;", T, "withdraws still go while sales answer 429:"],
+  [EVM, "      const cap = budget ? EVM_SELL_UNPAID_BUDGET_WEI : EVM_SELL_UNPAID_CAP_WEI;", "      const cap = EVM_SELL_UNPAID_CAP_WEI;", T, "withdraws still go while sales answer 429:"],
+  [EVM, '      const budget = k === "all" || k === "buys";', '      const budget = k === "buys";', T, "withdraws still go while sales answer 429:"],
   // fold 1, H2.3: the sell sender's own key
   [EVM, '    if (cfg.sellKey === undefined || sellSender === null) return no(503, "not_configured"', '    if (false) return no(503, "not_configured"', T, "the sell sender:"],
   [EVM, "  if (sellSender === sender) throw", "  if (false) throw", T, "the sell sender:"],
@@ -218,7 +225,7 @@ export const MUTANTS = [
   [EVM, "    if (maxFee > EVM_SELL_MAX_FEE_PER_GAS) {", "    if (maxFee >= EVM_SELL_MAX_FEE_PER_GAS) {", T, "at exactly EVM_SELL_MAX_FEE_PER_GAS"],
   [EVM, "      if (!lane.ceilingSaid) log(", "      log(", T, "a base fee whose 2 x base + tip is over"],
   [EVM, "maxFeePerGas: maxFee, gas, to: lane.from, data: new Uint8Array() }, key);", "maxFeePerGas: maxFee, gas, to: pool, data: new Uint8Array() }, key);", T, "a stuck sale on the sell lane"],
-  [EVM, "    watch(withdrawLane, nonce, hash, until);", "", T, "a stuck withdraw on the withdraw lane"],
+  [EVM, "    watch(withdrawLane, nonce, hash, until, landed);", "", T, "a stuck withdraw on the withdraw lane"],
   // fold 4, L1: a replacement's gas, 21,000, and on Robinhood the L1 poster's gas from the kit's ArbGasInfo read
   [EVM, "    let gas = EVM_SELF_TRANSFER_GAS;", "    let gas = EVM_POOL_SELL_GAS;", T, "a stuck sale on the sell lane"],
   [EVM, "    if (POSTER_GAS_CHAINS.has(cfg.network)) {", "    if (false) {", T, "the replacement's gas on Robinhood"],
@@ -309,27 +316,25 @@ export const MUTANTS = [
   [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS - 2_000 > now() ? now() + block : Infinity;", T, "callers obeying Retry-After go within one retry"],
   [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS + 2_000 > now() ? now() + block : Infinity;", T, "a held answer's Retry-After"],
   [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS >= now() ? now() + block : Infinity;", T, "a held answer's Retry-After"],
-  [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;", "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? lane.heldSentAt + block : Infinity;", T, "a held answer's Retry-After"],
   [EVM, "Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000))", "Math.max(1, Math.floor((Math.min(nextTend, mined) - now()) / 1000))", T, "a held answer's Retry-After"],
   [EVM, "      r.low.catch(() => {}); // a failed read is shared too: its whole block answers from it", "      r.low.catch(() => {\n        if (lane.heldRead === r) lane.heldRead = null;\n      });", T, "a hold read that fails"],
   [EVM, "      return { ...u, retryAfterS: Math.max(u.retryAfterS ?? 0, Math.max(1, Math.ceil((r.at + block - now()) / 1000))) };", "      return u;", T, "a hold read that fails"],
-  [EVM, "Math.max(1, Math.ceil((r.at + block - now()) / 1000))", "Math.max(1, Math.floor((r.at + block - now()) / 1000))", T, "a hold read that fails"],
   // card helper-sender-fee-proof: a landed sale counts as paid only when both providers' receipts read status 1 and carry
   // the fee collector's Paid log (from the collector, from W, value at least the fee); one provider's receipt never
   // clears a charge; the cost is the higher receipt's
-  [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [ra, rb].some((r) =>", T, "one provider's receipt never clears a charge"],
-  [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [ra].every((r) =>", T, "one provider's receipt never clears a charge"],
-  [EVM, "  const ok = [ra, rb].every((r) =>", "  const ok = [rb].every((r) =>", T, "one provider's receipt never clears a charge"],
+  [EVM, "  " + SALE_OK, "  " + SALE_OK.replace("[ra, rb].every(", "[ra, rb].some("), T, "one provider's receipt never clears a charge"],
+  [EVM, "  " + SALE_OK, "  " + SALE_OK.replace("[ra, rb].every(", "[ra].every("), T, "one provider's receipt never clears a charge"],
+  [EVM, "  " + SALE_OK, "  " + SALE_OK.replace("[ra, rb].every(", "[rb].every("), T, "one provider's receipt never clears a charge"],
   [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\");", T, "a sale that landed with status 1 but no Paid log"],
   [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmSalePaid(r, sale.collector, sale.w, sale.fee));", T, "one provider's receipt never clears a charge"],
   [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, 0n));", T, "each part of the Paid log is checked"],
   [EVM, "        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);", "        return landed(seen[0] ?? seen[1]!, seen[1] ?? seen[0]!);", T, "one provider's receipt never clears a charge"],
-  [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = ca;", T, "the cost is the higher of the two receipts'"],
-  [EVM, "  const cost = ca > cb ? ca : cb;", "  const cost = cb;", T, "the cost is the higher of the two receipts'"],
+  [EVM, "  const cost = ca > cb ? ca : cb;\n  " + SALE_OK, "  const cost = ca;\n  " + SALE_OK, T, "the cost is the higher of the two receipts'"],
+  [EVM, "  const cost = ca > cb ? ca : cb;\n  " + SALE_OK, "  const cost = cb;\n  " + SALE_OK, T, "the cost is the higher of the two receipts'"],
   [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee, maxFeePerGas }, held.wei);", T, "the same sale proven on both providers holds nothing"],
   [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (evmRpcHex(address) !== collector ||", T, "each part of the Paid log is checked"],
   [EVM, "    if (removed === true || evmRpcHex(address) !== collector ||", "    if (removed === true ||", T, "each part of the Paid log is checked"],
-  [EVM, " || !Array.isArray(topics) || topics.length !== 2) return false;", " || !Array.isArray(topics)) return false;", T, "each part of the Paid log is checked"],
+  [EVM, "evmRpcHex(address) !== collector || !Array.isArray(topics) || topics.length !== 2) return false;", "evmRpcHex(address) !== collector || !Array.isArray(topics)) return false;", T, "each part of the Paid log is checked"],
   [EVM, "    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;", "    if (evmRpcHex(topics[1]) !== from) return false;", T, "each part of the Paid log is checked"],
   [EVM, "    if (evmRpcHex(topics[0]) !== PAID_TOPIC || evmRpcHex(topics[1]) !== from) return false;", "    if (evmRpcHex(topics[0]) !== PAID_TOPIC) return false;", T, "each part of the Paid log is checked"],
   [EVM, "    return d !== null && d.length === 2 + 64 && BigInt(d) >= fee;", "    return d !== null && d.length === 2 + 64;", T, "each part of the Paid log is checked"],
@@ -339,50 +344,4 @@ export const MUTANTS = [
   [EVM, "\"Paid(address,uint256)\"", "\"Paid(address indexed,uint256)\"", T, "the Paid topic is FeeCollector's"],
 ];
 
-// "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a
-// run past 120 s is killed, its process group with it (scripts/group-run.mjs), and counts as a fail
-let lastFail = "";
-function run(dir, file, name) {
-  const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
-  const r = runSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8", timeoutMs: 120_000 });
-  if (r.status !== 0) {
-    lastFail = `${r.stdout ?? ""}${r.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
-    return "fail";
-  }
-  return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const dir = mkdtempSync(join(HELPER, ".sell-mutants-"));
-  let bad = 0;
-  try {
-    for (const p of ["src", "package.json"]) cpSync(join(HELPER, p), join(dir, p), { recursive: true });
-    const src = new Map([EVM].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-    for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
-      const r = run(dir, file, t);
-      if (r !== "pass") {
-        console.log(`FAIL "${t}" in ${file} ${r === "none" ? "names no test" : `fails on the code as it is:\n${lastFail}`}`);
-        bad++;
-      }
-    }
-    if (bad === 0) {
-      MUTANTS.forEach(([file, find, repl, tf, t], i) => {
-        const s = src.get(file);
-        if (s.split(find).length !== 2) {
-          console.log(`FAIL mutant ${i + 1}: its text is not in ${file} exactly once`);
-          bad++;
-          return;
-        }
-        writeFileSync(join(dir, file), s.replace(find, repl));
-        const r = run(dir, tf, t);
-        writeFileSync(join(dir, file), s);
-        console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].trim().slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
-        if (r !== "fail") bad++;
-      });
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
-  process.exit(bad === 0 ? 0 : 1);
-}
+if (process.argv[1] === fileURLToPath(import.meta.url)) sweepMain(MUTANTS, "sell-mutants.mjs");

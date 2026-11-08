@@ -17,12 +17,20 @@
 //!    does not close P on chain: a later full prepay on P lands, so "after a failed prepay nothing more on that P
 //!    succeeds" holds for a short one only because the relayer never sends one (2.10 (i), "the relayer's own sizing").
 //!
+//! 5. `a_taken_prepay_is_recovered_on_a_fresh_precommitment` (audit V-01, Pillow Auditors v1.0, poc/audit_v01.rs's
+//!    sequence, card wallet-near-prepay-taken): the relayer's prepay puts P on chain, a stranger's 1 USDC naming P lands
+//!    first (naming itself, then naming the victim: the depositor is the message's word), the victim's 10 USDC on P is
+//!    refused `PrecommitmentAlreadyUsed` and refunded whole; then the device's recovery (packages/wallet/src/deposit/
+//!    follow.ts, bind.ts ownRow): a prepay of the victim's next precommitment P' and the same 10 USDC on it, which
+//!    lands. The pages hold the stranger's 1 USDC under P and the victim's 10 under P', and nothing is left with the
+//!    victim. On the real USDC wasm.
+//!
 //! Each prints its gas table.
 #![cfg(feature = "sandbox")]
 
 mod harness;
 
-use harness::{Harness, Outcome, R, YOCTO_PER_BYTE};
+use harness::{Harness, Outcome, R, TokenKind, YOCTO_PER_BYTE};
 use near_sdk::json_types::Base64VecU8;
 use near_sdk::serde_json::{self, json, Value};
 use near_workspaces::types::{Gas, NearToken};
@@ -203,5 +211,60 @@ async fn a_short_prepay_is_a_failed_receipt() -> R<()> {
     prepay(&h, &relayer, p, MIN).await?.expect_all_ok("a full prepay after three short ones")?;
     assert_eq!(record(&h, p).await?, Some(MIN));
     println!("\ngas table\n{}", h.gas_table());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_taken_prepay_is_recovered_on_a_fresh_precommitment() -> R<()> {
+    const TAKEN: &str = "12345678901234567890123456789012345678901234567890";
+    const NEXT: &str = "12345678901234567890123456789012345678901234567891";
+    const ONE_USDC: u128 = 1_000_000;
+    const TEN_USDC: u128 = 10_000_000;
+    // the size the kit prepays whenever a tree may grow (2.10 (h))
+    const PAID: u128 = 904 * YOCTO_PER_BYTE;
+    for names_victim in [false, true] {
+        let h = Harness::with_vault_and(TokenKind::Usdc).await?;
+        let relayer = h.account("relayer", 10).await?;
+        let victim = h.account("victim", 10).await?;
+        let stranger = h.account("stranger", 10).await?;
+        h.mint(victim.id(), TEN_USDC).await?;
+        h.mint(stranger.id(), ONE_USDC).await?;
+        let send = |p: &str, depositor: &str, amount: u128| {
+            json!({"receiver_id": h.vault, "amount": amount.to_string(), "msg": json!({"precommitment": p, "depositor": depositor}).to_string()})
+        };
+        let one = NearToken::from_yoctonear(1);
+        let gas = Gas::from_tgas(180);
+        let named = if names_victim { victim.id().to_string() } else { stranger.id().to_string() };
+
+        prepay(&h, &relayer, TAKEN, PAID).await?.expect_all_ok("the relayer's prepay of P")?;
+        let o = h.call_outcome(&stranger, &h.token, "ft_transfer_call", send(TAKEN, &named, ONE_USDC), one, gas).await?;
+        println!("stranger naming {named}: failures {:?}", o.failures().iter().map(|r| r.line()).collect::<Vec<_>>());
+        assert_eq!(h.token_balance(stranger.id()).await?, 0, "the stranger's 1 USDC went in");
+        let o = h.call_outcome(&victim, &h.token, "ft_transfer_call", send(TAKEN, victim.id().as_str(), TEN_USDC), one, gas).await?;
+        let lines: Vec<_> = o.failures().iter().map(|r| r.line()).collect();
+        assert!(lines.iter().any(|l| l.contains("PrecommitmentAlreadyUsed")), "the victim's call on P is refused: {lines:?}");
+        assert_eq!(h.token_balance(victim.id()).await?, TEN_USDC, "the victim's USDC came back whole");
+
+        // the device's recovery: the relayer prepays P', the victim's call goes again on it
+        prepay(&h, &relayer, NEXT, PAID).await?.expect_all_ok("the relayer's prepay of P'")?;
+        let o = h.call_outcome(&victim, &h.token, "ft_transfer_call", send(NEXT, victim.id().as_str(), TEN_USDC), one, gas).await?;
+        assert!(o.failures().is_empty(), "the victim's call on P' lands: {:?}", o.failures().iter().map(|r| r.line()).collect::<Vec<_>>());
+        assert_eq!(h.token_balance(victim.id()).await?, 0, "nothing is left with the victim");
+        assert_eq!(h.token_balance(&h.vault).await?, ONE_USDC + TEN_USDC, "the vault holds both deposits");
+
+        let rows = h.view(&h.vault, "deposits", json!({"from": 0, "limit": 10})).await?;
+        let rows = rows.as_array().ok_or("deposits: not a list")?;
+        assert_eq!(rows.len(), 2, "two deposits: {rows:?}");
+        let got: Vec<(String, String, String)> = rows
+            .iter()
+            .map(|r| (r["precommitment"].to_string().replace('"', ""), r["depositor"].to_string().replace('"', ""), r["value"].to_string().replace('"', "")))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(TAKEN.to_string(), named.clone(), ONE_USDC.to_string()), (NEXT.to_string(), victim.id().to_string(), TEN_USDC.to_string())],
+            "the stranger's 1 USDC under P (naming {named}), the victim's 10 under P'"
+        );
+        println!("V-01 recovered (stranger names the victim: {names_victim}): {got:?}");
+    }
     Ok(())
 }

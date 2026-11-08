@@ -474,9 +474,9 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// -------------------------------------------------------------------------------------------- the twenty-three kinds
-test("every kind of the twenty-three has a fixture, and only the twenty-three do", () => {
-  assert.equal(SIGNPAGE_KINDS.length, 23);
+// -------------------------------------------------------------------------------------------- the twenty-four kinds
+test("every kind of the twenty-four has a fixture, and only the twenty-four do", () => {
+  assert.equal(SIGNPAGE_KINDS.length, 24);
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -589,7 +589,53 @@ test("the deposit sheet's reads: an asset list or dry quote the device cannot ha
   }
 });
 
-test("a kind not in the twenty-three cannot be built", () => {
+test("pool.address (card pool-deposit-address): a pool chain alone, or with an origin asset and a decimal amount both, never an address", () => {
+  assert.deepEqual(C.signpageBuildRequest("pool.address", { chain: "solana" }, "id"), { chain: "solana", v: 1, id: "id", type: "pool.address" });
+  assert.deepEqual(C.signpageBuildRequest("pool.address", { chain: "base", origin_asset: "nep141:usdc", amount: "25" }, "id"),
+    { chain: "base", origin_asset: "nep141:usdc", amount: "25", v: 1, id: "id", type: "pool.address" });
+  for (const b of [{}, { chain: "near" }, { chain: "ethereum" }, { chain: "solana", origin_asset: "nep141:usdc" }, { chain: "solana", amount: "25" },
+    { chain: "solana", origin_asset: "nep141:usdc", amount: "1e5" }, { chain: "solana", origin_asset: "nep141:usdc", amount: 25 },
+    { chain: "solana", recipient: "x" }, { chain: "solana", origin_asset: "nep141:usdc", amount: "25", refundTo: "x" }, { chain: "solana", origin_asset: 7, amount: "25" }])
+    assert.throws(() => C.signpageBuildRequest("pool.address", b, "id"), TypeError, JSON.stringify(b));
+});
+
+test("pool.address: an answer the device cannot have made is dropped, each check on its own", async () => {
+  const S = FIXTURES["pool.address"].result;
+  const SOL = "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T";
+  const EVM = "0x52908400098527886E0F7030069857D2E4169EE7";
+  const Q = { deposit_address: "dep1", origin_asset: "nep141:usdc", amount_in: "25", min_amount_out: "0.16", deadline: "2026-11-11T00:00:00.000Z", time_estimate_s: 20 };
+  const bad = [
+    [{ ...S, asset: "ETH" }, "the Solana pool's asset as ETH"],
+    [{ chain: "base", address: EVM, asset: "SOL" }, "the Base pool's asset as SOL"],
+    [{ ...S, asset: "USDC" }, "USDC, the vault's, on a pool"],
+    [{ ...S, chain: "near" }, "a chain with no pool"],
+    [{ ...S, address: EVM }, "an EVM address on Solana"],
+    [{ chain: "base", address: SOL, asset: "ETH" }, "a Solana address on Base"],
+    [{ chain: "base", address: EVM.toLowerCase().replace("0x", "0X"), asset: "ETH" }, "an EVM address not 0x"],
+    [{ ...S, address: "1111" }, "a Solana address not of 32 bytes"],
+    [{ ...S, quote: { ...Q, min_amount_out: "0.1234567891" } }, "a min out finer than SOL's 9 decimals"],
+    [{ ...S, quote: { ...Q, time_estimate_s: -1 } }, "a negative time"],
+    [{ ...S, quote: { ...Q, deadline: "soon" } }, "a deadline not ISO"],
+    [{ ...S, quote: { ...Q, recipient: SOL } }, "a field the quote does not have"],
+    [{ ...S, refund_to: SOL }, "a field the answer does not have"],
+  ];
+  for (const [result, why] of bad) {
+    const { h, c } = await readyClient();
+    const { id, settled } = await open(h, c, "pool.address");
+    h.post(answer(id, result));
+    await flush();
+    assert.equal(settled(), false, why);
+    assert.equal(c.dropped().shape, 1, why);
+  }
+  for (const result of [{ ...S, quote: Q }, { chain: "base", address: EVM, asset: "ETH" }, { chain: "robinhood", address: EVM, asset: "ETH", quote: { ...Q, min_amount_out: "0.000000000000000001" } }]) {
+    const { h, c } = await readyClient();
+    const { id, p } = await open(h, c, "pool.address");
+    h.post(answer(id, result));
+    assert.deepEqual(await p, { ok: true, result });
+  }
+});
+
+test("a kind not in the twenty-four cannot be built", () => {
   for (const k of ["sign", "eth_sendTransaction", "ready", "", "__proto__"]) {
     assert.throws(() => C.signpageBuildRequest(k, {}, "id"), TypeError, k);
   }
@@ -1316,6 +1362,8 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "pool.deposit": 10_000, "pool.buy": 10_000, "pool.sell": 10_000, "pool.withdraw": 5_000,
     // the deposit sheet's reads (card kit-deposit-assets-dry): the helper's 1Click round trips, as deposit.quote
     "deposit.assets": 15_000, "deposit.dry": 15_000,
+    // a pool's deposit address (card pool-deposit-address): the helper's 1Click round trip, as deposit.quote
+    "pool.address": 15_000,
   });
 });
 
