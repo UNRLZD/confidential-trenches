@@ -30,7 +30,8 @@ const M = [
   ["M6b whole USDC, the payload bound loosened too", "const calls = moveCalls(typed, read.usdc - 1n,", "const calls = moveCalls(typed, read.usdc,", "amount > usdc - 1n", "amount > usdc"],
   ["M7 U's key not zeroed", "          k.secretKey.fill(0);\n", ""],
   ["M8 no seed lock", "    const tx = await seedLock(async () => {", `    const tx = await ${SELF}(async () => {`],
-  ["M9 the payload rule not called", "    checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);\n", ""],
+  // the move built as the rule would seal it, the rule never called (card signers-own-bytes: the rule's call returns the sealed move)
+  ["M9 the payload rule not called", "    const move = checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);\n", "    const move = { signer: U, receiver: token, calls } as SealedMove;\n"],
   ["M10 a NEAR refusal not answered gas", '        if (lack !== null) return { kind: "gas", need: lack, u: U };', ""],
   ["M11 the token allowed as the typed account", "to === u || to === token", "to === u"],
   // this fold

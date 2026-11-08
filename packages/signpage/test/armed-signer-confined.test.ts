@@ -26,9 +26,32 @@ function code(dir: string, out: string[] = []): string[] {
 /** The text with its comments taken out (a `//` inside a string such as a URL stays). */
 const uncommented = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
-test("only the signing page's trade names the blind signer: the wallet that makes it and signpage/src/trade.ts", () => {
+// The sign-site census (scripts/ci/sign-sites.mjs) names every sign site, this one too, but can reach none: it names the
+// signer only as the text of its one entry and imports nothing but node's own modules, so it reads the source as text.
+const CENSUS = "scripts/ci/sign-sites.mjs";
+const ENTRY = '"packages/wallet/src/arming/records.ts:solanaArmedSigner"';
+function censusReachesNothing(src: string): string[] {
+  const why: string[] = [];
+  const at = [...src.matchAll(/solanaArmedSigner/g)].map((m) => m.index);
+  const entry = src.indexOf(ENTRY);
+  if (at.length !== 1 || entry < 0 || at[0] !== entry + ENTRY.indexOf("solanaArmedSigner")) why.push(`names the signer other than as its one entry, ${ENTRY}`);
+  const loads = [...src.matchAll(/\bimport\s*(?:[^"'`;]*?\bfrom\s*)?["'`]([^"'`]+)["'`]|\b(?:import|require)\s*\(\s*([^)]*)\)/g)].map((m) => m[1] ?? m[2]!);
+  for (const l of loads) if (!/^node:[a-z/_]+$/.test(l)) why.push(`loads ${l}, not one of node's own modules`);
+  return why;
+}
+
+test("only the signing page's trade names the blind signer: the wallet that makes it, signpage/src/trade.ts, and the census as text", () => {
   const naming = ["packages", "apps", "scripts"].flatMap((d) => code(d)).filter((f) => readFileSync(path.join(ROOT, f), "utf8").includes("solanaArmedSigner")).sort();
-  assert.deepEqual(naming, ["packages/signpage/src/trade.ts", "packages/wallet/src/arming/records.ts"]);
+  assert.deepEqual(naming, ["packages/signpage/src/trade.ts", "packages/wallet/src/arming/records.ts", CENSUS]);
+  const census = readFileSync(path.join(ROOT, CENSUS), "utf8");
+  assert.deepEqual(censusReachesNothing(census), []);
+  // planted: the census reading the signer through an import, a dynamic import or a require, or naming it twice
+  const imp = census.replace('import path from "node:path";', 'import path from "node:path";\nimport { solanaArmedSigner } from "../../packages/wallet/src/arming/records.ts";');
+  assert.notEqual(imp, census);
+  assert.ok(censusReachesNothing(imp).some((w) => /loads \.\.\/\.\.\/packages\/wallet/.test(w)) && censusReachesNothing(imp).some((w) => /names the signer other than/.test(w)));
+  assert.ok(censusReachesNothing(`${census}\nconst k = await import("../../packages/wallet/src/arming/records.ts");\n`).some((w) => /loads "\.\.\/\.\.\/packages/.test(w)));
+  assert.ok(censusReachesNothing(`${census}\nconst k = require("@blindfill/wallet");\n`).some((w) => /loads "@blindfill\/wallet"/.test(w)));
+  assert.ok(censusReachesNothing(census.replace('import { fileURLToPath } from "node:url";', 'import { fileURLToPath } from "node:url";\nimport "../../packages/kit/src/index.ts";')).some((w) => /loads \.\.\/\.\.\/packages\/kit/.test(w)));
 });
 
 test("trade.ts hands the blind signer's sign to the kit's runSolanaTrade alone, as its deps.sign", () => {
