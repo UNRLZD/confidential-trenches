@@ -80,7 +80,9 @@ export const RELEASE_HELPER = "https://api.confidential.unrealized.trade";
  * against and what the withdrawal pays its fee to), written here and never read from a helper; null where the release
  * names none, and no withdrawal is asked there (card signpage-withdraw-handoff). Testnet: VT-T02's R and F
  * (contracts/vault/deployments/testnet-t02-run.json), the pair the deployed helper's GET /v1/withdraw/fee names for the
- * testnet token (read 2026-11-06 15:58Z; R and F in that run record). Mainnet: none until the release's relayer is written with its vault.
+ * testnet token (read 2026-11-06 15:58Z; R and F in that run record). Mainnet: null until the helper's GET
+ * /v1/withdraw/fee names the relayer apps/helper/deploy/withdraw-relayer-key.sh makes, fee recipient fees.unrlzd.near
+ * (owner 7 Nov 09:27Z); test/release-relayer-pins.test.ts holds it to that answer and to reads on both release RPCs.
  * Testnet's pair is the testnet build's only (POOL_TESTNET, as ../pool/solana.ts folds the devnet pins): SIGN_HOST's
  * build folds it to null and carries neither id. Node and the tests read it with __SIGN_NETWORK__ = "testnet" set.
  */
