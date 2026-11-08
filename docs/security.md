@@ -95,7 +95,7 @@ Since the vault holds USDC, the token's issuer can halt transfers, block an acco
 These are read-only reads against two public NEAR RPCs. They need no account, no key and no install beyond `curl` and `jq`, and the full script is in the [README](../README.md#check-it-yourself-with-no-money).
 
 1. No access key. `view_access_key_list` on the vault's account must return `[]` on both RPCs.
-2. The published code is the running code. `view_code` returns the hash of the deployed code. It must equal the hash of the vault you build yourself with `pnpm run build:vault`.
+2. The published code is the running code. `view_code` returns the hash of the deployed code. It must equal `code_hash` in the vault's deploy record, [contracts/vault/deployments/mainnet-v1.json](../contracts/vault/deployments/mainnet-v1.json). `node contracts/vault/scripts/deploy.mjs --verify-records` rebuilds the vault at the commit that record names and fails unless the build has that hash. It needs Docker, Rust 1.96.0 and cargo-near 0.22.0.
 3. The vault holds what it owes. `totals()` on the vault reports what it owes. `ft_balance_of` on the USDC token for the vault's account must report the same amount.
 
 Point it at any keyless account today and line 1 passes. Point it at the vault once it's deployed and all three should. If any line fails, the vault isn't what we say it is.
