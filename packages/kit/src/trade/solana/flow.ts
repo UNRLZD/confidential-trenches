@@ -72,7 +72,7 @@ import {
   type SolanaCapStep,
   type SolanaJupiterBuild,
 } from "./build.ts";
-import { isOwnSolanaWire, ownSolanaWire } from "./own-wires.ts";
+import { ownedSolanaWire, ownSolanaWire } from "./own-wires.ts";
 import { dryRunSolanaSet, sendSolanaSet, solanaPacedRpc, solanaProviderLimits, solanaSameProvider, type SolanaProviderRps, type SolanaDryTx, type SolanaFetch, type SolanaRpc, type SolanaSendPath, type SolanaTxOutcome } from "./send.ts";
 
 export type SolanaTradeLeg = {
@@ -627,7 +627,7 @@ async function prepareLeg(
 
 /** Each tx signed, and sent with the very height its signer was handed: one path for the trade and its teardowns. */
 function signSet(deps: Pick<SolanaTradeDeps, "dry" | "sign">, items: readonly { wallet: string; tx: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number } }[]): Promise<{ wire: Uint8Array; lastValidBlockHeight: number }[]> {
-  return Promise.all(items.map(async ({ wallet, tx }) => ({ wire: await solanaSignedWire(deps, wallet, tx), lastValidBlockHeight: tx.lastValidBlockHeight })));
+  return Promise.all(items.map(async ({ wallet, tx }) => (await signedWire(deps, wallet, tx, () => null)) as { wire: Uint8Array; lastValidBlockHeight: number }));
 }
 
 /**
@@ -646,16 +646,21 @@ function referenceLate(at: number, now: number): string | null {
 /** The signature into the wire's one slot, checked against the wallet's key before anything is sent. Only a wire this
  *  flow built and checked is signed (own-wires.ts): any other is refused before the signer is asked. */
 export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }): Promise<Uint8Array> {
-  return (await signedWire(deps, wallet, a, () => null)) as Uint8Array;
+  return ((await signedWire(deps, wallet, a, () => null)) as { wire: Uint8Array }).wire;
 }
 
-/** solanaSignedWire with the age rule: `late` is read when the signer answers, before its signature is checked or put
- * in the wire; a reason from it is answered instead of the wire, and the signature is dropped. */
-async function signedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }, late: () => string | null): Promise<Uint8Array | string> {
+/** solanaSignedWire with the age rule, and the height the wire was checked with: `late` is read when the signer answers,
+ * before its signature is checked or put in the wire; a reason from it is answered instead of the wire, and the
+ * signature is dropped. */
+async function signedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }, late: () => string | null): Promise<{ wire: Uint8Array; lastValidBlockHeight: number } | string> {
   // The bytes signed are the bytes checked: a wire this flow built and checked, unchanged since; one signature slot, and
-  // the message is the wire's own message.
-  if (!isOwnSolanaWire(a)) throw new Error("the wire is not one this flow built and checked");
-  if (a.wire[0] !== 1 || a.wire.length !== 65 + a.message.length || a.wire.subarray(65).some((b, i) => b !== a.message[i])) throw new Error("the message is not the checked wire's message");
+  // the message is the wire's own message. From here on only the registry's copy is read (own-wires.ts): the caller's
+  // arrays changed while the signer awaits reach nothing signed, verified or sent.
+  const own = ownedSolanaWire(a);
+  if (own === null) throw new Error("the wire is not one this flow built and checked");
+  const { wire, lastValidBlockHeight } = own;
+  const message = wire.subarray(65);
+  if (wire[0] !== 1 || !(a.message instanceof Uint8Array) || a.message.length !== message.length || message.some((b, i) => b !== a.message[i])) throw new Error("the message is not the checked wire's message");
   let sig: Uint8Array;
   if (deps.dry) {
     // Dry: no key is used. A placeholder fills the slot; every simulation runs with sigVerify off.
@@ -664,15 +669,14 @@ async function signedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: s
     sig = placeholder;
   } else {
     if (!deps.sign) throw new Error("no signer");
-    if (!Number.isSafeInteger(a.lastValidBlockHeight) || a.lastValidBlockHeight <= 0) throw new Error("the tx has no lastValidBlockHeight");
-    sig = await deps.sign(wallet, a.message, { lastValidBlockHeight: a.lastValidBlockHeight });
+    if (!Number.isSafeInteger(lastValidBlockHeight) || lastValidBlockHeight <= 0) throw new Error("the tx has no lastValidBlockHeight");
+    sig = await deps.sign(wallet, message.slice(), { lastValidBlockHeight });
   }
   const why = late();
   if (why) return why;
-  if (!deps.dry && (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, a.message, base58.decode(wallet)))) throw new Error(`the signature for ${wallet} does not verify`);
-  const wire = Uint8Array.from(a.wire);
+  if (!deps.dry && (!(sig instanceof Uint8Array) || sig.length !== 64 || !ed25519.verify(sig, message, base58.decode(wallet)))) throw new Error(`the signature for ${wallet} does not verify`);
   wire.set(sig, 1);
-  return wire;
+  return { wire, lastValidBlockHeight };
 }
 
 /** The teardown never throws into the trade: the sell has already run; a read or send that fails leaves the accounts
@@ -707,9 +711,9 @@ async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps:
   }
   const bh = await readSolanaBlockhashBoth(deps.providers);
   const frames = buildSolanaTeardown(w, plan, bh);
-  const simulations = await Promise.all(frames.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers)));
-  // the copies checked are the only bytes signed (own-wires.ts)
+  // the copies simulated and checked are the only bytes signed (own-wires.ts): taken before the first await
   const checkedWires = frames.map((f) => Uint8Array.from(f.wire));
+  const simulations = await Promise.all(checkedWires.map((wire) => both((r) => simulateSolanaTeardown(r, wire, w, addresses).catch(() => null), deps.providers)));
   const verdict = checkSolanaTeardown(checkedWires, w, { accounts, wallet: [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], simulations });
   if (!verdict.ok || frames.length === 0) return { verdict, frames: frames.length, ...(verdict.ok ? {} : { refused: "teardown checks" }) };
   frames.forEach((f, i) => ownSolanaWire(f, checkedWires[i]!));
@@ -920,9 +924,9 @@ export async function runSolanaTrade(req: SolanaTradeRequest, bareDeps: SolanaTr
   // leg is refused and its signature, if one was made, is dropped, never put in a wire or sent.
   const late = () => referenceLate(renewed.at, clock());
   const wires = await Promise.all(checked.map(async (p) => {
-    const w = late() ?? (await signedWire(deps, p.leg.wallet, p.assembled, late));
-    if (typeof w === "string") { p.rec.refused = w; return null; }
-    return { p, tx: { wire: w, lastValidBlockHeight: p.assembled.lastValidBlockHeight } };
+    const t = late() ?? (await signedWire(deps, p.leg.wallet, p.assembled, late));
+    if (typeof t === "string") { p.rec.refused = t; return null; }
+    return { p, tx: t };
   }));
   const signedLegs = wires.filter((x): x is NonNullable<typeof x> => x !== null);
   const ready = signedLegs.map((x) => x.p);

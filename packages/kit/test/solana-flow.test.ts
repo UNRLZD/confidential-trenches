@@ -220,7 +220,7 @@ const MSG = Uint8Array.from([0x80, 1, 2, 3, 4, 5]);
 const WIRE = Uint8Array.from([1, ...new Uint8Array(64), ...MSG]);
 
 // A wire as the flow registers one once its checks pass (own-wires.ts): the tests of the signature slot start there.
-const own = <T extends { wire: Uint8Array }>(tx: T): T => { ownSolanaWire(tx, tx.wire); return tx; };
+const own = <T extends { wire: Uint8Array; lastValidBlockHeight: number }>(tx: T): T => { ownSolanaWire(tx, tx.wire); return tx; };
 
 test("the signer's answer goes into the slot only when it verifies against the wallet's key", async () => {
   const wire = await solanaSignedWire({ sign: async (w, m) => { assert.equal(w, PK); return ed25519.sign(m, SK); } }, PK, own({ lastValidBlockHeight: 1_000, wire: WIRE, message: MSG }));
@@ -282,6 +282,36 @@ test("only a wire this flow built and checked is signed (card signers-own-bytes)
   const src = Uint8Array.from(WIRE); const tx = { lastValidBlockHeight: 1_000, wire: src, message: MSG };
   ownSolanaWire(tx, src); src[70]! ^= 1; tx.wire = Uint8Array.from(src);
   await assert.rejects(solanaSignedWire(never, PK, tx), /not one this flow built and checked/);
+});
+
+test("the bytes signed are the registry's copy (review 1 M1, L1, L2): a caller's arrays changed during the signer's await, a wire cut short, a height changed: never signed", async () => {
+  const never = { sign: async () => assert.fail("never signed") };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // M1, the reviewer's probe: wire[70] and message[5] flipped while the signer awaits its store and seed
+  const tx = own({ lastValidBlockHeight: 1_000, wire: Uint8Array.from(WIRE), message: Uint8Array.from(MSG) });
+  let handed: Uint8Array | null = null;
+  const slow = { sign: async (_w: string, m: Uint8Array) => { await sleep(5); tx.wire[70]! ^= 1; tx.message[5]! ^= 1; handed = Uint8Array.from(m); return ed25519.sign(m, SK); } };
+  const signed = await solanaSignedWire(slow, PK, tx);
+  assert.deepEqual(handed, MSG, "the signer is handed the checked message");
+  assert.deepEqual(signed.subarray(65), MSG, "the wire is the checked one");
+  assert.ok(ed25519.verify(signed.subarray(1, 65), MSG, base58.decode(PK)));
+  // the wire handed back is a copy: a signature put in it, or a change to it, never reaches what the registry holds
+  const twice = own({ lastValidBlockHeight: 1_000, wire: Uint8Array.from(WIRE), message: MSG });
+  const first = await solanaSignedWire({ sign: async (_w, m) => ed25519.sign(m, SK) }, PK, twice);
+  first.fill(0);
+  assert.deepEqual((await solanaSignedWire({ dry: true }, PK, twice)).subarray(65), MSG);
+  // a signer that changes the message it was handed and signs that: its signature is not over the checked bytes
+  const editing = { sign: async (_w: string, m: Uint8Array) => { m[5]! ^= 1; return ed25519.sign(m, SK); } };
+  await assert.rejects(solanaSignedWire(editing, PK, own({ lastValidBlockHeight: 1_000, wire: Uint8Array.from(WIRE), message: MSG })), /does not verify/);
+  // L1: a registered wire cut short, its message cut to match
+  const cut = own({ lastValidBlockHeight: 1_000, wire: Uint8Array.from(WIRE), message: MSG });
+  cut.wire = cut.wire.subarray(0, WIRE.length - 1); cut.message = MSG.subarray(0, MSG.length - 1);
+  await assert.rejects(solanaSignedWire(never, PK, cut), /not one this flow built and checked/);
+  await assert.rejects(solanaSignedWire({ dry: true }, PK, cut), /not one this flow built and checked/);
+  // L2: the height changed after the check: the signer's mark and the send would carry a height no check read
+  const later = own({ lastValidBlockHeight: 1_000, wire: Uint8Array.from(WIRE), message: MSG });
+  later.lastValidBlockHeight = 9_999;
+  await assert.rejects(solanaSignedWire(never, PK, later), /not one this flow built and checked/);
 });
 
 // ---- after the send
