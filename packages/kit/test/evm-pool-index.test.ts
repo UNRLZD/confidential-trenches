@@ -457,10 +457,19 @@ test("Q3: a pool one reader logs inside the depth whose transaction's receipt on
   const moved = { key: q.key, block: 950_000 };
   const state = new Set([real, q].map((p) => evmPoolIdOf(p.key)));
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [real, q], state, calls: [] }, { head, pools: [real, moved], state, calls: [] })), code("rpc_disagree", /receipt of pool/));
-  // a transaction the other reader has no receipt of: refused too
+  // a transaction the other reader has no receipt of (null on every try, review 3: an honest reader's null too): never
+  // stored or served, its span unproven, the sync partial; the next sync of two honest readers goes on without it
   const made = { key: key(10), block: 950_000 };
   const st2 = new Set([real, made].map((p) => evmPoolIdOf(p.key)));
-  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [real], receipts: [real], state: st2, calls: [] }, { head, pools: [real, made], state: st2, calls: [] })), code("rpc_disagree", /receipt of pool/));
+  const mk = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], receipts: [real], state: st2, calls: [] }, { head, pools: [real, made], state: st2, calls: [] }));
+  assert.equal(mk.coversThrough, null);
+  assert.equal(mk.pools, null);
+  assert.equal(mk.error?.code, "rpc_error");
+  assert.ok(!mk.index!.pools.some((p) => p.id === evmPoolIdOf(made.key)));
+  assert.ok(!mk.index!.spans.some(([a, b]) => a <= made.block && made.block <= b), JSON.stringify(mk.index!.spans));
+  const next = await evmPoolIndexSync(mk.index, cfgOf({ head: head + 5, pools: [real], state: st2, calls: [] }, { head: head + 5, pools: [real], state: st2, calls: [] }));
+  assert.equal(next.coversThrough, head + 5);
+  assert.ok(!ids(next.pools).has(evmPoolIdOf(made.key)));
   // an honest log gap (the other reader's receipt agrees) is kept, at its block
   const gap = { key: key(11), block: 950_000 };
   const st3 = new Set([real, gap].map((p) => evmPoolIdOf(p.key)));
@@ -508,5 +517,78 @@ test("Q2: one lying reader in a partial sync never stores a pool at its block, s
     assert.equal(s.coversThrough, head + 10 * i);
     assert.equal(s.pools!.find((x) => x.id === evmPoolIdOf(p.key))?.block, p.block);
     index = s.index;
+  }
+});
+
+// review 3 of 7f1ad79a: base.api.pocket.network answered eth_getTransactionReceipt `result: null` for real mined
+// Initialize transactions, 119 of 500 (2026-11-08 21:08:58Z) and 6, 6, 3 of 16 in three rounds, other ones each round;
+// base-rpc.publicnode.com answered all. An honest pair: a logs `gap`, b's logs miss it (the log gap F5 exists for).
+const wrap = (inner: EvmRpc, f: (c: EvmRpcCall, x: unknown) => unknown): EvmRpc => async (calls) => (await inner(calls)).map((x, i) => f(calls[i]!, x));
+const gap = { key: key(11), block: 950_000 };
+const stGap = new Set([real, gap].map((p) => evmPoolIdOf(p.key)));
+
+test("R1: a receipt answered null is asked again after the backoff; null on every try leaves its span unproven, never refused", async () => {
+  const head = 1_000_000;
+  // null once, then present: asked again after a backoff, and the sync is whole with gap at its block
+  let nulls = 1;
+  const naps: number[] = [];
+  const b1 = reader({ head, pools: [real], receipts: [real, gap], state: stGap, calls: [] });
+  const pocket = wrap(b1, (c, x) => (c.method === "eth_getTransactionReceipt" && nulls-- > 0 ? { result: null } : x));
+  const cfg = cfgOf({ head, pools: [real, gap], state: stGap, calls: [] }, { head, pools: [], calls: [] }, { nap: async (ms) => void naps.push(ms) });
+  const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], pocket] });
+  assert.equal(r.error, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(r.pools!.find((p) => p.id === evmPoolIdOf(gap.key))?.block, gap.block);
+  assert.ok(naps.some((ms) => ms >= 500), JSON.stringify(naps));
+  // null on every try (the reader's tx index lacks it): INDEX_TRIES asks, then the pool unread, its span not stored,
+  // every other span kept, nothing served
+  const b2: Reader = { head, pools: [real], receipts: [real], state: stGap, calls: [] };
+  const s = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, gap], state: stGap, calls: [] }, b2));
+  assert.equal(s.coversThrough, null);
+  assert.equal(s.pools, null);
+  assert.equal(s.error?.code, "rpc_error");
+  assert.match(s.error!.message, /receipt/);
+  assert.equal(b2.calls.flat().filter((c) => c.method === "eth_getTransactionReceipt").length, 4);
+  assert.ok(!s.index!.pools.some((p) => p.id === evmPoolIdOf(gap.key)));
+  assert.ok(!s.index!.spans.some(([a, b]) => a <= gap.block && gap.block <= b), JSON.stringify(s.index!.spans));
+  assert.ok(s.index!.spans.some(([a, b]) => a <= real.block && real.block <= b));
+});
+
+test("R2: one-reader pools' receipts are asked in batches small enough for evmJsonRpc's 1 MiB cap", async () => {
+  // 500 Base receipts in one batch: 12,329,188 bytes on base-rpc.publicnode.com, 9,508,100 on Pocket (2026-11-08
+  // 21:08:54-58Z), mean 22.5 KB, largest 75.5 KB
+  const head = 1_000_000;
+  const gaps = Array.from({ length: 60 }, (_, i) => ({ key: key(100 + i), block: 940_000 + i * 100 }));
+  const st = new Set([real, ...gaps].map((p) => evmPoolIdOf(p.key)));
+  const inner = reader({ head, pools: [real], receipts: [real, ...gaps], state: st, calls: [] });
+  const pad = "0x" + "00".repeat(11_000); // 22 KB of a receipt's other fields (logsBloom, the launch's other logs)
+  const fetchFn = (async (_u: string, init: { body: string }) => {
+    const calls = JSON.parse(init.body) as { id: number; method: string; params: unknown[] }[];
+    const out = await inner(calls.map((c) => ({ method: c.method, params: c.params })));
+    const body = calls.map((c, i) => {
+      const x = out[i] as { result?: Record<string, unknown> | null };
+      return { jsonrpc: "2.0", id: c.id, ...(c.method === "eth_getTransactionReceipt" && x.result ? { result: { ...x.result, pad } } : x) };
+    });
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as unknown as typeof fetch;
+  const cfg = cfgOf({ head, pools: [real, ...gaps], state: st, calls: [] }, { head, pools: [], calls: [] });
+  const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], evmJsonRpc("https://pocket.example", fetchFn)] });
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 60);
+});
+
+test("R3: a receipt answer that is not a receipt (a number, a string, an array) is unread, never a TypeError or a refusal", async () => {
+  const head = 1_000_000;
+  for (const odd of [(_x: unknown) => 7, (_x: unknown) => ({ result: "0x01" }), (_x: unknown) => ({ result: [] }), (_x: unknown) => ({ result: 5 })]) {
+    const inner = reader({ head, pools: [real], receipts: [real, gap], state: stGap, calls: [] });
+    const b = wrap(inner, (c, x) => (c.method === "eth_getTransactionReceipt" ? odd(x) : x));
+    const cfg = cfgOf({ head, pools: [real, gap], state: stGap, calls: [] }, { head, pools: [], calls: [] });
+    const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], b] }).catch((e: unknown) => e);
+    assert.ok(!(r instanceof Error), String(r));
+    const s = r as Awaited<ReturnType<typeof evmPoolIndexSync>>;
+    assert.equal(s.coversThrough, null);
+    assert.equal(s.error?.code, "rpc_error");
+    assert.ok(!s.index!.pools.some((p) => p.id === evmPoolIdOf(gap.key)));
   }
 });

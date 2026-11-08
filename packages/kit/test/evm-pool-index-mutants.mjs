@@ -38,6 +38,9 @@ const BUDGET = "the halves' budget spent ends the sync rpc_error";
 const Q1 = "Q1: a 429 whose Retry-After is 0 or a past date waits at least the backoff";
 const Q2 = "Q2: one lying reader in a partial sync never stores a pool at its block";
 const Q3 = "Q3: a pool one reader logs inside the depth whose transaction's receipt on the other is another block refuses";
+const R1 = "R1: a receipt answered null is asked again after the backoff";
+const R2 = "R2: one-reader pools' receipts are asked in batches small enough";
+const R3 = "R3: a receipt answer that is not a receipt";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -96,17 +99,27 @@ export const MUTANTS = [
   // review 2 of 1fb6b198, P1: a one-reader pool's block taken on that reader's word: no receipt asked; asked of the
   // reader that logged it; each of the receipt's checks; an unanswered receipt taken as agreeing; a log with no hashes
   ["const check = ones.filter((p) => held.has(p.id));", "const check = ones.filter(() => false);", Q3],
-  ["const of = check.filter((p) => logged.get(p.id)!.by !== r);", "const of = check.filter((p) => logged.get(p.id)!.by === r);", Q3],
+  ["let of = check.filter((p) => logged.get(p.id)!.by !== r);", "let of = check.filter((p) => logged.get(p.id)!.by === r);", Q3],
   ["isQty(rc.blockNumber) && Number(rc.blockNumber) === p.block && ", "", Q3],
   ["typeof rc.blockHash === \"string\" && rc.blockHash.toLowerCase() === f.at && ", "", Q3],
   ["Array.isArray(rc.logs) && rc.logs.some((l) => {", "(Array.isArray(rc.logs) || true) && [true].some((l) => { return true;", Q3],
   ["return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;", "return g !== null && g.tx === f.tx && g.at === f.at;", Q3],
   ["return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;", "return g !== null && g.p.id === p.id && g.at === f.at;", Q3],
   ["return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;", "return g !== null && g.p.id === p.id && g.tx === f.tx;", Q3],
-  ["if (a === null || a === undefined || !(\"result\" in a)) return void unread.add(p.id);", "if (a === null || a === undefined || !(\"result\" in a)) return;", Q3],
+  ["if (typeof a !== \"object\" || Array.isArray(a)) return void unread.add(p.id);", "if (typeof a !== \"object\" || Array.isArray(a)) return;", Q3],
   ["if (!isHash(o.transactionHash) || !isHash(o.blockHash)) return null;", "", LOGS],
   // review 2 of 1fb6b198, P2 (Q2): the liar's one-reader pool kept, at its block
   ["if (!same) refuse(", "if (false) refuse(", Q2],
+  // review 3 of 7f1ad79a: a null receipt unread at once, or refused, or never asked again, or asked again at once; a
+  // receipt null on every try kept; 500 receipts a batch; an answer that is not a receipt checked as one
+  ["if (a === null) return void again.push(p);", "if (a === null) return void unread.add(p.id);", R1],
+  ["if (a === null) return void again.push(p);", "if (a === null) refuse(\"rpc_disagree\", \"null\");", R1],
+  ["for (let t = 0; t < INDEX_TRIES && of.length > 0; t++) {", "for (let t = 0; t < 1 && of.length > 0; t++) {", R1],
+  ["if (t > 0) await nap(BACKOFF_MS * 2 ** t);", "", R1],
+  ["for (const p of of) unread.add(p.id);", "", R1],
+  ["for (const p of of) unread.add(p.id);", "", Q3],
+  ["const INDEX_RECEIPT_BATCH = 10;", "const INDEX_RECEIPT_BATCH = 500;", R2],
+  ["if (typeof a !== \"object\" || Array.isArray(a)) return void unread.add(p.id);", "if (a === undefined) return void unread.add(p.id);", R3],
   // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
   ["else j.alone[r] = true;", "else j.ans[r] = NO_ANSWER;", ALONE],
   ["for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;", "for (const j of g) if (j.alone[r]) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],

@@ -89,6 +89,9 @@ export const INDEX_LIMITED_WAIT_MS = 60_000;
 export const INDEX_HALVES = 64;
 /** The PoolManager state reads (F5) in one batch. */
 const INDEX_STATE_BATCH = 500;
+/** The receipts (F5) in one batch: 500 Base receipts were 12.3 MB on base-rpc.publicnode.com (2026-11-08 21:08Z), the
+ *  largest 75.5 KB, so 10 stay under evmJsonRpc's 1 MiB. */
+const INDEX_RECEIPT_BATCH = 10;
 const BACKOFF_MS = 500;
 const SEL_EXTSLOAD = "1e2eaeaf"; // PoolManager.extsload(bytes32)
 const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
@@ -387,30 +390,40 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     });
     // the state proves the pool, never its block: the reader that did not log a held pool is asked for the logged
     // transaction's receipt, which must hold the same Initialize log at the same block and block hash (review 2 of
-    // 1fb6b198: a real pool initialized before `from`, logged by one reader inside the depth, was served there); a
-    // receipt not answered is unread
+    // 1fb6b198: a real pool initialized before `from`, logged by one reader inside the depth, was served there). A
+    // receipt answered null is asked again, INDEX_TRIES times with the backoff (review 3 of 7f1ad79a:
+    // base.api.pocket.network answered null for 119 of 500 mined Initialize transactions, another set each round), then
+    // unread; one not answered (an error, a batch spent on throws) or not a receipt is unread; only a receipt that is
+    // there and differs refuses
     const check = ones.filter((p) => held.has(p.id));
     for (const r of [0, 1] as const) {
-      const of = check.filter((p) => logged.get(p.id)!.by !== r);
-      for (let i = 0; i < of.length; i += INDEX_STATE_BATCH) {
-        const part = of.slice(i, i + INDEX_STATE_BATCH);
-        const out = await ask(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
-        part.forEach((p, k) => {
-          const a = out?.[k] as { result?: unknown } | null | undefined;
-          if (a === null || a === undefined || !("result" in a)) return void unread.add(p.id);
-          const f = logged.get(p.id)!.f;
-          const rc = a.result as { blockNumber?: unknown; blockHash?: unknown; logs?: unknown } | null;
-          const same = rc !== null && typeof rc === "object" && isQty(rc.blockNumber) && Number(rc.blockNumber) === p.block && typeof rc.blockHash === "string" && rc.blockHash.toLowerCase() === f.at && Array.isArray(rc.logs) && rc.logs.some((l) => {
-            const g = poolOfLog(l, pm, p.block, p.block);
-            return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;
+      let of = check.filter((p) => logged.get(p.id)!.by !== r);
+      for (let t = 0; t < INDEX_TRIES && of.length > 0; t++) {
+        if (t > 0) await nap(BACKOFF_MS * 2 ** t);
+        const again: EvmIndexedPool[] = [];
+        for (let i = 0; i < of.length; i += INDEX_RECEIPT_BATCH) {
+          const part = of.slice(i, i + INDEX_RECEIPT_BATCH);
+          const out = await ask(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
+          part.forEach((p, k) => {
+            const a = (out?.[k] as { result?: unknown } | null | undefined)?.result;
+            if (a === null) return void again.push(p);
+            if (typeof a !== "object" || Array.isArray(a)) return void unread.add(p.id);
+            const f = logged.get(p.id)!.f;
+            const rc = a as { blockNumber?: unknown; blockHash?: unknown; logs?: unknown };
+            const same = isQty(rc.blockNumber) && Number(rc.blockNumber) === p.block && typeof rc.blockHash === "string" && rc.blockHash.toLowerCase() === f.at && Array.isArray(rc.logs) && rc.logs.some((l) => {
+              const g = poolOfLog(l, pm, p.block, p.block);
+              return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;
+            });
+            if (!same) refuse("rpc_disagree", `index reader ${r + 1}'s receipt of pool ${p.id}'s transaction is not its Initialize at block ${p.block}`);
           });
-          if (!same) refuse("rpc_disagree", `index reader ${r + 1}'s receipt of pool ${p.id}'s transaction is not its Initialize at block ${p.block}`);
-        });
+        }
+        of = again;
       }
+      for (const p of of) unread.add(p.id);
     }
     for (const id of unread) held.delete(id);
     if (unread.size > 0) {
-      error ??= new EvmQuoteError("rpc_error", `the index readers did not answer the PoolManager's state of ${unread.size} pool(s)`);
+      error ??= new EvmQuoteError("rpc_error", `the index readers did not answer the PoolManager's state or the Initialize receipt of ${unread.size} pool(s)`);
       proved = proved.filter((p) => !p.one.some((o) => unread.has(o.id)));
     }
     // F4 (the review's): one reader's pools, held, past the cap with the rest: the readers disagree on what counts
