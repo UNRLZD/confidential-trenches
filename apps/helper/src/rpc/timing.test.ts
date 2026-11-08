@@ -36,7 +36,7 @@ async function serve(rpc: ReturnType<typeof createRpc>) {
   const port = (h.address() as AddressInfo).port;
   const post = (ip: string) =>
     new Promise<{ status: number; headers: Record<string, string | string[] | undefined> }>((done, fail) => {
-      const r = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/rpc/solana", headers: { "content-type": "application/json", origin: "https://ct-app.unrealized.trade", "x-forwarded-for": ip } }, (res) => {
+      const r = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/rpc/solana", headers: { "content-type": "application/json", origin: "https://other.example", "x-forwarded-for": ip } }, (res) => {
         res.resume().on("end", () => done({ status: res.statusCode ?? 0, headers: res.headers }));
       });
       r.on("error", fail).end(BODY);
