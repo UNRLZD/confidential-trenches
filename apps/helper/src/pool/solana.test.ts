@@ -545,8 +545,9 @@ test("I-6: a release whose venue fails in the simulation is refused unsigned (si
 // of 9 accounts, buy.rs:155-159 tag 3 flag bit 1 with the next state page after the tip account), so a release whose
 // change note an insert carried onto the next page still lands; the forms without it keep today's path.
 const NEXT = testKey("NEXT_STATE_PAGE").address;
-/** A release W signed with the next page: a ninth account (tag 2), or flag bit 1 and the next page after the tip (tag 3). */
-function withNext(tag: 2 | 3, o: { innerNames?: boolean; noAccount?: boolean } = {}): Uint8Array {
+/** A release W signed with the next page: a ninth account (tag 2), or flag bit 1 and the next page after the tip (tag 3;
+ *  at 8 when the tip is 0, since no tip account comes before it). `flags` sets more of tag 3's flag bits. */
+function withNext(tag: 2 | 3, o: { innerNames?: boolean; noAccount?: boolean; tip?: bigint; flags?: number } = {}): Uint8Array {
   const r = release();
   const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, r, 1023);
   let data: Uint8Array;
@@ -554,12 +555,14 @@ function withNext(tag: 2 | 3, o: { innerNames?: boolean; noAccount?: boolean } =
     data = solanaEncodePoolRelease(r);
     accounts.push({ key: NEXT, signer: false, writable: true });
   } else {
-    accounts.push({ key: TIP_TO, signer: false, writable: true }, ...(o.noAccount ? [] : [{ key: NEXT, signer: false, writable: true }]));
-    if (!o.noAccount) accounts.push({ key: TO, signer: false, writable: true });
+    const tip = o.tip ?? 10_000n;
+    const t = tip > 0n ? 1 : 0;
+    if (t) accounts.push({ key: TIP_TO, signer: false, writable: true });
+    if (!o.noAccount) accounts.push({ key: NEXT, signer: false, writable: true }, { key: TO, signer: false, writable: true });
     const transferData = Uint8Array.from([2, 0, 0, 0, ...u64(1_000_000n)]);
-    // the inner transfer W to TO (index 10, past the next page at 9), or to the next page itself (9)
-    data = solanaEncodePoolTag3(r, false, 10_000n, [{ program: 7, accounts: [1, o.innerNames ? 9 : o.noAccount ? 8 : 10], data: transferData }]);
-    data[1] = data[1]! | 2;
+    // the inner transfer W to TO (index 9 + t, past the next page at 8 + t), or to the next page itself (8 + t)
+    data = solanaEncodePoolTag3(r, false, tip, [{ program: 7, accounts: [1, o.innerNames ? 8 + t : o.noAccount ? 8 : 9 + t], data: transferData }]);
+    data[1] = data[1]! | 2 | (o.flags ?? 0);
   }
   const { message } = solanaCompileV0(FP.address, [cuLimit(400_000), cuPrice(1_000n), { program: PROGRAM, accounts, data }], BLOCKHASH, [], [FP.address, W.address]);
   return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
@@ -568,6 +571,9 @@ function withNext(tag: 2 | 3, o: { innerNames?: boolean; noAccount?: boolean } =
 test("pool-senders-next-page: a tag 2 naming the next state page (9 accounts) and a tag 3 with flag bit 1 and the page after the tip pass", () => {
   assert.equal(refusal(withNext(2)), "ok");
   assert.equal(refusal(withNext(3)), "ok");
+  // a tag 3 with no tip names its next page at 8 (contracts/pool-solana/svm-tests/tests/release.rs
+  // a_tag3_with_no_tip_names_its_next_page_at_8), as the device builds it
+  assert.equal(refusal(withNext(3, { tip: 0n })), "ok");
   // the forms without it keep today's path
   assert.equal(refusal(build()), "ok");
   assert.equal(refusal(build({ tag: 3 })), "ok");
@@ -581,6 +587,10 @@ test("pool-senders-next-page: a tag 2 of 10 accounts, a tag 3 whose inner instru
   assert.equal(refusal(withNext(3, { innerNames: true })), "not_pool");
   // bit 1 set and nothing past the tip account: the next page the flag names is not there
   assert.equal(refusal(withNext(3, { noAccount: true })), "not_pool");
+  // with no tip the page is at 8, so an inner instruction naming 8 names the page
+  assert.equal(refusal(withNext(3, { tip: 0n, innerNames: true })), "not_pool");
+  // a flag bit the program does not take (bit 2): refused here, not left to the simulation
+  assert.equal(refusal(withNext(3, { flags: 4 })), "not_pool");
 });
 
 // card pool-senders-next-page-helper (the expand): POOL_SOLANA_PROGRAM_DEVNET may list several devnet programs, comma
@@ -600,4 +610,10 @@ test("the devnet program list: one sender per listed program, keyed by its own p
   for (const s of one.values()) void s.ready.catch(() => {});
   for (const bad of [`${NEW},${NEW}`, `${NEW},`, `,${NEW}`, `${OLD} ,${NEW}`]) assert.throws(() => solanaPoolSendersFromEnv(env("DEVNET", bad), down), /POOL_SOLANA_PROGRAM_DEVNET/, bad);
   assert.throws(() => solanaPoolSendersFromEnv(env("MAINNET", `${OLD},${NEW}`), down), /POOL_SOLANA_PROGRAM_MAINNET must be a program id/);
+  // a devnet list naming the mainnet program (both key on the same pool address) stops the start, never replacing the
+  // mainnet pool's sender with one on the devnet fee payer and RPCs
+  assert.throws(() => solanaPoolSendersFromEnv({ ...env("MAINNET", NEW), ...env("DEVNET", `${OLD},${NEW}`) }, down), /POOL_SOLANA_PROGRAM_DEVNET names a program another cluster already serves/);
+  const both = solanaPoolSendersFromEnv({ ...env("MAINNET", NEW), ...env("DEVNET", OLD) }, down);
+  assert.deepEqual([...both.values()].map((s) => [s.cluster, s.program]).sort(), [["devnet", OLD], ["mainnet", NEW]]);
+  for (const s of both.values()) void s.ready.catch(() => {});
 });

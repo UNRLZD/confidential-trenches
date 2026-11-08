@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Live check of card pool-senders-next-page-helper: HELPER_HOST's Solana pool sender takes the forms the pool program takes
 // since d3edab1 (contracts/pool-solana/src/release.rs:155, buy.rs:155-159): a tag 2 naming the next state page as its
-// ninth account, and a tag 3 with flag bit 1 naming it after the tip account. For each Solana cluster with a pool deploy
-// record (scripts/ci/helper-live-checks.mjs solanaPools) it reads GET /v1/pool/fee for that pool, then POSTs
-// /v1/pool/solana/send three releases it builds with
+// ninth account, and a tag 3 with flag bit 1 naming it after the tip account. For each pool the helper must serve
+// (poolsToRead: each Solana cluster's deploy record pool, scripts/ci/helper-live-checks.mjs solanaPools, and on devnet
+// each pool of the move, DEVNET_MOVE, each with its own program) it reads GET /v1/pool/fee for that pool, which must
+// name that program, then POSTs /v1/pool/solana/send three releases it builds with
 // the kit for that pool and fee payer, each signed by a throwaway W made here, at the published fee, a deadline 270 s
 // away and a junk proof:
 //   - "next_tag2": tag 2 with the release's eight accounts and the next state page (the kit's solanaPoolTag2Accounts);
@@ -42,6 +43,24 @@ export const PLANTS = [
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const DEC = /^[1-9][0-9]{0,18}$/;
 const SHA = /^[0-9a-f]{40}$/;
+/** The devnet pools served side by side while the signing pages move from the one before the re-pin to today's (card
+ *  pool-senders-next-page, the expand): a helper that serves one of them FAILs. The contract drops the old one here in
+ *  the commit that drops its program from POOL_SOLANA_PROGRAM_DEVNET. */
+export const DEVNET_MOVE = Object.freeze([
+  Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }),
+  Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", pool: "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr" }),
+]);
+/** Each pool the check reads, { cluster, pool, program } (program null when only the deploy record names the pool):
+ *  every cluster's record pool, and on devnet each pool of the move. */
+export function poolsToRead(records = solanaPools()) {
+  const out = [];
+  for (const [cluster, pool] of Object.entries(records)) {
+    const move = cluster === "devnet" ? DEVNET_MOVE : [];
+    for (const m of move) out.push({ cluster, pool: m.pool, program: m.program });
+    if (pool && !move.some((m) => m.pool === pool)) out.push({ cluster, pool, program: null });
+  }
+  return out;
+}
 const json = (t) => {
   try {
     return JSON.parse(t);
@@ -50,13 +69,14 @@ const json = (t) => {
   }
 };
 
-/** The check on one recorded run: { pool, reads: [{ asked, status, headers, body }] }. */
+/** The check on one recorded run: { pool, program?, reads: [{ asked, status, headers, body }] }; a run that names its
+ *  program needs the fee answer to name that program. */
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const fee = run.reads.find((r) => r.asked === "fee");
   const f = json(fee?.body ?? "");
-  say(fee?.status === 200 && f?.chain === "solana" && f?.pool === run.pool && B58.test(f?.program ?? "") && B58.test(f?.fee_payer ?? "") && DEC.test(f?.fee ?? ""), `GET /v1/pool/fee answers ${fee?.status}: pool ${f?.pool} (asked ${run.pool}), program ${f?.program}, fee payer ${f?.fee_payer}, fee ${f?.fee}`);
+  say(fee?.status === 200 && f?.chain === "solana" && f?.pool === run.pool && B58.test(f?.program ?? "") && (run.program == null || f.program === run.program) && B58.test(f?.fee_payer ?? "") && DEC.test(f?.fee ?? ""), `GET /v1/pool/fee answers ${fee?.status}: pool ${f?.pool} (asked ${run.pool}), program ${f?.program}${run.program ? ` (want ${run.program})` : ""}, fee payer ${f?.fee_payer}, fee ${f?.fee}`);
   for (const [asked, code] of PLANTS) {
     const r = run.reads.find((x) => x.asked === asked);
     say(r?.status === 422 && json(r.body)?.error?.code === code, `planted ${asked}: POST /v1/pool/solana/send answers ${r?.status} ${r?.body?.slice(0, 120)} (want 422 ${code})`);
@@ -65,11 +85,12 @@ export function judge(run) {
   return { ok: lines.length === PLANTS.length + 1 + run.reads.length && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
-/** Every cluster's run: each PASS, and at least one. */
-export function judgeAll(runs) {
+/** Every run: each PASS, at least one, and one for each pool of `want` (poolsToRead()) with its cluster and program. */
+export function judgeAll(runs, want = poolsToRead()) {
   const lines = [];
+  for (const w of want) if (!runs.some((r) => r.pool === w.pool && r.cluster === w.cluster && (r.program ?? null) === w.program)) lines.push(`BAD [${w.cluster}] no run for pool ${w.pool}${w.program ? ` (program ${w.program})` : ""}`);
   for (const run of runs) for (const l of judge(run).lines) lines.push(`${l.slice(0, 4)}[${run.cluster}] ${l.slice(4)}`);
-  return { ok: runs.length > 0 && runs.every((run) => judge(run).ok), lines };
+  return { ok: runs.length > 0 && runs.every((run) => judge(run).ok) && !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
 const field = (n) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
@@ -138,11 +159,11 @@ if (import.meta.main) {
     return i < 0 ? undefined : args[i + 1];
   };
   try {
-    // each Solana cluster the helper may serve with the pool its deploy record names (helper-live-checks.mjs solanaPools)
-    const pools = Object.entries(solanaPools()).filter(([, p]) => p !== null);
+    // each pool the helper must serve: every cluster's record pool, and on devnet each pool of the move
+    const pools = poolsToRead();
     if (pools.length === 0) throw new Error("no Solana pool record");
     const runs = [];
-    for (const [cluster, pool] of pools) runs.push({ cluster, ...(await read(opt("--base") ?? BASE, pool)) });
+    for (const { cluster, pool, program } of pools) runs.push({ cluster, program, ...(await read(opt("--base") ?? BASE, pool)) });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(runs, null, 1)}\n`);
     const r = judgeAll(runs);
     for (const l of r.lines) console.log(l);
