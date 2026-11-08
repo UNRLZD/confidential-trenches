@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card evm-sell-unfunded-sim-keeps-route on SIGN_HOST (https://sign.confidential.unrealized.trade), review
+// Live check of card evm-sell-unfunded-sim-keeps-route on SIGN_HOST (https://confidential.unrealized.trade), review
 // a42f9c16 (Low 1): an EVM sale through a pool behind a hook the venue does not list is never priced off a worse pool
 // because the pinned sell sender cannot pay for W's sim. W's key lives only on the signing page, and the kit's sell
 // quote needs W's signature of the sim (signSim), so its bundle is the one place an EVM sell quote runs. The kit's quote
@@ -28,7 +28,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "evm-sell-unfunded-sim-keeps-route";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The kit's EVM sell quote, by its refusals: a bundle with any of them can quote a sale. */
