@@ -7,6 +7,7 @@
 //   - each is "keyed", "fallback" or "public", and no value holds a URL or a key;
 //   - a "fallback" slot is a note, not a failure: the pages keep answering from the public endpoint (the card's end
 //     state), and the box log names the switch.
+// After: helper
 //   node scripts/live-checks/helper-solana-failover.mjs [--base <url>] [--want rpc,trades,holders,stream] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

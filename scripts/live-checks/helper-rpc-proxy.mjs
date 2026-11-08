@@ -9,6 +9,7 @@
 //   - each unlisted method answers 400 { error: { code: "method_not_allowed" } }: refused, never forwarded;
 //   - every answer carries a full-sha X-Helper-Commit, echoes APP_HOST in Access-Control-Allow-Origin, has
 //     Vary: Origin and no Access-Control-Allow-Credentials.
+// After: helper
 //   node scripts/live-checks/helper-rpc-proxy.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

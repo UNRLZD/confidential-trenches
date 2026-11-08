@@ -11,6 +11,7 @@
 //     apps/terminal/src/screens/discover/fields.ts itself, plus buys_1h and sells_1h; every required field
 //     (ROW_REQUIRED) set; USD values decimal strings, shares, changes and counts integers, chain "solana";
 //   - every graduating row is on a curve by the terminal's one rule (a launchpad, curve_bps a whole number 0-9999).
+// After: helper
 //   node scripts/live-checks/market-data-solana-lists.mjs [--base <url>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more reads (printed).
 import "../net-window.mjs";

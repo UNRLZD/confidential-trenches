@@ -11,6 +11,7 @@
 //   - no element of the row (the avatar's initials aside) has the raw id as its text;
 //   - each badge lies inside its row's box and is not cut by the column (no clipping at either width).
 // A screenshot of every width is kept.
+// After: app
 //   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge(). A row is recorded by its `addr`

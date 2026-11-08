@@ -23,6 +23,7 @@
 // deposit.assets, and on its answer asks deposit.dry, and the run records both answers and every request the page sends
 // to the helper's 1Click proxy (url, method, body, and which of the two asks it followed). The helper is the real one in
 // every mode. A page before this card answers both kinds not_allowed.
+// After: sign
 //   node scripts/live-checks/kit-deposit-assets-dry.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/kit-deposit-assets-dry.mjs --local <build dir> [--record <file>]
 //     the same run with Playwright answering SIGN_HOST from a build dir under its own _headers (the helper and 1Click

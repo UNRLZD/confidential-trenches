@@ -20,6 +20,8 @@
 //          that price, rounded down (5 x 10^15 / price lamports at exponent -8), never the vault's buy;
 //        - stale and none: Bal shows no USD, Buy is off, and the tap asks for nothing.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
+// After: app --host app
+// After: sign
 //   node scripts/live-checks/signpage-pool-price.mjs [--host sign|app] [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/signpage-pool-price.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

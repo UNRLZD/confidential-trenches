@@ -13,6 +13,7 @@
 //     relayer is quoted).
 //   - anything else: FAIL.
 // At least one network must be quoted. Every RPC read that fails or disagrees is a FAIL.
+// After: helper
 //   node scripts/live-checks/vault-review-fixes-1.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

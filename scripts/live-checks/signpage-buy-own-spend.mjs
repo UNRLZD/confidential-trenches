@@ -12,6 +12,7 @@
 // and by the two-device devnet run in signpage-buy-own-spend.md.
 // The recorded testnet answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg, { network:
 // "testnet" }) of each tree (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/signpage-buy-own-spend.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

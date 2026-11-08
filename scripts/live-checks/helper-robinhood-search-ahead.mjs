@@ -8,6 +8,7 @@
 // then Trending 5m, then New, each once), and reads GET /v1/market/trades?chain=robinhood&token=<t>&limit=50 for all of
 // them at once. It passes only when the lists answer 200 with at least TOKENS_MIN tokens and every tape answers 200 JSON
 // { trades: [...], src: "chain", as_of_ms } within ANSWER_MS. A failing tape is named by its status, Retry-After and time.
+// After: helper
 //   node scripts/live-checks/helper-robinhood-search-ahead.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

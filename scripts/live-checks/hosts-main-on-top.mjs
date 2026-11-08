@@ -44,6 +44,7 @@
 //     not revoked FAILs: the cutover did not revoke it. The check then ends INCONCLUSIVE (exit 2) if every other line
 //     holds.
 // The tree holds no child either: scripts/ci/host-children.mjs, in test:gates.
+// After: sign
 //   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, INCONCLUSIVE or error
 //   exit 2
 // --record writes every answer the run read to <file>, so the check's test can replay it.

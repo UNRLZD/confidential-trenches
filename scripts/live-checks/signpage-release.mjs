@@ -4,6 +4,8 @@
 // against the release list gives MATCH). It runs check-signpage (node packages/signpage/scripts/check-signpage.mjs,
 // which reads the hosts over HTTPS), after holding the list's origins to the hosts' real names, written here:
 // SIGN_HOST https://confidential.unrealized.trade, APP_HOST https://ct-app.unrealized.trade.
+// After: app --host app
+// After: sign --host sign
 //   node scripts/live-checks/signpage-release.mjs --host sign|app [--record <file>]
 //     after a deploy: that one host against this checkout's own build (release-list.mjs --print --host), so a host
 //     that lags main fails only its own deploy's check, never the other host's

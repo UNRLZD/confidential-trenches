@@ -13,6 +13,8 @@
 // packages/kit/test/signpage-client.test.mjs (onRoute; an earlier kit's client drops route events and keeps every stage),
 // apps/terminal/test/buy-route.test.ts and test/buy-route/run.mjs (the live seam's values on the strip). SIGN_HOST's
 // mainnet build answers pool.buy only once pinned pools land there, so no live buy runs here.
+// After: app --host app
+// After: sign --host sign
 //   node scripts/live-checks/signpage-buy-route-events.mjs [--host sign|app] [--record <file>]
 //     the deployed hosts (both unless --host names one): SIGN_HOST https://confidential.unrealized.trade/ and
 //     APP_HOST https://ct-app.unrealized.trade/

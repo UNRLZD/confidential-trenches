@@ -15,6 +15,7 @@
 // and, for each network's collector, on its chain's two RPCs of two operators, evm-fee-collector.mjs check() holds: its
 // code is the FeeCollector build pinned to its address with the sink in its one immutable, the sink is the kit's sell
 // sender pin, it has no admin and no owner, and its deploy transaction made it.
+// After: helper
 //   node scripts/live-checks/helper-sender-fee-proof.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the fee answers and every RPC answer read, the shape
 //   helper-sender-fee-proof.test.mjs replays.

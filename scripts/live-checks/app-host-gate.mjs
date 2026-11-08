@@ -8,6 +8,7 @@
 //   - Integrity-Policy, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and Permissions-Policy equal the
 //     policy's, and no Cross-Origin-Embedder-Policy and no X-Frame-Options is sent (any X-Frame-Options value would
 //     refuse the shell's frame).
+// After: app
 //   node scripts/live-checks/app-host-gate.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 import "../net-window.mjs";

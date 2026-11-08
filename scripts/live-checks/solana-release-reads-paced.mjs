@@ -15,6 +15,7 @@
 // What each does is held by the card's tests (packages/kit/test/solana-pool.test.ts, packages/signpage/test/trade.test.ts
 // and page-rpc.test.ts, each "card solana-release-reads-paced"); the recorded answers are facts() over each tree's
 // packages/signpage/index.html and public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/solana-release-reads-paced.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

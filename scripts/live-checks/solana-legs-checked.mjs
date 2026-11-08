@@ -15,6 +15,7 @@
 // are that commit's build is signpage-release's (the release list against a fresh build); no sha of one release is
 // pinned here, since every later release changes app.js. The recorded planted bundles A (the walk starts past every
 // account), B (its wallet-account refusal behind `0&&`) and C (the walk removed) each FAIL.
+// After: sign
 //   node scripts/live-checks/solana-legs-checked.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

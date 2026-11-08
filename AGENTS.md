@@ -108,6 +108,8 @@ over public RPCs that rate-limit.
 2. Make the change and watch the test pass. Then run the commands above that cover what you touched.
 3. Add the live check: `scripts/live-checks/<key>.mjs` checks the change's end state on what is deployed. Its
    `<key>.test.mjs` replays `<key>.answers.json`: a recorded good answer must pass and a recorded bad one must fail.
+   The check's leading comment names who runs it after a deploy, one `// After: <host> [<args>]` line per run (`app`,
+   `sign` or `helper`), and `scripts/ci/live-listed.mjs` refuses a check with neither an After line nor a `// Runs:` line.
    Each Cloudflare deploy script prints the `gh workflow run live.yml -f host=<app|sign> -f commit=<sha>` line that runs
    them on GitHub's runners, each check its own job, then `gh run watch --exit-status`; after `redeploy.sh` run the same
    with `host=helper` (its list is `scripts/ci/helper-live-checks.mjs`).
