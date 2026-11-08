@@ -19,7 +19,9 @@
 //   moves up to it), so a failure never ends a lane early nor lets step 7 name an index that may hold a lost store's
 //   send; once DEPOSIT_ID_MARGIN reads of a lane fail with no read showing history between them (so DEPOSIT_ID_MARGIN
 //   in a row among them), step 5 stops with an error naming the lane, so a provider that keeps failing ends the
-//   restore, to be retried, instead of reading on toward 2^32.
+//   restore, to be retried, instead of reading on toward 2^32. Ids with history (or unread) past the note walk's end
+//   stop the restore with an error naming the index; restoring again with that index as the lane's `reach` (given to
+//   restoreNotes and here) walks the notes to it and reads the ids on from there.
 // - Step 7, after the restore: the new store draws its own lane when it opens (../store/index.ts). Its deposit counter
 //   for the scope is raised past the lost store's possible index, to its lane's highest with a note or any history plus
 //   two of the lane (in an empty lane, its second index). For 72 h of NEAR block time after the restore, every open
@@ -56,9 +58,16 @@ const U32 = 0xffffffff;
  */
 export type HistoryReader = (chain: HistoryChain, address: string) => Promise<boolean>;
 /**
- * What a deposit id (U, a NEAR implicit account) shows: "money" when it holds money on intents.near or the vault's
- * token; "used" when it holds none but has any history (its NEAR account, a nonce or a transaction on NEAR or inside
- * intents.near: it was funded, refunded or withdrawn out); "unused" when it was never used. Throws when it cannot tell.
+ * What a deposit id (U, a NEAR implicit account) shows. The contract every IdReader keeps (card wallet-restore-id-reader;
+ * ./id-reader.ts nearIdReader is the one on NEAR, with the mainnet read behind each rule):
+ * - "money": U holds money now: ft_balance_of(U) on the vault's token above 0, or a token inside intents.near above 0.
+ * - "used": U holds none, and a read proves it was used: storage_balance_of(U) on the token is not null (D16: a
+ *   never-used id has none; 1Click's delivery registers it), view_account(U) answers an account, or intents.near lists
+ *   a token for U at 0. has_public_key is no proof (true for every implicit id, D15), nor is is_nonce_used (intents.near
+ *   prunes V1 nonces past their deadline).
+ * - "unused": only when no read on either provider shows money or a trace: a provider that hides one ends a lane early.
+ * - An indexer is a server's word: it may say used, never unused.
+ * - Throws when it cannot tell (after its retries): step 5 counts the id as failed, never as unused.
  */
 export type IdState = "money" | "used" | "unused";
 export type IdReader = (id: string) => Promise<IdState>;

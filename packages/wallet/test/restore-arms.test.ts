@@ -12,6 +12,7 @@ import type { RestoredWallet, UnreadWallet, WalletRestore } from "../src/restore
 import {
   quietArms,
   restoreArmAccounts,
+  secondScanBoundHeight,
   secondScanDue,
   SECOND_SCAN_BLOCKS,
   SECOND_SCAN_DELIVERY_MS,
@@ -130,30 +131,47 @@ const MIN = 60_000;
 const AT = { heights: [1_000, 1_005] as [number, number], timesMs: [1_700_000_000_000, 1_700_000_003_000] as [number, number] };
 const maxT = AT.timesMs[1], maxH = AT.heights[1];
 const now = (t: [number, number], h: [number, number]) => ({ timesMs: t, heights: h });
+// both RPCs' times of block maxH + 601, the first past the height bound: here before the time bound
+const EARLY: [number, number] = [maxT + MIN, maxT + MIN];
 
 test("step 7: the second scan waits 10 min + 2 min of block time and 600 blocks past the higher of both RPCs", () => {
   assert.equal(SECOND_SCAN_WAIT_MS, 10 * MIN);
   assert.equal(SECOND_SCAN_DELIVERY_MS, 2 * MIN);
   assert.equal(SECOND_SCAN_BLOCKS, 600);
   const T = maxT + 12 * MIN, H = maxH + 600;
-  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H + 1, H + 1])), true, "one past each, on both");
-  assert.equal(secondScanDue(AT, now([T, T + 1], [H + 1, H + 1])), false, "time exactly at the edge on one RPC");
-  assert.equal(secondScanDue(AT, now([T + 1, T], [H + 1, H + 1])), false);
-  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H, H + 1])), false, "height exactly at the edge on one RPC");
-  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H + 1, H])), false);
-  assert.equal(secondScanDue(AT, now([T, T], [H, H])), false, "both exactly at the edges");
-  assert.equal(secondScanDue(AT, now([T + 1, AT.timesMs[0] + 12 * MIN + 1], [H + 1, H + 1])), false, "past the lower restore time only is not enough");
-  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H + 1, AT.heights[0] + 601])), false, "past the lower restore height only is not enough");
-  assert.equal(secondScanDue(AT, now([T + 9 * MIN, T + 9 * MIN], [H + 1, H + 1])), true);
+  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H + 1, H + 1]), EARLY), true, "one past each, on both");
+  assert.equal(secondScanDue(AT, now([T, T + 1], [H + 1, H + 1]), EARLY), false, "time exactly at the edge on one RPC");
+  assert.equal(secondScanDue(AT, now([T + 1, T], [H + 1, H + 1]), EARLY), false);
+  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H, H + 1]), EARLY), false, "height exactly at the edge on one RPC");
+  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H + 1, H]), EARLY), false);
+  assert.equal(secondScanDue(AT, now([T, T], [H, H]), EARLY), false, "both exactly at the edges");
+  assert.equal(secondScanDue(AT, now([T + 1, AT.timesMs[0] + 12 * MIN + 1], [H + 1, H + 1]), EARLY), false, "past the lower restore time only is not enough");
+  assert.equal(secondScanDue(AT, now([T + 1, T + 1], [H + 1, AT.heights[0] + 601]), EARLY), false, "past the lower restore height only is not enough");
+  assert.equal(secondScanDue(AT, now([T + 9 * MIN, T + 9 * MIN], [H + 1, H + 1]), EARLY), true);
+});
+
+// wallet.md l.338-342: the 2 minutes of 1Click's delivery run after BOTH bounds. With slow blocks the height bound comes
+// last, so a delegate landing at block maxH + 600 still gets its 2 minutes: they count from the block past it.
+test("step 7: with slow blocks the 2 minutes count from the first block past the height bound", () => {
+  assert.equal(secondScanBoundHeight(AT), maxH + 601);
+  const B = maxT + 20 * MIN; // block maxH + 601 came 20 min after the restore
+  const H = maxH + 601;
+  assert.equal(secondScanDue(AT, now([maxT + 13 * MIN, maxT + 13 * MIN], [H, H]), [B, B]), false, "past 10 + 2 min but not 2 min past the height bound");
+  assert.equal(secondScanDue(AT, now([B + 2 * MIN, B + 2 * MIN], [H, H]), [B, B]), false, "exactly 2 min past it");
+  assert.equal(secondScanDue(AT, now([B + 2 * MIN + 1, B + 2 * MIN + 1], [H, H]), [B - 5, B]), true, "the later of the two RPCs' times counts");
+  assert.equal(secondScanDue(AT, now([B + 2 * MIN, B + 2 * MIN + 1], [H, H]), [B - 5, B]), false);
+  // before the height bound is passed there is no bound block to read: not due
+  assert.equal(secondScanDue(AT, now([B + 9 * MIN, B + 9 * MIN], [maxH + 600, H]), null), false);
+  assert.throws(() => secondScanDue(AT, now([B + 9 * MIN, B + 9 * MIN], [H, H]), null), /the bound block's times are needed once both heights are past it/);
 });
 
 test("step 7: secondScanDue takes only safe positive integers, two of each", () => {
   const ok = now([maxT + 13 * MIN, maxT + 13 * MIN], [maxH + 700, maxH + 700]);
   for (const bad of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1, "5" as unknown as number]) {
-    assert.throws(() => secondScanDue({ ...AT, heights: [bad, 1] }, ok), /safe positive integer/);
-    assert.throws(() => secondScanDue(AT, { ...ok, timesMs: [ok.timesMs[0], bad] }), /safe positive integer/);
+    assert.throws(() => secondScanDue({ ...AT, heights: [bad, 1] }, ok, EARLY), /safe positive integer/);
+    assert.throws(() => secondScanDue(AT, { ...ok, timesMs: [ok.timesMs[0], bad] }, EARLY), /safe positive integer/);
   }
-  assert.throws(() => secondScanDue({ ...AT, heights: [1] as unknown as [number, number] }, ok), /two/);
+  assert.throws(() => secondScanDue({ ...AT, heights: [1] as unknown as [number, number] }, ok, EARLY), /two/);
 });
 
 // ---------- step 7: an arm with nothing visible ----------

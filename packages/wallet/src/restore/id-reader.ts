@@ -1,0 +1,171 @@
+// The restore's IdReader on NEAR (card wallet-restore-id-reader; docs/plan1/wallet.md §2.3 "Restore" step 5, l.297-303,
+// and its cost, l.312-324). What one deposit id U (a NEAR implicit account, U_{s,i}) shows, from public views only:
+//
+// - "money": U holds the vault's asset on the token (ft_balance_of(U) > 0; 1Click delivers to U's own NEAR account,
+//   §2.4 step 5) or any token inside intents.near (mt_tokens_for_owner(U) lists one and mt_batch_balance_of shows it
+//   above 0; D45).
+// - "used": U holds nothing now, and a lasting public trace shows it was used:
+//   - storage_balance_of(U) on the token is not null: a never-used implicit id has no storage there (D16), and 1Click's
+//     delivery registers U (its ft_withdraw with storage_deposit, D12). Read on mainnet USDC at block 223638277:
+//     9c484fa5…21c5c1 answers {"total":"1250000000000000000000","available":"0"} with ft_balance_of "0" (used, empty);
+//     abab…ab answers null at block 223638170 (never used).
+//   - view_account(U) answers an account: U was created (the relayer's prepay Transfer, §2.4). Read at block 223638199:
+//     a8969c04…f264e4 answers {"amount":"20000000000000000000000","storage_usage":428} with storage null and no token
+//     in intents.near; abab…ab answers UNKNOWN_ACCOUNT at block 223638171.
+//   - intents.near lists a token for U at a zero balance: it held it once.
+//   Not a trace: has_public_key(U, U's key) is true for every implicit id, used or not (D15), and intents.near's nonces
+//   are pruned (below), so neither is read.
+// - "unused": no view shows money or a trace, on BOTH providers. A provider that hides a trace would end a lane's margin
+//   early and leave money past it unseen, so "unused" needs the two operators to agree; money or a trace on either one
+//   is enough, since a false one only reads the lane further (bounded by step 5's walk end).
+// - An indexer (NearBlocks, the intents explorer) is a server's word: it may turn an id both providers see as unused
+//   into "used" (`indexer` answers true), never anything into "unused"; a failed or false answer changes nothing.
+//
+// The trace this cannot see (review 2, gap 1): an id whose whole life was inside intents.near (a refunded quote moved
+// out by an intent to a pool wallet or by withdraw.open) leaves no storage on the token and no NEAR account. Its
+// intents' nonces do not last: intents.near runs near/intents 16d04f6 (contract_source_metadata, block 223637676),
+// whose cleanup_nonces prunes a V1 versioned nonce once its deadline is past or its salt is no longer valid
+// (contracts/defuse/src/contract/garbage_collector.rs:9-43, is_nonce_cleanable l.32-42), by the DAO or the
+// GarbageCollector role; a legacy (unversioned) nonce is never cleaned (l.33-35), but "Legacy nonces can still be used
+// at this time, but will be prohibited out in the near future" (core/src/nonce/versioned.rs:20). So a seed-derived
+// nonce read back by is_nonce_used is no lasting proof. Such an id reads "unused" here unless the indexer says used;
+// its money is still under the 12 words.
+//
+// Failures (review 2, gap 2): every view is retried on its provider with doubling backoff (ID_READ_TRIES, from
+// ID_READ_BACKOFF_MS) before that provider's read of the id fails; the id's first read falls over to the other provider;
+// the confirming read of an unused id must come from the other provider. An id whose reads still fail throws, and step 5
+// counts it as failed (restoreDepositIds): so one provider always down ends a lane with its named error, never with
+// unused ids taken on one provider's word. A view that fails with "FiatToken: paused" is a halt, never a zero: it
+// fails the read, to be read again.
+//
+// Each request names U or the token and nothing else (§2.9 row 8); the provider read first is drawn at random per id,
+// so the reads spread over both operators (l.322-324). Nothing here logs.
+import { base64 } from "@scure/base";
+import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
+import type { IdReader, IdState } from "./wallets.ts";
+
+export const INTENTS = "intents.near";
+/** Tries of one view on one provider before that provider's read fails. */
+export const ID_READ_TRIES = 4;
+/** The wait before a view's second try; it doubles on each try after. */
+export const ID_READ_BACKOFF_MS = 250;
+const HALT = "FiatToken: paused";
+const HEX64 = /^[0-9a-f]{64}$/;
+const DIGITS = /^(0|[1-9][0-9]*)$/;
+
+type Obj = Record<string, unknown>;
+const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
+const sleepMs = (ms: number): Promise<void> => new Promise((res) => setTimeout(res, ms));
+const randomBit = (): number => globalThis.crypto.getRandomValues(new Uint8Array(1))[0]! & 1;
+
+/** A server's word that an id was used: true says used; false or a throw says nothing. */
+export type IdIndexer = (id: string) => Promise<boolean>;
+export type IdReaderOpts = { tries?: number; backoffMs?: number; sleep?: (ms: number) => Promise<void>; first?: () => number; indexer?: IdIndexer };
+
+/** The view's answer, or null for an account the provider says does not exist (view_account only). */
+async function view(rpc: NearRpc, params: Obj, what: string): Promise<unknown> {
+  const a = await rpc.query({ ...params, finality: "final" });
+  if (!isObj(a)) throw new Error(`${rpc.name}: ${what}: not a JSON-RPC answer`);
+  const text = JSON.stringify(a.error ?? (isObj(a.result) ? a.result.error : undefined) ?? "");
+  if (text.includes(HALT)) throw new Error(`${rpc.name}: ${what}: the token is halted (${HALT})`);
+  if (a.error !== undefined) {
+    const cause = isObj(a.error) && isObj(a.error.cause) ? a.error.cause.name : undefined;
+    if (params.request_type === "view_account" && cause === "UNKNOWN_ACCOUNT") return null;
+    throw new Error(`${rpc.name}: ${what}: ${String(isObj(a.error) ? (a.error.name ?? a.error.message) : "an error")}`.slice(0, 200));
+  }
+  const r = a.result;
+  if (!isObj(r) || r.error !== undefined || !Number.isSafeInteger(r.block_height)) throw new Error(`${rpc.name}: ${what}: not a view result`);
+  if (params.request_type === "view_account") {
+    if (typeof r.amount !== "string" || !DIGITS.test(r.amount)) throw new Error(`${rpc.name}: ${what}: not an account`);
+    return r;
+  }
+  const bytes = r.result;
+  if (!Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) throw new Error(`${rpc.name}: ${what}: no result bytes`);
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes as number[])));
+  } catch {
+    throw new Error(`${rpc.name}: ${what}: the result is not JSON`);
+  }
+}
+
+const call = (account: string, method: string, args: Obj): Obj => ({
+  request_type: "call_function",
+  account_id: account,
+  method_name: method,
+  args_base64: base64.encode(new TextEncoder().encode(JSON.stringify(args))),
+});
+const amount = (x: unknown, what: string): bigint => {
+  if (typeof x !== "string" || !DIGITS.test(x)) throw new Error(`${what}: not a decimal string`);
+  return BigInt(x);
+};
+
+/**
+ * The IdReader of step 5 on the network's token and intents.near, through one FastNEAR RPC and the dRPC RPC of that
+ * network (nearPairNetwork), in either order.
+ */
+export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts = {}): IdReader {
+  if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new Error(`unknown network ${String(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new Error(nearPairRule(network));
+  const token = NEAR_NETWORKS[network].usdc;
+  const tries = opts.tries ?? ID_READ_TRIES;
+  const backoff = opts.backoffMs ?? ID_READ_BACKOFF_MS;
+  if (!Number.isSafeInteger(tries) || tries < 1) throw new Error("tries is a count above 0");
+  if (!Number.isSafeInteger(backoff) || backoff < 0) throw new Error("backoffMs is a time in ms");
+  const sleep = opts.sleep ?? sleepMs;
+  const first = opts.first ?? randomBit;
+
+  // one view on one provider, retried with doubling backoff; the last failure is its error
+  const retried = async (rpc: NearRpc, params: Obj, what: string): Promise<unknown> => {
+    for (let k = 0; ; k++) {
+      try {
+        return await view(rpc, params, what);
+      } catch (e) {
+        if (k + 1 >= tries) throw e;
+        await sleep(backoff * 2 ** k);
+      }
+    }
+  };
+
+  // what one provider shows of U
+  const readOn = async (rpc: NearRpc, u: string): Promise<IdState> => {
+    const storage = await retried(rpc, call(token, "storage_balance_of", { account_id: u }), "storage_balance_of");
+    if (storage !== null && !(isObj(storage) && typeof storage.total === "string" && DIGITS.test(storage.total))) throw new Error(`${rpc.name}: storage_balance_of: neither null nor a balance`);
+    // an account with no storage on the token holds none of it (NEP-145): the balance is read only when registered
+    if (storage !== null && amount(await retried(rpc, call(token, "ft_balance_of", { account_id: u }), "ft_balance_of"), `${rpc.name}: ft_balance_of`) > 0n) return "money";
+    const listed = await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: u }), "mt_tokens_for_owner");
+    if (!Array.isArray(listed) || !listed.every((t) => isObj(t) && typeof t.token_id === "string" && t.token_id !== "")) throw new Error(`${rpc.name}: mt_tokens_for_owner: not a token list`);
+    if (listed.length > 0) {
+      const ids = listed.map((t) => (t as { token_id: string }).token_id);
+      const held = await retried(rpc, call(INTENTS, "mt_batch_balance_of", { account_id: u, token_ids: ids }), "mt_batch_balance_of");
+      if (!Array.isArray(held) || held.length !== ids.length) throw new Error(`${rpc.name}: mt_batch_balance_of: not one balance per token`);
+      return held.some((x) => amount(x, `${rpc.name}: mt_batch_balance_of`) > 0n) ? "money" : "used";
+    }
+    if (storage !== null) return "used";
+    return (await retried(rpc, { request_type: "view_account", account_id: u }, "view_account")) === null ? "unused" : "used";
+  };
+
+  return async (u: string): Promise<IdState> => {
+    if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
+    const a = first() === 0 ? 0 : 1;
+    let p = a;
+    let state: IdState;
+    try {
+      state = await readOn(rpcs[a], u);
+    } catch {
+      p = 1 - a;
+      state = await readOn(rpcs[p], u);
+    }
+    if (state !== "unused") return state;
+    // the other provider must agree it is unused; a failure here fails the id's read
+    const other = await readOn(rpcs[1 - p], u);
+    if (other !== "unused") return other;
+    if (opts.indexer) {
+      try {
+        if ((await opts.indexer(u)) === true) return "used";
+      } catch {
+        // a server's silence proves nothing
+      }
+    }
+    return "unused";
+  };
+}

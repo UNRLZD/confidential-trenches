@@ -13,7 +13,7 @@
 //   secret key derived here is zeroed at once: only account ids leave this file.
 // - Step 7, the second scan (l.335-342): a withdrawal the lost store signed lands until its deadline_ms, an arming
 //   delegate until its max_block_height, so steps 3-5 run once more only after both RPCs' final blocks are past both
-//   bounds, plus 1Click's delivery time. Block time and height are read from the chain on two RPCs, never the device
+//   bounds, plus 1Click's delivery time counted from the later of the two. Block time and height are read from the chain on two RPCs, never the device
 //   clock (l.346-348).
 // - Step 7, an arm with nothing visible (l.343-345): an arm whose spends row shows it landed, but whose A, W and V
 //   hold nothing, has its money in flight with 1Click or due as a late refund to V: its W and V are re-read on each
@@ -121,17 +121,28 @@ const pair = (xs: unknown, name: string): [number, number] => {
   return xs as [number, number];
 };
 
+/** The first block past the second scan's height bound: the higher restore height plus SECOND_SCAN_BLOCKS plus one. */
+export function secondScanBoundHeight(at: Pick<FinalPair, "heights">): number {
+  return Math.max(...pair(at?.heights, "at.heights")) + SECOND_SCAN_BLOCKS + 1;
+}
+
 /**
  * Step 7: whether the second scan is due. `at` is both RPCs' final blocks read at the restore, `now` both RPCs' final
- * blocks now. Due only when both RPCs' final block time is more than SECOND_SCAN_WAIT_MS + SECOND_SCAN_DELIVERY_MS past
- * the higher restore time, and both heights more than SECOND_SCAN_BLOCKS past the higher restore height.
+ * blocks now, and `bound` both RPCs' timestamps (ms) of block secondScanBoundHeight(at), or null while it is not read.
+ * Due only when both heights are past the higher restore height by more than SECOND_SCAN_BLOCKS, and both RPCs' final
+ * block time is more than SECOND_SCAN_DELIVERY_MS past the later of the two bounds: SECOND_SCAN_WAIT_MS past the higher
+ * restore time, and the higher time of the bound block (l.338-342: "Then it waits 2 more minutes of block time", after
+ * both; with slow blocks the height bound is the later, and a delegate landing in its last block gets its 2 minutes).
  */
-export function secondScanDue(at: FinalPair, now: FinalPair): boolean {
+export function secondScanDue(at: FinalPair, now: FinalPair, bound: [number, number] | null): boolean {
   const atH = pair(at?.heights, "at.heights"), atT = pair(at?.timesMs, "at.timesMs");
   const nowH = pair(now?.heights, "now.heights"), nowT = pair(now?.timesMs, "now.timesMs");
-  const t = Math.max(...atT) + SECOND_SCAN_WAIT_MS + SECOND_SCAN_DELIVERY_MS;
   const h = Math.max(...atH) + SECOND_SCAN_BLOCKS;
-  return nowT.every((x) => x > t) && nowH.every((x) => x > h);
+  if (!nowH.every((x) => x > h)) return false;
+  if (bound === null) throw new Error("the bound block's times are needed once both heights are past it");
+  const b = pair(bound, "bound");
+  const t = Math.max(Math.max(...atT) + SECOND_SCAN_WAIT_MS, ...b) + SECOND_SCAN_DELIVERY_MS;
+  return nowT.every((x) => x > t);
 }
 
 /** A landed arm with nothing visible: its own W (each on its chains) and its V, re-read on each open until money shows. */
