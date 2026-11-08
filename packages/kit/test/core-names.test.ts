@@ -1,5 +1,5 @@
-// Card exit-note-scan: the kit's ./core export (src/core.ts) holds exactly the wallet names the CO approved for
-// packages/ tools, so it never gains or loses one silently, and the kit's public entry never reaches it.
+// Card exit-note-scan: the core's names are pinned here. The kit's ./core export (src/core.ts) holds exactly these
+// wallet names for packages/ tools, so it never gains or loses one silently, and the kit's public entry never reaches it.
 //   node --test test/core-names.test.ts      (from packages/kit)
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
