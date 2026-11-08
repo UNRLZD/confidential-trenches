@@ -119,9 +119,9 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's fifty checks (signpage-shell runs four ways, held-deposit-way-out, pool-deposit-follow, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's fifty-one checks (signpage-shell runs four ways, held-deposit-way-out, pool-deposit-follow, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole, solana-legs-checked and signers-own-bytes the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 50);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 51);
   assert.ok(sign.include.some((e) => e.key === "pool-senders-next-page" && !e.chrome && e.args === ""), "pool-senders-next-page runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "held-deposit-way-out" && !e.chrome && e.args === ""), "held-deposit-way-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposit-address" && !e.chrome && e.args === ""), "pool-deposit-address runs after every sign deploy");
@@ -133,6 +133,7 @@ test("the signing page's fifty checks (signpage-shell runs four ways, held-depos
   assert.ok(sign.include.some((e) => e.key === "pool-deposit-sent-end" && !e.chrome && e.args === ""), "pool-deposit-sent-end runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-written-accounts-whole" && !e.chrome && e.args === ""), "solana-written-accounts-whole runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-legs-checked" && !e.chrome && e.args === ""), "solana-legs-checked runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "signers-own-bytes" && !e.chrome && e.args === ""), "signers-own-bytes runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "oneclick-fee-path-own-key" && !e.chrome && e.args === ""), "oneclick-fee-path-own-key runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
