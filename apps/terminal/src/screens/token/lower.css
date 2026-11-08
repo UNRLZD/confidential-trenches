@@ -7,7 +7,9 @@
 .tkl-tab { position: relative; flex: none; white-space: nowrap; padding: 0; border: 0; background: transparent; font: 600 15px var(--font-ui); color: var(--text-3); cursor: pointer; }
 .tkl-tab::after { content: ""; position: absolute; inset: -15px -6px; }
 .tkl-tab[aria-selected="true"] { color: var(--text-1); }
-.tkl-tabn { margin-left: 6px; font: 400 11px var(--font-num); color: var(--text-3); }
+/* the holders count's slot: the widest count (discover/format.ts count: "(12.35M)", 8 characters) at the tab's size in
+   the number face, drawn empty before the row lands, so no tab moves when it does (BAR-10 CLS 0) */
+.tkl-tabn { display: inline-block; width: 8ch; margin-left: 0.3em; text-align: left; vertical-align: baseline; white-space: nowrap; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .tkl-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .tkl-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .tkl-skel { display: flex; flex-direction: column; gap: 14px; padding: 12px 16px; }
@@ -87,6 +89,7 @@
   .tkl-tab { height: 46px; display: flex; align-items: center; font-size: 14.5px; color: var(--m-text-4, #6b6b6b); }
   .tkl-tab::after { inset: auto 0 -1px; height: 2px; border-radius: 2px; background: transparent; }
   .tkl-tab[aria-selected="true"] { color: var(--m-text, #f4f4f2); }
+  .tkl-tabn { width: 6ch; margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--m-text-4, #6b6b6b); }
   .tkl-tab[aria-selected="true"]::after { background: var(--m-text, #f4f4f2); }
   .tkl-thead, .tkl-trow, .tkl-hr, .tkl-sum { padding-left: 16px; padding-right: 16px; }
   .tkl-tr { grid-template-columns: 40px 24px 96px minmax(0, 1fr); }

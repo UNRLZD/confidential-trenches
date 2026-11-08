@@ -132,15 +132,12 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
     <button key={k} type="button" role="tab" className="tkl-tab" aria-selected={tab === k} data-testid={`lower-tab-${k}`} onClick={() => setTab(k)}>
       {k === "trades" ? (
         <W id="trades" />
-      ) : phone ? (
-        <>
-          <W id="holders" />
-          {sum && <span className="tkl-tabn">{sum.count}</span>}
-        </>
       ) : (
         <>
           <W id="holders" />
-          {sum && ` (${sum.count})`}
+          {/* the count's slot is drawn at its widest (lower.css .tkl-tabn) from the first paint, empty until the row
+              lands, so the tab after it never moves when the count arrives (BAR-10 CLS 0) */}
+          <span className="tkl-tabn" data-testid="lower-tab-count">{sum ? (phone ? sum.count : `(${sum.count})`) : ""}</span>
         </>
       )}
     </button>
