@@ -17,7 +17,10 @@ a.tkr-row:hover { background: var(--bg-row-hover); }
 .tkr-a { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .tkr-s { font: 600 15px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tkr-p { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tkr-b { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; white-space: nowrap; }
+/* the right column has one width whatever its values (the widest: $999.9M MC over +12.3K% · 24h), its lines filling it
+   right-aligned, so a refresh that changes a slot's values moves no box (a column as wide as its text moved its left edge) */
+.tkr-b { flex: none; width: 100px; display: flex; flex-direction: column; gap: 3px; white-space: nowrap; }
+.tkr-mc, .tkr-c { text-align: right; overflow: hidden; text-overflow: ellipsis; }
 .tkr-mc { font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; }
 .tkr-mc u { text-decoration: none; font-size: 11px; color: var(--text-3); margin-left: 4px; }
 .tkr-c { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-3); }

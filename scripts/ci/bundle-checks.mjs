@@ -57,6 +57,8 @@ export const IN_PROCESS = [
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
+  viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
@@ -109,6 +111,7 @@ export const OUT = {
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
+  "app-header-search-chain": "the helper's lists and token answers (its behaviour run is in test:e2e)",
   "app-token-route": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",

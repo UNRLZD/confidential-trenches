@@ -35,6 +35,16 @@
 //   each stranded 0.01 SOL). FLOW_RESUME=<that file> runs again from it: no U, no deposit; the notes restored from the
 //   seed on both devnet RPCs (the wallet's solanaRestoreNotes) into the store, then the buy and the sell as above.
 //   FLOW_CRASH_AFTER=deposit stops the run right after its deposit (the resume's test).
+// - FLOW_DUST=1 (card sol-rent-back-dust-burn) plants a stranger's unit on W's token account after its full sell: a
+//   stranger S (a key made in this run, kept beside the seed as run-<time>.stranger, 0600, never printed) is funded by
+//   someone else (its address and lamports printed with U's); after the buy, S takes 1 unit of the coin from W (S pays
+//   the fee and its token account's rent, so W keeps exactly its sell's need); W then sells all it holds; once the sell
+//   reads confirmed on both RPCs and before the rent back's first read of W's accounts, S sends that unit back to W's
+//   token account. FLOW_STRANGER=<that file> uses a kept S again; FLOW_RESUME with FLOW_BUY_SIG=<the buy's signature>
+//   goes on from a run that stopped after its buy (no deposit, no buy: the dust step and the sell). FLOW_RESUME with
+//   FLOW_SWEEP_W=<W> is a later load of that run: W's owed record as its sell wrote it (W from its spent note, the coin's
+//   account), then the page's state read, whose rent back runs once; W and its accounts read at finalized after it. The rent back must then burn it, close the account and sweep W: the run is filled only when a
+//   teardown frame burns exactly 1 and W, its token account and both volume accounts read null at finalized.
 // - Each kind is tapped once. A kind that does not land on its tap is a failed run, recorded as one: it is never tapped
 //   again (a re-tap would hide a page that gives up on a busy provider).
 import { randomBytes, createHash } from "node:crypto";
@@ -43,7 +53,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
-import { base58 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
 // the testnet build's network, set before any module that reads it loads (as test/pool-testnet.test.ts does)
 globalThis.__SIGN_NETWORK__ = "testnet";
@@ -74,14 +85,19 @@ const asked = new Map();
 // every transaction the page sends on a devnet RPC, by its first signature, in order (card sol-buy-rent-back: the sell,
 // then its rent back, the teardown frames and the sweep); public bytes only
 const sentTxs = [];
+const sentWire = new Map();
 const sentOf = (init) => {
   try {
     const b = JSON.parse(String(init?.body ?? ""));
     if (b?.method !== "sendTransaction") return;
     const sig = base58.encode(Buffer.from(String(b.params?.[0]), "base64").subarray(1, 65));
     if (!sentTxs.includes(sig)) sentTxs.push(sig);
+    sentWire.set(sig, Buffer.from(String(b.params?.[0]), "base64"));
   } catch {}
 };
+// FLOW_DUST: the stranger S and its unit (set below); dust.armed is sentTxs' length before the sell's send
+const DUST = process.env.FLOW_DUST === "1";
+let dust = null;
 // every devnet RPC answer of 429 or 5xx is logged (the page retries it); FLOW_BURST injects the bursts above
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
@@ -90,6 +106,19 @@ globalThis.fetch = async (u, init) => {
   const n = (asked.get(host) ?? 0) + 1;
   asked.set(host, n);
   sentOf(init);
+  // FLOW_DUST: the rent back's first read of W and its token account after the sell confirmed waits for S's unit
+  if (dust?.armed !== undefined && !dust.sent) {
+    try {
+      const b = JSON.parse(String(init?.body ?? ""));
+      const keys = b?.method === "getMultipleAccounts" ? b.params?.[0] : null;
+      if (Array.isArray(keys) && keys.includes(dust.w) && keys.includes(dust.ata) && sentTxs.length > dust.armed) {
+        dust.p ??= dustBack().finally(() => (dust.p = null));
+        await dust.p;
+      }
+    } catch (e) {
+      log(`dust: ${String(e?.message).slice(0, 160)}`);
+    }
+  }
   if (BURST && n % 15 <= 2 && n % 15 >= 1) {
     injected.rpc++;
     log(`rpc ${host}: 429 injected (request ${n})`);
@@ -235,6 +264,66 @@ const balance = async () => {
 const VENUE = SPEND === "max" ? await readSolanaPoolBuyVenue(rpcs, "pump-curve", MINT) : null;
 const KEEPS = VENUE === null ? null : solanaPoolBuySellNeed(VENUE, rent);
 if (VENUE !== null) log(`venue ${VENUE.kind} (token account ${VENUE.tokenAccountSize} B, cashback ${VENUE.cashback}); a buy leaves W ${KEEPS} for its sell on any venue the coin sells on`);
+// FLOW_DUST: S, its key kept beside the seed, funded by someone else before anything moves
+const { solanaCompileV0 } = await import("../../kit/src/trade/solana/build.ts");
+const { solanaDecodeMessage, solanaAta } = await import("../../kit/src/checks/solana/message.ts");
+const SYSTEM = "11111111111111111111111111111111";
+const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+const dustTxs = [];
+/** One transaction of `ixs`, `signers` ({ pub, key }) the payer first, sent on both RPCs and read confirmed on both. */
+const sendOwn = async (what, ixs, signers) => {
+  const { blockhash } = (await rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])).value;
+  const { message } = solanaCompileV0(signers[0].pub, ixs, blockhash, [], signers.map((x) => x.pub));
+  const m = solanaDecodeMessage(message);
+  const wire = new Uint8Array(1 + 64 * m.requiredSignatures + message.length);
+  wire[0] = m.requiredSignatures;
+  for (let i = 0; i < m.requiredSignatures; i++) wire.set(ed25519.sign(message, signers.find((x) => x.pub === m.staticKeys[i]).key), 1 + 64 * i);
+  wire.set(message, 1 + 64 * m.requiredSignatures);
+  const sig = base58.encode(wire.subarray(1, 65));
+  dustTxs.push({ what, sig });
+  log(`${what}: ${sig}`);
+  await Promise.allSettled(rpcs.map((r) => r("sendTransaction", [base64.encode(wire), { encoding: "base64", preflightCommitment: "confirmed" }])));
+  for (let i = 0; i < 60; i++) {
+    const st = await Promise.all(rpcs.map(async (r) => (await r("getSignatureStatuses", [[sig]])).value[0]));
+    if (st.some((x) => x?.err)) throw new Error(`${what} failed: ${JSON.stringify(st.map((x) => x?.err ?? null))}`);
+    if (st.every((x) => x?.confirmationStatus === "confirmed" || x?.confirmationStatus === "finalized")) return sig;
+    await sleep(1_000);
+  }
+  throw new Error(`${what} not confirmed on both RPCs`);
+};
+const tokenProgram = (await rpcs[0]("getAccountInfo", [MINT, { encoding: "base64", commitment: "confirmed" }])).value.owner;
+const decimals = Buffer.from((await rpcs[0]("getAccountInfo", [MINT, { encoding: "base64", commitment: "confirmed" }])).value.data[0], "base64")[44];
+const transfer = (from, to, owner, signer) => {
+  const data = new Uint8Array(10);
+  data[0] = 12; // TransferChecked(amount 1, decimals)
+  new DataView(data.buffer).setBigUint64(1, 1n, true);
+  data[9] = decimals;
+  return { program: tokenProgram, accounts: [{ key: from, signer: false, writable: true }, { key: MINT, signer: false, writable: false }, { key: to, signer: false, writable: true }, { key: owner, signer, writable: false }], data };
+};
+if (DUST) {
+  const kept = process.env.FLOW_STRANGER;
+  const key = kept ? Uint8Array.from(Buffer.from(readFileSync(kept, "utf8").trim(), "hex")) : Uint8Array.from(randomBytes(32));
+  if (key.length !== 32) throw new Error("the stranger's file holds no 32-byte key");
+  const dir = join(homedir(), ".ct-devnet-runs");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const at = kept ?? join(dir, `run-${new Date().toISOString().replace(/[:.]/g, "-")}.stranger`);
+  if (!kept) writeFileSync(at, Buffer.from(key).toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+  const S = base58.encode(ed25519.getPublicKey(key));
+  // S's token account (Token-2022's with ImmutableOwner is 170 bytes; 200 bounds it), its two fees, and S's own
+  // rent-exempt minimum, since S stays open after them (12:45Z: S at 1,700,000 failed "insufficient funds for rent")
+  const need = solanaRentMin(rent, 200) + solanaRentMin(rent, 0) + 2n * FEE;
+  dust = { S, key, need, ata: null, w: null, armed: undefined, sent: false, p: null };
+  log(`FLOW_DUST: the stranger S ${S} (its key kept at ${at}); fund S with at least ${need} lamports on devnet (S is waited for after the buy, U first)`);
+}
+/** S's unit back to W's token account, once the sell reads confirmed and ok on both RPCs; false while it does not. */
+async function dustBack() {
+  const sell = sentTxs[dust.armed];
+  const st = await Promise.all(rpcs.map(async (r) => (await r("getSignatureStatuses", [[sell]])).value[0]));
+  if (!st.every((x) => x && x.err === null && (x.confirmationStatus === "confirmed" || x.confirmationStatus === "finalized"))) return false;
+  dust.sent = true;
+  await sendOwn("dust: S's 1 unit to W's token account after the sell filled", [transfer(solanaAta(dust.S, MINT, tokenProgram), dust.ata, dust.S, true)], [{ pub: dust.S, key: dust.key }]);
+  return true;
+}
 let deposit;
 if (RESUME) {
   // the notes from the seed alone, as a restore reads them: each into the store, a change note under its parent
@@ -260,9 +349,40 @@ if (RESUME) {
     process.exit(3);
   }
 }
+if (RESUME && process.env.FLOW_SWEEP_W) {
+  const W = process.env.FLOW_SWEEP_W;
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const n = (await ns.list()).filter((x) => x.state === "SPENT" && x.leaf).find((x) => freshWallet(seed64, "sol", x.leaf.label, jOf(x.ref)).address === W);
+  if (!n) throw new Error("W is no spent note's W");
+  const { owedRentBacks } = await import("../src/pool-sell.ts");
+  await owedRentBacks(page.store).put({ address: W, l: String(n.leaf.label), j: jOf(n.ref), mints: [{ mint: MINT, program: tokenProgram }], passes: 0 });
+  const lamports = async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value?.lamports ?? null;
+  log(`a later load of W ${W} (${await lamports(W)} lamports at finalized): the page's state read`);
+  await t.stateRead();
+  // the rent back runs under the seed's shared lock, asked for inside the state read: this waits for it to end
+  await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
+  for (let i = 0; i < 45; i++) {
+    const st = sentTxs.length ? (await rpcs[0]("getSignatureStatuses", [sentTxs])).value : [];
+    if (st.every((x) => x?.confirmationStatus === "finalized")) break;
+    await sleep(2_000);
+  }
+  const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
+  const after = { W, tokenAccount: await lamports(solanaAta(W, MINT, tokenProgram)), pumpVolume: await lamports(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await lamports(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await lamports(W) };
+  const notes = await noteList();
+  log(`after the load ${JSON.stringify(after)}; sent ${JSON.stringify(sentTxs)}; notes ${JSON.stringify(notes)}`);
+  seed64.fill(0);
+  writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", sweepLoad: true, after, sentTxs, notes }, null, 2) + "\n");
+  await t.signedOut();
+  ns.close();
+  w.close();
+  process.exit(Object.entries(after).every(([k, v]) => k === "W" || v === null) ? 0 : 1);
+}
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
-if (landed) {
+// a run that stopped after its buy, resumed: its buy's signature, its note SPENT in the restored store
+if (RESUME && process.env.FLOW_BUY_SIG) buy = { answer: { result: { txs: [{ hash: process.env.FLOW_BUY_SIG }] } }, notes: await noteList(), resumedAfterBuy: true };
+else if (landed) {
   log("the proof queue's pass");
   const pass = await t.proofs();
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
@@ -287,10 +407,43 @@ if (bought) {
     if (!t) await sleep(2_000);
   }
   const W = t.transaction.message.accountKeys[1];
+  if (DUST) {
+    for (;;) {
+      const got = await Promise.all(rpcs.map(async (r) => BigInt((await r("getBalance", [dust.S, { commitment: "confirmed" }])).value)));
+      if (got.every((b) => b >= dust.need)) break;
+      log(`S holds ${got.join("/")}: waiting for at least ${dust.need}`);
+      await sleep(10_000);
+    }
+    log("S funded");
+    // W's key from the seed: the spent note's label and j (buy-wallets.ts: each spent note names its W), then S takes
+    // 1 unit: S pays, W only signs
+    const { jOf } = await import("../../wallet/src/pool/queue.ts");
+    const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+    const fw = (await ns.list()).filter((n) => n.state === "SPENT" && n.leaf).map((n) => freshWallet(seed64, "sol", n.leaf.label, jOf(n.ref))).find((x) => x.address === W);
+    if (!fw || base58.encode(fw.publicKey) !== W) throw new Error("W's key is not W");
+    const wKey = fw.secretKey.slice(0, 32);
+    fw.secretKey.fill(0);
+    const sAta = solanaAta(dust.S, MINT, tokenProgram);
+    dust.ata = solanaAta(W, MINT, tokenProgram);
+    dust.w = W;
+    const create = { program: ATA_PROGRAM, accounts: [{ key: dust.S, signer: true, writable: true }, { key: sAta, signer: false, writable: true }, { key: dust.S, signer: false, writable: false }, { key: MINT, signer: false, writable: false }, { key: SYSTEM, signer: false, writable: false }, { key: tokenProgram, signer: false, writable: false }], data: Uint8Array.of(1) };
+    try {
+      await sendOwn("dust setup: S takes 1 unit from W before the sell (S pays)", [create, transfer(dust.ata, sAta, W, true)], [{ pub: dust.S, key: dust.key }, { pub: W, key: wKey }]);
+    } finally {
+      wKey.fill(0);
+    }
+    // the sell's amount is read at finalized below: wait until the setup is finalized
+    for (let i = 0; i < 60; i++) {
+      const st = (await rpcs[0]("getSignatureStatuses", [[dustTxs.at(-1).sig]])).value[0];
+      if (st?.confirmationStatus === "finalized") break;
+      await sleep(2_000);
+    }
+  }
   const accs = (await rpcs[0]("getTokenAccountsByOwner", [W, { mint: MINT }, { encoding: "jsonParsed", commitment: "finalized" }])).value;
   const amount = accs[0].account.data.parsed.info.tokenAmount.uiAmountString;
   log(`W ${W} holds ${(await rpcs[0]("getBalance", [W, { commitment: "finalized" }])).value} lamports after the buy`);
   log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
+  if (DUST) dust.armed = sentTxs.length;
   sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
   log(`sell ${JSON.stringify(sell)}`);
   // the rent back (card sol-buy-rent-back): after the full sell, W's token account and volume accounts at finalized,
@@ -303,18 +456,31 @@ if (bought) {
   }
   const info =async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
   const program = (await info(MINT)).owner;
-  const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
   const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
   const left = async (a) => (await info(a))?.lamports ?? null;
   rentBack = { W, tokenAccount: await left(solanaAta(W, MINT, program)), pumpVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await left(W) };
   log(`after the rent back ${JSON.stringify(rentBack)}`);
+  // FLOW_DUST: the teardown frame that burned S's unit (a token program's Burn, tag 8, of W's token account)
+  if (DUST) {
+    for (const sig of sentTxs) {
+      const wire = sentWire.get(sig);
+      if (!wire) continue;
+      const m = solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]));
+      for (const ix of m.instructions) {
+        const prog = m.staticKeys[ix.programIndex];
+        if (prog === tokenProgram && ix.data.length === 9 && ix.data[0] === 8 && m.staticKeys[ix.accounts[0]] === dust.ata) dust.burned = { sig, amount: String(new DataView(ix.data.buffer, ix.data.byteOffset + 1, 8).getBigUint64(0, true)) };
+      }
+    }
+    log(`dust: sent back ${dust.sent}; burned ${JSON.stringify(dust.burned ?? null)}`);
+  }
 }
 const notes = await noteList();
 log(`notes ${JSON.stringify(notes)}`);
 const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
-const filled = landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
+const dusted = !DUST || (dust.sent && dust.burned?.amount === "1" && rentBack !== null && Object.entries(rentBack).every(([k, v]) => k === "W" || v === null));
+const filled = dusted && landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();
