@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { HELPER_INTENTS_CODES } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import type { Relayer, RelayerAction, Rpc, TxOutcome, TxRef } from "../bind/send.ts";
-import { createIntentsCarry, INTENTS_FLOOR_YOCTO, INTENTS_SENDS_MAX, REGISTRATION_YOCTO, SIGNER_CAP_STATUS, type IntentsAnswer } from "./carry.ts";
+import { createIntentsCarry, INTENTS_FLOOR_YOCTO, INTENTS_SENDS_MAX, OWN_SETTLE_MS, REGISTRATION_YOCTO, SIGNER_CAP_STATUS, SWEEP_MS, type IntentsAnswer } from "./carry.ts";
 import { RELAYER_FLOOR_YOCTO, USDC_PAUSED } from "../bind/send.ts";
 import { tokenHeld, type TokenStatus } from "../token-status/status.ts";
 import { intentsReads } from "./reads.ts";
@@ -58,7 +58,7 @@ const transfer = (to: string, amount = "2003610") => ({ intent: "transfer", rece
 const withdraw = (to: string, extra: Record<string, unknown> = {}) => ({ intent: "ft_withdraw", token: USDC, receiver_id: to, amount: "2003610", ...extra });
 
 // ---- the two providers ----
-type Chain = { refuseSimulateOn: number | null; executed?: number; storage: Map<string, "null" | "registered">; finalMs: number; finalMsOf?: [number, number]; paused?: boolean; sims?: number };
+type Chain = { refuseSimulateOn: number | null; executed?: number; storage: Map<string, "null" | "registered">; finalMs: number; finalMsOf?: [number, number]; paused?: boolean; sims?: number; storageReads?: number };
 const bytes = (v: unknown) => [...Buffer.from(JSON.stringify(v))];
 const SIM_OK = { intents_executed: [{ intent_hash: "x", account_id: "u", nonce: "n" }], logs: [], min_deadline: "2026-11-07T18:02:00Z", invariant_violated: null, state: { fee: 1, current_salt: "5628f6c6" } };
 function providers(chain: Chain): [Rpc, Rpc] {
@@ -80,6 +80,7 @@ function providers(chain: Chain): [Rpc, Rpc] {
         // is NEP-145's and a pause does not gate it
         if (chain.paused === true && p.account_id === USDC && p.method_name !== "storage_balance_of") throw new Error(`Server error: Smart contract panicked: ${USDC_PAUSED}`);
         if (p.method_name === "storage_balance_of") {
+          chain.storageReads = (chain.storageReads ?? 0) + 1;
           const s = chain.storage.get(`${p.account_id}/${args.account_id}`) ?? "registered";
           return { ...at, result: bytes(s === "null" ? null : { total: REGISTRATION_YOCTO.toString(), available: "0" }) };
         }
@@ -132,8 +133,10 @@ function setup(o: { outcome?: (a: Extract<RelayerAction, { kind: "call" }>) => "
   const store = createIntentsStore(dir, undefined, () => NOW);
   const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW, ...o.chain };
   const r = relayer(o.outcome ?? (() => "ran"));
-  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, now: () => NOW, resolveEveryMs: 1 });
-  return { dir, store, chain, r, carry };
+  // the helper's clock (a test moves it); the token watch holds while the chain's USDC is paused
+  const clock = { ms: NOW };
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => chain.paused === true, now: () => clock.ms, resolveEveryMs: 1 });
+  return { dir, store, chain, r, carry, clock };
 }
 const code = (a: IntentsAnswer) => ("error" in a.body ? a.body.error.code : "sent");
 
@@ -323,14 +326,14 @@ test("RT10 (13), (15) an ft_withdraw to an unregistered typed account: one stora
   s.store.close();
 });
 
-test("RT10 (14) the storage_deposit failing: registration_failed, no intent sent, the signer's count at 1", async () => {
+test("RT10 (14) the storage_deposit failing: registration_failed, no intent sent, never counted toward the signer's strikes (review F1: its receipt refunds the deposit)", async () => {
   const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "failed" : "ran") });
   const u = hex();
   await seeSigner(s.store, u);
   s.chain.storage.set(`${USDC}/fresh.near`, "null");
   count("registration_failed", await s.carry.carry(signedIntent(u, withdraw("fresh.near"))), "registration_failed");
   assert.deepEqual(s.r.sent.map((x) => x.action.method), ["storage_deposit"]);
-  assert.equal(s.store.signer(u).failed, 1);
+  assert.equal(s.store.signer(u).failed, 0);
   assert.equal(s.store.signer(u).registration, null, "free again: the device sends the same intent again");
   allSent.push(...s.r.sent);
   s.store.close();
@@ -480,7 +483,14 @@ test("H1: the caps bound one signer's cost: 4 execute_intents and 2 storage_depo
   const s = setup();
   const u = hex();
   await seeSigner(s.store, u);
-  s.chain.storage.set(`${USDC}/${u}`, "null"); // never reads registered: its own is paid once, then in_flight
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  // its own registration reads registered once it ran; the receivers' do not
+  const reg = s.r.send;
+  s.r.send = async (a, g, b, ...rest) => {
+    const out = await reg(a, g, b, ...rest);
+    if (a.kind === "call" && a.method === "storage_deposit" && JSON.parse(a.args).account_id === u) s.chain.storage.set(`${USDC}/${u}`, "registered");
+    return out;
+  };
   for (let k = 0; k < 8; k++) {
     s.chain.storage.set(`${USDC}/fresh${k}.near`, "null");
     await s.carry.carry(signedIntent(u, withdraw(`fresh${k}.near`)));
@@ -644,13 +654,14 @@ test("U registered first: the first intent of an unregistered U sends storage_de
   assert.equal(reg.receiver, USDC);
   assert.deepEqual(JSON.parse(reg.args), { account_id: u, registration_only: true });
   assert.equal(reg.deposit, REGISTRATION_YOCTO);
-  assert.equal(s.store.signer(u).own?.state, "landed");
+  assert.equal(s.store.signer(u).own ?? null, null, "cleared once it reads registered on both providers");
+  assert.equal(s.store.owed(u), null, "nothing left owed");
   assert.equal(s.store.signer(u).registration, null, "its own is not the one paid receiver");
   // the second intent, from a restarted helper (no memory of this process): the chain reads U registered
   s.store.close();
   const store = createIntentsStore(dir, undefined, () => NOW);
   const r2 = relayer(() => "ran");
-  const carry2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r2, now: () => NOW, resolveEveryMs: 1 });
+  const carry2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r2, held: async () => chain.paused === true, now: () => NOW, resolveEveryMs: 1 });
   assert.equal(code(await carry2.carry(signedIntent(u, withdraw("alice.near")))), "sent");
   await carry2.idle();
   assert.deepEqual(r2.sent.map((x) => x.action.method), ["execute_intents"], "no second storage_deposit");
@@ -682,7 +693,7 @@ test("U registered first: an ft_withdraw from an unregistered U to an unregister
   s.store.close();
 });
 
-test("U registered first: its registration failing is registration_failed with no intent sent, counted; its gate refusals send no storage_deposit", async () => {
+test("U registered first: its registration failing is registration_failed with no intent sent, never counted, and waits its backoff; its gate refusals send no storage_deposit", async () => {
   const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "failed" : "ran") });
   const u = hex();
   await seeSigner(s.store, u);
@@ -690,13 +701,18 @@ test("U registered first: its registration failing is registration_failed with n
   const to = await moveQuote(s.store, { refundTo: u, recipient: u });
   assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "registration_failed");
   assert.deepEqual(s.r.sent.map((x) => x.action.method), ["storage_deposit"]);
-  assert.equal(s.store.signer(u).failed, 1);
+  assert.equal(s.store.signer(u).failed, 0, "never a strike");
   assert.equal(s.store.signer(u).own, null, "free again");
+  assert.deepEqual(s.store.owed(u), { signer: u, tries: 1, next_ms: NOW + 2 * SWEEP_MS }, "owed, its next try after the backoff");
+  // within the backoff: nothing sent
+  assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "in_flight");
+  assert.equal(s.r.sent.length, 1);
   // a signer never seen, and an intent the simulation refuses: nothing paid
   const w = hex();
   s.chain.storage.set(`${USDC}/${w}`, "null");
   assert.equal(code(await s.carry.carry(signedIntent(w, transfer(to)))), "id_not_ours");
   s.chain.refuseSimulateOn = 1;
+  s.clock.ms = NOW + 2 * SWEEP_MS;
   assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "simulation_refused");
   assert.equal(s.r.sent.length, 1);
   s.store.close();
@@ -713,7 +729,9 @@ test("U registered first: registerSeen (a status answer showed U money) register
   await seeSigner(s.store, u);
   const [a, b] = await Promise.all([s.carry.registerSeen(u), s.carry.registerSeen(u)]);
   assert.deepEqual([a, b].sort(), ["in_flight", "registered"], "two polls at once: one storage_deposit");
+  const readsBefore = s.chain.storageReads ?? 0;
   assert.equal(await s.carry.registerSeen(u), "registered");
+  assert.equal(s.chain.storageReads ?? 0, readsBefore, "a signer read registered here is never read again: a device's polls cost no RPC read");
   assert.deepEqual(s.r.sent.map((x) => [x.action.method, JSON.parse(x.action.args).account_id]), [["storage_deposit", u]]);
   // its first intent then sends no second one
   const to = await moveQuote(s.store, { refundTo: u, recipient: u });
@@ -725,5 +743,159 @@ test("U registered first: registerSeen (a status answer showed U money) register
   await seeSigner(s.store, v);
   assert.equal(await s.carry.registerSeen(v), "registered");
   assert.equal(s.r.sent.length, 2);
+  s.store.close();
+});
+
+// ---- review FIX of f2292e77 (F1, F2, F4, surviving mutants) ----
+
+/** USDC as the token runs it: storage_deposit refuses while paused (fiat_token.rs:839), else registers its account. */
+const usdcOn = (chain: () => Chain) => (a: Extract<RelayerAction, { kind: "call" }>) => {
+  if (a.method !== "storage_deposit") return "ran" as const;
+  if (chain().paused === true) return "failed" as const;
+  chain().storage.set(`${a.receiver}/${JSON.parse(a.args).account_id}`, "registered");
+  return "ran" as const;
+};
+
+test("F1: while USDC is paused a seen U's registration sends nothing (in_flight), never strikes it; once unpaused it registers and its intent is carried", async () => {
+  let chain!: Chain;
+  const s = setup({ outcome: usdcOn(() => chain) });
+  chain = s.chain;
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  s.chain.paused = true;
+  // a 3-minute pause: the device's REFUNDED polls, and the sweep, each try
+  for (let k = 0; k < 4; k++) {
+    assert.equal(await s.carry.registerSeen(u), "in_flight", `poll ${k}`);
+    s.clock.ms += 45_000;
+    await s.carry.sweep();
+  }
+  assert.equal(s.r.sent.length, 0, "no storage_deposit while it holds");
+  assert.equal(s.store.signer(u).failed, 0, "never struck");
+  // an unregistered signer's intent under the halt (any id: U, R or V): in_flight, nothing sent
+  const to = await moveQuote(s.store, { refundTo: u, recipient: u });
+  assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "in_flight");
+  assert.equal(s.r.sent.length, 0);
+  s.chain.paused = false;
+  await s.carry.sweep();
+  assert.deepEqual(s.r.sent.map((x) => [x.action.method, JSON.parse(x.action.args).account_id]), [["storage_deposit", u]]);
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "sent");
+  await s.carry.idle();
+  assert.deepEqual(s.r.sent.map((x) => x.action.method), ["storage_deposit", "execute_intents"]);
+  s.store.close();
+});
+
+test("F1: an ft_withdraw to an unregistered receiver under the halt: in_flight, no storage_deposit for it either", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u); // U itself reads registered
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  s.chain.paused = true;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  assert.equal(s.r.sent.length, 0);
+  s.store.close();
+});
+
+test("F2: one failed try is never final while U is seen: it is owed at first sight, and the helper's own sweep registers it after its backoff, across a restart, with no device poll", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  let fail = true;
+  let chain!: Chain;
+  const s = setup({ dir, outcome: (a) => (fail && a.method === "storage_deposit" ? "failed" : usdcOn(() => chain)(a)) });
+  chain = s.chain;
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  // the one poll the device makes (its op then ends held under_min, or 1Click stops answering)
+  assert.equal(await s.carry.registerSeen(u), "registration_failed");
+  assert.equal(s.store.owed(u)?.tries, 1, "owed, kept apart from the quote records");
+  assert.equal(s.store.signer(u).failed, 0);
+  fail = false;
+  await s.carry.sweep();
+  assert.equal(s.r.sent.length, 1, "within its backoff the sweep sends nothing");
+  // a restart: the owed record is read back; the sweep tries it once due
+  s.store.close();
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const r2 = relayer(usdcOn(() => chain));
+  const clock = { ms: NOW + 2 * SWEEP_MS };
+  const c2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r2, held: async () => false, now: () => clock.ms, resolveEveryMs: 1 });
+  assert.deepEqual(store.owing().map((o) => o.signer), [u]);
+  await c2.sweep();
+  assert.deepEqual(r2.sent.map((x) => [x.action.method, JSON.parse(x.action.args).account_id]), [["storage_deposit", u]]);
+  assert.equal(store.owed(u), null, "registered: owed no more");
+  assert.equal(chain.storage.get(`${USDC}/${u}`), "registered");
+  // a signer seen with no money shown (not seen): never owed, never paid
+  const w = hex();
+  assert.equal(await c2.registerSeen(w), "id_not_ours");
+  assert.equal(store.owed(w), null);
+  store.close();
+});
+
+test("F2: the sweep's pace backs off on each failure (doubling, capped) and sends nothing in between", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "failed" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const sends: number[] = [];
+  for (let m = 0; m < 40 * 60; m++) {
+    s.clock.ms = NOW + m * 60_000;
+    await s.carry.sweep();
+    if (m === 0) assert.equal(s.store.owed(u), null, "the sweep reads only owed signers");
+    if (m === 0) await s.carry.registerSeen(u);
+    sends.push(s.r.sent.length);
+  }
+  // first sight, then 2, 4, 8, 16, 32 minutes... (about 11 tries over 40 h, never one a minute)
+  const tries = s.r.sent.length;
+  assert.ok(tries >= 9 && tries <= 12, `tries ${tries}`);
+  assert.ok((s.store.owed(u)?.next_ms ?? 0) - s.clock.ms <= 24 * 3_600_000);
+  assert.equal(s.store.signer(u).failed, 0);
+  s.store.close();
+});
+
+test("F4: a registration read as ran that does not read registered on both providers is no landing: in_flight, never a second payment within OWN_SETTLE_MS (a restart included); after it one new one goes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  let chain!: Chain;
+  let lie = true;
+  // a lying lookup: the first storage_deposit reads ran, but USDC never registered U
+  const s = setup({ dir, outcome: (a) => (a.method === "storage_deposit" && lie ? "ran" : usdcOn(() => chain)(a)) });
+  chain = s.chain;
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  assert.equal(await s.carry.registerSeen(u), "in_flight");
+  assert.equal(s.r.sent.length, 1);
+  assert.equal(await s.carry.registerSeen(u), "in_flight");
+  assert.equal(s.r.sent.length, 1, "no second payment while it may still read");
+  // M15: a restart within OWN_SETTLE_MS never pays twice
+  s.store.close();
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const r2 = relayer(() => "ran");
+  // the restarted helper reads the earlier tx as ran (r2 holds no outcome of it: resolve it as ran)
+  r2.resolve = async (tx: TxRef) => ({ kind: "final", tx_hash: tx.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] });
+  lie = false;
+  const clock = { ms: NOW + 1_000 };
+  const c2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: { ...r2, send: async (...a) => { const o = await s.r.send(...a); r2.sent.push(s.r.sent.at(-1)!); return o; } }, held: async () => false, now: () => clock.ms, resolveEveryMs: 1 });
+  assert.equal(await c2.registerSeen(u), "in_flight");
+  await c2.sweep();
+  assert.equal(r2.sent.length, 0, "after a restart, within the settle time: nothing sent");
+  clock.ms = NOW + 1_000 + OWN_SETTLE_MS + 1;
+  assert.equal(await c2.registerSeen(u), "registered");
+  assert.deepEqual(r2.sent.map((x) => x.action.method), ["storage_deposit"], "one new one, past the settle time");
+  assert.equal(store.signer(u).own ?? null, null);
+  assert.equal(store.owed(u), null);
+  store.close();
+});
+
+test("a struck signer gets no registration from registerSeen or the sweep, and is owed no more", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  s.store.owe({ signer: u, tries: 0, next_ms: 0 });
+  s.store.putSigner({ ...s.store.signer(u), failed: 3 });
+  assert.equal(await s.carry.registerSeen(u), "sender_struck");
+  await s.carry.sweep();
+  assert.equal(s.r.sent.length, 0);
+  assert.equal(s.store.owed(u), null);
   s.store.close();
 });

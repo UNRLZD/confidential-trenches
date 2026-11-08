@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { base58 } from "./checks.ts";
-import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV } from "./env.ts";
+import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV, registerLine } from "./env.ts";
 import { MAINNET_VAULT } from "../withdraw/send.ts";
 
 const keyOf = (fill: number) => {
@@ -189,4 +189,16 @@ test("card helper-intents-test-race: a quote record whose write fails resolves t
   assert.equal(await s.quoted!(JSON.stringify(q)), undefined);
   assert.deepEqual(logged, ["helper: intents quote_record_failed"]);
   s.stop();
+});
+
+test("card intents-u-registered-first: a seen id's registration logs its code only: never the id, an account or any text the code is not", () => {
+  const u = "c".repeat(64);
+  assert.equal(registerLine("registered"), null);
+  assert.equal(registerLine("in_flight"), null);
+  for (const c of ["relayer_low", "registration_failed", "sender_struck", "upstream", "id_not_ours"]) assert.equal(registerLine(c), `helper: intents register ${c}`);
+  for (const t of [u, `upstream ${u}`, "alice.near", `relayer_low ${u}`]) assert.equal(registerLine(t), "helper: intents register upstream", t);
+  // env.ts logs a registration only through registerLine, on its answer and on a rejection alike
+  const src = readFileSync(new URL("./env.ts", import.meta.url), "utf8");
+  const lines = src.split("\n").filter((l) => l.includes("intents register") || (l.includes("console.") && l.includes("register")));
+  assert.ok(lines.length >= 2 && lines.every((l) => /registerLine\(/.test(l) || /return `helper: intents register \$\{listed \? code : "upstream"\}`/.test(l)), lines.join("\n"));
 });
