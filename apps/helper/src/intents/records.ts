@@ -47,7 +47,8 @@ export type Registration = { receiver: string; state: "pending" | "landed"; tx: 
  *  sight, kept apart from the quote records (never swept with them), removed once it reads registered. `tries`: its
  *  failed registrations; `next_ms`: when the next may go (carry.ts SWEEP_MS backoff). */
 export type OwedRecord = { signer: string; tries: number; next_ms: number };
-/** `sent`: the execute_intents this endpoint sent for the signer, landed or not (carry.ts signer_cap). `own`: the
+/** `sent`: the execute_intents and receiver registrations this endpoint signed for the signer, landed or not (carry.ts
+ *  signer_cap). `own`: the
  *  signer's own registration on the release's USDC (card intents-u-registered-first), its receiver the signer itself. */
 export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number; own?: Registration | null };
 

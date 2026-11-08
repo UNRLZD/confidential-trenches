@@ -479,7 +479,7 @@ test("H1: a signer's sends 1-4 are carried, landed or not, and its 5th is signer
   t.store.close();
 });
 
-test("H1: the caps bound one signer's cost: 4 execute_intents and 2 storage_deposit (its own, one receiver's), whatever it sends", async () => {
+test("H1: the caps bound one signer's cost: 2 storage_deposit (its own, one receiver's) and 3 execute_intents, the receiver's taking a slot under INTENTS_SENDS_MAX (P1 fold), whatever it sends", async () => {
   const s = setup();
   const u = hex();
   await seeSigner(s.store, u);
@@ -499,7 +499,8 @@ test("H1: the caps bound one signer's cost: 4 execute_intents and 2 storage_depo
   }
   const m = s.r.sent.map((x) => x.action.method);
   assert.equal(m.filter((x) => x === "storage_deposit").length, 2);
-  assert.equal(m.filter((x) => x === "execute_intents").length, 4);
+  assert.equal(m.filter((x) => x === "execute_intents").length, INTENTS_SENDS_MAX - 1);
+  assert.equal(s.store.signer(u).sent, INTENTS_SENDS_MAX, "the receiver's registration and the intents, under one cap");
   s.store.close();
 });
 
@@ -1041,5 +1042,131 @@ test("a struck signer gets no registration from registerSeen or the sweep, and i
   await s.carry.sweep();
   assert.equal(s.r.sent.length, 0);
   assert.equal(s.store.owed(u), null);
+  s.store.close();
+});
+
+// ---- the P1 fold (owner 8 Nov 20:25Z): one lying or broken provider never makes the helper pay at once or unbounded ----
+const earlierTx = (): TxRef => ({ tx_hash: base58(randomBytes(32)), nonce: "9", height: "221603850", block_hash: base58(Buffer.alloc(32, 7)), signed_tx: "c2lnbmVk" });
+const failedFinal = (tx: TxRef): TxOutcome => ({ kind: "final", tx_hash: tx.tx_hash, receipts: [{ executor: USDC, ok: false, failure: '{"Failure":"x"}', height: 1n }] });
+
+test("P1 (own): an earlier registration one lookup reads failed is never paid again at once: the hold freed, registration_failed, the backoff; after it, both providers read U registered and nothing is paid", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const tx = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx } });
+  const resolve = s.r.resolve;
+  // a lying lookup: the registration landed, one provider's lookup says it failed
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => (t.tx_hash === tx.tx_hash ? failedFinal(t) : resolve(t, o));
+  assert.equal(await s.carry.registerSeen(u), "registration_failed");
+  assert.equal(s.r.sent.length, 0, "no second payment on one lookup's word");
+  assert.equal(s.store.signer(u).own ?? null, null, "the hold freed");
+  assert.deepEqual(s.store.owed(u), { signer: u, tries: 1, next_ms: NOW + 2 * SWEEP_MS });
+  assert.equal(s.store.signer(u).failed, 0, "never a strike");
+  // the device's intent within the backoff: nothing paid either
+  const to = await moveQuote(s.store, { refundTo: u, recipient: u });
+  assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "in_flight");
+  assert.equal(s.r.sent.length, 0);
+  // the truth reads on both providers: U registered; the sweep after the backoff pays nothing
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  s.clock.ms = NOW + 2 * SWEEP_MS;
+  await s.carry.sweep();
+  assert.equal(s.r.sent.length, 0);
+  assert.equal(s.store.owed(u), null, "read registered: owed no more");
+  s.store.close();
+});
+
+test("P1 (receiver): an earlier receiver registration one lookup reads failed is never paid again at once: registration_failed, no storage_deposit; once both read it registered, the intent goes with none", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const tx = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), registration: { receiver: "fresh.near", state: "pending", tx } });
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => (t.tx_hash === tx.tx_hash ? failedFinal(t) : resolve(t, o));
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "registration_failed");
+  assert.equal(s.r.sent.length, 0, "no second payment on one lookup's word");
+  assert.equal(s.store.signer(u).registration, null, "the hold freed");
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  await s.carry.idle();
+  assert.deepEqual(s.r.sent.map((x) => x.action.method), ["execute_intents"]);
+  s.store.close();
+});
+
+test("P1 (bound): a receiver registration every lookup reads failed takes a slot under INTENTS_SENDS_MAX each time, one kept for the intent: at most INTENTS_SENDS_MAX - 1 paid, then signer_cap", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "failed" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const codes: string[] = [];
+  for (let k = 0; k < 10; k++) codes.push(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))));
+  const regs = s.r.sent.filter((x) => x.action.method === "storage_deposit").length;
+  assert.equal(regs, INTENTS_SENDS_MAX - 1, `${regs} receiver registrations paid`);
+  assert.deepEqual(codes.slice(INTENTS_SENDS_MAX - 1), Array(10 - INTENTS_SENDS_MAX + 1).fill("signer_cap"));
+  assert.equal(s.store.signer(u).failed, 0, "never a strike");
+  // the slot kept for the intent: one to a registered account still goes, then the cap
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("alice.near")))), "sent");
+  await s.carry.idle();
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("alice.near")))), "signer_cap");
+  assert.equal(s.r.sent.length, INTENTS_SENDS_MAX);
+  s.store.close();
+});
+
+test("P1 (hold, settle): a registration's outcome read while the token watch holds never sends its bytes again", async () => {
+  let release!: () => void;
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  release = s.r.release;
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const send = s.r.send;
+  s.r.send = async (...a) => {
+    const o = await send(...a);
+    s.chain.paused = true; // the hold starts once the registration is out
+    return o;
+  };
+  const resends: boolean[] = [];
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    resends.push(o.resend);
+    if (resends.length === 5) {
+      s.chain.storage.set(`${USDC}/${u}`, "registered");
+      release();
+    }
+    return resolve(t, o);
+  };
+  await s.carry.registerSeen(u);
+  assert.ok(resends.length >= 5, `${resends.length} reads`);
+  assert.deepEqual(resends.filter((x) => x), [], "never sent again while held");
+  assert.equal(s.r.sent.length, 1);
+  s.store.close();
+});
+
+test("P1 (hold, guard): a hold that starts between the endpoint's reads and the relayer's queue signs no registration, U's own or a receiver's; the claim and the slot freed, no backoff", async () => {
+  const s: ReturnType<typeof setup> = setup({ outcome: (a) => usdcOn(() => s.chain)(a) });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const funds = s.r.funds;
+  // the hold starts while the gas account's balance is read, after any check before the queue
+  s.r.balance = async () => ((s.chain.paused = true), funds);
+  assert.equal(await s.carry.registerSeen(u), "in_flight");
+  assert.equal(s.r.sent.length, 0, "nothing signed while held");
+  assert.equal(s.store.signer(u).own ?? null, null, "the claim freed");
+  assert.deepEqual(s.store.owed(u), { signer: u, tries: 0, next_ms: 0 }, "no backoff: nothing failed");
+  s.chain.paused = false;
+  s.r.balance = async () => funds;
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  assert.equal(s.r.sent.length, 1);
+  // a receiver's
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  s.r.balance = async () => ((s.chain.paused = true), funds);
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  assert.equal(s.r.sent.length, 1, "nothing signed while held");
+  assert.equal(s.store.signer(u).registration, null, "the claim freed");
+  assert.equal(s.store.signer(u).sent ?? 0, 0, "its slot given back: nothing was signed");
   s.store.close();
 });
