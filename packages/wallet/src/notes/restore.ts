@@ -167,11 +167,18 @@ export type LaneWalk = { found: number[]; last: number; lastPrecommitment: bigin
  * in a row have none. `has` tells whether the vault holds a precommitment (a lookup in pages already read).
  */
 export function walkLane(seed64: Uint8Array, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP): LaneWalk {
+  return walkLaneOf(masters(seed64, "deposit"), scope, lane, has, gap);
+}
+
+/**
+ * walkLane from the deposit note masters alone (masters(seed64, "deposit")), so a walk Worker is handed the two
+ * masters and never the seed (../restore/walk.ts).
+ */
+export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP): LaneWalk {
   if (!Number.isInteger(lane) || lane < 0 || lane >= RESTORE_LANES) throw new Error("a lane is 0-7");
   if (!Number.isSafeInteger(gap) || gap < 1) throw new Error("gap is a count above 0");
   // depositNote's derivation (../derive/notes.ts) with its masters read once for the whole walk; every hit is checked
   // against noteSecrets below, so a drift between the two stops the restore instead of losing a note
-  const m = masters(seed64, "deposit");
   const found: number[] = [];
   let last = lane;
   let lastPrecommitment = 0n;
