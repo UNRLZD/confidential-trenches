@@ -496,25 +496,47 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     })),
     ...lone.map((i) => ({ method: "eth_call", params: [{ to: reads[i]!.to, data: reads[i]!.data, ...reads[i]!.tx }, at, reads[i]!.override, ...(reads[i]!.env !== undefined ? [reads[i]!.env] : [])] })),
   ];
-  const batches: EvmRpcCall[][] = [];
-  for (let k = 0; k < calls.length; k += CALLS_PER_BATCH) batches.push(calls.slice(k, k + CALLS_PER_BATCH));
-  const answersOf = async (rpc: EvmRpc, p: number): Promise<Answer[]> => {
-    const b = (await Promise.all(batches.map((x) => askAt(rpc, x)))).flat();
-    const who = `provider ${p + 1}`;
-    const all: Answer[] = new Array(reads.length);
-    parts.forEach((part, c) => unaggregate(b[c], part.length, who).forEach((x, k) => (all[part[k]!] = x)));
-    slotParts.forEach((part, c) => unslots(b[parts.length + c], part.length, who).forEach((x, k) => (all[part[k]!] = { kind: "out", amountOut: x })));
-    lone.forEach((i, k) => (all[i] = answerOf(b[parts.length + slotParts.length + k], who, false, reads[i]!.oog === true) as Answer));
-    return all;
-  };
+  // each call's answer as the reads it holds, [read, answer] pairs
+  const decode: ((raw: unknown, who: string) => [number, Answer][])[] = [
+    ...parts.map((part) => (raw: unknown, who: string) => unaggregate(raw, part.length, who).map((x, k): [number, Answer] => [part[k]!, x])),
+    ...slotParts.map((part) => (raw: unknown, who: string) => unslots(raw, part.length, who).map((x, k): [number, Answer] => [part[k]!, { kind: "out", amountOut: x }])),
+    ...lone.map((i) => (raw: unknown, who: string): [number, Answer][] => [[i, answerOf(raw, who, false, reads[i]!.oog === true) as Answer]]),
+  ];
   const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
-  const { a } = await agreeing(
-    rpcs,
-    answersOf,
-    (x, y) => x.every((a, i) => same(a, y[i]!)),
-    (x, y) => refuse("rpc_disagree", `the providers answer read ${x.findIndex((a, i) => !same(a, y[i]!))} differently at block ${hash}`),
+  // Each batch is agreed on its own (card evm-buy-quote-ends-on-node): its two answers from the first two providers,
+  // and a spare asked only for a batch whose own answer is late or failed, timed from the moment its request left the
+  // provider's gate. Agreed a round at a time, one slow batch sent the whole round to the next spare: a cold Robinhood
+  // WETH-USDG quote asked each of its 4,130 reads 5.3 times on average over five providers and ran past 50 s
+  // (2026-11-08 11:0xZ). No batch goes twice to one provider, and every answer used is one two providers gave.
+  // Spares for late answers are budgeted, as a retry budget is (Finagle's RetryBudget, gRPC's retry throttling): two,
+  // plus one per five batches, so a provider slowed by the quote's own load is not handed the load again; a batch
+  // whose answer failed or differs asks its spare whatever the budget.
+  const n = Math.ceil(calls.length / CALLS_PER_BATCH);
+  let spares = 2 + Math.ceil(n / 5);
+  const late = () => spares > 0 && (spares--, true);
+  const all: Answer[] = new Array(reads.length);
+  await Promise.all(
+    Array.from({ length: n }, async (_, n) => {
+      const c0 = n * CALLS_PER_BATCH;
+      const batch = calls.slice(c0, c0 + CALLS_PER_BATCH);
+      const answersOf = async (rpc: EvmRpc, p: number, sent: () => void): Promise<[number, Answer][]> => {
+        const b = await askAt(rpc, batch, sent);
+        return batch.flatMap((_, j) => decode[c0 + j]!(b[j], `provider ${p + 1}`));
+      };
+      const { a } = await agreeing(
+        rpcs,
+        answersOf,
+        (x, y) => x.length === y.length && x.every(([i, v], k) => i === y[k]![0] && same(v, y[k]![1])),
+        (x, y) => refuse("rpc_disagree", `the providers answer read ${x.find(([, v], k) => !same(v, y[k]![1]))?.[0] ?? -1} differently at block ${hash}`),
+        true,
+        undefined,
+        true,
+        late,
+      );
+      for (const [i, v] of a) all[i] = v;
+    }),
   );
-  return a;
+  return all;
 }
 
 /** The answers of two of the providers `rpcs` that are `same`: the first two are asked at once, and one more of the
@@ -532,12 +554,17 @@ export const EVM_HEDGE_MS = 400;
 const HOLD = new WeakMap<EvmRpc, () => void>();
 function agreeing<T>(
   rpcs: readonly EvmRpc[],
-  one: (rpc: EvmRpc, k: number) => Promise<T>,
+  one: (rpc: EvmRpc, k: number, sent: () => void) => Promise<T>,
   same: (a: T, b: T) => boolean,
   differ: (a: T, b: T) => never,
   vote = true,
   // which answers that differ from the two used are held (by default, any that is `same` as neither)
   held: (x: T, a: T, b: T) => boolean = (x, a, b) => !same(a, x) && !same(b, x),
+  // `one` calls its third argument when its request leaves the provider's gate: a request is late only from then, so a
+  // request queued behind its provider's others is never hedged for the queue (card evm-buy-quote-ends-on-node)
+  timedFromSend = false,
+  // whether a spare may be asked for an answer that is late (not one that failed or differs): false spends no spare
+  late?: () => boolean,
 ): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
   const need = Math.floor(list.length / 2) + 1;
@@ -587,15 +614,20 @@ function agreeing<T>(
     const arm = () => {
       clearTimeout(timer);
       if (started < list.length) {
-        timer = setTimeout(() => (done ? undefined : start()), first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
+        timer = setTimeout(() => (done || late?.() === false ? undefined : start()), first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
         (timer as { unref?: () => void }).unref?.();
       }
     };
     const start = () => {
       if (done || started >= list.length) return;
       const k = started++;
-      t0[k] = performance.now();
-      one(list[k]!, k).then(
+      if (!timedFromSend) t0[k] = performance.now();
+      const sent = () => {
+        if (!timedFromSend || t0[k] !== undefined) return;
+        t0[k] = performance.now();
+        if (!done && started >= 2) arm();
+      };
+      one(list[k]!, k, sent).then(
         (v) => {
           settled++;
           if (done) return;
@@ -624,22 +656,28 @@ function agreeing<T>(
           end();
         },
       );
-      if (started >= 2) arm();
+      if (started >= 2 && !timedFromSend) arm();
     };
     start();
     start();
   });
 }
 
+// a gated provider's call that says when its request leaves the gate (gated, ask)
+const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], sent?: () => void) => Promise<readonly unknown[]>>();
+
 /** One provider's answer to `calls`, asked up to 3 more times 0.5, 1 and 1.5 s apart while it answers 429 (Too Many
  *  Requests: rpc.mainnet.chain.robinhood.com, 2026-11-04 06:53Z, to the reads of one quote), a call's error names its
  *  rate limit ("25/second request limit reached", mainnet.base.org, 07:4xZ) or no connection is made (Unreachable: a
  *  read is asked again, as it sends nothing); any other failure, or a fourth, refuses. */
-async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly unknown[]> {
+async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], sent?: () => void): Promise<readonly unknown[]> {
   let out: unknown;
   for (let i = 0; ; i++) {
     try {
-      out = await rpc(calls);
+      // a gated provider says when the request leaves its gate; any other sends it now
+      const g = GATED.get(rpc);
+      if (g === undefined) sent?.();
+      out = await (g === undefined ? rpc(calls) : g(calls, sent));
       if (i < 3 && Array.isArray(out) && out.some(limited)) throw new RateLimited("a call's error names the provider's rate limit");
       break;
     } catch (e) {
@@ -657,9 +695,9 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly 
  *  hold the block yet: a provider behind a load balancer can send a call to a node one block behind the one that gave
  *  the head ("block not found: canonical hash", base-rpc.publicnode.com, 2026-11-03 19:09Z; "Unknown state. First
  *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z). */
-async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[]): Promise<readonly unknown[]> {
+async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], sent?: () => void): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
-    const out = await ask(rpc, calls);
+    const out = await ask(rpc, calls, sent);
     if (!out.some(notYet) || i === 3) return out;
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
@@ -1651,6 +1689,7 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number): readonly EvmRpc[] {
   return rpcsIn.map((rpc) => {
     const g = gateOf(parallel);
     const f = (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
+    GATED.set(f as unknown as EvmRpc, (calls, sent) => g(() => (sent?.(), rpc(calls))));
     const hold = HOLD.get(rpc);
     if (hold !== undefined) HOLD.set(f as unknown as EvmRpc, hold);
     return f;

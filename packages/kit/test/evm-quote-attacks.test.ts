@@ -7114,3 +7114,33 @@ test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap 
     assert.match(c.override[c.tx.to]!.balance, /^0x[0-9a-f]+$/);
   }
 });
+
+// Card evm-buy-quote-ends-on-node: a round is agreed a batch at a time. Agreed whole (main at 3a73b181), one late
+// answer sent the whole round to the next spare: a cold Robinhood WETH-USDG quote asked each of its 4,130 exact-out reads
+// 5.3 times on average over five providers (2026-11-08 11:0xZ). Here the second provider answers one batch of the
+// exact-out round late: that batch alone goes to a spare, and every other exact-out read is asked of two providers.
+test("QE1 one late batch of a round asks a spare for that batch alone: each exact-out read is asked of two providers, plus one batch", async () => {
+  const seeded = Array.from({ length: 99 }, (_, i) => rcSeeded(0x300 + i, i < 89 ? 1000n * AMOUNT : undefined));
+  const pools = [rcEth, ...seeded];
+  const asks = [0, 0, 0, 0];
+  // quoteExactOutputSingle's selector (quote.ts SEL_V4_OUT_SINGLE) once in each exact-out read's calldata
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  let slowed = false;
+  const counted = (rpc: EvmRpc, k: number, slowOne = false): EvmRpc => async (calls) => {
+    asks[k]! += per(calls);
+    if (slowOne && !slowed && per(calls) > 0) {
+      slowed = true;
+      await new Promise((r) => setTimeout(r, 1_500));
+    }
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1, true), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: rcCoin, amountIn: AMOUNT, slippageBps: 100, route: rcRoute }, rpcs, NOW, scanner(RC_HEAD, rcLogs(seeded), [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(slowed, "a batch of exact-out reads was answered late");
+  const distinct = asks[0]!;
+  assert.ok(distinct > 18 * 3, `${distinct} exact-out reads: more than three batches`);
+  assert.equal(asks[1], distinct, "the second provider is asked every read once");
+  // the spares: the late batch's reads alone (a batch is 3 calls of 6 reads)
+  assert.ok(asks[2]! + asks[3]! <= 18, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${distinct}`);
+});
