@@ -56,7 +56,7 @@ export const WORDS = {
   watchRemove: ok("Remove {sym} from watchlist", "R5 token.js token-watch and token-390.html m-token-watch aria-label (pressed)"),
   noData: ok("No data", "owner 3 Nov 20:26Z, picked; card app-token-chart: the chart's empty state (the helper holds no bars for this token and timeframe)"),
   // the chart's toolbar and bottom bar (card app-chart-controls), each in R5 token.js U.chartPanel at design-lock-r5
-  // (and trenches-1440.html's clock); the menus' rows R5 does not draw are drafts
+  // (and trenches-1440.html's clock); the menus' rows R5 does not draw were kept as drafted (the 8 Nov words page)
   indicators: ok("Indicators", "R5 token.js U.chartPanel chart-indicators"),
   display: ok("Display", "R5 token.js U.chartPanel chart-display"),
   mcap: ok("MCap", "R5 token.js U.chartPanel chart-mode (`Price / MCap`)"),
@@ -70,13 +70,13 @@ export const WORDS = {
   auto: ok("auto", "R5 token.js U.chartPanel chart-scale-auto"),
   autoTitle: ok("Auto-fit the price scale", "R5 token.js U.chartPanel chart-scale-auto title"),
   trades: ok("Trades", "R5 token.js U.lowerTabs lower-tab-trades; here the Display menu's row for the trade marks"),
-  gridLines: { text: "Grid lines", source: "draft, card app-chart-controls: the Display menu's row (the live UNRLZD terminal's chart/display.ts)", draft: true },
-  lastLine: { text: "Last price line", source: "draft, card app-chart-controls: the Display menu's row (the live UNRLZD terminal's chart/display.ts)", draft: true },
-  indMA: { text: "MA", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
-  indEMA: { text: "EMA", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
-  indBOLL: { text: "BOLL", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
-  indRSI: { text: "RSI", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
-  indMACD: { text: "MACD", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
+  gridLines: ok("Grid lines", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Display menu's row (the live UNRLZD terminal's chart/display.ts)"),
+  lastLine: ok("Last price line", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Display menu's row (the live UNRLZD terminal's chart/display.ts)"),
+  indMA: ok("MA", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)"),
+  indEMA: ok("EMA", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)"),
+  indBOLL: ok("BOLL", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)"),
+  indRSI: ok("RSI", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)"),
+  indMACD: ok("MACD", "owner 8 Nov 07:55Z, kept; drafted on card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)"),
   // the lower panel and About (card app-token-lower-panel), R5 token.js U.lowerTabs, U.tradesTab, U.holdersTab and
   // U.about at design-lock-r5: R5's own labels are kept; the ones R5 marks as draft copy (P.dc) are drafts here.
   // The tabs reuse `holders` and `trades`, the MC column `mc`, the rows' sides `buy` and `sell`, the top share `top10`,

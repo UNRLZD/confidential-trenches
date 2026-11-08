@@ -16,7 +16,6 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
-const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   discover: ok("Discover", "R5 app.js nav (S1 top bar) and discover-1440.html title"),
@@ -39,7 +38,7 @@ export const WORDS = {
   offline: ok("Offline", "owner 1 Nov 16:45Z, keep; drafted from 09-design-brief S5.5 Offline [draft copy: Offline]"),
   loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from S5.1 skeleton rows: the list's accessible name only (never drawn)"),
   // {age} is data (listAge: 1m, 12m, 2h, 3d); the owner's pick changes only the words around it
-  updated: draft("Updated {age} ago", "board/words-pending.json, card app-list-age: Discover's list header, right side, muted, only when the helper's list is older than 60 s"),
+  updated: ok("Updated {age} ago", "owner 8 Nov 07:55Z, kept; drafted on card app-list-age: Discover's list header, right side, muted, only when the helper's list is older than 60 s"),
   // the toolbar (card app-discover-toolbar): R5 discover-1440.html and discover-390.html's own labels (live UNRLZD's
   // Toolbar.tsx words, M160 N8), and round 4's signed CN-93, CN-94 and CN-95 (owner-decisions.md:189 words-r4)
   all: ok("All", "R5 discover-1440.html presets and discover-390.html chips"),
@@ -47,7 +46,7 @@ export const WORDS = {
   mc10k: ok("MC ≥ $10K", "R5 discover-1440.html chip-minMc"),
   launchpad: ok("Launchpad", "R5 discover-1440.html chip-launchpad and discover-390.html m-filter-launchpad"),
   launchpads: ok("Launchpads", "R5 discover-1440.html launchpad-menu aria-label (never drawn)"),
-  padMenuTitle: draft("Launchpads by tokens now", "R5 discover-1440.html launchpad-menu title, P.dc DV-13: CN-137 (09-design-brief §11.1), not signed"),
+  padMenuTitle: ok("Launchpads by tokens now", "8 Nov 19:40Z, kept as drawn; drawn from R5 discover-1440.html launchpad-menu title, P.dc DV-13: CN-137 (09-design-brief §11.1), not signed"),
   clear: ok("Clear", "CN-93 reset (words-r4, signed); R5 discover-1440.html launchpad-clear"),
   quickBuy: ok("Quick buy", "R5 discover-1440.html discover-qb and discover-390.html m-dock"),
   usd: ok("USD", "R5 discover-1440.html discover-qb unit"),
