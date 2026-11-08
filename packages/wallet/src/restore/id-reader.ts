@@ -29,7 +29,7 @@
 //   refuses the pass (a stop, never a wrong answer), and a fake hash fails the agreement. Money that lands after the
 //   pinned block is step 7's 72-h re-reads' (./wallets.ts afterRestore), as anything after the restore.
 // - A pass is used only while fresh and only on the providers it was opened on (review P1, P2): building a reader reads
-//   both finals once and refuses a pass more than VAULT_SYNC_LAG_MAX below the lower of them; a scan that exists to see
+//   both finals once and refuses a pass more than VAULT_SYNC_LAG_MAX below the higher of them; a scan that exists to see
 //   money after a height opens its own pass above it (openRereadPass, arms.ts openSecondScanPass); and the pass keeps
 //   its two provider objects, matched by identity, never by name.
 // - An indexer (NearBlocks, the intents explorer) is a server's word: it may turn an id both providers see as unused
@@ -215,11 +215,12 @@ function pinOf(pass: RestorePass, network: NearNetwork, rpcs: readonly [NearRpc,
 }
 
 // review P1: a reader is built on a pass only while it is fresh: its block no more than VAULT_SYNC_LAG_MAX below the
-// lower of both providers' finals now. An old pass reads a chain from before money landed, and nothing errors until
+// higher of both providers' finals now (as the pass's floor: a provider lying low never widens what passes as fresh;
+// one lying high only stops the restore while it lies). An old pass reads a chain from before money landed, and nothing errors until
 // the providers drop its block.
 async function fresh(pass: RestorePass, rpcs: readonly [NearRpc, NearRpc], blockOf: (rpc: NearRpc, ask: Ask, what: string) => Promise<Block>): Promise<void> {
   const [a, b] = await Promise.all([blockOf(rpcs[0], "final", "the reader's final"), blockOf(rpcs[1], "final", "the reader's final")]);
-  if (pass.h < Math.min(a.h, b.h) - VAULT_SYNC_LAG_MAX)
+  if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)
     throw new Error(`the pass at block ${pass.h} is stale: the RPCs' finals are at ${a.h} and ${b.h}, over ${VAULT_SYNC_LAG_MAX} blocks past it; open a fresh pass`);
 }
 

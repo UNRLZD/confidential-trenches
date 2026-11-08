@@ -348,6 +348,14 @@ test("a stale pass is refused; a fresh one reads money; the second scan's and th
   await idReaderAt("mainnet", rpcs, now, o);
   tip = 1821;
   await assert.rejects(idReaderAt("mainnet", rpcs, now, o), /the pass at block 1700 is stale/);
+  // freshness is judged against the higher final: an honest 1700 and a liar's 1000 refuse a pass at 1000 (the lower
+  // final would take it)
+  const liarLow: NearRpc = { name: FAST, query: async (p) => (p.finality === "final" ? { jsonrpc: "2.0", result: { amount: "1", block_height: 1000, block_hash: hashOf(1000) } } : rpcs[0].query(p)) };
+  tip = 1000;
+  const atLiar = await openRestorePass("mainnet", [liarLow, rpcs[1]], o);
+  assert.equal(atLiar.h, 1000);
+  tip = 1700;
+  await assert.rejects(idReaderAt("mainnet", [liarLow, rpcs[1]], atLiar, o), /^Error: the pass at block 1000 is stale: the RPCs' finals are at 1000 and 1700, over 120 blocks past it; open a fresh pass$/);
   // the second scan: its pass must be above secondScanBoundHeight (restore finals 1000 and 990: 1000 + 600 + 1 = 1601)
   tip = 1601;
   await assert.rejects(openSecondScanPass("mainnet", rpcs, { heights: [1000, 990] }, o), /^Error: the pass at block 1601 is not past block 1601; read again once the chain is past it$/);
