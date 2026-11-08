@@ -20,8 +20,8 @@ import { PADS } from "../../apps/terminal/src/screens/market/pads.ts";
 import { hintsOf, readOrigins } from "../../apps/helper/src/data/solana/origin.ts";
 
 const KEY = "helper-launchpad-origin";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const RPC = "https://api.mainnet-beta.solana.com";
 export const JUP = "https://lite-api.jup.ag/tokens/v2/search?query=";
 export const PATH = "/v1/market/lists?chain=solana";

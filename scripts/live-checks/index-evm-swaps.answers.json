@@ -8,7 +8,7 @@
     "ms": 1,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -29,7 +29,7 @@
     "ms": 1,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -217,7 +217,7 @@
   "note": "apps/helper at card helper-ready-page-warm run on a Mac against the real GeckoTerminal lists and Base providers, Base at its 200 ms blocks (2026-11-05 19:3xZ): PASS"
  },
  "bad_not_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "readAt": "2026-11-03T17:45:43.309Z",
   "reads": {},
   "chain": {},
@@ -225,7 +225,7 @@
   "coin": "0x11c863891865c6a10cc2b0eb34eb6672972bc935"
  },
  "bad_base_2s_clock": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "coin": "0xf0eede4f805de7c7285f20f5d56861565598cccc",
   "readAt": "2026-11-05T19:41:25.045Z",
   "reads": {
@@ -233,7 +233,7 @@
     "ms": 635,
     "status": 503,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -251,7 +251,7 @@
     "ms": 597,
     "status": 503,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -279,7 +279,7 @@
     "ms": 4025,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -299,7 +299,7 @@
     "ms": 264,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -657,7 +657,7 @@
   "note": "Robinhood: apps/helper at card index-evm-swaps-2 (4e409b8) run on a Mac against the real GeckoTerminal lists and Robinhood keyless providers, 2026-11-03 19:4xZ: PASS, 32 swaps of the pool after the oldest trade all on the tape"
  },
  "robinhood_bad_not_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "net": "robinhood",
   "coin": "0x0ece3b97db49a56662be2867d43a4958da61f1a7",
   "readAt": "2026-11-03T19:32:50.743Z",
@@ -666,7 +666,7 @@
     "ms": 175,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -684,7 +684,7 @@
     "ms": 176,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -703,7 +703,7 @@
   "note": "Robinhood: the deployed helper before card index-evm-swaps-2, 404 on Robinhood candles and trades, 2026-11-03 19:32Z: FAIL"
  },
  "robinhood_bad_hooked_buys": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "net": "robinhood",
   "coin": "0xe23c6618091c137f56d8486d25492311ccf33ab8",
   "readAt": "2026-11-04T20:14:49.029Z",
@@ -711,7 +711,7 @@
    "candles": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -730,7 +730,7 @@
    "trades": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1256,7 +1256,7 @@
    "candles": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -1275,7 +1275,7 @@
    "trades": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -2271,7 +2271,7 @@
   "bundler": "0x4b5c33c3c7a31bd108f5a99b64683b0056a62226"
  },
  "good_per_read": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "coin": "0xd137f137d236f4fd8e1ecd4f49315a325f623c9b",
   "readAt": "2026-11-06T06:51:18.452Z",
   "reads": {
@@ -2280,7 +2280,7 @@
     "ms": 2133,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -2302,7 +2302,7 @@
     "ms": 702,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -2668,7 +2668,7 @@
   "note": "card helper-restart-fresh: the deployed helper (4a6f1499) read by this check at the card branch, 2026-11-06 06:51Z from the Mac: each read with its own request time (at) and the heads with theirs (headsAt): PASS"
  },
  "robinhood_good_per_read": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "net": "robinhood",
   "coin": "0x5b5a7f047648f2e6cf4a5108c0dfbf05db8de659",
   "readAt": "2026-11-06T06:51:25.442Z",
@@ -2678,7 +2678,7 @@
     "ms": 1496,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -2700,7 +2700,7 @@
     "ms": 181,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",

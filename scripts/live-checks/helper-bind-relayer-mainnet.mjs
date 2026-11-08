@@ -18,8 +18,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KEY = "helper-bind-relayer-mainnet";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The mainnet vault's deploy record: the bind carry never falls back to mainnet-test.json (bind-relayer-key.sh). */
 export const RECORD = path.join(HERE, "../../contracts/vault/deployments/mainnet-v1.json");

@@ -49,15 +49,15 @@ import { consoleError } from "./console-errors.mjs";
 
 const KEY = "signpage-signin-kinds";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_HOST = "sign.confidential.unrealized.trade";
-export const APP_HOST = "confidential.unrealized.trade";
+export const SIGN_HOST = "confidential.unrealized.trade";
+export const APP_HOST = "ct-app.unrealized.trade";
 const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
 const WAIT_MS = 15_000;
 const GUARD_MS = 600; // past the page's 500 ms activation guard
 
 // Before SIGN_HOST's own scripts: a wallet that counts what any page asks of it and never answers.
 const WALLET_STUB = () => {
-  if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  if (location.hostname !== "confidential.unrealized.trade" || window.top !== window) return;
   globalThis.__ctWalletAsks = 0;
   const ask = () => ((globalThis.__ctWalletAsks += 1), new Promise(() => {}));
   const evm = { isMetaMask: true, request: ask, send: ask, sendAsync: ask, enable: ask, on() {}, removeListener() {} };
@@ -70,7 +70,7 @@ const WALLET_STUB = () => {
 // Before SIGN_HOST's own scripts: once a test sets __ctHoldSeed, the page's next decrypt of the seed record waits that
 // long (__ctHolding true meanwhile), so a step can be sent while the page reads its store.
 const HOLD_SEED_READ = () => {
-  if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  if (location.hostname !== "confidential.unrealized.trade" || window.top !== window) return;
   const decrypt = SubtleCrypto.prototype.decrypt;
   SubtleCrypto.prototype.decrypt = async function (alg, key, data) {
     const aad = alg?.additionalData ? new TextDecoder().decode(alg.additionalData) : "";

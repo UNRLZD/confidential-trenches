@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card kit-oneclick-pins-frozen on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds,
+// Live check of card kit-oneclick-pins-frozen on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // and only that: the served /app.js is the one index.html pins (its sha384), and, as minified:
 //   - every 1Click signing key it names (an "ed25519:" string of a 32-byte key) is one of PINNED_KEYS, the bytes this
 //     file names itself, and each of PINNED_KEYS is there: a build that ships a test harness's key, or any key the
@@ -19,7 +19,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "kit-oneclick-pins-frozen";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The 1Click signing keys SIGN_HOST's build may name: 1Click's one published key (SDK 0.1.26 dist/index.mjs:1593). */

@@ -14,14 +14,14 @@
     "symbol": "XMR",
     "scripts": [
      {
-      "url": "https://confidential.unrealized.trade/assets/index-D-9ADL_Q.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-D-9ADL_Q.js",
       "status": 200,
       "bytes": 0,
       "hits": 0,
       "samples": []
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-D-9ADL_Q.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-D-9ADL_Q.js",
       "status": 200,
       "bytes": 420930,
       "hits": 0,
@@ -29,7 +29,7 @@
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "as_of_ms": 1793700421739,
      "trending": [
@@ -536,7 +536,7 @@
      ]
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "chain": "solana",
      "mint": "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp",
      "params": 2,
@@ -556,14 +556,14 @@
     "symbol": "XMR",
     "scripts": [
      {
-      "url": "https://confidential.unrealized.trade/assets/index-D-9ADL_Q.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-D-9ADL_Q.js",
       "status": 200,
       "bytes": 0,
       "hits": 0,
       "samples": []
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-D-9ADL_Q.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-D-9ADL_Q.js",
       "status": 200,
       "bytes": 420930,
       "hits": 0,
@@ -571,7 +571,7 @@
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "as_of_ms": 1793700421739,
      "trending": [
@@ -1078,7 +1078,7 @@
      ]
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "chain": "solana",
      "mint": "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp",
      "params": 2,
@@ -1098,14 +1098,14 @@
     "symbol": "XMR",
     "scripts": [
      {
-      "url": "https://confidential.unrealized.trade/assets/index-D-9ADL_Q.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-D-9ADL_Q.js",
       "status": 200,
       "bytes": 0,
       "hits": 0,
       "samples": []
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-D-9ADL_Q.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-D-9ADL_Q.js",
       "status": 200,
       "bytes": 420930,
       "hits": 0,
@@ -1113,7 +1113,7 @@
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "as_of_ms": 1793700421739,
      "trending": [
@@ -1620,7 +1620,7 @@
      ]
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "chain": "solana",
      "mint": "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp",
      "params": 2,
@@ -1649,14 +1649,14 @@
     "symbol": "GLOW",
     "scripts": [
      {
-      "url": "https://confidential.unrealized.trade/assets/index-CErUIEDe.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CErUIEDe.js",
       "status": 200,
       "bytes": 0,
       "hits": 0,
       "samples": []
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-CErUIEDe.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CErUIEDe.js",
       "status": 200,
       "bytes": 421834,
       "hits": 6,
@@ -1684,14 +1684,14 @@
     "symbol": "GLOW",
     "scripts": [
      {
-      "url": "https://confidential.unrealized.trade/assets/index-CErUIEDe.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CErUIEDe.js",
       "status": 200,
       "bytes": 0,
       "hits": 0,
       "samples": []
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-CErUIEDe.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CErUIEDe.js",
       "status": 200,
       "bytes": 421834,
       "hits": 6,
@@ -1719,14 +1719,14 @@
     "symbol": "GLOW",
     "scripts": [
      {
-      "url": "https://confidential.unrealized.trade/assets/index-CErUIEDe.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CErUIEDe.js",
       "status": 200,
       "bytes": 0,
       "hits": 0,
       "samples": []
      },
      {
-      "url": "https://confidential.unrealized.trade/assets/index-CErUIEDe.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CErUIEDe.js",
       "status": 200,
       "bytes": 421834,
       "hits": 6,

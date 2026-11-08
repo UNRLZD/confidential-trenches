@@ -39,6 +39,6 @@ test("planted: a testnet pin served, a failed or one-sided Rent read, another pa
   fails(mut((r) => (r.signBundle.testnet = ["9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8"])), /mainnet table/);
   fails(mut((r) => (r.rent = { rpcs: r.rent.rpcs, error: "the two providers' Rent differ" })), /agrees on the Rent sysvar: the two providers/);
   fails(mut((r) => (r.rent.rpcs = [r.rent.rpcs[0], r.rent.rpcs[0]])), /page's Solana pair/);
-  fails(mut((r) => (r.signCsp = r.signCsp.replace("https://api.confidential.unrealized.trade", ""))), /connect-src names both: not https:\/\/api/);
+  fails(mut((r) => (r.signCsp = r.signCsp.replace("https://ct-api.unrealized.trade", ""))), /connect-src names both: not https:\/\/ct-api\./);
   fails(mut((r) => (r.signBundle.status = 404)), /HTTP 404/);
 });

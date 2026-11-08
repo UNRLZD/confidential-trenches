@@ -1,7 +1,7 @@
 {
  "note": "Card oneclick-partner-fee-live. good: HELPER_HOST read 2026-11-06T16:53:07.627Z, the three quotes as 1Click answered the helper (a live dry:false and a dry quote of 25 USDC from Solana to NEAR USDC, both appFees fee 1, and wNEAR to NEAR USDC fee 20): PASS. main_pin: HELPER_HOST read 2026-11-06T16:53:30.536Z by this check run on main 1e3e9a05, whose kit pinned fee 20 for the partner path (it FAILed there on live and usdc, app-fees); under this card's kit the same real answers PASS. bad_key_refused: what 1Click answers a key it does not honour, read 2026-11-06T16:53:19.683Z on 1Click's own /v0/quote with a made-up X-API-Key (401 Invalid token), as a helper holding a revoked key would be answered: FAIL. The test also derives bad answers from good by setting the unsigned appFees entry: fee 20 on the live and the dry USDC quote (the pin before this card, or a relabel) and fee 1 on wNEAR: FAIL each. Each body is recorded without 1Click's signature (the secret scan refuses its shape); the test signs each again with a throwaway key it adds to the kit's pinned set.",
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "answers": {
    "live": {
     "request": {
@@ -69,7 +69,7 @@
   }
  },
  "main_pin": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "answers": {
    "live": {
     "request": {

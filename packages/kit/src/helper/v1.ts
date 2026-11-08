@@ -41,7 +41,7 @@ deepFreeze(HELPER_FETCH_INIT);
  * `origins` are this release's APP_HOST and SIGN_HOST; a helper run by someone else lists its own two.
  */
 export const HELPER_CORS = {
-  origins: ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"],
+  origins: ["https://ct-app.unrealized.trade", "https://confidential.unrealized.trade"],
   allowMethods: ["GET", "POST", "PUT", "DELETE"],
   allowHeaders: ["content-type"],
   // Retry-After: a device reads a 429's wait cross-origin (card wallet-per-buy, M367)

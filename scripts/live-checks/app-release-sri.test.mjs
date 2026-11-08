@@ -13,7 +13,7 @@ import { judge, read } from "./app-release-sri.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-release-sri.answers.json"), "utf8"));
 const GOOD = ANSWERS.good;
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 const SCRIPT = Object.keys(GOOD.files).find((u) => u.endsWith(".js"));
 const SCRIPT_PATH = new URL(SCRIPT).pathname;
 
@@ -78,7 +78,7 @@ test("bad answers: a script with no integrity, an inline script, a script from a
   const integrity = /\sintegrity="[^"]*"/.exec(tag)[0];
   bad(withHtml(tag, tag.replace(integrity, "")), `BAD script ${SCRIPT_PATH}: no integrity`);
   bad(withHtml("</title>", "</title><script>window.x=1</script>"), "BAD an inline script");
-  bad(withHtml("</title>", '</title><script src="https://evil.ct.test/a.js" integrity="sha384-x"></script>'), "BAD script https://evil.ct.test/a.js: not on https://confidential.unrealized.trade");
+  bad(withHtml("</title>", '</title><script src="https://evil.ct.test/a.js" integrity="sha384-x"></script>'), "BAD script https://evil.ct.test/a.js: not on https://ct-app.unrealized.trade");
   bad(withHtml(integrity, integrity.replace(/"$/, ' sha384-AAAA"')), /^BAD script .*: integrity must be exactly one sha384/);
   bad({ ...GOOD, files: { ...GOOD.files, [SCRIPT]: { ...GOOD.files[SCRIPT], status: 404 } } }, `BAD script ${SCRIPT_PATH}: answers 404`);
   bad(withHtml(/<script\b[^>]*><\/script>/.exec(GOOD.html)[0], ""), "BAD the page loads 0 script(s)");

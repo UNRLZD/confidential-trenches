@@ -119,9 +119,9 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's fifty-one checks (signpage-shell runs four ways, evm-sell-unfunded-sim-keeps-route, held-deposit-way-out, pool-deposit-follow, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's fifty-three checks (signpage-shell runs four ways, hosts-main-on-top, terminal-harness-sign-spa, evm-sell-unfunded-sim-keeps-route, held-deposit-way-out, pool-deposit-follow, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 51);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 53);
   assert.ok(sign.include.some((e) => e.key === "pool-senders-next-page" && !e.chrome && e.args === ""), "pool-senders-next-page runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "held-deposit-way-out" && !e.chrome && e.args === ""), "held-deposit-way-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "evm-sell-unfunded-sim-keeps-route" && !e.chrome && e.args === ""), "evm-sell-unfunded-sim-keeps-route runs after every sign deploy");
@@ -136,6 +136,8 @@ test("the signing page's fifty-one checks (signpage-shell runs four ways, evm-se
   assert.ok(sign.include.some((e) => e.key === "solana-legs-checked" && !e.chrome && e.args === ""), "solana-legs-checked runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "oneclick-fee-path-own-key" && !e.chrome && e.args === ""), "oneclick-fee-path-own-key runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "hosts-main-on-top" && !e.chrome && e.args === ""), "hosts-main-on-top (SIGN_HOST's DNS: no child, no wildcard) runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "terminal-harness-sign-spa" && e.args === ""), "terminal-harness-sign-spa (SIGN_HOST's answer to a path with no file, as the terminal's harness serves it) runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
@@ -544,4 +546,20 @@ test("planted: live.yml that runs a serial group's checks as one single check, d
   assert.ok(has(liveProblems(LIVE.replace("node scripts/ci/live-serial.mjs $GROUP", "node scripts/live-checks/$GROUP.mjs")), /does not run a serial group's checks/), "a group run as one check");
   assert.ok(has(liveProblems(LIVE.replace("GROUP: ${{ matrix.group }}", "GROUP: ${{ matrix.key }}")), /does not run a serial group's checks/), "the group is not the matrix's");
   assert.ok(has(liveProblems(LIVE.replace("timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}", "timeout-minutes: 20")), /a serial group's job has no longer limit/), "a group of about 11 minutes of checks cannot be held to 20");
+});
+
+test("planted (card live-runs-one-per-host): a live.yml whose dispatched runs do not share one queue per host is refused: no concurrency block, a group that names the commit or the run, a group shared by every host, cancel-in-progress true", () => {
+  const conc = /^concurrency:\n(?: {2}.*\n)+/m;
+  assert.ok(conc.test(LIVE), "live.yml has a top-level concurrency block");
+  const at = (block) => liveProblems(LIVE.replace(conc, block));
+  assert.ok(has(at(""), /no top-level concurrency/), "missing");
+  const group = (g) => at(`concurrency:\n  group: ${g}\n  cancel-in-progress: \${{ github.event_name == 'pull_request' }}\n`);
+  assert.ok(has(group("live-${{ github.workflow }}-${{ github.ref }}-${{ inputs.host }}-${{ inputs.commit }}"), /concurrency group/), "main's group before this card: one run per commit, so two runs on one host read it at once");
+  assert.ok(has(group("live-${{ inputs.host }}-${{ github.run_id }}"), /concurrency group/), "a group per run");
+  assert.ok(has(group("live"), /concurrency group/), "one group for every host");
+  assert.deepEqual(group("live-${{ inputs.host || github.ref }}"), []);
+  const cancel = (c) => at(`concurrency:\n  group: live-\${{ inputs.host || github.ref }}\n  cancel-in-progress: ${c}\n`);
+  assert.ok(has(cancel("true"), /cancel-in-progress/), "a second run cancels the first");
+  assert.ok(has(cancel("${{ github.event_name == 'workflow_dispatch' }}"), /cancel-in-progress/), "true on a dispatch");
+  assert.deepEqual(cancel("false"), []);
 });

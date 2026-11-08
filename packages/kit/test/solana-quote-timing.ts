@@ -41,7 +41,7 @@ if (!process.argv.includes("--dry")) {
   process.exit(2);
 }
 const args = (k: string) => process.argv.flatMap((v, i) => (process.argv[i - 1] === k ? [v] : []));
-const HELPER = args("--helper")[0] ?? "https://api.confidential.unrealized.trade";
+const HELPER = args("--helper")[0] ?? "https://ct-api.unrealized.trade";
 const PROVIDER_A = "https://solana-rpc.publicnode.com";
 const SLIPPAGE_BPS = 500;
 // A wallet that holds SOL and wSOL (FVee…8qQi) (the card's measured wallet: a buy from it writes its wSOL

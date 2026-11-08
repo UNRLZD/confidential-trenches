@@ -51,8 +51,13 @@ on:
 permissions:
   contents: read
 
+# One queue per host (card live-runs-one-per-host): a second dispatched run on a host waits until the first ends, so no
+# check is judged against another run's load on the host's shared budgets (6 Nov 10:55Z: two helper runs at once, 42206377652
+# and 42206382978, read helper-token-page-cold 29 and 28 of 32 cold, floor 30; alone, 42207995804, 31). GitHub keeps one
+# run waiting per group: a newer dispatch on the host replaces a waiting one, never the one running. A pull request's run
+# is its own group (its ref) and a newer push cancels it.
 concurrency:
-  group: live-${{ github.workflow }}-${{ github.ref }}-${{ inputs.host }}-${{ inputs.commit }}
+  group: live-${{ inputs.host || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

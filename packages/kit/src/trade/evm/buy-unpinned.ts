@@ -413,7 +413,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 156-block pages, 744 pages in 222 s, about 8,250 pages and 41 min for the pool's life, 2,770 more a day
       // (04:27-04:31Z). PublicNode answered the same filter over 1,000 to 50,000 blocks in 116-176 ms and refused
       // 100,000 ("-32701: exceed maximum block range: 50000"); Pocket answered 1,000 to 100,000 in 188-265 ms (04:35Z).
-      // Both answer the signing page's CORS preflight (POST, content-type) from https://sign.confidential.unrealized.trade
+      // Both answer the signing page's CORS preflight (POST, content-type) from https://confidential.unrealized.trade
       // with 204: PublicNode allow-origin *, Pocket that origin (04:42Z). sepolia.base.org stays in the fee pair, whose
       // reads are views and blocks, never a log page.
       providers: Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"] as const),

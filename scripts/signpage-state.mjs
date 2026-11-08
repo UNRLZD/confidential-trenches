@@ -6,7 +6,7 @@
 // key the page adds together with the kit (pools, release-9) never leaves a hand copy of the keys behind.
 import { createSignpageClient } from "../packages/kit/src/index.ts";
 
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 
 /** @param {unknown} s a state as SIGN_HOST sent it @returns {boolean} the kit's client holds it as its state */
 export function kitTakesState(s) {

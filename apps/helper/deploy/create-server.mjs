@@ -22,7 +22,7 @@ import "../../../scripts/net-window.mjs";
 
 export const API = "https://api.hetzner.cloud/v1";
 export const REPO = "UNRLZD/confidential-trenches";
-export const HOST = "api.confidential.unrealized.trade";
+export const HOST = "ct-api.unrealized.trade";
 export const NAME = "ct-helper";
 export const LOCATION = "fsn1";
 export const IMAGE = "ubuntu-24.04";

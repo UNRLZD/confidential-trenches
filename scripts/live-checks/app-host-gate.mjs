@@ -16,9 +16,9 @@ import { fileURLToPath } from "node:url";
 import { evmOrigins } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "app-host-gate";
-export const URL_ = "https://confidential.unrealized.trade/";
-const SIGN = "https://sign.confidential.unrealized.trade";
-const HELPER = "api.confidential.unrealized.trade";
+export const URL_ = "https://ct-app.unrealized.trade/";
+const SIGN = "https://confidential.unrealized.trade";
+const HELPER = "ct-api.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
 // the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists, before the NEAR RPCs, which
 // a testnet build swaps as the connect-src's last sources (apps/terminal/build/network.mjs)

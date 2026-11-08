@@ -14,9 +14,9 @@ const SRC = process.env.SIGNPAGE_SRC ? pathToFileURL(`${process.env.SIGNPAGE_SRC
 const C = await import(`${SRC}signpage/client.ts`);
 const MSG = await import(`${SRC}signpage/messages.ts`);
 
-const URL_ = "https://sign.confidential.unrealized.trade/";
-const ORIGIN = "https://sign.confidential.unrealized.trade";
-const APP_ORIGIN = "https://confidential.unrealized.trade";
+const URL_ = "https://confidential.unrealized.trade/";
+const ORIGIN = "https://confidential.unrealized.trade";
+const APP_ORIGIN = "https://ct-app.unrealized.trade";
 const DOWN = { ok: false, error: { code: "signpage_down" } };
 const TIMEOUT = { ok: false, error: { code: "client_timeout" } };
 const READY = { v: 1, type: "ready", release: "sp-1", api: 1 };
@@ -162,7 +162,7 @@ test("parent mode drops, with no state change, a message from another origin or 
   const cases = [
     ["APP_HOST's origin", APP_ORIGIN, h.shell, "origin"],
     ["a same-site sibling", "https://evil.unrealized.trade", h.shell, "origin"],
-    ["SIGN_HOST over http", "http://sign.confidential.unrealized.trade", h.shell, "origin"],
+    ["SIGN_HOST over http", "http://confidential.unrealized.trade", h.shell, "origin"],
     ["SIGN_HOST's origin from another window", ORIGIN, new FakeWin(), "source"],
     ["SIGN_HOST's origin with no source", ORIGIN, null, "source"],
     ["SIGN_HOST's origin from the app's own window", ORIGIN, h.self, "source"],

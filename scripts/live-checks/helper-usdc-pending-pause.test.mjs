@@ -22,7 +22,7 @@ const net = (run, name) => run.nets.find((x) => x.network === name);
 const replay = (run) => async (url, init) => {
   const body = JSON.parse(init.body);
   if (url.endsWith("/v1/bind")) {
-    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+    assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
     const r = run.nets.find((x) => probeDelegate(NETS[x.network].token) === body.signed_delegate);
     return new Response(r.carry.body, { status: r.carry.status });
   }

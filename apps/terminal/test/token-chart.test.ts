@@ -45,7 +45,7 @@ test("no bars is the empty state, with its source", () => {
 });
 
 test("the helper's timeframe names: 1H, 4H and 1D are asked for as 1h, 4h and 1d", () => {
-  assert.equal(CANDLES_URL("solana", "Mint111", "1H"), "https://api.confidential.unrealized.trade/v1/market/candles?chain=solana&token=Mint111&tf=1h&limit=500");
+  assert.equal(CANDLES_URL("solana", "Mint111", "1H"), "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=Mint111&tf=1h&limit=500");
   assert.match(CANDLES_URL("base", "0xab", "1D"), /tf=1d&limit=500$/);
   assert.equal(toCandleData({ ...good(), tf: "1h" }, "1H", "chain")!.status, "ready");
   assert.equal(toCandleData({ ...good(), tf: "1h" }, "15m", "chain"), null);

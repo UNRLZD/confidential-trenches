@@ -1,6 +1,6 @@
 {
  "good": {
-  "note": "apps/helper at card/relayer-withdraw-fee (f4c83b0 with its two-round-trip read; the test machine's snapshot 211cb29 is its X-Helper-Commit) run with node src/server.ts on a Linux test machine, no NEAR URL set, so it read rpc.mainnet.fastnear.com + near.drpc.org and test.rpc.fastnear.com + near-testnet.drpc.org; WITHDRAW_RELAYER_* and WITHDRAW_FEE_RECIPIENT_* relayer.confidential.unrlzd.near on both networks (the wallet vectors' relayer; the release names none yet); the check's own device reads on the same pairs; read 2026-11-02T09:30:16.489Z (api.confidential.unrealized.trade does not serve the route yet)",
+  "note": "apps/helper at card/relayer-withdraw-fee (f4c83b0 with its two-round-trip read; the test machine's snapshot 211cb29 is its X-Helper-Commit) run with node src/server.ts on a Linux test machine, no NEAR URL set, so it read rpc.mainnet.fastnear.com + near.drpc.org and test.rpc.fastnear.com + near-testnet.drpc.org; WITHDRAW_RELAYER_* and WITHDRAW_FEE_RECIPIENT_* relayer.confidential.unrlzd.near on both networks (the wallet vectors' relayer; the release names none yet); the check's own device reads on the same pairs; read 2026-11-02T09:30:16.489Z (ct-api.unrealized.trade does not serve the route yet)",
   "base": "http://127.0.0.1:18111",
   "reads": [
    {
@@ -8,7 +8,7 @@
     "readAt": "2026-11-02T09:30:16.489Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -27,7 +27,7 @@
     "readAt": "2026-11-02T09:30:17.025Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -46,7 +46,7 @@
     "readAt": "2026-11-02T09:30:17.630Z",
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -107,7 +107,7 @@
     "readAt": "2026-11-02T09:30:16.489Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -126,7 +126,7 @@
     "readAt": "2026-11-02T09:30:17.025Z",
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -145,7 +145,7 @@
     "readAt": "2026-11-02T09:30:17.630Z",
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "connection": "keep-alive",

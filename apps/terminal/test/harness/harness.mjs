@@ -38,9 +38,9 @@ export const MAPPED = ["*.ct.test", "*.other.test"];
 // iframe or of passkey scope runs on them with startHarness({ realNames: true }): they map to this harness too, the
 // builds and headers stay byte-exact, and the same-site layout is the real one (decided 01:50Z Nov 1).
 export const REAL = {
-  app: "confidential.unrealized.trade",
-  sign: "sign.confidential.unrealized.trade",
-  api: "api.confidential.unrealized.trade",
+  app: "ct-app.unrealized.trade",
+  sign: "confidential.unrealized.trade",
+  api: "ct-api.unrealized.trade",
 };
 
 /** The real names' sites: APP_HOST's and SIGN_HOST's builds as the harness names serve them; the API has none yet. */
@@ -60,11 +60,14 @@ export function buildSignpage() {
   return out;
 }
 
-/** Each host's build: the terminal's build (pnpm --filter terminal build) and the signing page's, each with its own _headers. */
+/** Each host's build: the terminal's build (pnpm --filter terminal build) and the signing page's, each with its own _headers.
+ * Both are Pages projects with no 404.html, so a path with no file answers the index (spa): SIGN_HOST answers
+ * /favicon.ico, /_headers and /no-such-path 200 text/html, its index (read live 8 Nov 07:31Z; card terminal-harness-sign-spa,
+ * as sign-harness-like-live made every live-check harness). */
 export function defaultSites(signRoot) {
   return {
     [HOSTS.app]: { root: path.join(TERMINAL, "dist"), spa: true },
-    [HOSTS.sign]: { root: signRoot },
+    [HOSTS.sign]: { root: signRoot, spa: true },
     [HOSTS.sibling]: { root: path.join(HERE, "sites/plain") },
     [HOSTS.cross]: { root: path.join(HERE, "sites/plain") },
   };

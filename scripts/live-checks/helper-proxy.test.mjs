@@ -19,11 +19,11 @@ const A = JSON.parse(readFileSync(path.join(HERE, "helper-proxy.answers.json"), 
 const replay = (a) => async (url, init) => {
   assert.match(url, /\/v1\/proxy\/oneclick\/v0\/tokens$/);
   assert.equal(init.method, "POST");
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   return new Response(a.body, { status: a.status, headers: a.headers });
 };
 const run = async (a, keys = a.keys) => {
-  const r = await read("https://api.confidential.unrealized.trade", replay(a));
+  const r = await read("https://ct-api.unrealized.trade", replay(a));
   r.readAt = a.readAt; // the recorded read's own time, for the X-Fetched-At window
   return judge(r, keys);
 };

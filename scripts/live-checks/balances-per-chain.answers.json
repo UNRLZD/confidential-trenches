@@ -37,7 +37,7 @@
     "runs": [
       {
         "width": "phone",
-        "frame": "https://confidential.unrealized.trade/portfolio",
+        "frame": "https://ct-app.unrealized.trade/portfolio",
         "view": "rows",
         "rows": [
           {
@@ -85,7 +85,7 @@
       },
       {
         "width": "desktop",
-        "frame": "https://confidential.unrealized.trade/portfolio",
+        "frame": "https://ct-app.unrealized.trade/portfolio",
         "view": "rows",
         "rows": [
           {
@@ -135,7 +135,7 @@
   },
   "deployed": {
     "at": "2026-11-03T08:56:00.381Z",
-    "source": "live https://confidential.unrealized.trade",
+    "source": "live https://ct-app.unrealized.trade",
     "answer": {
       "release": "check-shell",
       "api": 1,
@@ -171,7 +171,7 @@
     "runs": [
       {
         "width": "phone",
-        "frame": "https://confidential.unrealized.trade/portfolio",
+        "frame": "https://ct-app.unrealized.trade/portfolio",
         "view": null,
         "rows": [],
         "violations": [],
@@ -179,7 +179,7 @@
       },
       {
         "width": "desktop",
-        "frame": "https://confidential.unrealized.trade/portfolio",
+        "frame": "https://ct-app.unrealized.trade/portfolio",
         "view": null,
         "rows": [],
         "violations": [],

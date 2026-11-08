@@ -3,7 +3,8 @@
 // network under its own watch, is networks.test.ts's.
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, promises as fsPromises, readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -95,8 +96,11 @@ test("one key on one account in both relayers is refused at start (two nonce cou
 test("delivered (card helper-create-u): the recorded 1Click SUCCESS on mainnet USDC starts mainnet's creation, one on a token no network carries reads nothing; it returns at once and a failed start is logged, never thrown", async (t) => {
   const recorded = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/oneclick-status.json"), "utf8")) as { answers: Record<string, unknown> };
   const reads: string[] = [];
+  // card helper-intents-test-race: each provider read fails only after 1.5 s (a loaded runner; the old 1 s poll gave up);
+  // the hook's promise is awaited
   const fetchFn = (async (url: string) => {
     reads.push(String(url));
+    await new Promise((ok) => setTimeout(ok, 1_500));
     throw new Error("provider down");
   }) as unknown as typeof fetch;
   const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "benv-")) };
@@ -104,12 +108,12 @@ test("delivered (card helper-create-u): the recorded 1Click SUCCESS on mainnet U
   t.mock.method(console, "error", (line: string) => void logged.push(line));
   const s = bindSenderFromEnv(env, {}, fetchFn, env.BIND_VAULT_MAINNET); // a stand-in vault: its own pin
   assert.ok(s.delivered);
-  assert.equal(s.delivered(JSON.stringify(recorded.answers.success_sol)), undefined);
-  assert.equal(s.delivered("not json"), undefined);
-  await new Promise((ok) => setTimeout(ok, 20));
+  assert.equal(await s.delivered(JSON.stringify(recorded.answers.success_sol)), undefined);
+  assert.equal(await s.delivered("not json"), undefined);
   assert.deepEqual(reads, [], "an answer that names no carried delivery reads nothing");
-  assert.equal(s.delivered(JSON.stringify(recorded.answers.success_usdc)), undefined);
-  for (let i = 0; i < 100 && logged.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
+  const run = s.delivered(JSON.stringify(recorded.answers.success_usdc));
+  assert.deepEqual(logged, [], "it returns before the start's reads end");
+  assert.equal(await run, undefined, "a failed start resolves, never rejects");
   assert.ok(reads.length > 0, "mainnet's start read its providers");
   assert.deepEqual([...new Set(logged)], ["helper: create start_failed"]);
   s.stop();
@@ -135,7 +139,7 @@ test("fold 4: a creation's log line names its code and our Transfer's hash only:
   assert.equal(createLine(null), null);
 });
 
-test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate answers before the relayer starts or any chain is read; a quote and a status the proxy carried make a signer seen", async () => {
+test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate answers before the relayer starts or any chain is read; a quote and a status the proxy carried make a signer seen", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "benv-intents-"));
   const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
   let fetched = 0;
@@ -146,8 +150,12 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   assert.deepEqual([a.status, code(a)], [403, "id_not_ours"]);
   // the proxy's hooks: our quote with U as refundTo, then 1Click's REFUNDED status for it
   const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
-  s.quoted!(JSON.stringify(q));
-  await new Promise((ok) => setTimeout(ok, 100)); // the quote record is written off the event loop
+  // card helper-intents-test-race: the record's write lands after 150 ms (a loaded runner); the hook's promise is awaited
+  const link = fsPromises.link;
+  t.mock.method(fsPromises, "link", (a: string, b: string) => new Promise<void>((ok, no) => setTimeout(() => link(a, b).then(ok, no), 150)));
+  syncBuiltinESMExports();
+  t.after(() => (t.mock.restoreAll(), syncBuiltinESMExports()));
+  await s.quoted!(JSON.stringify(q)); // the quote record is written off the event loop
   s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
   const v = await s.intents!(body(MAINNET_VAULT));
   assert.deepEqual([v.status, code(v)], [403, "receiver_is_vault"]);
@@ -158,5 +166,20 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   s.armed!(armedA);
   assert.equal(code(await s.intents!(bodyA)), "receiver_is_vault");
   assert.equal(fetched, 0, "no chain read and no relayer start");
+  s.stop();
+});
+
+test("card helper-intents-test-race: a quote record whose write fails resolves the quoted hook, never rejects, and logs quote_record_failed", async (t) => {
+  const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "benv-qfail-")) };
+  const s = bindSenderFromEnv(env, {}, (async () => new Response("{}", { status: 500 })) as typeof fetch);
+  const logged: string[] = [];
+  t.mock.method(console, "error", (line: string) => void logged.push(line));
+  t.mock.method(fsPromises, "link", async () => Promise.reject(Object.assign(new Error("disk gone"), { code: "EIO" })));
+  syncBuiltinESMExports();
+  t.after(() => (t.mock.restoreAll(), syncBuiltinESMExports()));
+  const u = "c".repeat(64);
+  const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
+  assert.equal(await s.quoted!(JSON.stringify(q)), undefined);
+  assert.deepEqual(logged, ["helper: intents quote_record_failed"]);
   s.stop();
 });

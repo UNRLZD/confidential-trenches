@@ -1,7 +1,7 @@
 {
  "notes": [
   "good: a local helper (apps/helper/src/server.ts start(), --base http://127.0.0.1:57041) at commit 02275347ff0b7e4826cc43a169f490104083c62b, read 2026-11-06T13:52:39.015Z (card helper-sender-fee-proof), both EVM testnet pools set in its own process: each withdraw and sell sender key sha256 of a label (a throwaway, never written), the kit's venues with each sell sender pin set to the throwaway sell key, the deployed fee answers' fee recipients (base-sepolia 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec, robinhood-testnet 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7), POOL_EVM_FEE_COLLECTOR_<NETWORK> the kit's pin, the deployed FeeCollector (base-sepolia 0x9cc4788af51677aaa7770d78277c41fb864b35e1, robinhood-testnet 0xb174f0e859f00a7b593baca38394327e3d6bf638; card evm-fee-collector), POOL_EVM_RPCS_<NETWORK> unset, so the kit's fee providers (feeProviders). Its fee answers name each pool's sell_sender and fee_collector; every plant pays the fee collector, and every plant, route_other_target included, is refused with its own code. Re-recorded on HELPER_HOST once this card's merge is redeployed with both collectors set.",
-  "bad_deployed: HELPER_HOST (https://api.confidential.unrealized.trade), read again at this commit: it carries no EVM pool yet, so the fee and every plant answer 404.",
+  "bad_deployed: HELPER_HOST (https://ct-api.unrealized.trade), read again at this commit: it carries no EVM pool yet, so the fee and every plant answer 404.",
   "Each plant is built at run time with a throwaway W key; no key is recorded.",
   "The sells the helper sent (checkSells) have no recorded answer here yet: each testnet's run through the deployed helper (contracts/pool-evm/script/testnet-run.mjs --sell-helper, its record helper-evm-sender.run.<network>.json) is made after the redeploy. Until then the check fails on each testnet's missing helper sell, as it must."
  ],
@@ -4967,7 +4967,7 @@
   ]
  },
  "bad_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pools": [
    {
     "network": "base-sepolia",

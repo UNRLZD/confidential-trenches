@@ -28,7 +28,7 @@
   "note": "this card: apps/terminal built fresh (vite build, 7 Nov 2026) and read from disk (--root); the page names one script and one stylesheet, which hold the quick buy"
  },
  "bad": {
-  "source": "https://confidential.unrealized.trade/",
+  "source": "https://ct-app.unrealized.trade/",
   "at": "2026-11-07T22:45:26.105Z",
   "pageStatus": 200,
   "js": [

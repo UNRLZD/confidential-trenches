@@ -22,7 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-ready-no-flicker";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
 export const READ_EPOCHS = 4; // the epoch of the first ready read and three whole ones after it
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");

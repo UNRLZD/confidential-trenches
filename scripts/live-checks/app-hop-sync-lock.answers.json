@@ -29,7 +29,7 @@
  "bad": {
   "check": "app-hop-sync-lock",
   "at": "2026-11-04T17:22:22.585Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell signed out",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed out",
   "browser": "156.0.8078.79",
   "runs": [
    {

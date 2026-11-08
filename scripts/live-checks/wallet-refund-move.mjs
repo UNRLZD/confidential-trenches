@@ -30,9 +30,9 @@ import { fileURLToPath } from "node:url";
 import { HELPER_INTENTS_CODES, checkOneClickQuote } from "../../packages/kit/src/index.ts";
 
 const KEY = "wallet-refund-move";
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const HELPER = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const INTENTS_URL = `${HELPER}/v1/intents`;
 export const QUOTE_URL = `${HELPER}/v1/proxy/oneclick/v0/quote`;
 export const RPCS = ["https://free.rpc.fastnear.com", "https://near.drpc.org"];

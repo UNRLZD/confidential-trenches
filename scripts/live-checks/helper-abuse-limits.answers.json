@@ -1,7 +1,7 @@
 {
  "_note": "good: apps/helper at the card branch run locally (node src/server.ts), read by this check with --record. bad_pre_card: apps/helper at be4b353 (before the card) run the same way: its pool 429 names a wait the browser cannot read and GET /v1/health is never limited. bad_no_expose's pool burst is the same be4b353 helper's, recorded earlier. Each other bad answer is the good one with one thing planted in one burst: pool no Retry-After, upstream text in the body, no 429 in 61, still 429 after the wait, a 503 in the burst; api no 429 in 241, no Retry-After exposed, a 503 in the burst; the api burst missing. date, keep-alive and connection headers are dropped; base is the deployed helper. good_deployed: the deployed helper at 3bf53c0 read from the Mac (about 250 to 540 ms a round trip) on 2026-11-03 14:23Z by this check in parallel batches (31 on the pool route, 121 on health): PASS, where one request at a time had read 241 answers and no 429.",
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -39,7 +39,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -54,7 +54,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -193,7 +193,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -208,7 +208,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -222,7 +222,7 @@
   }
  },
  "bad_pre_card": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -260,7 +260,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "content-length": "33",
@@ -275,7 +275,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "content-length": "30",
@@ -536,7 +536,7 @@
   }
  },
  "bad_no_expose": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -574,7 +574,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "content-length": "33",
@@ -589,7 +589,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "content-length": "30",
@@ -728,7 +728,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -743,7 +743,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -757,7 +757,7 @@
   }
  },
  "bad_no_retry_after": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -795,7 +795,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -935,7 +935,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -950,7 +950,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -964,7 +964,7 @@
   }
  },
  "bad_upstream_text": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -1002,7 +1002,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "69",
@@ -1017,7 +1017,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -1156,7 +1156,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1171,7 +1171,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -1185,7 +1185,7 @@
   }
  },
  "bad_never_429": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -1380,7 +1380,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1395,7 +1395,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -1409,7 +1409,7 @@
   }
  },
  "bad_still_throttled": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -1447,7 +1447,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1462,7 +1462,7 @@
    "after": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1602,7 +1602,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1617,7 +1617,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -1631,7 +1631,7 @@
   }
  },
  "bad_503": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -1669,7 +1669,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1684,7 +1684,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -1823,7 +1823,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1838,7 +1838,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -1852,7 +1852,7 @@
   }
  },
  "bad_api_never_429": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -1890,7 +1890,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -1905,7 +1905,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -2166,7 +2166,7 @@
   }
  },
  "bad_api_no_expose": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -2204,7 +2204,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -2219,7 +2219,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -2358,7 +2358,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At",
      "cache-control": "no-store",
      "content-length": "33",
@@ -2373,7 +2373,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -2387,7 +2387,7 @@
   }
  },
  "bad_api_503": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -2425,7 +2425,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -2440,7 +2440,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -2579,7 +2579,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -2594,7 +2594,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "176",
@@ -2608,7 +2608,7 @@
   }
  },
  "bad_api_missing": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     404,
@@ -2646,7 +2646,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "33",
@@ -2661,7 +2661,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "content-length": "30",
@@ -2675,7 +2675,7 @@
   }
  },
  "good_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pool": {
    "statuses": [
     429,
@@ -2713,7 +2713,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -2730,7 +2730,7 @@
    "after": {
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -2871,7 +2871,7 @@
    "throttle": {
     "status": 429,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -2888,7 +2888,7 @@
    "after": {
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",

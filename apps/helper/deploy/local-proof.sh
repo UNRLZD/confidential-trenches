@@ -47,15 +47,15 @@ echo "== helper-proxy live check through Caddy: POST /v1/proxy/oneclick/v0/token
 node "$PCHECK" --base http://127.0.0.1:18080 --record "$OUT/proxy-good.json" --planted | tail -1; echo "rc=${PIPESTATUS[0]} (want 0)"
 echo "== a proxied read through Caddy: cached list, 200 reads; cold (one per 5.2 s, past the 5 s cache), 12 reads; 1Click direct, 12 reads"
 pct() { sort -n | awk '{a[NR]=$1} END {printf "p50 %.1f ms, p95 %.1f ms, n=%d\n", a[int((NR+1)*0.5)]*1000, a[int((NR-1)*0.95)+1]*1000, NR}'; }
-for _ in $(seq 1 200); do curl -s -o /dev/null -w '%{time_total}\n' -X POST -H 'Origin: https://confidential.unrealized.trade' http://127.0.0.1:18080/v1/proxy/oneclick/v0/tokens; done | pct
+for _ in $(seq 1 200); do curl -s -o /dev/null -w '%{time_total}\n' -X POST -H 'Origin: https://ct-app.unrealized.trade' http://127.0.0.1:18080/v1/proxy/oneclick/v0/tokens; done | pct
 for _ in $(seq 1 12); do sleep 5.2; curl -s -o /dev/null -w '%{time_total}\n' -X POST http://127.0.0.1:18080/v1/proxy/oneclick/v0/tokens; done | pct
 for _ in $(seq 1 12); do curl -s -o /dev/null -w '%{time_total}\n' https://1click.chaindefuser.com/v0/tokens; done | pct
 echo "== preflight through Caddy"
-curl -sS -o /dev/null -D - -X OPTIONS -H 'Origin: https://sign.confidential.unrealized.trade' \
+curl -sS -o /dev/null -D - -X OPTIONS -H 'Origin: https://confidential.unrealized.trade' \
   -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' \
   http://127.0.0.1:18080/v1/bind | tr -d '\r' | grep -iE '^(HTTP|access-control|vary)'
 echo "== GET /v1/health through Caddy, 200 reads"
-for _ in $(seq 1 200); do curl -s -o /dev/null -w '%{time_total}\n' -H 'Origin: https://confidential.unrealized.trade' http://127.0.0.1:18080/v1/health; done |
+for _ in $(seq 1 200); do curl -s -o /dev/null -w '%{time_total}\n' -H 'Origin: https://ct-app.unrealized.trade' http://127.0.0.1:18080/v1/health; done |
   sort -n | awk '{a[NR]=$1} END {printf "p50 %.1f ms, p95 %.1f ms, n=%d\n", a[int(NR*0.5)]*1000, a[int(NR*0.95)]*1000, NR}'
 echo "== upstream down (502) and a malformed request: no IP may reach a log"
 docker compose -p $P stop helper >/dev/null 2>&1

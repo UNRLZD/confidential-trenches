@@ -172,7 +172,7 @@ services:
     restart: unless-stopped
     depends_on: [helper]
     environment:
-      HELPER_SITE: ${HELPER_SITE:-api.confidential.unrealized.trade}
+      HELPER_SITE: ${HELPER_SITE:-ct-api.unrealized.trade}
     ports: ["${HELPER_PORTS_HTTP:-80}:80", "${HELPER_PORTS_HTTPS:-443}:443", "${HELPER_PORTS_HTTPS:-443}:443/udp"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
