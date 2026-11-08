@@ -41,7 +41,9 @@
 //   the fee and its token account's rent, so W keeps exactly its sell's need); W then sells all it holds; once the sell
 //   reads confirmed on both RPCs and before the rent back's first read of W's accounts, S sends that unit back to W's
 //   token account. FLOW_STRANGER=<that file> uses a kept S again; FLOW_RESUME with FLOW_BUY_SIG=<the buy's signature>
-//   goes on from a run that stopped after its buy (no deposit, no buy: the dust step and the sell). The rent back must then burn it, close the account and sweep W: the run is filled only when a
+//   goes on from a run that stopped after its buy (no deposit, no buy: the dust step and the sell). FLOW_RESUME with
+//   FLOW_SWEEP_W=<W> is a later load of that run: W's owed record as its sell wrote it (W from its spent note, the coin's
+//   account), then the page's state read, whose rent back runs once; W and its accounts read at finalized after it. The rent back must then burn it, close the account and sweep W: the run is filled only when a
 //   teardown frame burns exactly 1 and W, its token account and both volume accounts read null at finalized.
 // - Each kind is tapped once. A kind that does not land on its tap is a failed run, recorded as one: it is never tapped
 //   again (a re-tap would hide a page that gives up on a busy provider).
@@ -346,6 +348,35 @@ if (RESUME) {
     log("stopped after the deposit (FLOW_CRASH_AFTER=deposit): the seed stays in its file");
     process.exit(3);
   }
+}
+if (RESUME && process.env.FLOW_SWEEP_W) {
+  const W = process.env.FLOW_SWEEP_W;
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const n = (await ns.list()).filter((x) => x.state === "SPENT" && x.leaf).find((x) => freshWallet(seed64, "sol", x.leaf.label, jOf(x.ref)).address === W);
+  if (!n) throw new Error("W is no spent note's W");
+  const { owedRentBacks } = await import("../src/pool-sell.ts");
+  await owedRentBacks(page.store).put({ address: W, l: String(n.leaf.label), j: jOf(n.ref), mints: [{ mint: MINT, program: tokenProgram }], passes: 0 });
+  const lamports = async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value?.lamports ?? null;
+  log(`a later load of W ${W} (${await lamports(W)} lamports at finalized): the page's state read`);
+  await t.stateRead();
+  // the rent back runs under the seed's shared lock, asked for inside the state read: this waits for it to end
+  await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
+  for (let i = 0; i < 45; i++) {
+    const st = sentTxs.length ? (await rpcs[0]("getSignatureStatuses", [sentTxs])).value : [];
+    if (st.every((x) => x?.confirmationStatus === "finalized")) break;
+    await sleep(2_000);
+  }
+  const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
+  const after = { W, tokenAccount: await lamports(solanaAta(W, MINT, tokenProgram)), pumpVolume: await lamports(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await lamports(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await lamports(W) };
+  const notes = await noteList();
+  log(`after the load ${JSON.stringify(after)}; sent ${JSON.stringify(sentTxs)}; notes ${JSON.stringify(notes)}`);
+  seed64.fill(0);
+  writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", sweepLoad: true, after, sentTxs, notes }, null, 2) + "\n");
+  await t.signedOut();
+  ns.close();
+  w.close();
+  process.exit(Object.entries(after).every(([k, v]) => k === "W" || v === null) ? 0 : 1);
 }
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
