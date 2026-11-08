@@ -27,10 +27,10 @@ test("a fresh list draws no age; one older than 60 s draws its age from its own 
   assert.equal(listAge(NOW + 5 * MIN, NOW), null);
 });
 
-test("the age line is the draft words with the age in them, marked a draft until the owner picks", () => {
+test("the age line is the kept words with the age in them, no draft mark (owner 8 Nov 07:55Z, kept)", () => {
   assert.equal(ageLine("2h"), "Updated 2h ago");
   assert.equal(ageLine("12m"), "Updated 12m ago");
-  assert.equal(WORDS.updated.draft, true);
+  assert.equal(WORDS.updated.draft, false);
 });
 
 test("a 2 h old list survives a failed re-read, still drawing its age; the error state comes only after 60 s with no 200", () => {

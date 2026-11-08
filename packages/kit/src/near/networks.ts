@@ -26,16 +26,23 @@ export const NEAR_NETWORKS = {
   // scripts/live-checks/vault-testnet-t01.mjs reads both).
   // usdc: the vault's asset, the token contract. Mainnet's is the kit's VAULT_CONSTANTS.TOKEN, copied here so the
   // signing page carries no kit code for it; test/near-networks.test.ts holds the two equal.
-  mainnet: { usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", vault: "vault.confidential.unrlzd.near", fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2] },
+  // archival: the network's archival RPCs, read only for a tx both of the pair no longer keep (the wallet's moveout.ts
+  // recordState: a held move out the pair forgot is read here before it is settled), every one asked and only an equal
+  // word from all counted. One operator, FastNEAR (scripts/ci/near-rpc-operators.mjs): near.org's archival
+  // first, the keyless public one the NEAR docs list (docs.near.org/api/rpc/providers), then FastNEAR's own, whose docs
+  // call it paid. Both answered keyless with CORS * on 8 Nov 2026: `tx` with wait_until NONE read a 2 Nov testnet tx
+  // FINAL and an unsent hash UNKNOWN_TRANSACTION, where the pair keeps about 100,000 to 230,000 mainnet blocks.
+  mainnet: { usdc: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", vault: "vault.confidential.unrlzd.near", fastnear: [NEAR_RPC_URLS[0], NEAR_RPC_URLS[1]], drpc: NEAR_RPC_URLS[2], archival: ["https://archival-rpc.mainnet.near.org", "https://archival-rpc.mainnet.fastnear.com"] }, // near-rpc-operators: one operator (the archival list, every one asked)
   testnet: {
     usdc: "bf-usdc-20261101t022248.testnet", // gitleaks:allow (a public account id)
     vault: "vault.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
     fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // near-rpc-operators: one operator (alternatives; the pair is one of these and drpc)
     drpc: "https://near-testnet.drpc.org",
+    archival: ["https://archival-rpc.testnet.near.org", "https://archival-rpc.testnet.fastnear.com"], // near-rpc-operators: one operator (the archival list, every one asked)
   },
 } as const;
 // Frozen, so no code on the page can point a network at another USDC contract, vault or RPC after load.
-for (const net of Object.values(NEAR_NETWORKS)) Object.freeze(Object.freeze(net).fastnear);
+for (const net of Object.values(NEAR_NETWORKS)) Object.freeze(Object.freeze(net).fastnear), Object.freeze(net.archival);
 Object.freeze(NEAR_NETWORKS);
 export type NearNetwork = keyof typeof NEAR_NETWORKS;
 export const RPC_TIMEOUT_MS = 10_000;

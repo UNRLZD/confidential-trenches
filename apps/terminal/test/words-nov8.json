@@ -1,0 +1,110 @@
+[
+ {
+  "screen": "token",
+  "key": "gridLines",
+  "text": "Grid lines",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "token",
+  "key": "lastLine",
+  "text": "Last price line",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "token",
+  "key": "indMA",
+  "text": "MA",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "token",
+  "key": "indEMA",
+  "text": "EMA",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "token",
+  "key": "indBOLL",
+  "text": "BOLL",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "token",
+  "key": "indRSI",
+  "text": "RSI",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "token",
+  "key": "indMACD",
+  "text": "MACD",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "trade",
+  "key": "proofReady",
+  "text": "Proof ready",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "trade",
+  "key": "proofMaking",
+  "text": "Making proof",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "trade",
+  "key": "poolBare",
+  "text": "Pool",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "trade",
+  "key": "poolSuffix",
+  "text": "pool",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "positions",
+  "key": "toPool",
+  "text": "Back to Cash",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "discover",
+  "key": "updated",
+  "text": "Updated {age} ago",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "deposit",
+  "key": "to",
+  "text": "To",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "portfolio",
+  "key": "exportKey",
+  "text": "Export key",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "portfolio",
+  "key": "wallets",
+  "text": "Wallets",
+  "pick": "owner 8 Nov 07:55Z, kept"
+ },
+ {
+  "screen": "discover",
+  "key": "padMenuTitle",
+  "text": "Launchpads by tokens now",
+  "pick": "8 Nov 19:40Z, kept as drawn"
+ },
+ {
+  "screen": "search",
+  "key": "placeholder",
+  "text": "Name, symbol or address",
+  "pick": "8 Nov 19:40Z, kept as drawn"
+ }
+]

@@ -4,14 +4,16 @@
 // op with no facts and only the eight stages kit-v1 named, and they refuse the whole state for one op they cannot
 // read. So the page sends such a client the nearest thing it reads: every field after it left out, a newer deposit
 // stage mapped down to the kit-v1.4 stage that tells the truth about where the money is (V1_4_DEPOSIT_STAGE), an op it
-// still cannot read left out, and no route event (kit-v1.4 has no pool.buy to ask for one). A client at
+// still cannot read left out, and no route event (kit-v1.4 has no pool.buy to ask for one). A client that names kit-v1.5
+// reads everything but a deposit's moved_out fact (card held-move-forgotten-tx), which it refuses the whole state for:
+// it is sent each deposit with that fact left out, so its app still draws the moved deposit as held. A client at
 // SIGNPAGE_KIT_VERSION or above gets every message as it is. A change to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import type { DepositStage, Operation, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
-/** The levels this page sends at: kit-v1.4's shape, or everything (kit-v1.5 and above). */
-export type KitLevel = "1.4" | "current";
+/** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out), or everything (kit-v1.6 and above). */
+export type KitLevel = "1.4" | "1.5" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -32,7 +34,8 @@ export function kitLevel(kit: string): KitLevel {
   const v = VERSION.exec(kit);
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
-  return major > CURRENT_FROM[0] || (major === CURRENT_FROM[0] && minor >= CURRENT_FROM[1]) ? "current" : KIT_DEFAULT;
+  const from = (m: number, n: number) => major > m || (major === m && minor >= n);
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -107,9 +110,22 @@ function opV1_4(op: Operation): Operation | null {
 /** kit-v1.4's state fields (kit-v1.4 schema.ts state): any other is left out. */
 const V1_4_STATE_KEYS: ReadonlySet<string> = new Set(["release", "api", "signed_in", "way", "code_saved", "signin_failed", "vault_balance", "wallets", "positions", "orders", "held", "ops"]);
 
-/** The state as a client at `level` reads it: kit-v1.4's fields only, in the state's own order, each op mapped or left out. */
+/**
+ * A deposit's facts as kit-v1.5 reads them: a moved-out one with no moved_out and no held_id (held_id is optional on
+ * held there, and a kit-v1.5 app turns its Withdraw off without one: nothing waits under it any more; review L1); the
+ * object as it is when it has no moved_out.
+ */
+function factsV1_5<T extends object>(d: T): T {
+  if (!own(d, "moved_out")) return d;
+  const { moved_out: _m, held_id: _h, ...rest } = d as T & { moved_out?: unknown; held_id?: unknown };
+  return rest as T;
+}
+
+/** The state as a client at `level` reads it: kit-v1.5's, each deposit op with no moved_out; kit-v1.4's fields only, in
+ *  the state's own order, each op mapped or left out. */
 export function stateFor(level: KitLevel, s: SignpageState): SignpageState {
   if (level === "current") return s;
+  if (level === "1.5") return { ...s, ops: s.ops.map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(s)) if (V1_4_STATE_KEYS.has(k)) out[k] = k === "ops" ? s.ops.map(opV1_4).filter((o) => o !== null) : s[k as keyof SignpageState];
   return out as unknown as SignpageState;
@@ -117,16 +133,18 @@ export function stateFor(level: KitLevel, s: SignpageState): SignpageState {
 
 /** A progress stage as a client at `level` reads it, or null when that client has no stage for it (the event is not sent). */
 export function stageFor(level: KitLevel, stage: Stage): Stage | null {
-  if (level === "current" || V1_4_STAGES.has(stage)) return stage;
+  if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;
   return own(V1_4_DEPOSIT_STAGE, stage) ? V1_4_DEPOSIT_STAGE[stage as DepositStage] : null;
 }
 
 /**
- * An answer's result of `kind` as a client at `level` reads it: the state mapped, deposit.confirm's stage mapped with no
- * facts; every other kind's result as it is (kit-v1.4 reads each kind it can ask the same as now).
+ * An answer's result of `kind` as a client at `level` reads it: for kit-v1.5 the state and deposit.confirm's facts with
+ * no moved_out; for kit-v1.4 the state mapped, deposit.confirm's stage mapped with no facts; every other kind's result
+ * as it is (each reads each kind it can ask the same as now).
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, result: unknown): unknown {
   if (level === "current") return result;
+  if (level === "1.5") return kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;
   if (kind === "state") return stateFor(level, result as SignpageState);
   if (kind !== "deposit.confirm") return result;
   // a stage with no mapping is sent as it is: the kit's schema refuses that answer, never a made-up stage

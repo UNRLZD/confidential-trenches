@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/signpage-skeleton.test.mjs: the live check replays recorded answers
 // (signpage-skeleton.answers.json). good: packages/signpage built by deploy.mjs --dry-run and served by the Pages
 // runtime of wrangler 4.151.1 (re-recorded on a Linux build machine for card signpage-solana-trade's connect-src, and on a Mac for card page-evm-rpc-csp's,
-// deploy.mjs --dry-run's build, 2026-11-07, its pre-card answer kept as beforeEvm: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
+// deploy.mjs --dry-run's build, 2026-11-07, its pre-card answer kept as beforeEvm: FAIL; and on a Mac for card held-move-forgotten-tx's
+// archival RPC, 2026-11-08, the answer before it kept as beforeArchival: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
@@ -70,6 +71,14 @@ test("recorded bad answer: the good build before card page-evm-rpc-csp (no kit E
   const r = judge(ANSWERS.beforeEvm);
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeEvm.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  const want = CSP.find(([k]) => k === "connect-src")[1];
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+});
+
+test("recorded bad answer: the good build before card held-move-forgotten-tx (no archival RPC in connect-src): FAIL on connect-src alone", () => {
+  const r = judge(ANSWERS.beforeArchival);
+  assert.equal(r.ok, false);
+  const site = ANSWERS.beforeArchival.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
 });

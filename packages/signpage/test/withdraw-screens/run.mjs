@@ -3,7 +3,8 @@
 // vault, intents.near, the token, a named account absent on both RPCs, RPCs unanswered), each amount refusal (not an
 // amount, at or below the fee, above the note less the fee), and ready, then the Withdraw tap's hand-off. The page is
 // test/withdraw-screens/entry.ts, bundled by Vite as the page's own build bundles src/main.ts, served with no network.
-// For each state it checks the form's data-state, each line's data-refusal and words, Withdraw's disabled flag, and
+// For each state it checks the form's data-state, each line's data-refusal and words (a draft mark only on Min $, the
+// words the owner kept on 8 Nov 07:55Z carry none), Withdraw's disabled flag, and
 // that no refusal needed a proof (the stub has no prover). PASS exit 0, FAIL exit 1.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,7 +78,7 @@ for (const [wname, width, height] of [["390", 390, 844], ["1440", 1440, 900]]) {
       const go = f.querySelector('[data-action="withdraw"]');
       return { state: f.dataset.state, to: line("to"), amount: line("amount"), disabled: go.disabled, drafts: [...f.querySelectorAll("[data-draft-copy]")].filter((e) => !e.hidden).length };
     });
-    const lineOk = (k) => (want[k] ? got[k]?.[0] === want[k][0] && got[k]?.[1] === want[k][1] && !!got[k]?.[2] : got[k] === null || !want[k]);
+    const lineOk = (k) => (want[k] ? got[k]?.[0] === want[k][0] && got[k]?.[1] === want[k][1] && (got[k]?.[2] ?? null) === (want[k][0] === "min" ? "min" : null) : got[k] === null || !want[k]);
     const ok = got.state === want.state && lineOk("to") && lineOk("amount") && got.disabled === (want.state !== "ready");
     say(ok, `${wname} ${name}: ${got.state}, to ${JSON.stringify(got.to?.slice(0, 2) ?? null)}, amount ${JSON.stringify(got.amount?.slice(0, 2) ?? null)}, Withdraw ${got.disabled ? "off" : "on"}`);
     if (SHOTS) await page.screenshot({ path: join(SHOTS, `withdraw-${name}-${wname}.png`), fullPage: true });

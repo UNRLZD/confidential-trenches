@@ -290,7 +290,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.5";
+export const SIGNPAGE_KIT_VERSION = "1.6";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -382,7 +382,9 @@ export const DEPOSIT_HELD_STAGES: readonly DepositStage[] = Object.freeze(["refu
  * - held_id: the id the money waits under (U, or the refund move's id), for withdraw.open's from_id (DEPOSIT_HELD_STAGES);
  * - since_ms: unix ms when the device first saw the send, the sheet's counter's zero; on every stage but quote_checked
  *   and expired, where nothing was sent;
- * - amount_usd: the USDC credited into the vault, a decimal string, on "done" only.
+ * - amount_usd: the USDC credited into the vault, a decimal string, on "done" only;
+ * - moved_out: true once the device moved the held money out to an account the user typed (card held-move-forgotten-tx),
+ *   on "held" only: the app draws no Held mark and no withdraw for it, as nothing waits under held_id any more.
  * States and amounts only: never a key, the 12 words or which note is whose.
  */
 export interface DepositFacts {
@@ -391,6 +393,7 @@ export interface DepositFacts {
   readonly held_id?: string;
   readonly since_ms?: number;
   readonly amount_usd?: string;
+  readonly moved_out?: true;
 }
 export type WithdrawStage = "proving" | "submitted" | "in_transit" | "sent" | "refunded" | "stopped";
 export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";

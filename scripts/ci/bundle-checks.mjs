@@ -77,6 +77,8 @@ export const CHILD_RUNS = [
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
+  { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
@@ -88,6 +90,7 @@ export const OUT = {
   "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
+  "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",
   "wallet-deposit-follow": "the helper's deposit status answer",
   "pool-ready-no-flicker": "the devnet run record",

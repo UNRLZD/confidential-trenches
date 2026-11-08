@@ -46,8 +46,10 @@ const ARRAYS = /\[((?:`[^`$\\]*`,)*`[^`$\\]*`)\]/g;
 const esc = (n) => n.replace(/\$/g, "\\$");
 /** The hello reader: the version of an exact { v: 1, type: "hello", kit }, else null. */
 const READER = /function ([\w$]+)\([\w$]+\)\{[^{}]{0,200}?\.type!==`hello`[^{}]{0,120}?\?null:[\w$]+\.kit\}/;
-/** The level of a version: kit-v1.4 for a malformed one, current from the threshold on. */
-const LEVEL = /function ([\w$]+)\(([\w$]+)\)\{let ([\w$]+)=[\w$]+\.exec\(\2\);if\(!\3\)return`1\.4`;[^{}]{0,200}?`current`:`1\.4`\}/;
+/** The level of a version: kit-v1.4 for a malformed one, current from the threshold on, and (card held-move-forgotten-tx)
+ *  kit-v1.5 between them, which is sent everything but a deposit's moved_out fact (a build with no kit-v1.5 level sends
+ *  it moved_out, and kit-v1.5 refuses the whole state for it). */
+const LEVEL = /function ([\w$]+)\(([\w$]+)\)\{let ([\w$]+)=[\w$]+\.exec\(\2\);if\(!\3\)return`1\.4`;[^{}]{0,200}?`current`:[\w$]+\(1,5\)\?`1\.5`:`1\.4`\}/;
 
 /** The pairs of a `key:\`value\`` object literal, as an object. */
 const pairsOf = (src) => Object.fromEntries(src.split(",").map((p) => p.split(":").map((x) => x.replace(/`/g, ""))));
@@ -62,17 +64,17 @@ function helloPath(js) {
   const v = assign ? esc(assign[2]) : null;
   const shaper = v ? new RegExp(`([\\w$]+)=\\(([\\w$]+),([\\w$]+)\\)=>\\{if\\(\`ok\`in \\2\\)return \\2\\.ok&&\\3!==void 0\\?\\{\\.\\.\\.\\2,result:[\\w$]+\\(${v},\\3,\\2\\.result\\)\\}:\\2;if\\(\\2\\.type===\`state\`\\)return\\{\\.\\.\\.\\2,state:[\\w$]+\\(${v},\\2\\.state\\)\\};`).exec(js) : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
-  // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent only at
-  // the current level, a stage through the stage function at the level, dropped when it gives null
+  // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
+  // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
   let branch = null;
   if (shaper) {
     const m = esc(shaper[2]);
-    const re = new RegExp(`if\\(${m}\\.type!==\`progress\`\\)return ${m};if\\(!\\(\`stage\`in ${m}\\)\\)return ${v}===\`current\`\\?${m}:null;let ([\\w$]+)=([\\w$]+)\\(${v},${m}\\.stage\\);return \\1===null\\?null:\\1===${m}\\.stage\\?${m}:\\{\\.\\.\\.${m},stage:\\1\\}\\}`, "y");
+    const re = new RegExp(`if\\(${m}\\.type!==\`progress\`\\)return ${m};if\\(!\\(\`stage\`in ${m}\\)\\)return (?:${v}===\`current\`\\?${m}:null|${v}===\`1\\.4\`\\?null:${m});let ([\\w$]+)=([\\w$]+)\\(${v},${m}\\.stage\\);return \\1===null\\?null:\\1===${m}\\.stage\\?${m}:\\{\\.\\.\\.${m},stage:\\1\\}\\}`, "y");
     re.lastIndex = shaper.index + shaper[0].length;
     branch = re.exec(js);
   }
   // the stage function: the current level and a stage kit-v1.4 has pass as they are, else the map's stage, else null
-  const stage = branch ? new RegExp(`function ${esc(branch[2])}\\(([\\w$]+),([\\w$]+)\\)\\{return \\1===\`current\`\\|\\|[\\w$]+\\.has\\(\\2\\)\\?\\2:[\\w$]+\\(([\\w$]+),\\2\\)\\?\\3\\[\\2\\]:null\\}`).exec(js) : null;
+  const stage = branch ? new RegExp(`function ${esc(branch[2])}\\(([\\w$]+),([\\w$]+)\\)\\{return (?:\\1===\`current\`|\\1!==\`1\\.4\`)\\|\\|[\\w$]+\\.has\\(\\2\\)\\?\\2:[\\w$]+\\(([\\w$]+),\\2\\)\\?\\3\\[\\2\\]:null\\}`).exec(js) : null;
   const map = stage ? new RegExp(`(?:^|[^\\w$])${esc(stage[3])}=Object\\.freeze\\(\\{((?:[a-z_]+:\`[a-z_]+\`,)+[a-z_]+:\`[a-z_]+\`)\\}\\)`).exec(js) : null;
   return {
     assign: assign?.[0] ?? null,
