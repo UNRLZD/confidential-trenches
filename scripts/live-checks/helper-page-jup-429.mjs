@@ -17,14 +17,15 @@
 //   - a re-read within REREAD_MS of the first send (one of Jupiter's windows) holds its Jupiter row read for it
 //     (risk.holders src "jupiter", as_of_ms at or after the first send less SKEW_MS): the search went at the page
 //     lane's next free send and was held for the next read.
+// After: helper
 //   node scripts/live-checks/helper-page-jup-429.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-page-jup-429";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const PATH = "/v1/proxy/jupiter/swap/v2/build";
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";

@@ -16,7 +16,7 @@ import { EVM_LADDER } from "../pool/evm.ts";
 import { SOL_LADDER } from "../pool/solana.ts";
 
 /** The helper's 1Click proxy on HELPER_HOST (apps/helper/src/proxy/vendors.ts: oneclick, POST /v0/quote). */
-export const DEPOSIT_QUOTE_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote";
+export const DEPOSIT_QUOTE_URL = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote";
 /** The vault's asset on 1Click: NEAR USDC, the release's token (§2.4 step 2). */
 export const DEPOSIT_QUOTE_DESTINATION = `nep141:${VAULT_CONSTANTS.TOKEN}`;
 /** The device's own slippage on a deposit quote, in bps: 100, as every 1Click quote of the G1 runs asked. */
@@ -79,9 +79,11 @@ export const POOL_DEPOSIT_DESTINATION: Readonly<Record<PoolDepositChain, string>
 export const POOL_DEPOSIT_NETWORK = "mainnet";
 
 /**
- * The least a pool deposit quote may deliver to U_X, in the pool coin's base units: the pool's own smallest deposit
- * (its ladder's least rung: pool/solana.ts SOL_LADDER.min, 0.01 SOL, above the 890,880 lamports a fresh Solana account
- * needs as rent; pool/evm.ts EVM_LADDER.min, 0.001 ETH), so money 1Click delivers is always enough for one note.
+ * The pool's own smallest deposit, in the pool coin's base units: its ladder's least rung (pool/solana.ts SOL_LADDER.min,
+ * 0.01 SOL; pool/evm.ts EVM_LADDER.min, 0.001 ETH). This is the rung only: U_X pays its deposit's fee and rents out of
+ * what arrives, so the floor a pool deposit quote is held to is this plus one deposit's worst-case cost, read at quote
+ * time (card pool-deposit-follow: packages/signpage/src/pool-deposit-quote.ts solanaPoolDepositFloor and
+ * evmPoolDepositFloor), and no floor under this rung is taken.
  */
 export const POOL_DEPOSIT_MIN_OUT: Readonly<Record<PoolDepositChain, bigint>> = Object.freeze({
   solana: SOL_LADDER.min,

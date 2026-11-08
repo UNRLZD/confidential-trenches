@@ -9,6 +9,7 @@
 //     the active step's glow (rs-glow) and the check's pop (rs-pop).
 // The behaviour itself (each step checks only on its own event, a failed step shows the error, nothing after it checks) is
 // the terminal's own tests: apps/terminal/test/buy-route.test.ts and test/buy-route/run.mjs.
+// After: app
 //   node scripts/live-checks/app-buy-route-strip.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-buy-route-strip.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk
@@ -20,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-buy-route-strip";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 export const JS_MARKERS = ["route-strip", "route-balance", "route-wallet", "route-pool", "route-token", "data-steps", "fill-toast", "New one-time wallet"];
 export const CSS_MARKERS = [".rs-grp", ".rs-ld", "rs-glow", "rs-pop"];
 

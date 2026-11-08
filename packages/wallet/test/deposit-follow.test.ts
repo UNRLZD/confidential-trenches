@@ -252,7 +252,7 @@ test("the status is read through the helper's keyed proxy, naming the address on
     const oc = oneClick(u, [st]);
     assert.deepEqual(await readDepositStatus(ADDR, u, oc.fetchFn), { status: st, delivered: null });
     assert.deepEqual(oc.urls, [`${DEPOSIT_STATUS_URL}?depositAddress=${ADDR}`]);
-    assert.ok(DEPOSIT_STATUS_URL.startsWith("https://api.confidential.unrealized.trade/v1/proxy/oneclick/"));
+    assert.ok(DEPOSIT_STATUS_URL.startsWith("https://ct-api.unrealized.trade/v1/proxy/oneclick/"));
   }
   const bad: [string, unknown, number?][] = [
     ["another address", statusAnswer("SUCCESS", u, "b".repeat(64))],
@@ -2340,4 +2340,28 @@ test("REVIEW2 L3b (the floor across a reload, a held op's move): a held op's mov
   t.onTick.fn = () => {};
   await followDeposit(t.args, { ...t.deps, refundMove, untilFinal: true, signal: stop(t, 4) }).catch(() => {});
   assert.deepEqual(moves, [], "no second move for the refund the held op's move took");
+});
+
+test("review of d791adda L2: a field another writer puts between the follow's read and its write (a held op's way out) is kept", async () => {
+  const t = await setup(["PENDING_DEPOSIT", "KNOWN_DEPOSIT_TX", "PROCESSING", "SUCCESS"]);
+  t.onTick.fn = (n) => n === 3 && t.chain.credit(CREDIT);
+  const out = { to: "alice.testnet", amount: "1", nonce: "8", height: 1, register: false, hash: "11111111111111111111111111111111", signed: "AA==" };
+  let writes = 0;
+  const w = t.w;
+  const racing = new Proxy(w, {
+    get(target, p) {
+      if (p !== "update") {
+        const v = (target as unknown as Record<string | symbol, unknown>)[p];
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      }
+      return async (store: "ops", key: string, change: (v: unknown) => unknown) => {
+        // the second write of the op: another writer's field lands first, after the follow read the op
+        if (store === "ops" && key === "dq-1" && ++writes === 2) await w.update("ops", key, (v) => ({ ...(v as DepositOp), follow: { ...(v as DepositOp).follow, out } }));
+        return w.update(store, key, change);
+      };
+    },
+  });
+  assert.equal((await followDeposit(t.args, { ...t.deps, ops: racing as WalletStore })).kind, "done");
+  assert.ok(writes >= 3, "the follow wrote the op again after the other writer");
+  assert.deepEqual((await opOf(w)).follow.out, out, "the other writer's field was dropped");
 });

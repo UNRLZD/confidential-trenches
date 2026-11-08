@@ -38,7 +38,7 @@ writeFileSync(join(BUILD, "assets/f.woff2"), "font");
 writeFileSync(join(BUILD, "index.html"), PAGE);
 const CSP = /Content-Security-Policy: (.*)/.exec(FILE)![1]!;
 const PP = /Permissions-Policy: (.*)/.exec(FILE)![1]!;
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 
 const csp = (from: string, to: string) => {
   assert.ok(CSP.includes(from), from);
@@ -296,11 +296,11 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   const keys = readdirSync(dir).filter((f) => /^app-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));
   assert.ok(keys.length >= 4, keys.join(" "));
   for (const k of keys) {
-    assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /"https:\/\/confidential\.unrealized\.trade\/?"/, `${k} does not hold APP_HOST's address`);
+    assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /"https:\/\/ct-app\.unrealized\.trade\/?"/, `${k} does not hold APP_HOST's address`);
     assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   }
   // and signpage-release, which reads APP_HOST alone against this commit's own build
-  assert.match(readFileSync(join(dir, "signpage-release.mjs"), "utf8"), /"https:\/\/confidential\.unrealized\.trade"/);
+  assert.match(readFileSync(join(dir, "signpage-release.mjs"), "utf8"), /"https:\/\/ct-app\.unrealized\.trade"/);
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host app"), `the success line does not run signpage-release on APP_HOST alone: ${out}`);
   // app-verify-mount runs on the network the build names: this build's _headers names the mainnet RPCs
   assert.ok(out.includes("scripts/live-checks/app-verify-mount.mjs --network mainnet"), out);
@@ -309,8 +309,6 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   const t = mkdtempSync(join(tmpdir(), "check-deploy-testnet-"));
   writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
   assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
-  const { LIVE_CHECKS } = await import("./deploy.mjs");
-  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain", "evm-quote-warm-round", "evm-quote-lag-held", "evm-sell-hook-intrablock", "rh-cold-quote", "token-page-fills-after", "page-evm-rpc-csp"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events, balances-per-chain, evm-quote-warm-round and evm-quote-lag-held (the kit's EVM quote the app's bundle runs), evm-sell-hook-intrablock (the trace pair the kit's Robinhood bans read), rh-cold-quote, token-page-fills-after (the token page's re-read), and page-evm-rpc-csp (the policy lets the page reach the kit's EVM providers)");
   assert.ok(out.includes("scripts/live-checks/page-evm-rpc-csp.mjs --host app"), `the success line does not run page-evm-rpc-csp on APP_HOST alone: ${out}`);
 });
 
@@ -401,7 +399,7 @@ test("a deploy wrangler calls done while APP_HOST still serves the old bundle ex
   const tries = h.asked.filter((a) => new URL(a).pathname === "/assets/index-a1.js");
   assert.ok(tries.length >= 3, `${tries.length} tries`);
   assert.equal(new Set(tries.map((a) => new URL(a).search)).size, tries.length, "each try its own cache-buster");
-  for (const a of h.asked) assert.equal(new URL(a).origin, "https://confidential.unrealized.trade");
+  for (const a of h.asked) assert.equal(new URL(a).origin, "https://ct-app.unrealized.trade");
   const waited = h.slept.reduce((a, b) => a + b, 0);
   assert.ok(waited >= 45_000 && waited <= 90_000, `${waited} ms`);
   assert.equal(existsSync(s.made.at(-1)!), false, "the build is removed");

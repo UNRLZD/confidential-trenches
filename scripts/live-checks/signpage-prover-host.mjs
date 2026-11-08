@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card signpage-prover-host: the prover runs on SIGN_HOST, with its files served from SIGN_HOST's own
 // origin (vault.md 2.14 and V2's end state, M304 D-8, wallet.md W:880-882). It reads, against pins written out here and
-// not read from the kit, on SIGN_HOST = https://sign.confidential.unrealized.trade (signpage-skeleton's SIGN):
+// not read from the kit, on SIGN_HOST = https://confidential.unrealized.trade (signpage-skeleton's SIGN):
 //   - each of the six setup files at https://SIGN_HOST/assets/zk/<sha256>.<ext>: 200, its size and sha256 equal to
 //     vault.md 2.6's table (research ffcba5e, V:522-527), and cached for good: Cache-Control exactly ZK_CACHE;
 //   - the worker at https://SIGN_HOST/prover-worker.js: 200, a script, byte for byte the committed
@@ -16,6 +16,7 @@
 //   - no CSP or Trusted Types violation on the page or in the worker but the three the probes make.
 // The page script here speaks the worker's protocol itself (load, prove) rather than run the kit's client, so the check
 // does not trust the code it checks; the kit's own call in Chromium is packages/kit/test/prove-e2e.test.ts's.
+// After: sign
 //   node scripts/live-checks/signpage-prover-host.mjs [--record <file>]                       the live SIGN_HOST
 //   node scripts/live-checks/signpage-prover-host.mjs --harness [--site <dir>] [--record <file>]
 //     the harness: SIGN_HOST answered from a build folder under its own _headers, every rule that matches joined as

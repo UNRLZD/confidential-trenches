@@ -29,24 +29,19 @@ import { THREAD_CSP, THREAD_PATH } from "../../../scripts/live-checks/signpage-p
 import { facts as pinFacts, judge as judgePins } from "../../../scripts/live-checks/kit-oneclick-pins-frozen.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, copyServed, pinProblems } from "./build-app.mjs";
+import { hostList } from "../../../scripts/ci/live-after.mjs";
 
-/** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it). */
-export const LIVE_CHECKS = ["signpage-skeleton", "wallet-passkey-prf", "signpage-postmessage", "signpage-shell", "signpage-signin-kinds", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-withdraw-form", "signpage-solana-trade", "signpage-pool-kinds", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form", "app-harness-signin-e2e", "signpage-pool-price", "signpage-pool-pins", "signpage-pool-mainnet", "pool-ready-no-flicker", "signpage-buy-route-events", "signpage-withdraw-own-spend", "signpage-buy-own-spend", "signpage-sent-read-back", "kit-renewal-read-bounded", "signpage-error-after-timeout", "sol-buy-rent-back", "pool-read-down", "pool-restore-wired", "evm-pool-sync-wide-pages", "kit-deposit-calls", "kit-frame-version", "kit-deposit-assets-dry", "signpage-withdraw-handoff", "wallet-deposit-follow", "wallet-near-prepay-taken", "kit-oneclick-pins-frozen", "pool-deposits", "oneclick-fee-path-own-key", "pool-answer-unknown", "page-evm-rpc-csp", "solana-legs-checked", "solana-written-accounts-whole", "solana-release-reads-paced", "pool-deposit-sent-end", "evm-sell-no-release-in-flight", "wallet-withdraw-move-out", "pool-deposit-address"];
-// the arguments a check is run with after this deploy (a list: one run for each, each its own job in live.yml):
-// signpage-release reads SIGN_HOST alone against this commit's own build, and app-harness-signin-e2e SIGN_HOST's
-// backdrop alone, so an APP_HOST that lags does not fail this deploy; signpage-shell takes an engine and runs live on
-// Chromium and Firefox at both widths (its WebKit run is the Mac's own harness, which a runner has not); the engines a
-// run needs are named, so live.yml installs Playwright's Firefox and WebKit only where an argument says so
-export const LIVE_ARGS = {
-  "signpage-prover-threads": "--browser webkit",
-  "signpage-release": "--host sign",
-  "app-harness-signin-e2e": "--host sign",
-  "signpage-buy-route-events": "--host sign",
-  "page-evm-rpc-csp": "--host sign",
-  "signpage-shell": ["chromium", "firefox"].flatMap((e) => ["phone", "desktop"].map((w) => `--engine ${e} --live --width ${w}`)),
-};
+/** Every live check that reads SIGN_HOST, run after each deploy (a failing one undoes it): each check's `// After: sign`
+ *  lines (scripts/ci/live-after.mjs), one run for each, each its own job in live.yml. A run's arguments are on its line:
+ *  signpage-release reads SIGN_HOST alone against this commit's own build, and app-harness-signin-e2e SIGN_HOST's
+ *  backdrop alone, so an APP_HOST that lags does not fail this deploy; signpage-shell runs live on Chromium and Firefox at
+ *  both widths (its WebKit run is the Mac's own harness, which a runner has not); the engines a run needs are named, so
+ *  live.yml installs Playwright's Firefox and WebKit only where an argument says so. */
+const AFTER = hostList("sign", join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".."));
+export const LIVE_CHECKS = AFTER.checks;
+export const LIVE_ARGS = AFTER.args;
 /** The runs of one check, each as `scripts/live-checks/<key>.mjs <args>`. */
-export const liveRuns = (k) => [LIVE_ARGS[k] ?? ""].flat().map((a) => `scripts/live-checks/${k}.mjs${a ? ` ${a}` : ""}`);
+export const liveRuns = (k) => (LIVE_ARGS[k] ?? []).map((a) => `scripts/live-checks/${k}.mjs${a ? ` ${a}` : ""}`);
 /** The command a deploy prints for the live run on GitHub's runners (card ci-live-runners). */
 export const liveCommands = (sha) => [`next: gh workflow run live.yml -f host=sign -f commit=${sha}`, "then: gh run watch --exit-status"];
 /** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs`). */
@@ -133,6 +128,11 @@ export function checkDir(dir) {
   const p = [];
   if (!existsSync(join(dir, "index.html"))) p.push(`${dir} has no index.html`);
   if (existsSync(join(dir, "_worker.js"))) p.push(`${dir} carries _worker.js: Pages applies no _headers rule to a Function's response`);
+  // Pages' other config files: a _redirects rule could rewrite /.well-known/webauthn to a file that lends SIGN_HOST's
+  // passkeys to other origins, and _routes.json and functions/ belong to Functions; _headers is the only one allowed
+  for (const f of ["_redirects", "_routes.json", "functions"]) {
+    if (existsSync(join(dir, f))) p.push(`${dir} carries ${f}: _headers is the only Pages config file the signing page has`);
+  }
   if (existsSync(join(dir, ".well-known", "webauthn"))) p.push(`${dir} carries .well-known/webauthn: no other origin may use SIGN_HOST's passkeys`);
   p.push(...checkProver(dir));
   p.push(...checkPins(dir));

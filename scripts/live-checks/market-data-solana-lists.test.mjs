@@ -17,9 +17,9 @@ const A = JSON.parse(readFileSync(path.join(HERE, "market-data-solana-lists.answ
 
 // a fetch that answers with the recorded answer, after checking the check asked the right thing
 const replay = (a) => async (url, init) => {
-  assert.equal(url, "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana");
+  assert.equal(url, "https://ct-api.unrealized.trade/v1/market/lists?chain=solana");
   assert.equal(init.method, undefined);
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   return new Response(a.status === 204 ? null : a.body, { status: a.status, headers: a.headers });
 };
 const run = async (a) => {

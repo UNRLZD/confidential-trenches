@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-deposit-address on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card pool-deposit-address on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified:
 //   - naming ahead (deposit-name.ts): the page's namer is handed the page's pinned pools less NEAR, each with its scope
 //     (main.ts pagePoolScopes), names the vault's scope and each pool's, each in its own try (one scope that fails names
@@ -8,15 +8,16 @@
 //   - pool.address (pool-deposit-address.ts): wired on the page with the pools, the deposit record read and the namer's
 //     wait, and nothing more; it answers the asked chain's own pool, from that pool scope's record read back (the seed
 //     backed up), the address on Solana the one-time id's own key and on an EVM pool the record's EVM address;
-//   - a cross-chain quote (an origin asset or an amount) with no follow wired, or on a page whose pools are not pinned on
+//   - a cross-chain quote (an origin asset or an amount) with no follow or floor read wired, or on a page whose pools are not pinned on
 //     mainnet (the only network 1Click pays out on), is refused: the answer starts not_allowed and the host returns
-//     before any quote is asked when the page passes no `checked` or its network is not mainnet; the page passes its own
-//     network (review F2);
-//   - a pool quote whose min out is under the pool's smallest deposit is refused "floor" after the kit's check, at the
-//     ladders' least rungs: 0.01 SOL, 0.001 ETH on Base and Robinhood (review F3).
+//     before any quote is asked when the page passes no `checked`, no `floor` or its network is not mainnet; the page passes
+//     its own network (review F2), and since card pool-deposit-follow the follow's `quoted`, the price and the floor read;
+//   - a pool quote whose min out is under its context floor is refused "floor" after the kit's check, and a context floor
+//     under the ladders' least rungs (0.01 SOL, 0.001 ETH on Base and Robinhood) is refused (review F3).
 // What each does is held by the card's tests (packages/signpage/test/deposit-name.test.ts and
 // pool-deposit-address.test.ts); the recorded answers are facts() over each tree's packages/signpage/index.html and
 // public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/pool-deposit-address.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -25,7 +26,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-deposit-address";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const N = "[\\w$]+";
 const esc = (s) => s.replace(/[$]/g, "\\$");
@@ -51,11 +52,14 @@ const HOST_SRC = (h) =>
   `let ${N}=${N}\\[\\4\\],(${N})=${N}\\.origin_asset!==void 0\\|\\|${N}\\.amount!==void 0;await ${N}\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\);let (${N})=(${N})\\(await ${N}\\.read\\(\\5\\.scope\\),\\4,\\5\\.scope\\);if\\(!\\7\\)return;` +
   `if\\(!\\6\\)return void\\(\\2=\\{result:\\{chain:\\4,address:\\7\\.wallet,asset:${N}\\}\\}\\);`;
 const HOST = (h) => new RegExp(HOST_SRC(h));
-// ...and then, with no follow (`checked`) passed, it returns before any quote is asked.
-const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.checked===void 0\\|\\|\\9\\.network!==${Q}mainnet${Q}\\)return;`);
-const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\)\\}\\)`);
-// pool-deposit-quote.ts: the kit's check with no vault floor, then the pool's own floor per chain, at the ladders' least rungs.
-const FLOOR = new RegExp(`let (${N})=${N}\\(${N},${N},\\{\\.\\.\\.${N}\\.check,intoVault:!1\\}\\);return \\1\\.minAmountOut<(${N})\\[${N}\\.chain\\]&&${N}\\(${Q}floor${Q}\\)`);
+// ...and then, with no follow (`checked`) or no floor read passed, it returns before any quote is asked.
+const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.checked===void 0\\|\\|\\9\\.floor===void 0\\|\\|\\9\\.network!==${Q}mainnet${Q}\\)return;`);
+const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\)\\}\\)`);
+// pool-deposit-quote.ts: the kit's check with no vault floor, then the quote's own floor (card pool-deposit-follow: the
+// least rung plus the deposit's cost, which that card's live check holds).
+const FLOOR = new RegExp(`let (${N})=${N}\\(${N},${N},\\{\\.\\.\\.${N}\\.check,intoVault:!1\\}\\);return \\1\\.minAmountOut<(${N})\\.floor&&${N}\\(${Q}floor${Q}\\)`);
+// ...with the context floor refused under the pool's least rung per chain.
+const CTX_FLOOR = new RegExp(`\\(typeof (${N})\\.floor!=${Q}bigint${Q}\\|\\|\\1\\.floor<(${N})\\[\\1\\.chain\\]\\)&&${N}\\(${Q}floor${Q}\\)`);
 const FLOOR_TABLE = (t) => new RegExp(`${esc(t)}=Object\\.freeze\\(\\{solana:(${N})\\.min,base:(${N})\\.min,robinhood:\\2\\.min\\}\\)`);
 const LADDER = (n, one, min) => new RegExp(`${esc(n)}=Object\\.freeze\\(\\{one:${one}n,min:${min}n\\}\\)`);
 const NAMER = (p) => new RegExp(`=${N}\\(\\{top:!${N},scope:${N},pools:${esc(p)},`);
@@ -66,7 +70,7 @@ export function facts(index, js) {
   const wallet = WALLET_FN.exec(js)?.[1];
   const read = wallet ? READ_FN(wallet).exec(js)?.[1] : undefined;
   const host = new RegExp(`"pool\\.address":(${N})\\(\\{pools:${N},`).exec(js)?.[1];
-  const table = FLOOR.exec(js)?.[2];
+  const table = FLOOR.test(js) ? CTX_FLOOR.exec(js)?.[2] : undefined;
   const ladders = table ? FLOOR_TABLE(table).exec(js) : null;
   return {
     index,
@@ -85,8 +89,8 @@ export const WHY = {
   namesEach: "the namer does not name each pool's scope (an EVM pool as Base or Robinhood), or one scope that fails stops the rest",
   namesRecord: "a pool's record is not written from its scope's planned index and one-time id, or an EVM pool's carries no EVM address (or its key is not zeroed)",
   sameChain: "pool.address does not answer the asked chain's own pool from that scope's record read back (Solana: the one-time id's key; EVM: the record's address)",
-  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is wired with more than its pools, network, read and wait",
-  floored: "a pool quote whose min out is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood) is not refused floor",
+  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read and the follow's quoted",
+  floored: "a pool quote whose min out is under its floor, or whose floor is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood), is not refused floor",
 };
 
 /** The verdict on an answer (facts()). */

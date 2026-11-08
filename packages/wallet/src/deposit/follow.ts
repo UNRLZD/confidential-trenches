@@ -100,10 +100,11 @@ import type { WalletStore } from "../store/index.ts";
 import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
 import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, findDeadCall, LAPSE_MARGIN, ownRow, POLL_MS, readU, RELEASE_RELAYER } from "./bind.ts";
 import { depositId } from "../derive/keys.ts";
+import type { MoveOutRecord } from "./moveout.ts";
 import type { MoveRecord, RefundMoveAsk, RefundMoveResult, RefundRead } from "./refund.ts";
 
 /** The helper's 1Click proxy for status (apps/helper/src/proxy/vendors.ts: oneclick, /v0/status read upstream by GET). */
-export const DEPOSIT_STATUS_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/status";
+export const DEPOSIT_STATUS_URL = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/status";
 export const DEPOSIT_STATUS_TIMEOUT_MS = 10_000;
 /** A status answer is the quote and a few hashes: a few KB. */
 export const DEPOSIT_STATUS_ANSWER_MAX = 65_536;
@@ -147,9 +148,10 @@ export type StatusRead = { status: OneClickStatus; delivered: bigint | null } | 
 
 /**
  * 1Click's status of `address` through the helper, or null when it is no read: not 200, too big, not JSON, not one of
- * the seven statuses, or an answer for another address, recipient or refund than ours (U). A 429 answers its wait.
+ * the seven statuses, or an answer for another address, recipient or refund than ours (U; a pool quote's recipient U_X
+ * and its refund `refundTo`, U_{s,i}: card pool-deposit-follow). A 429 answers its wait.
  */
-export async function readDepositStatus(address: string, u: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal, nowMs: number = Date.now()): Promise<StatusRead | null> {
+export async function readDepositStatus(address: string, u: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal, nowMs: number = Date.now(), refundTo: string = u): Promise<StatusRead | null> {
   try {
     const timeout = AbortSignal.timeout(DEPOSIT_STATUS_TIMEOUT_MS);
     const res = await fetchFn(`${DEPOSIT_STATUS_URL}?depositAddress=${encodeURIComponent(address)}`, {
@@ -168,7 +170,7 @@ export async function readDepositStatus(address: string, u: string, fetchFn: typ
     const qr = isObj(body.quoteResponse) ? body.quoteResponse : undefined;
     const quote = qr && isObj(qr.quote) ? qr.quote : undefined;
     const req = qr && isObj(qr.quoteRequest) ? qr.quoteRequest : undefined;
-    if (!quote || !req || quote.depositAddress !== address || req.recipient !== u || req.refundTo !== u) return null;
+    if (!quote || !req || quote.depositAddress !== address || req.recipient !== u || req.refundTo !== refundTo) return null;
     const out = isObj(body.swapDetails) ? body.swapDetails.amountOut : undefined;
     const delivered = body.status === "SUCCESS" && typeof out === "string" && DIGITS.test(out) && out.length <= 30 ? BigInt(out) : null;
     return { status: body.status as OneClickStatus, delivered };
@@ -392,6 +394,10 @@ export interface FollowRecord {
   final?: true;
   /** Why the op is held. */
   why?: string;
+  /** A held op's way out (./moveout.ts): U's own transfer to the typed account, written before it is sent. */
+  out?: MoveOutRecord;
+  /** Way-out records that can never land any more (failed on both RPCs, expired, or their nonce taken): history only. */
+  out_past?: MoveOutRecord[];
 }
 export type DepositOp = { kind: "deposit"; stage: DepositStage; txs: { chain: "near"; hash: string }[]; created_ms: number; follow: FollowRecord } & DepositFacts;
 
@@ -628,17 +634,24 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   };
   // Writes op `id`'s stage and facts (only the facts that stage carries, kit messages.ts DepositFacts), follow fields
   // (an undefined one is dropped) and tx hashes. The same again is no write.
+  // The next value is built inside the store's compare-and-set from the value it read, so a field another writer put
+  // between (a held op's way out, moveout.ts follow.out) is kept (review of d791adda, L2).
   const write = async (id: string, stage: DepositStage, facts: DepositFacts, follow?: Partial<FollowRecord>, txs: string[] = []): Promise<DepositOp> => {
-    const cur = (await ops.get("ops", id)) as DepositOp;
-    const f: Record<string, unknown> = { ...cur.follow, ...follow };
-    for (const k of Object.keys(f)) if (f[k] === undefined) delete f[k];
-    const had = cur.txs ?? [];
-    const next: Record<string, unknown> = { kind: "deposit", stage, txs: [...had, ...[...new Set(txs)].filter((h) => !had.some((t) => t.hash === h)).map((hash) => ({ chain: "near", hash }))], created_ms: cur.created_ms, follow: f };
-    for (const k of FACT_KEYS) if (facts[k] !== undefined) next[k] = facts[k];
-    if (JSON.stringify(next) === JSON.stringify({ ...cur, follow: { ...cur.follow }, txs: had })) return cur;
-    const out = (await ops.update("ops", id, () => next)) as DepositOp | undefined;
-    if (out === undefined) throw new DepositFollowRefused("the op could not be written");
-    if (cur.stage !== stage || FACT_KEYS.some((k) => cur[k] !== out[k])) deps.onStage?.(stage, facts, id);
+    let cur: DepositOp | undefined;
+    const out = (await ops.update("ops", id, (v) => {
+      cur = v as DepositOp;
+      const f: Record<string, unknown> = { ...cur.follow, ...follow };
+      for (const k of Object.keys(f)) if (f[k] === undefined) delete f[k];
+      const had = cur.txs ?? [];
+      const next: Record<string, unknown> = { kind: "deposit", stage, txs: [...had, ...[...new Set(txs)].filter((h) => !had.some((t) => t.hash === h)).map((hash) => ({ chain: "near", hash }))], created_ms: cur.created_ms, follow: f };
+      for (const k of FACT_KEYS) if (facts[k] !== undefined) next[k] = facts[k];
+      return JSON.stringify(next) === JSON.stringify({ ...cur, follow: { ...cur.follow }, txs: had }) ? undefined : next;
+    })) as DepositOp | undefined;
+    if (out === undefined) {
+      if (cur === undefined) throw new DepositFollowRefused("the op could not be written");
+      return cur; // the same again: no write
+    }
+    if (cur!.stage !== stage || FACT_KEYS.some((k) => cur![k] !== out[k])) deps.onStage?.(stage, facts, id);
     return out;
   };
   // each fact only on the stages it belongs to (kit schema.ts depositFactsFit)

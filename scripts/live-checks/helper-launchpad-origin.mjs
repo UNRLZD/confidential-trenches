@@ -11,6 +11,7 @@
 //     name the same pad as the row, or none for an untagged row. A row the read does not settle is said, not failed; a
 //     sample with tagged rows and none of them re-read is a FAIL.
 // The Base and Robinhood tags are judged by market-data-evm the same way.
+// After: helper
 //   node scripts/live-checks/helper-launchpad-origin.mjs [--base <url>] [--rpc <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read (the lists cut to each row's token,
 //   symbol, launchpad and curve; Jupiter's answer; every account read).
@@ -20,8 +21,8 @@ import { PADS } from "../../apps/terminal/src/screens/market/pads.ts";
 import { hintsOf, readOrigins } from "../../apps/helper/src/data/solana/origin.ts";
 
 const KEY = "helper-launchpad-origin";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const RPC = "https://api.mainnet-beta.solana.com";
 export const JUP = "https://lite-api.jup.ag/tokens/v2/search?query=";
 export const PATH = "/v1/market/lists?chain=solana";

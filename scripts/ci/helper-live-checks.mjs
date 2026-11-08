@@ -1,5 +1,5 @@
 // Every live check that reads HELPER_HOST, run after each helper deploy (card ci-live-runners). The helper deploys from
-// its server (apps/helper/deploy/redeploy.sh), which cannot print its own checks' runs, so this file is the list: live.yml
+// its server (apps/helper/deploy/redeploy.sh), which cannot print its own checks' runs, so this file prints the list: live.yml
 // reads it for host=helper, the way it reads the two Cloudflare deploy scripts' LIVE_CHECKS for host=app and host=sign.
 // It lives here, not beside redeploy.sh: apps/helper/deploy is a helper image input (image-inputs.mjs), so a change there
 // moves the commit helper-host-health expects the helper to run, and would need a redeploy for a list of checks.
@@ -8,65 +8,14 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { poolRecordName } from "../live-checks/pool-redeploys.mjs";
+import { hostList } from "./live-after.mjs";
 
-export const LIVE_CHECKS = [
-  "helper-host-health",
-  "helper-proxy",
-  "helper-rpc-proxy",
-  "helper-token-watch",
-  "helper-usdc-event-watch",
-  "helper-pool-senders",
-  "helper-evm-sender",
-  "helper-evm-sender-2",
-  "evm-sell-hook-converge",
-  "helper-sell-fee-recipient",
-  "helper-sender-fee-proof",
-  "helper-abuse-limits",
-  "market-data-solana-lists",
-  "market-data-solana-token",
-  "market-data-evm",
-  "helper-launchpad-origin",
-  "index-evm-swaps",
-  "index-sol-trades",
-  "relayer-withdraw-send",
-  "relayer-withdraw-fee",
-  "helper-solana-failover",
-  "app-console-429",
-  "helper-token-page-cold",
-  "solana-jupiter-build",
-  "solana-legs-share-wait",
-  "solana-mint-supply-moves",
-  "wallet-per-buy",
-  "helper-v4-hook-liquidity",
-  "helper-robinhood-capacity",
-  "helper-robinhood-search-ahead",
-  "evm-buy-hookdata-fee",
-  "evm-buy-gas-depth",
-  "helper-evm-abi-tie",
-  "helper-tape-4337-trader",
-  "helper-live-bars-no-503",
-  "sol-small-note-buys",
-  "evm-rpc-spare-list",
-  "base-200ms-blocks",
-  "wallet-restore-transfer-rpcs",
-  "pool-buy-send-fast",
-  "helper-page-jup-429",
-  "vault-review-fixes-1",
-  "oneclick-partner-fee-live",
-  "evm-testnet-delegate-review3",
-  "robinhood-mainnet-rpcs",
-  "helper-usdc-pending-pause",
-  "helper-id-intents",
-  "helper-rpc-sell-methods",
-  "robinhood-listed-tape-opens",
-  "rpc-keyed-lists",
-  "helper-mainnet-vault-env",
-  "helper-bind-relayer-mainnet",
-  "relayer-cost-guards",
-];
-
-// `{commit}` is the deployed commit
-export const LIVE_ARGS = { "helper-host-health": "--commit {commit}", "relayer-cost-guards": "--commit {commit}" };
+// The checks are each check's `// After: helper` lines (scripts/ci/live-after.mjs), one run for each; `{commit}` in a
+// line's arguments is the deployed commit. helper-pool-senders and helper-bind-relayer-mainnet take their runs from the
+// deploy records below.
+const AFTER = hostList("helper", path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."));
+export const LIVE_CHECKS = AFTER.checks;
+export const LIVE_ARGS = AFTER.args;
 
 // helper-pool-senders takes one --pool: it runs once for each Solana cluster the helper may serve (the keys of
 // POOL_SOLANA_ENV in apps/helper/src/pool/solana.ts, a test holds them), with the pool its deploy record names, read from
@@ -192,7 +141,7 @@ export const BUDGET_EXEMPT = {
 };
 
 export const liveRuns = (k, { commit = "{commit}", root = ROOT } = {}) =>
-  k === "helper-pool-senders" ? poolSenderPlan(root).runs : k === "helper-bind-relayer-mainnet" ? bindMainnetPlan(root, commit).runs : [`scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k].replaceAll("{commit}", commit)}` : ""}`];
+  k === "helper-pool-senders" ? poolSenderPlan(root).runs : k === "helper-bind-relayer-mainnet" ? bindMainnetPlan(root, commit).runs : (LIVE_ARGS[k] ?? []).map((x) => `scripts/live-checks/${k}.mjs${x ? ` ${x.replaceAll("{commit}", commit)}` : ""}`);
 
 /** The list live.yml reads (scripts/ci/live-plan.mjs runs `node <this file> --live-runs --commit <sha>`). */
 export const liveList = (opts = {}) => {

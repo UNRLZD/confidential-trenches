@@ -2,8 +2,9 @@
 // "Storage and unlock" :151-160, §2.3 the note store table :197-204, §7 item 4; the shapes are
 // packages/kit/src/signpage/messages.ts, api 1). src/main.ts hands it to the postMessage API (src/api.ts) in the frame.
 //
-// - The frame never opens the seed record, nor any record that holds a secret. SIGN_HOST and APP_HOST are one site, so
-//   the frame may share APP_HOST's renderer process, and decoded seed JSON in its heap would sit beside APP_HOST's code.
+// - The frame never opens the seed record, nor any record that holds a secret. SIGN_HOST and APP_HOST are one site
+//   (both under unrealized.trade), so the frame may share APP_HOST's renderer process, and decoded seed JSON in its
+//   heap would sit beside APP_HOST's code.
 //   It reads four things: keys("meta"), get("meta", "status"), keys/get on "ops" and, for deposit.quote,
 //   get("meta", "deposit/<scope>") (U's public record, which SIGN_HOST's top-level page writes; src/deposit-name.ts). APP_HOST and SIGN_HOST being one
 //   site is also why the frame opens the same database as SIGN_HOST's top-level tabs.

@@ -15,7 +15,7 @@
     "answeredMs": 1793741219013,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -36,7 +36,7 @@
     "answeredMs": 1793741219215,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
@@ -58,7 +58,7 @@
    "answeredMs": 1793741219216,
    "status": 200,
    "headers": {
-    "access-control-allow-origin": "https://confidential.unrealized.trade",
+    "access-control-allow-origin": "https://ct-app.unrealized.trade",
     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
     "cache-control": "no-store",
     "connection": "keep-alive",
@@ -76,7 +76,7 @@
   }
  },
  "bad_not_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "coin": "6XWAopwaU2zL9AyQgQYejYSSAKaPh39zwXj5EP3hpump",
   "fresh": null,
   "polls": [
@@ -85,7 +85,7 @@
     "answeredMs": 1793739553079,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",

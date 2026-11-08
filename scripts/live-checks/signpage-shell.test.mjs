@@ -93,7 +93,7 @@ test("a second ready while the frame shows APP_HOST fails", () => {
 });
 
 test("a frame at another path or query fails", () => {
-  for (const href of [`https://confidential.unrealized.trade/`, `https://confidential.unrealized.trade${START.split("?")[0]}`, `https://example.com${START}`]) {
+  for (const href of [`https://ct-app.unrealized.trade/`, `https://ct-app.unrealized.trade${START.split("?")[0]}`, `https://example.com${START}`]) {
     const a = clone(GOOD);
     a.steps.open.frameHref = href;
     assert.equal(judge(a).ok, false, href);
@@ -143,7 +143,7 @@ const signedInStates = (rec) =>
 for (const width of Object.keys(WIDTHS)) {
   test(`recorded live run on release-9 at ${width} width, pools in its signed-in states: PASS`, () => {
     const rec = ANSWERS.release9.chromium[width];
-    assert.match(rec.source, /^live https:\/\/sign\.confidential\.unrealized\.trade/);
+    assert.match(rec.source, /^live https:\/\/confidential\.unrealized\.trade/);
     const r = judge(rec);
     assert.equal(r.ok, true, r.lines.join("\n"));
     const ins = signedInStates(rec);
@@ -237,7 +237,7 @@ test("the review's fixes, each undone in the good run: FAIL", () => {
     "nav to another host answered ok": (a) => (ref(a, a.steps.nav.evilId).data = { v: 1, id: a.steps.nav.evilId, ok: true, result: {} }),
     "nav made a new frame": (a) => (a.steps.nav.frames = 2),
     "reload refused": (a) => (ref(a, a.steps.reload.reloadId).data = { v: 1, id: a.steps.reload.reloadId, ok: false, error: { code: "not_allowed" } }),
-    "the reloaded frame at the old path": (a) => (a.steps.reload.frameHref = `https://confidential.unrealized.trade${START}`),
+    "the reloaded frame at the old path": (a) => (a.steps.reload.frameHref = `https://ct-app.unrealized.trade${START}`),
   };
   for (const [name, change] of Object.entries(cases)) {
     const a = clone(GOOD);

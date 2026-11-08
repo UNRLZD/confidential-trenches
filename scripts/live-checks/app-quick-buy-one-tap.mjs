@@ -9,6 +9,7 @@
 // The behaviour itself (one tap = one buy, the box's kit call; a double tap = one buy; a refused buy asks the kit nothing
 // more; Retry sends the same amount once) is the terminal's own tests: apps/terminal/test/quick-buy.test.ts and
 // test/quick-buy/run.mjs at 360, 390 and 430.
+// After: app
 //   node scripts/live-checks/app-quick-buy-one-tap.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-quick-buy-one-tap.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk
@@ -20,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-quick-buy-one-tap";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 export const JS_MARKERS = ["quick-toast", "quick-toast-line", "quick-retry", "fill-toast"];
 export const CSS_MARKERS = [".qt-retry", ".tkp-chip:disabled"];
 

@@ -153,7 +153,7 @@
     "loads": [
      {
       "width": "desktop",
-      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "opened": "https://ct-app.unrealized.trade/token/solana/<token>",
       "chart": "ready",
       "first": "1793888100000:5.146758855161752e-8",
       "final": "1793888100000:5.0171242587187026e-8",
@@ -173,7 +173,7 @@
      },
      {
       "width": "phone",
-      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "opened": "https://ct-app.unrealized.trade/token/solana/<token>",
       "chart": "ready",
       "first": "1793888100000:5.146758855161752e-8",
       "final": "1793888100000:4.502866210757563e-8",
@@ -406,7 +406,7 @@
     "loads": [
      {
       "width": "desktop",
-      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "opened": "https://ct-app.unrealized.trade/token/solana/<token>",
       "chart": "ready",
       "first": null,
       "final": null,
@@ -425,7 +425,7 @@
      },
      {
       "width": "phone",
-      "opened": "https://confidential.unrealized.trade/token/solana/<token>",
+      "opened": "https://ct-app.unrealized.trade/token/solana/<token>",
       "chart": "ready",
       "first": null,
       "final": null,
@@ -447,5 +447,111 @@
   ],
   "shots": "live-bad5",
   "browser": "157.0.8103.38"
+ },
+ "flake": {
+  "source": "live, APP_HOST at main 1ffffdf0: app live run 42453338800 attempt 1, job 128647061213 (06:06:43-06:08:45Z), rebuilt from its log: \"20 listed candidates on solana and base; 3 picks\", each pick \"no candidate probe moved\" with nothing watched; the run kept no record, so the symbols and the probe counts are not known",
+  "at": "2026-11-08T06:06:43Z",
+  "candidates": [
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   }
+  ],
+  "attempts": [
+   {
+    "pick": null,
+    "helper": [],
+    "tape": [],
+    "loads": []
+   },
+   {
+    "pick": null,
+    "helper": [],
+    "tape": [],
+    "loads": []
+   },
+   {
+    "pick": null,
+    "helper": [],
+    "tape": [],
+    "loads": []
+   }
+  ]
  }
 }

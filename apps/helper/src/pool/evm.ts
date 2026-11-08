@@ -508,6 +508,11 @@ export const EVM_SELL_UNPAID_WINDOW_MS = 3_600_000;
 export const EVM_SELL_UNPAID_CAP_WEI = 10n ** 15n;
 export const EVM_SELL_UNPAID_BUDGET_WEI = 10n ** 16n;
 /**
+ * The sell sender's low mark: one hour's unpaid sell budget, what reverted sales can take from it in a window. A sale
+ * that reads its sender's lower pending balance under it logs one line ending "refill the sender", once per fall.
+ */
+export const EVM_SELL_LOW_MARK_WEI = EVM_SELL_UNPAID_BUDGET_WEI;
+/**
  * The most maxFeePerGas a lane's replacement (its 0-value transfer to itself, at a stuck send's or a hole's nonce) is
  * ever sent at, on every chain: EVM_SELL_UNPAID_CAP_WEI / EVM_POOL_SELL_GAS, 1 gwei, the price at which one sale's worst
  * gas is a whole W's unpaid cap, so the caps above (about 30 reverts at a 0.01 gwei base) hold no sale at it. The sale's
@@ -859,6 +864,8 @@ export function evmPoolSender(
   const buysInFlight = new Set<Charge>();
   /** Whether the last buy that read the reserve stopped at it: one log line per stop and per start again. */
   let reserveHeld = false;
+  /** Whether the last sale that read the sell sender's balance found it under EVM_SELL_LOW_MARK_WEI: one log line per fall. */
+  let sellLow = false;
   const live = (k: string, t: number): Charge[] => {
     const l = (unpaid.get(k) ?? []).filter((c) => c.at > t - EVM_SELL_UNPAID_WINDOW_MS);
     if (l.length === 0) unpaid.delete(k);
@@ -1588,7 +1595,19 @@ export function evmPoolSender(
       if (stuck !== null) return stuck;
       id = await chain();
       if (id !== BigInt(venue.chainId)) return no(503, "upstream", `the providers name chain ${id}, not ${venue.chainId}`);
-      const [ba, bb, wa, wb, n, m, ln, lm] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [from, "pending"]), b("eth_getTransactionCount", [from, "pending"]), a("eth_getTransactionCount", [from, "latest"]), b("eth_getTransactionCount", [from, "latest"])]);
+      // the sender's pending balance on both providers rides the same round trip; a failed balance read never stops a sale
+      const balanceOf = (r: EvmRpc) => r("eth_getBalance", [from, "pending"]).then(qty).catch(() => null);
+      const [ba, bb, wa, wb, n, m, ln, lm, bla, blb] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [from, "pending"]), b("eth_getTransactionCount", [from, "pending"]), a("eth_getTransactionCount", [from, "latest"]), b("eth_getTransactionCount", [from, "latest"]), balanceOf(a), balanceOf(b)]);
+      // the low mark: one log line when the lower balance first falls under one hour's unpaid sell budget, again only
+      // after a read at or over it; the sale goes on either way (a dry sender fails at broadcast, 503)
+      const known = [bla, blb].filter((x): x is bigint => x !== null);
+      if (known.length > 0) {
+        const low = known.reduce((x, y) => (x < y ? x : y));
+        if (low < EVM_SELL_LOW_MARK_WEI) {
+          if (!sellLow) log(`evm ${cfg.network}: sells run low: ${from}'s lower pending balance ${low} wei, under the mark ${EVM_SELL_LOW_MARK_WEI} wei (one hour's unpaid sell budget); refill the sender`);
+          sellLow = true;
+        } else sellLow = false;
+      }
       const [x, y] = [qty((ba as { baseFeePerGas?: unknown } | null)?.baseFeePerGas), qty((bb as { baseFeePerGas?: unknown } | null)?.baseFeePerGas)];
       base = x > y ? x : y;
       baseLow = x < y ? x : y;

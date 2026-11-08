@@ -189,7 +189,7 @@ async function connections(base) {
 }
 
 async function main() {
-  const base = args("--base")[0] ?? process.env.HELPER_HOST ?? "https://api.confidential.unrealized.trade";
+  const base = args("--base")[0] ?? process.env.HELPER_HOST ?? "https://ct-api.unrealized.trade";
   const n = Number(args("--runs")[0] ?? RUNS);
   await fetch(`${base}/health`).then((r) => r.arrayBuffer()).catch(() => undefined);
   const runs = [];

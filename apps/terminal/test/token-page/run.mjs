@@ -23,7 +23,7 @@ import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
-const HELPER = "https://api.confidential.unrealized.trade";
+const HELPER = "https://ct-api.unrealized.trade";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
@@ -61,6 +61,9 @@ const STATES = [
   // trade moves the last bar within one tick, with no reload; and the same live reads answered 503 keep the bars drawn
   { id: "chart-live", top: "pool", state: "ready", curve: false, candles: "live" },
   { id: "chart-live-503", top: "pool", state: "ready", curve: false, candles: "live503" },
+  // the toolbar, the bottom bar and the trade marks (card app-chart-controls): GeckoTerminal's bars with a tape of
+  // trades in them; each control is used once and read back
+  { id: "chart-controls", top: "pool", state: "ready", curve: false, trades: true },
 ];
 /** The page's live read interval (src/screens/token/candles.ts LIVE_MS). */
 const LIVE_MS = 1_000;
@@ -81,7 +84,7 @@ let endS = null;
 /** CANDLE_COUNT bars of a 15m walk ending at the run's one end time, around `p` (a price string), as the helper's answer. */
 const CANDLE_COUNT = 160;
 function candles(p, tf) {
-  const step = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 }[tf];
+  const step = { "1s": 1, "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 }[tf];
   const base = Number(p) > 0 ? Number(p) : 0.0000273;
   endS ??= Math.floor(chartNow() / 1000);
   const end = Math.floor(endS / step) * step;
@@ -152,7 +155,27 @@ function helperAnswer(s, url, calls) {
     a.headers["access-control-expose-headers"] = "X-Helper-Source";
     return a;
   }
+  if (url.pathname === "/v1/market/trades") {
+    const row = live(s.top);
+    if (!s.trades || url.searchParams.get("token") !== row.token) return json(200, { trades: [], src: "chain", as_of_ms: Date.now() });
+    return json(200, { trades: tape(row.price_usd), src: "chain", as_of_ms: Date.now() });
+  }
   return null;
+}
+
+/** TAPE_COUNT trades, newest first, one in every third of the newest 15m bars, at the bar's close: buys and sells by
+ *  five traders, as the helper's tape (apps/helper/src/data/solana/trades.ts trades). */
+const TAPE_COUNT = 24;
+function tape(p) {
+  const bars = candles(p, "15m");
+  const out = [];
+  for (let i = 0; i < TAPE_COUNT; i++) {
+    const b = bars[bars.length - 1 - i * 3];
+    const usdV = 20 + ((i * 53) % 400);
+    const amt = usdV / Number(b[4]);
+    out.push({ t_ms: b[0] * 1000 + 30_000, side: i % 3 === 0 ? "sell" : "buy", usd: usdV.toFixed(2), amt: amt.toFixed(6), trader: `Trader${i % 5}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx${i % 5}`, tx: `tx${i}` });
+  }
+  return out;
 }
 
 async function build() {
@@ -291,6 +314,72 @@ try {
           check(ch.canvases > 0, `${tag}: no canvas in the chart`);
         }
         check(ch.vendor === (want === "ready" && !["chain", "live", "live503"].includes(s.candles)), `${tag}: CoinGecko's label ${ch.vendor ? "shown" : "not shown"}`);
+        if (s.trades) {
+          // card app-chart-controls: R5's toolbar and bottom bar on the desktop, the marks at both widths
+          const q = (t) => f.locator(`${box} [data-testid="${t}"]`);
+          const pressed = async (t) => (await q(t).getAttribute("aria-pressed")) === "true";
+          const tfs = await f.$$eval(`${box} .tkp-tfs .tkp-tf`, (els) => els.map((e) => e.textContent.trim()));
+          check(JSON.stringify(tfs) === JSON.stringify(["1s", "1m", "5m", "15m", "1H", "4H", "1D"]), `${tag}: the timeframes read ${tfs.join(" ")} (1s is served on Solana)`);
+          await f.waitForSelector(`${box} [data-testid="trade-mark"]`, { timeout: 8_000 }).catch(() => {});
+          const marks = await f.$$eval(`${box} [data-testid="trade-mark"]`, (els) => els.map((e) => ({ side: e.getAttribute("data-side"), logo: !!e.querySelector(".tok-av"), r: e.getBoundingClientRect() })));
+          const plotR = await f.$eval(`${box} .tkp-plot`, (e) => e.getBoundingClientRect().toJSON());
+          check(marks.length > 0, `${tag}: no trade marks over ${TAPE_COUNT} trades`);
+          check(marks.every((m) => m.logo && (m.side === "buy" || m.side === "sell")), `${tag}: a mark without the token's logo or a side`);
+          check(marks.every((m) => m.r.left >= plotR.left - 1 && m.r.right <= plotR.right + 1 && m.r.top >= plotR.top - 1 && m.r.bottom <= plotR.bottom + 1), `${tag}: a mark outside the plot`);
+          console.log(`${tag}: ${marks.length} trade marks (${marks.filter((m) => m.side === "buy").length} buy), each the token's logo`);
+          if (!phone) {
+            for (const t of ["chart-toolbar", "chart-indicators", "chart-display", "chart-mode", "chart-denom", "chart-bottom", "chart-clock", "chart-scale-pct", "chart-scale-log", "chart-scale-auto"]) check((await q(t).count()) === 1, `${tag}: no ${t}`);
+            const ranges = await f.$$eval(`${box} [data-testid^="chart-range-"]`, (els) => els.map((e) => e.textContent.trim()));
+            check(JSON.stringify(ranges) === JSON.stringify(["1D", "7D", "30D", "180D", "All"]), `${tag}: the ranges read ${ranges.join(" ")}`);
+            check((await f.locator(`${box} [data-testid="chart-bottom"] [data-testid="chart-vendor"]`).count()) === 1, `${tag}: CoinGecko's label is not in the bottom bar`);
+            const clock = (await q("chart-clock").textContent())?.trim() ?? "";
+            check(/^\d{2}:\d{2}:\d{2} UTC$/.test(clock), `${tag}: the clock reads ${clock}`);
+            const unit = () => f.$eval(`${box} .tkp-plot`, (e) => e.getAttribute("data-unit"));
+            check((await unit()) === "mc/usd" && (await pressed("chart-mode")), `${tag}: the chart opens in ${await unit()}, R5's MCap`);
+            await q("chart-mode").click();
+            check((await unit()) === "price/usd", `${tag}: Price / MCap did not switch to Price (${await unit()})`);
+            await q("chart-mode").click();
+            check((await q("chart-denom").isDisabled()) === true, `${tag}: USD / SOL is open with no SOL price read`);
+            // Indicators: RSI adds its own pane (one more canvas set); Escape closes the menu
+            const canv = () => f.$eval(`${box} [data-testid="chart-canvas"]`, (e) => e.querySelectorAll("canvas").length);
+            const c0 = await canv();
+            await q("chart-indicators").click();
+            check(await q("chart-indicators-menu").isVisible(), `${tag}: the Indicators menu did not open`);
+            await q("chart-indicators-RSI").click();
+            await f.waitForTimeout(200);
+            const c1 = await canv();
+            check(c1 > c0, `${tag}: RSI drew no pane (${c0} -> ${c1} canvases)`);
+            await q("chart-indicators-RSI").click();
+            await f.waitForTimeout(200);
+            check((await canv()) === c0, `${tag}: RSI off left its pane`);
+            await page.keyboard.press("Escape");
+            check((await q("chart-indicators-menu").count()) === 0, `${tag}: Escape left the Indicators menu open`);
+            // Display: Trades off takes the marks away, on brings them back
+            await q("chart-display").click();
+            await q("chart-display-trades").click();
+            check((await q("trade-mark").count()) === 0, `${tag}: Trades off left the marks`);
+            await q("chart-display-trades").click();
+            await page.keyboard.press("Escape");
+            await f.waitForSelector(`${box} [data-testid="trade-mark"]`, { timeout: 5_000 }).catch(() => {});
+            check((await q("trade-mark").count()) > 0, `${tag}: Trades on did not bring the marks back`);
+            // 7D: drawn at 1H, both pressed; a timeframe picked clears the range
+            await q("chart-range-7D").click();
+            await f.waitForFunction((box) => document.querySelector(`${box} [data-testid="chart-tf-1H"]`)?.getAttribute("aria-pressed") === "true", box, { timeout: 5_000 }).catch(() => {});
+            check((await pressed("chart-range-7D")) && (await pressed("chart-tf-1H")), `${tag}: 7D did not draw 1H with 7D on`);
+            await q("chart-tf-15m").click();
+            check(!(await pressed("chart-range-7D")), `${tag}: picking 15m left 7D on`);
+            // log on and off; auto on
+            await q("chart-scale-log").click();
+            check(await pressed("chart-scale-log"), `${tag}: log did not turn on`);
+            await q("chart-scale-log").click();
+            check(!(await pressed("chart-scale-log")) && (await pressed("chart-scale-auto")), `${tag}: log off, auto ${await pressed("chart-scale-auto")}`);
+            // hover a mark: its card, for the shot
+            await f.waitForSelector(`${box} [data-testid="trade-mark"]`, { timeout: 5_000 }).catch(() => {});
+            const m = q("trade-mark").last();
+            await m.hover().catch(() => {});
+            check(await q("trade-mark-card").isVisible().catch(() => false), `${tag}: hovering a mark showed no card`);
+          }
+        }
         if (s.candles === "live" || s.candles === "live503") {
           const read = () => f.evaluate((box) => {
             const c = document.querySelector(`${box} [data-testid=chart-canvas]`);
@@ -323,7 +412,7 @@ try {
           check(errors.length === 0, `${tag}: page errors after the live reads: ${errors.join(" | ")}`);
           // the page itself logs nothing; Chrome writes its own line for every response that is not a 2xx, which no page
           // code can stop (the card's hand-back names the helper change that would): held to one per failed live read
-          const net = consoles.filter((c) => /^Failed to load resource: the server responded with a status of 503 .*\(https:\/\/api\.confidential\.unrealized\.trade\/v1\/market\/candles\)$/.test(c));
+          const net = consoles.filter((c) => /^Failed to load resource: the server responded with a status of 503 .*\(https:\/\/ct-api\.unrealized\.trade\/v1\/market\/candles\)$/.test(c));
           const own = consoles.filter((c) => !net.includes(c));
           check(own.length === 0, `${tag}: console errors: ${own.join(" | ")}`);
           check(net.length === (s.candles === "live503" ? calls.live : 0), `${tag}: ${net.length} browser network lines for ${calls.live} live reads`);

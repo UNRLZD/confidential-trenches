@@ -151,7 +151,7 @@ test("GET /v1/token-status on the server: the release's USDC answered in the kit
   const port = (server.address() as AddressInfo).port;
   const call = (method: string, p: string) =>
     new Promise<{ status: number; headers: Record<string, unknown>; body: string }>((ok, fail) => {
-      const r = request({ host: "127.0.0.1", port, method, path: p, headers: { origin: "https://confidential.unrealized.trade" } }, (res) => {
+      const r = request({ host: "127.0.0.1", port, method, path: p, headers: { origin: "https://ct-app.unrealized.trade" } }, (res) => {
         let body = "";
         res.setEncoding("utf8").on("data", (d) => (body += d)).on("end", () => ok({ status: res.statusCode ?? 0, headers: res.headers, body }));
       });
@@ -162,7 +162,7 @@ test("GET /v1/token-status on the server: the release's USDC answered in the kit
     assert.equal(good.status, 200);
     assert.deepEqual(JSON.parse(good.body), { token: USDC, caught_up: false, halted: null, vault_blocked: null, code_hash_ok: null, code_hash: USDC_CODE_HASH, block_height: 7, last_event: null });
     assert.ok(Buffer.byteLength(good.body) <= 1024, "1 KB limit (H7)");
-    assert.equal(good.headers["access-control-allow-origin"], "https://confidential.unrealized.trade");
+    assert.equal(good.headers["access-control-allow-origin"], "https://ct-app.unrealized.trade");
     assert.equal(good.headers["cache-control"], "no-store");
     for (const p of ["/v1/token-status", "/v1/token-status?token=usdc.near", `/v1/token-status?token=${USDC}&token=${USDC}`, `/v1/token-status?token=${USDC.toUpperCase()}`]) {
       const r = await call("GET", p);

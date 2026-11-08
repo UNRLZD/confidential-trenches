@@ -12,6 +12,7 @@
 //     sheet on the phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
 //     no sheet (its screen is another card's).
 // A screenshot of each width and scheme is kept.
+// After: app
 //   node scripts/live-checks/app-portfolio-mount.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-portfolio-mount.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -28,9 +29,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-portfolio-mount";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signed-in account the stand-in shell sends. */
 export const ACCOUNT = {
   release: "harness-shell",

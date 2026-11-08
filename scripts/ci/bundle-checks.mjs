@@ -23,8 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const SIGN_DIR = path.join(ROOT, "packages/signpage");
 export const APP_DIR = path.join(ROOT, "apps/terminal/dist");
 
@@ -39,7 +39,9 @@ export const IN_PROCESS = [
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
+  viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
   viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
+  viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
   viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
@@ -47,9 +49,13 @@ export const IN_PROCESS = [
   viaRead("oneclick-fee-path-own-key", () => import("../live-checks/oneclick-fee-path-own-key.mjs")),
   viaRead("pool-deposit-sent-end", () => import("../live-checks/pool-deposit-sent-end.mjs")),
   viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
+  viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
+  // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
+  { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
+  viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "wallet-withdraw-move-out", host: "sign", load: () => import("../live-checks/wallet-withdraw-move-out.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
@@ -64,9 +70,11 @@ export const CHILD_RUNS = [
   { key: "app-buy-route-strip", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",
@@ -117,6 +125,8 @@ export const OUT = {
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
+  "deposit-to-pool": "a browser (its --harness run is in test-browser)",
+  "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */

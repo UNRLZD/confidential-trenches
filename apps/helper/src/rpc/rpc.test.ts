@@ -119,7 +119,7 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
 // pool program; an open or wider scan would spend the keyed provider's quota. SPENT and PRE are the two requests the
 // wallet's solanaMarks sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
 // with minContextSlot 7): a 13-byte spent mark and a 17-byte pre-mark, memcmp at 9 on size - 9 bytes ending in tag 1.
-const DEV_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+const DEV_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 const MAIN_PROGRAM = "11111111111111111111111111111111";
 type ScanConfig = Record<string, unknown>;
 const SPENT: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] };
@@ -183,6 +183,21 @@ for (const [name, program, config] of ONE_OFF)
     }
     assert.equal(seen.length, 0, "nothing reached a provider");
   });
+// card pool-senders-next-page-helper (the expand): POOL_SOLANA_PROGRAM_DEVNET may list several devnet programs, comma
+// apart, while a re-pinned devnet pool and the one before it are served side by side; mainnet stays exactly one
+test("getProgramAccounts: each devnet program the host lists, comma apart, is scanned; any other is refused; mainnet takes no list", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const NEW = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: `${DEV_PROGRAM},${NEW}`, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
+  seen.length = 0;
+  for (const program of [DEV_PROGRAM, NEW]) assert.equal((await call(r, "solana-devnet", scan(program))).status, 200, program);
+  assert.equal(seen.length, 2);
+  for (const [chain, program] of [["solana-devnet", MAIN_PROGRAM], ["solana-devnet", `${DEV_PROGRAM},${NEW}`], ["solana", DEV_PROGRAM], ["solana", NEW]] as const) assert.equal((await call(r, chain, scan(program))).status, 400, `${chain} ${program}`);
+  // a comma in the mainnet name is no list: neither program is the route's
+  const m = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_MAINNET: `${MAIN_PROGRAM},${NEW}` });
+  for (const program of [MAIN_PROGRAM, NEW]) assert.equal((await call(m, "solana", scan(program))).status, 400, program);
+  assert.equal(seen.length, 2, "nothing more reached a provider");
+});
 test("getProgramAccounts (review L-2): a host with no pinned pool program refuses every scan", async () => {
   const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
   seen.length = 0;

@@ -22,22 +22,25 @@ import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
 import { readBack } from "../../../scripts/pages-readback.mjs";
 import { TESTNET_RPCS } from "../build/network.mjs";
 import { checkDir } from "./check-deploy.ts";
+import { hostList } from "../../../scripts/ci/live-after.mjs";
 
 export const PROJECT = "confidential-trenches-app";
 export const BRANCH = "main"; // the project's production branch: a deploy on it serves APP_HOST
 export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 const REPO = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 
-// every live check that reads APP_HOST, run after each deploy (a test holds this list to scripts/live-checks/app-*.mjs
-// and signpage-release, which reads APP_HOST alone against this commit's own build, so a SIGN_HOST that lags does not
-// fail this deploy). A check in no host's list says why in its own header (a "Runs:" line, scripts/ci/live-listed.mjs).
-export const LIVE_CHECKS = ["app-host-gate", "app-release-sri", "app-shell", "app-in-shell", "app-discover-live", "app-no-test-token", "app-launchpad-badges", "app-token-route", "app-trade-box-mount", "app-token-chart", "app-chart-live", "app-harness-signin-e2e", "app-verify-mount", "app-no-blank-pages", "app-portfolio-mount", "signpage-release", "trade-box-pool", "app-console-429", "trade-box-bal-cash", "app-list-age", "app-pool-withdraw", "signpage-pool-price", "app-buy-route-strip", "signpage-buy-route-events", "app-hop-sync-lock", "balances-per-chain", "app-export-every-wallet", "evm-quote-warm-round", "evm-quote-lag-held", "evm-sell-hook-intrablock", "rh-cold-quote", "token-page-fills-after", "app-deposit-mount", "page-evm-rpc-csp", "app-quick-buy-one-tap", "app-toast-clears-sheet-head"];
-export const LIVE_ARGS = { "app-in-shell": "--engines chromium,firefox,webkit", "app-harness-signin-e2e": "--host app", "signpage-release": "--host app", "signpage-pool-price": "--host app", "signpage-buy-route-events": "--host app", "page-evm-rpc-csp": "--host app" };
+// every live check that reads APP_HOST, run after each deploy: each check's `// After: app` lines (scripts/ci/live-after.mjs),
+// one run for each (a test holds the list to scripts/live-checks/app-*.mjs, and signpage-release reads APP_HOST alone
+// against this commit's own build, so a SIGN_HOST that lags does not fail this deploy). A check in no host's list says
+// why in its own header (a "Runs:" line, scripts/ci/live-listed.mjs).
+const AFTER = hostList("app", REPO);
+export const LIVE_CHECKS = AFTER.checks;
+export const LIVE_ARGS = AFTER.args;
 // app-verify-mount reads the network the build names: a testnet build's _headers carries the testnet pair (build/network.mjs)
 export const networkOfBuild = (dir) => (readFileSync(join(dir, "_headers"), "utf8").includes(TESTNET_RPCS) ? "testnet" : "mainnet");
-export const liveRun = (k, network = "mainnet") => `scripts/live-checks/${k}.mjs${LIVE_ARGS[k] ? ` ${LIVE_ARGS[k]}` : ""}${k === "app-verify-mount" ? ` --network ${network}` : ""}`;
-/** The runs of one check, each as `liveRun` writes it: live.yml runs each as its own job. */
-export const liveRuns = (k, { network = "mainnet" } = {}) => [liveRun(k, network)];
+// (app-verify-mount's line takes --network {network})
+/** The runs of one check, `{network}` in its arguments the build's: live.yml runs each as its own job. */
+export const liveRuns = (k, { network = "mainnet" } = {}) => (LIVE_ARGS[k] ?? []).map((a) => `scripts/live-checks/${k}.mjs${a ? ` ${a.replaceAll("{network}", network)}` : ""}`);
 /** The commands a deploy prints for the live run on GitHub's runners (card ci-live-runners); a testnet build says so. */
 export const liveCommands = (sha, network = "mainnet") => [`next: gh workflow run live.yml -f host=app -f commit=${sha}${network === "mainnet" ? "" : ` -f network=${network}`}`, "then: gh run watch --exit-status"];
 

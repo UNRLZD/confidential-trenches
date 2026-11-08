@@ -9,6 +9,8 @@
 //     shell draws under the frame (packages/signpage/src/backdrop.ts): its id and the tab bar's ink, string literals
 //     the minifier keeps.
 // The hop itself is judged in a browser by apps/terminal/test/e2e/signin/run.mjs (BAR-03 at both widths).
+// After: app --host app
+// After: sign --host sign
 //   node scripts/live-checks/app-harness-signin-e2e.mjs [--host app|sign] [--sign <origin>] [--app <origin>] [--record <file>]
 //   --host reads that host alone: each host's deploy runs the check on its own host (apps/terminal/scripts/deploy.mjs,
 //   packages/signpage/scripts/deploy.mjs), so a host that lags does not fail the other's deploy; with no --host, both.
@@ -21,8 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-harness-signin-e2e";
-export const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
+export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 /** The boot frame in APP_HOST's page and its rules in the page's stylesheet, as the build writes them. */
 export const APP_MARKERS = { page: ['<div id="boot" aria-hidden="true" hidden>', 'class="boot-panel"'], css: ["#root:not(:empty)~#boot{display:none}", ".boot-panel{"] };
 /** The backdrop in SIGN_HOST's script, as the minifier writes it. */

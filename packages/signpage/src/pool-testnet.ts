@@ -43,7 +43,7 @@ import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool, ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
-import { poolDepositKind, type PoolDepositHost } from "./pool-deposit.ts";
+import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
@@ -55,8 +55,8 @@ import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } 
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
-import type { PoolChain } from "./rules/pool.ts";
-import type { HostAnswer, KindContext } from "./api.ts";
+import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
+import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
@@ -233,9 +233,9 @@ export type TestnetOver = {
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
  *  its pages to entry 2,047, the token programs, wSOL and the pump curve venue's program-wide accounts, created by devnet
- *  tx 4K48NMp5awMjg1789a6uS6JE9Xr3JUwECC2bZnPCUQnfRAQGDYm252CDcAuPDHPJudUoBwqrj9juokXRC8TneWJ3 and read back the same on
+ *  tx 4M7F8EG164qLBH4Noecx6TW22Tak9nH9oVhFeLidfbgf7W7BNfYtvULwCYRm8SzcgyaLWkDrYRvLCxGA7iszjFe8 for the pool 92YuYhb4… and read back the same on
  *  both devnet RPCs (scripts/live-checks/signpage-pool-flow.mjs reads it after every deploy). */
-export const DEVNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
+export const DEVNET_TABLE: string | null = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
 /** The mainnet pool's lookup table: none until pool-sol-deploy-mainnet makes it, so pool.buy is refused until then. */
 export const MAINNET_TABLE: string | null = null;
 /** The page network's lookup table. */
@@ -304,6 +304,9 @@ export async function poolRelayFee(pool: string, epochStartMs: bigint, signal?: 
 export type TestnetPool = {
   /** The pool kinds' flow: pool.deposit, pool.buy and pool.sell on the devnet pool. */
   flow: NonNullable<PoolKindsDeps["flow"]>;
+  /** pool.deposit on the page's Solana pool from one fixed U_{s,i} (card pool-deposit-follow, review H1: the follow of a
+   *  quote into U_X): the request checked by the pool rule as the kind's own, then run with `from`; never another U. */
+  depositFrom(params: Record<string, unknown>, from: PoolDepositFrom, ctx: KindContext): HostRefusal | Running<"pool.deposit">;
   /** The deposit run's host (a new one per run): its `landed` runs the proof queue's pass. */
   host(): PoolDepositHost;
   /** The INCOMING notes finished (src/pool-deposit.ts settlePoolDeposits), one pass at a time: a signed-in load. */
@@ -939,6 +942,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               : ask.kind === "pool.withdraw" && page.openWithdraw
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
                 : { error: "not_allowed" },
+    depositFrom: (params, from, ctx) => {
+      let ask: PoolAsk;
+      try {
+        ask = checkPoolRequest({ ...params, kind: "pool.deposit" } as PoolRequest);
+      } catch {
+        return { error: "not_allowed" };
+      }
+      return ask.chain !== "solana" || pin === undefined ? { error: "not_allowed" } : deposit(ask, ctx, from);
+    },
     host: () => host(),
     settle,
     stateRead,

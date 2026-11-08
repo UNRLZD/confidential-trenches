@@ -1,212 +1,295 @@
 {
- "note": "good_local: apps/helper at af47aaaa (re-review L-2) run on the Mac, 2026-11-05 23:41Z, the devnet pool pinned (POOL_SOLANA_PROGRAM_DEVNET 5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ, its fee payer a key made in memory for the run) and SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com for the recording only: the restore's scan forwarded (9 marks), the open scan refused. bad_unpinned: the same helper with no POOL_SOLANA_PROGRAM_DEVNET, 23:37Z: the restore's scan refused 400. bad_deployed: HELPER_HOST at main 3d416775dd4244ab5a713092a414594bf65d2003, before this card, 23:41Z: /v1/rpc/solana-devnet 404, the pool path reads refused 400",
+ "note": "good_local: apps/helper at 69e5cfd3 (card pool-senders-next-page, the delta review fold) run on the Mac, 2026-11-08T02:19Z, the devnet pool pinned (POOL_SOLANA_PROGRAM_DEVNET 9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8, today's deploy record, its fee payer a key made in memory for the run) and SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com for the recording only: the restore's scan forwarded (0 marks: the re-pinned pool has none spent), the open scan refused. bad_unpinned: the same helper with no POOL_SOLANA_PROGRAM_DEVNET, 2026-11-08T02:19Z: the restore's scan refused 400. bad_deployed: HELPER_HOST at main 3d416775dd4244ab5a713092a414594bf65d2003, before card pool-buy-send-fast, 2026-11-05 23:41Z, read for the pool before the re-pin: /v1/rpc/solana-devnet 404, the pool path reads refused 400 (judged on today's pin, it FAILs on those reads alike)",
  "good_local": {
   "base": "http://127.0.0.1:18787",
+  "deployment": {
+   "cluster": "devnet",
+   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+   "rpc": "api.devnet.solana.com",
+   "program_id": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "programdata": "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "so_len": 79088,
+   "so_sha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162",
+   "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 42012187381, pool-solana job 127193696070, commit c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+   "ci_run": "42012187381",
+   "commit": "c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+   "funder": "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3",
+   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+   "buffer": "BgtxJw2vYcnxaHVTbSvcmeNYoXUzUZzhWa12rurzRYgx",
+   "need": "429764960",
+   "needs": {
+    "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3": "429764960"
+   },
+   "need_parts": {
+    "program_account": "833120",
+    "programdata": "402645880",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "985000"
+   },
+   "scope": "1a3cefdf88fa307a61e860c77148a29c84fb9c91265ba91118e0e0dbd0e43bd6",
+   "deposit": {
+    "value": "10000000",
+    "nonce": "1",
+    "precommitment": "1b1df828c58ccb3e50bd61969d9aa9b4a7204074616fa0ddd3dc82696b1a5fa9",
+    "label": "20a1093685a42372ff7f203c4cedf63b9b4a7a0c4baf23909e1d2b3e4bcc8777",
+    "commitment": "01cdd76b1b7c59de5b3715524300687f24dd39b22893cfddb1bb732dc620a868"
+   },
+   "at": "2026-11-07T23:13:52.110Z",
+   "funder_after": "0",
+   "swept": "1195240",
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "5vCG9BtNfmyzpQt1yhWFBTEFoK952vWvye6LtwtmrAM8AXFn7aWfQpCUJooFC6mhfBnsthL2LedCa9TMiJHKAWMZ"
+    },
+    {
+     "step": "deploy with the upgradeable loader",
+     "signature": "4cbim2bS6hvAK6xhnC8pxrUCD8jbtUjLy9k7XXjqEKzk9ZBK2xS9LxGo5pzf9xURxxwYgCy2sUYPiVuSLUj19hjZ"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (to none)",
+     "signature": "MGh5wwg2kbMYHRRmsYXcCNd4GUnLLVRMEXZo8CirEpB5z3Tj4g1ELK6FKaGj7mpJu9R2YcsF8dJ6VxEKdnMpw44"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "55L7bTRDsxRPmuk78H5imdDhPHiCxn3PirneAVdCu4Uda7DmQtRrQ1thcNVjKmMxH2R2LKTyuoQ4sPw5Y71SEwg3"
+    },
+    {
+     "step": "deposit 0.01 SOL (tag 1)",
+     "signature": "3PM5GF9NHxSGqWnBy3QE5VpzmxbTsVE9zWaYFDRDhcSR2kWGATB8bn57g8s9CfREPedx1VbAQxgjRUK6wsJZovUa"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "ZnWQESKi9MUwZZJG6L95sdSVgKWmTJZYxUnHvLTcSrAijysRcrWpKT7otTeH8HFA1ewb2Hx7sP75AKSkrm2xR8p"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "5aqY8EGFrkUY4TnZcob7ZyTNnCH3wWrhUoFga7dExFCDAooeP5wZJQFc58876Yne7Qbah6UuZWdhgt1ab96XQ4mH"
+    }
+   ],
+   "funders": [
+    "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3"
+   ]
+  },
   "reads": [
    {
     "route": "solana-devnet",
     "kind": "owner",
     "method": "getAccountInfo",
     "id": 1,
-    "readAt": "2026-11-05T23:39:39.719Z",
-    "ms": 74,
+    "readAt": "2026-11-08T02:19:00.107Z",
+    "ms": 181,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "277",
+     "content-length": "269",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:39 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=155;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0-beta.1\",\"slot\":519106428},\"value\":{\"data\":[\"YmZwb29sMDE=\",\"base64\"],\"executable\":false,\"lamports\":131257867,\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"rentEpoch\":18446744073709551615,\"space\":2179}},\"id\":1}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":519868217},\"value\":{\"data\":[\"YmZwb29sMDE=\",\"base64\"],\"executable\":false,\"lamports\":21719560,\"owner\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"rentEpoch\":18446744073709551615,\"space\":2179}},\"id\":1}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 2,
-    "readAt": "2026-11-05T23:39:39.837Z",
-    "ms": 118,
+    "readAt": "2026-11-08T02:19:00.162Z",
+    "ms": 55,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:39 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=51;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106429,\"id\":2}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868217,\"id\":2}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 3,
-    "readAt": "2026-11-05T23:39:39.891Z",
-    "ms": 54,
+    "readAt": "2026-11-08T02:19:00.285Z",
+    "ms": 123,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:39 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=121;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106429,\"id\":3}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868217,\"id\":3}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 4,
-    "readAt": "2026-11-05T23:39:39.946Z",
-    "ms": 55,
+    "readAt": "2026-11-08T02:19:00.337Z",
+    "ms": 52,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:39 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=51;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106429,\"id\":4}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868217,\"id\":4}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 5,
-    "readAt": "2026-11-05T23:39:40.080Z",
-    "ms": 134,
+    "readAt": "2026-11-08T02:19:00.390Z",
+    "ms": 53,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=51;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106431,\"id\":5}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868217,\"id\":5}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 6,
-    "readAt": "2026-11-05T23:39:40.133Z",
+    "readAt": "2026-11-08T02:19:00.442Z",
     "ms": 52,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=51;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106431,\"id\":6}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868219,\"id\":6}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 7,
-    "readAt": "2026-11-05T23:39:40.186Z",
-    "ms": 53,
+    "readAt": "2026-11-08T02:19:00.497Z",
+    "ms": 54,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=53;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106431,\"id\":7}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868219,\"id\":7}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getSlot",
     "id": 8,
-    "readAt": "2026-11-05T23:39:40.241Z",
-    "ms": 55,
+    "readAt": "2026-11-08T02:19:00.550Z",
+    "ms": 53,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=52;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106431,\"id\":8}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868219,\"id\":8}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getBlockTime",
     "id": 9,
-    "readAt": "2026-11-05T23:39:40.453Z",
-    "ms": 212,
+    "readAt": "2026-11-08T02:19:00.810Z",
+    "ms": 261,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "113",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=259;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32009,\"message\":\"Slot 1 was skipped, or missing in long-term storage\"},\"id\":9}\n"
    },
@@ -215,67 +298,70 @@
     "kind": "pool",
     "method": "getSignaturesForAddress",
     "id": 10,
-    "readAt": "2026-11-05T23:39:40.682Z",
-    "ms": 229,
+    "readAt": "2026-11-08T02:19:00.863Z",
+    "ms": 52,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "260",
+     "content-length": "259",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:00 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=50;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":[{\"blockTime\":1793913153,\"confirmationStatus\":\"finalized\",\"err\":null,\"memo\":null,\"signature\":\"3UzcQVNEdv1ekZhhMAPGu2BoAsR7bAGUCg9pFDPwo6bRMKzAfZPTxjpjiUF4ZHESW2eUaxxEbBjwEfoSVuh3qZgG\",\"slot\":519069428,\"transactionIndex\":12}],\"id\":10}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":[{\"blockTime\":1794093230,\"confirmationStatus\":\"finalized\",\"err\":null,\"memo\":null,\"signature\":\"3PM5GF9NHxSGqWnBy3QE5VpzmxbTsVE9zWaYFDRDhcSR2kWGATB8bn57g8s9CfREPedx1VbAQxgjRUK6wsJZovUa\",\"slot\":519821822,\"transactionIndex\":4}],\"id\":10}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getFeeForMessage",
     "id": 11,
-    "readAt": "2026-11-05T23:39:40.889Z",
-    "ms": 207,
+    "readAt": "2026-11-08T02:19:01.098Z",
+    "ms": 236,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "107",
+     "content-length": "100",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:01 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=184, rpc;dur=50;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0-beta.1\",\"slot\":519106433},\"value\":null},\"id\":11}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":519868221},\"value\":null},\"id\":11}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getProgramAccounts",
     "id": 12,
-    "readAt": "2026-11-05T23:39:40.889Z",
+    "readAt": "2026-11-08T02:19:01.099Z",
     "ms": 1,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "39",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:01 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -284,44 +370,46 @@
     "kind": "pool",
     "method": "getSlot",
     "id": 13,
-    "readAt": "2026-11-05T23:39:40.945Z",
-    "ms": 55,
+    "readAt": "2026-11-08T02:19:01.333Z",
+    "ms": 234,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "45",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:40 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:01 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=233;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":465893777,\"id\":13}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":466744621,\"id\":13}\n"
    },
    {
     "route": "solana",
     "kind": "pool",
     "method": "getBlockTime",
     "id": 14,
-    "readAt": "2026-11-05T23:39:41.218Z",
-    "ms": 274,
+    "readAt": "2026-11-08T02:19:01.574Z",
+    "ms": 241,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "40",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:41 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:01 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=239;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":14}\n"
    },
@@ -330,21 +418,22 @@
     "kind": "pool",
     "method": "getSignaturesForAddress",
     "id": 15,
-    "readAt": "2026-11-05T23:39:41.938Z",
-    "ms": 720,
+    "readAt": "2026-11-08T02:19:02.282Z",
+    "ms": 708,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "38",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:41 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:02 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=707;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"result\":[],\"id\":15}\n"
    },
@@ -353,44 +442,46 @@
     "kind": "pool",
     "method": "getFeeForMessage",
     "id": 16,
-    "readAt": "2026-11-05T23:39:42.000Z",
-    "ms": 61,
+    "readAt": "2026-11-08T02:19:02.383Z",
+    "ms": 100,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "100",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:41 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:02 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=99;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":465893783},\"value\":null},\"id\":16}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":466744624},\"value\":null},\"id\":16}\n"
    },
    {
     "route": "solana",
     "kind": "pool",
     "method": "getProgramAccounts",
     "id": 17,
-    "readAt": "2026-11-05T23:39:42.000Z",
+    "readAt": "2026-11-08T02:19:02.384Z",
     "ms": 1,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "39",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:41 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:02 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -399,233 +490,317 @@
     "kind": "restore",
     "method": "getProgramAccounts",
     "id": 18,
-    "readAt": "2026-11-05T23:39:42.127Z",
-    "ms": 127,
+    "readAt": "2026-11-08T02:19:02.440Z",
+    "ms": 56,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "2325",
+     "content-length": "104",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:39:42 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:02 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=54;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":519106439,\"apiVersion\":\"4.3.0-beta.2\"},\"value\":[{\"pubkey\":\"8uXFaTCMhQEbQwFdYQNsm9zhJ6GDaiKeAjrCUKfB7UG\",\"account\":{\"lamports\":716280,\"data\":[\"8yE1AAAAAAAEAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"58QUgGYTn9MbdiXX34yQrxw4h1Hspv5S7PvmcVVgv6mC\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAAIAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"6ckrykwoqzAkzViHS1Kitamcwc4BdP9zFYXi7qFjATa2\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAAAAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"7N7Jtt24ozEWwmqLFe8Fy5ZtXR9nY5ja3CvtS9Y8iqY8\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAADAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"9KPDfuiDzoL7vofuGtXNsCEqpD2Zw8V4FQi6j9pspesg\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAAFAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"ADLyvfVLB3Myv81m24VdVJxXMKy2kTbqRpN1RMxLSTTW\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAACAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"C6juhLCSYY2EnibVChu4LdR2e2itFeXXTqjgMbWP1Lxy\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAAGAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"FVu9n8jyvsWyc4iRxb22d3PNgsSe4GmNRoyLn9qhYYLh\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAABAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}},{\"pubkey\":\"J7Aq11aCMewo5PutVtSUS3hyrDd99y9AQke4kWxxKNvm\",\"account\":{\"lamports\":716280,\"data\":[\"gJaYAAAAAAAHAAAAAQ==\",\"base64\"],\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"executable\":false,\"rentEpoch\":18446744073709551615,\"space\":13}}]},\"id\":18}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"slot\":519868227,\"apiVersion\":\"4.3.0-beta.2\"},\"value\":[]},\"id\":18}"
    }
   ]
  },
  "bad_unpinned": {
   "base": "http://127.0.0.1:18787",
+  "deployment": {
+   "cluster": "devnet",
+   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+   "rpc": "api.devnet.solana.com",
+   "program_id": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+   "programdata": "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
+   "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+   "so_len": 79088,
+   "so_sha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162",
+   "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 42012187381, pool-solana job 127193696070, commit c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+   "ci_run": "42012187381",
+   "commit": "c3fbad7147e6c049adaa1ed91cc6efda31f0ec6c",
+   "funder": "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3",
+   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+   "buffer": "BgtxJw2vYcnxaHVTbSvcmeNYoXUzUZzhWa12rurzRYgx",
+   "need": "429764960",
+   "needs": {
+    "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3": "429764960"
+   },
+   "need_parts": {
+    "program_account": "833120",
+    "programdata": "402645880",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "985000"
+   },
+   "scope": "1a3cefdf88fa307a61e860c77148a29c84fb9c91265ba91118e0e0dbd0e43bd6",
+   "deposit": {
+    "value": "10000000",
+    "nonce": "1",
+    "precommitment": "1b1df828c58ccb3e50bd61969d9aa9b4a7204074616fa0ddd3dc82696b1a5fa9",
+    "label": "20a1093685a42372ff7f203c4cedf63b9b4a7a0c4baf23909e1d2b3e4bcc8777",
+    "commitment": "01cdd76b1b7c59de5b3715524300687f24dd39b22893cfddb1bb732dc620a868"
+   },
+   "at": "2026-11-07T23:13:52.110Z",
+   "funder_after": "0",
+   "swept": "1195240",
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "5vCG9BtNfmyzpQt1yhWFBTEFoK952vWvye6LtwtmrAM8AXFn7aWfQpCUJooFC6mhfBnsthL2LedCa9TMiJHKAWMZ"
+    },
+    {
+     "step": "deploy with the upgradeable loader",
+     "signature": "4cbim2bS6hvAK6xhnC8pxrUCD8jbtUjLy9k7XXjqEKzk9ZBK2xS9LxGo5pzf9xURxxwYgCy2sUYPiVuSLUj19hjZ"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (to none)",
+     "signature": "MGh5wwg2kbMYHRRmsYXcCNd4GUnLLVRMEXZo8CirEpB5z3Tj4g1ELK6FKaGj7mpJu9R2YcsF8dJ6VxEKdnMpw44"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "55L7bTRDsxRPmuk78H5imdDhPHiCxn3PirneAVdCu4Uda7DmQtRrQ1thcNVjKmMxH2R2LKTyuoQ4sPw5Y71SEwg3"
+    },
+    {
+     "step": "deposit 0.01 SOL (tag 1)",
+     "signature": "3PM5GF9NHxSGqWnBy3QE5VpzmxbTsVE9zWaYFDRDhcSR2kWGATB8bn57g8s9CfREPedx1VbAQxgjRUK6wsJZovUa"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "ZnWQESKi9MUwZZJG6L95sdSVgKWmTJZYxUnHvLTcSrAijysRcrWpKT7otTeH8HFA1ewb2Hx7sP75AKSkrm2xR8p"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "5aqY8EGFrkUY4TnZcob7ZyTNnCH3wWrhUoFga7dExFCDAooeP5wZJQFc58876Yne7Qbah6UuZWdhgt1ab96XQ4mH"
+    }
+   ],
+   "funders": [
+    "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3"
+   ]
+  },
   "reads": [
    {
     "route": "solana-devnet",
     "kind": "owner",
     "method": "getAccountInfo",
     "id": 1,
-    "readAt": "2026-11-05T23:38:13.174Z",
-    "ms": 79,
+    "readAt": "2026-11-08T02:19:16.367Z",
+    "ms": 204,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "277",
+     "content-length": "269",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=182;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0-beta.1\",\"slot\":519106067},\"value\":{\"data\":[\"YmZwb29sMDE=\",\"base64\"],\"executable\":false,\"lamports\":131257867,\"owner\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"rentEpoch\":18446744073709551615,\"space\":2179}},\"id\":1}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":519868285},\"value\":{\"data\":[\"YmZwb29sMDE=\",\"base64\"],\"executable\":false,\"lamports\":21719560,\"owner\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"rentEpoch\":18446744073709551615,\"space\":2179}},\"id\":1}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 2,
-    "readAt": "2026-11-05T23:38:13.236Z",
-    "ms": 62,
+    "readAt": "2026-11-08T02:19:16.428Z",
+    "ms": 60,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=58;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106067,\"id\":2}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868285,\"id\":2}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 3,
-    "readAt": "2026-11-05T23:38:13.563Z",
-    "ms": 327,
+    "readAt": "2026-11-08T02:19:16.539Z",
+    "ms": 111,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=110;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106067,\"id\":3}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868285,\"id\":3}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 4,
-    "readAt": "2026-11-05T23:38:13.624Z",
-    "ms": 61,
+    "readAt": "2026-11-08T02:19:16.599Z",
+    "ms": 60,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=58;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106069,\"id\":4}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868285,\"id\":4}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 5,
-    "readAt": "2026-11-05T23:38:13.698Z",
-    "ms": 74,
+    "readAt": "2026-11-08T02:19:16.658Z",
+    "ms": 59,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=58;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106069,\"id\":5}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868285,\"id\":5}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 6,
-    "readAt": "2026-11-05T23:38:13.762Z",
-    "ms": 64,
+    "readAt": "2026-11-08T02:19:16.717Z",
+    "ms": 59,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=57;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106069,\"id\":6}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868285,\"id\":6}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pace",
     "method": "getSlot",
     "id": 7,
-    "readAt": "2026-11-05T23:38:13.910Z",
-    "ms": 148,
+    "readAt": "2026-11-08T02:19:16.776Z",
+    "ms": 59,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:13 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=58;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106069,\"id\":7}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868285,\"id\":7}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getSlot",
     "id": 8,
-    "readAt": "2026-11-05T23:38:14.049Z",
-    "ms": 139,
+    "readAt": "2026-11-08T02:19:16.834Z",
+    "ms": 58,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "44",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:14 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:16 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=57;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":519106071,\"id\":8}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":519868287,\"id\":8}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getBlockTime",
     "id": 9,
-    "readAt": "2026-11-05T23:38:14.273Z",
-    "ms": 224,
+    "readAt": "2026-11-08T02:19:17.066Z",
+    "ms": 232,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "113",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:14 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:17 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=231;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32009,\"message\":\"Slot 1 was skipped, or missing in long-term storage\"},\"id\":9}\n"
    },
@@ -634,67 +809,70 @@
     "kind": "pool",
     "method": "getSignaturesForAddress",
     "id": 10,
-    "readAt": "2026-11-05T23:38:14.379Z",
-    "ms": 106,
+    "readAt": "2026-11-08T02:19:17.124Z",
+    "ms": 58,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "260",
+     "content-length": "259",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:14 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:17 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=57;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":[{\"blockTime\":1793913153,\"confirmationStatus\":\"finalized\",\"err\":null,\"memo\":null,\"signature\":\"3UzcQVNEdv1ekZhhMAPGu2BoAsR7bAGUCg9pFDPwo6bRMKzAfZPTxjpjiUF4ZHESW2eUaxxEbBjwEfoSVuh3qZgG\",\"slot\":519069428,\"transactionIndex\":12}],\"id\":10}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":[{\"blockTime\":1794093230,\"confirmationStatus\":\"finalized\",\"err\":null,\"memo\":null,\"signature\":\"3PM5GF9NHxSGqWnBy3QE5VpzmxbTsVE9zWaYFDRDhcSR2kWGATB8bn57g8s9CfREPedx1VbAQxgjRUK6wsJZovUa\",\"slot\":519821822,\"transactionIndex\":4}],\"id\":10}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getFeeForMessage",
     "id": 11,
-    "readAt": "2026-11-05T23:38:14.439Z",
-    "ms": 60,
+    "readAt": "2026-11-08T02:19:17.341Z",
+    "ms": 217,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
-     "content-length": "107",
+     "content-length": "100",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:14 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:17 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=157, rpc;dur=58;desc=\"SOLANA_DEVNET_RPC_URL\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0-beta.1\",\"slot\":519106072},\"value\":null},\"id\":11}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":519868288},\"value\":null},\"id\":11}\n"
    },
    {
     "route": "solana-devnet",
     "kind": "pool",
     "method": "getProgramAccounts",
     "id": 12,
-    "readAt": "2026-11-05T23:38:14.440Z",
+    "readAt": "2026-11-08T02:19:17.342Z",
     "ms": 1,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "39",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:14 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:17 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -703,44 +881,46 @@
     "kind": "pool",
     "method": "getSlot",
     "id": 13,
-    "readAt": "2026-11-05T23:38:14.739Z",
-    "ms": 298,
+    "readAt": "2026-11-08T02:19:17.587Z",
+    "ms": 245,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "45",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:14 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:17 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=244;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":465893379,\"id\":13}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":466744697,\"id\":13}\n"
    },
    {
     "route": "solana",
     "kind": "pool",
     "method": "getBlockTime",
     "id": 14,
-    "readAt": "2026-11-05T23:38:15.332Z",
-    "ms": 593,
+    "readAt": "2026-11-08T02:19:17.832Z",
+    "ms": 245,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "40",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:15 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:17 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=245;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":14}\n"
    },
@@ -749,21 +929,22 @@
     "kind": "pool",
     "method": "getSignaturesForAddress",
     "id": 15,
-    "readAt": "2026-11-05T23:38:15.735Z",
-    "ms": 403,
+    "readAt": "2026-11-08T02:19:18.372Z",
+    "ms": 540,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "38",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:15 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:18 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=539;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"result\":[],\"id\":15}\n"
    },
@@ -772,44 +953,46 @@
     "kind": "pool",
     "method": "getFeeForMessage",
     "id": 16,
-    "readAt": "2026-11-05T23:38:15.808Z",
-    "ms": 73,
+    "readAt": "2026-11-08T02:19:18.435Z",
+    "ms": 62,
     "status": 200,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "100",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:15 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:18 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=61;desc=\"public\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":465893385},\"value\":null},\"id\":16}\n"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":466744702},\"value\":null},\"id\":16}\n"
    },
    {
     "route": "solana",
     "kind": "pool",
     "method": "getProgramAccounts",
     "id": 17,
-    "readAt": "2026-11-05T23:38:15.809Z",
+    "readAt": "2026-11-08T02:19:18.435Z",
     "ms": 1,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "39",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:15 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:18 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -818,28 +1001,99 @@
     "kind": "restore",
     "method": "getProgramAccounts",
     "id": 18,
-    "readAt": "2026-11-05T23:38:15.809Z",
-    "ms": 1,
+    "readAt": "2026-11-08T02:19:18.436Z",
+    "ms": 0,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "cache-control": "no-store",
      "connection": "keep-alive",
      "content-length": "39",
      "content-type": "application/json; charset=utf-8",
-     "date": "Thu, 05 Nov 2026 23:38:15 GMT",
+     "date": "Sun, 08 Nov 2026 02:19:18 GMT",
      "keep-alive": "timeout=65",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
      "vary": "Origin",
      "x-content-type-options": "nosniff",
-     "x-helper-commit": "af47aaaac84934cf0bb6392de5f25fda02178254"
+     "x-helper-commit": "69e5cfd30dcbe5af63495da16f873d20e88988bf"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    }
   ]
  },
  "bad_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "deployment": {
+   "cluster": "devnet",
+   "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+   "rpc": "https://api.devnet.solana.com",
+   "at": "2026-11-03T19:30:39.249Z",
+   "program_id": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+   "programdata": "2z2CxFYEeik3PQsui67mxUFFjAVZcmb1z61GJiPdyDrv",
+   "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+   "scope": "2e2c02e1ea70ff51ed15a9e901d9e6d2a0852b2df75582b775dd65346029d0eb",
+   "so_len": 77472,
+   "so_sha256": "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01",
+   "build": "cargo-build-sbf 4.5.0; Default platform-tools: v1.57; Default Rust: 1.95.0; solana-cli 4.4.0 (src:9ef63128; feat:dddabd53, client:Agave); cargo-build-sbf --sbf-out-dir out -- --locked; CI run 41700702945, pool-solana job 126144439173, commit 10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "ci_run": "41700702945",
+   "commit": "10e685dd2294a32ebf4d9852efaf32e54b929359",
+   "deposit": {
+    "value": "10000000",
+    "nonce": "1",
+    "precommitment": "13d795c96f00c2a5ea68c15e29ba995b6914a00da16e14d9ce596fd57921bc6a",
+    "label": "1c1b38e96453a87883eed3197fb66f3cf68371442d2c12cf19038ef87acdc59b",
+    "commitment": "0e4076e2b452c124ac30d8d23e4ec2017d2e796ca1ab7a273d6398c1b905f6f9"
+   },
+   "funder": "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn",
+   "return_to": "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx",
+   "need": "421550680",
+   "need_parts": {
+    "program_account": "833120",
+    "programdata": "394436600",
+    "pool": "11719560",
+    "deposit": "10000000",
+    "deposit_mark": "736600",
+    "deposit_pages": "2194560",
+    "funder_floor": "650240",
+    "fees": "980000"
+   },
+   "funder_after": "0",
+   "swept": "1200240",
+   "txs": [
+    {
+     "step": "funding (to the funder)",
+     "signature": "3Pk3GhfX9nZ8NnLA69rah6afoCBDMJJbqRtkWLHhm533XYr4ZGJ339sQGyJ7GWwt3pVbhT6xYiQqL6V5Kk3jLbMc"
+    },
+    {
+     "step": "deploy with the upgradeable loader, --final",
+     "signature": "5uAzzsgscZsdPHDLqBy9DZKRLxDYCBaEc2iU4JBgPonNAxJJzn76evSNKML3B8GETpcp5iuMkd3qBwP9tZyhiVMg"
+    },
+    {
+     "step": "the upgradeable loader: SetAuthority (--final: to none)",
+     "signature": "66BcwYwsdXDmMmbgWg9yfcTuUCR97Y8Ahk6V1vu8pRHG5dqomp8qydc8sCCUAqqxBbLgmFULHVS8e6WgofBuaNf"
+    },
+    {
+     "step": "init (tag 0)",
+     "signature": "3A1jysvq6P2CJMTxZD2oardRS5BEtKSuUakHaSFUGUzc4Zs8ahWYurrNhivJWX6vFbZxdtXG95x92bUfshd5gshW"
+    },
+    {
+     "step": "deposit 0.01 SOL (tag 1)",
+     "signature": "D2xcLtj9sBWpwT2HoNMt8kromhZKDmnvSVjn78CvHbAGLW8h66tCt8APP11wCWgo94iJwUD69o6ZUCKs8Rd3uwj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "25QsubihKQh3rebfAd9Nbsd8t6dt63KdSWAbNhJTbfZai9JdGYERxc2W5xmccHiy41Kz2mmRpKH2rb5KsJ9dMJJj"
+    },
+    {
+     "step": "sweep (the funder's rest back)",
+     "signature": "2g8ypRJJNggQCusW9EuJWrwnTkcjq5fU7wyTWdjfme45rfUcWF8ntu1VZTba88dd57qeD5HX3Ud7fjfQ2Db7eVhf"
+    }
+   ],
+   "funders": [
+    "Aj9L7RTqRPma4pBbEVswfSYoY8y753aMnqHc3Rhbf1bn"
+   ]
+  },
+  "base": "https://ct-api.unrealized.trade",
   "reads": [
    {
     "route": "solana-devnet",
@@ -850,7 +1104,7 @@
     "ms": 562,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -873,7 +1127,7 @@
     "ms": 531,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -896,7 +1150,7 @@
     "ms": 177,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -919,7 +1173,7 @@
     "ms": 177,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -942,7 +1196,7 @@
     "ms": 176,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -965,7 +1219,7 @@
     "ms": 175,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -988,7 +1242,7 @@
     "ms": 176,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1011,7 +1265,7 @@
     "ms": 176,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1034,7 +1288,7 @@
     "ms": 177,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1057,7 +1311,7 @@
     "ms": 690,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1080,7 +1334,7 @@
     "ms": 177,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1103,7 +1357,7 @@
     "ms": 175,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1126,7 +1380,7 @@
     "ms": 175,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1149,7 +1403,7 @@
     "ms": 175,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1172,7 +1426,7 @@
     "ms": 175,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1195,7 +1449,7 @@
     "ms": 175,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1218,7 +1472,7 @@
     "ms": 177,
     "status": 400,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",
@@ -1241,7 +1495,7 @@
     "ms": 176,
     "status": 404,
     "headers": {
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
      "alt-svc": "h3=\":443\"; ma=2592000",
      "cache-control": "no-store",

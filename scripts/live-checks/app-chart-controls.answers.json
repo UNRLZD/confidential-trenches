@@ -1,0 +1,63 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-08T02:21:10.152Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CHCAoPoK.js",
+    "status": 200,
+    "found": [
+     "chart-toolbar",
+     "chart-tf-",
+     "chart-indicators",
+     "chart-display",
+     "chart-mode",
+     "chart-denom",
+     "chart-bottom",
+     "chart-range-",
+     "chart-clock",
+     "chart-scale-pct",
+     "chart-scale-log",
+     "chart-scale-auto",
+     "trade-mark",
+     "trade-mark-card",
+     "/v1/market/trades"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-rFQlC9W4.css",
+    "status": 200,
+    "found": [
+     ".tkp-bottombar",
+     ".tkp-menu",
+     ".tm-layer",
+     ".tm-dot"
+    ]
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 8 Nov 2026) and read from disk (--root); the page names one script and one stylesheet, which hold the toolbar, the bottom bar and the trade marks"
+ },
+ "bad": {
+  "source": "https://confidential.unrealized.trade/",
+  "at": "2026-11-08T02:21:08.118Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-HFA7o5Lm.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-B59pDiyQ.css",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "note": "APP_HOST as deployed before this card (read 8 Nov 2026 over https): the script holds none of the chart controls or marks, the stylesheet none of their rules"
+ }
+}

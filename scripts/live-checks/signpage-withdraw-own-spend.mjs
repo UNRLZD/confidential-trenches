@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card signpage-withdraw-own-spend on SIGN_HOST (https://sign.confidential.unrealized.trade), which
+// Live check of card signpage-withdraw-own-spend on SIGN_HOST (https://confidential.unrealized.trade), which
 // serves the mainnet build: a withdraw's owed sends (their attempt and context) live in the wallet store's meta under
 // owed/<op id>, which the frame's reader neither reads nor lists, so the ops records the frame decrypts hold none
 // (round-3 review LOW 2), and the database stays at version 1, so a rollback of SIGN_HOST never locks a wallet (fold 3).
@@ -14,6 +14,7 @@
 //     names the key written, and the seed-move test skips owed/ keys: fold 4).
 // The withdraw run's own-spend reads (src/pool-withdraw.ts spendOwner) are in the testnet build only, which no host
 // serves; the pool-withdraw and pool-testnet tests and the round-3 probes cover them.
+// After: sign
 //   node scripts/live-checks/signpage-withdraw-own-spend.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -22,7 +23,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-withdraw-own-spend";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 // the minified store list, quoted with backticks or double quotes: the paper's seven, then any more
 const STORES = /\[([`"])notes\1,\1wallets\1,\1quotes\1,\1orders\1,\1ops\1,\1counters\1,\1meta\1((?:,\1[a-z]+\1)*)\]/;

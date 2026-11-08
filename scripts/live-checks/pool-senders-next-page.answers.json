@@ -1,0 +1,18 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet), release-92: packages/signpage/index.html and public/app.js at 20b0f2c8 (build-app.mjs), the sha384 release-92.json names for SIGN_HOST",
+    "bad": "SIGN_HOST read 2026-11-08T03:29Z: release-91 (pool-deposit-address), whose sell names the next pages whatever the trees' size and is never built again as the six"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL",
+    "window": true,
+    "fallback": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-V8NImw+FhFfqQjn2h07k2rK4FnVRXC1ZBneZmt+pgkKcSyRFbXXTs3iQrx2/Zh63\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-V8NImw+FhFfqQjn2h07k2rK4FnVRXC1ZBneZmt+pgkKcSyRFbXXTs3iQrx2/Zh63",
+    "window": false,
+    "fallback": false
+  }
+}

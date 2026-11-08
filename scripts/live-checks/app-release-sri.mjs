@@ -9,6 +9,7 @@
 //   - the page loads at least one script, has no inline script, and every script and stylesheet tag is on APP_HOST's
 //     own origin and carries exactly one sha384 equal to the sha384 of the bytes APP_HOST serves for it (200).
 // The rules are written here, not read from the repo's gate, so a change to the gate cannot pass this check.
+// After: app
 //   node scripts/live-checks/app-release-sri.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-release-sri.mjs --harness [--root <dir>] [--record <file>]   the same read on a local
 //     build served as APP_HOST: the app harness's https server (apps/terminal/test/harness/server.mjs) serves <dir>
@@ -25,8 +26,8 @@ import { named } from "./record-names.mjs";
 
 const KEY = "app-release-sri";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const URL_ = "https://confidential.unrealized.trade/";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const URL_ = "https://ct-app.unrealized.trade/";
+export const SIGN = "https://confidential.unrealized.trade";
 export const INTEGRITY_POLICY = "blocked-destinations=(script)";
 
 const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;

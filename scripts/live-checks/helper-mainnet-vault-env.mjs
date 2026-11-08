@@ -18,6 +18,7 @@
 // implicit account: the key its id names) and at least RELAYER_FLOOR_YOCTO, one withdrawal's floor (send.ts
 // withdrawFloor, else every send answers relayer_low). Every answer carries a full-sha X-Helper-Commit and APP_HOST
 // echoed, a JSON body under 1 KB, and no tx_hash.
+// After: helper
 //   node scripts/live-checks/helper-mainnet-vault-env.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { createRequire } from "node:module";
@@ -27,8 +28,8 @@ import { fileURLToPath } from "node:url";
 import { VAULT_CONSTANTS, vaultContextInput, vaultContextOf, vaultScopeOf } from "../../packages/kit/src/index.ts";
 
 export const KEY = "helper-mainnet-vault-env";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const USDC = VAULT_CONSTANTS.TOKEN;
 /** Two mainnet RPCs of two operators (relayer-withdraw-fee's mainnet pair). */
 export const PAIR = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];

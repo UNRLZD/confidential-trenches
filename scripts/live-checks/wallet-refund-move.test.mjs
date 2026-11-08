@@ -55,7 +55,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
     // SIGN_HOST reads the answer cross-origin: the helper must name it
     [{ ...g, relay: { ...g.relay, cors: "*" } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer: access-control-allow-origin \"*\""],
     [{ ...g, relay: { ...g.relay, cors: null } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer: access-control-allow-origin null"],
-    [{ ...g, relay: { ...g.relay, cors: "https://confidential.unrealized.trade" } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer"],
+    [{ ...g, relay: { ...g.relay, cors: "https://ct-app.unrealized.trade" } }, "BAD SIGN_HOST may not read the helper's /v1/intents answer"],
   ];
   for (const [a, line] of planted) {
     const v = judge(a);
@@ -71,9 +71,9 @@ test("read() asks SIGN_HOST's / and /app.js, the quote for a fresh U by POST, in
     const body = init.body ? JSON.parse(init.body) : undefined;
     asked.push([init.method ?? "GET", url, body?.params?.method_name ?? null, body?.params?.block_id ?? body?.params?.finality ?? null]);
     if (url.endsWith("/app.js")) return new Response(`x ${INTENTS_URL}`);
-    if (url.startsWith("https://sign.")) return new Response(A.good.index);
+    if (url.startsWith("https://confidential.unrealized.trade/")) return new Response(A.good.index);
     if (url.endsWith("/v0/quote")) return Response.json({ quote: {}, quoteRequest: { recipient: "e1".repeat(32) } }, { status: 201 });
-    if (url.endsWith("/v1/intents")) return Response.json({ error: { code: "bad_shape" } }, { status: 400, headers: { "access-control-allow-origin": "https://sign.confidential.unrealized.trade" } });
+    if (url.endsWith("/v1/intents")) return Response.json({ error: { code: "bad_shape" } }, { status: 400, headers: { "access-control-allow-origin": "https://confidential.unrealized.trade" } });
     const h = url.includes("fastnear") ? 101 : 100;
     const value = body.params.method_name === "current_salt" ? "252812b3" : false;
     return Response.json({ result: { block_height: body.params.block_id ?? h, result: [...Buffer.from(JSON.stringify(value))] } });
@@ -83,7 +83,7 @@ test("read() asks SIGN_HOST's / and /app.js, the quote for a fresh U by POST, in
   assert.notEqual(a.quote.verdict, "pass");
   assert.equal(a.quote.toU, false);
   assert.deepEqual(a.near, [{ height: 100, salt: "252812b3", used: false }, { height: 100, salt: "252812b3", used: false }]);
-  assert.deepEqual(a.relay, { status: 400, code: "bad_shape", cors: "https://sign.confidential.unrealized.trade" });
+  assert.deepEqual(a.relay, { status: 400, code: "bad_shape", cors: "https://confidential.unrealized.trade" });
   assert.equal(a.intents_url, true);
   const reads = asked.filter((x) => x[2] !== null).map((x) => JSON.stringify(x.slice(2)));
   assert.deepEqual(reads.slice(0, 2), [JSON.stringify(["current_salt", "final"]), JSON.stringify(["current_salt", "final"])], "each RPC's final first");
@@ -127,13 +127,13 @@ test("read() reads the relay's answer through the cap: a 1025-byte refusal from 
   const fetchFn = async (url, init = {}) => {
     const body = init.body ? JSON.parse(init.body) : undefined;
     if (url.endsWith("/app.js")) return new Response(`x ${INTENTS_URL}`);
-    if (url.startsWith("https://sign.")) return new Response(A.good.index);
+    if (url.startsWith("https://confidential.unrealized.trade/")) return new Response(A.good.index);
     if (url.endsWith("/v0/quote")) return Response.json({ quote: {}, quoteRequest: {} }, { status: 201 });
-    if (url.endsWith("/v1/intents")) return new Response(big, { status: 400, headers: { "access-control-allow-origin": "https://sign.confidential.unrealized.trade" } });
+    if (url.endsWith("/v1/intents")) return new Response(big, { status: 400, headers: { "access-control-allow-origin": "https://confidential.unrealized.trade" } });
     const value = body.params.method_name === "current_salt" ? "252812b3" : false;
     return Response.json({ result: { block_height: body.params.block_id ?? 100, result: [...Buffer.from(JSON.stringify(value))] } });
   };
   const a = await read(fetchFn, Date.parse("2026-11-07T14:40:00Z"));
-  assert.deepEqual(a.relay, { status: 400, code: null, cors: "https://sign.confidential.unrealized.trade" });
+  assert.deepEqual(a.relay, { status: 400, code: null, cors: "https://confidential.unrealized.trade" });
   assert.ok(judge(a).lines.some((l) => l.startsWith("BAD the helper carries no id's intent: POST /v1/intents answers 400 null")));
 });

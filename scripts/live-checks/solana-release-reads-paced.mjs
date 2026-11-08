@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card solana-release-reads-paced on SIGN_HOST (https://sign.confidential.unrealized.trade). What it
+// Live check of card solana-release-reads-paced on SIGN_HOST (https://confidential.unrealized.trade). What it
 // holds, and only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified:
 //   - release: the release's trade deps (trade.ts releaseTradeDeps) make provider A (PublicNode) and the helper's route
 //     each under the kit's paced wrapper (send.ts solanaPacedRpc), and the reference reads on the pair the kit hands
@@ -15,6 +15,7 @@
 // What each does is held by the card's tests (packages/kit/test/solana-pool.test.ts, packages/signpage/test/trade.test.ts
 // and page-rpc.test.ts, each "card solana-release-reads-paced"); the recorded answers are facts() over each tree's
 // packages/signpage/index.html and public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/solana-release-reads-paced.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -23,7 +24,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "solana-release-reads-paced";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const Q = "[`\"']";
@@ -47,7 +48,7 @@ const urlVar = (js, url) => {
 export function facts(index, js) {
   const p = PACED.exec(js)?.[1];
   const a = urlVar(js, "https://solana-rpc.publicnode.com");
-  const h = urlVar(js, "https://api.confidential.unrealized.trade");
+  const h = urlVar(js, "https://ct-api.unrealized.trade");
   const t = p ? TIMED(p).exec(js)?.[1] : undefined;
   const release =
     !!(p && a && h) &&

@@ -11,6 +11,7 @@
 //     apps/terminal/src/screens/discover/fields.ts itself, plus buys_1h and sells_1h; every required field
 //     (ROW_REQUIRED) set; USD values decimal strings, shares, changes and counts integers, chain "solana";
 //   - every graduating row is on a curve by the terminal's one rule (a launchpad, curve_bps a whole number 0-9999).
+// After: helper
 //   node scripts/live-checks/market-data-solana-lists.mjs [--base <url>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more reads (printed).
 import "../net-window.mjs";
@@ -18,8 +19,8 @@ import { writeFileSync } from "node:fs";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../apps/terminal/src/screens/discover/fields.ts";
 
 const KEY = "market-data-solana-lists";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const PATH = "/v1/market/lists?chain=solana";
 /** The frozen list: the terminal's Row fields, then the two the Trending column asked for. */
 export const FIELDS = [...new Set([...TERMINAL_FIELDS, "buys_1h", "sells_1h"])];

@@ -29,6 +29,7 @@
 // watch's own pausedAt rule (block h's header, ft_balance_of at its parent and at h by hash, the pin at both) reads
 // open then halted at the Pause's block and halted then open at the Unpause's. Every view is read through the helper's
 // own functions (apps/helper/src/token-status/status.ts viewOutcome, haltOf and pausedFrom), never a copy.
+// After: helper
 //   node scripts/live-checks/helper-usdc-event-watch.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -42,8 +43,8 @@ export { haltOf, viewOutcome };
 const KEY = "helper-usdc-event-watch";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 /** The networks the helper carries, so its watch must answer caught up there. Mainnet is carried because the host names
  *  its vault (WITHDRAW_VAULT_MAINNET, BIND_VAULT_MAINNET: token-status/status.ts vaultOf), not because the release forces
  *  it: withdraw/send.ts starts a helper that names no mainnet vault and refuses only one other than MAINNET_VAULT. The

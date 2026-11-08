@@ -13,6 +13,7 @@
 //     token page drawn behind it, with text), never over an empty page.
 // A screenshot of the signed-out "/" (its header) and of /verify opened directly is kept at both widths, and one of
 // every link's page.
+// After: app
 //   node scripts/live-checks/app-no-blank-pages.mjs [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST as it is served, signed out
 //   node scripts/live-checks/app-no-blank-pages.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -30,8 +31,8 @@ import { named } from "./record-names.mjs";
 
 const KEY = "app-no-blank-pages";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
 export const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, links: ".phh a[href], .tabbar a[href]" },
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false, links: ".tb a[href], .ft a[href]" },

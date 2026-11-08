@@ -62,7 +62,7 @@ test("a CSP with no frame-ancestors is refused, and nothing is uploaded", async 
   const r = await deploy([], ENV, run, pkgWith(swap(" frame-ancestors 'none';", "")));
   assert.equal(r.code, 1);
   assert.ok(r.err.includes(`REFUSED _headers: CSP frame-ancestors: none, want "'none'"`), r.err.join("\n"));
-  assert.ok(r.err.includes("REFUSED _headers: framed from https://confidential.unrealized.trade: allowed (no frame-ancestors)"), r.err.join("\n"));
+  assert.ok(r.err.includes("REFUSED _headers: framed from https://ct-app.unrealized.trade: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.ok(r.err.includes("REFUSED _headers: framed from https://example.com: allowed (no frame-ancestors)"), r.err.join("\n"));
   assert.equal(r.err.at(-1), "nothing was uploaded");
   assert.equal(uploads().length, 0);
@@ -71,10 +71,10 @@ test("a CSP with no frame-ancestors is refused, and nothing is uploaded", async 
 test("other policy breaks are refused", () => {
   const bad = {
     "frame-ancestors *": swap("frame-ancestors 'none'", "frame-ancestors *"),
-    "frame-ancestors APP_HOST (the framed page's policy)": swap("frame-ancestors 'none'", "frame-ancestors https://confidential.unrealized.trade"),
-    "frame-src gone": swap(" frame-src https://confidential.unrealized.trade;", ""),
-    "frame-src *": swap("frame-src https://confidential.unrealized.trade", "frame-src *"),
-    "frame-src a second host": swap("frame-src https://confidential.unrealized.trade", "frame-src https://confidential.unrealized.trade https://example.com"),
+    "frame-ancestors APP_HOST (the framed page's policy)": swap("frame-ancestors 'none'", "frame-ancestors https://ct-app.unrealized.trade"),
+    "frame-src gone": swap(" frame-src https://ct-app.unrealized.trade;", ""),
+    "frame-src *": swap("frame-src https://ct-app.unrealized.trade", "frame-src *"),
+    "frame-src a second host": swap("frame-src https://ct-app.unrealized.trade", "frame-src https://ct-app.unrealized.trade https://example.com"),
     "Origin-Agent-Cluster gone": swap("  Origin-Agent-Cluster: ?1\n", ""),
     "X-Frame-Options sent": `${REAL}  X-Frame-Options: DENY\n`,
     "Integrity-Policy gone": swap("  Integrity-Policy: blocked-destinations=(script)\n", ""),
@@ -131,12 +131,21 @@ test("other policy breaks are refused", () => {
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
 });
 
-test("a build carrying _worker.js or .well-known/webauthn is refused", async () => {
+test("a build carrying any Pages config file but _headers, or .well-known/webauthn, is refused", async () => {
   const { uploads, run } = recorder();
-  for (const f of ["_worker.js", ".well-known/webauthn"]) {
-    const r = await deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
+  // review F8: a _redirects rewrite of /.well-known/webauthn to a JSON file would hand SIGN_HOST's passkeys to the
+  // origins it lists; _routes.json and functions/ are Pages' other config, never part of the signing page
+  const planted = {
+    "_worker.js": "x",
+    ".well-known/webauthn": "x",
+    "_redirects": "/.well-known/webauthn /ror.json 200\n",
+    "_routes.json": "{}",
+    "functions/x.js": "export const onRequest = () => new Response('x');\n",
+  };
+  for (const [f, body] of Object.entries(planted)) {
+    const r = await deploy([], ENV, run, pkgWith(REAL, { [f]: body }));
     assert.equal(r.code, 1, f);
-    assert.ok(r.err.some((e) => e.includes(f)), r.err.join("\n"));
+    assert.ok(r.err.some((e) => e.includes(`carries ${f.startsWith("functions/") ? "functions" : f}`)), r.err.join("\n"));
   }
   assert.equal(uploads().length, 0);
 });
@@ -235,8 +244,7 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
   const own = readdirSync(dir).filter((f) => /^signpage-[\w-]+\.mjs$/.test(f) && !f.endsWith(".test.mjs")).map((f) => f.replace(/\.mjs$/, ""));
   assert.ok(own.length >= 3, own.join(" "));
   for (const k of own) assert.ok(LIVE_CHECKS.includes(k), `LIVE_CHECKS does not name ${k}`);
-  for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /sign\.confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
-  assert.deepEqual([...LIVE_CHECKS].sort(), ["app-harness-signin-e2e", "evm-pool-sync-wide-pages", "evm-sell-no-release-in-flight", "kit-deposit-assets-dry", "kit-deposit-calls", "kit-frame-version", "kit-oneclick-pins-frozen", "kit-renewal-read-bounded", "oneclick-fee-path-own-key", "page-evm-rpc-csp", "pool-answer-unknown", "pool-deposit-address", "pool-deposit-sent-end", "pool-deposits", "pool-read-down", "pool-ready-no-flicker", "pool-restore-wired", "signpage-buy-own-spend", "signpage-buy-route-events", "signpage-error-after-timeout", "signpage-pool-flow", "signpage-pool-kinds", "signpage-pool-mainnet", "signpage-pool-notes", "signpage-pool-pins", "signpage-pool-price", "signpage-pool-withdraw-form", "signpage-postmessage", "signpage-prover-host", "signpage-prover-threads", "signpage-release", "signpage-sent-read-back", "signpage-shell", "signpage-signin-kinds", "signpage-skeleton", "signpage-solana-trade", "signpage-withdraw-form", "signpage-withdraw-handoff", "signpage-withdraw-own-spend", "sol-buy-rent-back", "solana-legs-checked", "solana-release-reads-paced", "solana-written-accounts-whole", "wallet-deposit-follow", "wallet-near-prepay-taken", "wallet-passkey-prf", "wallet-withdraw-move-out"]);
+  for (const k of LIVE_CHECKS) assert.match(readFileSync(join(dir, `${k}.mjs`), "utf8"), /confidential\.unrealized\.trade/, `${k} does not read SIGN_HOST`);
   for (const k of LIVE_CHECKS) assert.ok(out.includes(`scripts/live-checks/${k}.mjs`), `the success line does not name ${k}: ${out}`);
   // the release check reads SIGN_HOST alone, against this commit's build
   assert.ok(out.includes("scripts/live-checks/signpage-release.mjs --host sign"), `the success line does not run signpage-release on SIGN_HOST alone: ${out}`);
@@ -318,7 +326,7 @@ test("a deploy wrangler calls done while SIGN_HOST still serves the old bundle e
   const tries = h.asked.filter((a) => new URL(a.url).pathname === "/app.js");
   assert.ok(tries.length >= 3, `${tries.length} tries`);
   assert.equal(new Set(tries.map((a) => new URL(a.url).search)).size, tries.length, "each try its own cache-buster");
-  for (const a of h.asked) assert.equal(new URL(a.url).origin, "https://sign.confidential.unrealized.trade");
+  for (const a of h.asked) assert.equal(new URL(a.url).origin, "https://confidential.unrealized.trade");
   const waited = h.slept.reduce((a, b) => a + b, 0);
   assert.ok(waited >= 45_000 && waited <= 90_000, `${waited} ms`);
 });

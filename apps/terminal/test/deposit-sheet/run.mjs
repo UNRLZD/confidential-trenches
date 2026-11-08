@@ -8,7 +8,10 @@
 // S4.13, S4.15 and S4.16 within 1 px and within 2 px of R5's (app.md:1100); BAR-11, the counter's box constant and no
 // layout shift over 120 s of page clock; and the calls: Get address sends deposit.quote with the asset and amount only,
 // Withdraw on a held deposit sends withdraw.open with the held id only (no address from the app, W:684), Backup sends
-// backup.open with the typed amount in the return view, Copy copies the checked quote's address.
+// backup.open with the typed amount in the return view, Copy copies the checked quote's address. Card deposit-to-pool:
+// the To row in every form state, the NEAR vault and the three pools in that order, each tile its chain's own mark
+// (market/pads.ts logos) loaded; each pool picked draws pool-off with Get address off and asks no quote; the vault
+// picked back draws the quote again and Get address sends deposit.quote; Recent's header is whole or not drawn.
 //   node apps/terminal/test/deposit-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -36,7 +39,7 @@ const R5 = {
   "1440": { sheet: [1110, 0, 330, 900], action: [1123, 849, 305, 39] },
 };
 
-// fixture, whether the shot taps Get address first, the state it must show
+// fixture, whether the shot taps Get address first, the state it must show, and the To tile it picks first (none: the vault)
 const STATES = [
   ["loading", false, "S4.1"],
   ["quoting", false, "S4.2"],
@@ -63,7 +66,14 @@ const STATES = [
   ["held-not-caught-up", true, "held-not-caught-up"],
   ["held-vault-blocked", true, "held-vault-blocked"],
   ["expired", true, "S4.20"],
+  ["quote", false, "pool-off", "solana"],
+  ["quote", false, "pool-off", "base"],
+  ["quote", false, "pool-off", "robinhood"],
 ];
+const DESTS = ["near", "solana", "base", "robinhood"];
+const DEST_NAMES = ["NEAR", "Solana", "Base", "Robinhood"];
+// the states with the To row: the form's and pool-off
+const FORM_STATES = new Set(["S4.1", "S4.2", "S4.3", "S4.4", "S4.5", "S4.6", "S4.7", "S4.8", "quote-refused", "S4.19", "pool-off"]);
 const ADDRESS_STATES = new Set(["S4.13", "S4.14", "S4.15", "S4.18"]);
 
 async function build() {
@@ -97,7 +107,7 @@ const rect = (page, sel) => page.locator(sel).first().evaluate((e) => { const r 
 const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
 
 let BASE = "";
-async function open(browser, w, f, { tap = false, clock = "fixed" } = {}) {
+async function open(browser, w, f, { tap = false, clock = "fixed", dest = null } = {}) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
   await ctx.addInitScript(INIT);
   const page = await ctx.newPage();
@@ -107,6 +117,7 @@ async function open(browser, w, f, { tap = false, clock = "fixed" } = {}) {
   page.on("request", (r) => !r.url().startsWith(BASE) && !r.url().startsWith("data:") && external.push(r.url()));
   await page.goto(`${BASE}/?f=${f}`);
   await page.waitForSelector(".dep[data-state]");
+  if (dest) await page.locator(`[data-dest="${dest}"]`).click();
   if (tap) {
     await page.waitForSelector('.dep[data-state="S4.3"]');
     await page.locator('[data-control="deposit-get"]').click();
@@ -122,9 +133,9 @@ const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     const boxes = {};
-    for (const [f, tap, want] of STATES) {
-      const tag = `${f} @${w.name}`;
-      const { ctx, page, external } = await open(browser, w, f, { tap });
+    for (const [f, tap, want, dest = null] of STATES) {
+      const tag = `${f}${dest ? ` to ${dest}` : ""} @${w.name}`;
+      const { ctx, page, external } = await open(browser, w, f, { tap, dest });
       const shown = await page.locator(`.dep[data-state="${want}"]`).waitFor({ timeout: 5000 }).then(() => true, () => false);
       const got = await page.locator(".dep").getAttribute("data-state");
       check(shown, `${tag}: state ${got}, want ${want}`);
@@ -140,6 +151,15 @@ try {
       else check(addrs.length === 0, `${tag}: an address outside the address states`);
       const body = await page.locator(".dep").innerText();
       if (!ADDRESS_STATES.has(want)) check(!body.replace(/\s/g, "").includes(ADDRESS.slice(0, 8)), `${tag}: address text drawn`);
+      // Recent's header whole or not drawn: under the To row the phone's form leaves Recent less room than its header,
+      // and a header cut by Recent's own clip box (overflow hidden, so no BAR-10 rule sees it) read "Recent" in half
+      const cut = await page.$$eval(".drecent", (els) => els.flatMap((r) => {
+        const hd = r.querySelector(".hd");
+        if (!hd || !hd.getClientRects().length) return [];
+        const a = r.getBoundingClientRect(), b = hd.getBoundingClientRect();
+        return b.top < a.bottom - 0.5 && b.bottom > a.bottom + 0.5 ? [`${b.bottom.toFixed(1)} past ${a.bottom.toFixed(1)}`] : [];
+      }));
+      check(cut.length === 0, `${tag}: Recent's header cut: ${cut.join(", ")}`);
       // BAR-12: the done screen only at the kit's done
       check((want === "S4.16") === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
       if (["S4.3", "S4.13", "S4.15", "S4.16"].includes(want) && !boxes[want]) boxes[want] = { sheet: await rect(page, ".dep-box"), action: await rect(page, ".dfoot .dbtn") };
@@ -147,7 +167,21 @@ try {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(want);
       }
-      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}.png`) });
+      // the To row: in the form states only, the vault and the three pools in order, each its own chain's mark loaded,
+      // the picked tile pressed; a pool picked asks no quote and keeps Get address off
+      const tiles = await page.$$eval(".dtiles button", (els) => els.map((e) => ({ dest: e.getAttribute("data-dest"), name: e.querySelector(".nm")?.textContent, on: e.getAttribute("aria-pressed"), img: e.querySelector("img")?.getAttribute("src") ?? "", loaded: (e.querySelector("img")?.naturalWidth ?? 0) > 0 })));
+      if (FORM_STATES.has(want)) {
+        check(JSON.stringify(tiles.map((t) => t.dest)) === JSON.stringify(DESTS) && JSON.stringify(tiles.map((t) => t.name)) === JSON.stringify(DEST_NAMES), `${tag}: To tiles ${JSON.stringify(tiles.map((t) => [t.dest, t.name]))}`);
+        check(tiles.every((t) => t.loaded && new RegExp(`/${t.dest}[-.]`).test(t.img)), `${tag}: To marks ${JSON.stringify(tiles.map((t) => [t.img, t.loaded]))}`);
+        check(tiles.filter((t) => t.on === "true").map((t) => t.dest).join() === (dest ?? "near"), `${tag}: To picked ${JSON.stringify(tiles.map((t) => t.on))}`);
+      } else check(tiles.length === 0, `${tag}: To row outside the form states`);
+      if (dest) {
+        const calls = await page.evaluate(() => window.__calls);
+        check(!calls.some((c) => c.kind === "deposit.quote"), `${tag}: a pool picked sent deposit.quote`);
+        check(await page.locator('[data-control="deposit-get"]').isDisabled(), `${tag}: Get address on for a pool`);
+        check((await page.locator(".dep").getAttribute("data-dest")) === dest, `${tag}: data-dest`);
+      }
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}${dest ? `-${dest}` : ""}-${w.name}.png`) });
       await ctx.close();
     }
 
@@ -184,6 +218,25 @@ try {
       const q = calls.find((c) => c.kind === "deposit.quote");
       check(q && JSON.stringify(Object.keys(q.params).sort()) === '["amount","origin_asset"]' && q.params.amount === "15", `@${w.name}: deposit.quote ${JSON.stringify(q)}`);
       check(calls.some((c) => c.kind === "copy" && c.text === ADDRESS), `@${w.name}: Copy ${JSON.stringify(calls)}`);
+      await ctx.close();
+    }
+    // a pool picked asks nothing more, even a new amount; the vault picked back quotes and gets the address
+    {
+      const { ctx, page } = await open(browser, w, "quote");
+      await page.waitForSelector('.dep[data-state="S4.3"]');
+      await page.locator('[data-dest="base"]').click();
+      await page.waitForSelector('.dep[data-state="pool-off"]');
+      const n0 = (await page.evaluate(() => window.__calls)).length;
+      await page.clock.runFor(1_000).catch(() => {});
+      await page.locator('[data-control="deposit-get"]').click({ force: true, timeout: 1_000 }).catch(() => {});
+      const after = (await page.evaluate(() => window.__calls)).slice(n0);
+      check(after.length === 0, `@${w.name}: pool-off asked ${JSON.stringify(after)}`);
+      await page.locator('[data-dest="near"]').click();
+      await page.waitForSelector('.dep[data-state="S4.3"]', { timeout: 5_000 }).catch(() => {});
+      await page.locator('[data-control="deposit-get"]').click({ timeout: 3_000 }).catch(() => {});
+      await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).catch(() => {});
+      const q = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "deposit.quote");
+      check(q.length === 1 && q[0].params.amount === "15" && (await page.locator(".dep").getAttribute("data-state")) === "S4.13", `@${w.name}: the vault picked back: ${JSON.stringify(q)}`);
       await ctx.close();
     }
     for (const f of ["held", "held-halted", "held-not-caught-up", "held-vault-blocked"]) {

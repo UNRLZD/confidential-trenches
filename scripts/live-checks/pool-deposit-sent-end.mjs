@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-deposit-sent-end on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card pool-deposit-sent-end on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified (review 7: each mark
 // pins the helpers and the hand-off its rule rests on, not only the rule's own shape):
 //   - Solana end read (pool-deposit.ts noteEnd): the note's own record first, read only (records: no note store opened;
@@ -28,6 +28,7 @@
 // What each does is held by the card's tests (packages/signpage/test/pool-deposit.test.ts and pool-deposit-evm.test.ts,
 // each "pool-deposit-sent-end" and "review 8"); the recorded answers are facts() over each tree's
 // packages/signpage/index.html and public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/pool-deposit-sent-end.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -36,7 +37,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-deposit-sent-end";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const Q = "[`\"']";
@@ -80,10 +81,11 @@ const EVM_LEFT = new RegExp(`finally\\{${N}\\.fill\\(0\\);for\\(let ${N} of ${N}
 // posted unless the reads gave up (null)
 const ENDED = `\`stage\`in (${N})&&\\(\\1\\.stage===${Q}filled${Q}\\|\\|\\1\\.stage===${Q}part_filled${Q}&&\\((${N})===null\\|\\|\\2\\.notes\\.length===0\\)\\)`;
 const AFTER = `\\.then\\(\\(\\)=>\\{let (${N})=${N};if\\(\\1!==null&&(${N})!==null\\)return ${N}\\(\\1\\.h,\\1\\.left\\)\\.then\\((${N})=>void\\(\\3!==null&&\\2\\.progress\\(\\3\\)\\),\\(\\)=>\\{\\}\\)\\}\\)`;
-// the Solana kind: its run awaited in a try whose finally reads the hand-off (a throw too)
+// the Solana kind: its run awaited in a try whose finally reads the hand-off (a throw too); the run takes the follow's
+// fixed source as a third argument since card pool-deposit-follow
 // answered, an end goes as the run's own stage (filled or part_filled), once
 const POSTED = `;${N}\\?${N}\\?${N}\\?\\.progress\\(\\1\\.stage\\):`;
-const SOL_KIND = [new RegExp(`${N}=null;try\\{${N}=await ${N}\\(${N},${N}\\)\\}finally\\{try\\{let ${N}=${N},${N}=${N}!==null&&${ENDED}${POSTED}`), new RegExp(`\\.finally\\(${N}\\)${AFTER}`)];
+const SOL_KIND = [new RegExp(`${N}=null;try\\{${N}=await ${N}\\(${N},${N}(?:,${N})?\\)\\}finally\\{try\\{let ${N}=${N},${N}=${N}!==null&&${ENDED}${POSTED}`), new RegExp(`\\.finally\\(${N}\\)${AFTER}`)];
 const EVM_KIND = [new RegExp(`${N}=${ENDED}${POSTED}`), new RegExp(`${Q}failed${Q}\\},${N}\\(\\)\\}\\)${AFTER}`)];
 // a run's landing posts no stage: the Solana rung's landing returns at its proof's start; the EVM note's goes on
 const SOL_RUNG = new RegExp(`[,{ ;](${N})=await ${N}\\.move\\(${N}\\.id,${Q}INCOMING${Q},${Q}UNSPENT${Q},\\{leaf:${N}\\}\\);for\\(let ${N} of ${N}\\)${N}\\.add\\(${N}\\.signature\\);let ${N}=${N}\\?await ${N}\\(${N},${N}\\):null;return [^;]{0,80}?,${N}&&${N}\\+\\+,${N}\\.landed\\?\\.\\(\\1\\),${Q}landed${Q}\\}`);

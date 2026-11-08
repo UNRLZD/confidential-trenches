@@ -13,6 +13,7 @@
 // no pool and ends done at once; a pin that lands makes the same run read it, and a pool it cannot read ends stalled,
 // which this check fails. The devnet and Base Sepolia notes themselves are the card's run record
 // (pool-restore-wired.run.json), read on two RPCs.
+// After: sign
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/pool-restore-wired.mjs --local [--record <file>]   SIGN_HOST from this checkout's
 //     committed build under its own _headers, nothing on the network
@@ -27,8 +28,8 @@ import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const KEY = "pool-restore-wired";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SIGN_HOST = "sign.confidential.unrealized.trade";
-const APP_HOST = "confidential.unrealized.trade";
+const SIGN_HOST = "confidential.unrealized.trade";
+const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const START = "/portfolio";
 const WAIT_MS = 20_000;

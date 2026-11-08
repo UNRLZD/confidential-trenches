@@ -172,6 +172,8 @@ type Opts = {
   maxTip?: bigint;
   /** this provider refuses each method it names */
   refuse?: (method: string) => boolean;
+  /** eth_getBalance of the sell sender at "pending" (10^18 unless given) */
+  balance?: () => unknown;
 };
 function rpc(calls: Calls, o: Opts = {}): EvmRpc {
   return async (method, params) => {
@@ -197,6 +199,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
         if (o.revert) throw new Error("RPC error 3: execution reverted: 0xd6d39ee2"); // the kit client's wording
         return `0x${w32(1n)}`;
       }
+      case "eth_getBalance": return params[0] === SENDER && params[1] === "pending" ? (o.balance?.() ?? `0x${(10n ** 18n).toString(16)}`) : "0x0";
       case "eth_sendRawTransaction":
         if (o.sendFails) throw new Error("RPC error -32000: already known");
         return `0x${hex(keccak_256(unhex(params[0] as string)))}`;
@@ -2201,4 +2204,50 @@ test("no fee collector set: every sell is 503 not_configured with nothing read; 
   // review L2: the collector is never the release's fee recipient (EvmFeeAnswer: "never the withdraw's fee_recipient"),
   // in either case of hex
   for (const c of [FEE_TO, FEE_TO.toUpperCase().replace("0X", "0x")]) assert.throws(() => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: c }, [rpc([]), rpc([])], () => NOW), /fee collector must be an address, not the pool's, a sender's or the fee recipient's/, c);
+});
+
+// ---- card sell-sender-low-mark: the sell sender says when it runs low ----
+test("the sell sender's low mark: one line when its lower pending balance first falls under one hour's unpaid sell budget, none at the mark, again only after a read at or over it; every sale still goes", async () => {
+  const mark = EVM_SELL_UNPAID_BUDGET_WEI; // one hour's unpaid sell budget
+  const q = (x: bigint) => `0x${x.toString(16)}`;
+  const line = (bal: bigint) => `evm base-sepolia: sells run low: ${SENDER}'s lower pending balance ${bal} wei, under the mark ${mark} wei (one hour's unpaid sell budget); refill the sender`;
+  const run = (oa: Opts, ob: Opts) => {
+    const lines: string[] = [];
+    const calls: Calls = [];
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, log: (l) => lines.push(l) }, [rpc(calls, oa), rpc([], ob)], () => NOW);
+    let n = 0n;
+    const sellOne = async () => {
+      const a = await s.sell(body({ sell: { nonce: n++ } }));
+      assert.equal(code(a), "ok", `a sale the sender can pay goes: ${JSON.stringify(a.body)}`);
+    };
+    return { lines, calls, sellOne };
+  };
+  // the lower of the two providers is read: A at the mark, B one wei under it; one line over three sales
+  let low = run({ balance: () => q(mark) }, { balance: () => q(mark - 1n) });
+  for (let i = 0; i < 3; i++) await low.sellOne();
+  assert.deepEqual(low.lines, [line(mark - 1n)], "one line for the whole fall");
+  assert.ok(low.calls.some((c) => c.method === "eth_getBalance" && c.params[0] === SENDER && c.params[1] === "pending"), "the sell sender's pending balance is read");
+  // at the mark on both: nothing
+  low = run({ balance: () => q(mark) }, { balance: () => q(mark) });
+  for (let i = 0; i < 3; i++) await low.sellOne();
+  assert.deepEqual(low.lines, [], "at the mark is not under it");
+  // falls, refills to the mark, falls again: a second line, and only one per fall
+  let bal = mark - 1n;
+  low = run({ balance: () => q(bal) }, { balance: () => q(bal) });
+  await low.sellOne();
+  await low.sellOne();
+  bal = mark;
+  await low.sellOne();
+  bal = mark - 2n;
+  await low.sellOne();
+  await low.sellOne();
+  assert.deepEqual(low.lines, [line(mark - 1n), line(mark - 2n)], "a second line only after a read at the mark");
+  // one provider's balance read fails or answers garbage: the other's is the balance, and the sale still goes
+  low = run({ refuse: (m) => m === "eth_getBalance" }, { balance: () => q(mark - 3n) });
+  await low.sellOne();
+  assert.deepEqual(low.lines, [line(mark - 3n)], "a failed read on A: B's balance is read");
+  low = run({ balance: () => "0x00ff" }, { balance: () => ({ hex: "0x1" }) });
+  await low.sellOne();
+  assert.deepEqual(low.lines, [], "no balance read on either: no line, and the sale went");
+  assert.equal((evmModule as Record<string, unknown>).EVM_SELL_LOW_MARK_WEI, mark, "the mark is exported as one hour's unpaid sell budget");
 });

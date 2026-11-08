@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Live check of card pool-deposits: the signing page's same-chain Solana deposit, built, priced and its mark read by the
 // kit (packages/kit/src/trade/solana/pool-deposit.ts) since slice 2, landed a note on the devnet pool its testnet build
-// pins, and SIGN_HOST (https://sign.confidential.unrealized.trade) still serves the mainnet build, which carries no testnet pin. The run is pool-deposits.run.json,
+// pins, and SIGN_HOST (https://confidential.unrealized.trade) still serves the mainnet build, which carries no testnet pin. The run is pool-deposits.run.json,
 // written from packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts, at this card's
 // code, a seed made in that run). The reads are signpage-pool-notes's, on each of two devnet RPCs of two operators at
 // finalized: the deposit tx with no error, paid and signed by the run's U, calling the pinned program; the mark at the
 // run's value and nonce, the program's; the label leaf keccak256(scope, nonce) mod p and the state leaf the note's
 // commitment, both worked out here; U at 0 lamports (the kit's cost was exactly what the program took).
+// After: sign
 //   node scripts/live-checks/pool-deposits.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
 // error exit 2.
@@ -24,13 +25,13 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, recorder } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, devnetPin, recorder } from "./pool-sol-deploy.mjs";
 import { check as checkRun, readSignFlow } from "./signpage-pool-notes.mjs";
 
 const KEY = "pool-deposits";
 export const RUN = new URL("./pool-deposits.run.json", import.meta.url);
 
-const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+const SIGN_HOST = "https://confidential.unrealized.trade";
 /** The EVM deposit's marks in SIGN_HOST's bundle, each a string the minifier keeps. */
 export const EVM_MARKS = Object.freeze({
   // derive/keys.ts depositIdEvm: U^evm's HKDF label
@@ -81,7 +82,7 @@ export function judgeEvm(e, routed = routedReleases()) {
 }
 
 /** The verdict for this card's run (with `precommitment` in its place when given), read through `fetchFn`, SIGN_HOST's
- *  read `sign`, and SIGN_HOST's EVM facts `evm`. */
+ *  read `sign`, and SIGN_HOST's EVM facts `evm`, on today's devnet pin (signpage-pool-notes's check, which takes no deploy record). */
 export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), evm, ...rest } = {}) {
   const r = await checkRun({ run, ...rest });
   const lines = [...r.lines, ...judgeEvm(evm)];
@@ -100,7 +101,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const precommitment = opt("--precommitment") ?? run.precommitment;
     const evm = await readSignEvm();
     const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, evm });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, evm, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment: devnetPin().record, precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, evm, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);

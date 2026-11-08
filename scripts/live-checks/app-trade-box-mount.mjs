@@ -10,6 +10,7 @@
 //   - 390: the page behind holds no box; the bar's Buy opens the trade sheet with the same box and grid in it, inside the
 //     window, and its button opens the sign-in sheet over it.
 // A screenshot of every load and step is kept.
+// After: app
 //   node scripts/live-checks/app-trade-box-mount.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell, signed out (app-in-shell.mjs harnessRoute
@@ -23,8 +24,8 @@ import { count, usd } from "../../apps/terminal/src/screens/discover/format.ts";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-trade-box-mount";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LOADS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },

@@ -6,7 +6,7 @@
   "note": "card helper-solana-failover: apps/helper (this card's tree on 62741c6) run on a Mac by node src/server.ts with every Solana slot (SOLANA_RPC_URL, _TRADES_, _HOLDERS_, SOLANA_STREAM_WS_URL) a Helius URL with a made-up key (Helius answers 401 Unauthorized, read 10:05Z), read 2026-11-04T10:20:16Z: the RPC slot fell back on its first read (log: solana rpc fallback (401)), the others not yet asked; PASS, the fallback a note"
  },
  "bad_pre_card": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "status": 200,
   "body": "{\"ok\":true,\"commit\":\"500a56cb4ebf4697259a4625e54e2fed591e4887\",\"release\":20,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"}}",
   "note": "the deployed helper before this card (500a56c, read 2026-11-04T10:20:17Z): no solana in /v1/health, so a fallen-back slot would not show; FAIL"

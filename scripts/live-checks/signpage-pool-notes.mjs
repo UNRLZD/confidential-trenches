@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Live check of card signpage-pool-notes: the signing page's pool.deposit landed a note on the devnet pool its testnet
-// build pins, and SIGN_HOST (https://sign.confidential.unrealized.trade) still serves the mainnet build, which carries no
+// build pins, and SIGN_HOST (https://confidential.unrealized.trade) still serves the mainnet build, which carries no
 // testnet pin. Since card signpage-pool-mainnet that build carries the same deposit flow (it runs on the page's own
 // network, and refuses every pool kind while mainnet pins no pool: signpage-pool-mainnet's check), so the flow's
 // presence is recorded here and no longer judged. The run is signpage-pool-notes.run.json, written by
@@ -12,14 +12,15 @@
 //   - state page entry at the run's leaf index: the note's commitment, worked out here from the run's value, the label
 //     and the precommitment (the kit's vaultCommitment), with a nonzero root; the run's recorded commitment must be it;
 //   - U holds 0 lamports: the deposit spent all of it, rung and costs.
+// After: sign
 //   node scripts/live-checks/signpage-pool-notes.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
 // error exit 2.
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, answerOf, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
-import { PIN, SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
+import { DEVNET_PROVIDERS, MARK_TAG, PRE_MARK_LEN, account, answerOf, devnetPin, be32, hex, labelOf, onTwoOperators, operatorOf, operatorProblems, pageAddress, poolAddress, preMarkAddress, recorder, rpc, scopeOf } from "./pool-sol-deploy.mjs";
+import { SIGN, TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { vaultCommitment } from "../../packages/kit/src/index.ts";
 
 const KEY = "signpage-pool-notes";
@@ -38,13 +39,17 @@ export async function readSignFlow(fetchFn = fetch) {
   return { status: r.status, bytes: text.length, found: TESTNET_ONLY.filter((s) => text.includes(s)), flow: text.includes(DEPOSIT_FLOW) };
 }
 
-/** The verdict for the run `run` (with `precommitment` in its place when given), read through `fetchFn`, and SIGN_HOST's read `sign`. */
-export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign } = {}) {
+/** The verdict for the run `run` (with `precommitment` in its place when given), read through `fetchFn`, and SIGN_HOST's read `sign`,
+ *  against today's devnet pin (pool-sol-deploy.devnet.json, devnetPin()), the one a live run reads: a replay is judged on
+ *  it too, so a recording on another program or pool FAILs (it takes no deploy record of its own). */
+export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, ...rest } = {}) {
+  if ("deployment" in rest) throw new Error("check reads today's devnet pin only: no deploy record is passed in");
+  const pin = devnetPin();
   const lines = [];
   const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
   say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0,
     `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}], deposit flow ${sign.flow}` : "not read"}`);
-  say(run.cluster === "devnet" && run.program === PIN.program && run.pool === PIN.pool, `the run is on the pinned devnet pool: ${run.cluster}, ${run.program}, ${run.pool}`);
+  say(run.cluster === "devnet" && run.program === pin.program && run.pool === pin.pool, `the run is on the pinned devnet pool ${pin.pool}: ${run.cluster}, ${run.program}, ${run.pool}`);
   say(precommitment === run.precommitment, `the precommitment read is the run's: ${precommitment}`);
   const problems = operatorProblems(rpcs, "devnet");
   say(problems.length === 0, `two devnet operators or more, in order: ${rpcs.join(", ")}${problems.length ? `: ${problems.join("; ")}` : ""}`);
@@ -101,8 +106,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const rec = recorder();
     const sign = await readSignFlow();
     const precommitment = opt("--precommitment") ?? run.precommitment;
+    const deployment = devnetPin().record;
     const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);

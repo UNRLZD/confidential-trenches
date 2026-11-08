@@ -11,6 +11,7 @@
 // `chainId` on both, and the anchor's height must hold its hash on both. The report adds each RPC's raw eth_chainId
 // answer and the wallet's reading of it (evmRpcHex).
 import { createInterface } from "node:readline";
+import { bridgeAnswers } from "./bridge-answers.ts";
 import { EVM_POOL_TAG, evmAgreedBlock, evmHoldsAnchor, evmRetryLag, evmRpcHex, type EvmRpc } from "../src/pool/evm.ts";
 
 type Args = { chainId: string; urls: [string, string]; wait: boolean };
@@ -21,14 +22,15 @@ const out = (o: unknown) => process.stdout.write(`${JSON.stringify(o)}\n`);
 const waiting = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let next = 0;
 const calls: Call[] = [];
-createInterface({ input: process.stdin }).on("line", (line) => {
-  const m = JSON.parse(line) as { id: number; result?: unknown; error?: string };
+// a replay's answers are handed one at a time in the read's own order (./bridge-answers.ts, card spares-replay-order)
+const take = bridgeAnswers<{ id: number; result?: unknown; error?: string }>(a.wait !== false, (m) => {
   const w = waiting.get(m.id);
   if (w === undefined) return;
   waiting.delete(m.id);
   if (m.error !== undefined) w.reject(new Error(m.error));
   else w.resolve(m.result);
-});
+}, () => waiting.size);
+createInterface({ input: process.stdin }).on("line", (line) => take(JSON.parse(line)));
 const bridge = (k: number): EvmRpc =>
   Object.assign(
     (method: string, params: readonly unknown[]) =>

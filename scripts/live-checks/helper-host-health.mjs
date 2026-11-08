@@ -18,6 +18,7 @@
 //     number is up from it. Without --since the comparison is not made, and the run says so;
 //   - every answer says ready: true (card helper-ready-gate): the deployed helper has warmed (its lists, a token page
 //     and its holders answer 200) before it took this read, so the first live run after a redeploy needs no warm-up wait.
+// After: helper --commit {commit}
 //   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--since <record>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -27,9 +28,9 @@ import { fileURLToPath } from "node:url";
 import { IMAGE_INPUTS } from "../../apps/helper/deploy/image-inputs.mjs";
 
 const KEY = "helper-host-health";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const OTHER = "https://example.com";
 export const PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"];
 /** POST /v1/bind's probe: not one SignedDelegateAction, so the route answers check 1's bad_shape and reads nothing. */

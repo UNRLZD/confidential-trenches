@@ -18,7 +18,7 @@ import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 
-const DEVNET_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+const DEVNET_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 const DEVNET_FEE_PAYER = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
 const SOL_LINE = `  POOL_TESTNET ? { devnet: Object.freeze({ program: "${DEVNET_PROGRAM}", feePayer: "${DEVNET_FEE_PAYER}" }) } : {},`;
 const TABLE_LINE = "export const MAINNET_TABLE: string | null = null;";
@@ -251,7 +251,7 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   // would see the user's W asked from the user's own address
   const holdings = calls.slice(from).filter((c) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner");
   assert.ok(holdings.length >= 3, `the sell's W holdings were read: ${holdings.length} call(s)`);
-  assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://api.confidential.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
+  assert.deepEqual([...new Set(holdings.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "the W's holdings on the helper's route only");
   ns.close();
   w.close();
 });
@@ -267,11 +267,11 @@ test("the mainnet build's pool reads on the network's own pair and fee route: SI
   await b("getAccountInfo", ["SysvarRent111111111111111111111111111111111", { encoding: "base64" }]);
   assert.deepEqual(
     rentReads.slice(before).map((u) => new URL(u).origin),
-    ["https://solana-rpc.publicnode.com", "https://api.confidential.unrealized.trade"],
+    ["https://solana-rpc.publicnode.com", "https://ct-api.unrealized.trade"],
   );
   const pool = solanaPoolOf(PROGRAM).pool;
   const asked: string[] = [];
   const fetchFn = (async (url: string | URL | Request) => (asked.push(String(url)), new Response("{}", { status: 404 }))) as typeof fetch;
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchFn), /HTTP 404/);
-  assert.equal(asked[0], `https://api.confidential.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=${pool}&epoch=1800000000000`);
+  assert.equal(asked[0], `https://ct-api.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=${pool}&epoch=1800000000000`);
 });

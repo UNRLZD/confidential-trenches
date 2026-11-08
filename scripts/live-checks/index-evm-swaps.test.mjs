@@ -25,8 +25,8 @@ const hex = (n) => `0x${n.toString(16)}`;
 
 /** A fetch that answers the recorded run: the helper's two reads, and the providers' replies built from run.chain. */
 const replay = (run) => async (url, init) => {
-  if (url.startsWith("https://api.confidential.unrealized.trade")) {
-    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  if (url.startsWith("https://ct-api.unrealized.trade")) {
+    assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
     const k = url.endsWith(CANDLES_PATH(run.coin)) ? "candles" : url.endsWith(TRADES_PATH(run.coin)) ? "trades" : null;
     assert.ok(k, url);
     return new Response(run.reads[k].body, { status: run.reads[k].status, headers: run.reads[k].headers });
@@ -76,7 +76,7 @@ test("the good answer passes", () => {
 });
 
 test("read() asks the helper and the providers what the check judges: the replay of the good run passes with the same lines", async () => {
-  const again = asRecorded(await read("https://api.confidential.unrealized.trade", A.good.coin, replay(A.good)), A.good);
+  const again = asRecorded(await read("https://ct-api.unrealized.trade", A.good.coin, replay(A.good)), A.good);
   for (const k of ["candles", "trades"]) delete again.reads[k].ms;
   assert.deepEqual(again.chain, A.good.chain);
   assert.deepEqual(judge(again).lines, judge(A.good).lines);
@@ -319,7 +319,7 @@ test("card helper-deploy-reads-fast: read() keeps the lists read and each listed
     if (url.includes("0x00000000000000000000000000000000000000a1")) return new Response('{"error":{"code":"upstream"}}', { status: 503, headers: { "server-timing": 'evm-open;dur=12000, evm-queue;dur=9100;desc="14 posts: pace 6200 ms, in flight 2900 ms"' } });
     return replay(A.good)(url, init);
   };
-  const got = await read("https://api.confidential.unrealized.trade", undefined, fetchFn);
+  const got = await read("https://ct-api.unrealized.trade", undefined, fetchFn);
   assert.equal(got.coin, A.good.coin);
   assert.deepEqual([got.listsRead.status, got.listsRead.headers["server-timing"]], [200, "total;dur=1"]);
   assert.equal(got.tried.length, 1);
@@ -429,7 +429,7 @@ test("card helper-restart-fresh: judged by its own read, an answer whose X-Fetch
 
 test("card helper-restart-fresh: read() dates each answer by its own request and the heads by their read", async () => {
   const before = Date.now();
-  const got = await read("https://api.confidential.unrealized.trade", A.good.coin, replay(A.good));
+  const got = await read("https://ct-api.unrealized.trade", A.good.coin, replay(A.good));
   const after = Date.now();
   for (const k of ["candles", "trades"]) {
     const t = Date.parse(got.reads[k].at);

@@ -19,14 +19,15 @@
 // complete and agreed, and either no request that may be pending is stored, or one is and the carry sends nothing
 // (token_halted, token_not_accepted or relayer_low). A request that may be pending while the carry runs its checks is
 // the bad end state. /v1/token-status is not read: the request hold gates only the deposit carry.
+// After: helper
 //   node scripts/live-checks/helper-usdc-pending-pause.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-usdc-pending-pause";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const NETS = {
   mainnet: { token: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", rpcs: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], archive: "https://archival-rpc.mainnet.fastnear.com" },
   testnet: { token: "bf-usdc-20261101t022248.testnet", rpcs: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], archive: "https://archival-rpc.testnet.fastnear.com" }, // gitleaks:allow (a public account id)

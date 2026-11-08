@@ -17,6 +17,7 @@
 //   - Recent reads the account's deposits from state.ops: none under the form before (No activity), and on the done
 //     screen the one row Deposited $73.18.
 // A screenshot of the quote, the address and the deposited state is kept per width and scheme.
+// After: app
 //   node scripts/live-checks/app-deposit-mount.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served), framed by the stand-in shell
 //   node scripts/live-checks/app-deposit-mount.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -33,9 +34,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-deposit-mount";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signed-in account the stand-in shell sends: backup saved, nothing yet in the vault. */
 export const ACCOUNT = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 /** The deposit reads, in the kit's shapes (messages.ts DepositAsset, DepositDry, SignpageResults["deposit.quote"]). */

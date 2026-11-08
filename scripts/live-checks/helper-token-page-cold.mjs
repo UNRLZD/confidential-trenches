@@ -17,14 +17,15 @@
 // The time judged is the helper's: each page read goes right after two GET /v1/health on the same kept-alive
 // connection (the first opens it), and the second's time (the round trip to the helper, which answers it at once) is
 // taken off the page read's. So a runner far from the helper, or a connection made anew, is not counted as the page's.
+// After: helper
 //   node scripts/live-checks/helper-token-page-cold.mjs [--base <url>] [--pairs <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-token-page-cold";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const POOL_URL = "https://lite-api.jup.ag/tokens/v2/tag?query=verified";
 export const PAIRS = 16;
 export const COLD_MIN = 30;

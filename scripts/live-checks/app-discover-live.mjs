@@ -17,6 +17,7 @@
 // from that frame's own document answer, and counts only that frame's requests and errors. A script of the outer page
 // or of a hidden frame is judged by its own host's checks (app-shell, signpage-*).
 // A screenshot of every width is kept.
+// After: app
 //   node scripts/live-checks/app-discover-live.mjs [--url <page>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --url is the page to open (default APP_HOST/discover); --record writes what the run read, so the check's test can
@@ -30,8 +31,8 @@ import { launchBrowser } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
 
 const KEY = "app-discover-live";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
 export const COLUMNS = ["new", "trending", "hot", "graduating"];
 /** The columns that must hold rows: the helper's own check requires `new` and `trending_1h` to hold rows. */

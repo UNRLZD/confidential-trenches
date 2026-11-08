@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card wallet-restore-transfer-rpcs: a restore from the 12 words reads every W's tokens on every EVM
 // network, never "unread" because a provider caps the range, or because one is out: on Base and Robinhood on the live
-// helper's route (POST https://api.confidential.unrealized.trade/v1/rpc/{chain}, one reader, decision M359, card
+// helper's route (POST https://ct-api.unrealized.trade/v1/rpc/{chain}, one reader, decision M359, card
 // evm-transfer-rpc-spares), on a testnet on its Transfer list (the wallet's EVM_TRANSFER_RPCS, which testnet-run takes
 // too: three operators read as a pair with a spare; on 5 Nov 17:1xZ thirdweb's keyless daily quota failed Base and
 // Robinhood testnet, HTTP 429 with Retry-After about 7.4 h). On 4 Nov 23:18Z the evm-buy-hookdata-fee run's restore left two of its three Base Sepolia Ws
@@ -27,6 +27,7 @@
 // (the URL's host, never a key; the method, the block range, its try, and the Retry-After the provider named and the
 // time waited since its last answer). Run 42146750370's job was cancelled at 20 min with no line: four reads one after
 // another, printed only at the end, the Base one at 78-block pages (EVM_LOG_CEILING_PAGES in the wallet's evm.ts).
+// After: helper
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run: the
@@ -45,7 +46,7 @@ export const CHECK = path.join(REPO, "packages", "wallet", "scripts", "transfer-
 /** scripts/live-checks/evm-buy-hookdata-fee.base-sepolia.json: the v3 buy's W, its block and the token it bought. */
 export const W = "0x809286a1bf1585b1eeeefcc7a7f3508158fd078e";
 export const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
-export const HELPER = "https://api.confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 /** Each network's read ends within this: the slowest, Base's 50,000 blocks on the helper's route at its 1,000-block cap,
  * is 80 pages of 625 blocks at the holdings pace (2 eth_getLogs in 3 s), 130 s from the Mac (6 Nov 02:53Z, 88 calls)
  * and 3.2 min on GitHub's runner (run 42152968842); this is 2.8 times the Mac's read, and with the networks read at once
@@ -72,33 +73,56 @@ export async function post(url, method, params) {
   }
 }
 
-/** A live transport that keeps every answer, in order, with the network it was read for. */
+/** A live transport that keeps every answer, in order, with the network it was read for and, when the caller names one,
+ * its context (`ctx`: the run it was read in, such as one case of evm-transfer-rpc-spares.mjs). */
 export function recorder() {
   const log = [];
-  const transport = async (network, url, method, params) => {
+  const transport = async (network, url, method, params, ctx) => {
     const a = await post(url, method, params);
-    log.push({ network, url, method, params, ...a });
+    log.push({ ...(ctx === undefined ? {} : { ctx }), network, url, method, params, ...a });
     return a;
   };
   return { transport, log };
 }
 
-/** A transport that answers each call with the recorded answers to that same call, in their order; past the last,
- * the last again. */
+/** A transport that answers each call with the answers recorded to that same call in its own context (`ctx`, when the
+ * run named one; else the run): a call that was answered gets its answers only, in their order, past the last the
+ * last again; a call never answered gets its last refusal; none recorded is an error. So a call that names its block
+ * (a range, a number, a hash, a chain id) gets its one answer however many times and in whatever order it is asked,
+ * and a call of a moving head ("latest", "finalized") its heads in the order its own context read them (card
+ * spares-replay-order). The wallet's spare walk asks its providers in an order its clock and its answers' arrival set:
+ * on run 42330914189 a replay that served each call its answers in turn, refusals included, gave
+ * rpc-robinhood.globalstake.io's page the recorded timeout where the live run had gone on to its answer, and the case
+ * failed on a recorded good run. A refusal of a call the provider later answered is not replayed: the live read went
+ * past it, so the replay's verdict is the live one. */
 export function replayer(log) {
-  const queues = new Map();
+  const calls = new Map();
   for (const e of log) {
-    const k = JSON.stringify([e.url, e.method, e.params]);
-    if (!queues.has(k)) queues.set(k, []);
-    queues.get(k).push(e);
+    const k = JSON.stringify([e.ctx ?? null, e.url, e.method, e.params]);
+    if (!calls.has(k)) calls.set(k, { answers: [], refusal: undefined });
+    const c = calls.get(k);
+    if ("error" in e) c.refusal = e;
+    else c.answers.push(e);
   }
-  return async (_network, url, method, params) => {
-    const q = queues.get(JSON.stringify([url, method, params]));
-    const e = q?.length > 1 ? q.shift() : q?.[0];
+  return async (_network, url, method, params, ctx) => {
+    const c = calls.get(JSON.stringify([ctx ?? null, url, method, params]));
+    const e = c === undefined ? undefined : c.answers.length > 1 ? c.answers.shift() : (c.answers[0] ?? c.refusal);
     if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
     return "error" in e ? { error: e.error, ...(e.name ? { name: e.name } : {}), ...(e.afterMs !== undefined ? { afterMs: e.afterMs } : {}) } : { result: e.result };
   };
 }
+
+/** A replay's child (`wait` false) reads a clock that stands still (card spares-replay-order). The wallet's spare walk
+ * (evmPair in its evm.ts) picks the next provider by each call's time and each provider's rest, both read on Date.now;
+ * in a replay those times are the runner's, not the providers', so a loaded runner walked another way and asked a page
+ * the recording never held (a recorded good run, its lists and cases shuffled and each answer held 0 to 2 ms: "no
+ * recorded answer to eth_getLogs" on base-mainnet.public.blastapi.io). With the clock still, every call takes 0 ms and
+ * no rest ends, on every runner; a live run keeps the real clock. The clock alone did not hold it: when each answer
+ * reached the child set the walk too (main's runs 42449928067, 42450557518, 42450652755), so the child's bridge hands a
+ * replay's answers one at a time in the read's own order (packages/wallet/scripts/bridge-answers.ts). Every live check
+ * that runs one of the wallet's bridges gives its replay this clock (evm-pool-reads-throttle, notes-per-pool-evm,
+ * wallet-rpc-hex-case too). */
+export const STILL_CLOCK = Object.freeze(["--import", "data:text/javascript,const t=Date.now();Date.now=()=>t;"]);
 
 const host = (u) => new URL(u).host;
 const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
@@ -117,7 +141,7 @@ function runCheck(job, transport, wait, deadlineMs) {
   return new Promise((resolve, reject) => {
     const { want, ...args } = job;
     const t0 = Date.now();
-    const child = spawn(process.execPath, [CHECK, JSON.stringify({ ...args, wait })], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [...(wait ? [] : STILL_CLOCK), CHECK, JSON.stringify({ ...args, wait })], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "", err = "", settled = false;
     const stats = { calls: 0, refused: new Map() };
     const open = new Map(); // id -> the call, asked at

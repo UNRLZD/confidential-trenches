@@ -1,9 +1,9 @@
 {
  "dry": true,
- "helper": "https://api.confidential.unrealized.trade",
+ "helper": "https://ct-api.unrealized.trade",
  "providers": [
   "https://solana-rpc.publicnode.com",
-  "https://api.confidential.unrealized.trade/v1/rpc/solana"
+  "https://ct-api.unrealized.trade/v1/rpc/solana"
  ],
  "slippageBps": 500,
  "runs": [

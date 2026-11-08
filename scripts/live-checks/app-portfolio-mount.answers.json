@@ -65,7 +65,7 @@
   "bad": {
     "check": "app-portfolio-mount",
     "at": "2026-11-04T06:30:26.232Z",
-    "source": "live https://confidential.unrealized.trade, the stand-in shell signed in",
+    "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in",
     "browser": "156.0.8078.80",
     "runs": [
       {

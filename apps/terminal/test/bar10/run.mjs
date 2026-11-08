@@ -34,9 +34,10 @@ const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : undefined;
 const recordAt = args.indexOf("--record");
 const RECORD = recordAt >= 0 ? path.resolve(args[recordAt + 1]) : undefined;
 
-const LISTS_URL = "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana";
-const isTokenRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/token";
-const isCandleRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/candles";
+const LISTS_URL = "https://ct-api.unrealized.trade/v1/market/lists?chain=solana";
+const isTokenRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/token";
+const isCandleRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/candles";
+const isTradesRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/trades";
 
 /** The helper's answer: every list of the fixtures, edge rows after the recorded ones; New also holds the rows on a
  *  curve, as the live one does, so the percent pills are on its first screen. */
@@ -156,6 +157,12 @@ try {
         return [end - (59 - i) * step, f(o), f(Math.max(o, c) * 1.01), f(Math.min(o, c) * 0.99), f(c), String(100 + i * 10)];
       });
       await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST, "access-control-expose-headers": "X-Helper-Source", "x-helper-source": "chain" }, body: JSON.stringify({ tf, candles, src: "chain", as_of_ms: Date.now() }) }).catch(() => {});
+    });
+    // and its tape (card app-chart-controls, the chart's trade marks): a token whose book holds no trades yet, so the
+    // chart draws no marks and the page makes no failed load
+    await ctx.route(isTradesRead, async (r) => {
+      if (late) await wait(LATE.helperMs);
+      await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify({ trades: [], src: "chain", as_of_ms: Date.now() }) }).catch(() => {});
     });
   };
   const prepare = answering(false);

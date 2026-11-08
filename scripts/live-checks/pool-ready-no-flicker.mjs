@@ -12,6 +12,7 @@
 //      run's deposit is read back on two devnet RPCs by the money gate (pool-ready-no-flicker.md's Tx lines).
 // Not read here, and why: SIGN_HOST's mainnet build pins no pool yet (card pool-sol-deploy-mainnet), so no deployed
 // page holds a ready proof to watch; the devnet run is the testnet build of the same code.
+// After: sign
 //   node scripts/live-checks/pool-ready-no-flicker.mjs [--harness] [--record <file>]
 //     --harness: this checkout's bundle stands for SIGN_HOST's /app.js
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -22,7 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-ready-no-flicker";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
 export const READ_EPOCHS = 4; // the epoch of the first ready read and three whole ones after it
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");

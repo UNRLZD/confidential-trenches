@@ -25,6 +25,7 @@
 //   - tap: the shell sends a signed-out state and refuses every open (not_allowed); Sign in, then Use passkey, shows the
 //     line in place of the tap (refused, no Retry, in the sheet) within the kit's 5,000 ms for an open plus 1,500 ms,
 //     the top window stays on SIGN_HOST, and no pop-up opens (card app-hop-refused's rule: a tap never ends in nothing).
+// After: app --engines chromium,firefox,webkit
 //   node scripts/live-checks/app-in-shell.mjs [--engines chromium,firefox,webkit] [--shots <dir>] [--record <file>]
 //     [--expect in|out]   the live hosts; a fresh browser is signed out, so live runs read --expect out (default)
 //   --engines: the engines run and judged, each in full (default all three; CI's browser job runs Chromium only)
@@ -49,8 +50,8 @@ const KEY = "app-in-shell";
 // what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
 const BROWSER_NAMES = { chromium: "Chrome", firefox: "Firefox (Playwright's build)", webkit: "WebKit (Playwright's build)" };
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
 /** The path and query the check opens: a route of the app with a query, so both must survive the move. */
 export const PATH = "/discover?ref=app-in-shell";
 export const ENGINES = ["chromium", "firefox", "webkit"];
@@ -467,9 +468,10 @@ export function shellHeaders(signHeadersFile) {
 /** The helper's reads the terminal makes on its own (Discover's lists, the token route's lists and token read),
  *  answered from recorded live answers so the page under test never reaches the network and / draws a real token
  *  (card app-no-test-token): GET /v1/market/lists?chain=solana as read on 1 Nov, and GET /v1/market/token for the top of
- *  its Trending column as read on 3 Nov (apps/terminal/test/discover-data, test/token-source). A token read for any
+ *  its Trending column as read on 3 Nov (apps/terminal/test/discover-data, test/token-source); GET /v1/market/trades
+ *  answers an empty tape (card app-chart-controls). A token read for any
  *  other mint answers 404, as the helper answers a mint it does not know, never an aborted load. */
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 const RECORDED = (f) => JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test", f), "utf8"));
 const unzipRows = (fields, rows) => rows.map((v) => Object.fromEntries(fields.map((k, i) => [k, v[i]])));
 const LISTS_READ = RECORDED("discover-data/helper-lists-2026-11-01.json");
@@ -516,6 +518,11 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
     }
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/lists") {
       return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(LISTS) });
+    }
+    // the token page's tape (card app-chart-controls, the chart's trade marks): answered as the helper answers a token
+    // whose book holds no trades yet, so the page draws no marks and makes no failed load
+    if (u.origin === HELPER_HOST && u.pathname === "/v1/market/trades") {
+      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify({ trades: [], src: "chain", as_of_ms: Date.now() }) });
     }
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/token") {
       const known = u.searchParams.get("chain") === "solana" && u.searchParams.get("token") === TOKEN_ANSWER.row.token;

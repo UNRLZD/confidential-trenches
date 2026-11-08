@@ -11,6 +11,7 @@
 //   - no element of the row (the avatar's initials aside) has the raw id as its text;
 //   - each badge lies inside its row's box and is not cut by the column (no clipping at either width).
 // A screenshot of every width is kept.
+// After: app
 //   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge(). A row is recorded by its `addr`
@@ -23,8 +24,8 @@ import { CHAINS, NO_LOGO, PADS } from "../../apps/terminal/src/screens/market/pa
 import { launchBrowser } from "../browsers.mjs";
 
 const KEY = "app-launchpad-badges";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
 export const COLUMNS = ["new", "trending", "hot", "graduating"];
 export const WIDTHS = [

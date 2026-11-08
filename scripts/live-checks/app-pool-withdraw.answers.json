@@ -103,7 +103,7 @@
  "bad": {
   "check": "app-pool-withdraw",
   "at": "2026-11-04T13:53:00.590Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in",
   "browser": "157.0.8103.38",
   "runs": [
    {

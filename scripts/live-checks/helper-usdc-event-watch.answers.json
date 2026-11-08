@@ -307,7 +307,7 @@
  "bad_mainnet_not_carried": {
   "note": "the deployed helper, read 2026-11-07 17:13Z by this check: mainnet not carried (its env names no mainnet vault), so its mainnet watch answers the kit not-caught-up answer; everything else read as the good run",
   "readAt": "2026-11-07T17:13:20.012Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "helper": {
    "mainnet": {
     "status": 200,
@@ -611,7 +611,7 @@
  },
  "bad_deployed_before": {
   "readAt": "2026-11-02T15:53:11.432Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "helper": {
    "mainnet": {
     "status": 200,
