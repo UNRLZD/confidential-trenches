@@ -1,35 +1,35 @@
 {
- "note": "app-footer-bar.mjs collect(), headless Chromium at 1440 x 900, signed out. good: this card's build (dd798cfb) at the hosts' names inside the stand-in shell (--harness), a local chain at 600 ms blocks, read 8 Nov 10:45:20Z on the PC box: PASS. bad: the deployed APP_HOST before this card (its footer draws Terms, Privacy and Verify only), NEAR's final block read on rpc.mainnet.fastnear.com, 8 Nov 10:45:28Z on the PC box: FAIL.",
+ "note": "app-footer-bar.mjs collect(), headless Chromium at 1440 x 900, signed out. good: this card's build (615491b9) at the hosts' names inside the stand-in shell (--harness), a local chain at 600 ms blocks, read 8 Nov 12:11:34Z on the Mac queue: PASS. bad: the deployed APP_HOST before this card (its footer draws Terms, Privacy and Verify only), NEAR's final block read on rpc.mainnet.fastnear.com, 8 Nov 10:45:28Z on the PC box: FAIL.",
  "good": {
   "check": "app-footer-bar",
-  "at": "2026-11-08T10:45:20.014Z",
+  "at": "2026-11-08T12:11:34.894Z",
   "source": "harness, terminal build apps/terminal/dist, signed out, a local chain at 600 ms blocks",
-  "browser": "156.0.8078.79",
+  "browser": "157.0.8103.38",
   "framed": true,
   "top": "https://confidential.unrealized.trade/",
   "header": "S1.1",
   "reads": [
    {
     "visible": true,
-    "blockText": "Block 223,500,001",
-    "block": 223500001,
+    "blockText": "Block 223,500,003",
+    "block": 223500003,
     "conn": "on",
     "health": "Stable",
-    "ms": 17,
+    "ms": 29,
     "ticks": [],
-    "near": 223500001,
-    "at": 1794134720728
+    "near": 223500003,
+    "at": 1794139895797
    },
    {
     "visible": true,
-    "blockText": "Block 223,500,011",
-    "block": 223500011,
+    "blockText": "Block 223,500,013",
+    "block": 223500013,
     "conn": "on",
     "health": "Stable",
-    "ms": 4,
+    "ms": 2,
     "ticks": [],
-    "near": 223500013,
-    "at": 1794134727897
+    "near": 223500015,
+    "at": 1794139902977
    }
   ],
   "links": [
