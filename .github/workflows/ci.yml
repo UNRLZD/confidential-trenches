@@ -260,8 +260,9 @@ jobs:
   # package's test:mutants into its commands and gives each to exactly one part, by the job's own strategy.job-index
   # of strategy.job-total, balanced by the seconds each took on CI; its test fails when the heaviest part of this
   # matrix is planned over 540 s, and scripts/ci/tests-run.test.mjs reads the split, so no sweep is lost.
-  # Six parts (card helper-sell-sweep-in-ci): the helper's EVM sell sweep joined the split as three commands of about
-  # 290, 400 and 245 s, which four parts could hold only at 569 s planned; at six the heaviest is the kit's 466 s.
+  # Five parts (cards helper-sell-sweep-in-ci, helper-release-sweep-in-ci): the helper's sell sweep runs as three
+  # commands and its release sweep as one, at the seconds pull request #436's run read (MUTANT_SECONDS); five plan the
+  # heaviest part at the kit's own 430 s, as six do (four would plan 484 s).
   test-mutants:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
@@ -269,7 +270,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6]
+        part: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
