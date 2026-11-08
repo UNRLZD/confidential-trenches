@@ -9,7 +9,7 @@
 // Sepolia W taken out (bad). The wallet's own read runs on the replay: good passes, bad fails, its USDC not listed.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { JOBS, USDC, W, check, replayer, spoil } from "./wallet-restore-transfer-rpcs.mjs";
 
@@ -115,4 +115,23 @@ test("a replay's child reads a clock that stands still, so the wallet's spare wa
   const r = spawnSync(process.execPath, [...STILL_CLOCK, "-e", "const a = Date.now(); setTimeout(() => console.log(a, Date.now()), 25)"], { encoding: "utf8" });
   const [a, b] = r.stdout.trim().split(" ").map(Number);
   assert.ok(a > 0 && a === b, `${r.stdout}${r.stderr}`);
+});
+
+test("every stdio bridge of the wallet's checks hands a replay's answers one at a time in the read's own order, and every live check that runs one gives its replay the still clock (card spares-replay-order: one fix on every bridge)", () => {
+  const dir = new URL("../../packages/wallet/scripts/", import.meta.url);
+  const bridges = readdirSync(dir).filter((f) => f.endsWith(".ts") && /createInterface\(\{ input: process\.stdin \}\)/.test(readFileSync(new URL(f, dir), "utf8")));
+  assert.ok(bridges.length >= 4, bridges.join(", "));
+  for (const f of bridges) {
+    const s = readFileSync(new URL(f, dir), "utf8");
+    assert.match(s, /bridgeAnswers<[^>]*>\(a\.wait !== false, /, `${f}: its answers are not taken through bridgeAnswers`);
+    assert.match(s, /\.on\("line", \(line\) => take\(JSON\.parse\(line\)\)\)/, `${f}: a stdin line not handed to take`);
+  }
+  const here = new URL("./", import.meta.url);
+  for (const f of readdirSync(here).filter((x) => x.endsWith(".mjs") && !x.endsWith(".test.mjs"))) {
+    const s = readFileSync(new URL(f, here), "utf8");
+    for (const b of bridges) {
+      if (!s.includes(`"${b}"`)) continue;
+      assert.match(s, /spawn\(process\.execPath, \[\.\.\.\((?:args\.)?wait \? \[\] : STILL_CLOCK\), /, `${f} runs ${b} with no still clock for its replay`);
+    }
+  }
 });

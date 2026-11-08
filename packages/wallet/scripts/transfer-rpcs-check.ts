@@ -23,6 +23,7 @@
 // same anchors and evmHoldsAnchor, then a log read of the pool's shape (an address, here W, which has no logs, and the
 // pool's three event topics) over the blocks asked, alike on both (evmAgreedLogs); no W is named in a topic.
 import { createInterface } from "node:readline";
+import { bridgeAnswers } from "./bridge-answers.ts";
 import { solanaPacedRpc } from "@blindfill/kit";
 import { HOLDINGS_RPC_LIMIT } from "../src/pool/buy-wallets.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -34,14 +35,15 @@ const a = JSON.parse(process.argv[2] ?? "null") as Args;
 const out = (o: unknown) => process.stdout.write(`${JSON.stringify(o)}\n`);
 const waiting = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let next = 0;
-createInterface({ input: process.stdin }).on("line", (line) => {
-  const m = JSON.parse(line) as { id: number; result?: unknown; error?: string; name?: string; afterMs?: number | null };
+// a replay's answers are handed one at a time in the read's own order (./bridge-answers.ts, card spares-replay-order)
+const take = bridgeAnswers<{ id: number; result?: unknown; error?: string; name?: string; afterMs?: number | null }>(a.wait !== false, (m) => {
   const w = waiting.get(m.id);
   if (w === undefined) return;
   waiting.delete(m.id);
   if (m.error !== undefined) w.reject(Object.assign(new Error(m.error), m.name ? { name: m.name } : {}, m.afterMs !== undefined ? { afterMs: m.afterMs } : {}));
   else w.resolve(m.result);
-});
+}, () => waiting.size);
+createInterface({ input: process.stdin }).on("line", (line) => take(JSON.parse(line)));
 
 try {
   const mainnet = a.network === "base" || a.network === "robinhood";
