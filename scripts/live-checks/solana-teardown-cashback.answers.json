@@ -2,11 +2,11 @@
  "_note": {
   "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
   "bad": "main 3a57948a's build (mainnet): no claims, no claim rules: FAIL",
-  "liveBefore": "SIGN_HOST read 2026-11-08T04:51:17.761Z, before this card's deploy: FAIL"
+  "liveBefore": "SIGN_HOST read 2026-11-08T05:02:00.964Z, before this card's deploy: FAIL"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-GHVBR77kXvINwTwcgL9EGb2278lD5Jft94PrbvDzLYXiYwkLBax5zT57WcUGtAjD\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-GHVBR77kXvINwTwcgL9EGb2278lD5Jft94PrbvDzLYXiYwkLBax5zT57WcUGtAjD",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lqtt9X5Makvg0C8Qk24HCFSpVRyUXarF3Q26LF0UvYyEBcX1KtiNRss5EzCdhVJP\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-lqtt9X5Makvg0C8Qk24HCFSpVRyUXarF3Q26LF0UvYyEBcX1KtiNRss5EzCdhVJP",
   "carries": {
    "PumpSwap's claim_cashback": true,
    "pump's claim_cashback_v2": true,
