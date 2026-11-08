@@ -147,7 +147,7 @@ test("a live read never spans more than one new bar: the full read comes within 
 });
 
 // ------------------------------------------------------------------------------------------------ the follow loop
-const HEAD = "https://api.confidential.unrealized.trade/v1/market/candles";
+const HEAD = "https://ct-api.unrealized.trade/v1/market/candles";
 function clock() {
   let t = 1_000_000;
   const due: { at: number; fn: () => void; live: boolean }[] = [];

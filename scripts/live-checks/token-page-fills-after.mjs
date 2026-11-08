@@ -35,8 +35,8 @@ import { pageError } from "./console-errors.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "token-page-fills-after";
-export const APP_HOST = "https://confidential.unrealized.trade";
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const WIDTHS = [
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { appPath, isTopLevel, moveToShell, reloadAll, shellUrl, tellShell } from "../src/shell/in-shell.ts";
 
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 
 function fakeWindow(pathname: string, search: string, framed: boolean) {
   const moves: { how: string; to: string }[] = [];

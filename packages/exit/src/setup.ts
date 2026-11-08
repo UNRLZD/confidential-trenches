@@ -13,7 +13,7 @@
 import { ZK_SETUP_FILES, ZK_SETUP_SOURCE, type ZkSetupFileName } from "@blindfill/kit";
 
 /** The release mirror: each setup file at <this><sha256>.<ext>. */
-export const EXIT_SETUP_MIRROR = "https://sign.confidential.unrealized.trade/assets/zk/";
+export const EXIT_SETUP_MIRROR = "https://confidential.unrealized.trade/assets/zk/";
 
 /** One place a setup file can be fetched from. */
 export type ExitSetupSource = { name: string; url(file: ZkSetupFileName): string };

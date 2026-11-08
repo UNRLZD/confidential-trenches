@@ -27,7 +27,7 @@
 //     number both read (card wallet-bind-carry-wait); and one widening, HelperWithdrawRequest's fund_recipient from
 //     true to a boolean (false: the vault pays the NEAR account the user typed straight; card wallet-withdraw-move-out);
 //   - after 06:00Z, main's v1.ts equals the tag's byte for byte.
-// Once the helper answers (card helper-host-health), it also reads https://api.confidential.unrealized.trade/v1/health
+// Once the helper answers (card helper-host-health), it also reads https://ct-api.unrealized.trade/v1/health
 // from APP_HOST's Origin and from a stranger's, and compares its parts, X-Helper-Commit and CORS headers with the file.
 // While the host does not answer at all, that part is skipped and said so; --require-health makes it a failure.
 //   node scripts/live-checks/kit-freeze-helper-api.mjs [--tag <06:00Z tag>] [--require-health] [--record <file>]
@@ -45,7 +45,7 @@ export const V1 = "packages/kit/src/helper/v1.ts";
 export const ENTRY = "packages/kit/src/index.ts";
 export const RECORD = "packages/kit/src/orders/record.ts";
 // HELPER_HOST, markets.md:2434
-export const HEALTH = "https://api.confidential.unrealized.trade/v1/health";
+export const HEALTH = "https://ct-api.unrealized.trade/v1/health";
 export const FREEZE = Date.parse("2026-11-01T06:00:00Z");
 const STRANGER = "https://stranger.invalid";
 const TIMEOUT_MS = 10_000;
@@ -74,7 +74,15 @@ export const PATHS = [
 ];
 export const PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"]; // :3278, :3331
 // APP_HOST and SIGN_HOST (M326 (5); wallet.md:1227), the only origins (:3297-3298)
-export const ORIGINS = ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"];
+export const ORIGINS = ["https://ct-app.unrealized.trade", "https://confidential.unrealized.trade"];
+// The kit tags cut before card hosts-main-on-top moved the hosts (it took SIGN_HOST to the main address, APP_HOST and the
+// helper to siblings, before any outside app used them): those tags are held to the origins they froze, main and every
+// later tag to ORIGINS (as kit-freeze-vault's MOVED_SINCE_KIT_V1 holds each ref to its own values).
+export const MOVED_SINCE_KIT_V1 = {
+  HELPER_CORS_ORIGINS: { card: "hosts-main-on-top", tags: ["kit-v1", "kit-v1.1", "kit-v1.2", "kit-v1.3", "kit-v1.4"], value: ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade"] },
+};
+/** The two origins one ref is held to. */
+export const originsFor = (ref) => (MOVED_SINCE_KIT_V1.HELPER_CORS_ORIGINS.tags.includes(ref) ? MOVED_SINCE_KIT_V1.HELPER_CORS_ORIGINS.value : ORIGINS);
 export const CODES = {
   // :3338, H3.4's order
   HELPER_WITHDRAW_CODES: ["bad_shape", "bad_proof", "bad_fee_recipient", "fee_too_low", "fee_above_cap", "spent", "unknown_root", "index_behind", "in_flight", "withdraw_failed", "recipient_refused", "register_deposit_wrong", "bad_recipient", "deadline_too_close", "token_halted", "fund_recipient_wrong", "relayer_low"],
@@ -148,7 +156,7 @@ export const SHAPES = {
   HelperOrderState: "export type HelperOrderState = \"armed\" | \"firing\" | \"sent\" | \"filled\" | \"void\" | \"expired\" | \"deleted\";",
 };
 export const VALUES = {
-  HELPER_CORS: {"origins":["https://confidential.unrealized.trade","https://sign.confidential.unrealized.trade"],"allowMethods":["GET","POST","PUT","DELETE"],"allowHeaders":["content-type"],"exposeHeaders":["X-Helper-Commit","X-Helper-Source","X-Fetched-At"],"maxAgeSeconds":600,"vary":"Origin","allowCredentialsHeader":"absent"},
+  HELPER_CORS: {"origins":["https://ct-app.unrealized.trade","https://confidential.unrealized.trade"],"allowMethods":["GET","POST","PUT","DELETE"],"allowHeaders":["content-type"],"exposeHeaders":["X-Helper-Commit","X-Helper-Source","X-Fetched-At"],"maxAgeSeconds":600,"vary":"Origin","allowCredentialsHeader":"absent"},
   HELPER_V1_PATHS: [{"method":"GET","path":"/v1/health","part":"all","limitBytes":1024},{"method":"POST","path":"/v1/proxy/{vendor}/{path}","part":"proxy","limitBytes":65536},{"method":"POST","path":"/v1/rpc/{chain}","part":"proxy","limitBytes":262144},{"method":"GET","path":"/v1/market/...","part":"proxy","limitBytes":null},{"method":"GET","path":"/v1/logo/{chain}/{token}","part":"proxy","limitBytes":262144},{"method":"GET","path":"/v1/token-status","part":"relay","limitBytes":1024},{"method":"GET","path":"/v1/withdraw/fee","part":"relay","limitBytes":1024},{"method":"POST","path":"/v1/withdraw","part":"relay","limitBytes":8192},{"method":"GET","path":"/v1/withdraw/{tx_hash}","part":"relay","limitBytes":1024},{"method":"POST","path":"/v1/bind","part":"delegate","limitBytes":4096},{"method":"POST","path":"/v1/intents","part":"intents","limitBytes":8192},{"method":"POST","path":"/v1/orders","part":"orders","limitBytes":65536},{"method":"POST","path":"/v1/orders/status","part":"orders","limitBytes":16384},{"method":"PUT","path":"/v1/orders/{order_id}","part":"orders","limitBytes":32768},{"method":"DELETE","path":"/v1/orders/{order_id}","part":"orders","limitBytes":1024},{"method":"POST","path":"/v1/log","part":"log","limitBytes":4096}],
   HELPER_RPC_METHODS: {"solana":["getAccountInfo","getMultipleAccounts","getBalance","getTokenAccountsByOwner","getTokenLargestAccounts","getLatestBlockhash","simulateTransaction","sendTransaction","getSignatureStatuses","getTransaction","getBlockHeight","getMinimumBalanceForRentExemption","isBlockhashValid"],"base":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"robinhood":["eth_call","eth_simulateV1","eth_getTransactionCount","eth_getBalance","eth_feeHistory","eth_blockNumber","eth_sendRawTransaction","eth_getTransactionReceipt","eth_getLogs","eth_estimateGas","eth_getBlockByNumber","eth_getTransactionByHash"],"near":["query","block","gas_price","tx","send_tx","EXPERIMENTAL_tx_status","EXPERIMENTAL_protocol_config"]},
   HELPER_RPC_BATCH_MAX: 10,
@@ -295,7 +303,7 @@ export function shapeText({ sf, decls }, name) {
 }
 
 // The checks on one v1.ts text, with orders/record.ts's text for ORDER_RECORD_FIELDS: [ok, line] pairs.
-export function checkV1(text, recordText = "") {
+export function checkV1(text, recordText = "", ref = "main") {
   const out = [];
   const t = (what, fn) => {
     try {
@@ -380,7 +388,7 @@ export function checkV1(text, recordText = "") {
   t("cross-origin reads for exactly APP_HOST and SIGN_HOST, never *, no credentials", () => {
     const c = constOf(f, "HELPER_CORS");
     if (JSON.stringify(c).includes("*")) return `HELPER_CORS holds "*": ${JSON.stringify(c)}`;
-    if (!same(c.origins, ORIGINS)) return `origins ${JSON.stringify(c.origins)}`;
+    if (!same(c.origins, originsFor(ref))) return `origins ${JSON.stringify(c.origins)}`;
     if (c.allowCredentialsHeader !== "absent") return `allowCredentialsHeader ${c.allowCredentialsHeader}`;
     if (c.vary !== "Origin") return `vary ${c.vary}`;
     return (Array.isArray(c.exposeHeaders) && c.exposeHeaders.includes("X-Helper-Commit")) || "X-Helper-Commit is not exposed";
@@ -393,7 +401,7 @@ export function checkV1(text, recordText = "") {
   t("every frozen value equals its pin", () => {
     const bad = Object.entries(VALUES).filter(([k, v]) => {
       try {
-        return !same(constOf(f, k), v);
+        return !same(constOf(f, k), k === "HELPER_CORS" ? { ...v, origins: originsFor(ref) } : v);
       } catch {
         return true;
       }
@@ -478,7 +486,7 @@ export async function check({ fetchFn = fetch, now = Date.now(), tag, requireHea
     texts[ref] = r.text;
     const rec = await readText(fetchFn, `${RAW}/${encodeURIComponent(ref)}/${RECORD}`);
     if (rec.status !== 200 || rec.text === null) add(false, `${ref}: ${RECORD} answers status ${rec.status}`);
-    for (const [good, line] of checkV1(r.text, rec.text ?? "")) add(good, `${ref}: ${line}`);
+    for (const [good, line] of checkV1(r.text, rec.text ?? "", ref)) add(good, `${ref}: ${line}`);
     const e = await readText(fetchFn, `${RAW}/${encodeURIComponent(ref)}/${ENTRY}`);
     if (e.status !== 200 || e.text === null) add(false, `${ref}: ${ENTRY} answers status ${e.status}`);
     else {

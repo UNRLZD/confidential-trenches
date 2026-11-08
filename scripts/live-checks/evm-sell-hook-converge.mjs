@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card evm-sell-hook-converge on HELPER_HOST (https://api.confidential.unrealized.trade): a sale the
+// Live check of card evm-sell-hook-converge on HELPER_HOST (https://ct-api.unrealized.trade): a sale the
 // device's quote routes through a pool behind a v4 hook no venue lists is one the helper's EVM pool sender carries, so
 // such a pool can never freeze a token's sales. The device's quote takes that route only where it sets the reference,
 // at the reference's minOut, and bans the pool on this device, for an hour at first, where the real sale's revert proves

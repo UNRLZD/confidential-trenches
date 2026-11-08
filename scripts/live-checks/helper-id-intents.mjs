@@ -20,8 +20,8 @@ import { writeFileSync } from "node:fs";
 import { loadRecord } from "./helper-mainnet-vault-env.mjs";
 
 export const KEY = "helper-id-intents";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 const SHA = /^[0-9a-f]{40}$/;
 const IMPLICIT = /^[0-9a-f]{64}$/;

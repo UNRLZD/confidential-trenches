@@ -20,8 +20,8 @@ import { writeFileSync } from "node:fs";
 import { fromLogs, poolMints, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
 
 const KEY = "index-sol-trades";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const WS = "wss://api.mainnet-beta.solana.com";
 const RPC = "https://api.mainnet-beta.solana.com";
 export const FRESH_MS = 2_000;

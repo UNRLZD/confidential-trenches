@@ -15,13 +15,13 @@
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -34,7 +34,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "wordsIn": {
       "openId": "77afa9fe-4bc0-4a97-93d3-d2623929cf5e",
@@ -44,7 +44,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -58,7 +58,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "5a97fefd-f486-43ec-a80f-b5345116cdb7"
      },
@@ -66,20 +66,20 @@
       "t": 1793554730802,
       "okId": "6686f3ff-cd3c-4d10-93cb-b9e5b818fb5f",
       "evilId": "a3a216ab-5480-4d4d-b62e-549bb75885ae",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793554731009,
       "reloadId": "5a3658a7-ce55-435a-a753-14eb5346485a",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "0c556a6d-9513-43ed-ac9e-a2940fa9a201"
      },
@@ -93,7 +93,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "c25a40b5-c741-46d0-b773-c07f5146276a"
      },
@@ -104,7 +104,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -346,33 +346,23 @@
     ],
     "requests": [
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/solana/So11111111111111111111111111111111111111112",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
-      "method": "GET"
-     },
-     {
       "host": "confidential.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
       "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
@@ -381,17 +371,27 @@
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
       "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -412,13 +412,13 @@
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -431,7 +431,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "wordsIn": {
       "openId": "391906a2-893c-49e8-b58c-7503970f40fc",
@@ -441,7 +441,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -455,7 +455,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "e4031845-7c57-4838-a0e7-3477a8e9fb0b"
      },
@@ -463,20 +463,20 @@
       "t": 1793554750853,
       "okId": "87803a09-c69e-4edd-8c95-fd5a07440edd",
       "evilId": "d61d0097-80a8-40c4-97cd-e2d714d14482",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793554751060,
       "reloadId": "2a410ef9-28a0-4d05-a623-320d9908f6bb",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "cb290ef1-6f6f-4952-865e-3dfa9fa28183"
      },
@@ -490,7 +490,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "2ed0277f-d27a-4266-8bd2-826f5847dd54"
      },
@@ -501,7 +501,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -743,33 +743,23 @@
     ],
     "requests": [
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/solana/So11111111111111111111111111111111111111112",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
-      "method": "GET"
-     },
-     {
       "host": "confidential.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
       "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
@@ -778,17 +768,27 @@
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
       "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -811,13 +811,13 @@
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -830,7 +830,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "passkeyIn": {
       "openId": "c7133e5c-76e3-496f-a300-41d83d3b21ba",
@@ -839,7 +839,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "created": {
@@ -849,7 +849,7 @@
        "codeSaved": "false",
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "saved": {
@@ -859,7 +859,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "4400c015-4400-4457-a286-6b56b99e7255"
      },
@@ -870,7 +870,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "wordsIn": {
@@ -881,7 +881,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -895,7 +895,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "904d63e2-2380-4dd4-a156-6a346dd55d78"
      },
@@ -903,20 +903,20 @@
       "t": 1793554800382,
       "okId": "617f0c2d-b084-4784-bee6-0a73cabd0e30",
       "evilId": "01aa4e33-8d84-4da6-a870-70b1da8a92a4",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793554800589,
       "reloadId": "e30c9241-8d50-4962-bfbd-12ed32f3180e",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "83732ca2-5254-4392-85b3-f01d1f8c2371"
      },
@@ -930,7 +930,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "b416f512-9637-43b2-bf40-abff04f3342b"
      },
@@ -941,7 +941,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -1234,38 +1234,28 @@
     ],
     "requests": [
      {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
       "method": "GET"
      },
      {
@@ -1274,17 +1264,27 @@
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
       "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -1305,13 +1305,13 @@
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -1324,7 +1324,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "passkeyIn": {
       "openId": "7a074620-193a-48a0-a1e5-ec311130acc5",
@@ -1333,7 +1333,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "created": {
@@ -1343,7 +1343,7 @@
        "codeSaved": "false",
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "saved": {
@@ -1353,7 +1353,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "babd306e-4b96-4624-b827-6c3c1a87efcc"
      },
@@ -1364,7 +1364,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "wordsIn": {
@@ -1375,7 +1375,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -1389,7 +1389,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "0ffefb0a-c2fc-46d4-b829-63aa44610e72"
      },
@@ -1397,20 +1397,20 @@
       "t": 1793554829394,
       "okId": "3eb4c733-c81a-46f2-b75b-7d88eca561c0",
       "evilId": "39d07ad6-2509-42c9-9a79-8078858c112b",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793554829602,
       "reloadId": "48a35f72-5fd5-47a2-b52c-c496efb88189",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "7fe48621-39a9-4ef6-b2fd-0fa10527d81e"
      },
@@ -1424,7 +1424,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "709d8b05-e58d-4e2f-9aac-06dc1a067324"
      },
@@ -1435,7 +1435,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -1728,38 +1728,28 @@
     ],
     "requests": [
      {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
       "method": "GET"
      },
      {
@@ -1768,17 +1758,27 @@
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
       "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -1801,13 +1801,13 @@
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -1820,7 +1820,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "wordsIn": {
       "openId": "ad491fa4-2da9-49c6-b157-1eb3d1ff7a70",
@@ -1830,7 +1830,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -1844,7 +1844,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "e94b7f9a-ffd9-4df9-86fb-2f2a14f1efd9"
      },
@@ -1852,20 +1852,20 @@
       "t": 1793554958182,
       "okId": "abc8e13b-e162-4439-bdbc-379247708bd9",
       "evilId": "acfdc3dc-9838-483c-8f40-a063dbcd9b1d",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793554958392,
       "reloadId": "a3ddeb04-a458-4746-9565-202d74c75e64",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "5ed9b386-d735-4a32-bbc5-f8909ab3d6b4"
      },
@@ -1879,7 +1879,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "6d1f8c28-b7a1-465a-9d0e-46a75ccee90b"
      },
@@ -1890,7 +1890,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -2123,33 +2123,23 @@
     ],
     "requests": [
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/solana/So11111111111111111111111111111111111111112",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
-      "method": "GET"
-     },
-     {
       "host": "confidential.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
       "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
@@ -2158,17 +2148,27 @@
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
       "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -2189,13 +2189,13 @@
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -2208,7 +2208,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "wordsIn": {
       "openId": "e170fb24-f2d0-4d99-ba55-b59f09cf6b62",
@@ -2218,7 +2218,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -2232,7 +2232,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "81fcce43-958f-4c75-9afc-6749dbd26e58"
      },
@@ -2240,20 +2240,20 @@
       "t": 1793554977006,
       "okId": "37752842-1faf-4683-9d65-cf3222af4002",
       "evilId": "49b888ab-3a83-48db-b777-4fab4e60bb31",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793554977215,
       "reloadId": "affe0f25-976c-4a59-a064-6845cdf2f4e0",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "ac3749a8-0e05-4fea-ab2f-0fb23827be2b"
      },
@@ -2267,7 +2267,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "f763f5df-5f2b-4296-ae38-2cbae8584453"
      },
@@ -2278,7 +2278,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -2511,33 +2511,23 @@
     ],
     "requests": [
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/solana/So11111111111111111111111111111111111111112",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
-      "method": "GET"
-     },
-     {
       "host": "confidential.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
       "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/app.js",
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
@@ -2546,17 +2536,27 @@
       "method": "GET"
      },
      {
-      "host": "sign.confidential.unrealized.trade",
-      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "method": "GET"
-     },
-     {
-      "host": "sign.confidential.unrealized.trade",
+      "host": "confidential.unrealized.trade",
       "path": "/app.js",
       "method": "GET"
      },
      {
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
       "host": "confidential.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET"
+     },
+     {
+      "host": "confidential.unrealized.trade",
+      "path": "/app.js",
+      "method": "GET"
+     },
+     {
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -2635,27 +2635,27 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
      "path": "/",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     }
@@ -2733,27 +2733,27 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
      "path": "/",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     }
@@ -2776,13 +2776,13 @@
    "topology": "shell",
    "steps": {
     "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "top": {
       "state": "signed-out",
       "codeSaved": null,
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "attrs": {
       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -2795,7 +2795,7 @@
     },
     "topNav": {
      "tried": true,
-     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
     },
     "wordsIn": {
      "openId": "33d1241b-0b27-44d6-ad6e-8a365efd013b",
@@ -2805,7 +2805,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 0,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "typed": {
       "shellHasWords": true,
@@ -2819,7 +2819,7 @@
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "38c227aa-3f37-45ef-8901-3bf6df5562dd"
     },
@@ -2827,20 +2827,20 @@
      "t": 1793554770974,
      "okId": "6a6589e0-5ffe-4465-a393-cef0077f58d6",
      "evilId": "e6629bee-afff-4bee-bf28-d156420e3a24",
-     "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-     "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
      "frames": 1
     },
     "reload": {
      "t": 1793554771185,
      "reloadId": "088a6b22-1f20-4373-871c-77327a01eb63",
-     "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
      "top": {
       "state": "signed-in",
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "f4bcd8c9-c3ba-4aec-be4b-3bf3a0f3b2a6"
     },
@@ -2854,7 +2854,7 @@
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "50fc134f-68f5-4c0e-8ce4-96ddbf6bea37"
     },
@@ -2865,7 +2865,7 @@
       "codeSaved": null,
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      }
     },
     "last": {
@@ -3098,33 +3098,23 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
      "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
@@ -3133,17 +3123,27 @@
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     },
     {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
      "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     },
@@ -3188,13 +3188,13 @@
    "topology": "shell",
    "steps": {
     "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "top": {
       "state": "signed-out",
       "codeSaved": null,
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "attrs": {
       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -3207,7 +3207,7 @@
     },
     "topNav": {
      "tried": true,
-     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
     },
     "passkeyIn": {
      "openId": "a86369f0-b50f-41aa-8798-89d8b9125cd6",
@@ -3216,7 +3216,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 0,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      }
     },
     "created": {
@@ -3226,7 +3226,7 @@
       "codeSaved": "false",
       "layerHidden": false,
       "frames": 0,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      }
     },
     "saved": {
@@ -3236,7 +3236,7 @@
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "ca762065-87b9-48d2-b076-b115465a0be9"
     },
@@ -3247,7 +3247,7 @@
       "codeSaved": null,
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      }
     },
     "wordsIn": {
@@ -3258,7 +3258,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 0,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "typed": {
       "shellHasWords": true,
@@ -3272,7 +3272,7 @@
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "2d306f9c-2621-4546-a784-8c282bd4ebc0"
     },
@@ -3280,20 +3280,20 @@
      "t": 1793554939015,
      "okId": "3ccdb060-58e6-46f9-be01-bc8d5db3a34e",
      "evilId": "a76d2d7b-1bae-47e7-b3fe-d8c221829742",
-     "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-     "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
      "frames": 1
     },
     "reload": {
      "t": 1793554939224,
      "reloadId": "d545597f-449b-40df-a374-3be410c9aaca",
-     "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+     "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
      "top": {
       "state": "signed-in",
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "b49f66d8-89cb-471d-aecc-858b8b581eb7"
     },
@@ -3307,7 +3307,7 @@
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "9c6aa2c3-4734-4ddf-8c2e-14379e16c551"
     },
@@ -3318,7 +3318,7 @@
       "codeSaved": null,
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      }
     },
     "last": {
@@ -3611,38 +3611,28 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     },
     {
-     "host": "confidential.unrealized.trade",
+     "host": "ct-app.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "confidential.unrealized.trade",
+     "host": "ct-app.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "confidential.unrealized.trade",
+     "host": "ct-app.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
      "method": "GET"
     },
     {
@@ -3651,17 +3641,27 @@
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     },
     {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
      "host": "confidential.unrealized.trade",
+     "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     },
@@ -3689,13 +3689,13 @@
    "topology": "shell",
    "steps": {
     "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "top": {
       "state": "signed-out",
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "attrs": {
       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -3708,7 +3708,7 @@
     },
     "topNav": {
      "tried": true,
-     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
     },
     "wordsIn": {
      "openId": "7066dfa8-3b6e-4704-a801-f155328cc6bb",
@@ -3718,7 +3718,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "typed": {
       "shellHasWords": false,
@@ -3732,7 +3732,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "5b1018fd-5385-4ca7-a784-0c82f799e0d0"
     },
@@ -3740,8 +3740,8 @@
      "t": 1793553872720,
      "okId": "2619ed7e-5c26-4f22-a3e9-34d5c957c23c",
      "evilId": "81e38efd-6378-4dcc-8305-52cd83b22f46",
-     "after": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
-     "afterEvil": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "after": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "afterEvil": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "frames": 1
     },
     "reload": {
@@ -3753,7 +3753,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "ef4b255c-eef7-4727-9b6b-995a8517fe3b"
     },
@@ -3767,7 +3767,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "cf7b1de8-b29a-4728-8ec6-969a19eb8189"
     },
@@ -3778,7 +3778,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      }
     },
     "last": {
@@ -3984,32 +3984,32 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     },
     {
-     "host": "confidential.unrealized.trade",
+     "host": "ct-app.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     }
@@ -4030,13 +4030,13 @@
    "topology": "shell",
    "steps": {
     "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "top": {
       "state": "signed-out",
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "attrs": {
       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -4049,7 +4049,7 @@
     },
     "topNav": {
      "tried": true,
-     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
     },
     "passkeyIn": {
      "openId": "2eeda832-347a-4948-9102-a367eee807ae",
@@ -4058,7 +4058,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      }
     },
     "created": {
@@ -4068,7 +4068,7 @@
       "codeSaved": "false",
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      }
     },
     "saved": {
@@ -4078,7 +4078,7 @@
       "codeSaved": "true",
       "layerHidden": true,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "a3eb52b5-1e98-41e3-89f6-d84d4f5e2fad"
     },
@@ -4089,7 +4089,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      }
     },
     "wordsIn": {
@@ -4100,7 +4100,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "typed": {
       "shellHasWords": false,
@@ -4114,7 +4114,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "a832c79d-6712-4ebd-8f7b-4a26a5250cf8"
     },
@@ -4122,8 +4122,8 @@
      "t": 1793554894939,
      "okId": "f621e1de-dcaa-4e43-9dd8-d7ee41b60e4b",
      "evilId": "75624ead-f97c-4388-928a-89ebf6105b09",
-     "after": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
-     "afterEvil": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "after": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "afterEvil": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "frames": 1
     },
     "reload": {
@@ -4135,7 +4135,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "536af754-882e-4892-954a-d1227e56664a"
     },
@@ -4149,7 +4149,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "bd3f2ae7-48d1-49c4-a851-9f05a3e52861"
     },
@@ -4160,7 +4160,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      }
     },
     "last": {
@@ -4448,32 +4448,32 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     },
     {
-     "host": "confidential.unrealized.trade",
+     "host": "ct-app.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     }
@@ -4494,13 +4494,13 @@
    "topology": "shell",
    "steps": {
     "open": {
-     "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "top": {
       "state": "signed-out",
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "attrs": {
       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -4513,7 +4513,7 @@
     },
     "topNav": {
      "tried": true,
-     "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
     },
     "wordsIn": {
      "openId": "7fb08e8b-1ad1-4cdc-8fa1-52060f7bd259",
@@ -4523,7 +4523,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "typed": {
       "shellHasWords": false,
@@ -4537,7 +4537,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "30efaa53-3c9a-4faf-a0a4-7f092425ecaf"
     },
@@ -4545,8 +4545,8 @@
      "t": 1793555013973,
      "okId": "ae5cadf4-36f7-42c9-8845-bbcfc23bbd8b",
      "evilId": "52f37989-9e17-4c24-91bb-c5a663c34f62",
-     "after": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
-     "afterEvil": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "after": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+     "afterEvil": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
      "frames": 1
     },
     "reload": {
@@ -4558,7 +4558,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "id": "54997738-8354-4477-aecf-30f193fa4e1c"
     },
@@ -4572,7 +4572,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      },
      "id": "deff97e1-45af-4254-974d-3d6431b13d2d"
     },
@@ -4583,7 +4583,7 @@
       "codeSaved": null,
       "layerHidden": false,
       "frames": 1,
-      "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
      }
     },
     "last": {
@@ -4780,32 +4780,32 @@
    ],
    "requests": [
     {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/token/solana/So11111111111111111111111111111111111111112",
-     "method": "GET"
-    },
-    {
-     "host": "sign.confidential.unrealized.trade",
-     "path": "/app.js",
-     "method": "GET"
-    },
-    {
      "host": "confidential.unrealized.trade",
      "path": "/token/solana/So11111111111111111111111111111111111111112",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
+     "path": "/app.js",
+     "method": "GET"
+    },
+    {
+     "host": "ct-app.unrealized.trade",
+     "path": "/token/solana/So11111111111111111111111111111111111111112",
+     "method": "GET"
+    },
+    {
+     "host": "confidential.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     },
     {
-     "host": "sign.confidential.unrealized.trade",
+     "host": "confidential.unrealized.trade",
      "path": "/app.js",
      "method": "GET"
     },
     {
-     "host": "confidential.unrealized.trade",
+     "host": "ct-app.unrealized.trade",
      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
      "method": "GET"
     }
@@ -4823,19 +4823,19 @@
      "height": 844,
      "inner": 390
     },
-    "source": "live https://sign.confidential.unrealized.trade",
+    "source": "live https://confidential.unrealized.trade",
     "at": "2026-11-03T15:50:13.633Z",
     "browser": "chromium 153.0.8010.12 (Playwright)",
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -4848,7 +4848,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "passkeyIn": {
       "openId": "19ab91dd-9e24-48eb-b078-f925a1c1f7b9",
@@ -4857,7 +4857,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "created": {
@@ -4867,7 +4867,7 @@
        "codeSaved": "false",
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "saved": {
@@ -4877,7 +4877,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "df26e8fc-87f8-4893-8054-d02dcc9a98bd"
      },
@@ -4888,7 +4888,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "wordsIn": {
@@ -4899,7 +4899,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -4913,7 +4913,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "f1a5926e-bfd1-44fe-9cb9-075e18a6a19b"
      },
@@ -4921,20 +4921,20 @@
       "t": 1793721034263,
       "okId": "26cfa45f-0ac7-4c63-8569-98dbcc039f15",
       "evilId": "178c7835-a448-4752-ab90-dd7943534ac0",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793721034470,
       "reloadId": "ce74a517-c76f-4437-a1a2-ccb9623b46cf",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "14bdd27c-93fe-4613-90c4-861d33fd08a5"
      },
@@ -4948,7 +4948,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "ce1b4121-995d-4e9c-b89a-8419cf5f5a24"
      },
@@ -4959,7 +4959,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -5278,27 +5278,27 @@
     ],
     "requests": [
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }
@@ -5313,19 +5313,19 @@
      "height": 900,
      "inner": 1440
     },
-    "source": "live https://sign.confidential.unrealized.trade",
+    "source": "live https://confidential.unrealized.trade",
     "at": "2026-11-03T15:50:46.156Z",
     "browser": "chromium 153.0.8010.12 (Playwright)",
     "topology": "shell",
     "steps": {
      "open": {
-      "frameHref": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
       "top": {
        "state": "signed-out",
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "attrs": {
        "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
@@ -5338,7 +5338,7 @@
      },
      "topNav": {
       "tried": true,
-      "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
      },
      "passkeyIn": {
       "openId": "064f95fd-84d9-49a3-b431-b0fb7f1c4e05",
@@ -5347,7 +5347,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "created": {
@@ -5357,7 +5357,7 @@
        "codeSaved": "false",
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "saved": {
@@ -5367,7 +5367,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "cb50f2b4-5e32-43f4-9b73-fa57e98fe46f"
      },
@@ -5378,7 +5378,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       }
      },
      "wordsIn": {
@@ -5389,7 +5389,7 @@
        "codeSaved": null,
        "layerHidden": false,
        "frames": 0,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "typed": {
        "shellHasWords": true,
@@ -5403,7 +5403,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
       },
       "id": "e0696c53-6eea-435e-984c-daee56e0ac66"
      },
@@ -5411,20 +5411,20 @@
       "t": 1793721067381,
       "okId": "94b4e4f4-103a-4d39-a324-a04a97d52790",
       "evilId": "77b5298a-11c9-482a-9cac-fe664db0be81",
-      "after": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
-      "afterEvil": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "frames": 1
      },
      "reload": {
       "t": 1793721067587,
       "reloadId": "8a353ed2-0181-4b46-be11-41fea27c92de",
-      "frameHref": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
       "top": {
        "state": "signed-in",
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "f392489d-8f8d-4317-9bd2-007757de8679"
      },
@@ -5438,7 +5438,7 @@
        "codeSaved": "true",
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       },
       "id": "47fb70da-ffd3-40f0-adae-350d0e433c26"
      },
@@ -5449,7 +5449,7 @@
        "codeSaved": null,
        "layerHidden": true,
        "frames": 1,
-       "href": "https://sign.confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
       }
      },
      "last": {
@@ -5768,27 +5768,27 @@
     ],
     "requests": [
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/solana/So11111111111111111111111111111111111111112",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      },
      {
-      "host": "confidential.unrealized.trade",
+      "host": "ct-app.unrealized.trade",
       "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "method": "GET"
      }

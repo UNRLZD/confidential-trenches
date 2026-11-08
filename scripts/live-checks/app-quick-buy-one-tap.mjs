@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-quick-buy-one-tap";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 export const JS_MARKERS = ["quick-toast", "quick-toast-line", "quick-retry", "fill-toast"];
 export const CSS_MARKERS = [".qt-retry", ".tkp-chip:disabled"];
 

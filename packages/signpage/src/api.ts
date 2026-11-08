@@ -27,7 +27,7 @@ import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/s
 import { KIT_DEFAULT, helloKit, kitLevel, resultFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 /** This page's release tag; a tagged release sets it (W §2.7 item 3). */
 export const RELEASE = "unreleased";
 /** The api of messages.ts this page speaks. */

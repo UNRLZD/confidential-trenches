@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card signpage-buy-own-spend on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds,
+// Live check of card signpage-buy-own-spend on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // and only that: the served /app.js is the one index.html pins (its sha384); and the bundle sends no pool transaction
 // (it never names the helper's /v1/pool/solana/send), or it reads a landed transaction's loaded keys
 // (loadedAddresses, src/pool-spend.ts keysOf: without it, a buy's own tag 3, whose pool account comes from the lookup
@@ -20,7 +20,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-buy-own-spend";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const count = (js, s) => js.split(s).length - 1;
 

@@ -2,7 +2,7 @@
  "good": {
   "check": "trade-box-pool",
   "at": "2026-11-04T12:03:02.496Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-D2sAQfy_.js",
   "runs": [
@@ -67,7 +67,7 @@
  "bad": {
   "check": "trade-box-pool",
   "at": "2026-11-04T10:47:29.906Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with the devnet pool",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-BjgBW9E7.js",
   "runs": [

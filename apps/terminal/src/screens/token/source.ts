@@ -25,7 +25,7 @@ import { chainNamed } from "./model.ts";
 export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead; filling?: boolean };
 
 /** HELPER_HOST's token read for one token (the CSP's connect-src names the host, public/_headers). */
-export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://api.confidential.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
+export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://ct-api.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
 const TIMEOUT_MS = 10_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

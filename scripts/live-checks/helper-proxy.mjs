@@ -18,8 +18,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-proxy";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const PATH = "/v1/proxy/oneclick/v0/tokens";
 export const ENV_KEYS = ["JUPITER_API_KEY", "RELAY_API_KEY", "LIFI_API_KEY", "ONECLICK_JWT"];
 const SHA = /^[0-9a-f]{40}$/;

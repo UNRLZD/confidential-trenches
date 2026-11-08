@@ -47,26 +47,26 @@
   },
   "requests": [
    {
-    "host": "sign.confidential.unrealized.trade",
+    "host": "confidential.unrealized.trade",
     "path": "/portfolio"
    },
    {
-    "host": "sign.confidential.unrealized.trade",
+    "host": "confidential.unrealized.trade",
     "path": "/app.js"
    },
    {
-    "host": "confidential.unrealized.trade",
+    "host": "ct-app.unrealized.trade",
     "path": "/portfolio"
    },
    {
-    "host": "confidential.unrealized.trade",
+    "host": "ct-app.unrealized.trade",
     "path": "/portfolio"
    }
   ],
   "errors": []
  },
  "bad": {
-  "source": "live https://sign.confidential.unrealized.trade",
+  "source": "live https://confidential.unrealized.trade",
   "at": "2026-11-06T04:12:33.341Z",
   "browser": "Chrome 157.0.8103.38, sandbox on",
   "steps": {
@@ -103,19 +103,19 @@
   },
   "requests": [
    {
-    "host": "sign.confidential.unrealized.trade",
+    "host": "confidential.unrealized.trade",
     "path": "/portfolio"
    },
    {
-    "host": "sign.confidential.unrealized.trade",
+    "host": "confidential.unrealized.trade",
     "path": "/app.js"
    },
    {
-    "host": "confidential.unrealized.trade",
+    "host": "ct-app.unrealized.trade",
     "path": "/portfolio"
    },
    {
-    "host": "confidential.unrealized.trade",
+    "host": "ct-app.unrealized.trade",
     "path": "/portfolio"
    }
   ],

@@ -1,16 +1,16 @@
 {
  "good": {
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "source": "local, SIGN_HOST answered from packages/signpage's build (deploy.mjs build())",
   "at": "2026-11-02T16:37:28.597Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
-    "parent": "https://confidential.unrealized.trade",
+    "parent": "https://ct-app.unrealized.trade",
     "headers": "served",
     "loaded": false,
     "frames": [
-     "https://confidential.unrealized.trade/",
+     "https://ct-app.unrealized.trade/",
      "",
      "about:blank"
     ],
@@ -19,7 +19,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -69,7 +69,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -86,7 +86,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -136,7 +136,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -145,7 +145,7 @@
     "loaded": true,
     "frames": [
      "https://example.com/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -156,12 +156,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -226,7 +226,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -276,7 +276,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -285,7 +285,7 @@
     "loaded": true,
     "frames": [
      "https://evil.ct.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -296,12 +296,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -366,7 +366,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -416,7 +416,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -425,7 +425,7 @@
     "loaded": true,
     "frames": [
      "https://app.other.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -436,12 +436,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -494,12 +494,12 @@
    }
   ],
   "deposit": {
-   "signUrl": "https://sign.confidential.unrealized.trade/",
+   "signUrl": "https://confidential.unrealized.trade/",
    "ready": true,
    "log": [
     {
      "t": 18.799999997019768,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -510,7 +510,7 @@
     },
     {
      "t": 21.19999999552965,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -532,7 +532,7 @@
     },
     {
      "t": 21.299999997019768,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -565,17 +565,17 @@
   }
  },
  "liveRelease3": {
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "source": "live",
   "at": "2026-11-02T14:23:50.021Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
-    "parent": "https://confidential.unrealized.trade",
+    "parent": "https://ct-app.unrealized.trade",
     "headers": "served",
     "loaded": false,
     "frames": [
-     "https://confidential.unrealized.trade/",
+     "https://ct-app.unrealized.trade/",
      "",
      "about:blank"
     ],
@@ -584,7 +584,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -634,7 +634,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -651,7 +651,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -701,7 +701,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -710,7 +710,7 @@
     "loaded": true,
     "frames": [
      "https://example.com/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -721,12 +721,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -791,7 +791,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -841,7 +841,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -850,7 +850,7 @@
     "loaded": true,
     "frames": [
      "https://evil.ct.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -861,12 +861,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -931,7 +931,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -981,7 +981,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -990,7 +990,7 @@
     "loaded": true,
     "frames": [
      "https://app.other.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -1001,12 +1001,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -1059,12 +1059,12 @@
    }
   ],
   "deposit": {
-   "signUrl": "https://sign.confidential.unrealized.trade/",
+   "signUrl": "https://confidential.unrealized.trade/",
    "ready": true,
    "log": [
     {
      "t": 22,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -1075,7 +1075,7 @@
     },
     {
      "t": 25,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -1097,7 +1097,7 @@
     },
     {
      "t": 25.099999997764826,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -1130,18 +1130,18 @@
   }
  },
  "framed": {
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "source": "live",
   "at": "2026-11-01T14:29:02.262Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
-    "parent": "https://confidential.unrealized.trade",
+    "parent": "https://ct-app.unrealized.trade",
     "headers": "served",
     "loaded": true,
     "frames": [
+     "https://ct-app.unrealized.trade/",
      "https://confidential.unrealized.trade/",
-     "https://sign.confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -1152,12 +1152,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -1208,7 +1208,7 @@
     "messages": [
      {
       "t": 1260.2999999523163,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1219,7 +1219,7 @@
      },
      {
       "t": 1272.7999999523163,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1241,7 +1241,7 @@
      },
      {
       "t": 1272.7999999523163,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1254,7 +1254,7 @@
      },
      {
       "t": 1272.7999999523163,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1267,7 +1267,7 @@
      },
      {
       "t": 1272.7999999523163,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1280,7 +1280,7 @@
      },
      {
       "t": 1272.7999999523163,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1293,7 +1293,7 @@
      },
      {
       "t": 1273,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1330,7 +1330,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -1380,7 +1380,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://confidential.unrealized.trade\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://ct-app.unrealized.trade\". The request has been blocked.\n"
     ]
    },
    {
@@ -1389,7 +1389,7 @@
     "loaded": true,
     "frames": [
      "https://example.com/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -1400,12 +1400,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -1470,7 +1470,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -1520,7 +1520,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://confidential.unrealized.trade\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://ct-app.unrealized.trade\". The request has been blocked.\n"
     ]
    },
    {
@@ -1529,7 +1529,7 @@
     "loaded": true,
     "frames": [
      "https://evil.ct.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -1540,12 +1540,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -1610,7 +1610,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -1660,7 +1660,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://confidential.unrealized.trade\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://ct-app.unrealized.trade\". The request has been blocked.\n"
     ]
    },
    {
@@ -1669,7 +1669,7 @@
     "loaded": true,
     "frames": [
      "https://app.other.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -1680,12 +1680,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -1740,30 +1740,30 @@
   "note": "SIGN_HOST as deployed before card signpage-shell (frame-ancestors APP_HOST), live: FAIL, APP_HOST frames it and gets its ready and answers"
  },
  "planted": {
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "source": "local, SIGN_HOST answered from ct-signpage-vjVvkF",
   "at": "2026-11-01T03:04:05.867Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
-    "parent": "https://confidential.unrealized.trade",
+    "parent": "https://ct-app.unrealized.trade",
     "headers": "served",
     "loaded": true,
     "frames": [
+     "https://ct-app.unrealized.trade/",
      "https://confidential.unrealized.trade/",
-     "https://sign.confidential.unrealized.trade/",
      "about:blank"
     ],
     "sentAt": 47.099999994039536,
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/api.js",
+      "url": "https://confidential.unrealized.trade/api.js",
       "type": "script",
       "status": 200
      }
@@ -1814,7 +1814,7 @@
     "messages": [
      {
       "t": 30.80000001192093,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1825,7 +1825,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1847,7 +1847,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1860,7 +1860,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1873,7 +1873,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1886,7 +1886,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1899,7 +1899,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1921,7 +1921,7 @@
      },
      {
       "t": 48.20000001788139,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -1957,7 +1957,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -2007,7 +2007,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://confidential.unrealized.trade\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://ct-app.unrealized.trade\". The request has been blocked.\n"
     ]
    },
    {
@@ -2016,19 +2016,19 @@
     "loaded": true,
     "frames": [
      "https://example.com/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "sentAt": 27.5,
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/api.js",
+      "url": "https://confidential.unrealized.trade/api.js",
       "type": "script",
       "status": 200
      }
@@ -2079,7 +2079,7 @@
     "messages": [
      {
       "t": 15,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2090,7 +2090,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2112,7 +2112,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2125,7 +2125,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2138,7 +2138,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2151,7 +2151,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2164,7 +2164,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2186,7 +2186,7 @@
      },
      {
       "t": 28.400000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2222,7 +2222,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -2272,7 +2272,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://confidential.unrealized.trade\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://ct-app.unrealized.trade\". The request has been blocked.\n"
     ]
    },
    {
@@ -2281,19 +2281,19 @@
     "loaded": true,
     "frames": [
      "https://evil.ct.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "sentAt": 28.099999994039536,
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/api.js",
+      "url": "https://confidential.unrealized.trade/api.js",
       "type": "script",
       "status": 200
      }
@@ -2344,7 +2344,7 @@
     "messages": [
      {
       "t": 16.30000001192093,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2355,7 +2355,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2377,7 +2377,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2390,7 +2390,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2403,7 +2403,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2416,7 +2416,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2429,7 +2429,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2451,7 +2451,7 @@
      },
      {
       "t": 28.900000005960464,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2487,7 +2487,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -2537,7 +2537,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://confidential.unrealized.trade\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors https://ct-app.unrealized.trade\". The request has been blocked.\n"
     ]
    },
    {
@@ -2546,19 +2546,19 @@
     "loaded": true,
     "frames": [
      "https://app.other.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "sentAt": 27.200000017881393,
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/api.js",
+      "url": "https://confidential.unrealized.trade/api.js",
       "type": "script",
       "status": 200
      }
@@ -2609,7 +2609,7 @@
     "messages": [
      {
       "t": 15.200000017881393,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2620,7 +2620,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2642,7 +2642,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2655,7 +2655,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2668,7 +2668,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2681,7 +2681,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2694,7 +2694,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2716,7 +2716,7 @@
      },
      {
       "t": 28,
-      "origin": "https://sign.confidential.unrealized.trade",
+      "origin": "https://confidential.unrealized.trade",
       "fromFrame": true,
       "data": {
        "v": 1,
@@ -2743,17 +2743,17 @@
   "note": "the e9a673e build with the page origin and source check taken out and answers posted to *, integrity recomputed, --local; recorded on the pre-merge page (api.js at 25ebd81)"
  },
  "plantedDeposit": {
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "source": "local, SIGN_HOST answered from a planted build of this card's source: deposit.quote answers an address with no seed stored and no request sent",
   "at": "2026-11-02T14:27:21.575Z",
   "browser": "153.0.8010.12",
   "runs": [
    {
-    "parent": "https://confidential.unrealized.trade",
+    "parent": "https://ct-app.unrealized.trade",
     "headers": "served",
     "loaded": false,
     "frames": [
-     "https://confidential.unrealized.trade/",
+     "https://ct-app.unrealized.trade/",
      "",
      "about:blank"
     ],
@@ -2762,7 +2762,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -2812,7 +2812,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -2829,7 +2829,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -2879,7 +2879,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -2888,7 +2888,7 @@
     "loaded": true,
     "frames": [
      "https://example.com/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -2899,12 +2899,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -2969,7 +2969,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -3019,7 +3019,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -3028,7 +3028,7 @@
     "loaded": true,
     "frames": [
      "https://evil.ct.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -3039,12 +3039,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -3109,7 +3109,7 @@
     "scriptRan": false,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "failure": "net::ERR_BLOCKED_BY_RESPONSE"
      }
@@ -3159,7 +3159,7 @@
     },
     "messages": [],
     "errors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -3168,7 +3168,7 @@
     "loaded": true,
     "frames": [
      "https://app.other.test/",
-     "https://sign.confidential.unrealized.trade/",
+     "https://confidential.unrealized.trade/",
      "about:blank"
     ],
     "rendered": {
@@ -3179,12 +3179,12 @@
     "scriptRan": true,
     "signRequests": [
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document",
       "status": 200
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/app.js",
+      "url": "https://confidential.unrealized.trade/app.js",
       "type": "script",
       "status": 200
      }
@@ -3237,12 +3237,12 @@
    }
   ],
   "deposit": {
-   "signUrl": "https://sign.confidential.unrealized.trade/",
+   "signUrl": "https://confidential.unrealized.trade/",
    "ready": true,
    "log": [
     {
      "t": 27.19999998807907,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -3253,7 +3253,7 @@
     },
     {
      "t": 29.799999952316284,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,
@@ -3275,7 +3275,7 @@
     },
     {
      "t": 30.099999964237213,
-     "origin": "https://sign.confidential.unrealized.trade",
+     "origin": "https://confidential.unrealized.trade",
      "fromParent": true,
      "data": {
       "v": 1,

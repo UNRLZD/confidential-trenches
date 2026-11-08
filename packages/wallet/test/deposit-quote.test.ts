@@ -40,7 +40,7 @@ test("the request goes to the helper's 1Click proxy only, as it is, with no cook
   }) as typeof fetch;
   assert.deepEqual(await askDepositQuote(request, fetchFn), { status: 200, body: { quote: {} } });
   assert.equal(seen.length, 1);
-  assert.equal(seen[0].url, "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote");
+  assert.equal(seen[0].url, "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote");
   assert.equal(seen[0].url, DEPOSIT_QUOTE_URL);
   const init = seen[0].init;
   assert.equal(init.method, "POST");

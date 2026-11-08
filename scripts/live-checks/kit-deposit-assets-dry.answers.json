@@ -4,7 +4,7 @@
   "source": "live",
   "at": "2026-11-06T13:49:48.987Z",
   "browser": "157.0.8103.38",
-  "signUrl": "https://sign.confidential.unrealized.trade/",
+  "signUrl": "https://confidential.unrealized.trade/",
   "ready": true,
   "ids": {
    "assets": "c5ca6996-e980-4c72-ac3d-b6c9bbd694ab",
@@ -17,7 +17,7 @@
   "log": [
    {
     "t": 35.19999998807907,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -28,7 +28,7 @@
    },
    {
     "t": 45.900000005960464,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -41,7 +41,7 @@
    },
    {
     "t": 49.400000005960464,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -174,7 +174,7 @@
   "source": "synthetic",
   "at": "2026-11-06T14:00:00.000Z",
   "browser": "157.0.8103.38",
-  "signUrl": "https://sign.confidential.unrealized.trade/",
+  "signUrl": "https://confidential.unrealized.trade/",
   "ready": true,
   "ids": {
    "assets": "11111111-1111-4111-8111-111111111111",
@@ -187,7 +187,7 @@
   "log": [
    {
     "t": 100,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -198,7 +198,7 @@
    },
    {
     "t": 900,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -236,7 +236,7 @@
    },
    {
     "t": 1700,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -254,13 +254,13 @@
   "helper": [
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/tokens",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens",
     "method": "POST",
     "body": null
    },
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -280,7 +280,7 @@
    },
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -300,7 +300,7 @@
    },
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -320,7 +320,7 @@
    },
    {
     "phase": "dry",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -399,7 +399,7 @@
   "source": "local, SIGN_HOST answered from a build dir of the card's tree (index.html and public/ as build-app.mjs wrote them)",
   "at": "2026-11-06T15:07:25.547Z",
   "browser": "157.0.8103.38",
-  "signUrl": "https://sign.confidential.unrealized.trade/",
+  "signUrl": "https://confidential.unrealized.trade/",
   "ready": true,
   "ids": {
    "assets": "f25029c2-2b22-4203-9476-5b191a3aa3f7",
@@ -412,7 +412,7 @@
   "log": [
    {
     "t": 19.299999982118607,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -423,7 +423,7 @@
    },
    {
     "t": 2302.199999988079,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -461,7 +461,7 @@
    },
    {
     "t": 3062,
-    "origin": "https://sign.confidential.unrealized.trade",
+    "origin": "https://confidential.unrealized.trade",
     "fromParent": true,
     "data": {
      "v": 1,
@@ -479,13 +479,13 @@
   "helper": [
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/tokens",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens",
     "method": "POST",
     "body": null
    },
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -504,7 +504,7 @@
    },
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -523,7 +523,7 @@
    },
    {
     "phase": "assets",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,
@@ -542,7 +542,7 @@
    },
    {
     "phase": "dry",
-    "url": "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
     "method": "POST",
     "body": {
      "dry": true,

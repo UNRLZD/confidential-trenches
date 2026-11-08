@@ -61,9 +61,9 @@ test("read() asks SIGN_HOST's / and /app.js, and the helper's status by POST wit
   };
   const a = await read(fetchFn);
   assert.deepEqual(asked, [
-    ["GET", "https://sign.confidential.unrealized.trade/", null],
-    ["GET", "https://sign.confidential.unrealized.trade/app.js", null],
-    ["POST", `https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/status?depositAddress=${ADDRESS}`, "https://confidential.unrealized.trade"],
+    ["GET", "https://confidential.unrealized.trade/", null],
+    ["GET", "https://confidential.unrealized.trade/app.js", null],
+    ["POST", `https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/status?depositAddress=${ADDRESS}`, "https://ct-app.unrealized.trade"],
   ]);
   assert.deepEqual(a.helper, { status: 200, source: "oneclick", answer: { status: "SUCCESS", depositAddress: ADDRESS } });
 });

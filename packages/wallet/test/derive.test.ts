@@ -235,7 +235,7 @@ test("every input is checked: a field element >= p, a counter >= 2^32, an unknow
 
 // ---------- the frozen identifiers ----------
 test("SIGN_HOST and the PRF input are the frozen ones (owner-decisions.md:263; wallet.md:47)", () => {
-  assert.equal(d.SIGN_HOST, "sign.confidential.unrealized.trade");
+  assert.equal(d.SIGN_HOST, "confidential.unrealized.trade");
   assert.equal(d.PRF_INPUT, "confidential-trenches/v1/seed");
   assert.equal(d.HKDF_SALT, "blindfill/v1");
   // the PRF output to the entropy, against node:crypto's own HKDF
@@ -250,16 +250,16 @@ test("the wallet sign-in bytes: EIP-4361 and Sign In With Solana, frozen but for
   const evm = d.toChecksum("0x48966d6e92ec496d9dbb37974d531cdc3a68ae35");
   assert.equal(
     d.evmSignIn(evm),
-    "sign.confidential.unrealized.trade wants you to sign in with your Ethereum account:\n" + evm + "\n\n" +
-      d.SIGNIN_STATEMENT + "\n\nURI: https://sign.confidential.unrealized.trade/\nVersion: 1\nChain ID: 1\n" +
+    "confidential.unrealized.trade wants you to sign in with your Ethereum account:\n" + evm + "\n\n" +
+      d.SIGNIN_STATEMENT + "\n\nURI: https://confidential.unrealized.trade/\nVersion: 1\nChain ID: 1\n" +
       "Nonce: blindfillv1signin\nIssued At: 2026-11-01T06:00:00Z",
   );
   assert.throws(() => d.evmSignIn(evm.toLowerCase()), /EIP-55/);
   const sol = "7z2kxnsPwHTWkdY6fet53R1b3Bw2hwJ4URqP3rHR1cq";
   assert.equal(
     d.solanaSignIn(sol),
-    "sign.confidential.unrealized.trade wants you to sign in with your Solana account:\n" + sol + "\n\n" +
-      d.SIGNIN_STATEMENT + "\n\nURI: https://sign.confidential.unrealized.trade/\nVersion: 1\nNonce: blindfillv1signin",
+    "confidential.unrealized.trade wants you to sign in with your Solana account:\n" + sol + "\n\n" +
+      d.SIGNIN_STATEMENT + "\n\nURI: https://confidential.unrealized.trade/\nVersion: 1\nNonce: blindfillv1signin",
   );
   assert.throws(() => d.solanaSignIn("0x00"), /base58/);
   assert.match(d.SIGNIN_NONCE, /^[A-Za-z0-9]{8,}$/); // EIP-4361 nonce: 8 or more alphanumerics

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-deposit-follow on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card pool-deposit-follow on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified:
 //   - the floor (pool-deposit-quote.ts solanaPoolDepositFloor): a pool quote's least delivery is the ladder's least rung
 //     (0.01 SOL) plus the worst-case deposit cost (mark address empty, both trees at a new page) plus U_X's rent floor;
@@ -31,7 +31,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-deposit-follow";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const N = "[\\w$]+";
 const esc = (s) => s.replace(/[$]/g, "\\$");

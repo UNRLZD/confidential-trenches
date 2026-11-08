@@ -22,7 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "wallet-withdraw-move-out";
-export const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
+export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage");
 /** This card's strings in the bundle, each as the minifier writes it. */
 export const MARKERS = [

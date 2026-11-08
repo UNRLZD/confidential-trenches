@@ -75,13 +75,13 @@ export const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 // Left out: devnet.rpcpool.com and explorer-api.devnet.solana.com are the same node as api.devnet.solana.com (x-rpc-node
 // sg140, 74.63.203.93); Tatum's gateway answers 5 reads and then 429 for 60 s; dRPC, Ankr, Alchemy, Helius, Chainstack
 // and Shyft answer only with a key.
-export const DEVNET_HELPER_RPC = "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet";
+export const DEVNET_HELPER_RPC = "https://ct-api.unrealized.trade/v1/rpc/solana-devnet";
 export const DEVNET_PROVIDERS = Object.freeze(["https://api.devnet.solana.com", DEVNET_HELPER_RPC, "https://solana-devnet.api.onfinality.io/public"]);
 // The devnet deploy's own pair (contracts/pool-solana/scripts/deploy.mjs reads its second here: it needs getGenesisHash
 // and getProgramAccounts, which the helper's route refuses), read on 2026-11-02 between 23:12 and 23:14Z. The checks
 // read DEVNET_PROVIDERS; a deploy's printed --rpc pair is read through the same walk.
 export const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
-export const OPERATORS = Object.freeze({ "api.devnet.solana.com": "solana", "api.confidential.unrealized.trade": "the helper's devnet provider", "solana-devnet.api.onfinality.io": "onfinality" });
+export const OPERATORS = Object.freeze({ "api.devnet.solana.com": "solana", "ct-api.unrealized.trade": "the helper's devnet provider", "solana-devnet.api.onfinality.io": "onfinality" });
 // The two mainnet RPCs, each its operator's (card pool-sol-deploy-mainnet), both answering mainnet's genesis hash and the
 // same rents on 2026-11-05 at 14:35Z: the cluster's public RPC (docs.anza.xyz/clusters/available), first since it alone
 // answers getProgramAccounts (the deploy's buffer scan; PublicNode answered it "Indexed requests require a personal

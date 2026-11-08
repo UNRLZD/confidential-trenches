@@ -23,8 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const SIGN_DIR = path.join(ROOT, "packages/signpage");
 export const APP_DIR = path.join(ROOT, "apps/terminal/dist");
 
@@ -72,6 +72,7 @@ export const CHILD_RUNS = [
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",

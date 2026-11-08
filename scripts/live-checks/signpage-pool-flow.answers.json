@@ -80,7 +80,7 @@
   "table": "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
   "rpcs": [
    "https://api.devnet.solana.com",
-   "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+   "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
    "https://solana-devnet.api.onfinality.io/public"
   ],
   "at": "2026-11-08T04:50:46.623Z",
@@ -336,7 +336,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getGenesisHash",
     "params": [],
     "status": 200,
@@ -347,7 +347,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
@@ -380,7 +380,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
@@ -413,7 +413,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
@@ -446,7 +446,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "9G1kNpB3gu726wuH8z8UXR3Rc4nwPk9KjMFMUs4dKbrK",
@@ -479,7 +479,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "74HD9CHiWZjbRxBk2xqUhhAsYK8fg5vkomfFzqdbEZXk",
@@ -512,7 +512,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "D8zR1ZCAViWBfV49xmKMNivB5AiKE6Npik1QnkYoJdcQ",
@@ -545,7 +545,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getBalance",
     "params": [
      "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3",
@@ -1368,7 +1368,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "53ppgpzgRj1Ler5byRWVpUhxgXRizaEtnkYBuQjoSWXH1KAk9xyVkhrphgWkigWCVakKuEs1z2h7ErHXo2rr8jTx",
@@ -1489,7 +1489,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "2r3panFRXsEE4K4duP9juAXpVjLpzQPNetEDUmyowJ8EbDq6wWbPPQs3eoRjBCSDoU5jrKbNZ14SQMtXv3wCWnD7",
@@ -1887,7 +1887,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "2BATzt6gAKUzhgTUvoUs3keMEAyLZW3x1M3VeWzLNpqqnRjCEssGv3LzFmcZrSpueDVYdQgToYuDPAyztN87u3Ty",
@@ -2136,7 +2136,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
@@ -2250,7 +2250,7 @@
   "table": "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
   "rpcs": [
    "https://api.devnet.solana.com",
-   "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+   "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
    "https://solana-devnet.api.onfinality.io/public"
   ],
   "at": "2026-11-08T04:51:03.213Z",
@@ -2496,7 +2496,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getGenesisHash",
     "params": [],
     "status": 200,
@@ -2507,7 +2507,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
@@ -2540,7 +2540,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "2z2CxFYEeik3PQsui67mxUFFjAVZcmb1z61GJiPdyDrv",
@@ -2573,7 +2573,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
@@ -2606,7 +2606,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "217JaNHoFxUdM9yF72kphhQYqgm8Ya5rKFNbuZsBhq6q",
@@ -2629,7 +2629,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "EcAkptED2Gz9xTg4ariCKSUuAB7x4DdU4RrRHNNX1iPp",
@@ -2662,7 +2662,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "2p7i2JNokosDECaxxbxyD5ZbS3Wf94qPmmtPsesWVJaM",
@@ -2695,7 +2695,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getBalance",
     "params": [
      "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3",
@@ -3518,7 +3518,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "53ppgpzgRj1Ler5byRWVpUhxgXRizaEtnkYBuQjoSWXH1KAk9xyVkhrphgWkigWCVakKuEs1z2h7ErHXo2rr8jTx",
@@ -3639,7 +3639,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "2r3panFRXsEE4K4duP9juAXpVjLpzQPNetEDUmyowJ8EbDq6wWbPPQs3eoRjBCSDoU5jrKbNZ14SQMtXv3wCWnD7",
@@ -4037,7 +4037,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "2BATzt6gAKUzhgTUvoUs3keMEAyLZW3x1M3VeWzLNpqqnRjCEssGv3LzFmcZrSpueDVYdQgToYuDPAyztN87u3Ty",
@@ -4286,7 +4286,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
@@ -4400,7 +4400,7 @@
   "table": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
   "rpcs": [
    "https://api.devnet.solana.com",
-   "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+   "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
    "https://solana-devnet.api.onfinality.io/public"
   ],
   "at": "2026-11-08T04:51:09.955Z",
@@ -4656,7 +4656,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getGenesisHash",
     "params": [],
     "status": 200,
@@ -4667,7 +4667,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
@@ -4700,7 +4700,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
@@ -4733,7 +4733,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
@@ -4766,7 +4766,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "9G1kNpB3gu726wuH8z8UXR3Rc4nwPk9KjMFMUs4dKbrK",
@@ -4799,7 +4799,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "74HD9CHiWZjbRxBk2xqUhhAsYK8fg5vkomfFzqdbEZXk",
@@ -4832,7 +4832,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "D8zR1ZCAViWBfV49xmKMNivB5AiKE6Npik1QnkYoJdcQ",
@@ -4865,7 +4865,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getBalance",
     "params": [
      "7PnRw6daz6XePFQUjqRYJoRH33GJPXjaMh2FyjXPGFR3",
@@ -5688,7 +5688,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "53ppgpzgRj1Ler5byRWVpUhxgXRizaEtnkYBuQjoSWXH1KAk9xyVkhrphgWkigWCVakKuEs1z2h7ErHXo2rr8jTx",
@@ -5809,7 +5809,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "2r3panFRXsEE4K4duP9juAXpVjLpzQPNetEDUmyowJ8EbDq6wWbPPQs3eoRjBCSDoU5jrKbNZ14SQMtXv3wCWnD7",
@@ -6207,7 +6207,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getTransaction",
     "params": [
      "2BATzt6gAKUzhgTUvoUs3keMEAyLZW3x1M3VeWzLNpqqnRjCEssGv3LzFmcZrSpueDVYdQgToYuDPAyztN87u3Ty",
@@ -6456,7 +6456,7 @@
     }
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet",
+    "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
     "method": "getAccountInfo",
     "params": [
      "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",

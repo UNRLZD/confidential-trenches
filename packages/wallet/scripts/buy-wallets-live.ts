@@ -17,7 +17,7 @@ const A8 = JSON.parse(readFileSync(new URL("../test/vectors/a8.json", import.met
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
 const L = BigInt(`0x${A8.l}`);
 const arg = (k: string, dflt: string): string => (process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1]! : dflt);
-const HELPER = arg("--helper", "https://api.confidential.unrealized.trade");
+const HELPER = arg("--helper", "https://ct-api.unrealized.trade");
 // solana-rpc.publicnode.com refuses getTokenAccountsByOwner (HTTP 403, 2026-11-03 06:10Z): the kit's public RPC instead
 const PUBLIC = { sol: SOLANA_PUBLIC_RPC_URL, base: "https://base-rpc.publicnode.com" };
 const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";

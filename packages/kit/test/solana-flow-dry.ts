@@ -50,7 +50,7 @@ const args = (k: string) => process.argv.flatMap((v, i) => (process.argv[i - 1] 
 // A live pump.fun curve token and a graduated one in its PumpSwap pool (2026-11-02).
 const TOKENS = args("--token").length ? args("--token") : ["7G36iB8rmCjtik3X68siSPxXXnsypXqzxdbJoajQpump", "EQM29p2pzrRMUckhb5umAzSgjEhnCy8gNKSVfVnrpump"];
 const BUY_LAMPORTS = BigInt(args("--buy")[0] ?? "10000000"); // 0.01 SOL a wallet
-const HELPER = "https://api.confidential.unrealized.trade";
+const HELPER = "https://ct-api.unrealized.trade";
 // LD1 (markets paper §2.0): two providers, one reached device-direct; the second may go through the helper's /v1/rpc.
 // Provider A is PublicNode's keyless Solana RPC, provider B the helper's /v1/rpc/solana.
 const PROVIDER_A = "https://solana-rpc.publicnode.com";

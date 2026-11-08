@@ -18,8 +18,8 @@ import { writeFileSync } from "node:fs";
 import { ROW_FIELDS as TERMINAL_FIELDS, ROW_REQUIRED } from "../../apps/terminal/src/screens/discover/fields.ts";
 
 const KEY = "market-data-solana-lists";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const PATH = "/v1/market/lists?chain=solana";
 /** The frozen list: the terminal's Row fields, then the two the Trending column asked for. */
 export const FIELDS = [...new Set([...TERMINAL_FIELDS, "buys_1h", "sells_1h"])];
