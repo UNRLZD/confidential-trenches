@@ -11,11 +11,13 @@
 //     pool's balance set to the amount, its execution capped at 476,190: both providers answer a result above 0 (the
 //     route fits), and the same read capped at 20,000 answers out of gas in words the kit maps to "does not fit"
 //     (the kit's own evmIsOutOfGas, its answerOf's words), never another error the kit would refuse on.
+//   - the kit's public buy quote of the same routes on Node (card evm-buy-quote-ends-on-node's check, run here as
+//     well): on each chain it ends within EVM_QUOTE_MAX_AGE_MS plus 10 s, in at most 2,000 requests, with a quote or
+//     a refusal the kit names. No quote fitted the window when recorded (2026-11-08 12:13Z); card
+//     evm-buy-quote-in-window.
 // Nothing deployed quotes a buy yet: the signing page's bundle carries no EVM buy quote (build-app at 87f280e2 matches a
-// fresh build with this card in it). The kit's public buy quote is not run here: on Node it does not end (it asked 583
-// requests in 45 s on Base before this card too, at 7b4e5113), an open finding. That the floor refuses, names the
-// next route and prices against routes that fit is the kit's test (test/evm-quote-attacks.test.ts GF1-GF9 and their
-// mutants in test/evm-quote-mutants.mjs).
+// fresh build with this card in it). That the floor refuses, names the next route and prices against routes that fit
+// is the kit's test (test/evm-quote-attacks.test.ts GF1-GF9 and their mutants in test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-buy-gas-floor.mjs [--record <file> --as good|bad [--from <note>] [--sender <address>]]
 //     [--answer <file> --as good|bad]   (--sender sends the swap read from another address: how the bad answer was made)
 // PASS exit 0, FAIL exit 1, error exit 2.
@@ -23,6 +25,7 @@
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { evmBuySwapFitCall, evmIsOutOfGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { collect as quoteRuns, judge as judgeQuotes } from "./evm-buy-quote-ends-on-node.mjs";
 
 const KEY = "evm-buy-gas-floor";
 /** BUY_SWAP_GAS() (PrivacyPoolSimple.sol) and buySwap((address,bytes,uint256,address),address,uint256) */
@@ -75,7 +78,7 @@ async function swaps(chain, from) {
 }
 
 export async function collect(from) {
-  return { at: new Date().toISOString(), pools: await pools(), swaps: [await swaps("base", from), await swaps("robinhood", from)] };
+  return { at: new Date().toISOString(), pools: await pools(), swaps: [await swaps("base", from), await swaps("robinhood", from)], quotes: (await quoteRuns()).runs };
 }
 
 /** The verdict on an answer { pools, quotes }. */
@@ -100,6 +103,8 @@ export function judge(a) {
       say(oog, `${chain} ${r.provider}: the swap at 20,000 ${oog ? `runs out of gas in words the kit maps ("${m}")` : `answers what the kit would refuse on: ${JSON.stringify(r.low).slice(0, 120)}`}`);
     }
   }
+  // the kit's public quote, on each chain
+  lines.push(...judgeQuotes({ runs: a?.quotes }).lines);
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 

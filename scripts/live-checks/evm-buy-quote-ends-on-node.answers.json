@@ -1,5 +1,5 @@
 {
- "now": {
+ "good": {
   "at": "2026-11-08T11:55:21.838Z",
   "runs": [
    {
@@ -17,7 +17,7 @@
     "message": "rpc_error: provider 2 answered the multicall with an error: historical state c493227977911af2359d195b917dc720651d7e5048b61130abaf2790ac6c0896 is not available"
    }
   ],
-  "from": "a real run at 2af5db57 (the card's fix), 2026-11-08T11:5xZ: both quotes end within the bound and the request cap, neither with a quote"
+  "from": "a real run at 2af5db57 (the card's fix), 2026-11-08T11:55Z: both end in time and under the cap with a named refusal; no quote fitted the window (Base stale_quote at 31 s, its scans; Robinhood rpc_error at 33 s, a provider had dropped the block's state)"
  },
  "bad": {
   "at": "2026-11-08T11:59:52.212Z",

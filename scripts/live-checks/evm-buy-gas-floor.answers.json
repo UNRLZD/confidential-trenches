@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-08T08:37:07.197Z",
+  "at": "2026-11-08T12:13:44.039Z",
   "pools": [
    {
     "chain": "base",
@@ -65,8 +65,8 @@
     "reads": [
      {
       "provider": "base-rpc.publicnode.com",
-      "block": "0xd386634c30677418cfc13b49704358153de97b2b47509175d35d356c3179b3de",
-      "cap": "0x000000000000000000000000000000000000000000000000000000000155162f",
+      "block": "0xc911fe7f18430dc184ae9ec14f451f1a0be3fff8e6f10b1689b1cf524bb71ab7",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000001556063",
       "low": {
        "error": {
         "code": -32003,
@@ -76,8 +76,8 @@
      },
      {
       "provider": "base-mainnet.public.blastapi.io",
-      "block": "0x7b24816940616ec17578637bbbe60e84506b254d9b00aa903eba72e9d19ff373",
-      "cap": "0x000000000000000000000000000000000000000000000000000000000155172f",
+      "block": "0x4785bacce2513a439d5439575515f622030b8ec03d36477985e16745e75003be",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000001556063",
       "low": {
        "error": {
         "code": -32003,
@@ -92,8 +92,8 @@
     "reads": [
      {
       "provider": "robinhood-rpc.publicnode.com",
-      "block": "0x74ceb35712d90c691294f6b21a5a0b45562cb505898905953f9704d38d31c048",
-      "cap": "0x0000000000000000000000000000000000000000000000000000000000221a0e",
+      "block": "0xd45d408c317edd1a03c496e51511968eae75c52a7a1dad1811a7886294ebd498",
+      "cap": "0x000000000000000000000000000000000000000000000000000000000022209c",
       "low": {
        "error": {
         "code": -32000,
@@ -103,8 +103,8 @@
      },
      {
       "provider": "robinhood.drpc.org",
-      "block": "0xc15db9fbec696ecb2899d065a5432ce48c565677399a6d92b822d77c12ceea11",
-      "cap": "0x0000000000000000000000000000000000000000000000000000000000221a0e",
+      "block": "0x8949de737eefdae4fb01786ca586adf3caca4856f5de7c572b4a2b92d24f45f5",
+      "cap": "0x000000000000000000000000000000000000000000000000000000000022209c",
       "low": {
        "error": {
         "code": -32000,
@@ -115,7 +115,23 @@
     ]
    }
   ],
-  "from": "the kit's evmBuySwapFitCall at each provider's latest block, 2026-11-08T08:37Z"
+  "quotes": [
+   {
+    "chain": "base",
+    "ms": 31106,
+    "requests": 304,
+    "end": "stale_quote",
+    "message": "stale_quote: the quote's block is more than 30 s old: no more scans are sent"
+   },
+   {
+    "chain": "robinhood",
+    "ms": 31963,
+    "requests": 888,
+    "end": "rpc_error",
+    "message": "rpc_error: provider 2 answered the multicall with an error: historical state 7162ca7f92988ba62248c41c34ce43101931a39ff30de3828e959a29d60362b8 is not available"
+   }
+  ],
+  "from": "a real run at 8afd3083 (card evm-buy-quote-ends-on-node), 2026-11-08T12:13Z: the reads as before, and the kit's public quote on both chains ending in time with a named refusal; no quote fitted the window"
  },
  "bad": {
   "at": "2026-11-08T08:37:27.226Z",
@@ -261,6 +277,22 @@
     ]
    }
   ],
-  "from": "the kit's read sent from 0x...dEaD, not the pool, 2026-11-08T08:37Z"
+  "from": "the kit's read sent from 0x...dEaD, not the pool, 2026-11-08T08:37Z; quotes: card evm-buy-quote-ends-on-node's bad run (the kit with quote.ts at 3a73b181, 2026-11-08T11:59:52.212Z), both past the bound",
+  "quotes": [
+   {
+    "chain": "base",
+    "ms": 62516,
+    "requests": 447,
+    "end": "rpc_error",
+    "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms"
+   },
+   {
+    "chain": "robinhood",
+    "ms": 59902,
+    "requests": 1421,
+    "end": "rpc_error",
+    "message": "rpc_error: the scan provider limited its rate past the quote's bound of 60000 ms"
+   }
+  ]
  }
 }
