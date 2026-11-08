@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Makes the mainnet withdrawal relayer's key on the helper's server (card helper-mainnet-vault-env). Run on the server,
-# from the checkout redeploy.sh keeps, once it is at a commit that has this file (git fetch and checkout, as redeploy.sh's
-# step 1 does):
+# from the checkout redeploy.sh keeps, once it is at a commit that has this file (main fetched and the commit found on
+# it, as redeploy.sh's step 0 does, then checked out, its step 1; vault-lines.sh's step 1 has the command):
 #   apps/helper/deploy/withdraw-relayer-key.sh [--fee-recipient <account>]
 # The order, which it prints again at the end with the accounts filled in:
 #   0. this step;

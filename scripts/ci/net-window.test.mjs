@@ -25,6 +25,7 @@ export const CHANGED = [
   "scripts/ci/money-gate.mjs",
   "scripts/pages-readback.mjs",
   "scripts/live-checks/app-buy-route-strip.mjs",
+  "scripts/live-checks/app-chart-controls.mjs",
   "scripts/live-checks/app-chart-live.mjs",
   "scripts/live-checks/app-console-429.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
@@ -117,6 +118,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-deploy-mainnet.mjs",
   "scripts/live-checks/pool-sol-deploy-sweep.mjs",
   "scripts/live-checks/pool-sol-deploy.mjs",
+  "scripts/live-checks/pool-senders-next-page-helper.mjs",
   "scripts/live-checks/precommit-taken-recover.mjs",
   "scripts/live-checks/relayer-cost-guards.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
@@ -171,6 +173,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
   "scripts/live-checks/wallet-withdraw-move-out.mjs",
+  "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.
