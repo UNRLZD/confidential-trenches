@@ -20,6 +20,7 @@ import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
 import { About, LowerPanel } from "./LowerPanel.tsx";
+import { Rail } from "./Rail.tsx";
 import { TradeMarks } from "./TradeMarks.tsx";
 import { useTrades } from "./trades.ts";
 import type { Tape, Trade as TapeTrade } from "./trades.ts";
@@ -47,6 +48,7 @@ import "./token.css";
 // buy is drawn where it is on the next open; a pushed page (/token/<chain>/<id>) has no tab bar, its bar at the bottom.
 // Card app-token-lower-panel draws R5's lower panel under the chart (desktop) and under the tiles (phone): Trades from
 // the tape the marks read, Holders from the helper's holders read; and About under the box (LowerPanel.tsx).
+// Card app-token-rail puts the left rail (Trending and New, each row a link to its token) before the main column (Rail.tsx).
 
 /** A word, marked when it is still the owner's draft. */
 export function W({ id }: { id: WordId }) {
@@ -517,6 +519,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
   const tax = r ? taxOf(r) : null;
   return (
     <div className="tkp-desk">
+      <Rail chain={c.chain} token={v?.token ?? null} />
       <div className="tkp-main">
         <header className="tkp-head">
           <div className="tkp-ident">

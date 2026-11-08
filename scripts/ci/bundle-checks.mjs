@@ -107,6 +107,7 @@ export const OUT = {
   "app-no-test-token": "a browser and the helper",
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
+  "app-token-rail": "the helper's lists answer",
   "app-token-route": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",

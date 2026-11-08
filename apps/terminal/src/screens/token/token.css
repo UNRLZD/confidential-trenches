@@ -36,8 +36,12 @@
 /* BAR-10: the tap box is at least 44 x 44, the button stays as drawn (an invisible hit box, as Discover's Retry) */
 .tkp-retry::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 
-/* desktop: the main column (header over chart) beside the trade box's place */
-.tkp-desk { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 8px; padding: 0 8px 8px; }
+/* desktop: the left rail (Rail.tsx), the main column (header over chart) and the trade box's place. The rail's width
+   modes (card app-token-rail, R5 token.css): full from 1500 px, slim from 1180, none under it; the column is set from
+   the first paint, so the main column never moves when the rail's rows land */
+.tkp-desk { height: 100%; display: grid; grid-template-columns: 340px minmax(0, 1fr) 440px; gap: 8px; padding: 0 8px 8px; }
+@media (max-width: 1499.98px) { .tkp-desk { grid-template-columns: 78px minmax(0, 1fr) 440px; } }
+@media (max-width: 1179.98px) { .tkp-desk { grid-template-columns: minmax(0, 1fr) 440px; } .tkp-desk > .tkr { display: none; } }
 .tkp-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: nowrap; }
 /* one row (the locked design): the identity takes what the strip leaves and its text truncates, so the strip's width
