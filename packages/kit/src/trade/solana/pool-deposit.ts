@@ -29,7 +29,7 @@ import { solanaProgramAddress } from "../../checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 import { VAULT_FIELD_P } from "../../vault/shapes.ts";
 import { solanaCompileV0, type SolanaApiInstruction } from "./build.ts";
-import { solanaPoolAccount, solanaPoolFee, solanaPoolNextPage, solanaPoolPage, solanaPoolReleaseCost, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
+import { solanaPoolAccount, solanaPoolFee, solanaPoolNextPage, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
 
 /**
  * How near its page's end (entries from the size read to the page's last slot, inclusive: 1 at slot 1,023) a tree's
@@ -56,19 +56,17 @@ export const SOLANA_POOL_PAGE_HEADER = 16;
 
 /**
  * The smallest note the kit builds a deposit of (audit S-01), at `rent` (the Rent sysvar read on two RPCs,
- * readSolanaRent): the smallest chunk one release can take, contracts/pool-solana/src/lib.rs:52-57, max(rent(0) + fee,
- * 2 x fee) (W left rent-exempt, the backstop met), at the larger of two fees: a relayer paid its whole cost on the
- * release whose change opens a page (solanaPoolReleaseCost plus the page's rent beyond its entry, rent(16): 1,823,560
- * lamports at mainnet rent, release.rs:224-227), and the kit's own epoch fee (solanaPoolFee, 1,300,000). Either fee
- * holds the spent mark's rent(13), more than rent(0), so 2 x fee is the larger term. A note at the floor can be
- * released whole by any relayer paid its cost, on any release, and by the kit's own fee. Read from the rent, never a
- * constant: a rent rise lifts both fees and the floor with them. Never under MIN_DEPOSIT. 3,647,120 lamports at mainnet
- * rent (5,080 a byte, read 2 Nov 2026).
+ * readSolanaRent): the smallest chunk one release can take whole at the kit's relay fee F (solanaPoolFee, the fee our
+ * relay path charges on every release, page opening or not: the page reserve inside it pays for openings), as
+ * contracts/pool-solana/src/lib.rs:52-57 puts it, max(rent(0) + F, 2 x F): W left rent-exempt, and the backstop's
+ * withdrawnValue >= 2 x relay_fee met. Under it a note costs more to get out than it holds. The exact cost at the rent
+ * read, no headroom added: read from the rent, never a constant, so a rent change moves it. Never under MIN_DEPOSIT.
+ * 2,600,000 lamports at mainnet rent (5,080 a byte, read 2 Nov 2026: F 1,300,000), the signing page's withdrawNoteFloor.
  */
 export function solanaPoolNoteFloor(rent: SolanaRent): bigint {
-  const opening = solanaPoolReleaseCost(rent) + solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER);
-  const ours = solanaPoolFee(rent);
-  const chunk = 2n * (opening > ours ? opening : ours);
+  const fee = solanaPoolFee(rent);
+  const kept = solanaRentMin(rent, 0) + fee;
+  const chunk = 2n * fee > kept ? 2n * fee : kept;
   return chunk > SOLANA_POOL_MIN_DEPOSIT ? chunk : SOLANA_POOL_MIN_DEPOSIT;
 }
 
@@ -152,7 +150,7 @@ function checkPrecommitment(p: unknown): bigint {
 export function solanaPoolDepositIx(program: string, depositor: string, note: SolanaPoolDepositNote, sizes: { stateSize: number; labelSize: number }, rent: SolanaRent): SolanaApiInstruction {
   const { value, precommitment } = note;
   if (typeof value !== "bigint" || value < SOLANA_POOL_MIN_DEPOSIT || value >= U64) refuse(`the value is not a u64 at or above ${SOLANA_POOL_MIN_DEPOSIT}`);
-  if (rent === null || typeof rent !== "object" || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 0n || (rent.factor !== 1n && rent.factor !== 2n)) refuse("the rent is not a Rent sysvar read");
+  if (rent === null || typeof rent !== "object" || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) refuse("the rent is not a Rent sysvar read");
   const floor = solanaPoolNoteFloor(rent);
   if (value < floor) refuse(`the value ${value} is under the release floor of ${floor} lamports at this rent: the note would cost more to release than it holds`);
   const pre = be32(checkPrecommitment(precommitment));

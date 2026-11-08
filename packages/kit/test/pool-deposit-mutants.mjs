@@ -1,8 +1,8 @@
 // node packages/kit/test/pool-deposit-mutants.mjs (card kit-sol-pool-deposit-floor, audit S-01): plants one weakening of
 // the Solana pool deposit's note floor at a time in a copy of the kit's src/trade/solana/pool-deposit.ts
 // (test/mutant-copy.mjs), runs the named tests of test/pool-deposit.test.ts there, and expects each to fail: the
-// comparison removed or off by one either way, the floor taken as a constant, without the page opening's rent, without
-// the kit's own epoch fee or without MIN_DEPOSIT, and the rent's check removed.
+// comparison removed or off by one either way, the floor taken as a constant, a lamport under or over the kit's epoch
+// fee, or without MIN_DEPOSIT, and the rent's check removed or taking a rate solanaRentOf refuses (0, over 1,000,000).
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { runSync } from "../../../scripts/group-run.mjs";
@@ -13,11 +13,13 @@ const M = [
   ["the floor's comparison removed", "  if (value < floor) refuse(", "  if (false) refuse(", "S-01"],
   ["a note at the floor refused", "  if (value < floor) refuse(", "  if (value <= floor) refuse(", "S-01"],
   ["a note one under the floor built", "  if (value < floor) refuse(", "  if (value < floor - 1n) refuse(", "S-01"],
-  ["the floor a constant (mainnet's on 2 Nov)", "  const floor = solanaPoolNoteFloor(rent);", "  const floor = 3_647_120n;", "S-01"],
-  ["the floor without the page opening's rent", "  const opening = solanaPoolReleaseCost(rent) + solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER);", "  const opening = solanaPoolReleaseCost(rent);", "S-01"],
-  ["the floor without the kit's own epoch fee", "  const chunk = 2n * (opening > ours ? opening : ours);", "  const chunk = 2n * opening;", "S-01"],
+  ["the floor a constant (mainnet's on 2 Nov)", "  const floor = solanaPoolNoteFloor(rent);", "  const floor = 2_600_000n;", "S-01"],
+  ["the floor under the kit's fee (a lamport less)", "  const fee = solanaPoolFee(rent);", "  const fee = solanaPoolFee(rent) - 1n;", "S-01"],
+  ["the floor over the kit's fee (headroom added)", "  const fee = solanaPoolFee(rent);", "  const fee = solanaPoolFee(rent) + 1n;", "S-01"],
   ["the floor without MIN_DEPOSIT", "  return chunk > SOLANA_POOL_MIN_DEPOSIT ? chunk : SOLANA_POOL_MIN_DEPOSIT;", "  return chunk;", "S-01"],
   ["the rent's check removed", "  if (rent === null || typeof rent !== \"object\"", "  if (false && typeof rent !== \"object\"", "refused before any bytes"],
+  ["a rent rate of 0 taken (S-01 review)", "rent.lamportsPerByte < 1n ||", "rent.lamportsPerByte < 0n ||", "S-01 review"],
+  ["a rent rate over 1,000,000 taken (S-01 review)", " || rent.lamportsPerByte > 1_000_000n ||", " ||", "S-01 review"],
 ];
 // a sweep run inside node --test (test/mutants/pool-deposit-mutants.test.mjs) must not hand its test context on: the
 // child's own runner then reports to its parent, not on stdout

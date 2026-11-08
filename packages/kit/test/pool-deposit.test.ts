@@ -179,41 +179,48 @@ test("Solana: a value below MIN_DEPOSIT or past u64, a precommitment of 0 or at 
     assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, s, rent), /the rent is not a Rent sysvar read/);
 });
 
-// Audit S-01: the program takes any note from MIN_DEPOSIT (lib.rs:78), but the smallest release of a note is
-// max(rent(0) + fee, 2 x fee) (lib.rs:52-57): a note under it costs more to get out than it holds, and the pool has no
-// ragequit and no merge. Mainnet rent as read 2 Nov 2026 (5,080 a byte, factor 1): the fee a relayer needs on the
-// release whose change opens a page is 1,823,560 (release.rs:224-227), so the floor is 3,647,120.
+test("S-01 review: a rent rate solanaRentOf would refuse (0, or over 1,000,000 a byte) is refused, so a zero rate never drops the floor to MIN_DEPOSIT", () => {
+  const ok = { value: SOLANA_POOL_MIN_DEPOSIT, precommitment: 1n };
+  for (const rent of [{ lamportsPerByte: 0n, factor: 1n }, { lamportsPerByte: 1_000_001n, factor: 1n }] as const)
+    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, { ...ok, value: 1n << 62n }, { stateSize: 0, labelSize: 0 }, rent), /the rent is not a Rent sysvar read/, `${rent.lamportsPerByte}`);
+  // the edges solanaRentOf takes still build
+  assert.doesNotThrow(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, { stateSize: 0, labelSize: 0 }, { lamportsPerByte: 1n, factor: 1n }));
+  assert.doesNotThrow(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, { ...ok, value: 1n << 62n }, { stateSize: 0, labelSize: 0 }, { lamportsPerByte: 1_000_000n, factor: 2n }));
+});
+
+// Audit S-01: the program takes any note from MIN_DEPOSIT (lib.rs:78), but the smallest whole release of a note is
+// max(rent(0) + F, 2 x F) at the relay fee F (lib.rs:52-57): a note under it costs more to get out than it holds, and
+// the pool has no ragequit and no merge. F is the kit's epoch fee, the one our relay path charges on every release
+// (solanaPoolFee): 1,300,000 at mainnet rent as read 2 Nov 2026 (5,080 a byte, factor 1), so the floor is 2,600,000,
+// the signing page's withdrawNoteFloor.
 const MAINNET: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
 const S = { stateSize: 0, labelSize: 0 };
 const at = (value: bigint, rent: SolanaRent = MAINNET) => () => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, { value, precommitment: 1n }, S, rent);
 
 test("S-01: a 1,000,000-lamport note, or any under the release floor at the rent read, is refused, the refusal naming the floor", () => {
-  assert.throws(at(SOLANA_POOL_MIN_DEPOSIT), { name: "SolanaPoolDepositError", message: "solana pool deposit: the value 1000000 is under the release floor of 3647120 lamports at this rent: the note would cost more to release than it holds" });
-  // the floor without a page opening (lib.rs:55, 2,184,080) and the kit's own epoch fee's (2 x 1,300,000): both under it
-  for (const v of [2_184_080n, 2_600_000n, 3_647_119n]) assert.throws(at(v), /under the release floor of 3647120 lamports/);
-  assert.equal(kit.solanaPoolNoteFloor(MAINNET), 3_647_120n);
+  assert.throws(at(SOLANA_POOL_MIN_DEPOSIT), { name: "SolanaPoolDepositError", message: "solana pool deposit: the value 1000000 is under the release floor of 2600000 lamports at this rent: the note would cost more to release than it holds" });
+  // the floor at the bare release cost (lib.rs:55, 2 x 1,092,040): under it
+  for (const v of [2_184_080n, 2_599_999n]) assert.throws(at(v), /under the release floor of 2600000 lamports/);
+  assert.equal(kit.solanaPoolNoteFloor(MAINNET), 2_600_000n);
 });
 
-test("S-01: a note at the release floor builds, and the tx with it", () => {
-  assert.doesNotThrow(at(3_647_120n));
-  assert.equal(new DataView(at(3_647_120n)().data.buffer).getBigUint64(1, true), 3_647_120n);
-  assert.doesNotThrow(() => solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 3_647_120n, precommitment: 9n }, S, "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", MAINNET));
-  assert.throws(() => solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 3_647_119n, precommitment: 9n }, S, "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", MAINNET), /under the release floor of 3647120/);
+test("S-01: a note at the release floor builds, and the tx with it: the device's own withdraw floor (2,600,000) is one", () => {
+  assert.doesNotThrow(at(2_600_000n));
+  assert.equal(new DataView(at(2_600_000n)().data.buffer).getBigUint64(1, true), 2_600_000n);
+  assert.doesNotThrow(() => solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 2_600_000n, precommitment: 9n }, S, "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", MAINNET));
+  assert.throws(() => solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 2_599_999n, precommitment: 9n }, S, "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", MAINNET), /under the release floor of 2600000/);
 });
 
 test("S-01: the floor follows the rent read, never a constant: a rent rise lifts it, and it is never under MIN_DEPOSIT", () => {
-  // twice mainnet's rate: the 2 Nov floor would be a note no release can take
+  // twice mainnet's rate: F = 2,174,080 rounded up to 2,200,000, plus 200,000; the 2 Nov floor would be a note no
+  // release at the kit's fee can take
   const twice: SolanaRent = { lamportsPerByte: 10_160n, factor: 1n };
-  assert.equal(kit.solanaPoolNoteFloor(twice), 7_274_240n); // 2 x (rent(13) + 72 x 10,160 + 10,000 + rent(16))
-  assert.throws(at(3_647_120n, twice), /under the release floor of 7274240 lamports/);
-  assert.doesNotThrow(at(7_274_240n, twice));
-  // the rent before SIMD-0194 (3,480 a byte, factor 2.0)
-  assert.equal(kit.solanaPoolNoteFloor({ lamportsPerByte: 3_480n, factor: 2n }), 4_989_440n);
-  // a rent where the kit's own epoch fee (600,000: 329,500 rounded up to 400,000, plus 200,000) is over the page
-  // opening's cost (545,500): the floor is the kit's, 2 x 600,000
-  assert.equal(kit.solanaPoolNoteFloor({ lamportsPerByte: 1_500n, factor: 1n }), 1_200_000n);
-  assert.throws(at(1_199_999n, { lamportsPerByte: 1_500n, factor: 1n }), /under the release floor of 1200000 lamports/);
-  // a rent so low that the release floor is under the program's least deposit: the floor is MIN_DEPOSIT
+  assert.equal(kit.solanaPoolNoteFloor(twice), 4_800_000n);
+  assert.throws(at(2_600_000n, twice), /under the release floor of 4800000 lamports/);
+  assert.doesNotThrow(at(4_800_000n, twice));
+  // the rent before SIMD-0194 (3,480 a byte, factor 2.0): F 1,700,000
+  assert.equal(kit.solanaPoolNoteFloor({ lamportsPerByte: 3_480n, factor: 2n }), 3_400_000n);
+  // a rent so low that the release floor (2 x 300,000) is under the program's least deposit: the floor is MIN_DEPOSIT
   assert.equal(kit.solanaPoolNoteFloor({ lamportsPerByte: 100n, factor: 1n }), SOLANA_POOL_MIN_DEPOSIT);
   assert.doesNotThrow(at(SOLANA_POOL_MIN_DEPOSIT, { lamportsPerByte: 100n, factor: 1n }));
   // the recorded devnet rent: the recorded deposits' 10,000,000 clears it
