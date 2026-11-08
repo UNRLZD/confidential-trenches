@@ -16,6 +16,9 @@ const PROXY_VENDOR_MAX = 300;
 const PROXY_CLIENT_MAX = 60;
 const WIDE = { PROXY_BUDGET_JUPITER: `${PROXY_VENDOR_MAX},${PROXY_CLIENT_MAX}` };
 import { VENDOR_NAMES, VENDORS } from "./vendors.ts";
+import { ONECLICK_USDC_ASSETS } from "@blindfill/kit";
+// read off the module, so this file still loads at a base without it (red runs)
+const DEPOSIT_SHEET_CALLS = (proxyModule as unknown as { DEPOSIT_SHEET_CALLS?: number }).DEPOSIT_SHEET_CALLS;
 
 const ENV = {
   JUPITER_API_KEY: "fake-jupiter-key-" + "j".repeat(16),
@@ -270,7 +273,7 @@ test("review F-C2: one address reading a cached proxy list 1000 times in one win
 
 test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per client>\"), else its published limit's; a bad value stops the start naming the variable", async () => {
   const M = 60_000; // every vendor's limit is a minute's
-  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34, lend: true }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0, lend: true }, oneclick: { total: 1_200, perClient: 5, windowMs: M, reserve: 0, lend: true } });
+  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34, lend: true }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0, lend: true }, oneclick: { total: 1_000, perClient: 5, windowMs: M, reserve: 0, lend: true } });
   for (const v of VENDOR_NAMES) assert.ok(PROXY_BUDGETS[v]!.perClient < PROXY_BUDGETS[v]!.total, v);
   assert.equal(proxyBudgetEnv("oneclick"), "PROXY_BUDGET_ONECLICK");
   assert.throws(() => createProxy({ PROXY_BUDGET_RELAY: "8,8" }), /^Error: PROXY_BUDGET_RELAY must be/);
@@ -291,22 +294,58 @@ test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per cli
 // within a second (packages/signpage/src/rules/deposit-dry.ts: deposit.assets reads the token list, then one dry quote
 // per asset at once; deposit.dry one dry quote). At a0726204's share of 2 and total of 50 the third went only as lent,
 // and lending stops while other clients drew in the minute, so the eighth user's sheet answered 429 (busy) with 1Click idle.
+// Review LOW 4 (429d0a63): beside them two clients send at the proxy route's cap (server.ts UPSTREAM_ROUTE_MAX, 120 a
+// 10 s window each, 1,440 a minute, past the total) for two minutes, so the total is contended and the sheets get only
+// what the share holds for them, never what lending leaves idle.
 test("card deposit-sheet-oneclick-budget: one deposit sheet open (the token list, three dry quotes at once, then one dry quote) fits one client's 1Click share at any load other clients put on the helper", async () => {
   const c = clock();
   const f = vendor((s) => (s.url.endsWith("/v0/tokens") ? json([]) : json({ quote: {} }, 201)));
-  const p = createProxy(ENV, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: c.sleep });
+  const p = createProxy(ENV, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: async () => {} });
+  const ROUTE_CAP = 120;
   const refused: string[] = [];
-  const sheets = 40;
-  for (let k = 0; k < sheets; k++) {
+  let heavyServed = 0;
+  const windows = 12;
+  for (let k = 0; k < windows; k++) {
+    for (const heavy of ["203.0.113.200", "203.0.113.201"]) for (let i = 0; i < ROUTE_CAP; i++) if ((await p.handle("oneclick", "/v0/quote", "", "{}", heavy)).status === 201) heavyServed++;
     const ip = `198.51.100.${k}`;
     const answers = [await p.handle("oneclick", "/v0/tokens", "", "", ip)];
     answers.push(...(await Promise.all([0, 1, 2].map(() => p.handle("oneclick", "/v0/quote", "", "{}", ip)))));
     answers.push(await p.handle("oneclick", "/v0/quote", "", "{}", ip));
     for (const a of answers) if (a.status !== 200 && a.status !== 201) refused.push(`sheet ${k}: ${a.status}`);
-    c.add(1_000);
+    c.add(10_000);
   }
   assert.deepEqual(refused, [], "every sheet's five calls answered");
-  assert.equal(f.seen.filter((s) => s.url.endsWith("/v0/quote")).length, sheets * 4, "every dry quote reached 1Click");
+  assert.ok(heavyServed > 0 && heavyServed < 2 * windows * ROUTE_CAP, `the heavy clients were lent ${heavyServed}, and refused past the room the others keep`);
+  assert.equal(f.seen.filter((s) => s.url.endsWith("/v0/quote")).length, heavyServed + windows * 4, "every sheet's dry quote reached 1Click");
+});
+
+// review LOW 5: the sheet's calls are the kit's deposit assets' (one dry quote each) and the list and the dry quote
+test("card deposit-sheet-oneclick-budget: DEPOSIT_SHEET_CALLS is the kit's ONECLICK_USDC_ASSETS plus the token list and deposit.dry's quote", () => {
+  assert.equal(DEPOSIT_SHEET_CALLS, ONECLICK_USDC_ASSETS.length + 2);
+  assert.equal(PROXY_BUDGETS.oneclick!.perClient, DEPOSIT_SHEET_CALLS);
+});
+
+// review MEDIUM 1: a deploy's other helper at the vendor's whole total is counted whole, whatever the total, so the new
+// one sends nothing more in that minute (a cap under the total let 1,400 reach 1Click in 34 s, then its 429 held every
+// call for its 60 s reset)
+test("card deposit-sheet-oneclick-budget: another helper's calls at a vendor's full total, a total set past the default included, are all counted: no caller's call reaches the vendor", async () => {
+  for (const [env, total] of [[ENV, PROXY_BUDGETS.oneclick!.total], [{ ...ENV, PROXY_BUDGET_ONECLICK: "3000,5" }, 3000]] as const) {
+    const c = clock();
+    const f = vendor(() => json({ quote: {} }, 201));
+    const peerCalls = Array.from({ length: total }, (_, i) => c.now() - 30_000 + Math.floor((i * 29_000) / total));
+    const p = createProxy(env, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: async () => {}, peers: { read: () => ({ oneclick: peerCalls }), write: () => {} } });
+    const r = await p.handle("oneclick", "/v0/quote", "", "{}", "198.51.100.7");
+    assert.equal(r.status, 503, `total ${total}: ${r.status}`);
+    assert.equal(f.seen.length, 0, `total ${total}: a call reached the vendor with the peer at its full total`);
+  }
+});
+
+// review LOW 3: an override names 1Click's plan, never a share under one sheet open
+test("card deposit-sheet-oneclick-budget: PROXY_BUDGET_ONECLICK with a share under DEPOSIT_SHEET_CALLS stops the start, naming the variable", () => {
+  assert.throws(() => createProxy({ ...ENV, PROXY_BUDGET_ONECLICK: "50,2" }), /^Error: PROXY_BUDGET_ONECLICK must be .*at least 5/);
+  assert.throws(() => createProxy({ ...ENV, PROXY_BUDGET_ONECLICK: "9999,4" }), /PROXY_BUDGET_ONECLICK/);
+  createProxy({ ...ENV, PROXY_BUDGET_ONECLICK: "50,5" });
+  createProxy({ ...ENV, PROXY_BUDGET_RELAY: "50,1" });
 });
 
 // review F-D on the proxy: a vendor that keeps its published per-minute limit on a 60-second sliding window (the

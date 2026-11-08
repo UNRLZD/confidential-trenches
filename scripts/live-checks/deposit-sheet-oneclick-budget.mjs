@@ -10,10 +10,13 @@
 //     vendor and is never lent past the share (limits.ts takeEach shareOnly), so this reads the share itself: at a
 //     share under five the third answers 429 even with the helper idle.
 // Each refusal is named with its status, the cause in the helper's Server-Timing (cause;desc=...) and its Retry-After.
+// A 503 whose cause is 1Click's own (VENDOR_CAUSES: it sent nothing in the helper's 8 s, failed twice, or was never
+// reached) is not the helper's budget: with no other refusal the run is INCONCLUSIVE (exit 3, said on its own line, as
+// solana-jupiter-build's), never PASS (review LOW 6 of 429d0a63: 1Click's 02:07-02:31Z slowdown read as a FAIL of ours).
 // The quotes are dry: nothing is signed, nothing of anyone's is named, no money moves.
 //   node scripts/live-checks/deposit-sheet-oneclick-budget.mjs [--base <helper url>] [--record <file>]
 //   node scripts/live-checks/deposit-sheet-oneclick-budget.mjs --answer <file>     judge a recorded answer, no network
-// PASS exit 0, FAIL exit 1, error exit 2; the last line is "PASS deposit-sheet-oneclick-budget" or "FAIL ...".
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3; the last line is "<verdict> deposit-sheet-oneclick-budget".
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -41,20 +44,31 @@ export function dryBody(origin, amount, now = Date.now()) {
   };
 }
 
+/** The helper's 503 causes that are 1Click's own (apps/helper/src/proxy/proxy.ts Cause): timeout, 5xx, send. Every
+ *  other refusal (429 share, 503 budget or held, 1Click's 429 to our count, our key, an answer) is the helper's. */
+export const VENDOR_CAUSES = Object.freeze(["timeout", "5xx", "send"]);
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2). */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 const causeOf = (timing) => /cause;desc="([a-z0-9]+)"/.exec(timing ?? "")?.[1] ?? null;
 
-/** The verdict on an answer { base, sheet: [call], share: [call] }, each call { what, status, cause, retryAfter }. */
+/** The verdict on an answer { base, sheet: [call], share: [call] }, each call { what, status, cause, retryAfter }:
+ *  { verdict, ok, lines }. */
 export function judge(a) {
   const lines = [];
+  const vendor = [];
   const bad = (m) => lines.push(`BAD ${m}`);
+  const ours = (c) => !(c.status === 503 && VENDOR_CAUSES.includes(c.cause));
   const named = (c) => `${c.what} answered ${c.status}${c.cause ? ` (cause ${c.cause})` : ""}${c.retryAfter ? `, Retry-After ${c.retryAfter}` : ""}`;
   const sheet = Array.isArray(a?.sheet) ? a.sheet : [];
   const share = Array.isArray(a?.share) ? a.share : [];
   if (sheet.length !== SHEET_CALLS) bad(`sheet: ${sheet.length} calls recorded, want ${SHEET_CALLS}`);
   if (share.length !== SHEET_CALLS) bad(`share: ${share.length} calls recorded, want ${SHEET_CALLS}`);
-  for (const c of sheet) if (!(c.status === 200 || (c.what.startsWith("quote") && c.status === 201))) bad(`sheet: ${named(c)}, want ${c.what.startsWith("quote") ? "200 or 201" : "200"}`);
-  for (const c of share) if (c.status !== 200) bad(`share: ${named(c)}, want 200`);
-  return { ok: lines.length === 0, lines };
+  const refuse = (part, c, want) => (ours(c) ? bad(`${part}: ${named(c)}, want ${want}`) : vendor.push(`${part}: ${named(c)}: 1Click's own, not the helper's budget`));
+  for (const c of sheet) if (!(c.status === 200 || (c.what.startsWith("quote") && c.status === 201))) refuse("sheet", c, c.what.startsWith("quote") ? "200 or 201" : "200");
+  for (const c of share) if (c.status !== 200) refuse("share", c, "200");
+  const verdict = lines.length > 0 ? "FAIL" : vendor.length > 0 ? "INCONCLUSIVE" : "PASS";
+  if (verdict === "INCONCLUSIVE") lines.push(...vendor.map((l) => `INCONCLUSIVE ${l}`));
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 async function call(base, what, path, body, fetchFn) {
@@ -97,8 +111,8 @@ async function main() {
   for (const c of [...(answer.sheet ?? []), ...(answer.share ?? [])]) console.log(`  ${c.what}: ${c.status} in ${c.ms} ms${c.cause ? `, cause ${c.cause}` : ""}`);
   const v = judge(answer);
   for (const l of v.lines) console.log(l);
-  console.log(`${v.ok ? "PASS" : "FAIL"} ${KEY}`);
-  process.exit(v.ok ? 0 : 1);
+  console.log(`${v.verdict} ${KEY}`);
+  process.exit(EXIT[v.verdict]);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

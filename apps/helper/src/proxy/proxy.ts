@@ -18,7 +18,7 @@
 // helper's own read names), then reads; past it the answer is 503 upstream, the not-ready form the device falls back
 // on (H2.3). The calls that waited go to a PACED vendor one per its second's share, so the end of a hold is no burst. Identical GETs
 // in flight share one call.
-import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, type HelperV1Path } from "@blindfill/kit";
+import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, ONECLICK_USDC_ASSETS, type HelperV1Path } from "@blindfill/kit";
 import { budgetFromEnv, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { VENDOR_NAMES, VENDORS, type Upstream, type Vendor, type VendorName } from "./vendors.ts";
 
@@ -71,14 +71,16 @@ export const QUEUE_POLL_MS = 250;
 /** Past a hold's end, a wait's margin (card helper-rpc-wait-timing), as rpc.ts HOLD_MARGIN_MS: a timer can fire a few
  *  ms before the clock reads its end. */
 const HOLD_MARGIN_MS = 5;
-/** The most of one vendor's calls the other helpers may seed (card helper-deploy-reads-fast): a Developer key's 600 a minute
- *  and the second a counted minute spans, with room. */
-export const VENDOR_SEED_MAX = 1_000;
+/** The most of one vendor's calls the other helpers may seed, for the vendors' `totals` (card helper-deploy-reads-fast):
+ *  the largest total a minute, overrides included, and the second a counted minute spans (61 of 60). Card
+ *  deposit-sheet-oneclick-budget review MEDIUM 1: a fixed 1,000 under 1Click's then 1,200 let a deploy's new helper count
+ *  1,000 of the old one's calls and send 200 more, and 1Click's 429 held every call for its 60 s reset. */
+export const vendorSeedMax = (totals: readonly number[]): number => Math.ceil((Math.max(0, ...totals) * 61) / 60);
 /** The 1Click calls one deposit sheet open sends within a second (card deposit-sheet-oneclick-budget): deposit.assets
  *  reads the token list, then one dry quote per release asset at once (packages/signpage/src/rules/deposit-dry.ts
- *  depositAssetsKind, DEPOSIT_ASSET_CHAINS: 3), and deposit.dry one dry quote: 5, one client's share of 1Click, so no
- *  other client's load can refuse it. */
-export const DEPOSIT_SHEET_CALLS = 5;
+ *  depositAssetsKind over DEPOSIT_ASSET_CHAINS, the kit's ONECLICK_USDC_ASSETS in order), and deposit.dry one dry quote:
+ *  5 for the 3 assets, one client's share of 1Click, so no other client's load can refuse it. */
+export const DEPOSIT_SHEET_CALLS = ONECLICK_USDC_ASSETS.length + 2;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
 /**
@@ -103,16 +105,23 @@ export const VENDOR_WINDOW_MS = 60_000;
  * - oneclick: no limit in the docs (docs.near-intents.org 1click-api/authentication.md and the quote reference, read
  *   2026-11-08 02:39Z), but 1Click answers its own on every call: x-ratelimit-limit-unauth 1200 and
  *   x-ratelimit-reset-unauth 60 on /v0/quote and /v0/tokens, keyless and with our JWT alike, one counter for both
- *   (remaining 1197 then 1196, read from the Mac 02:40Z): 1200. Share DEPOSIT_SHEET_CALLS 5 (card
- *   deposit-sheet-oneclick-budget): one deposit sheet open, within a second. At 50 and 2 the sheet's third call went
+ *   (remaining 1197 then 1196, read from the Mac 02:40Z): 1200 less 200, so 1,000 (card deposit-sheet-oneclick-budget
+ *   review MEDIUM 2): a handover's seed gap (the peers' files are read at a draw, not as each call is sent) and the send
+ *   latency (a draw is counted by its whole second, and reaches 1Click up to a timeout later) can only make our count
+ *   short of 1Click's, and one 429 holds every call for its 60 s reset. Share DEPOSIT_SHEET_CALLS 5: one deposit sheet
+ *   open, within a second, and no override may name less (PROXY_MIN_SHARE). At 50 and 2 the sheet's third call went
  *   only as lent, and from the eighth sheet in a minute it answered 429 busy or 503 with 1Click idle.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
   jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34, lend: true },
   relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
   lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
-  oneclick: { total: 1_200, perClient: DEPOSIT_SHEET_CALLS, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
+  oneclick: { total: 1_000, perClient: DEPOSIT_SHEET_CALLS, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
 };
+/** The least share PROXY_BUDGET_<VENDOR> may name (limits.ts budgetFromEnv minShare; deploy/redeploy.sh budget_ok holds
+ *  the same): 1Click's is one deposit sheet open (card deposit-sheet-oneclick-budget review LOW 3: "50,2" brought the
+ *  bug back), every other vendor's 1. */
+export const PROXY_MIN_SHARE: Readonly<Record<VendorName, number>> = { jupiter: 1, relay: 1, lifi: 1, oneclick: DEPOSIT_SHEET_CALLS };
 /**
  * Requests kept in each vendor's total for the helper's own reads that serve every user, which only those reads may
  * draw, whatever PROXY_BUDGET_<VENDOR> says. Jupiter: Discover's three lists once per FRESH_MS 12 s (data/solana/
@@ -239,19 +248,21 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const burstMs = deps.burstMs ?? BURST_MS;
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v], lend: true }])) as Record<VendorName, BudgetLimits>;
+  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v], minShare: PROXY_MIN_SHARE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v], lend: true }])) as Record<VendorName, BudgetLimits>;
   const budget = upstreamBudget((v) => limits[v as VendorName], now);
+  /** The most of a vendor's calls the other helpers' files may seed: the largest total this helper runs (vendorSeedMax). */
+  const seedMax = vendorSeedMax(VENDOR_NAMES.map((v) => limits[v].total));
   /** Each vendor's calls this helper made that its window may still count (card helper-deploy-reads-fast). */
   const calls = (): Record<string, number[]> => Object.fromEntries(VENDOR_NAMES.map((v) => [v, budget.calls(v)]));
   /** The other helpers' calls on the same keys (hostile input: whole ms numbers no later than a second from now,
-   *  VENDOR_SEED_MAX a vendor at most, the newest kept), counted in each vendor's budget in place of the last seed: a
+   *  seedMax a vendor at most, the newest kept), counted in each vendor's budget in place of the last seed: a
    *  vendor counts every call on its key, and while a deploy's two helpers overlapped each one counted only its own,
    *  so together they drew Jupiter past its minute (live run 42125976095 attempt 1: helper-token-page-cold, a page 503
    *  "jupiter held" after Jupiter's 429). */
   function seed(vendors: unknown): void {
     const o = typeof vendors === "object" && vendors !== null && !Array.isArray(vendors) ? (vendors as Record<string, unknown>) : {};
     for (const v of VENDOR_NAMES) {
-      const t = Object.hasOwn(o, v) && Array.isArray(o[v]) ? (o[v] as unknown[]).filter((x): x is number => typeof x === "number" && Number.isSafeInteger(x) && x <= now() + 1_000).sort((x, y) => x - y).slice(-VENDOR_SEED_MAX) : [];
+      const t = Object.hasOwn(o, v) && Array.isArray(o[v]) ? (o[v] as unknown[]).filter((x): x is number => typeof x === "number" && Number.isSafeInteger(x) && x <= now() + 1_000).sort((x, y) => x - y).slice(-seedMax) : [];
       budget.seed(v, t);
     }
   }
