@@ -138,10 +138,11 @@ const PLANTED = {
   "the wallet's sweeps by pnpm --filter, no run": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm --filter @blindfill/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
   "the wallet's sweeps by pnpm -C": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm -C packages/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
   "the wallet's sweeps by npm in a run block": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: |\n          cd packages/wallet && npm run test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
-  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
-  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
-  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
-  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]", "test-mutants: the sweeps are"],
+  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
+  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
+  "seven mutant parts once the rent back's sweep grew": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8\]/, "$1part: [1, 2, 3, 4, 5, 6, 7]", "test-mutants' heaviest of 7 part(s) is planned at"],
+  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
+  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]", "test-mutants: the sweeps are"],
   "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
 };
@@ -277,7 +278,7 @@ test("planted: a part added to the matrix drops nothing and doubles nothing; pas
     const seen = Array.from({ length: total }, (_, i) => mutantsPart(SWEEPS, i, total)).flat().map(key);
     assert.deepEqual(seen.toSorted(), SWEEPS.map(key).toSorted(), `${total} parts`);
   }
-  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7)\]/, `$1, 8]`);
+  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7, 8)\]/, `$1, 9]`);
   assert.notEqual(more, CI);
   assert.deepEqual(shardProblems(more), []);
   assert.throws(() => mutantsPart(SWEEPS, 0, SWEEPS.length + 1), /fewer than/);

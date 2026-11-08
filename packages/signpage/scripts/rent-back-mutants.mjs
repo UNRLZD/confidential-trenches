@@ -105,7 +105,16 @@ const M = [
 ];
 // ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
 const only = process.env.ONLY;
-const run = only ? M.filter(([name]) => name.includes(only)) : M;
+// <k>/<n>: part k of n only, mutant i in part (i % n) + 1, as the helper's sweeps split (apps/helper/test/pool-evm/
+// mutant-sweep.mjs partOf); test:mutants runs the parts, one command each, so ci.yml's split shares them out
+const arg = process.argv.slice(2);
+const part = /^(\d+)\/(\d+)$/.exec(arg[0] ?? "");
+if (arg.length > 1 || (arg.length === 1 && (!part || Number(part[1]) < 1 || Number(part[1]) > Number(part[2])))) {
+  console.log(`FAIL the part is <k>/<n> with 1 <= k <= n, one at most, not ${JSON.stringify(arg)}`);
+  process.exit(1);
+}
+const inPart = (i) => !part || i % Number(part[2]) === Number(part[1]) - 1;
+const run = (only ? M.filter(([name]) => name.includes(only)) : M).filter((_, i) => inPart(i));
 let killed = 0;
 for (const [name, file, test, from, to] of run) {
   const src = readFileSync(file, "utf8");
