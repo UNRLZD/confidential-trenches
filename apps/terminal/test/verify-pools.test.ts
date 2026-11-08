@@ -130,6 +130,40 @@ test("readPool: an EVM pool is read at the lower head on both RPCs, every read a
   await assert.rejects(readPool(pin("base"), async () => ({ error: "down" })), /no head/);
 });
 
+// An RPC that does not answer is a screen state, as on the NEAR pair (live.ts, readVerify): one RPC of a pair down
+// draws its checks Unverified and our code logs nothing; only a pool with no head on either RPC logs its reason, once,
+// as the NEAR pair logs "no final height on either RPC".
+test("one RPC of each pair down: every row amber, nothing logged; both of an EVM pair down: Unverified, its reason logged once", async () => {
+  const ids: Record<string, string> = { getMultipleAccounts: "accounts", eth_getBlockByNumber: "block", eth_getCode: "code", eth_call: "owner" };
+  const slot = (p: unknown[]) => (Object.keys(EIP1967) as (keyof typeof EIP1967)[]).find((k) => EIP1967[k] === p[1])!;
+  const replay = (down: (url: string) => boolean) =>
+    (async (url: string, init: RequestInit) => {
+      if (down(url)) throw new TypeError("Failed to fetch");
+      const { method, params } = JSON.parse(String(init.body));
+      const c = (Object.keys(REC) as (keyof typeof REC)[]).find((k) => k !== ("notes" as string) && REC[k].rpcs?.some((x) => x.name === url))!;
+      const answer = method === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${REC[c].height!.toString(16)}` } : (REC[c].rpcs.find((x) => x.name === url)!.answers as any)[ids[method] ?? slot(params)];
+      return new Response(JSON.stringify(answer), { status: 200 });
+    }) as unknown as typeof fetch;
+  const logged: string[] = [];
+  const was = console.error;
+  console.error = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
+  try {
+    for (const side of [0, 1]) {
+      const firsts = new Set(Object.values(PINS).map((p) => p!.rpcs[side]));
+      const v = await livePools(PINS, replay((u) => firsts.has(u)));
+      assert.ok(v.state === "read" && v.rows.every((r) => r.status === "warn"), `side ${side} down`);
+      assert.deepEqual(logged, [], `side ${side} down: nothing logged`);
+    }
+    const base = new Set(PINS.base!.rpcs);
+    const v = await livePools(PINS, replay((u) => base.has(u)));
+    assert.ok(v.state === "read");
+    assert.deepEqual(v.rows.map((r) => r.status), ["ok", "warn", "ok"]);
+    assert.deepEqual(logged, [`Verify read no head on ${PINS.base!.rpcs.join(" or ")}`]);
+  } finally {
+    console.error = was;
+  }
+});
+
 test("the testnet build names no pool: every row Unverified, nothing asked", async () => {
   let asked = 0;
   const v = await livePools(VERIFY_RELEASES.testnet.pools, (async () => (asked++, new Response("{}"))) as unknown as typeof fetch);
