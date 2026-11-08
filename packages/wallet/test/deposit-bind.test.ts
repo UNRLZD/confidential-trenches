@@ -26,6 +26,7 @@ import {
   findDeadCall,
   LAPSE_MARGIN,
   readU,
+  RELEASE_RELAYER,
   resetBindSession,
   SHORT_READ_CALLS,
   resignDeposit,
@@ -1389,6 +1390,27 @@ test("R2-5: txCarriesFinal is true on a valid view and false when any one field 
     const v = structuredClone(good) as V;
     alter(v);
     assert.equal(await txCarriesFinal(rpcOf(new Map([[hash, v]])), hash, RELAYER, call), false, what);
+  }
+});
+
+// The release's mainnet carry (card wallet-mainnet-relayer-pins): the device never reads which account carries a
+// deposit from a helper (not /v1/health's bind.mainnet, not a reply); a tx the written pin did not sign is not U's call.
+test("R2-5: with the release's mainnet carry, a tx it signed carries U's call; one any other relayer signed does not", async () => {
+  const pin = RELEASE_RELAYER.mainnet;
+  assert.equal(typeof pin, "string", "the release names its mainnet carry");
+  const t = await setup();
+  const { call, view } = await signedCall(t);
+  const hash = base58.encode(new Uint8Array(32).fill(5));
+  const by = (signer: string) => {
+    const v = structuredClone(txView(view, hash, true, false)) as any;
+    v.result.transaction.signer_id = signer;
+    v.result.transaction_outcome.outcome.executor_id = signer;
+    return rpcOf(new Map([[hash, v]]));
+  };
+  assert.equal(await txCarriesFinal(by(pin!), hash, pin!, call), true, "the pin's own tx");
+  const throwaway = "9747fa11a4de38cecc3b9086239633a2164a81c8e7b03a39bd3f1522438717d6"; // helper-mainnet-vault-env's Mac test run
+  for (const other of [throwaway, "ab".repeat(32), "bind.unrlzd.near"]) {
+    assert.equal(await txCarriesFinal(by(other), hash, pin!, call), false, `a tx ${other} signed`);
   }
 });
 

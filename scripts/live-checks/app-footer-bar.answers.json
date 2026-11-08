@@ -1,0 +1,79 @@
+{
+ "note": "app-footer-bar.mjs collect(), headless Chromium at 1440 x 900, signed out. good: this card's build (615491b9) at the hosts' names inside the stand-in shell (--harness), a local chain at 600 ms blocks, read 8 Nov 12:11:34Z: PASS. bad: the deployed APP_HOST before this card (its footer draws Terms, Privacy and Verify only), NEAR's final block read on rpc.mainnet.fastnear.com, 8 Nov 10:45:28Z: FAIL.",
+ "good": {
+  "check": "app-footer-bar",
+  "at": "2026-11-08T12:11:34.894Z",
+  "source": "harness, terminal build apps/terminal/dist, signed out, a local chain at 600 ms blocks",
+  "browser": "157.0.8103.38",
+  "framed": true,
+  "top": "https://confidential.unrealized.trade/",
+  "header": "S1.1",
+  "reads": [
+   {
+    "visible": true,
+    "blockText": "Block 223,500,003",
+    "block": 223500003,
+    "conn": "on",
+    "health": "Stable",
+    "ms": 29,
+    "ticks": [],
+    "near": 223500003,
+    "at": 1794139895797
+   },
+   {
+    "visible": true,
+    "blockText": "Block 223,500,013",
+    "block": 223500013,
+    "conn": "on",
+    "health": "Stable",
+    "ms": 2,
+    "ticks": [],
+    "near": 223500015,
+    "at": 1794139902977
+   }
+  ],
+  "links": [
+   "/terms",
+   "/privacy",
+   "/verify"
+  ]
+ },
+ "bad": {
+  "check": "app-footer-bar",
+  "at": "2026-11-08T10:45:28.791Z",
+  "source": "live https://ct-app.unrealized.trade",
+  "browser": "156.0.8078.79",
+  "framed": true,
+  "top": "https://confidential.unrealized.trade/",
+  "header": "S1.1",
+  "reads": [
+   {
+    "visible": true,
+    "blockText": null,
+    "block": null,
+    "conn": null,
+    "health": null,
+    "ms": null,
+    "ticks": [],
+    "near": 223605415,
+    "at": 1794134746269
+   },
+   {
+    "visible": true,
+    "blockText": null,
+    "block": null,
+    "conn": null,
+    "health": null,
+    "ms": null,
+    "ticks": [],
+    "near": 223605428,
+    "at": 1794134753650
+   }
+  ],
+  "links": [
+   "/terms",
+   "/privacy",
+   "/verify"
+  ]
+ }
+}

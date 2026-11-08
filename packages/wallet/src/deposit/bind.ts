@@ -110,12 +110,18 @@ const TX_METHOD = "tx";
 if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(TX_METHOD)) throw new Error(`"${TX_METHOD}" is not on the kit's NEAR method list`);
 
 /**
- * The account that sends the release relayer's transactions (markets.md LD3, `bind.<ours>.near`), the `tx` read's
- * sender_account_id. The release has not written it yet: while null, a refused call's transaction cannot be read, so
- * the refused branch never signs (fail closed). A wrong value only makes the read fail: the tx must carry U's own
- * signed call.
+ * The account that sends the release relayer's transactions (markets.md LD3), the `tx` read's sender_account_id. Where
+ * null, a refused call's transaction cannot be read, so the refused branch never signs (fail closed). A wrong value
+ * only makes the read fail: the tx must carry U's own signed call.
+ * Mainnet: the deposit carry's gas account, the implicit account apps/helper/deploy/bind-relayer-key.sh made on the
+ * helper's server, as the helper's GET /v1/health names it (bind.mainnet), holding one full-access key, its own, on
+ * the release pair's two operators, rpc.mainnet.fastnear.com and near.drpc.org (test/vectors/mainnet-relayer-pins.json,
+ * held by test/release-relayer-pins.test.ts). Testnet: none; the rehearsal names its gas account itself.
  */
-export const RELEASE_RELAYER: Readonly<Record<NearNetwork, string | null>> = Object.freeze({ mainnet: null, testnet: null });
+export const RELEASE_RELAYER: Readonly<Record<NearNetwork, string | null>> = Object.freeze({
+  mainnet: "f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc",
+  testnet: null,
+});
 
 export interface BindDeps {
   store: NoteStore;

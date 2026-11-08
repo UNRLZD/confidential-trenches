@@ -57,6 +57,8 @@ export const IN_PROCESS = [
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  // the bundle part only: the chain part reads the helper and two RPCs, past the build
+  { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "wallet-withdraw-move-out", host: "sign", load: () => import("../live-checks/wallet-withdraw-move-out.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
@@ -111,6 +113,7 @@ export const OUT = {
   "app-chart-live": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
   "app-no-blank-pages": "a browser",
+  "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
   "app-portfolio-mount": "a browser (its --harness run is in test-browser)",
   "trade-box-pool": "a browser",
   "app-console-429": "the helper under load",

@@ -178,14 +178,17 @@ test("the testnet form, whose release names a vault and a relayer, offers the ha
   assert.equal(await d.fee(), RELAY_FEE);
 });
 
-test("a mainnet form names no vault or relayer: the note value 0, the fee unread, no hand-off and no settle pass", async () => {
+// The release names its mainnet vault and withdrawal relayer (card wallet-mainnet-relayer-pins); the release-with-no-relayer
+// case is held in test/withdraw-mainnet-relayer.test.ts, with the pin planted null.
+test("a mainnet form over testnet notes: the note value 0, the fee refused unasked, nothing to settle", async () => {
   const v = await world([5_000_000n]);
   const p = page(v);
-  const d = withdrawFormDeps(p, { network: "mainnet", rpcs: pair("mainnet"), priceRpcs: pair("mainnet"), fetchFn: helper() });
+  const seen: string[] = [];
+  const d = withdrawFormDeps(p, { network: "mainnet", rpcs: pair("mainnet"), priceRpcs: pair("mainnet"), fetchFn: helper(feeAnswer(), seen) });
   assert.equal(d.network, "mainnet");
-  assert.equal(await d.available(), 0n);
-  await assert.rejects(d.fee(), /no withdrawal relayer on mainnet/);
-  assert.equal(withdrawHandoff(p, { network: "mainnet", rpcs: pair("mainnet") }), null);
+  assert.equal(await d.available(), 0n, "no note of this world is on the mainnet vault's scope");
+  await assert.rejects(d.fee(), /withdraw relay refused \(input\): amount: not a bigint above 0/);
+  assert.deepEqual(seen, [], "the helper is never asked");
   assert.deepEqual(await withdrawSettle(p, { network: "mainnet", rpcs: pair("mainnet") }), { outcomes: {} });
   assert.equal(p.opened.length, 0, "the seed is never opened");
 });

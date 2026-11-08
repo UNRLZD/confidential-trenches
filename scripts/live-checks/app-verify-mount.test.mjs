@@ -207,6 +207,33 @@ test("planted: stray NEAR requests between and after the opens: FAIL", () => {
   }
 });
 
+test("the footer's block read (card app-footer-bar) on the pair, in any phase, is not Verify's; one in another form or off the pair: FAIL", () => {
+  const pair = ANSWERS.good.rpcs;
+  const footer = (base, phase, over = {}) => ({ url: `${base.replace(/\/$/, "")}/?ct=footer`, method: "POST", type: "fetch", status: 200, phase, account: null, rpcId: "ct-footer", rpcMethod: "block", rpcParams: JSON.stringify({ finality: "final" }), ...over });
+  // footer reads on both RPCs of the pair, before, during and after the opens, some unanswered: still PASS
+  const ok = mut("good", (rec) => {
+    for (const phase of ["open", "between", "reopen", "after"]) for (const u of pair) desktop(rec).requests.push(footer(u, phase, phase === "open" ? { status: null } : {}));
+    desktop(rec).rpcTiming = [...(desktop(rec).rpcTiming ?? []), ...pair.map((u) => ({ name: `${u.replace(/\/$/, "")}/?ct=footer`, start: 0, end: 0 }))];
+  });
+  assert.equal(ok.ok, true, ok.lines.join("\n"));
+  assert.ok(ok.lines.some((l) => /and 8 footer block read\(s\)/.test(l)), ok.lines.join("\n"));
+  const cases = [
+    [{ account: ANSWERS.good.pins.vault }, /naming vault\./],
+    [{ rpcMethod: "query" }, /a footer-tagged query/],
+    [{ rpcParams: JSON.stringify({ block_id: 1 }) }, /a footer-tagged block .*not the footer's block read/],
+    [{ rpcId: "verify" }, /not the footer's block read/],
+  ];
+  for (const [over, line] of cases) {
+    const r = mut("good", (rec) => desktop(rec).requests.push(footer(pair[0], "between", over)));
+    assert.equal(r.ok, false, JSON.stringify(over));
+    assert.ok(bad(r).some((l) => line.test(l)), `${JSON.stringify(over)}\n${bad(r).join("\n")}`);
+  }
+  // the footer's tag on an RPC that is not the pair
+  const off = mut("good", (rec) => desktop(rec).requests.push(footer("https://rpc.testnet.near.org", "after"))); // near-rpc-operators: one operator (a planted stray)
+  assert.equal(off.ok, false);
+  assert.ok(bad(off).some((l) => /footer-tagged block to rpc\.testnet\.near\.org/.test(l)), bad(off).join("\n"));
+});
+
 test("planted: any NEAR request with no vault named, or a panel naming an RPC it never asked: FAIL", () => {
   const post = (url) => ({ url, method: "POST", type: "fetch", status: 200, phase: "open", account: ANSWERS.good.pins.vault, rpcId: "verify" });
   // a POST to a NEAR RPC the panel does not name (not one of the release's pair)
