@@ -462,7 +462,7 @@ test("the scan is refused before any read: an unknown network, a pair that is no
   await assert.rejects(exitScan({ words: WORDS, network: "devnet" as "testnet", rpcs: rpcs(v) }), ExitRpcRefused);
   const sent: string[] = [];
   const spy = (name: string): VaultSyncRpc => ({ name, query: async () => void sent.push(name) });
-  await assert.rejects(exitScan({ words: WORDS, network: "testnet", rpcs: [spy("https://test.rpc.fastnear.com"), spy("https://rpc.testnet.fastnear.com")] }), ExitRpcRefused);
+  await assert.rejects(exitScan({ words: WORDS, network: "testnet", rpcs: [spy("https://test.rpc.fastnear.com"), spy("https://rpc.testnet.fastnear.com")] }), ExitRpcRefused); // near-rpc-operators: one operator (planted, refused)
   await assert.rejects(exitScan({ words: WORDS, network: "mainnet", rpcs: rpcs(v) }), ExitRpcRefused);
   assert.deepEqual(sent, []);
 });

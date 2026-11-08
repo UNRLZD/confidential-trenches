@@ -3,9 +3,11 @@
 // test/scan.test.ts and expects it to fail; the source is put back after each run, whatever happens. Each mutant is a way
 // the scan could take a leaf on one of our precommitments that is not ours to take, the stranger's twin on R above all,
 // whose spend would burn our refund F through their shared nullifier.
+// Each run leads its own process group, killed whole when the run ends or times out, as scripts/group-run.mjs does: the
+// exit package imports nothing outside its own folder and the kit's entries (the gates copy packages/ alone).
+import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../scripts/group-run.mjs";
 
 const ROOT = new URL("../../../", import.meta.url);
 const F = fileURLToPath(new URL("packages/wallet/src/notes/restore.ts", ROOT));
@@ -42,13 +44,36 @@ for (const [name, reps] of M)
       console.log(`NOT ONCE in restore.ts, for [${name}]: ${JSON.stringify(from.slice(0, 60))}`);
       process.exit(1);
     }
+/** One run of the scan test in a process group of its own: { status, stdout }, the group killed at the end. */
+function run(timeoutMs) {
+  return new Promise((resolve) => {
+    const c = spawn("node", ["--test", T], { cwd: EXIT, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    c.stdout.on("data", (d) => (stdout += d));
+    c.stderr.on("data", () => {});
+    const kill = () => {
+      try {
+        process.kill(-c.pid, "SIGKILL");
+      } catch (e) {
+        if (e.code !== "ESRCH" && e.code !== "EPERM") throw e;
+      }
+    };
+    const t = setTimeout(kill, timeoutMs);
+    c.on("close", (status) => {
+      clearTimeout(t);
+      kill();
+      resolve({ status, stdout });
+    });
+  });
+}
+
 let killed = 0;
 for (const [name, reps] of M) {
   writeFileSync(F, reps.reduce((s, [from, to]) => s.replace(from, () => to), src));
   let r;
   try {
-    // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-    r = runSync("node", ["--test", T], { cwd: EXIT, encoding: "utf8", timeoutMs: 180_000 });
+    // a run past 180 s is killed, its process group with it
+    r = await run(180_000);
   } finally {
     writeFileSync(F, src);
   }
