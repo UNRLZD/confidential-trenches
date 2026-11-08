@@ -37,8 +37,9 @@
 //     and those checked bytes are the ones sent; the max fee (the lower of both RPCs') must be at most MAX_FEE_CAP.
 //     Then: the run key, made in memory, is kept in a 0700 folder (keysBase(), file 0600), written with the journal just
 //     before the run's try (a throw before it leaves no key behind), until the cleanup reads it at
-//     most DUST on both RPCs with every nonce it signed landed, each RPC read at its own head block at or past every
-//     receipt of the key's, and what the key has received (that balance plus each
+//     most DUST on both RPCs with every nonce it signed landed, each RPC read at "latest" once its head block
+//     (eth_blockNumber) and its safe block are at or past every receipt of the key's (no block-numbered read, which a
+//     public RPC refuses as archive), and what the key has received (that balance plus each
 //     landed transaction's outflowOf) covers every funding its runs asked for (the journal's asked); never removed
 //     after a stop before the funding was read (on both RPCs), nor while a run not whole made a contract (a receipt
 //     or code at a journaled deploy address on either RPC: the same paste resumes, in the run and in --sweep-kept
@@ -55,8 +56,9 @@
 //     funding wait) is watched for WAITS.lateFunding and its key kept until the need its run asked for has landed:
 //     its balance plus what it sent out since the wait (outflowOf: each landed transaction's fee and value, from its
 //     receipt, counted from the journal's wait_txs on, so a stopped run's own transactions never count) reaches the
-//     need. Each journaled transaction keeps its value and to for that count. A journal whose key is removed is moved aside by
-//     the next run. The record is written once every deploy is made, before the sweep, and again with the sweep; a
+//     need. Each journaled transaction keeps its value and to for that count. A stopped run's journal whose key is removed is moved
+//     aside by the next run; a completed run's is removed once its key is (by the run, or by --sweep-kept once the record
+//     lists every transaction of the key). The record is written once every deploy is made, before the sweep, and again with the sweep; a
 //     run that made fewer writes none. The journal and the record are each written whole (writeAtomic). Each contract's
 //     code is read again on both RPCs. The funding line asks for the need less what the key holds, in wei and, exactly,
 //     in ETH, and for nothing when the key holds the need (a resume's kept key). Each RPC call is tried RPC_TRIES times.
@@ -1069,15 +1071,18 @@ async function run(args, io = {}) {
             }
             return { out, floor };
           };
-          // each RPC read at its own "safe" block: the balance, the nonce and each deploy address's code at that block
+          // each RPC read at "latest", the one state every RPC serves (a public RPC refuses a block-numbered or "safe"
+          // state read as archive: -32602 on robinhood-rpc.publicnode.com, 7 Nov): first its head (eth_blockNumber) and
+          // its safe block, each to be at or past every receipt of the key's (floor), then the balance, the nonce and
+          // each deploy address's code. The head at or past the floor puts every transaction of the key's in what latest
+          // reads; the safe block at or past it means no reorg can undo them; a transfer that landed after the floor, safe
+          // or not, is on the key at latest
           const readAt = async (u) => {
             try {
-              const block = big((await call("eth_getBlockByNumber", ["safe", false], u)).number);
-              const tag = "0x" + block.toString(16);
-              const v = { block, bal: big(await call("eth_getBalance", [deployer, tag], u)), nonce: big(await call("eth_getTransactionCount", [deployer, tag], u)), made: [] };
-              // and at the head: a transfer that landed after the floor but is not yet safe is on the key there
-              v.head = big(await call("eth_getBalance", [deployer, "latest"], u));
-              for (const a of deploys) if ((await call("eth_getCode", [a, tag], u)) !== "0x") v.made.push(a);
+              const head = big(await call("eth_blockNumber", [], u));
+              const safe = big((await call("eth_getBlockByNumber", ["safe", false], u)).number);
+              const v = { head, safe, bal: big(await call("eth_getBalance", [deployer, "latest"], u)), nonce: big(await call("eth_getTransactionCount", [deployer, "latest"], u)), made: [] };
+              for (const a of deploys) if ((await call("eth_getCode", [a, "latest"], u)) !== "0x") v.made.push(a);
               return v;
             } catch (e) {
               return { err: String(e.message).split("\n")[0] };
@@ -1098,15 +1103,15 @@ async function run(args, io = {}) {
           }
           const { out, floor: last } = await ledger();
           floor = last;
-          const left = await onBoth(readAt, (v) => !v.err && v.block >= floor && v.bal <= DUST && v.head <= DUST && v.nonce >= top);
+          const left = await onBoth(readAt, (v) => !v.err && v.head >= floor && v.safe >= floor && v.bal <= DUST && v.nonce >= top);
           for (const [u, v] of left) {
             if (v.err) {
               why.push(`its rest was not read on ${u}: ${v.err}`);
               continue;
             }
-            if (v.block < floor) why.push(`its safe block ${v.block} on ${u} is behind block ${floor}, the last the run saw: run --sweep-kept again once it is safe`);
-            if (v.bal > DUST) why.push(`it holds ${v.bal} wei on ${u}`);
-            if (v.head > DUST) why.push(`it holds ${v.head} wei at the head on ${u} (a transfer not yet safe): run --sweep-kept to send it back`);
+            if (v.head < floor) why.push(`its head block ${v.head} on ${u} is behind block ${floor}, the last the run saw: run --sweep-kept again once that RPC has caught up`);
+            if (v.safe < floor) why.push(`its safe block ${v.safe} on ${u} is behind block ${floor}, the last the run saw: run --sweep-kept again once it is safe`);
+            if (v.bal > DUST) why.push(`it holds ${v.bal} wei on ${u}: run --sweep-kept to send it back`);
             if (v.nonce < top) why.push(`its nonce ${v.nonce} on ${u} is below the ${top} it signed`);
             for (const a of v.made) made.add(a);
             if (out !== null && v.bal + out + DUST < askedAll) {
@@ -1145,6 +1150,13 @@ async function run(args, io = {}) {
         if (more) {
           await record(d);
           console.log(`deploy: ${rel(out)} lists the ${more} more transaction(s) of the key`);
+        }
+        // a completed run's journal ends as a completed run's does (below): once its key is removed and its record lists
+        // every transaction of the key that landed, the journal is removed, so nothing of the run is left beside the record
+        const listed = new Set(JSON.parse(readFileSync(out, "utf8")).txs.map((t) => t.hash));
+        if (j0.complete && journalKeys?.state === "removed" && landed().every((s) => listed.has(s.hash))) {
+          rmSync(journalFile, { force: true });
+          console.log(`deploy: done: the run key is removed and ${rel(journalFile)} with it, every transaction of the key listed in ${rel(out)}. Next: ${liveCheck}`);
         }
       }
     } else if (signed.length && (!mainnet || complete)) {

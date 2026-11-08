@@ -1397,7 +1397,7 @@ test("resume-safe unread: a removal read that fails on one RPC keeps the key; on
   const fetch0 = c.fetch;
   c.fetch = async (u, init) => {
     const { method, params } = JSON.parse(init.body);
-    if (down && u === BASE.rpcs[1] && method === "eth_getBalance" && params[1] !== "latest") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "header not found" } }) };
+    if (down && u === BASE.rpcs[1] && method === "eth_blockNumber") return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "header not found" } }) };
     return fetch0(u, init);
   };
   const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
@@ -1501,10 +1501,13 @@ test("review: a deploy that reverted names no contract in the record: the resume
 test("review: a completed run's journal with its record missing is refused, never moved aside for a second deploy", OPTS, async (t) => {
   const m = room(t);
   const c = mainnet();
-  await killedAtSweep(t, m, c);
+  const snap = await killedAtSweep(t, m, c);
   const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
   assert.equal(sw.error, null, String(sw.error?.message) + why(c));
-  assert.equal(journalOf(m).keys.state, "removed");
+  assert.ok(!existsSync(m.journal), "--sweep-kept removes a completed run's journal with its key (card pool-evm-rest-read-head)");
+  // a kill between the journal's last write (its key removed) and its removal leaves it so
+  const j0 = JSON.parse(snap.journal);
+  writeFileSync(m.journal, JSON.stringify({ ...j0, keys: { ...j0.keys, state: "removed", why: [] } }, null, 2) + "\n");
   assert.equal(journalOf(m).complete, true);
   rmSync(m.out);
   const made = c.created.length;
@@ -1585,4 +1588,82 @@ test("REVIEW2 head: ETH that lands on the key after its sweep, in a block past t
   assert.equal(r.error, null, String(r.error?.message) + why(c));
   const removedLine = c.logs.find((l) => /its key folder is removed/.test(l));
   assert.equal(folders(m.keys).length, 1, `the key holds ${c.balanceOf(c.deployer)} wei at the head (safe ${safe}, head ${c.block}): kept? ${removedLine}`);
+});
+
+// ---- card pool-evm-rest-read-head: a public RPC that serves only the newest state (robinhood-rpc.publicnode.com
+// answers -32602 "Archive requests require a personal token" to a block-numbered eth_getBalance, and -32000 to one at
+// "safe": the Robinhood mainnet run of 7 Nov kept its key for that alone). The rest is read at "latest" once each RPC's
+// head (eth_blockNumber) is at or past every receipt of the key's ----
+const ARCHIVE = { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" };
+/** both RPCs answer only the newest state: a state read at any block but "latest" or "pending" is refused */
+const latestOnly = (c) => {
+  const fetch0 = c.fetch;
+  c.fetch = async (u, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (["eth_getBalance", "eth_getTransactionCount", "eth_getCode"].includes(method) && !["latest", "pending"].includes(params[1])) {
+      c.refused = (c.refused ?? 0) + 1;
+      const error = params[1] === "safe" ? { code: -32000, message: "historical state not available in path scheme yet" } : ARCHIVE;
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, error }) };
+    }
+    return fetch0(u, init);
+  };
+};
+
+test("rest-read-head: a completed mainnet run on RPCs that serve only the newest state reads its rest at latest: the key is removed and the completed run's journal with it", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  latestOnly(c);
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  assert.deepEqual(folders(m.keys), [], `the key folder is removed${existsSync(m.journal) ? ": " + journalOf(m).keys.why.join("; ") : ""}${why(c)}`);
+  assert.ok(!existsSync(m.journal), "a completed run whose key is removed leaves no journal");
+  assert.equal(c.refused ?? 0, 0, "no state read at a block but latest");
+  assert.equal(JSON.parse(readFileSync(m.out, "utf8")).txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
+});
+
+test("rest-read-head: an RPC whose head is below a receipt of the key's is still refused (the key kept, naming it); once it catches up the sweep form, on the same newest-state RPCs, removes the key and the completed run's journal, and its last line names the live check", OPTS, async (t) => {
+  const m = room(t);
+  const c = mainnet();
+  latestOnly(c);
+  let lag = true;
+  answer(c, (u, method) => (lag && method === "eth_blockNumber" && u === BASE.rpcs[1] ? "0x64" : undefined));
+  const r = await run(t, c, { head: MAIN, io: m.io, outArg: false, out: m.out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  assert.ok(c.balanceOf(c.deployer) <= DUST, why(c));
+  const j = journalOf(m);
+  assert.equal(j.complete, true, why(c));
+  assert.equal(j.keys.state, "kept", why(c));
+  assert.ok(j.keys.why.some((w) => /^its head block 100 on https:\/\/base-rpc\.publicnode\.com is behind block \d+, the last the run saw/.test(w)), j.keys.why.join("; "));
+  assert.ok(!j.keys.why.some((w) => /mainnet\.base\.org/.test(w)), "the RPC at the head is not named: " + j.keys.why.join("; "));
+  assert.equal(folders(m.keys).length, 1, "kept");
+  // the paste's sweep form: sh contracts/pool-evm/script/mainnet-deploy.sh base --sweep-kept
+  lag = false;
+  const from = c.logs.length;
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.deepEqual(folders(m.keys), [], `removed${existsSync(m.journal) ? ": " + journalOf(m).keys.why.join("; ") : ""}${why(c)}`);
+  assert.ok(!existsSync(m.journal), "the completed run's journal is removed with its key" + why(c));
+  assert.equal(c.refused ?? 0, 0, "no state read at a block but latest");
+  const rec = JSON.parse(readFileSync(m.out, "utf8"));
+  assert.equal(rec.txs.length, Number(c.nonce.get(c.deployer)), "the record lists every transaction of the key" + why(c));
+  const lines = c.logs.slice(from);
+  assert.match(lines.at(-1), new RegExp(`^deploy: done: the run key is removed and \\S*base\\.journal\\.json with it, every transaction of the key listed in \\S*base\\.json\\. Next: node scripts/live-checks/pool-evm-deploy\\.mjs --deployment \\S*base\\.json$`), lines.join("\n"));
+});
+
+test("rest-read-head: a stopped run's journal is not removed by the sweep form once its key is: the next run moves it aside, as before", OPTS, async (t) => {
+  const m = room(t);
+  const j = await killedInWait(t, m, mainnet());
+  assert.equal(j.txs.length, 0, "killed before any transaction");
+  // a chain where the owner's transfer of the need has landed, on RPCs that serve only the newest state
+  const c = mainnet();
+  latestOnly(c);
+  c.deployer = j.deployer;
+  c.bal.set(j.deployer, BigInt(j.need));
+  const sw = await run(t, c, { head: [...MAIN, "--sweep-kept", m.journal], ret: null, io: m.io, outArg: false, out: m.out });
+  assert.equal(sw.error, null, String(sw.error?.message) + why(c));
+  assert.ok(c.balanceOf(j.deployer) <= DUST, "sent back" + why(c));
+  assert.deepEqual(folders(m.keys), [], `removed${existsSync(m.journal) ? ": " + journalOf(m).keys.why.join("; ") : ""}${why(c)}`);
+  assert.equal(journalOf(m).keys.state, "removed", why(c));
+  assert.equal(journalOf(m).complete, false);
 });
