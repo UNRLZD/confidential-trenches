@@ -7,7 +7,7 @@ import { createRpc, keyedAccountOf, keyedPaces, readUpstreams, RPC_UPSTREAMS, KE
 import { providerHolds, KEYED_COST, type ProviderHolds } from "../limits/limits.ts";
 import { INDEX_RPCS, SWAP_RPCS } from "../data/evm/swaps.ts";
 import { fakeChain, CURVE_TOKEN, REC } from "../../test/evm-swaps/robinhood.ts";
-import { blockvectraFromEnv, blockvectraHeaders } from "./blockvectra.ts";
+import { blockvectraFromEnv, blockvectraHeaders, blockvectraLeaks } from "./blockvectra.ts";
 import { health } from "../health.ts";
 
 const URL_ = "https://api.blockvectra.com/v1/robinhood_mainnet";
@@ -16,6 +16,14 @@ const ENV = { ROBINHOOD_RPC_URL_BLOCKVECTRA: URL_, ROBINHOOD_RPC_KEY_BLOCKVECTRA
 const methods = ["eth_getBlockByNumber", "eth_getLogs", "eth_call", "eth_getTransactionReceipt", "eth_getTransactionByHash"];
 const json = (x: unknown, status = 200) => new Response(JSON.stringify(x), { status, headers: { "content-type": "application/json" } });
 const take = (h: ProviderHolds, url: string, ms: string[]) => (h.take as (u: string, n: number, bg: boolean, sender: boolean, methods: string[]) => number)(url, ms.length, false, false, ms);
+
+test("reflected header fixtures containing quotes and backslashes are rejected after JSON escaping", () => {
+  for (const key of ['fixture-only-"quoted"-key', "fixture-only-\\backslash-key"]) {
+    const config = blockvectraFromEnv({ ...ENV, ROBINHOOD_RPC_KEY_BLOCKVECTRA: key });
+    assert.equal(blockvectraLeaks(config, JSON.stringify({ result: key })), true);
+    assert.equal(blockvectraLeaks(config, JSON.stringify({ [key]: "reflected property" })), true);
+  }
+});
 
 test("BlockVectra is a distinct Robinhood-only opt-in; partial or unsafe config is refused without its value", () => {
   assert.ok(RPC_UPSTREAMS.robinhood.keyed.includes("ROBINHOOD_RPC_URL_BLOCKVECTRA"));

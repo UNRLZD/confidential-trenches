@@ -104,10 +104,17 @@ export function blockvectraHeaders(config: Blockvectra | undefined, url: string)
 export function blockvectraLeaks(config: Blockvectra | undefined, text: string): boolean {
   if (config === undefined) return false;
   const key = config.key;
-  // Decode JSON escapes before checking too; a provider may reflect a key as \u escapes.
-  let decoded = "";
-  if (text.includes("\\")) {
-    try { decoded = JSON.stringify(JSON.parse(text)); } catch {}
-  }
-  return [key, encodeURIComponent(key), Buffer.from(key).toString("base64").replace(/=+$/, ""), Buffer.from(key).toString("base64url")].some((s) => text.includes(s) || decoded.includes(s));
+  const forms = [key, encodeURIComponent(key), Buffer.from(key).toString("base64").replace(/=+$/, ""), Buffer.from(key).toString("base64url")];
+  const hasKey = (value: string) => forms.some((s) => value.includes(s));
+  if (hasKey(text)) return true;
+  // Compare decoded strings, not re-serialized JSON: quotes and backslashes in a key stay escaped there.
+  if (!text.includes("\\")) return false;
+  let leaked = false;
+  try {
+    JSON.parse(text, (name, value: unknown) => {
+      if (hasKey(name) || (typeof value === "string" && hasKey(value))) leaked = true;
+      return value;
+    });
+  } catch { return true; }
+  return leaked;
 }
