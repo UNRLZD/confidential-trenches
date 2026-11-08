@@ -131,12 +131,21 @@ test("other policy breaks are refused", () => {
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
 });
 
-test("a build carrying _worker.js or .well-known/webauthn is refused", async () => {
+test("a build carrying any Pages config file but _headers, or .well-known/webauthn, is refused", async () => {
   const { uploads, run } = recorder();
-  for (const f of ["_worker.js", ".well-known/webauthn"]) {
-    const r = await deploy([], ENV, run, pkgWith(REAL, { [f]: "x" }));
+  // review F8: a _redirects rewrite of /.well-known/webauthn to a JSON file would hand SIGN_HOST's passkeys to the
+  // origins it lists; _routes.json and functions/ are Pages' other config, never part of the signing page
+  const planted = {
+    "_worker.js": "x",
+    ".well-known/webauthn": "x",
+    "_redirects": "/.well-known/webauthn /ror.json 200\n",
+    "_routes.json": "{}",
+    "functions/x.js": "export const onRequest = () => new Response('x');\n",
+  };
+  for (const [f, body] of Object.entries(planted)) {
+    const r = await deploy([], ENV, run, pkgWith(REAL, { [f]: body }));
     assert.equal(r.code, 1, f);
-    assert.ok(r.err.some((e) => e.includes(f)), r.err.join("\n"));
+    assert.ok(r.err.some((e) => e.includes(`carries ${f.startsWith("functions/") ? "functions" : f}`)), r.err.join("\n"));
   }
   assert.equal(uploads().length, 0);
 });

@@ -133,6 +133,11 @@ export function checkDir(dir) {
   const p = [];
   if (!existsSync(join(dir, "index.html"))) p.push(`${dir} has no index.html`);
   if (existsSync(join(dir, "_worker.js"))) p.push(`${dir} carries _worker.js: Pages applies no _headers rule to a Function's response`);
+  // Pages' other config files: a _redirects rule could rewrite /.well-known/webauthn to a file that lends SIGN_HOST's
+  // passkeys to other origins, and _routes.json and functions/ belong to Functions; _headers is the only one allowed
+  for (const f of ["_redirects", "_routes.json", "functions"]) {
+    if (existsSync(join(dir, f))) p.push(`${dir} carries ${f}: _headers is the only Pages config file the signing page has`);
+  }
   if (existsSync(join(dir, ".well-known", "webauthn"))) p.push(`${dir} carries .well-known/webauthn: no other origin may use SIGN_HOST's passkeys`);
   p.push(...checkProver(dir));
   p.push(...checkPins(dir));
