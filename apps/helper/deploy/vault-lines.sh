@@ -7,9 +7,12 @@
 # The first deploy of contracts/vault/deployments/mainnet-v1.json, in this order (the one place it is written; the
 # key scripts point here). R is the commit that adds the record and moves MAINNET_VAULT to its account_id (send.test.ts
 # holds the two equal):
-#   1. on the server: git -C <checkout> fetch -q --depth 1 https://github.com/UNRLZD/confidential-trenches.git R &&
-#      git -C <checkout> checkout -q --detach R (the checkout has no origin remote: redeploy.sh fetches this URL,
-#      REDEPLOY_REMOTE), then this script, with the helper of the commit before R still running (its image reads
+#   1. on the server: git -C <checkout> fetch -q --no-tags https://github.com/UNRLZD/confidential-trenches.git
+#      +refs/heads/main:refs/remotes/origin/main &&
+#      git -C <checkout> merge-base --is-ancestor R refs/remotes/origin/main &&
+#      git -C <checkout> checkout -q --detach R (main fetched and R found on it, as redeploy.sh's step 0 does, never
+#      R by id: a PR head pasted for the merge commit is refused here, before its vault lines are written; the
+#      checkout has no origin remote: redeploy.sh fetches this URL, REDEPLOY_REMOTE), then this script, with the helper of the commit before R still running (its image reads
 #      the record): WITHDRAW_VAULT_MAINNET, and BIND_VAULT_MAINNET when set, move to mainnet-v1.json's account_id;
 #   2. apps/helper/deploy/redeploy.sh R, holding the helper's live checks (from R on helper-bind-relayer-mainnet is
 #      listed, scripts/ci/helper-live-checks.mjs bindMainnetPlan, and fails until step 4, and a failing check undoes a

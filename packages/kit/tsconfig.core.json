@@ -1,0 +1,15 @@
+{
+  "//": "Card exit-note-scan: src/core.ts re-exports the wallet's own code, so it and its names test are checked under the wallet's own flags (packages/wallet/package.json typecheck), not the kit's stricter ones, which the wallet's files were never written to; tsconfig.json excludes both.",
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "files": ["src/core.ts", "test/core-names.test.ts"]
+}
