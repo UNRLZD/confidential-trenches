@@ -91,13 +91,17 @@ jobs:
       - name: every gate refuses its planted cases
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 
+  # 25 minutes: the quote-speed step's two tries, each up to about 6 minutes on a runner whose cold quote is slow (79 to
+  # 99 s read in evm-quote-warm-round's review), on top of the 17 s the rest takes (run 42532277117).
   deep-import:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
+      # the full history: the quote-speed step reads the change base..head and the base's scripts/
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -110,6 +114,34 @@ jobs:
         run: node --test scripts/perf-table.test.mjs
       - name: the README and docs/performance.md match the run records
         run: node scripts/perf-table.mjs --check
+      # Card quote-speed-before-merge: a change to the EVM quote's code (scripts/ci/quote-speed.mjs PATHS) runs the live
+      # check evm-quote-warm-round on this runner against this checkout's kit, and is refused when its warm p95 misses a
+      # second on two tries (public RPCs are noisy, so one rerun); a run that writes no record is refused. On a pull
+      # request the gate and the check run as main has them, from the base's whole scripts/ tree (see verify-gate), and
+      # measure the checkout's kit; scripts/ci/quote-speed.test.mjs and base-gate.test.mjs replay these lines. While main
+      # has no copy of the gate, this pull request's own copy measures.
+      - name: a change to the EVM quote keeps its warm p95 under a second (evm-quote-warm-round on this kit)
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request)
+              mkdir -p "$RUNNER_TEMP/base"
+              git archive "$PR_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+              [ -e "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" ] || { echo "main has no scripts/ci/quote-speed.mjs yet, so this pull request's own copy measures"; node scripts/ci/quote-speed.mjs --all; exit; }
+              node "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" "$PR_BASE" "$PR_HEAD" ;;
+            push)
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+                node scripts/ci/quote-speed.mjs --all
+              else
+                node scripts/ci/quote-speed.mjs "$BEFORE" "$AFTER"
+              fi ;;
+            *) node scripts/ci/quote-speed.mjs --all ;;
+          esac
 
   verify-gate:
     if: github.event_name == 'pull_request'
