@@ -2414,3 +2414,46 @@ test("from a fixed U_X: U_X short with the planned U funded answers not_funded a
   assert.deepEqual(r.answer(), { error: "not_funded" });
   assert.equal(c.lamports(nv.address), Number(RUNG) + COST, "the kind ran from U_X, not the planned U");
 });
+
+test("from a fixed U_X (review X2): U_X with a deposit note still landing answers not_landed and signs nothing, directly, through the kind and through the follow", async () => {
+  const { depositToEnd, followPoolQuote } = await import("../src/pool-deposit-follow.ts");
+  const c = chain();
+  const ns = await notes();
+  const ux = await plannedU(ns);
+  c.fund(ux.address, 3 * (Number(RUNG) + COST));
+  // cut short: one RPC has not the mark yet, so U_X's deposit note stays INCOMING
+  const slow = () => host(c, ns, { rpcs: [c.rpc(), c.rpc({ hide: isMark(c) })], reads: 1 });
+  assert.equal(((await runPoolDeposit(slow(), ask(RUNG))) as { stage: string }).stage, "not_landed");
+  assert.equal(c.sent.length, 1);
+  const held = c.lamports(ux.address);
+  const from = { s: SCOPE, i: ux.i };
+  // directly: still landing, so U_X is no source this run
+  assert.deepEqual(await runPoolDeposit(slow(), ask(RUNG), from), { stage: "not_landed", txs: [] });
+  // through the kind, as the follow's deposit runs it (depositToEnd)
+  const ac = new AbortController();
+  const kind = (_p: Record<string, unknown>, ctx: { id: string; sha: string; progress(s: string): void }) => poolDepositKind(() => slow())(ask(RUNG), ctx as never, from);
+  assert.equal(await depositToEnd(kind, "solana", 9, RUNG, ac.signal), "not_landed");
+  // through the follow: U_X over the floor on both RPCs, the deposit not landed: never in_pool, nothing signed
+  const stages: string[] = [];
+  let rounds = 0;
+  const end = await followPoolQuote(
+    { chain: "solana", s: SCOPE.toString(), i: ux.i, u: ux.address, refund_id: "ab".repeat(32), address: "DEPOSIT", deadline_ms: 1, origin: "nep141:base-usdc", min_out: "20000000" },
+    {
+      status: async () => null,
+      balances: async () => [BigInt(held), BigInt(held)],
+      costs: async () => ({ floor: RUNG + BigInt(COST), perRung: BigInt(COST), keep: 0n }),
+      ladder: { one: 1_000_000n, min: RUNG },
+      deposit: (_f, amount, signal) => depositToEnd(kind, "solana", 9, amount, signal),
+      past: async () => false,
+      stage: async (s) => void stages.push(s),
+      sleep: async () => {
+        if (++rounds >= 2) ac.abort();
+      },
+      signal: ac.signal,
+    },
+  );
+  assert.notEqual(end, "in_pool");
+  assert.ok(!stages.includes("in_pool"), stages.join(","));
+  assert.equal(c.sent.length, 1, "no second send of U_X's money while its note lands");
+  assert.equal(c.lamports(ux.address), held);
+});
