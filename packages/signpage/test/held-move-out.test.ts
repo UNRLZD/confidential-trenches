@@ -149,3 +149,16 @@ test("L6: a resume that answers failed signs nothing; the tap (Not moved · Retr
   assert.deepEqual(f.calls, [null, "alice.near"]);
   assert.equal(f.page.dataset.outcome, "sent");
 });
+
+test("D5: Not moved · Retry on a move's account that no longer exists (no-account on both RPCs): refused at the tap, nothing moved", async () => {
+  // the recorded move names gone.near, an account deleted since the first tap: these RPCs read it UNKNOWN_ACCOUNT
+  const rec: MoveOutRecord = { to: "gone.near", amount: "2499999", nonce: "8", height: 1, register: false, hash: "h", signed: "AA==" };
+  const f = drawn((to) => (to === null ? { kind: "failed", to: "gone.near", amount: 2_499_999n, hash: "h" } : { kind: "sent", to, amount: 2_499_999n, hash: "h2" }), rec);
+  await f.steps();
+  assert.equal(f.page.dataset.outcome, "failed");
+  assert.equal(f.input.value, "gone.near");
+  assert.equal(f.input.readOnly, true);
+  await f.tap();
+  assert.deepEqual(f.calls, [null], "the wallet's move is never called for the account");
+  assert.equal(f.page.find((e) => e.dataset.for === "to")!.dataset.refusal, "no-account");
+});
