@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/wallet-withdraw-move-out.test.mjs: the live check's verdict on its recorded answers,
-// with no network. Each record is a real run of the check (2026-11-07 23:38Z):
+// with no network. Each record is a real run of the check (2026-11-08 00:25Z; bad_handoff_drop 2026-11-08 00:13Z):
 // - good: this card's build (index.html and public/app.js at the card's branch, --local) served at / and /app.js: PASS;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose script still routes nothing to the typed
 //   account and shows no unmatched withdrawal: FAIL on the markers alone;

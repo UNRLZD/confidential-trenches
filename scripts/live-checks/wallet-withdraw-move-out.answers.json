@@ -2,7 +2,7 @@
  "good": {
   "key": "wallet-withdraw-move-out",
   "url": "local build",
-  "at": "2026-11-08T00:13:38.566Z",
+  "at": "2026-11-08T00:25:02.211Z",
   "index": {
    "status": 200,
    "scripts": 1,
@@ -27,7 +27,7 @@
  "bad_live_before": {
   "key": "wallet-withdraw-move-out",
   "url": "https://sign.confidential.unrealized.trade",
-  "at": "2026-11-07T23:38:56.633Z",
+  "at": "2026-11-08T00:25:02.526Z",
   "index": {
    "status": 200,
    "scripts": 1,
@@ -44,7 +44,8 @@
     "to: the vault, intents.near or the token": 0,
     "nullifierHash or recipient: not given": 0,
     "dataset.notice=`unmatched`": 0,
-    "Withdrawal unmatched": 0
+    "Withdrawal unmatched": 0,
+    "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:": 0
    }
   }
  },

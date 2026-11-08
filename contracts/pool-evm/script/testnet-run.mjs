@@ -522,7 +522,10 @@ export async function main(args, io = {}) {
       const { q, built } = await fresh(
         // `bought` and `boughtBlock`: the route of the buy that paid W the token and the block it landed in, which the
         // sell quote requires (it reads at that block or a later one)
-        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block }),
+        // `sent`: the releases the device sent to W that have not landed (card evm-sell-no-release-in-flight): none, the
+        // run keeps no note store and its buy has landed; its Bought pays W no ETH, so the quote's own read of W's
+        // releases does not hold the sale for it
+        () => sellQuote({ chain, token, w: W.address, amountIn: amount, slippageBps: SLIPPAGE_BPS, bought: b.route, boughtBlock: b.block, sent: [] }),
         // the fee cap is the device's own rule's (the quote's feeMax); the run's sender takes it whole, paid to the fee
         // recipient W signs (pool review round 3, L-1): the chain's FeeCollector, which forwards it to the sell sender
         (q) => kit.evmPoolBuildSell(q, { feeRecipient: feeTo, precommitment: noteSecrets(seed64, ref).precommitment, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n }),

@@ -39,6 +39,7 @@ export const IN_PROCESS = [
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
+  viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
   viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
@@ -60,6 +61,7 @@ export const CHILD_RUNS = [
   { key: "signpage-buy-route-events", host: "sign", args: ["--local", "--host", "sign"] },
   { key: "signpage-buy-route-events", host: "app", args: ["--local", "--host", "app"] },
   { key: "app-buy-route-strip", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
