@@ -552,8 +552,8 @@ try {
           const ab = `${phone ? ".tkp-phone [role=dialog]" : ".tkp-desk .tkp-trade"} [data-testid="ticket-about"]`;
           await f.locator(ab).scrollIntoViewIfNeeded().catch(() => {});
           await page.waitForTimeout(400);
-          const a = await f.$eval(ab, (e) => ({ head: e.querySelector(".tkl-ahead")?.textContent.trim(), windows: [...e.querySelectorAll("[data-testid=about-windows] > *")].map((c) => c.textContent.trim()), five: [...e.querySelectorAll("[data-testid=about-5m] > *")].map((c) => c.textContent.trim()), flow: e.querySelector("[data-testid=about-flow]")?.textContent.replace(/\s+/g, " ").trim(), bar: e.querySelector(".tkl-flowbar > div")?.style.width })).catch(() => null);
-          const want = { head: "About GLOW", windows: ["5M+2.14%", "1H−3.80%", "4H+12.90%", "1D+8.02%"], five: ["5m vol$4.82K", "Buys61", "Sells44", "Net+$730.00"], flow: "1,904 buys 1,611 sells", bar: `${((1904 / 3515) * 100).toFixed(1)}%` };
+          const a = await f.$eval(ab, (e) => ({ head: e.querySelector(".tkl-ahead")?.textContent.trim(), windows: [...e.querySelectorAll("[data-testid=about-windows] > *")].map((c) => c.textContent.trim()), five: [...e.querySelectorAll("[data-testid=about-5m] > *")].map((c) => c.textContent.trim()), flow: [...(e.querySelector("[data-testid=about-flow] > div")?.children ?? [])].map((c) => c.textContent.replace(/\s+/g, " ").trim()), bar: e.querySelector(".tkl-flowbar > div")?.style.width })).catch(() => null);
+          const want = { head: "About GLOW", windows: ["5M+2.14%", "1H−3.80%", "4H+12.90%", "1D+8.02%"], five: ["5m vol$4.82K", "Buys61", "Sells44", "Net+$730.00"], flow: ["1,904 buys", "1,611 sells"], bar: `${((1904 / 3515) * 100).toFixed(1)}%` };
           check(JSON.stringify(a) === JSON.stringify(want), `${tag}: About reads ${JSON.stringify(a)}, want ${JSON.stringify(want)}`);
         } else await f.locator(lp).scrollIntoViewIfNeeded().catch(() => {});
         if (phone && s.lower !== "about") await f.evaluate((sel) => window.scrollBy(0, document.querySelector(sel).getBoundingClientRect().top - 60), lp);

@@ -137,7 +137,7 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
           <W id="holders" />
           {/* the count's slot is drawn at its widest (lower.css .tkl-tabn) from the first paint, empty until the row
               lands, so the tab after it never moves when the count arrives (BAR-10 CLS 0) */}
-          <span className="tkl-tabn" data-testid="lower-tab-count">{sum ? (phone ? sum.count : `(${sum.count})`) : ""}</span>
+          <span className="tkl-tabn" data-testid="holders-count">{sum ? (phone ? sum.count : `(${sum.count})`) : ""}</span>
         </>
       )}
     </button>
@@ -156,7 +156,7 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
 export function About({ row }: { row: MarketRow }) {
   const a = aboutView(row);
   const five = [
-    ["vol5m", a.five.vol, "none"],
+    ["vol5m", a.five.vol, "plain"],
     ["buys5m", a.five.buys, "acc"],
     ["sells5m", a.five.sells, "sell"],
     ["net5m", a.five.net, a.five.netTone],

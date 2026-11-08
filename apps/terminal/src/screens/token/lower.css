@@ -72,6 +72,8 @@
 .tkl-change[data-tone="sell"] > span:last-child { color: var(--sell); }
 .tkl-change[data-tone="none"] > span:last-child { color: var(--text-3); }
 .tkl-change.tkl-five { background: var(--bg-raised); }
+/* R5's 5m vol value is drawn in the text colour (U.about t5 `var(--text-1)`), not dimmed */
+.tkl-change[data-tone="plain"] > span:last-child { color: var(--text-1); }
 .tkl-mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .tkl-flow { display: flex; flex-direction: column; gap: 6px; }
 .tkl-flow > div:first-child { display: flex; justify-content: space-between; font-size: 13px; }
