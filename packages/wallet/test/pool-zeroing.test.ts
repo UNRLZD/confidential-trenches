@@ -27,6 +27,7 @@ const { closeVaults, SEED, SCOPE, signalsProver, vaultWith } = await import("./w
 const { solanaRestore, solanaMarkOf } = await import("../src/pool/solana-restore.ts");
 const { buyWallets, solanaSpentNotes } = await import("../src/pool/buy-wallets.ts");
 const { evmRestore } = await import("../src/pool/evm-restore.ts");
+const { restoreWallets } = await import("../src/restore/wallets.ts");
 const { noteSecrets, noteCommitment } = await import("../src/notes/secrets.ts");
 const { vaultLabelOf } = await import("@blindfill/kit");
 const { keccak_256 } = await import("@noble/hashes/sha3.js");
@@ -121,4 +122,15 @@ test("evmRestore zeroes each spent note's W secret key once it has the address, 
   assert.equal(r.spends.length, 1);
   assert.equal(calls.length - at, 1, "one W derived, for the one spent note");
   assert.ok(zero(calls[at]!.out.secretKey), "W's secret key is left in memory");
+});
+
+test("restoreWallets zeroes every W secret key it derives, on all six chain tags, once it has the address (card wallet-restore-wallets)", async () => {
+  const spends = [{ l: 11n, j: 0, note: "a", spend: {} }, { l: 22n, j: 3, note: "b", spend: {} }] as unknown as Parameters<typeof restoreWallets>[1]["spends"];
+  const at = calls.length;
+  // a yes on every read: each arm's own three wallets and its three hop targets are derived
+  const r = await restoreWallets(SEED, { notes: [], spends }, async () => true);
+  assert.equal(r.wallets.length, 12);
+  assert.equal(calls.length - at, 12, "one W derived per arm and tag");
+  for (const c of calls.slice(at)) assert.ok(zero(c.out.secretKey), "W's secret key is left in memory");
+  assert.ok(!zero(SEED), "never the caller's seed");
 });

@@ -58,9 +58,19 @@ The vault has no access key. We deploy it with no key added, and once an account
 
 No owner, no upgrade path, no pause, no setter. A keyless contract could still add a key or redeploy itself by calling itself, so we looked at that door too: its compiled code imports none of the host calls that add a key, deploy new code, stake or delete an account, and a test reads the import list to keep it that way.
 
+<!-- Draft for the owner's docs pass (audit I-3): the words are not final. -->
+That covers the vault's own code, and only that. The USDC inside it is Circle's, and Circle can pause the token or blocklist an account, the vault's included. A payout stopped that way isn't lost: its receipt fails, and the vault books the whole amount back as a refund note (`contracts/vault/src/payout.rs:146-147`). We run both cases in the sandbox on the real USDC code, a paused token and a blocklisted vault, and the notes and totals come out right (`contracts/vault/tests/s16.rs:409`, `:414`). The money still can't leave until Circle lifts the block, though, and we can't change that. The issuer's other powers are listed under [USDC has an issuer](#usdc-has-an-issuer) (audit I-3).
+
 ### No payout a proof doesn't name
 
 Your device makes a proof that fixes the recipient, the fee recipient and the fee. Should a relayer edit any of the three, the proof fails and nothing moves. When a payment bounces, the money comes back as a new note that only your device can open.
+
+<!-- Draft for the owner's docs pass (audit V-02, I-1): the words are not final. -->
+If you write your own client, two things here are yours to get right. The kit already does both, so this is only for code that reads the vault directly. The kit's own notes ([packages/kit/README.md](../packages/kit/README.md)) carry these two and the pool rules beside the calls they qualify.
+
+First, find a refund note through the spend that made it. Its precommitment won't do, because the vault doesn't reserve it, and only a deposit ever writes one (`contracts/vault/src/deposit.rs:144`). Once a withdrawal lands, a stranger can deposit 1 USDC on that refund precommitment. If the payout then bounces, two notes share one precommitment, and so one nullifier, and whichever is spent first strands the other for good. We take the note at the spend's own leaf (`packages/kit/src/vault/settle.ts:17-21`), and that rule is pinned by a test (`packages/wallet/test/note-restore.test.ts:888`; audit V-02).
+
+Second, a USDC transfer event doesn't prove a payout arrived. NEAR keeps the logs of a receipt that failed, so when the recipient's transfer runs and the fee's transfer then fails, the logs still show USDC going to someone who was never paid. Read the vault's own `payout` event instead (`contracts/vault/src/payout.rs:150`), which says what was delivered and what came back, or the spend's status in `spends()` (audit I-1).
 
 ### No list keeper to wait on
 
