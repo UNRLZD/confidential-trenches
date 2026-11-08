@@ -89,6 +89,9 @@ test("the signer signs only a move a check sealed (review 3): an unchecked list,
   assert.equal(sealed.calls.at(-1)!.args.amount, "5");
   // another key than the move's U
   assert.throws(() => m.signMoveTx(ed25519.getPublicKey(new Uint8Array(32).fill(1)), new Uint8Array(32).fill(1), 1n, BH, sealed), /not the move's U/);
+  // a nonce that does not fit the u64 is refused, never cut to its low 8 bytes (exit-ids-out delta review 4, finding 3)
+  for (const n of [2n ** 64n, 2n ** 64n + 8n, -1n]) assert.throws(() => m.signMoveTx(PK, SK, n, BH, sealed), /does not fit 8 bytes/, String(n));
+  assert.equal(base64.decode(m.signMoveTx(PK, SK, 2n ** 64n - 1n, BH, sealed).signed).length, signed.length, "the largest u64 signs");
   // a list the check refuses is never sealed
   assert.throws(() => m.checkMoveCalls(U, TO, TOKEN, m.moveCalls(TO, 50n, false, 0n), 10n, 0n), m.MoveOutRefused);
   // a seal of the real module is not one of the copy's, and the copy's are not the module's: one set per module

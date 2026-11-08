@@ -132,8 +132,12 @@ function keyNonce(keys: unknown, at: number, own: string): bigint | null {
   const k = resultAt(keys, at);
   const list = k?.keys;
   if (!Array.isArray(list) || list.length !== 1 || !isObj(list[0]) || list[0].public_key !== own || !isObj(list[0].access_key)) return null;
-  return big(list[0].access_key.nonce);
+  // below 2^64 - 1, so the nonce signed next (this + 1) fits the u64 nearcore reads; a string answer is not capped by
+  // isSafeInteger, and Borsh keeps only 8 bytes of a larger one
+  const n = big(list[0].access_key.nonce);
+  return n !== null && n < U64_MAX ? n : null;
 }
+const U64_MAX = 2n ** 64n - 1n;
 /** U's key nonce at block `at` on both RPCs, equal, else null. */
 async function keyNonceAt(u: string, at: number, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<bigint | null> {
   const own = ownKey(u);
@@ -208,6 +212,8 @@ export async function readMoveOut(u: string, to: string, token: string, rpcs: re
 class Borsh {
   private parts: Uint8Array[] = [];
   private int(x: bigint, n: number) {
+    // an integer that does not fit n bytes is refused, never cut to its low bytes (as delegate.ts's uint)
+    if (x < 0n || x >> BigInt(8 * n) !== 0n) throw new MoveOutRefused(`an integer does not fit ${n} bytes`);
     const b = new Uint8Array(n);
     for (let k = 0; k < n; k++) b[k] = Number((x >> BigInt(8 * k)) & 0xffn);
     this.parts.push(b);

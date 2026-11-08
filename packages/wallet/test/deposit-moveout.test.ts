@@ -40,6 +40,8 @@ class Chain {
   foreignKey: string | null = null;
   sent: string[] = [];
   txs = new Map<string, "ok" | "failed">();
+  /** the access key nonce answered as a JSON string (nearcore answers a number; a hostile RPC may not) */
+  nonceString = false;
   /** U's key nonce at a height (default: the current one at every height) */
   nonceAt: (h: number) => bigint = () => this.nonce;
   /** what the second RPC answers differently, at the same height */
@@ -68,7 +70,7 @@ class Chain {
         const h = at(p);
         if (p.request_type === "view_access_key_list") {
           const own = `ed25519:${base58.encode(Uint8Array.from(U.match(/../g)!, (x) => parseInt(x, 16)))}`;
-          const keys = [{ public_key: this.foreignKey ?? own, access_key: { nonce: Number(sk.nonce ?? this.nonceAt(h)), permission: "FullAccess" } }];
+          const keys = [{ public_key: this.foreignKey ?? own, access_key: { nonce: this.nonceString ? String(sk.nonce ?? this.nonceAt(h)) : Number(sk.nonce ?? this.nonceAt(h)), permission: "FullAccess" } }];
           if (this.keys > 1) keys.push({ public_key: "ed25519:11111111111111111111111111111111", access_key: { nonce: 0, permission: "FullAccess" } });
           return { result: { block_height: h, keys } };
         }
@@ -325,6 +327,26 @@ test("M2 the token's code is not the kit's pin on both RPCs: nothing signed (W:9
   chain.code = "11111111111111111111111111111111";
   assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" });
   assert.equal(chain.sent.length, 0);
+});
+
+test("L a nonce of 2^64-1 or more, answered as a string by both RPCs, is unread: nonce + 1 would not fit the u64 signed (exit-ids-out delta review 4, finding 3)", async () => {
+  for (const nonce of [2n ** 64n - 1n, 2n ** 64n, 2n ** 70n]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonceString = true;
+    chain.nonce = nonce;
+    seedOpens = 0;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" }, String(nonce));
+    assert.equal(seedOpens, 0);
+    assert.equal(chain.sent.length, 0);
+  }
+  // the largest nonce whose next one fits a u64 is read, and signed at 2^64-1
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.nonceString = true;
+  chain.nonce = 2n ** 64n - 2n;
+  assert.equal((await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain))).kind, "moved");
+  assert.equal(decode(chain.sent[0]!).nonce, 2n ** 64n - 1n);
 });
 
 test("M3 U's one key is not U's own key: nothing signed", async () => {
