@@ -1,0 +1,353 @@
+/// <reference types="node" />
+// The teardown's cashback claims (card solana-teardown-cashback): before a volume account closes, what it owes is
+// claimed to the wallet in the same frame, PumpSwap's claim_cashback (WSOL out of the volume account's WSOL account) and
+// pump's claim_cashback_v2 (stable cashback out of its USDC account). close_user_volume_accumulator does not check for
+// owed cashback (simulated on 12FzhSyn…), so a close without its claim would leave the WSOL in an account whose owner
+// is gone. Good: the recorded mainnet wallet GATRKVEP… (test/fixtures/solana-teardown-cashback.json, captured with
+// solana-teardown-capture.mjs on two public RPCs), its PumpSwap volume account owed 12,742,862, gains exactly that
+// claim on both providers. Bad: planted frames that claim to another account, close before the claim, or a simulation
+// that pays short, are refused.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { base58, base64 } from "@scure/base";
+import {
+  SOLANA_CLAIM_CASHBACK,
+  SOLANA_CLAIM_CASHBACK_V2,
+  SOLANA_CLOSE_VOLUME_ACCUMULATOR,
+  SOLANA_COMPUTE_BUDGET_PROGRAM,
+  SOLANA_PUMP_AMM_PROGRAM,
+  SOLANA_PUMP_PROGRAM,
+  SOLANA_PUMP_STABLE_MINT,
+  SOLANA_SOL_MINT,
+  SOLANA_SYSTEM_PROGRAM,
+  SOLANA_TOKEN_PROGRAM,
+  checkSolanaTeardown,
+  solanaCashbackAccounts,
+  solanaEventAuthority,
+  solanaTeardownAddresses,
+  solanaTeardownPlan,
+  solanaVolumeAccumulator,
+  type SolanaHeldRead,
+  type SolanaTeardownPlan,
+  type SolanaTeardownReads,
+  type SolanaTeardownSimulation,
+} from "../src/checks/solana/checks.ts";
+import { SOLANA_ATA_PROGRAM, solanaAta } from "../src/checks/solana/message.ts";
+import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0, type SolanaApiInstruction } from "../src/trade/solana/build.ts";
+import type { SolanaRpc } from "../src/trade/solana/send.ts";
+
+type RawAcc = { owner: string; lamports: number; data: [string, string] } | null;
+type RawSim = { context: { slot: number }; value: { err: unknown; unitsConsumed: number; accounts: RawAcc[] } };
+type Rec = { wallet: string; mints: { mint: string; program: string }[]; addresses: string[]; reads: { context: { slot: number }; value: RawAcc[] }[]; chain: { blockhash: string; lastValidBlockHeight: number }; frames: string[]; sims: RawSim[][][] };
+const F = JSON.parse(readFileSync(new URL("./fixtures/solana-teardown-cashback.json", import.meta.url), "utf8")) as { readAt: string; rpcs: string[]; wallets: Rec[] };
+const R = F.wallets[0]!;
+const W = R.wallet;
+const held = (a: RawAcc): SolanaHeldRead | null => (a ? { owner: a.owner, lamports: BigInt(a.lamports), data: base64.decode(a.data[0]) } : null);
+const ACCOUNTS = Object.fromEntries(R.addresses.map((x, i) => [x, [held(R.reads[0]!.value[i + 1]!), held(R.reads[1]!.value[i + 1]!)] as const]));
+const W0 = BigInt(R.reads[0]!.value[0]!.lamports);
+const UVA_A = solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM);
+const UVA_P = solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM);
+const STRANGER = "9Egm6XfbVdNpL7ouFfmeRjnLsYJUE4qh8AuVFjHyKrCp";
+const replay = (answers: RawSim[]): SolanaRpc => {
+  const q = [...answers];
+  return async (method) => {
+    assert.equal(method, "simulateTransaction");
+    const a = q.shift();
+    if (!a) throw new Error("no more recorded answers");
+    return a;
+  };
+};
+async function readsOf(sims: RawSim[][][] = R.sims): Promise<SolanaTeardownReads> {
+  const simulations: [SolanaTeardownSimulation, SolanaTeardownSimulation][] = [];
+  for (const [f, pair] of sims.entries()) {
+    const wire = base64.decode(R.frames[f] as string);
+    simulations.push([await simulateSolanaTeardown(replay(pair[0]!), wire, W, R.addresses), await simulateSolanaTeardown(replay(pair[1]!), wire, W, R.addresses)]);
+  }
+  return { accounts: ACCOUNTS, wallet: [W0, BigInt(R.reads[1]!.value[0]!.lamports)], simulations };
+}
+const failed = (v: ReturnType<typeof checkSolanaTeardown>) => v.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`);
+const acc = (key: string, signer = false, writable = false) => ({ key, signer, writable });
+const ix = (program: string, accounts: ReturnType<typeof acc>[], data: readonly number[]): SolanaApiInstruction => ({ program, accounts, data: Uint8Array.from(data) });
+const u32 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+const frame = (ixs: SolanaApiInstruction[], payer = W): Uint8Array => {
+  const { message } = solanaCompileV0(payer, ixs, R.chain.blockhash, []);
+  const w = new Uint8Array(1 + 64 + message.length);
+  w[0] = 1;
+  w.set(message, 65);
+  return w;
+};
+const limit = (n: number) => ix(SOLANA_COMPUTE_BUDGET_PROGRAM, [], [2, ...u32(n)]);
+const openIx = (to: string, mint: string, owner = W) => ix(SOLANA_ATA_PROGRAM, [acc(W, true, true), acc(to, false, true), acc(owner), acc(mint), acc(SOLANA_SYSTEM_PROGRAM), acc(SOLANA_TOKEN_PROGRAM)], [1]);
+const ammClaim = (o: { user?: string; to?: string; from?: string } = {}) => {
+  const c = solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM);
+  return ix(SOLANA_PUMP_AMM_PROGRAM, [acc(o.user ?? W, false, true), acc(UVA_A, false, true), acc(SOLANA_SOL_MINT), acc(SOLANA_TOKEN_PROGRAM), acc(o.from ?? c.from, false, true), acc(o.to ?? c.to, false, true), acc(SOLANA_SYSTEM_PROGRAM), acc(solanaEventAuthority(SOLANA_PUMP_AMM_PROGRAM)), acc(SOLANA_PUMP_AMM_PROGRAM)], SOLANA_CLAIM_CASHBACK);
+};
+const unwrap = (a: string, dest = W) => ix(SOLANA_TOKEN_PROGRAM, [acc(a, false, true), acc(dest, false, true), acc(W, true, false)], [9]);
+const vclose = (p: string) => ix(p, [acc(W, true, true), acc(solanaVolumeAccumulator(W, p), false, true), acc(solanaEventAuthority(p)), acc(p)], SOLANA_CLOSE_VOLUME_ACCUMULATOR);
+const WSOL_W = solanaAta(W, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+const WSOL_STRANGER = solanaAta(STRANGER, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+
+test("recorded: GATRKVEP…'s PumpSwap volume account is owed 12,742,862 of WSOL, held in its own WSOL account; the plan claims it to the wallet and closes both volume accounts", () => {
+  assert.deepEqual(F.rpcs.length, 2);
+  assert.deepEqual(R.addresses, solanaTeardownAddresses(W, R.mints));
+  // the volume account the review named, derived from the wallet, never typed
+  assert.ok(UVA_A.startsWith("12FzhSyn"), UVA_A);
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  const c = solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM);
+  assert.deepEqual(plan.claim, [{ program: SOLANA_PUMP_AMM_PROGRAM, uva: UVA_A, mint: SOLANA_SOL_MINT, from: c.from, to: WSOL_W, amount: 12_742_862n, open: true, unwrap: true, fromAmount: 12_742_862n, toAmount: 0n }]);
+  assert.deepEqual(plan.close.map((h) => h.address).sort(), [UVA_A, UVA_P].sort());
+  assert.deepEqual(plan.keep, []);
+});
+
+test("good: the frame rebuilds byte for byte; on both providers the claim lands in full and the wallet gains exactly 12,742,862 plus the closed accounts' lamports less the fee", async () => {
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  const frames = buildSolanaTeardown(W, plan, R.chain);
+  assert.deepEqual(frames.map((f) => base64.encode(f.wire)), R.frames);
+  assert.equal(frames.length, 1);
+  const reads = await readsOf();
+  const v = checkSolanaTeardown(frames.map((f) => f.wire), W, reads);
+  assert.deepEqual(failed(v), []);
+  const closed = plan.close.reduce((s, h) => s + h.lamports, 0n);
+  for (const s of reads.simulations[0]!) {
+    assert.equal(s!.err, null);
+    assert.equal(s!.wallet - W0 - closed + 5_000n, 12_742_862n);
+    assert.equal(s!.amounts![plan.claim[0]!.from], 0n);
+    // gone: one provider answers no account, the other an empty system account
+    assert.ok(s!.accounts[WSOL_W] === null || s!.accounts[WSOL_W] === 0n);
+  }
+  for (const p of [0, 1]) for (const a of R.sims[0]![p]!) assert.ok(a.value.unitsConsumed <= frames[0]!.cuLimit);
+});
+
+test("bad: a frame that claims to another account, for another user, or from another account is refused", async () => {
+  const reads = await readsOf();
+  const cases: [string, Uint8Array][] = [
+    ["claim to a stranger's WSOL account", frame([limit(121_600), openIx(WSOL_STRANGER, SOLANA_SOL_MINT, STRANGER), ammClaim({ to: WSOL_STRANGER }), unwrap(WSOL_STRANGER), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])],
+    ["claim naming a stranger as the user", frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim({ user: STRANGER }), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])],
+    ["claim from another account", frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim({ from: STRANGER }), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])],
+    ["the claim's WSOL closed to a stranger", frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim(), unwrap(WSOL_W, STRANGER), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])],
+  ];
+  for (const [what, wire] of cases) {
+    const v = checkSolanaTeardown([wire], W, reads);
+    assert.equal(v.ok, false, what);
+    assert.ok(failed(v).some((x) => x.startsWith("FRAME")), `${what}: ${failed(v).join(" | ")}`);
+  }
+  // A plan edited to pay a stranger, built by the kit's own builder: the check's own plan from the reads refuses it.
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  const evil: SolanaTeardownPlan = { ...plan, claim: plan.claim.map((c) => ({ ...c, to: WSOL_STRANGER })) };
+  const v = checkSolanaTeardown(buildSolanaTeardown(W, evil, R.chain).map((f) => f.wire), W, reads);
+  assert.equal(v.ok, false);
+  assert.ok(failed(v).some((x) => x.startsWith("FRAME")), failed(v).join(" | "));
+});
+
+test("bad: an owed volume account closed without its claim, or before it, and a claim's WSOL closed before the claim, are refused", async () => {
+  const reads = await readsOf();
+  const noClaim = checkSolanaTeardown([frame([limit(56_600), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.equal(noClaim.ok, false);
+  assert.ok(failed(noClaim).some((x) => x.includes(`close of ${UVA_A} before its claim`)), failed(noClaim).join(" | "));
+  assert.ok(failed(noClaim).some((x) => x.includes(`${UVA_A}'s cashback claimed 0 times (want 1)`)), failed(noClaim).join(" | "));
+  const closeFirst = checkSolanaTeardown([frame([limit(121_600), vclose(SOLANA_PUMP_AMM_PROGRAM), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim(), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM)])], W, reads);
+  assert.ok(failed(closeFirst).some((x) => x.includes(`close of ${UVA_A} before its claim`)), failed(closeFirst).join(" | "));
+  const unwrapFirst = checkSolanaTeardown([frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), unwrap(WSOL_W), ammClaim(), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.equal(unwrapFirst.ok, false);
+  assert.ok(failed(unwrapFirst).some((x) => x.includes(`close of ${WSOL_W} not right after its claim`)), failed(unwrapFirst).join(" | "));
+  // The claim's WSOL closed after another instruction, not right after the claim.
+  const between = checkSolanaTeardown([frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim(), vclose(SOLANA_PUMP_AMM_PROGRAM), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM)])], W, reads);
+  assert.ok(failed(between).some((x) => x.includes(`close of ${WSOL_W} not right after its claim`)), failed(between).join(" | "));
+  // The open: for a stranger as the owner, not right before its claim, or left out when the plan opens.
+  const strangerOwner = checkSolanaTeardown([frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT, STRANGER), ammClaim(), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.ok(failed(strangerOwner).some((x) => x.includes(`open of ${WSOL_W}`)), failed(strangerOwner).join(" | "));
+  const openEarly = checkSolanaTeardown([frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), vclose(SOLANA_PUMP_PROGRAM), ammClaim(), unwrap(WSOL_W), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.ok(failed(openEarly).some((x) => x.includes(`open of ${WSOL_W}`)), failed(openEarly).join(" | "));
+  const noOpen = checkSolanaTeardown([frame([limit(96_600), ammClaim(), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.ok(failed(noOpen).some((x) => x.includes(`${WSOL_W} opened 0 times (want 1)`)), failed(noOpen).join(" | "));
+  const noUnwrap = checkSolanaTeardown([frame([limit(115_600), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim(), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.ok(failed(noUnwrap).some((x) => x.includes(`${WSOL_W} closed 0 times after its claim (want 1)`)), failed(noUnwrap).join(" | "));
+  // The claim's source read-only (the claim could not move it).
+  const ro = ammClaim();
+  const roFrom = { ...ro, accounts: ro.accounts.map((x, i) => (i === 4 ? { ...x, writable: false } : x)) };
+  for (const c of [roFrom]) {
+    const v = checkSolanaTeardown([frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), c, unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+    assert.ok(failed(v).some((x) => x.includes("no claim of the plan's")), failed(v).join(" | "));
+  }
+  // PumpSwap's claim with another instruction's data (pump's claim_cashback_v2) in its place.
+  const otherData = checkSolanaTeardown([frame([limit(121_600), openIx(WSOL_W, SOLANA_SOL_MINT), { ...ammClaim(), data: Uint8Array.from(SOLANA_CLAIM_CASHBACK_V2) }, unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.ok(failed(otherData).some((x) => x.includes("no claim of the plan's")), failed(otherData).join(" | "));
+  // The claim twice in one frame.
+  const twice = checkSolanaTeardown([frame([limit(200_000), openIx(WSOL_W, SOLANA_SOL_MINT), ammClaim(), ammClaim(), unwrap(WSOL_W), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)])], W, reads);
+  assert.ok(failed(twice).some((x) => x.includes(`claimed 2 times (want 1)`)), failed(twice).join(" | "));
+});
+
+test("bad: a simulation that pays the claim short, or leaves the claim's WSOL account open, is refused", async () => {
+  // Provider B's answer edited: the volume account's WSOL account keeps 1 token (simulateSolanaTeardown reads three
+  // addresses a call after the wallet; from is the sixth address).
+  const at = R.addresses.indexOf(solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM).from);
+  const sims = structuredClone(R.sims);
+  const slot = sims[0]![1]![Math.floor(at / 3)]!.value.accounts[(at % 3) + 1]!;
+  const d = base64.decode(slot.data[0]);
+  new DataView(d.buffer).setBigUint64(64, 1n, true);
+  slot.data[0] = base64.encode(d);
+  const v = checkSolanaTeardown(R.frames.map((x) => base64.decode(x)), W, await readsOf(sims));
+  assert.equal(v.ok, false);
+  assert.deepEqual(failed(v), [`SIM frame 0 provider B: ${solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM).from} holds 1 after the claim (want 0)`]);
+  // The wallet short by one lamport on provider A.
+  const short = structuredClone(R.sims);
+  for (const call of short[0]![0]!) call.value.accounts[0]!.lamports -= 1;
+  const v2 = checkSolanaTeardown(R.frames.map((x) => base64.decode(x)), W, await readsOf(short));
+  assert.equal(v2.ok, false);
+  assert.match(failed(v2).join(" | "), /SIM frame 0 provider A: the wallet gains/);
+  // The wallet's WSOL account still there after.
+  const wat = R.addresses.indexOf(WSOL_W);
+  const open = structuredClone(R.sims);
+  open[0]![0]![Math.floor(wat / 3)]!.value.accounts[(wat % 3) + 1] = { owner: SOLANA_TOKEN_PROGRAM, lamports: 2_039_280, data: [base64.encode(new Uint8Array(165)), "base64"] };
+  const v3 = checkSolanaTeardown(R.frames.map((x) => base64.decode(x)), W, await readsOf(open));
+  assert.ok(failed(v3).some((x) => x.includes(`${WSOL_W} still holds 2039280 lamports`)), failed(v3).join(" | "));
+});
+
+// ---- pump's stable cashback (no real owed account found to record: built from the IDL's layouts on GATRKVEP…'s reads)
+
+const STABLE = solanaCashbackAccounts(W, SOLANA_PUMP_PROGRAM);
+function tokenAccount(mint: string, owner: string, amount: bigint, state = 1): SolanaHeldRead {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(mint), 0);
+  d.set(base58.decode(owner), 32);
+  new DataView(d.buffer).setBigUint64(64, amount, true);
+  d[108] = state;
+  return { owner: SOLANA_TOKEN_PROGRAM, lamports: 2_039_280n, data: d };
+}
+// GATRKVEP…'s pump volume account with stable_cashback_earned @90 = 500,000 and total_stable_cashback_claimed @98 = 0.
+function stableWorld(o: { source?: bigint; to?: SolanaHeldRead | null } = {}) {
+  const real = ACCOUNTS[UVA_P]![0]!;
+  assert.ok(real.data.length >= 106);
+  const d = Uint8Array.from(real.data);
+  new DataView(d.buffer).setBigUint64(90, 500_000n, true);
+  new DataView(d.buffer).setBigUint64(98, 0n, true);
+  const uva = { ...real, data: d };
+  const src = tokenAccount(SOLANA_PUMP_STABLE_MINT, UVA_P, o.source ?? 500_000n);
+  const to = o.to === undefined ? null : o.to;
+  return { ...ACCOUNTS, [UVA_P]: [uva, uva] as const, [STABLE.from]: [src, src] as const, [STABLE.to]: [to, to] as const };
+}
+// Honest simulations of one frame: W up by what closes and the WSOL claim, less the fee and the USDC account's rent.
+function stableSims(plan: SolanaTeardownPlan, rentPaid: bigint, over: Partial<{ to: bigint; from: bigint; rent: bigint }> = {}) {
+  const closed = plan.close.reduce((s, h) => s + h.lamports, 0n) + plan.claim.reduce((s, c) => s + (c.unwrap ? c.amount : 0n), 0n);
+  const sc = plan.claim.find((c) => c.program === SOLANA_PUMP_PROGRAM)!;
+  const ac = plan.claim.find((c) => c.program === SOLANA_PUMP_AMM_PROGRAM)!;
+  const s: SolanaTeardownSimulation = {
+    err: null,
+    wallet: W0 + closed - 5_000n - rentPaid,
+    accounts: { ...Object.fromEntries(plan.close.map((h) => [h.address, null])), [ac.to]: null, [sc.to]: over.rent ?? 2_039_280n },
+    amounts: { [ac.from]: 0n, [sc.from]: over.from ?? 0n, [sc.to]: over.to ?? sc.toAmount + sc.amount },
+  };
+  return [[s, s]] as const;
+}
+
+test("stable cashback: the plan claims it to the wallet's own USDC account (opened when there is none, kept after), right before the pump close; checked like the WSOL claim", () => {
+  const accounts = stableWorld();
+  const plan = solanaTeardownPlan(W, accounts);
+  const sc = plan.claim.find((c) => c.program === SOLANA_PUMP_PROGRAM)!;
+  assert.deepEqual(sc, { program: SOLANA_PUMP_PROGRAM, uva: UVA_P, mint: SOLANA_PUMP_STABLE_MINT, from: STABLE.from, to: solanaAta(W, SOLANA_PUMP_STABLE_MINT, SOLANA_TOKEN_PROGRAM), amount: 500_000n, open: true, unwrap: false, fromAmount: 500_000n, toAmount: 0n });
+  assert.deepEqual(plan.keep, [{ address: STABLE.to, why: `takes stable cashback 500000 of ${SOLANA_PUMP_STABLE_MINT}` }]);
+  const frames = buildSolanaTeardown(W, plan, R.chain);
+  assert.equal(frames.length, 1);
+  assert.ok(frames[0]!.size <= 1232, `${frames[0]!.size} bytes`);
+  const base = { accounts, wallet: [W0, W0] as const };
+  assert.deepEqual(failed(checkSolanaTeardown(frames.map((f) => f.wire), W, { ...base, simulations: stableSims(plan, 2_039_280n) })), []);
+  // short to the wallet, left in the source, an open that takes more than a token account's rent: refused
+  assert.match(failed(checkSolanaTeardown(frames.map((f) => f.wire), W, { ...base, simulations: stableSims(plan, 2_039_280n, { to: 499_999n }) })).join(" | "), new RegExp(`${STABLE.to} holds 499999 after the claim`));
+  assert.match(failed(checkSolanaTeardown(frames.map((f) => f.wire), W, { ...base, simulations: stableSims(plan, 2_039_280n, { from: 1n }) })).join(" | "), new RegExp(`${STABLE.from} holds 1 after the claim`));
+  assert.match(failed(checkSolanaTeardown(frames.map((f) => f.wire), W, { ...base, simulations: stableSims(plan, 3_000_000n, { rent: 3_000_000n }) })).join(" | "), /opened with 3000000 lamports/);
+  // the stable claim to a stranger's USDC account, built by the kit's builder from an edited plan: refused
+  const strangerUsdc = solanaAta(STRANGER, SOLANA_PUMP_STABLE_MINT, SOLANA_TOKEN_PROGRAM);
+  const evil = { ...plan, claim: plan.claim.map((c) => (c === sc ? { ...c, to: strangerUsdc } : c)) };
+  assert.ok(failed(checkSolanaTeardown(buildSolanaTeardown(W, evil, R.chain).map((f) => f.wire), W, { ...base, simulations: stableSims(plan, 2_039_280n) })).some((x) => x.startsWith("FRAME")));
+  // the v2 claim's discriminator on the PumpSwap program (or the reverse) is no claim
+  const v2OnAmm = { ...plan, claim: plan.claim.map((c) => (c === sc ? c : { ...c, program: SOLANA_PUMP_PROGRAM })) } as SolanaTeardownPlan;
+  assert.equal(checkSolanaTeardown(buildSolanaTeardown(W, v2OnAmm, R.chain).map((f) => f.wire), W, { ...base, simulations: stableSims(plan, 2_039_280n) }).ok, false);
+  assert.deepEqual(SOLANA_CLAIM_CASHBACK_V2, [122, 243, 204, 65, 94, 116, 29, 55]);
+});
+
+test("stable cashback: an existing USDC account of the wallet takes it without an open; one that is frozen, or a source short of what is owed, keeps the volume account open", () => {
+  const usdc = tokenAccount(SOLANA_PUMP_STABLE_MINT, W, 7n);
+  const plan = solanaTeardownPlan(W, stableWorld({ to: usdc }));
+  const sc = plan.claim.find((c) => c.program === SOLANA_PUMP_PROGRAM)!;
+  assert.equal(sc.open, false);
+  assert.equal(sc.toAmount, 7n);
+  assert.ok(plan.close.some((h) => h.address === UVA_P));
+  const frozen = solanaTeardownPlan(W, stableWorld({ to: tokenAccount(SOLANA_PUMP_STABLE_MINT, W, 0n, 2) }));
+  assert.ok(!frozen.claim.some((c) => c.program === SOLANA_PUMP_PROGRAM));
+  assert.ok(!frozen.close.some((h) => h.address === UVA_P));
+  assert.match(frozen.keep.find((k) => k.address === UVA_P)!.why, /^stable cashback 500000 unclaimed/);
+  const shortSrc = solanaTeardownPlan(W, stableWorld({ source: 499_999n }));
+  assert.ok(!shortSrc.claim.some((c) => c.program === SOLANA_PUMP_PROGRAM));
+  assert.match(shortSrc.keep.find((k) => k.address === UVA_P)!.why, /holds 499999/);
+  // the claim into the existing account: an open the plan does not ask for, or the account read-only, is refused
+  const accounts = stableWorld({ to: usdc });
+  const v2 = (o: { open?: boolean; roTo?: boolean } = {}) => {
+    const k = [acc(W, false, true), acc(UVA_P, false, true), acc(SOLANA_PUMP_STABLE_MINT), acc(SOLANA_TOKEN_PROGRAM), acc(SOLANA_ATA_PROGRAM), acc(STABLE.from, false, true), acc(STABLE.to, false, !o.roTo), acc(SOLANA_SYSTEM_PROGRAM), acc(solanaEventAuthority(SOLANA_PUMP_PROGRAM)), acc(SOLANA_PUMP_PROGRAM)];
+    const amm = plan.claim.find((c) => c.program === SOLANA_PUMP_AMM_PROGRAM)!;
+    return frame([limit(150_000), ...(o.open ? [openIx(STABLE.to, SOLANA_PUMP_STABLE_MINT)] : []), ix(SOLANA_PUMP_PROGRAM, k, SOLANA_CLAIM_CASHBACK_V2), openIx(amm.to, SOLANA_SOL_MINT), ammClaim(), unwrap(amm.to), vclose(SOLANA_PUMP_PROGRAM), vclose(SOLANA_PUMP_AMM_PROGRAM)]);
+  };
+  const sims = [[{ err: null, wallet: 0n, accounts: {} }, { err: null, wallet: 0n, accounts: {} }]] as const;
+  const r = (w: Uint8Array) => failed(checkSolanaTeardown([w], W, { accounts, wallet: [W0, W0], simulations: sims })).filter((x) => !x.startsWith("SIM"));
+  assert.deepEqual(r(v2()), []);
+  assert.deepEqual(r(v2({ open: true })), [`COVER ${STABLE.to} opened 1 times (want 0)`]);
+  assert.ok(r(v2({ roTo: true })).some((x) => x.includes("no claim of the plan's")), r(v2({ roTo: true })).join(" | "));
+  // an empty USDC account of the wallet that takes the claim is not closed by S-4
+  const empty = solanaTeardownPlan(W, stableWorld({ to: tokenAccount(SOLANA_PUMP_STABLE_MINT, W, 0n) }));
+  assert.ok(!empty.close.some((h) => h.address === STABLE.to));
+  assert.ok(empty.claim.some((c) => c.to === STABLE.to && !c.open));
+});
+
+test("a volume account kept for another reason still has its cashback claimed: a frame that only claims passes", () => {
+  const real = ACCOUNTS[UVA_A]![0]!;
+  const d = Uint8Array.from(real.data);
+  new DataView(d.buffer).setBigUint64(57, 1n, true); // current_sol_volume: volume not settled
+  const uva = { ...real, data: d };
+  const accounts = { ...ACCOUNTS, [UVA_A]: [uva, uva] as const };
+  const plan = solanaTeardownPlan(W, accounts);
+  assert.equal(plan.claim.length, 1);
+  assert.ok(!plan.close.some((h) => h.address === UVA_A));
+  assert.deepEqual(plan.keep, [{ address: UVA_A, why: "volume 1 not settled" }]);
+  const only = { ...plan, close: [] };
+  const frames = buildSolanaTeardown(W, only, R.chain);
+  const s: SolanaTeardownSimulation = { err: null, wallet: W0 + 12_742_862n - 5_000n, accounts: { [WSOL_W]: null }, amounts: { [plan.claim[0]!.from]: 0n } };
+  const pump = plan.close.find((h) => h.address === UVA_P)!;
+  const withPump = { ...s, wallet: s.wallet + pump.lamports, accounts: { ...s.accounts, [UVA_P]: null } };
+  assert.deepEqual(failed(checkSolanaTeardown(buildSolanaTeardown(W, plan, R.chain).map((f) => f.wire), W, { accounts, wallet: [W0, W0], simulations: [[withPump, withPump]] })), []);
+  // the claim alone, with the pump close left out, is refused only for the missing close
+  assert.deepEqual(failed(checkSolanaTeardown(frames.map((f) => f.wire), W, { accounts, wallet: [W0, W0], simulations: [[s, s]] })), [`COVER ${UVA_P} closed 0 times (want 1)`]);
+});
+
+test("WSOL claim: a source short of what is owed, or one not read, keeps the PumpSwap volume account open with the reason", () => {
+  const src = solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM).from;
+  const short = tokenAccount(SOLANA_SOL_MINT, UVA_A, 12_742_861n);
+  const p = solanaTeardownPlan(W, { ...ACCOUNTS, [src]: [short, short] });
+  assert.deepEqual(p.claim, []);
+  assert.ok(!p.close.some((h) => h.address === UVA_A));
+  assert.match(p.keep.find((k) => k.address === UVA_A)!.why, /^cashback 12742862 unclaimed \(the volume account's .* holds 12742861\)$/);
+  const { [src]: _, ...unread } = ACCOUNTS;
+  const p2 = solanaTeardownPlan(W, unread);
+  assert.ok(!p2.close.some((h) => h.address === UVA_A));
+  assert.match(p2.keep.find((k) => k.address === UVA_A)!.why, /holds nothing read\)$/);
+  // the wallet's WSOL account there but not closable by the wallet (another close authority): no claim into it
+  const wsol = tokenAccount(SOLANA_SOL_MINT, W, 0n);
+  const d = Uint8Array.from(wsol.data);
+  new DataView(d.buffer).setUint32(129, 1, true);
+  d.set(base58.decode(STRANGER), 133);
+  const locked = { ...wsol, data: d };
+  const p3 = solanaTeardownPlan(W, { ...ACCOUNTS, [WSOL_W]: [locked, locked] });
+  assert.deepEqual(p3.claim, []);
+  assert.match(p3.keep.find((k) => k.address === UVA_A)!.why, new RegExp(`cannot take it \\(close authority ${STRANGER}\\)`));
+  // a source that is not the volume account's own WSOL account is refused as a read
+  const other = tokenAccount(SOLANA_SOL_MINT, STRANGER, 12_742_862n);
+  assert.throws(() => solanaTeardownPlan(W, { ...ACCOUNTS, [src]: [other, other] }), /not the volume account's/);
+});
+
+test("the reads: one traded mint's teardown accounts and the wallet fit in one getMultipleAccounts of 10 (solana-rpc.publicnode.com's cap)", () => {
+  const list = solanaTeardownAddresses(W, [{ mint: STRANGER, program: SOLANA_TOKEN_PROGRAM }]);
+  assert.ok(1 + list.length <= 10, `${1 + list.length}`);
+  for (const p of [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]) {
+    const c = solanaCashbackAccounts(W, p);
+    assert.ok(list.includes(c.from) && list.includes(c.to));
+  }
+});

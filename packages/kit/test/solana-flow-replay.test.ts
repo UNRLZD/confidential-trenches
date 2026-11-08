@@ -91,6 +91,34 @@ function replay(at: "A" | "B", edit: Edit = (_a, _m, _n, x) => x, valid: Valid =
       const main = fx.rpc.find((r) => r.at === at && r.ask.startsWith('["simulateTransaction"') && (JSON.parse(r.ask) as [string, { addresses?: string[] } | null])[1]?.addresses?.[0] === WSOL_HELD.wallet)!;
       list = [{ context: { slot: 1 }, value: { err: null, accounts: [(main.answer as { value: { accounts: unknown[] } }).value.accounts[0], { data: ["", "base64"], executable: false, lamports: 0, owner: "11111111111111111111111111111111", rentEpoch: 0, space: 0 }] } }]; // edited as a recorded answer
     }
+    // The recording also predates the claims' accounts in a teardown's reads (card solana-teardown-cashback), which
+    // shift its simulations' groups of three addresses after the wallet: a group the recording never asked answers each
+    // address from the recorded group that read it, at the same count, and as no account where the recording read
+    // none (the claims' accounts, which none of the recorded wallets holds: read as no account above).
+    if (!list && back && back.length >= 2) {
+      // the recorded teardown groups: the wallet, then three at a time of the list a teardown read before the claims'
+      // (its WSOL account, its account of the token, its two volume accounts)
+      const w = back[0] as string;
+      const old = fx.requests.flatMap((r) => [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((p) => [solanaAta(w, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), solanaAta(w, r.mint, p), solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM), solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM)]));
+      const chunks = new Set(old.flatMap((l) => [JSON.stringify([w, ...l.slice(0, 3)]), JSON.stringify([w, ...l.slice(3)])]));
+      const groups = [...by.entries()].flatMap(([ask, answers]) => {
+        if (!ask.startsWith('["simulateTransaction"')) return [];
+        const addresses = (JSON.parse(ask) as [string, { addresses?: string[] } | null])[1]?.addresses ?? [];
+        return chunks.has(JSON.stringify(addresses)) ? [{ ask, addresses, answers }] : [];
+      });
+      if (groups.length) {
+        const n = seen.get(k) ?? 0;
+        seen.set(k, n + 1);
+        const at0 = (g: (typeof groups)[number]) => clone(g.answers[Math.min(n, g.answers.length - 1)]) as { context: unknown; value: { err: unknown; accounts: unknown[] } };
+        const first = at0(groups[0]!);
+        if (first.value.err !== null) return first;
+        return { ...first, value: { ...first.value, accounts: back.map((x, i) => {
+          if (i === 0) return first.value.accounts[0];
+          const g = groups.find((y) => y.addresses.indexOf(x) > 0);
+          return g ? at0(g).value.accounts[g.addresses.indexOf(x)] : null;
+        }) } };
+      }
+    }
     if (!list) throw new Error(`not recorded on ${at}: ${k.slice(0, 160)}`);
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
