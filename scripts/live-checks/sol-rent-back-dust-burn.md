@@ -1,4 +1,4 @@
-CARD sol-rent-back-dust-burn / live: PENDING (its live check runs after the sign deploy)
+CARD sol-rent-back-dust-burn / live: PASS
 Money path: yes
 Tx: solana-devnet 5ox5mRCZ1TSXTxJvRimEAFLPNSVENNuCtD9aHmTvj9Pv84P849dz3ecDf734Vkx767GtxAi9vxmUBbiuUgPhbDob
 Tx: solana-devnet 4PP83peu4RzYZtL3xhZeuVgXsF3qVxUatX1exobZakF1BksuQNRTdYrNZMHtwtzEwVQxaz1eVdfptoWomCwe3sT4
@@ -14,6 +14,7 @@ Tx: solana-devnet 43JXAJ1TEJWCNf2TTiw3TgqLAyP3558vvfHP9xnznUCqRU4JuA2oHoP35Frj5A
 Tx: solana-devnet 2Bgb4J2Bjm1X9KyhThG5QiKQcgMBURavYd1nKvqYRCaJYFSmZ8wvhpBspn593QqBKn3Eaqhwrr4CV2MXUxZwPsB
 Tx: solana-devnet 2KG5eFNpt7jKPyaT9GdTgNAMS4PBgAg6WHr818ALfA95PzxJHuGPtntiaQff5f4F8qX8rpVWVuLpsjHF3CPkhRAv
 
+This is the devnet run's record, as sol-w-sweep.md is; the card's live check (sol-rent-back-dust-burn.mjs) runs after the sign deploy.
 The run, on Solana devnet, 2026-11-08 12:30-12:58Z, from the sol-rent-back-dust-burn worktree: packages/signpage/scripts/pool-flow-devnet.mjs with FLOW_DUST=1 on table 6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ, coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P (venue pump-curve, SPL Token, cashback false), pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr, spend max. The deposit and the buy ran at 122ca63f (12:30Z); that run stopped at its dust step (a holdings restore did not find W), and the rest ran resumed from the run's kept seed after its buy (FLOW_RESUME with FLOW_BUY_SIG, FLOW_STRANGER) at 11be498c (12:48Z); the last load (FLOW_RESUME with FLOW_SWEEP_W) at af3b1bd4 (12:57Z). The device code (src/pool-sell.ts, the kit) is f6243055's in both.
 In the order of the lines above:
 1. Our devnet wallet D (3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx) funds the run's U (7mXZuTQBpaJwm2rbSGEBS9g4a8yuBS4aY5uND2aZS1A2) with exactly 11473120 lamports, the need the run printed.
