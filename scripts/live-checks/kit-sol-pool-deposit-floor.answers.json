@@ -1,0 +1,25 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at e11791bd, release-101: the deposit builder refuses a note under the release floor at the rent read: PASS",
+    "bad": "main c7778df0's build (mainnet): the deposit builder takes any note from 1,000,000 lamports and no rent: FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-08T15:2xZ, before this card's deploy: FAIL; its sha384 equals bad's, the same bytes"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-acaJh3HRThSoCcg2+JtQ4apHkH4cf3kHXnOXNd1mjiMqnsA6rpOV/tamkxCvn+qF\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-acaJh3HRThSoCcg2+JtQ4apHkH4cf3kHXnOXNd1mjiMqnsA6rpOV/tamkxCvn+qF",
+    "floor": true,
+    "rent": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-NIDOuWAYxtGM4Gv3PY4Ok74g2SJU/Nh5VaCIw/Lxz5SLihSAhX/nFzdmoV+XmBuo\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-NIDOuWAYxtGM4Gv3PY4Ok74g2SJU/Nh5VaCIw/Lxz5SLihSAhX/nFzdmoV+XmBuo",
+    "floor": false,
+    "rent": false
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-NIDOuWAYxtGM4Gv3PY4Ok74g2SJU/Nh5VaCIw/Lxz5SLihSAhX/nFzdmoV+XmBuo\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-NIDOuWAYxtGM4Gv3PY4Ok74g2SJU/Nh5VaCIw/Lxz5SLihSAhX/nFzdmoV+XmBuo",
+    "floor": false,
+    "rent": false
+  }
+}
