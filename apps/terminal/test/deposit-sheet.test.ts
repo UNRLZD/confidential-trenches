@@ -86,6 +86,7 @@ const TABLE: [DepositStatus | null, string][] = [
   [{ stage: "into_vault", refunded: true }, "refund-move"],
   [{ stage: "done", refunded: true, amount_usd: "73.18" }, "S4.16"],
   [{ stage: "held", held_id: "u1" }, "held"],
+  [{ stage: "held", held_id: "u1", moved_out: true }, "moved"],
   [{ stage: "halted", hold: "halted", held_id: "u1" }, "held-halted"],
   [{ stage: "halted", hold: "not_caught_up", held_id: "u1" }, "held-not-caught-up"],
   [{ stage: "halted", hold: "vault_blocked", held_id: "u1" }, "held-vault-blocked"],
@@ -206,6 +207,8 @@ test("Recent: the account's deposits from state.ops, newest first, three at most
   assert.deepEqual(recentRows([dep("r", "done", { refunded: true, amount_usd: "5" })]), [{ id: "r", word: "deposited", amount_usd: "5" }], "a refund moved in is deposited");
   assert.deepEqual(recentRows([dep("q", "quote_checked"), dep("e", "expired"), dep("s", "short", { since_ms: 1 }), dep("f", "failed", { since_ms: 1 })]).map((r) => r.word), ["processing", "short", "expired"], "four deposits: the newest three");
   assert.deepEqual(recentRows([dep("q", "quote_checked")]).map((r) => r.word), ["waiting"]);
+  // card held-move-forgotten-tx: a held deposit the device moved out reads Moved, never Held
+  assert.deepEqual(recentRows([dep("m", "held", { held_id: "u1", since_ms: 1, moved_out: true }), dep("h", "held", { held_id: "u1" })]), [{ id: "h", word: "held" }, { id: "m", word: "moved" }]);
   assert.deepEqual(recentRows([]), []);
   assert.deepEqual(recentRows(undefined), []);
   for (const k of ["recent", "noActivity"] as const) assert.equal(WORDS[k].draft, false, k);
@@ -236,4 +239,14 @@ test("a pool picked: pool-off before any quote, in every form state; Get address
 
 test("a deposit already asked follows its own stages: the destination cannot turn a vault deposit into a pool's", () => {
   for (const [status, want] of TABLE) assert.equal(sheetState({ ...base, dest: "solana", checked: { kind: "ok", value: checked }, status }), want, JSON.stringify(status));
+});
+
+test("held-move-forgotten-tx: a moved-out deposit draws no Held mark and no withdraw.open", () => {
+  const st = tracked({ stage: "held", held_id: "u1", since_ms: 1, moved_out: true });
+  assert.equal(st, "moved");
+  assert.equal(HELD_STATES.has(st), false, "no held state, so no withdraw.open from its id");
+  assert.equal(ADDRESS_STATES.has(st), false);
+  assert.equal(tracked({ stage: "held", held_id: "u1" }), "held", "still held without the fact");
+  const op: Operation = { id: "m1", kind: "deposit", stage: "held", txs: [], held_id: "u1", since_ms: 5, moved_out: true };
+  assert.equal(tracked(statusOf(op)), "moved", "the kit's op carries the fact through statusOf");
 });

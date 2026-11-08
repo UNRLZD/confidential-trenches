@@ -20,7 +20,7 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { DepositAccountRefused, depositAccount, HEIGHT_SPREAD_MAX, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src/deposit/bind.ts";
 import { encodeDelegateAction, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
-import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, followEnded, readMoveAt, type FollowArgs, type FollowDeps, type FollowMoveAsk, followDeposit, type FollowRpc, MOVE_RETRY_MIN_MS, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, SLOW_MS, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
+import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, followEnded, readMoveAt, type FollowArgs, type FollowDeps, type FollowMoveAsk, type FollowRecord, followDeposit, type FollowRpc, MOVE_RETRY_MIN_MS, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, SLOW_MS, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
@@ -475,6 +475,88 @@ test("held: the bind stops (struck): the money under U for withdraw.open", async
   assert.deepEqual(out, { kind: "held", why: "sender_struck" });
   const op = await opOf(t.w);
   assert.equal(op.held_id, t.u);
+});
+
+// Delta review 8, ruling 1: the bind stops before the status loop, so holdAll reads each op's status before its held
+// write, on the reader the loop uses; the way out (moveout.ts landed) reads it to tell whose money U's move took. B,
+// another op of U stored PENDING_DEPOSIT or with no status, is held with what its read answers; a failed read (HTTP 500,
+// a 429) keeps the stored status and is asked once, never in a loop.
+test("R8-HOLD held: the bind stops; each op of U is held with its status read then, a failed read keeps the stored one", async () => {
+  const B = "b".repeat(64);
+  const cases: [Partial<FollowRecord>, { raw: unknown; http?: number } | "PROCESSING" | "SUCCESS", Partial<FollowRecord>][] = [
+    [{ status: "PENDING_DEPOSIT" }, "PROCESSING", { status: "PROCESSING", sent: true, delivered: undefined }],
+    [{}, "PROCESSING", { status: "PROCESSING", sent: true, delivered: undefined }],
+    [{ status: "PENDING_DEPOSIT" }, "SUCCESS", { status: "SUCCESS", sent: true, delivered: "2500000" }],
+    [{ status: "PENDING_DEPOSIT" }, { raw: {}, http: 500 }, { status: "PENDING_DEPOSIT", sent: undefined, delivered: undefined }],
+    [{}, { raw: {}, http: 500 }, { status: undefined, sent: undefined, delivered: undefined }],
+    [{ status: "PENDING_DEPOSIT" }, { raw: {}, http: 429 }, { status: "PENDING_DEPOSIT", sent: undefined, delivered: undefined }],
+  ];
+  for (const [stored, answer, want] of cases) {
+    const t = await setup(["SUCCESS"]);
+    t.chain.credit(CREDIT);
+    await t.w.put("ops", "dq-B", { kind: "deposit", stage: "waiting", txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: B, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, ...stored } });
+    let readsB = 0;
+    const fetchFn = (async (url: string) => {
+      if (!url.includes(B)) return Response.json(statusAnswer("SUCCESS", t.u));
+      readsB++;
+      if (typeof answer !== "string") return Response.json(answer.raw, { status: answer.http ?? 200 });
+      return Response.json(statusAnswer(answer, t.u, B, (j) => answer === "SUCCESS" && (j.swapDetails.amountOut = "2500000")));
+    }) as typeof fetch;
+    const when = `${JSON.stringify(stored)} then ${JSON.stringify(answer)}`;
+    const out = await followDeposit(t.args, { ...t.deps, fetchFn, bind: async () => ({ kind: "struck", account: t.u }) });
+    assert.deepEqual(out, { kind: "held", why: "sender_struck" }, when);
+    const b = await opOf(t.w, "dq-B");
+    assert.equal(b.stage, "held", when);
+    assert.equal(b.follow.why, "sender_struck", when);
+    assert.deepEqual({ status: b.follow.status, sent: b.follow.sent, delivered: b.follow.delivered }, want, when);
+    assert.equal(readsB, 1, `${when}: read once before its held write, never in a loop`);
+  }
+});
+
+// the page closes while holdAll reads (its signal aborts): the read is a failed one, so every op of U is still held with
+// its stored status, never left unheld until the next load
+test("R8-HOLD-ABORT held: the signal aborts during holdAll's status read; every op of U is still held, its stored status kept", async () => {
+  const B = "b".repeat(64);
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  await t.w.put("ops", "dq-B", { kind: "deposit", stage: "waiting", txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: B, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, status: "PENDING_DEPOSIT" } });
+  const stop = new AbortController();
+  let struck = false;
+  const fetchFn = (async (url: string) => {
+    if (!struck) return Response.json(statusAnswer("SUCCESS", t.u));
+    stop.abort();
+    throw new DOMException("closed", "AbortError");
+  }) as typeof fetch;
+  const bind = async () => ((struck = true), { kind: "struck" as const, account: t.u });
+  await assert.rejects(followDeposit(t.args, { ...t.deps, fetchFn, signal: stop.signal, bind }), { name: "AbortError" });
+  // the follow answers the abort at once; holdAll's writes finish behind it
+  for (let k = 0; k < 20 && (await opOf(t.w)).stage !== "held"; k++) await new Promise((ok) => setTimeout(ok, 5));
+  assert.ok(stop.signal.aborted, "the read was aborted");
+  for (const id of ["dq-1", "dq-B"]) {
+    const o = await opOf(t.w, id);
+    assert.equal(o.stage, "held", id);
+    assert.equal(o.follow.why, "sender_struck", id);
+  }
+  assert.equal((await opOf(t.w, "dq-B")).follow.status, "PENDING_DEPOSIT");
+});
+
+// Delta review 9, ruling 2: holdAll writes every op of U held before any status read, so a tab that dies during a read
+// leaves no op of U unheld: at each of holdAll's reads, both ops already read held
+test("R9-HOLD-FIRST held: every op of U is written held before holdAll's first status read", async () => {
+  const B = "b".repeat(64);
+  const t = await setup(["SUCCESS"]);
+  t.chain.credit(CREDIT);
+  await t.w.put("ops", "dq-B", { kind: "deposit", stage: "waiting", txs: [], created_ms: NOW - 1, follow: { network: "testnet", s: "1", i: t.i, u: t.u, address: B, deadline_ms: DEADLINE, origin: ORIGIN, min_out: MIN_OUT, status: "PENDING_DEPOSIT" } });
+  let struck = false;
+  const seen: string[] = [];
+  const fetchFn = (async (url: string) => {
+    if (struck) seen.push(`${(await opOf(t.w)).stage}/${(await opOf(t.w, "dq-B")).stage}`);
+    return Response.json(url.includes(B) ? statusAnswer("PROCESSING", t.u, B) : statusAnswer("SUCCESS", t.u));
+  }) as typeof fetch;
+  const bind = async () => ((struck = true), { kind: "struck" as const, account: t.u });
+  assert.deepEqual(await followDeposit(t.args, { ...t.deps, fetchFn, bind }), { kind: "held", why: "sender_struck" });
+  assert.deepEqual(seen, ["held/held", "held/held"], "both held at each of holdAll's two reads");
+  assert.equal((await opOf(t.w, "dq-B")).follow.status, "PROCESSING", "the read still kept");
 });
 
 test("a front-run on P: that note is never counted, and what U still holds goes on U's next second-arrival note", async () => {

@@ -90,6 +90,10 @@ test("a checked account goes to the wallet's move at the tap, checked again; mov
   assert.deepEqual(f.calls, ["alice.near"]);
   assert.equal(f.page.dataset.outcome, "moved");
   assert.equal(f.input.readOnly, true);
+  // Moved is the owner's word (owner 8 Nov 07:50Z, card held-move-forgotten-tx): drawn with no draft mark
+  const line = f.page.find((e) => e.textContent === HELD_WORDS.moved)!;
+  assert.ok(line, "the Moved line");
+  assert.equal(line.dataset.draftCopy, undefined);
   // an implicit id passes with no read
   const g = drawn((to) => ({ kind: "moved", to: to!, amount: 1n, hash: "h" }));
   await g.steps();
@@ -161,4 +165,19 @@ test("D5: Not moved · Retry on a move's account that no longer exists (no-accou
   await f.tap();
   assert.deepEqual(f.calls, [null], "the wallet's move is never called for the account");
   assert.equal(f.page.find((e) => e.dataset.for === "to")!.dataset.refusal, "no-account");
+});
+
+test("a replaced record (open: it never ran, another tx of U took its nonce): no outcome line, never Not moved; the account is typed again", async () => {
+  const rec: MoveOutRecord = { to: "alice.near", amount: "2499999", nonce: "8", height: 1, register: false, hash: "h", signed: "AA==" };
+  const f = drawn((to) => (to === null ? { kind: "open" } : { kind: "sent", to, amount: 2_499_999n, hash: "h2" }), rec);
+  await f.steps();
+  await settle();
+  assert.deepEqual(f.calls, [null]);
+  assert.equal(f.page.dataset.outcome, "open");
+  assert.ok(!f.page.text().includes(HELD_WORDS.failed), "never 'Not moved'");
+  assert.equal(f.input.readOnly, false, "the account is typed again");
+  assert.equal(f.page.dataset.state, "ready", "its last value checked as typed");
+  await f.tap();
+  assert.deepEqual(f.calls, [null, "alice.near"]);
+  assert.equal(f.page.dataset.outcome, "sent");
 });

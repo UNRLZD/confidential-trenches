@@ -180,6 +180,18 @@ export async function readDepositStatus(address: string, u: string, fetchFn: typ
   }
 }
 
+/** The follow facts a status read adds to a held op's record: its status, the send seen past PENDING_DEPOSIT, and
+ *  delivered on SUCCESS; nothing for a failed read (null, or a 429's retry). One rule for holdAll and the tap's re-read
+ *  (moveout.ts). */
+export function statusFacts(f: FollowRecord, st: StatusRead | null): Partial<FollowRecord> {
+  const read: Partial<FollowRecord> = {};
+  if (st === null || !("status" in st)) return read;
+  if (f.status !== st.status) read.status = st.status;
+  if (st.status !== "PENDING_DEPOSIT" && !f.sent) read.sent = true;
+  if (st.status === "SUCCESS" && f.delivered === undefined) read.delivered = (st.delivered ?? 0n).toString();
+  return read;
+}
+
 async function capped(res: Response, max: number): Promise<string> {
   if (Number(res.headers.get("content-length") ?? "0") > max) throw new Error("too big");
   if (res.body === null) return "";
@@ -667,8 +679,24 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     for (const k of FACT_KEYS) if (op[k] !== undefined) out[k] = op[k];
     return out as DepositFacts;
   };
+  // every op of U held first, then each one's 1Click status read once, on the reader the status loop uses, and kept on it
+  // while it is still held (delta review 9, ruling 2: a tab that dies mid-loop leaves no op of U unheld). A held op's
+  // status is never read again here (ENDS); the way out reads it to tell whose money U's move took (moveout.ts landed),
+  // and reads a stale one again at the tap (delta review 9, ruling 1), so a round that ends at the bind before its status
+  // loop must not leave it PENDING_DEPOSIT or none (delta review 8, ruling 1). A failed read keeps the stored status;
+  // never asked again here. A read the signal aborts (the page closes) ends the reads, every op already held
   const holdAll = async (why: string): Promise<void> => {
-    for (const [id, op] of await opsOfU()) if (!ENDS.has(op.stage)) await write(id, "held", legFacts(op, "held"), { why });
+    const all = (await opsOfU()).filter(([, op]) => !ENDS.has(op.stage));
+    for (const [id, op] of all) await write(id, "held", legFacts(op, "held"), { why });
+    for (const [id, op] of all) {
+      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());
+      await ops.update("ops", id, (v) => {
+        const o = v as DepositOp | undefined;
+        if (!isObj(o) || o.stage !== "held" || !isObj(o.follow)) return undefined;
+        const read = statusFacts(o.follow, st);
+        return Object.keys(read).length === 0 ? undefined : { ...o, follow: { ...o.follow, ...read } };
+      });
+    }
   };
 
   // ---------- U's notes: -1 its deposit note, n its n-th second arrival ----------

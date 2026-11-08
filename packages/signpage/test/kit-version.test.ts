@@ -55,6 +55,7 @@ const OPS = [
   dep("d-move-done", "done", { refunded: true, since_ms: 1, amount_usd: "9" }),
   dep("d-move-vault", "into_vault", { refunded: true, since_ms: 1 }),
   dep("d-move-held", "held", { refunded: true, held_id: "v.near", since_ms: 1 }),
+  dep("d-moved", "held", { held_id: "u.near", since_ms: 1, moved_out: true }),
   { id: "w", kind: "withdraw" as const, stage: "sent" as const, txs: tx },
   { id: "b", kind: "buy" as const, stage: "refused" as const, txs: [], code: "price_moved" },
   { id: "s", kind: "sell" as const, stage: "filled" as const, txs: tx },
@@ -69,6 +70,7 @@ const DEPOSIT_V1_4: Record<string, string> = {
   "d-done": "done", "d-refunded": "refunded", "d-held": "held", "d-halted": "halted",
   "d-failed": "in_transit", "d-short": "in_transit", "d-expired": "quote_checked", "d-move": "refunded",
   "d-move-transit": "refunded", "d-move-done": "done", "d-move-vault": "refunded", "d-move-held": "held",
+  "d-moved": "held",
 };
 const OPS_V1_4 = OPS.map((o) => (o.kind === "deposit" ? { id: o.id, kind: "deposit", stage: DEPOSIT_V1_4[o.id], txs: o.txs } : o));
 
@@ -89,6 +91,9 @@ const FULL: SignpageState = {
 };
 const { pools: _p, deposit_wallets: _d, ...FULL_V1_4_BASE } = FULL;
 const FULL_V1_4 = { ...FULL_V1_4_BASE, ops: OPS_V1_4 };
+/** What kit-v1.5 is sent (card held-move-forgotten-tx): FULL with each moved-out deposit's moved_out and held_id left
+ *  out (review L1: no live Withdraw on an older app). */
+const FULL_V1_5 = { ...FULL, ops: OPS.map((o) => (o.kind === "deposit" && "moved_out" in o ? (({ moved_out: _m, held_id: _h, ...r }: Record<string, unknown>) => r)(o) : o)) } as SignpageState;
 
 /** What deposit.confirm answers, by its address: the stage named, with the facts that stage carries in OPS. */
 const confirmOf = (address: string) => {
@@ -238,10 +243,29 @@ test("no hello: a route event (kit-v1.4 has no pool.buy) is not posted", async (
   assert.equal(posted.filter((m) => (m as { type?: string; out?: string }).out !== undefined).length, 0);
 });
 
+test("hello kit 1.5: a route event is posted (kit-v1.5 has pool.buy), as at the kit's own version", async () => {
+  for (const kit of ["1.5", SIGNPAGE_KIT_VERSION]) {
+    const posted: unknown[] = [];
+    const parent = { postMessage: (m: unknown) => void posted.push(m) };
+    let listener: ((e: IncomingMessage) => void) | null = null;
+    const api = startApi({
+      parent,
+      listen: (fn) => (listener = fn),
+      state: () => FULL,
+      kinds: { "pool.buy": (_p, ctx) => (ctx.route!({ out: "1.5" }), { result: { stage: "filled", txs: [] } }) },
+    });
+    listener!({ origin: APP_ORIGIN, source: parent, data: hello(kit) });
+    const id = crypto.randomUUID();
+    listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.buy", chain: "solana", token: "T", amount: "1", slippage_bps: 50 } });
+    for (let i = 0; i < 3; i++) await api.idle();
+    assert.equal(posted.filter((m) => (m as { out?: string }).out === "1.5").length, 1, kit);
+  }
+});
+
 // ------------------------------------------------------------------------------------------------ the hello
-test("hello kit 1.5: every message as it is, and the kit's own schema reads each one", async () => {
+test("hello at the kit's own version: every message as it is, and the kit's own schema reads each one", async () => {
   const p = page();
-  p.send(hello("1.5"));
+  p.send(hello(SIGNPAGE_KIT_VERSION));
   const id = await p.ask();
   assert.deepEqual(p.answer(id).result, FULL);
   assert.ok(reads(NOW, p.answer(id), "state"));
@@ -255,9 +279,9 @@ test("hello kit 1.5: every message as it is, and the kit's own schema reads each
 
 test("a hello gets no answer; a later or higher version reads everything, an older, malformed or extra-keyed one is kit-v1.4", async () => {
   for (const [msg, full] of [
-    [hello("1.5"), true], [hello("1.12"), true], [hello("2.0"), true],
-    [hello("1.4"), false], [hello("1.0"), false], [hello("1.5.0"), false], [hello("v1.5"), false], [hello(15), false],
-    [{ ...hello("1.5"), id: crypto.randomUUID() }, false], [{ v: 2, type: "hello", kit: "1.5" }, false],
+    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.5"), FULL_V1_5],
+    [hello("1.4"), FULL_V1_4], [hello("1.0"), FULL_V1_4], [hello("1.5.0"), FULL_V1_4], [hello("v1.5"), FULL_V1_4], [hello(15), FULL_V1_4],
+    [{ ...hello(SIGNPAGE_KIT_VERSION), id: crypto.randomUUID() }, FULL_V1_4], [{ v: 2, type: "hello", kit: SIGNPAGE_KIT_VERSION }, FULL_V1_4],
   ] as const) {
     const p = page();
     const before = p.posted.length;
@@ -265,7 +289,7 @@ test("a hello gets no answer; a later or higher version reads everything, an old
     await p.api.idle();
     const after = p.posted.length;
     const id = await p.ask();
-    assert.deepEqual(p.answer(id).result, full ? FULL : FULL_V1_4, JSON.stringify(msg));
+    assert.deepEqual(p.answer(id).result, full, JSON.stringify(msg));
     if (!("id" in msg)) assert.equal(after, before, `${JSON.stringify(msg)}: no answer`);
   }
 });
@@ -273,14 +297,14 @@ test("a hello gets no answer; a later or higher version reads everything, an old
 test("in the shell's order (hello, a 1.5 answer, the next document's ready, a store change): no state event before that document's own answer", async () => {
   const p = page({ readyOnLoad: true });
   p.api.ready();
-  p.send(hello("1.5"));
+  p.send(hello(SIGNPAGE_KIT_VERSION));
   const id = await p.ask();
   assert.deepEqual(p.answer(id).result, FULL);
   p.api.ready();
   p.set({ ...FULL, vault_balance: "99" });
   await p.api.idle();
   assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "state").length, 0, "no event in any shape to the new document before it asks");
-  p.send(hello("1.5"));
+  p.send(hello(SIGNPAGE_KIT_VERSION));
   const id2 = await p.ask();
   assert.deepEqual(p.answer(id2).result, { ...FULL, vault_balance: "99" });
   p.set({ ...FULL, vault_balance: "100" });
@@ -289,26 +313,56 @@ test("in the shell's order (hello, a 1.5 answer, the next document's ready, a st
   assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "100" } }], "events again after its answer, in its own shape");
 });
 
-test("the version the page reads every kit at from 1.5 on is the kit's own SIGNPAGE_KIT_VERSION", async () => {
+test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.5's", async () => {
   const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
-  for (const [kit, full] of [[SIGNPAGE_KIT_VERSION, true], [`${major}.${minor - 1}`, false], [`${major}.${minor + 1}`, true]] as const) {
+  assert.equal(`${major}.${minor - 1}`, "1.5", "raising the version again adds its level here");
+  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
     const p = page();
     p.send(hello(kit));
     const id = await p.ask();
-    assert.deepEqual(p.answer(id).result, full ? FULL : FULL_V1_4, kit);
+    assert.deepEqual(p.answer(id).result, want, kit);
   }
 });
+
+test("hello kit 1.5 (held-move-forgotten-tx): every deposit with no moved_out, in the state, its events and deposit.confirm; the rest as it is", async () => {
+  const p = page();
+  p.send(hello("1.5"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL_V1_5);
+  assert.ok(reads(NOW, p.answer(id), "state"));
+  assert.ok(!JSON.stringify(p.answer(id)).includes("moved_out"), "no moved_out in kit-v1.5's state");
+  const cid = await p.confirm("d-moved");
+  assert.deepEqual(p.answer(cid).result, { stage: "held", since_ms: 1 }, "deposit.confirm: held with no held_id (no Withdraw on kit-v1.5), its other facts kept");
+  assert.ok(reads(NOW, p.answer(cid), "deposit.confirm"));
+  assert.deepEqual((p.answer(id).result as unknown as SignpageState).ops.find((o) => o.id === "d-moved-held" || o.id === "d-held"), OPS.find((o) => o.id === "d-held"), "a deposit still held keeps its held_id");
+  for (const [from] of MAPPED) {
+    const c = await p.confirm(OPS.find((o) => o.stage === from)!.id);
+    assert.equal(p.answer(c).result.stage, from, "later stages as they are");
+    assert.ok(p.posted.some((m) => (m as { id?: string; type?: string; stage?: string }).id === c && (m as { type?: string }).type === "progress" && (m as { stage?: string }).stage === from), `its progress at ${from} as it is`);
+  }
+  p.set({ ...FULL, vault_balance: "99" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state").at(-1) as { state: SignpageState };
+  assert.deepEqual(ev.state, { ...FULL_V1_5, vault_balance: "99" }, "a state event in kit-v1.5's shape");
+  // the kit at its own version gets the fact, and its schema reads it
+  const q = page();
+  q.send(hello(SIGNPAGE_KIT_VERSION));
+  const qc = await q.confirm("d-moved");
+  assert.deepEqual(q.answer(qc).result, { stage: "held", held_id: "u.near", since_ms: 1, moved_out: true });
+  assert.ok(reads(NOW, q.answer(qc), "deposit.confirm"));
+});
+
 
 test("each ready (the shell's, on each load of the app's frame) reads the app as kit-v1.4 again until its own hello", async () => {
   const p = page({ readyOnLoad: true });
   p.api.ready();
-  p.send(hello("1.5"));
+  p.send(hello(SIGNPAGE_KIT_VERSION));
   let id = await p.ask();
   assert.deepEqual(p.answer(id).result, FULL);
   p.api.ready();
   id = await p.ask();
   assert.deepEqual(p.answer(id).result, FULL_V1_4, "a new document with no hello");
-  p.send(hello("1.5"));
+  p.send(hello(SIGNPAGE_KIT_VERSION));
   id = await p.ask();
   assert.deepEqual(p.answer(id).result, FULL);
 });
@@ -319,7 +373,7 @@ test("a repeated deposit.confirm gets its first answer shaped for the version as
   p.send(msg);
   await p.api.idle();
   assert.deepEqual(p.answer(msg.id).result, { stage: "refunded" });
-  p.send(hello("1.5"));
+  p.send(hello(SIGNPAGE_KIT_VERSION));
   p.send(msg);
   await p.api.idle();
   const again = () => (p.posted.filter((m) => (m as { id?: string }).id === msg.id).at(-1) as { result: unknown }).result;

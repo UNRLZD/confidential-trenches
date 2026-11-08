@@ -105,7 +105,7 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   // the hello's path as the head build minifies it (packages/signpage/src/kit-version.ts helloKit, kitLevel; api.ts)
   const path = [
     "function zc(e){if(typeof e!=`object`||!e||Array.isArray(e))return null;let t=Reflect.ownKeys(e),n=e;return t.length!==3||n.v!==1||n.type!==`hello`||!Object.hasOwn(n,`kit`)||typeof n.kit!=`string`?null:n.kit}",
-    "function Bc(e){let t=Rc.exec(e);if(!t)return`1.4`;let[n,r]=[Number(t[1]),Number(t[2])];return n>Lc[0]||n===Lc[0]&&r>=Lc[1]?`current`:`1.4`}",
+    "function Bc(e){let t=Rc.exec(e);if(!t)return`1.4`;let[n,r]=[Number(t[1]),Number(t[2])],i=(e,t)=>n>e||n===e&&r>=t;return i(Lc[0],Lc[1])?`current`:i(1,5)?`1.5`:`1.4`}",
     "function Qc(e,t){return e===`current`||Kc.has(t)?t:qc(Wc,t)?Wc[t]:null}",
     "function pl(e){let r=`1.4`,i=(e,t)=>{if(`ok`in e)return e.ok&&t!==void 0?{...e,result:Xc(r,t,e.result)}:e;if(e.type===`state`)return{...e,state:Jc(r,e.state)};if(e.type!==`progress`)return e;if(!(`stage`in e))return r===`current`?e:null;let n=Qc(r,e.stage);return n===null?null:n===e.stage?e:{...e,stage:n}},a=(t,n)=>{let r=i(t,n);r!==null&&e.parent.postMessage(r,Zc)},c=async i=>{let c=zc(i);if(c!==null)return void(r=Bc(c));}}",
   ].join(";");
@@ -135,4 +135,21 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   assert.equal(facts("", js.replace("return void(r=Bc(c))", "return void(q=Bc(c))")).hello.shaper, null);
   assert.equal(facts("", js.replace("let r=i(t,n);", "let r=t;")).hello.post, null);
   assert.equal(facts("", js.replace("result:Xc(r,t,e.result)", "result:e.result")).hello.shaper, null);
+});
+
+test("facts() reads the hello's path with the kit-v1.5 level (card held-move-forgotten-tx) as release-94 minifies it; a level that sends kit-v1.4 a route event or an unmapped stage reads no path", () => {
+  const pairs = Object.entries(MAP).map(([k, v]) => `${k}:\`${v}\``).join(",");
+  const path = [
+    "function zc(e){if(typeof e!=`object`||!e||Array.isArray(e))return null;let t=Reflect.ownKeys(e),n=e;return t.length!==3||n.v!==1||n.type!==`hello`||!Object.hasOwn(n,`kit`)||typeof n.kit!=`string`?null:n.kit}",
+    "function fl(e){let t=ul.exec(e);if(!t)return`1.4`;let[n,r]=[Number(t[1]),Number(t[2])],i=(e,t)=>n>e||n===e&&r>=t;return i(ll[0],ll[1])?`current`:i(1,5)?`1.5`:`1.4`}",
+    "function Sl(e,t){return e!==`1.4`||hl.has(t)?t:gl(pl,t)?pl[t]:null}",
+    "function ql(e){let r=`1.4`,i=(e,t)=>{if(`ok`in e)return e.ok&&t!==void 0?{...e,result:Xc(r,t,e.result)}:e;if(e.type===`state`)return{...e,state:Jc(r,e.state)};if(e.type!==`progress`)return e;if(!(`stage`in e))return r===`1.4`?null:e;let n=Sl(r,e.stage);return n===null?null:n===e.stage?e:{...e,stage:n}},a=(t,n)=>{let r=i(t,n);r!==null&&e.parent.postMessage(r,Zc)},c=async i=>{let c=zc(i);if(c!==null)return void(r=fl(c));}}",
+  ].join(";");
+  const js = `var pl=Object.freeze({${pairs}}),b=new Set([${V1_4_KEYS.map((k) => `\`${k}\``).join(",")}]);${path}`;
+  const f = facts("", js);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object"]);
+  assert.deepEqual(f.hello.progressMap, MAP);
+  assert.equal(facts("", js.replace("return r===`1.4`?null:e", "return e")).hello.progress, null, "a route event to kit-v1.4");
+  assert.equal(facts("", js.replace("return e!==`1.4`||hl.has(t)", "return e!==`1.5`||hl.has(t)")).hello.progress, null, "kit-v1.4 sent a later stage unmapped");
+  assert.equal(facts("", js.replace("i(1,5)?`1.5`:`1.4`", "i(1,5)?`current`:`1.4`")).hello.assign, null, "kit-v1.5 read as current");
 });

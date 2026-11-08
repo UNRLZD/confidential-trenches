@@ -101,5 +101,6 @@
  { "screen": "portfolio", "key": "balance", "text": "Balance", "pick": "owner 3 Nov 09:17Z, keep" },
  { "screen": "portfolio", "key": "ready", "text": "Ready", "pick": "owner 3 Nov 09:17Z, keep" },
  { "screen": "portfolio", "key": "pending", "text": "Pending", "pick": "owner 3 Nov 09:17Z, keep" },
- { "screen": "portfolio", "key": "noBalance", "text": "No balance", "pick": "owner 3 Nov 09:17Z, keep" }
+ { "screen": "portfolio", "key": "noBalance", "text": "No balance", "pick": "owner 3 Nov 09:17Z, keep" },
+ { "screen": "deposit", "key": "moved", "text": "Moved", "pick": "owner 8 Nov 07:50Z, Moved" }
 ]

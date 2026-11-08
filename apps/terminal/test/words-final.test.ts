@@ -1,6 +1,7 @@
 // The owner's final words (card words-final-nov2): test/words-final.json lists every word the owner picked on the Nov 2
 // words page (owner 2 Nov 06:08Z, all approved; with the five that page left out as already kept or signed) and the
-// new draft words kept on 1 Nov 16:45Z, and the Portfolio pool rows' five kept on 3 Nov 09:17Z (card balances-per-chain),
+// new draft words kept on 1 Nov 16:45Z, the Portfolio pool rows' five kept on 3 Nov 09:17Z (card balances-per-chain) and
+// the deposit sheet's Moved picked on 8 Nov 07:50Z (card held-move-forgotten-tx),
 // each with its screen, key, text and pick. Each must read its text byte for byte,
 // be no draft (so no data-draft-copy on its element) and name its pick in its source. The trade box's own words are not
 // on the list and stay drafts until the next words page; the ones it shares with Portfolio (Sending, Landing) are
@@ -22,7 +23,7 @@ interface Row { screen: string; key: string; text: string; pick: string }
 
 const SCREENS: Record<string, { WORDS: Record<string, Word>; DRAFTS: readonly string[] }> = { deposit, discover, portfolio, signin, token, verify, withdraw };
 const ROWS = JSON.parse(readFileSync(new URL("./words-final.json", import.meta.url), "utf8")) as Row[];
-const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep"];
+const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep", "owner 8 Nov 07:50Z, Moved"];
 // the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name, Discover's list age
 // line (card app-list-age, on the owner's next picks page) and launchpad menu title (CN-137, card app-discover-toolbar), Portfolio's export label and wallets heading (card
 // app-export-every-wallet, on the owner's next picks page), the chart menus' rows R5 does not draw (card
@@ -31,12 +32,12 @@ const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "
 // owner's next picks page)
 const STILL_DRAFT: Record<string, string[]> = { deposit: ["to"], discover: ["padMenuTitle", "updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine", "net5m", "sells5m", "vol5m"], verify: [], withdraw: [] };
 
-test("the list: 103 words on these screens, each once, each with a pick", () => {
-  assert.equal(ROWS.length, 103);
+test("the list: 104 words on these screens, each once, each with a pick", () => {
+  assert.equal(ROWS.length, 104);
   assert.equal(new Set(ROWS.map((r) => `${r.screen}.${r.key}`)).size, ROWS.length);
   const per: Record<string, number> = {};
   for (const r of ROWS) per[r.screen] = (per[r.screen] ?? 0) + 1;
-  assert.deepEqual(per, { deposit: 13, withdraw: 6, verify: 17, portfolio: 51, signin: 10, discover: 3, token: 3 });
+  assert.deepEqual(per, { deposit: 14, withdraw: 6, verify: 17, portfolio: 51, signin: 10, discover: 3, token: 3 });
   for (const r of ROWS) assert.ok(PICKS.includes(r.pick), `${r.screen}.${r.key}: ${r.pick}`);
 });
 

@@ -32,14 +32,14 @@ export const MUTANTS = [
   // a client with no hello read as current, and a version before 1.5 read as current
   ["kit", 'export const KIT_DEFAULT: KitLevel = "1.4";', 'export const KIT_DEFAULT: KitLevel = "current";'],
   ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 4] as [number, number];"],
-  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 6] as [number, number];"],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 7] as [number, number];"],
   // a refund's later leg read as a new deposit's, or a landed refund read as still moving
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', "return stage;"],
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', 'return d.refunded === true && stage === "in_transit" ? "refunded" : stage;'],
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', 'return d.refunded === true ? "refunded" : stage;'],
   // a new document sent events before its own first answer
   ["api", "      sent = null;\n", ""],
-  ["kit", "minor >= CURRENT_FROM[1]", "minor > CURRENT_FROM[1]"],
+  ["kit", "(major === m && minor >= n)", "(major === m && minor > n)"],
   ["kit", 'if (!v) return KIT_DEFAULT;', 'if (!v) return "current";'],
   // the hello's exact shape
   ["kit", "keys.length !== 3 || ", ""],
@@ -56,7 +56,19 @@ export const MUTANTS = [
   ["kit", "!V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;", "false) return null;"],
   // a progress stage not mapped, a route event sent
   ["kit", "  return own(V1_4_DEPOSIT_STAGE, stage) ? V1_4_DEPOSIT_STAGE[stage as DepositStage] : null;", "  return stage;"],
-  ["api", 'if (!("stage" in msg)) return level === "current" ? msg : null;', 'if (!("stage" in msg)) return msg;'],
+  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;', 'if (!("stage" in msg)) return msg;'],
+  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;', 'if (!("stage" in msg)) return level === "current" ? msg : null;'],
+  // card held-move-forgotten-tx: kit-v1.5 sent moved_out (which it refuses the whole state for), or read at another level
+  ["kit", 'from(1, 5) ? "1.5" : KIT_DEFAULT', 'from(1, 5) ? "current" : KIT_DEFAULT'],
+  ["kit", 'from(1, 5) ? "1.5" : KIT_DEFAULT', 'from(1, 4) ? "1.5" : KIT_DEFAULT'],
+  ["kit", 'from(1, 5) ? "1.5" : KIT_DEFAULT', 'from(1, 6) ? "1.5" : KIT_DEFAULT'],
+  ["kit", "  return rest as T;\n", "  return d;\n"],
+  ["kit", "const { moved_out: _m, held_id: _h, ...rest }", "const { moved_out: _m, ...rest }"],
+  ["kit", '  if (level === "1.5") return { ...s, ops: s.ops.map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };\n', '  if (level === "1.5") return s;\n'],
+  ["kit", '  if (level === "1.5") return { ...s, ops: s.ops.map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };\n', ""],
+  ["kit", 'kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;', 'result;'],
+  ["kit", 'kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm"', 'kind === "deposit.confirm"'],
+  ["kit", 'if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;', 'if (level === "current" || V1_4_STAGES.has(stage)) return stage;'],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void (level = kitLevel(kit));", "if (kit !== null) return;"],
   ["api", "      level = KIT_DEFAULT;\n", ""],

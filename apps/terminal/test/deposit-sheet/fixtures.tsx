@@ -61,6 +61,7 @@ export const FIXTURES: Record<string, Fx> = {
   "refund-move": { status: { stage: "refund_move", refunded: true, since_ms: since(8), held_id: "u1" } },
   "refund-done": { status: { stage: "done", refunded: true, amount_usd: "73.18" }, state: { vault_balance: "73.18" } },
   held: { status: { stage: "held", held_id: "u1" } },
+  moved: { status: { stage: "held", held_id: "u1", since_ms: since(30), moved_out: true } },
   "held-halted": { status: { stage: "halted", hold: "halted", held_id: "u1" } },
   "held-not-caught-up": { status: { stage: "halted", hold: "not_caught_up", held_id: "u1" } },
   "held-vault-blocked": { status: { stage: "halted", hold: "vault_blocked", held_id: "u1" } },
