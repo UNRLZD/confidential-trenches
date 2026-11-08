@@ -1891,9 +1891,19 @@ test("T8 a quote's reads go to each provider at most the chain's limit at once (
     now--;
     return inner(calls);
   };
-  const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) }, [chain([best(token)], 0, 50_000_000), slow], NOW));
-  assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  assert.ok(most >= 1 && most <= 2, `${most} requests at once`);
+  // at 6 reads a call (card evm-buy-quote-in-window): Robinhood's venue sends 64 to a call, which packs this quote's
+  // rounds into a request or two, so the gate has nothing to hold; at 6 a round is more requests than its limit and
+  // only the gate keeps them to it (mutant 256 of evm-quote-mutants.mjs, 16:25Z: the gate bypassed passed T8 at 64)
+  quoteMod.evmReadsPerCall(6);
+  try {
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) }, [chain([best(token)], 0, 50_000_000), slow], NOW));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+  console.log("T8", JSON.stringify({ most }));
+  // the gate is loaded: the limit was reached, so a bypassed gate would pass it
+  assert.equal(most, 2, `${most} requests at once`);
 });
 
 test("T8b the reads' gate never has more than its limit in flight, however many wait and in whatever order they end", async () => {
