@@ -1,12 +1,13 @@
 // node --test contracts/vault/scripts/source-gate.test.mjs: the mainnet money run's source gate (card
 // vault-mainnet-money, review 4 F1), offline. Each case plants one way a clone could differ from the commit its paste
-// names, in a fresh clone of a local bare repo whose origin is then set to the public repo's URL (the gate reads origin
-// and origin/main locally; the paste line's clone is the fetch), and the gate must refuse it. Then the driver: on
+// names, in a fresh clone of a local bare repo whose origin is then set to the public repo's URL, and the gate must
+// refuse it. The gate reads main from the remote itself (git ls-remote): here the local bare repo stands in for it. Then the driver: on
 // mainnet it refuses before anything is read, and a tree changed after its start never signs.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { deflateSync } from "node:zlib";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -60,8 +61,11 @@ function origin() {
   return { root, bare, old, head, card };
 }
 // the paste line's clone: a new folder, origin the public repo's URL, the commit checked out detached
+const BARE = new Map();
+const gate = (opts) => cloneProblems({ remote: BARE.get(opts.root), ...opts });
 function clone(o, commit = o.head, { install = true } = {}) {
   const dir = path.join(o.root, `clone-${n++}`);
+  BARE.set(dir, o.bare);
   git(o.root, "clone", "-q", o.bare, dir);
   git(dir, "remote", "set-url", "origin", `${REPO}.git`);
   git(dir, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", commit);
@@ -76,16 +80,25 @@ function clone(o, commit = o.head, { install = true } = {}) {
   }
   return dir;
 }
+// a bin whose git answers the public repo's URL from the bare repo (the CLI reads main from REPO itself)
+function shim(o) {
+  const bin = path.join(o.root, "bin");
+  mkdirSync(bin, { recursive: true });
+  const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  writeFileSync(path.join(bin, "git"), `#!/bin/sh\nfor a; do shift; case "$a" in ${REPO}|${REPO}.git) set -- "$@" "${o.bare}" ;; *) set -- "$@" "$a" ;; esac; done\nexec "${real}" "$@"\n`);
+  chmodSync(path.join(bin, "git"), 0o755);
+  return bin;
+}
 const refuses = (dir, commit, re, opts = {}) => {
-  const p = cloneProblems({ root: dir, commit, ...opts });
+  const p = gate({ root: dir, commit, ...opts });
   assert.ok(p.length > 0, `not refused: ${re}`);
   assert.match(p.join("\n"), re);
 };
 
 test("F1: a fresh clone at the paste's commit, on main, installed, passes; before the install, with no node_modules, too", () => {
   const o = origin();
-  assert.deepEqual(cloneProblems({ root: clone(o), commit: o.head }), []);
-  assert.deepEqual(cloneProblems({ root: clone(o, o.head, { install: false }), commit: o.head, installed: false }), []);
+  assert.deepEqual(gate({ root: clone(o), commit: o.head }), []);
+  assert.deepEqual(gate({ root: clone(o, o.head, { install: false }), commit: o.head, installed: false }), []);
   // node_modules before the install is a path the commit does not hold
   refuses(clone(o), o.head, /path\(s\) the commit does not hold \(node_modules/, { installed: false });
 });
@@ -94,10 +107,10 @@ test("F1: HEAD must be the paste's commit, and that commit on the public repo's 
   const o = origin();
   refuses(clone(o, o.old), o.head, /HEAD is [0-9a-f]{40}, not the paste's commit/);
   // an older commit on main is on main, but it is not the commit the paste names: the line checks out what it names
-  assert.deepEqual(cloneProblems({ root: clone(o, o.old), commit: o.old }), []);
+  assert.deepEqual(gate({ root: clone(o, o.old), commit: o.old }), []);
   // a pushed card branch's commit is not merged: refused on main, passed only with onMain false (the rehearsal)
   refuses(clone(o, o.card), o.card, /is not on https:\/\/github\.com\/UNRLZD\/confidential-trenches's main/);
-  assert.deepEqual(cloneProblems({ root: clone(o, o.card), commit: o.card, onMain: false }), []);
+  assert.deepEqual(gate({ root: clone(o, o.card), commit: o.card, onMain: false }), []);
   const other = clone(o);
   git(other, "remote", "set-url", "origin", "https://github.com/someone/confidential-trenches.git");
   refuses(other, o.head, /origin is https:\/\/github\.com\/someone/);
@@ -221,13 +234,106 @@ test("F1: what the run loads from node_modules resolves inside the clone: a plan
   refuses(d, o.head, /snarkjs does not resolve/);
 });
 
+test("L1 (B, C, D, H; review 5): a node_modules folder pnpm does not make, a dot-named stray, any core key git clone does not write, and a fake-indexeddb outside the store are refused", () => {
+  const o = origin();
+  // B: only the root's and each workspace package's node_modules stand beside the commit's files
+  const b = clone(o);
+  put(b, "packages/wallet/src/node_modules/evil.js", "x\n");
+  refuses(b, o.head, /does not hold \(packages\/wallet\/src\/node_modules\)/);
+  // C: a dot-named file the commit does not hold (pnpm runs a .pnpmfile.cjs at install)
+  const c = clone(o);
+  put(c, ".pnpmfile.cjs", "module.exports = {};\n");
+  refuses(c, o.head, /does not hold \(\.pnpmfile\.cjs\)/);
+  // D: a core key of anyone's, beyond what git clone and git init write
+  for (const [k, val] of [["core.hooksPath", "/tmp"], ["core.fsmonitor", "true"], ["core.sshCommand", "true"], ["core.attributesFile", "/tmp/a"]]) {
+    const d = clone(o);
+    git(d, "config", k, val);
+    refuses(d, o.head, new RegExp(`git config holds ${k.toLowerCase().replace(".", "\\.")}`));
+  }
+  // H: fake-indexeddb (the run's note store) copied into the wallet's node_modules: inside the clone, outside the store
+  const h = clone(o);
+  unlinkSync(path.join(h, "packages/wallet/node_modules/fake-indexeddb"));
+  cpSync(path.join(h, "node_modules/.pnpm/fake-indexeddb@1/node_modules/fake-indexeddb"), path.join(h, "packages/wallet/node_modules/fake-indexeddb"), { recursive: true });
+  refuses(h, o.head, /fake-indexeddb from packages\/wallet\/package\.json resolves to .*outside node_modules\/\.pnpm of the clone/);
+});
+
+test("L1 (E, review 5): a replace ref that swaps the commit's tree is not honoured: the files are read against the commit's own tree", () => {
+  const o = origin();
+  const a = clone(o);
+  const tree = git(a, "rev-parse", `${o.head}^{tree}`);
+  put(a, "packages/wallet/src/deposit/bind.ts", "export const x = 9;\n");
+  git(a, "add", "--", "packages/wallet/src/deposit/bind.ts");
+  const evil = git(a, "write-tree");
+  git(a, "replace", tree, evil);
+  refuses(a, o.head, /differ from commit [0-9a-f]{12} \(packages\/wallet\/src\/deposit\/bind\.ts\)/);
+});
+
+test("L2 (review 5): every link under node_modules resolves inside the clone", () => {
+  const o = origin();
+  // a package link of the wallet's pointed outside the clone (not one of the three the driver's resolve checks)
+  const a = clone(o);
+  put(o.root, "evil-curves/package.json", JSON.stringify({ name: "@noble/curves" }));
+  mkdirSync(path.join(a, "packages/wallet/node_modules/@noble"), { recursive: true });
+  symlinkSync(path.join(o.root, "evil-curves"), path.join(a, "packages/wallet/node_modules/@noble/curves"));
+  refuses(a, o.head, /packages\/wallet\/node_modules\/@noble\/curves links outside the clone/);
+  const a2 = clone(o);
+  symlinkSync("../../../../../evil-curves", path.join(a2, "node_modules/.pnpm/snarkjs@1/node_modules/evil"));
+  refuses(a2, o.head, /node_modules\/\.pnpm\/snarkjs@1\/node_modules\/evil links outside the clone/);
+});
+
+test("L2 (review 5): a forged tree object is refused: the commit and every tree of it are hashed against their ids", () => {
+  const o = origin();
+  // a loose subtree object forged under its id (bind.ts's folder holding other bytes): git reads it unchecked, the gate hashes it
+  const probe = path.join(o.root, "probe");
+  git(o.root, "init", "-q", probe);
+  put(probe, "dir/b.txt", "the commit's\n");
+  git(probe, "add", "--", "dir");
+  git(probe, "commit", "-q", "-m", "p");
+  const commit = git(probe, "rev-parse", "HEAD");
+  assert.deepEqual(cloneProblems({ root: probe, commit, onMain: false, installed: false }), []);
+  const sub = git(probe, "rev-parse", `${commit}:dir`);
+  writeFileSync(path.join(probe, "dir/b.txt"), "other bytes\n");
+  const blob = git(probe, "hash-object", "-w", "dir/b.txt");
+  const body = Buffer.concat([Buffer.from("100644 b.txt\0"), Buffer.from(blob, "hex")]);
+  const file = path.join(probe, ".git/objects", sub.slice(0, 2), sub.slice(2));
+  unlinkSync(file);
+  writeFileSync(file, deflateSync(Buffer.concat([Buffer.from(`tree ${body.length}\0`), body])));
+  assert.deepEqual(git(probe, "ls-tree", "-r", commit).split(/\s+/).slice(2, 3), [blob], "git lists the forged subtree's blob");
+  const p = cloneProblems({ root: probe, commit, onMain: false, installed: false });
+  assert.match(p.join("\n"), new RegExp(`tree ${sub} does not hash to its id`));
+});
+
+test("L2 (review 5): main is read from the remote, not the clone's own refs", () => {
+  const o = origin();
+  // main is the remote's: the clone's own refs/remotes/origin/main moved to an unmerged commit is not believed
+  const b = clone(o, o.card);
+  git(b, "update-ref", "refs/remotes/origin/main", o.card);
+  refuses(b, o.card, /is not on https:\/\/github\.com\/UNRLZD\/confidential-trenches's main/);
+  // main moved on after the clone (another merge while the run waits): the commit is still on main, read from the remote
+  const c = clone(o);
+  const src = path.join(o.root, "src");
+  git(src, "checkout", "-q", "main");
+  put(src, "packages/wallet/src/withdraw/request.ts", "export const y = 2;\n");
+  git(src, "commit", "-q", "-am", "later");
+  git(src, "push", "-q", o.bare, "main");
+  assert.deepEqual(gate({ root: c, commit: o.head }), []);
+});
+
+test("L2 (review 5): the config is read with -z: a value holding a newline is one value", () => {
+  const o = origin();
+  // a value of origin's url holding a newline is one value, not two lines: refused as the wrong origin
+  const d = clone(o);
+  git(d, "config", "remote.origin.url", `${REPO}\nx`);
+  refuses(d, o.head, /the clone's origin is https:\/\/github\.com\/UNRLZD\/confidential-trenches\nx, not/);
+});
+
 test("F1: --not-on-main is the testnet rehearsal's only, and the CLI refuses with exit 1 before anything runs", () => {
   assert.throws(() => gateArgs(["--commit", "a".repeat(40), "--not-on-main"]), /testnet rehearsal only/);
   assert.throws(() => gateArgs(["--commit", "a".repeat(40), "--not-on-main", "--network", "mainnet"]), /testnet rehearsal only/);
   assert.deepEqual(gateArgs(["--commit", "a".repeat(40), "--not-on-main", "--network", "testnet"]), { commit: "a".repeat(40), network: "testnet", notOnMain: true, beforeInstall: false });
   const o = origin();
   const a = clone(o, o.card, { install: false });
-  const cli = (args) => spawnSync(process.execPath, [GATE, ...args], { cwd: a, encoding: "utf8" });
+  const cli = (args) => spawnSync(process.execPath, [GATE, ...args], { cwd: a, encoding: "utf8", env: { ...process.env, PATH: `${shim(o)}:${process.env.PATH}` } });
   let r = cli(["--commit", o.card, "--before-install"]);
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, /^refused, nothing signed: commit [0-9a-f]{40} is not on/);

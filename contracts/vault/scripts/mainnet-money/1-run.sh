@@ -17,16 +17,21 @@
 #      whole note less the relayer's fee to the named account (the wallet's withdrawRequest, POST /v1/withdraw),
 #      followed until the spends row shows it paid to that account on both RPCs.
 # Stopped anywhere (Ctrl-C, a lost connection, a closed lid): paste the same line again. It restores the run's notes
-# from its seed and the vault's pages and goes on from where it stopped; keep the folder as it is.
+# from its seed and the vault's pages and goes on from where it stopped; keep the folder as it is. A deposit is withdrawn
+# only once a deposit tx of U for P at its value reads back a success; when the run stops because it heard none, and U's
+# own deposit tx is known, paste the line again with --deposit-tx <hash> at its end.
 # It runs only from a fresh clone of the public repo at the reviewed, merged commit its line names (lines.sh prints the
 # line): source-gate.mjs holds the clone to that commit before pnpm installs, and the driver again before each signature.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
-[ $# = 2 ] || { echo "paste 1: the commit and the NEAR account the withdrawal pays: sh $0 <commit> <your-account.near>"; exit 1; }
+{ [ $# = 2 ] || { [ $# = 4 ] && [ "$3" = --deposit-tx ]; }; } || { echo "paste 1: the commit and the NEAR account the withdrawal pays, and only after a stop that names it --deposit-tx <hash>: sh $0 <commit> <your-account.near> [--deposit-tx <hash>]"; exit 1; }
 node contracts/vault/scripts/source-gate.mjs --commit "$1" --before-install
 pnpm install --frozen-lockfile
 DIR="$HOME/.confidential-trenches/runs"
 mkdir -p "$DIR"
 chmod 700 "$DIR"
-exec node contracts/vault/scripts/mainnet-money.ts run --commit "$1" --state "$DIR/vault-mainnet-money" --to "$2"
+C=$1
+TO=$2
+shift 2
+exec node contracts/vault/scripts/mainnet-money.ts run --commit "$C" --state "$DIR/vault-mainnet-money" --to "$TO" "$@"

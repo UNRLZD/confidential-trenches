@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { bindProblem, ownDeposit, runStepProblems, feeProblems, recordRead, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
+import * as MM from "./mainnet-money.ts";
 import { noteCommitment, noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { restorePages, writeRestored } from "../../../packages/wallet/src/notes/restore.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
@@ -348,7 +349,7 @@ test("LA: a second transfer that reached U after its deposit landed is no front-
     if (!(h in byHash)) throw new Error(`${h}: not a success on both RPCs`);
     return byHash[h];
   };
-  assert.deepEqual(await bindProblem("deposited", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) }), { why: null });
+  assert.deepEqual(await bindProblem("deposited", { rows: [], want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) }), { why: null });
   assert.deepEqual(await bindProblem("struck", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) }), { why: "struck" });
   // the earlier call landed 5 USDC, its tx heard and read back as the run's; U now holds the 2 USDC of a later transfer
   const own = await bindProblem("front_run", { rows: [{ precommitment: 9n, depositor: "x.near", value: 1n }, rowU], want, amount: 2_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) });
@@ -388,12 +389,87 @@ test("F2: a row of P naming U is U's own only when a deposit tx of U for P with 
   // each read back on both release RPCs; a row of P met while it waits goes through the same proof
   assert.match(SRC, /const \{ why, row \} = await bindProblem\(outcome\.kind, \{ rows, want: wantOf\(\), amount, txs: \[\.\.\.callTxs, \.\.\.depositTxs\(\)\], readTx \}\);/);
   assert.match(SRC, /const own = await ownDeposit\(\{ rows, want: wantOf\(\)/);
-  assert.match(SRC, /const readTx = \(h: string\) => readBackBoth\(o\.urls, h, relayers\.bind\);/);
+  assert.match(SRC, /const readTx = \(h: string\) => readBackBoth\(o\.urls, h, relayers\.bind\)\.catch\(\(\) => recordRead\(network, h, relayers\.bind\)\);/);
   assert.doesNotMatch(SRC, /r\.depositor === U\)/, "no row's depositor alone makes a deposit U's own");
   // the way out when U's own tx was not heard: run/resume --deposit-tx <hash>, a tx hash, read like every heard one
   assert.match(SRC, /const v = flags\(argv, \["--state", "--to"\], \[[^\]]*"--deposit-tx"[^\]]*\]/);
   assert.match(SRC, /const named = v\["--deposit-tx"\];\n\s+if \(named !== undefined && !\/\^\[1-9A-HJ-NP-Za-km-z\]\{43,44\}\$\/\.test\(named\)\) throw/);
   assert.match(SRC, /const depositTxs = \(\): string\[\] => \[\.\.\.heard\.bind, \.\.\.\(named === undefined \? \[\] : \[named\]\)\];/);
+});
+
+test("M1 (review 5): every path to the prover holds the run's deposit leaf to a landed tx of U for P at its value: bind, wait, resume, restore", async () => {
+  const leafProblem = (MM as any).leafProblem;
+  assert.equal(typeof leafProblem, "function", "one check that every path to the prover passes");
+  const want = { ...RUN, value: undefined } as never;
+  const reads = (byHash: Record<string, unknown>) => async (h: string) => {
+    if (!(h in byHash)) throw new Error(`${h}: not a success on both RPCs`);
+    return byHash[h];
+  };
+  const stop = (v: string) => new RegExp(`^no deposit tx of U for P with ${v} reads back a success on both RPCs`);
+  // the deposit note of index i as the wallet restores it from the vault's pages (restore matches a row by P alone)
+  const seed64 = Uint8Array.from({ length: 64 }, (_, k) => (k * 5 + 1) & 255);
+  const scope = 12345n, i = 2, L = 555n;
+  const { precommitment: P } = noteSecrets(seed64, { kind: "deposit", s: scope, i });
+  const U = depositAccount(seed64, scope, i).account;
+  const restored = async (depositor: string, value: bigint) => {
+    const pages = { deposits: [{ index: 0, precommitment: P, label: L, value, leafIndex: 0n, depositor }], spends: [], leaves: [noteCommitment(value, L, P)] };
+    const { w, ns } = await storeOfLane(i % 8);
+    try {
+      await writeRestored(ns, restorePages(seed64, scope, pages as any, { gap: 2 }));
+      return await ns.list();
+    } finally {
+      ns.close();
+      w.close();
+    }
+  };
+  const wantU = { ...want, U, P: String(P) } as never;
+  const txU = (value: string) => {
+    const t: any = depTx({ receiver_id: U }, {}, { amount: value, msg: JSON.stringify({ precommitment: String(P), depositor: U }) });
+    t.actions[0].Delegate.delegate_action.sender_id = U;
+    return t;
+  };
+  // (a) a resume: U's 5 USDC row restored, the only heard tx failed on chain (PrecommitmentAlreadyUsed): a stop
+  const mine = await restored(U, 5_000_000n);
+  assert.match(String(await leafProblem({ notes: mine, i, want: wantU, txs: ["h1"], readTx: reads({}) })), stop("5000000"));
+  assert.match(String(await leafProblem({ notes: mine, i, want: wantU, txs: [], readTx: reads({}) })), stop("5000000"));
+  assert.equal(await leafProblem({ notes: mine, i, want: wantU, txs: ["h0", "h1"], readTx: reads({ h1: txU("5000000") }) }), null);
+  // (c) a stranger's row of P (1 USDC, naming anyone) restored as mine: U's own landed 5 USDC tx proves nothing for it
+  const theirs = await restored("x.near", 1_000_000n);
+  assert.equal(theirs.find((n: any) => n.ref.kind === "deposit" && n.ref.i === i)?.leaf?.value, 1_000_000n, "restore takes the stranger's row as the run's note");
+  assert.match(String(await leafProblem({ notes: theirs, i, want: wantU, txs: ["h1"], readTx: reads({ h1: txU("5000000") }) })), stop("1000000"));
+  // no deposit note of i with a leaf: nothing to withdraw is proven
+  assert.match(String(await leafProblem({ notes: [], i, want: wantU, txs: [], readTx: reads({}) })), /no deposit note of index 2 with a leaf/);
+  // (b) bind answered "deposited" at U's amount (a stranger's exact-amount row naming U), its only tx failed: a stop
+  assert.match(String((await bindProblem("deposited", { rows: [], want, amount: 5_000_000n, txs: ["h1"], readTx: reads({}) })).why), stop("5000000"));
+  assert.match(String((await bindProblem("deposited", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) })).why), stop("5000000"));
+  // the driver: one leafProblem right before the prover's gate, on every path, with every tx the run holds for the
+  // deposit (the note's calls, the deposit step's, the heard and the named); the restored step only after it passes
+  assert.match(SRC, /const why = await leafProblem\(\{ notes: await ns\.list\(\), i, want: wantOf\(\), txs: \[\.\.\.noteTxs, \.\.\.\(st\.read\("deposit"\)\?\.txs \?\? \[\]\), \.\.\.depositTxs\(\)\], readTx \}\);\n\s+if \(why !== null\) throw[^\n]*\n\s+if \(st\.read\("deposit"\) === undefined && note\.leaf !== undefined\)/);
+  const prover = SRC.indexOf('sourceGate("the prover loads');
+  assert.ok(SRC.indexOf("await leafProblem(") > 0 && SRC.indexOf("await leafProblem(") < prover, "the check stands before the prover's gate");
+  assert.equal(SRC.split("await leafProblem(").length, 2, "one check, every path through it");
+  // the stop's way out is pasteable: line 1 again with --deposit-tx <hash> at its end
+  assert.match(SRC, /paste line 1 again with --deposit-tx <hash> at its end/);
+  assert.doesNotMatch(SRC, /resume \.\.\. --deposit-tx/);
+});
+
+test("L3 (review 5): the code a wait or a resume reads txs with is loaded before the seed, so no code loads with seed64 in memory but under a gate", () => {
+  const seed = SRC.indexOf("const seed64 = await seed64Of(st.seed);");
+  const goAt = SRC.indexOf("async function go(");
+  for (const m of ['await import("./testnet-t04.mjs")', 'await import("../../../scripts/ci/money-gate.mjs")']) {
+    const at = SRC.indexOf(m, goAt);
+    assert.ok(at > goAt && at < seed, `${m} is loaded in go() before the seed is read`);
+  }
+});
+
+test("L1 (G, review 5): a step file that names no commit is refused by a run that names one", () => {
+  const A = "a".repeat(40);
+  for (const body of [{ amount: "1" }, { amount: "1", commit: null }]) {
+    const dir = path.join(fresh(), "run");
+    stateDir(dir, ROOTS, { create: true, commit: A });
+    writeFileSync(path.join(dir, "deposit.json"), JSON.stringify(body));
+    assert.throws(() => stateDir(dir, ROOTS, { create: false, commit: A }), new RegExp(`written by commit none, not this paste's ${A}`), JSON.stringify(body));
+  }
 });
 
 test("F4 (28): a run step of another seed or network, or one that pays another account than --to, is refused", () => {

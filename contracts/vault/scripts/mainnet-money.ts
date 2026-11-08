@@ -225,16 +225,38 @@ export async function ownDeposit(a: { rows: readonly DepositRow[] | null; want: 
   if (row === undefined) return { why: "front_run, and the deposits page holds no row of P on this read" };
   const stays = `U's ${a.amount} USDC stays at U (sweep-u sends it on)`;
   if (row.depositor !== a.want.U) return { why: `front-run: P was deposited by ${row.depositor}, not U, with ${row.value}; ${stays}`, row };
-  for (const h of new Set(a.txs)) {
-    const t = await a.readTx(h).catch(() => null);
-    if (t !== null && relayerTxProblems("deposit", t, { ...a.want, value: String(row.value) }).length === 0) return { why: null, row };
-  }
-  return { why: `front-run: P was deposited naming U with ${row.value}, but no deposit tx of U for P with that value reads back a success on both RPCs (${a.txs.length} heard); ${stays}. If it is U's own and its hash was not heard, name it: resume ... --deposit-tx <hash>`, row };
+  if (await landedOwn(a.txs, a.want, row.value, a.readTx)) return { why: null, row };
+  return { why: `front-run: P was deposited naming U with ${row.value}, but no deposit tx of U for P with that value reads back a success on both RPCs (${a.txs.length} heard); ${stays}. ${NAME_IT}`, row };
 }
 
-/** Null when the run goes on with what bindDeposit landed: deposited, or a front_run that ownDeposit proves U's own. Else why the run stops. */
+/** The way out when U's own deposit tx was not heard: the owner names it on line 1. */
+const NAME_IT = "If it is U's own and its hash was not heard, name it: paste line 1 again with --deposit-tx <hash> at its end";
+
+/** Whether one of `txs` reads back a success on both RPCs (`readTx` throws otherwise) as the run's deposit of `value`: the deposit relayer carrying U's one delegate for P (relayerTxProblems). */
+async function landedOwn(txs: readonly string[], want: Omit<RunTxs, "value">, value: bigint, readTx: (hash: string) => Promise<unknown>): Promise<boolean> {
+  for (const h of new Set(txs)) {
+    const t = await readTx(h).catch(() => null);
+    if (t !== null && relayerTxProblems("deposit", t, { ...want, value: String(value) }).length === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Null when the run's deposit leaf (the deposit note of index i, as the bind, the wait or a restore put it in the store)
+ * is U's own: one of `txs` reads back a success on both RPCs as the deposit relayer carrying U's delegate for P at the
+ * leaf's value. Every path to the prover passes here: restore matches a row by P alone, and a row's depositor and value
+ * are whoever transferred, so no note is withdrawn on a row nobody proved U's. Else why the run stops.
+ */
+export async function leafProblem(a: { notes: readonly { ref: { kind: string; i?: number }; leaf?: { value: bigint } }[]; i: number; want: Omit<RunTxs, "value">; txs: readonly string[]; readTx: (hash: string) => Promise<unknown> }): Promise<string | null> {
+  const dep = a.notes.find((n) => n.ref.kind === "deposit" && n.ref.i === a.i && n.leaf !== undefined);
+  if (dep === undefined) return `no deposit note of index ${a.i} with a leaf is in the store: nothing is withdrawn`;
+  if (await landedOwn(a.txs, a.want, dep.leaf!.value, a.readTx)) return null;
+  return `no deposit tx of U for P with ${dep.leaf!.value} reads back a success on both RPCs (${new Set(a.txs).size} held): the leaf of P is not proven U's own, so nothing is withdrawn. ${NAME_IT}`;
+}
+
+/** Null when the run goes on with what bindDeposit landed: deposited, its tx read back as U's at U's amount, or a front_run that ownDeposit proves U's own. Else why the run stops. */
 export async function bindProblem(kind: string, a: Parameters<typeof ownDeposit>[0]): Promise<{ why: string | null; row?: DepositRow }> {
-  if (kind === "deposited") return { why: null };
+  if (kind === "deposited") return { why: (await landedOwn(a.txs, a.want, a.amount, a.readTx)) ? null : `no deposit tx of U for P with ${a.amount} reads back a success on both RPCs (${new Set(a.txs).size} held): bindDeposit's "deposited" is not taken alone. ${NAME_IT}` };
   if (kind !== "front_run") return { why: kind };
   return ownDeposit(a);
 }
@@ -591,6 +613,10 @@ async function go(argv: string[], create: boolean) {
   const { withdrawRequest, withdrawDeadlineMs } = await wallet("withdraw/request.ts");
   const { lowerFinalTime, treesOf } = await import(pathToFileURL(path.join(ROOT, "packages/signpage/src/withdraw/handoff.ts")).href);
   const { vaultSync, vaultSyncStart } = await import(pathToFileURL(path.join(ROOT, "packages/kit/src/vault/sync.ts")).href);
+  // what a wait or a resume reads txs with (readBackBoth, recordRead), loaded here under the start's gate, before the
+  // seed: no code loads later with seed64 in memory but the prover's, which has its own gate
+  await import("./testnet-t04.mjs");
+  await import("../../../scripts/ci/money-gate.mjs");
 
   // the fee, before any money moves: held to the device's own fee_max at the token's storage minimum (the register
   // deposit every withdrawal carries, arming/accounts.ts), on the smallest note the vault takes
@@ -658,7 +684,8 @@ async function go(argv: string[], create: boolean) {
   if (named !== undefined && !/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(named)) throw new Error("--deposit-tx takes a tx hash");
   const wantOf = (): Omit<RunTxs, "value"> => ({ U, G: relayers.bind, R: relayers.withdraw.relayer_account, vault, token, P: run.precommitment, nf: "" });
   const depositTxs = (): string[] => [...heard.bind, ...(named === undefined ? [] : [named])];
-  const readTx = (h: string) => readBackBoth(o.urls, h, relayers.bind);
+  // a tx older than the release pair keeps (a resume days later) is read as the record reads it (recordRead)
+  const readTx = (h: string) => readBackBoth(o.urls, h, relayers.bind).catch(() => recordRead(network, h, relayers.bind));
 
   let note = mine;
   if (note === undefined) {
@@ -720,6 +747,11 @@ async function go(argv: string[], create: boolean) {
     if (left > 0n) log(`U still holds ${left} USDC that was not deposited: sweep-u sends it to ${to} (the run goes on)`);
     }
   }
+  // every path (the bind, the wait's row, a resume's restore): the run's deposit leaf is U's own only by a landed tx of
+  // U for P at its value; the hashes are the note's calls, the deposit step's, the heard and the named
+  const noteTxs: string[] = ((await ns.get(note.id))?.calls ?? []).flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []);
+  const why = await leafProblem({ notes: await ns.list(), i, want: wantOf(), txs: [...noteTxs, ...(st.read("deposit")?.txs ?? []), ...depositTxs()], readTx });
+  if (why !== null) throw new Error(`deposit: ${why}; the USDC is at U or in the vault: sweep-u sends what is at U to ${to}`);
   if (st.read("deposit") === undefined && note.leaf !== undefined) {
     // landed in an earlier attempt whose step file was not written: the record takes the leaf from the chain
     st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });

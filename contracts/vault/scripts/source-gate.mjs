@@ -5,22 +5,24 @@
 // The paste line makes the clone (git clone of REPO into a new folder, with no global or system git config, then a
 // detached checkout of the commit); this gate then holds, before pnpm installs and again in the driver right before each
 // signature (mainnet-money.ts):
-//   - HEAD is the named commit, and (mainnet) an ancestor of origin/main, origin being REPO itself;
+//   - HEAD is the named commit, and (mainnet) an ancestor of main as REPO itself answers it now (git ls-remote, then a
+//     fetch when main moved on since the clone), origin being REPO; the commit and every tree of it hash to their ids;
 //   - the clone's own git config is what git clone writes and nothing more (no url.insteadOf, include, hooksPath,
 //     fsmonitor, status or core setting of anyone's), no alternates, no grafts, no info/exclude patterns;
 //   - every file on disk is the commit's, read here byte for byte against the commit's tree (git's blob hash), not
 //     through git status or the index, so no assume-unchanged or skip-worktree flag, ignore rule or stat cache can hide
 //     an edit; a tracked path that is a symlink, a missing file or any file the commit does not hold is refused;
 //   - the only paths the commit does not hold are the node_modules folders pnpm makes (the root's and each workspace
-//     package's), and once installed, what the driver loads from them resolves inside the clone: the wallet's
-//     @blindfill/kit to the clone's packages/kit, snarkjs and fake-indexeddb to the clone's own node_modules/.pnpm.
+//     package's), and once installed, every link in them points inside the clone and what the driver loads from them
+//     resolves inside it: the wallet's @blindfill/kit to the clone's packages/kit, snarkjs and fake-indexeddb to the
+//     clone's own node_modules/.pnpm.
 // The rehearsal on testnet runs from a clone of a commit that is not on main yet: --not-on-main skips only the origin
 // and main check, and is refused unless the network is testnet.
 //   node contracts/vault/scripts/source-gate.mjs --commit <sha> [--before-install] [--not-on-main --network testnet]
 //        (from the clone's root; exit 1 with the reason when refused)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +37,53 @@ const MODULES = /^(node_modules|(apps|packages)\/[^/]+\/node_modules)$/;
 function gitIn(root) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
   Object.assign(env, { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_NO_REPLACE_OBJECTS: "1", GIT_TERMINAL_PROMPT: "0" });
-  return (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 << 20 });
+  const run = (a, input) => execFileSync("git", ["-C", root, ...a], { env, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], maxBuffer: 256 << 20 });
+  const git = (...a) => run(a).toString("utf8");
+  git.bytes = (a, input) => run(a, input);
+  return git;
+}
+
+/** [] when the commit and every tree of it hash to their ids: git reads a loose object without checking it, so a forged one is read here. */
+function objectProblems(git, commit) {
+  const trees = [git("rev-parse", `${commit}^{tree}`).trim()];
+  for (const rec of git("ls-tree", "-r", "-t", "-z", "--full-tree", commit).split("\0").filter(Boolean)) {
+    const [, type, id] = rec.slice(0, rec.indexOf("\t")).split(" ");
+    if (type === "tree") trees.push(id);
+  }
+  const ids = [commit, ...new Set(trees)];
+  const out = git.bytes(["cat-file", "--batch"], ids.join("\n") + "\n");
+  const p = [];
+  let at = 0;
+  for (const id of ids) {
+    const nl = out.indexOf(10, at);
+    const [got, type, size] = out.subarray(at, nl).toString("utf8").split(" ");
+    if (got !== id || (type !== "commit" && type !== "tree")) return [`the clone's object ${id} is not read whole: make a fresh clone`];
+    const body = out.subarray(nl + 1, nl + 1 + Number(size));
+    if (createHash("sha1").update(`${type} ${body.length}\0`).update(body).digest("hex") !== id) p.push(`${type} ${id} does not hash to its id: make a fresh clone`);
+    at = nl + 1 + Number(size) + 1;
+  }
+  return p;
+}
+
+/** Every link under the clone's node_modules folders that points outside the clone (relative to `rel`, e.g. "node_modules"). */
+function linksOutside(real, rel) {
+  const inside = (f) => f === real || f.startsWith(real + path.sep);
+  const out = [];
+  const walk = (r) => {
+    for (const d of readdirSync(path.join(real, r), { withFileTypes: true })) {
+      const e = `${r}/${d.name}`;
+      if (d.isSymbolicLink()) {
+        const to = path.resolve(path.join(real, r), readlinkSync(path.join(real, e)));
+        let target = to;
+        try {
+          target = realpathSync(to);
+        } catch {}
+        if (!inside(to) || !inside(target)) out.push(e);
+      } else if (d.isDirectory()) walk(e);
+    }
+  };
+  walk(rel);
+  return out;
 }
 
 /** git's blob id of a file's bytes. */
@@ -43,9 +91,10 @@ const blobId = (bytes) => createHash("sha1").update(`blob ${bytes.length}\0`).up
 
 /**
  * [] when `root` is a clone at `commit` that holds exactly the commit's files (and, `installed`, pnpm's node_modules
- * resolving inside it); `onMain`: also origin is REPO and the commit is an ancestor of origin/main.
+ * resolving inside it); `onMain`: also origin is REPO and the commit is an ancestor of main as `remote` (REPO; a test's
+ * local stand-in) answers it now.
  */
-export function cloneProblems({ root, commit, onMain = true, installed = true }) {
+export function cloneProblems({ root, commit, onMain = true, installed = true, remote = REPO }) {
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) return [`--commit ${String(commit)}: not a 40-hex commit`];
   const git = gitIn(root);
   const p = [];
@@ -59,22 +108,18 @@ export function cloneProblems({ root, commit, onMain = true, installed = true })
   if (head !== commit) return [`HEAD is ${head}, not the paste's commit ${commit}`];
   const gitDir = path.join(root, ".git");
   if (!existsSync(gitDir) || !lstatSync(gitDir).isDirectory()) return [`${root}/.git is not a clone's own folder (a worktree or a linked .git file)`];
-  const config = git("config", "--local", "--list").split("\n").filter(Boolean);
+  // -z: each entry is "key\nvalue", so a value holding a newline is one value, never a second line
+  const config = git("config", "--local", "--list", "-z").split("\0").filter(Boolean).map((e) => (e.includes("\n") ? `${e.slice(0, e.indexOf("\n"))}=${e.slice(e.indexOf("\n") + 1)}` : e));
   const extra = config.filter((l) => !CLONE_CONFIG.test(l));
   if (extra.length) p.push(`the clone's git config holds ${extra.map((l) => l.split("=")[0]).join(", ")}: make a fresh clone`);
   for (const f of ["objects/info/alternates", "info/grafts", "shallow"]) if (existsSync(path.join(gitDir, f))) p.push(`the clone has .git/${f}: make a fresh clone`);
   const exclude = path.join(gitDir, "info", "exclude");
   if (existsSync(exclude) && readFileSync(exclude, "utf8").split("\n").some((l) => l.trim() && !l.startsWith("#"))) p.push("the clone's .git/info/exclude holds a pattern: make a fresh clone");
+  p.push(...objectProblems(git, commit));
   if (onMain) {
     const url = config.find((l) => l.startsWith("remote.origin.url="))?.slice("remote.origin.url=".length);
     if (url !== REPO && url !== `${REPO}.git`) p.push(`the clone's origin is ${url ?? "none"}, not ${REPO}`);
-    else {
-      try {
-        git("merge-base", "--is-ancestor", commit, "refs/remotes/origin/main");
-      } catch {
-        p.push(`commit ${commit} is not on ${REPO}'s main (not an ancestor of the fetched origin/main): the paste runs only a reviewed, merged commit`);
-      }
-    }
+    else if (p.length === 0) p.push(...mainProblems(git, commit, remote));
   }
   // the commit's tree, every entry: mode, type, id, path
   const tree = new Map();
@@ -117,8 +162,50 @@ export function cloneProblems({ root, commit, onMain = true, installed = true })
   walk("");
   if (changed.length) p.push(`${changed.length} file(s) differ from commit ${commit.slice(0, 12)} (${changed.slice(0, 3).join(", ")}): make a fresh clone`);
   if (strays.length) p.push(`${strays.length} path(s) the commit does not hold (${strays.slice(0, 3).join(", ")}): make a fresh clone`);
-  if (installed) p.push(...moduleProblems(root));
+  if (installed) {
+    const real = realpathSync(root);
+    const links = [];
+    for (const d of dirs) {
+      const m = d ? `${d}/node_modules` : "node_modules";
+      if (MODULES.test(m) && existsSync(path.join(real, m)) && lstatSync(path.join(real, m)).isDirectory()) links.push(...linksOutside(real, m));
+    }
+    for (const l of links.slice(0, 3)) p.push(`${l} links outside the clone: make a fresh clone`);
+    if (links.length > 3) p.push(`${links.length - 3} more link(s) under node_modules point outside the clone`);
+    p.push(...moduleProblems(root));
+  }
   return p;
+}
+
+/** [] when `commit` is an ancestor of main as `remote` answers it now: its sha read by ls-remote, fetched when the clone lacks it. */
+function mainProblems(git, commit, remote) {
+  const no = (why) => [`commit ${commit} is not on ${REPO}'s main (${why}): the paste runs only a reviewed, merged commit`];
+  let main;
+  try {
+    main = git("ls-remote", "--", remote, "refs/heads/main").split("\t")[0].trim();
+  } catch (e) {
+    return [`${REPO}'s main was not read (git ls-remote: ${String(e.stderr || e.message).trim().split("\n")[0]}): nothing signed, paste the line again`];
+  }
+  if (!/^[0-9a-f]{40}$/.test(main)) return no("ls-remote names no main");
+  const has = () => {
+    try {
+      git("cat-file", "-e", `${main}^{commit}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!has()) {
+    try {
+      git("fetch", "-q", "--no-tags", "--", remote, "refs/heads/main");
+    } catch {}
+    if (!has()) return [`${REPO}'s main ${main} could not be fetched into the clone: nothing signed, paste the line again`];
+  }
+  try {
+    git("merge-base", "--is-ancestor", commit, main);
+  } catch {
+    return no(`not an ancestor of main ${main.slice(0, 12)}`);
+  }
+  return [];
 }
 
 /** [] when what the run loads from node_modules resolves inside the clone (realpath), the workspace's kit to its own packages/kit. */

@@ -26,6 +26,7 @@ let n = 0;
 
 // the stub: query (view_access_key_list, view_account, call_function, view_access_key), block, send_tx and
 // EXPERIMENTAL_tx_status, each answered from the case's plan; send_tx logs the run's kept files as they are at the send.
+// plan.statusFailed answers every EXPERIMENTAL_tx_status FINAL with a failed receipt;
 // plan.absentOn = { [url]: [ids] } holds an account absent on that RPC only; plan.txs = { [hash]: { failed?, transaction? } }
 // answers EXPERIMENTAL_tx_status per hash (a hash it does not name is UNKNOWN_TRANSACTION), as the record reads it
 const STUB = path.join(TMP, "stub.mjs");
@@ -55,6 +56,7 @@ globalThis.fetch = async (url, init) => {
     const at = { ...ok, transaction: t.transaction ?? { signer_id: p.sender_account_id, hash: p.tx_hash }, transaction_outcome: { block_hash: "11111111111111111111111111111111" } };
     return out({ result: t.failed ? { ...at, status: { Failure: { ActionError: { kind: "planted" } } } } : at });
   }
+  if (b.method === "EXPERIMENTAL_tx_status" && plan.statusFailed) return out({ result: { ...ok, status: { Failure: { ActionError: { kind: "planted" } } }, receipts_outcome: [{ outcome: { status: { Failure: { ActionError: { kind: "planted" } } }, executor_id: "x" } }] } });
   if (b.method === "EXPERIMENTAL_tx_status") return plan.send === "error" ? out({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } }) : out({ result: ok });
   if (b.method !== "query") return out({ error: { name: "STUB", cause: { name: "UNPLANNED " + b.method } } });
   if (p.request_type === "view_access_key_list") return out({ result: { keys: [] } });
@@ -114,6 +116,14 @@ test("LB: sweep-u sends U's whole USDC to the run's account in one ft_transfer, 
   const kept = JSON.parse(r.sends[0].kept.sweep);
   assert.equal(kept.txs.length, 1);
   assert.deepEqual({ ...kept.txs[0], hash: "h" }, { hash: "h", signer: f.U, amount: "2000000", to: TO });
+});
+
+test("L1 (A, review 5): a send that lands FINAL with a failed receipt stops the command: the read-back holds every receipt to a success", async () => {
+  const f = await folder();
+  const r = drive(f, ["sweep-u"], { balances: { [f.U]: "2000000" }, registered: [TO], statusFailed: true });
+  assert.notEqual(r.status, 0, r.out);
+  assert.equal(r.sends.length, 1, r.out);
+  assert.doesNotMatch(r.out, /read back FINAL on both RPCs, every receipt a success/);
 });
 
 test("LB: sweep-u refuses an account that is the run's own (R, F, U) or exists on neither RPC: nothing sent", async () => {

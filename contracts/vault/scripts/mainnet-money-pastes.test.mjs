@@ -63,6 +63,8 @@ if [ "$1" = clone ]; then
   for last; do :; done
   "${GIT}" clone -q "${bare}" "$last" && exec "${GIT}" -C "$last" remote set-url origin "${REPO}"
 fi
+# the gate reads main from the public repo itself (ls-remote, then a fetch when main moved on): the bare one answers
+for a; do shift; case "$a" in ${REPO}|${REPO.replace(/\.git$/, "")}) set -- "$@" "${bare}" ;; *) set -- "$@" "$a" ;; esac; done
 exec "${GIT}" "$@"
 `);
   writeFileSync(path.join(bin, "node"), `#!/bin/sh\nif [ "$1" = contracts/vault/scripts/source-gate.mjs ]; then exec "${process.execPath}" "$@"; fi\n${rec("node")}\nexit 0\n`);
@@ -122,6 +124,23 @@ test("F1: line 1 clones the public repo into a new folder with no git config of 
   const clone2 = c2[2].match(/ @ (.*)$/)[1];
   assert.notEqual(clone2, clone);
   assert.equal(c2[2].replace(clone2, clone), c[2]);
+});
+
+test("M1 (review 5): line 1 takes --deposit-tx <hash> at its end, the way out a front-run stop names, and hands it to the driver; any other extra is refused", () => {
+  const w = world();
+  const h = "9".repeat(44);
+  const r = paste(w, 1, ` --deposit-tx ${h}`);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const drivers = calls(w).filter((l) => l.startsWith("node "));
+  assert.equal(drivers.length, 1, calls(w).join("\n"));
+  assert.equal(drivers[0].replace(/ @ .*$/, ""), `${D} run --commit ${w.C} --state ${w.state} --to owner.near --deposit-tx ${h}`);
+  for (const extra of [" --deposit-tx", ` --withdraw-tx ${h}`, ` --deposit-tx ${h} x`, " x"]) {
+    const bad = paste(w, 1, extra);
+    assert.equal(bad.status, 1, extra);
+    assert.match(bad.stdout, /paste 1: /, extra);
+  }
+  assert.equal(calls(w).filter((l) => l.startsWith("node ")).length, 1, "nothing more ran");
+  assert.match(lines(w).stdout, /# 1, the run [^\n]*--deposit-tx <hash>/);
 });
 
 test("F1: lines 2, 3 and 4 run open-u, record (with the txs typed after the line) and sweep-u from their own clones at the commit", () => {
