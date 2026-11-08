@@ -1,15 +1,15 @@
 {
-  "at": "2026-11-03T22:24:11.531Z",
+  "at": "2026-11-08T02:21:29.710Z",
   "cluster": "devnet",
-  "program": "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
-  "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
-  "U": "GLUzYu1rkJXbZa9gRSj85v8a6YUGpcsa1x1Jf9HnSTUN",
+  "program": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+  "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+  "U": "5zDT6r44nTHrvDuBME3vEzdSmbf3JkbcRCM7E95zcUNe",
   "funded": "11473120",
-  "signature": "26QENvER7RhnE39Kvoy6MRUuWwHR88GZF1JQ8GEkkrw8YpUSNi2xKN3RhrbNK4ZeijeHVR6oKYqsRVBDX2LLZdam",
+  "signature": "nXDTJybVD2PMycUsGzvAHLKyQBLWuGvzJA2KeGdN5ZNzZPhMfcKMQx2jyDqyNKVmrPN5eHpQGQwTwxh37apsZxz",
   "value": "10000000",
-  "nonce": "2",
-  "precommitment": "28fb4aaedb8bc5a86143b4404719b308e41c297bcccd058edd831d990c064b48",
-  "commitment": "0446b3c85886af8a2b4ae432180fa6383587a2444f4df91581e2341426a1df3b",
-  "leafIndex": "1",
-  "by": "packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts)"
+  "nonce": "3",
+  "precommitment": "12d90abd9b9431bccea6ef283d876d8507a14a4799f6280aebe90cf6a058b17c",
+  "commitment": "21d1b5eaf768ec9ec9cd2cd116345508efdd1dac6050d7202c74e2e13b96016b",
+  "leafIndex": "2",
+  "by": "packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts at 69e5cfd3: the kit's builder, cost and mark parse)"
 }

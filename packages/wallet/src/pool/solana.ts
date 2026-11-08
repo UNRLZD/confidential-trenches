@@ -189,11 +189,11 @@ export const solanaEpochFee = (rent: SolanaRent): { cost: bigint; fee: bigint } 
 export type SolanaPoolPin = { readonly program: string; readonly feePayer: string };
 /** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule).
  *  Mainnet: none until pool-sol-deploy-mainnet pins it. Devnet, in the testnet build only (./network.ts, card
- *  signpage-pool-flow): the program of scripts/live-checks/pool-sol-deploy.devnet.json (its pool 2S5wpE7U…, read back
+ *  signpage-pool-flow): the program of scripts/live-checks/pool-sol-deploy.devnet.json (its pool 92YuYhb4…, read back
  *  on two devnet RPCs by scripts/live-checks/signpage-pool-flow.mjs) and the helper's devnet fee payer, which
  *  GET /v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef answered on 3 Nov 21:07Z. */
 export const SOL_POOLS: Readonly<Partial<Record<"devnet" | "mainnet", SolanaPoolPin>>> = Object.freeze(
-  POOL_TESTNET ? { devnet: Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" }) } : {},
+  POOL_TESTNET ? { devnet: Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" }) } : {},
 );
 
 /** The mainnet deploy (card pool-sol-deploy-mainnet): the program id and the pool buy's lookup table, frozen (authority

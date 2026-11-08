@@ -334,10 +334,12 @@ test("size table: tag 3 with the compressed proof, pump and PumpSwap, with and w
   }
   console.log(rows.join("\n"));
   // with a tip, the tip account is a static key (32 B) instead of a table index (1 B): M362 (4); the largest, PumpSwap on
-  // a cashback coin with a tip, is 1,201 B against 1,232 (M369 (L2))
+  // a cashback coin with a tip, is 1,201 B against 1,232 (M369 (L2)). Card pool-senders-next-page: the next state page
+  // (flag bit 1), not in this table, is a static key (+33 B) wherever it fits: every build but that largest, which
+  // would be 1,234 B with it and so names none (solana-pool-next-page.test.ts: loaded from the table, +2 B, it fits)
   assert.deepEqual(sizes, {
-    "pump none": 977, "pump tip": 1010, "pump cashback none": 977, "pump cashback tip": 1010,
-    "pumpswap none": 1134, "pumpswap tip": 1167, "pumpswap cashback none": 1168, "pumpswap cashback tip": 1201,
+    "pump none": 1010, "pump tip": 1043, "pump cashback none": 1010, "pump cashback tip": 1043,
+    "pumpswap none": 1167, "pumpswap tip": 1200, "pumpswap cashback none": 1201, "pumpswap cashback tip": 1201,
   });
 });
 

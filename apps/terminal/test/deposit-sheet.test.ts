@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
@@ -17,7 +17,7 @@ const DEADLINE = "2026-11-04T18:00:00Z";
 const near: Asset = { id: "nep141:wrap.near", chain: "near", symbol: "NEAR", min: "2.1", max_usd: "1000" };
 const checked: SignpageResults["deposit.quote"] = { deposit_address: "a1b2c3d4e5f6", origin_asset: near.id, amount_in: "15", min_amount_out: "72.45", deadline: DEADLINE, time_estimate_s: 37 };
 const dry = { amount_out_usd: "73.18", min_amount_out_usd: "72.45", fee_usd: "0.62", time_estimate_s: 37 };
-const base: SheetInput = { signedIn: true, moneyOn: true, codeSaved: true, asset: near, amount: "15", dry: { kind: "ok", value: dry }, checked: { kind: "idle" }, status: null, now: NOW };
+const base: SheetInput = { dest: "near", signedIn: true, moneyOn: true, codeSaved: true, asset: near, amount: "15", dry: { kind: "ok", value: dry }, checked: { kind: "idle" }, status: null, now: NOW };
 const at = (p: Partial<SheetInput>) => sheetState({ ...base, ...p });
 const tracked = (status: DepositStatus | null, now = NOW) => at({ checked: { kind: "ok", value: checked }, status, now });
 
@@ -130,9 +130,9 @@ test("BAR-11: the counter from the kit's first sight of the send; the countdown 
   assert.equal(countdown(DEADLINE, Date.parse(DEADLINE) + 1), "00:00:00");
 });
 
-test("WORDS: every word carries its source; no draft is left (owner 2 Nov 06:08Z, all approved)", () => {
+test("WORDS: every word carries its source; the only drafts are card deposit-to-pool's, on its picks page", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0, k);
-  assert.deepEqual([...DRAFTS], []);
+  assert.deepEqual([...DRAFTS], ["to"]);
   for (const k of ["asset", "chain", "amount", "expiresIn", "expired", "getAddress", "copy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
 });
 
@@ -209,4 +209,31 @@ test("Recent: the account's deposits from state.ops, newest first, three at most
   assert.deepEqual(recentRows([]), []);
   assert.deepEqual(recentRows(undefined), []);
   for (const k of ["recent", "noActivity"] as const) assert.equal(WORDS[k].draft, false, k);
+});
+
+// card deposit-to-pool (v2 A3): where the money goes. The sheet's To row names the NEAR vault (the cash home) and the
+// three pools (the kit's POOL_CHAINS). The kit's deposit.quote and deposit.dry land only in the NEAR vault, and nothing
+// yet follows money sent to a pool's address on into the pool (card pool-deposit-follow), so a pool picked is its own state: no quote,
+// no address, Get address off, whatever the amount and the dry quote say.
+
+test("the To row: the NEAR vault first, then the kit's three pools; only the vault takes a deposit from the sheet", () => {
+  assert.deepEqual([...DESTS], ["near", "solana", "base", "robinhood"]);
+  assert.equal(destFundable("near"), true);
+  for (const d of ["solana", "base", "robinhood"] as const) assert.equal(destFundable(d), false, d);
+});
+
+test("a pool picked: pool-off before any quote, in every form state; Get address off; never an address", () => {
+  for (const dest of ["solana", "base", "robinhood"] as const) {
+    for (const p of [{}, { asset: null }, { dry: { kind: "pending" } }, { amount: "1.5" }, { codeSaved: false }, { dry: { kind: "refused", code: "busy" } }] as Partial<SheetInput>[]) {
+      const s = at({ ...p, dest });
+      assert.equal(s, "pool-off", `${dest} ${JSON.stringify(p)}`);
+      assert.equal(getAddressOn(s, base), false);
+      assert.equal(ADDRESS_STATES.has(s), false);
+    }
+  }
+  assert.equal(at({ dest: "near" }), "S4.3", "the vault: the quote, Get address on");
+});
+
+test("a deposit already asked follows its own stages: the destination cannot turn a vault deposit into a pool's", () => {
+  for (const [status, want] of TABLE) assert.equal(sheetState({ ...base, dest: "solana", checked: { kind: "ok", value: checked }, status }), want, JSON.stringify(status));
 });

@@ -25,7 +25,7 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, json: async () => json };
   };
 }
-const run = (rec, plant, r = R) => check({ run: r, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {} });
+const run = (rec, plant, r = R) => check({ run: r, deployment: rec.deployment, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {} });
 const bad = (r, start) => {
   assert.equal(r.ok, false);
   assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${start}`)), r.lines.join("\n"));
@@ -115,4 +115,14 @@ test("card signpage-pool-flow-answers, planted on the good answer: both deposits
   const p = await run(A.good, nulls(["page"], pageSlots));
   namesNull(p, "restored note's label page ", pageSlots);
   namesNull(p, "next note's state page ", pageSlots);
+});
+
+test("the pin is the deploy record's: the good recording PASSES against its own record and FAILS against today's", async () => {
+  const { devnetPin } = await import("./pool-sol-deploy.mjs");
+  const now = devnetPin();
+  assert.equal(devnetPin(A.good.deployment).program, "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ");
+  assert.equal((await run(A.good)).ok, true);
+  const r = await run({ ...A.good, deployment: now.record });
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD  the run is on the pinned devnet pool ${now.pool}`)), r.lines.join("\n"));
 });

@@ -1,7 +1,7 @@
 {
- "release": "release-94",
- "commit": "2099ec8ea2257b21c8efa2f818c69bf684b6601f",
- "tree": "54d0eda247284245430e74689843aef49278d033",
+ "release": "release-92",
+ "commit": "b5511a5c7645a0fba4d94fbed8c13a103e4f71c0",
+ "tree": "32b67a3a4dc20db4bdd5103f355e6bf9c2ffc003",
  "hosts": {
   "SIGN_HOST": {
    "origin": "https://sign.confidential.unrealized.trade",
@@ -14,8 +14,8 @@
     {
      "path": "/",
      "bytes": 382,
-     "sha256": "e0eceb8b52ec975121100a15fb95de9f324413e7db2b5c609f10b003ee16a418",
-     "sha384": "sha384-Kf+D/lG+C3kPJUtqU3fbzl9Qlg8QL+TvC6E+2gAx9T7bICCWbIIYNWazm0yBO8ts",
+     "sha256": "b389236ad29b44241229c5ab0f138e4b9a53f0399ca7b579374693e03562d88b",
+     "sha384": "sha384-GL9/zaaM0hNEP3+CSzPXS6y63aRXemFPGaH0kox6d++x4k+Gsn8qA0bka4uTG5Cr",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
       "integrity-policy": "blocked-destinations=(script)",
@@ -30,9 +30,9 @@
     },
     {
      "path": "/app.js",
-     "bytes": 752601,
-     "sha256": "d59c60f75881e57aeeb791d1f75a4e0bc66814b3608dfb68ed8f0291279f1ec9",
-     "sha384": "sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B",
+     "bytes": 744509,
+     "sha256": "09a4890619466b3cc099ffe9689d7f81a432da49a4fcb4ecc48abc4a80977405",
+     "sha384": "sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL",
      "headers": {
       "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
       "integrity-policy": "blocked-destinations=(script)",

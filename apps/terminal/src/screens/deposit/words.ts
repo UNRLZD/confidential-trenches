@@ -14,6 +14,7 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
+const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   deposit: ok("Deposit", "R5 app.js:626 (dseg); src/screens/signin/words.ts"),
@@ -51,6 +52,9 @@ export const WORDS = {
   heldLine: ok("This deposit couldn't reach your balance, so withdraw it to an address you choose.", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D3 and CH-119"),
   recent: ok("Recent", "R5 app.js:641 (drecent), R5's own label in the picked design (card app-deposit-mount)"),
   noActivity: ok("No activity", "owner 2 Nov 06:08Z, all approved; the same word as src/screens/portfolio/words.ts noActivity"),
+  // card deposit-to-pool (v2 A3): the To row's label, over the NEAR vault and the three pools (their names are data);
+  // a draft on the card's owner picks page until the owner picks
+  to: draft("To", "card deposit-to-pool draft: the label over where the money goes (the NEAR vault, the Solana, Base and Robinhood pools)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

@@ -21,6 +21,7 @@ import {
   solanaPoolDepositTx,
   solanaPoolPreMark,
   solanaPoolTreeSizes,
+  solanaPoolPage,
   VAULT_FIELD_P,
 } from "@blindfill/kit";
 import { solanaDecodeMessage } from "../src/checks/solana/message.ts";
@@ -87,7 +88,7 @@ function landed(k: number) {
 }
 const RENT = solanaRentOf({ owner: SOL.now[0]!.rent.owner, data: base64.decode(SOL.now[0]!.rent.data) });
 
-test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte (pool, depositor, pages, mark, system; 41 bytes)", () => {
+test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte (pool, depositor, pages, mark, system; 41 bytes), then each tree's next page", () => {
   const got = landed(0).ix;
   assert.equal(got.data[0], 1);
   const value = new DataView(got.data.buffer, got.data.byteOffset).getBigUint64(1, true);
@@ -96,7 +97,9 @@ test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte 
   // the pool's first deposit: both trees at size 0
   const built = solanaPoolDepositIx(DEVNET.program, depositor, { value, precommitment }, { stateSize: 0, labelSize: 0 });
   assert.equal(built.program, got.program);
-  assert.deepEqual(built.accounts, got.accounts);
+  // the landed deposit predates the next pages (d3edab1): its six are the kit's first six; the kit names pages 1 after
+  assert.deepEqual(built.accounts.slice(0, 6), got.accounts);
+  assert.deepEqual(built.accounts.slice(6).map((a) => [a.key, a.signer, a.writable]), [[solanaPoolPage(DEVNET.program, 0, 1024), false, true], [solanaPoolPage(DEVNET.program, 1, 1024), false, true]]);
   assert.equal(hex(built.data), hex(got.data));
   assert.equal(built.data.length, 41);
   assert.equal(built.accounts[0]!.key, DEVNET.pool);

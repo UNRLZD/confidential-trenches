@@ -233,9 +233,9 @@ export type TestnetOver = {
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
  *  its pages to entry 2,047, the token programs, wSOL and the pump curve venue's program-wide accounts, created by devnet
- *  tx 4K48NMp5awMjg1789a6uS6JE9Xr3JUwECC2bZnPCUQnfRAQGDYm252CDcAuPDHPJudUoBwqrj9juokXRC8TneWJ3 and read back the same on
+ *  tx 4M7F8EG164qLBH4Noecx6TW22Tak9nH9oVhFeLidfbgf7W7BNfYtvULwCYRm8SzcgyaLWkDrYRvLCxGA7iszjFe8 for the pool 92YuYhb4… and read back the same on
  *  both devnet RPCs (scripts/live-checks/signpage-pool-flow.mjs reads it after every deploy). */
-export const DEVNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
+export const DEVNET_TABLE: string | null = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
 /** The mainnet pool's lookup table: none until pool-sol-deploy-mainnet makes it, so pool.buy is refused until then. */
 export const MAINNET_TABLE: string | null = null;
 /** The page network's lookup table. */
