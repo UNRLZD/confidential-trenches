@@ -317,11 +317,17 @@ function chain(plant: Plant = {}) {
         // CreateIdempotent: the payer funds a token account of the owner's at the associated address
         const [payer, at, owner, mint] = keys as [string, string, string, string];
         if (at !== solanaAta(owner, mint, keys[5]!)) throw new Error("InvalidSeeds");
-        if (on.has(at)) continue;
+        // as the ATA program runs it (review 6 of 13898c19, F1): on a System account with no data (lamports anyone sent
+        // there) it moves only the shortfall to the rent, allocates and assigns, then InitializeAccount3 (a native
+        // account's amount = its lamports less its rent); a made account is left as it is
+        const prior = on.get(at);
+        if (prior && (prior.owner !== "11111111111111111111111111111111" || prior.data.length !== 0)) continue;
         const r = Number(rentMin(165));
-        if (on.get(payer)!.lamports < r) throw new Error("InsufficientFunds");
-        on.set(payer, { ...on.get(payer)!, lamports: on.get(payer)!.lamports - r });
-        on.set(at, { owner: keys[5]!, lamports: r, data: mint === SOLANA_SOL_MINT ? nativeAccount(owner, 0n) : new Uint8Array(165) });
+        const have = prior?.lamports ?? 0;
+        const short = Math.max(0, r - have);
+        if (on.get(payer)!.lamports < short) throw new Error("InsufficientFunds");
+        on.set(payer, { ...on.get(payer)!, lamports: on.get(payer)!.lamports - short });
+        on.set(at, { owner: keys[5]!, lamports: have + short, data: mint === SOLANA_SOL_MINT ? nativeAccount(owner, BigInt(have + short - r)) : new Uint8Array(165) });
         continue;
       }
       if (program === SOLANA_PUMP_AMM_PROGRAM && ix.data.every((b, i) => b === SOLANA_CLAIM_CASHBACK[i]) && ix.data.length === 8) {
@@ -2809,4 +2815,22 @@ test("L3: a floor end keeps what W read as only when W stays under the floor at 
   await resumeRentBacks(loaded, fakeLocks());
   assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
   assert.equal(w.owed.get(W.address)?.seen, undefined);
+});
+
+// Review 6 of 13898c19, F1 (its probe REV6 Q2a): one lamport a stranger sent to W's unmade WSOL account while PumpSwap
+// cashback is owed. The claim's open keeps that lamport and W pays only the rest of the rent, so W ended one lamport
+// richer than the check wanted: every teardown refused, 30 faults a pass on every load, W never swept. The claim now
+// carries the lamports at the account it opens: the cashback is claimed, W swept to 0 on the sell's own rent back.
+test("a stranger's lamport at W's unmade WSOL account while PumpSwap cashback is owed: the claim takes it, W swept to 0, no fault", async () => {
+  const CASHBACK = 12_742_862n;
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }] });
+  const wsol = solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  w.c.accounts.set(wsol, { owner: "11111111111111111111111111111111", lamports: 1, data: new Uint8Array(0) });
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(w.told.filter((t) => t.state === "fault").map((t) => t.detail), []);
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "W swept");
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
+  assert.equal(w.c.accounts.has(wsol), false, "the WSOL account the claim opened is closed");
+  assert.equal(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM)), false, "the cashback claimed, its volume account closed");
 });
