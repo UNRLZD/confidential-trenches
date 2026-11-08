@@ -1,12 +1,12 @@
 {
  "_note": {
-  "good": "facts() over this card's build (packages/signpage/index.html and public/app.js with the review fold): PASS",
+  "good": "facts() over the build of card pool-deposit-follow (the follow wired, the floor read passed): PASS",
   "bad": "facts() over main 7d70c9fd's build, before this card: FAIL, each mark named",
   "liveBefore": "SIGN_HOST read at 2026-11-08 before this card's deploy: FAIL, each mark named"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9kN6Q88+myM4chVOXusyEh3JtwU98Ao1o9hEAv6Iuitd3am8HC9uFydkEcgoxFcw\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-9kN6Q88+myM4chVOXusyEh3JtwU98Ao1o9hEAv6Iuitd3am8HC9uFydkEcgoxFcw",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B",
   "namerPools": true,
   "namesEach": true,
   "namesRecord": true,
