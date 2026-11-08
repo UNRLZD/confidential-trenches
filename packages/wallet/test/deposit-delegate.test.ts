@@ -177,6 +177,28 @@ test("no hand-made read is signed: the module exports no signer but depositDeleg
   await assert.rejects(sign({}, { keys: "keys_no_account" }), DepositAccountRefused);
 });
 
+test("a NEAR action the user never asked for is never signed (card signers-own-bytes): fields a caller adds to the args do not reach the call", async () => {
+  // Another receiver, method, actions, sender, gas and deposit handed in with the user's own request: the call is still
+  // the release's ft_transfer_call of the user's amount from U_{s,i} into the vault, byte for byte the vector's.
+  const hostile = {
+    receiver_id: "attacker.near", method_name: "ft_transfer", sender_id: "attacker.near", token: "attacker.near",
+    gas: 300n * 10n ** 12n, deposit: 10n ** 24n, msg: "{}", args: new TextEncoder().encode('{"receiver_id":"attacker.near","amount":"1"}'),
+    actions: [{ Transfer: { deposit: "1000000000000000000000000" } }, { DeleteAccount: { beneficiary_id: "attacker.near" } }],
+  };
+  const out = await sign({ window: V.input.window, ...hostile } as Partial<DepositDelegateArgs>);
+  assert.equal(out.signed_delegate, V.signed_delegate);
+  const d = decodeSignedDelegate(bytesOf(out.signed_delegate));
+  assert.equal(d.sender_id, U);
+  assert.equal(d.receiver_id, NET.usdc);
+  assert.equal(d.actions.length, 1);
+  const a = d.actions[0]!;
+  assert.equal(a.kind, "FunctionCall");
+  if (a.kind !== "FunctionCall") return;
+  assert.equal(a.method_name, V.expect.method_name);
+  assert.equal(JSON.parse(Buffer.from(a.args).toString("utf8")).receiver_id, NET.vault);
+  assert.equal(a.deposit, 1n);
+});
+
 test("what is signed is what was read: args and seed64 changed while the reads are out do not reach the call", async () => {
   const signedArgs = (out: { signed_delegate: string }) => {
     const d = decodeSignedDelegate(bytesOf(out.signed_delegate));
