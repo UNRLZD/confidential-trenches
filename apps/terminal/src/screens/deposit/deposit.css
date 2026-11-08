@@ -79,12 +79,14 @@
 .addrb .kv .r { text-align: right; }
 .addrb .kv .r .k { justify-content: flex-end; }
 .addrb .kv .v { font: 500 13px var(--font-num); margin-top: 4px; }
-.drecent { flex: 1; min-height: 0; overflow: hidden; container-type: size; }
-@container (max-height: 27.98px) { .drecent > * { display: none; } } /* card deposit-to-pool: under the To row the phone's form leaves Recent less than its header; it draws nothing rather than a cut header */ /* R5 proto.css:764-766, 820; under the form it takes the room left, the sheet's height fixed (BAR-05) */
+.drecent { flex: 1; min-height: 0; overflow: hidden; container-type: size; } /* R5 proto.css:764-766, 820; under the form it takes the room left, the sheet's height fixed (BAR-05) */
 .drecent .hd { display: flex; justify-content: space-between; align-items: center; font: 600 15px var(--font-ui); height: 28px; color: var(--text-1); }
 .drecent .it { height: 52px; display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--border-row); font: 13px var(--font-ui); color: var(--text-1); }
 .drecent .it .num { margin-left: auto; text-align: right; }
 .drecent .empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 14px 0 8px; color: var(--text-2); font: 13px var(--font-ui); }
+/* card deposit-to-pool: under the To row the phone's form leaves Recent less than its header; it draws nothing rather
+   than a cut header. After Recent's own rules, at (0,3,0), so their display (0,2,0) cannot draw a child back. */
+@container (max-height: 27.98px) { .dep .dbody .drecent > * { display: none; } }
 .ddone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 0 8px; }
 .damt-done { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); }
 .dsub { font: 14px var(--font-ui); color: var(--text-2); }

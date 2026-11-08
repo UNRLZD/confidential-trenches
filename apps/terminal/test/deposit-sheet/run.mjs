@@ -11,7 +11,7 @@
 // backup.open with the typed amount in the return view, Copy copies the checked quote's address. Card deposit-to-pool:
 // the To row in every form state, the NEAR vault and the three pools in that order, each tile its chain's own mark
 // (market/pads.ts logos) loaded; each pool picked draws pool-off with Get address off and asks no quote; the vault
-// picked back draws the quote again and Get address sends deposit.quote.
+// picked back draws the quote again and Get address sends deposit.quote; Recent's header is whole or not drawn.
 //   node apps/terminal/test/deposit-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -151,6 +151,15 @@ try {
       else check(addrs.length === 0, `${tag}: an address outside the address states`);
       const body = await page.locator(".dep").innerText();
       if (!ADDRESS_STATES.has(want)) check(!body.replace(/\s/g, "").includes(ADDRESS.slice(0, 8)), `${tag}: address text drawn`);
+      // Recent's header whole or not drawn: under the To row the phone's form leaves Recent less room than its header,
+      // and a header cut by Recent's own clip box (overflow hidden, so no BAR-10 rule sees it) read "Recent" in half
+      const cut = await page.$$eval(".drecent", (els) => els.flatMap((r) => {
+        const hd = r.querySelector(".hd");
+        if (!hd || !hd.getClientRects().length) return [];
+        const a = r.getBoundingClientRect(), b = hd.getBoundingClientRect();
+        return b.top < a.bottom - 0.5 && b.bottom > a.bottom + 0.5 ? [`${b.bottom.toFixed(1)} past ${a.bottom.toFixed(1)}`] : [];
+      }));
+      check(cut.length === 0, `${tag}: Recent's header cut: ${cut.join(", ")}`);
       // BAR-12: the done screen only at the kit's done
       check((want === "S4.16") === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
       if (["S4.3", "S4.13", "S4.15", "S4.16"].includes(want) && !boxes[want]) boxes[want] = { sheet: await rect(page, ".dep-box"), action: await rect(page, ".dfoot .dbtn") };
