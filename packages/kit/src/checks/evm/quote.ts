@@ -308,7 +308,8 @@ function fitRead(chain: EvmPoolChain, v: { pool: string | undefined; adapterV3: 
 /** The eth_call the EVM buy quote sends to learn whether `route`'s swap at `amount` fits the pool's swap gas, at the
  *  block `blockHash` (card evm-buy-gas-floor): the pool's own buySwap, from the pool, its execution capped at `exec`
  *  (EVM_BUY_SWAP_FIT unless given), and its one state override, the pool's balance at the amount; null where `chain`
- *  pins no adapter for the route's venue. A result is a fit; a revert or out of gas is none. */
+ *  pins no adapter for the route's venue, and refused (bad_request) where it pins no pool. A result is a fit; a revert
+ *  or out of gas is none. */
 export function evmBuySwapFitCall(chain: EvmPoolChain, route: EvmRoute, amount: bigint, blockHash: string, exec: bigint = EVM_BUY_SWAP_FIT): { tx: { from: string; to: string; data: string; gas: string }; override: Record<string, { balance: string }> } | null {
   const r = fitRead(chain, venue(chain), copyRoute(route), amount, blockHash, exec);
   if (r === null) return null;
