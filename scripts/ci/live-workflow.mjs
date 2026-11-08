@@ -11,6 +11,11 @@
 //     names a check that does not exist; the plan job runs on a dispatch alone; no step installs Playwright's own
 //     Chromium (a browser starts only as the installed Chrome, scripts/browsers.mjs); the check job's summary grep keeps
 //     every verdict line a check prints (SUMMARY_LINES: card jupiter-build-budget-503, an INCONCLUSIVE line it dropped);
+//   - live.yml: the dispatched runs of one host share one queue (card live-runs-one-per-host): the top-level concurrency
+//     group is LIVE_GROUP, so a second run on a host waits for the first to end, and cancel-in-progress is false or true on
+//     a pull request alone (a pull request's group is its own ref). On 6 Nov 10:55Z two helper runs at once (42206377652,
+//     42206382978) shared the helper's budgets: helper-token-page-cold read 29 and 28 of 32 cold (floor 30) where a run
+//     alone (42207995804) read 31;
 //   - the check job runs a serial group's checks in one step (scripts/ci/live-serial.mjs, GROUP the matrix's) and a single
 //     check in the other, each `if` on matrix.group so no check runs twice or not at all (card helper-live-jup-serial);
 //   - the helper's plan puts every check that reads the helper's Jupiter budget (BUDGET_READS: a Jupiter proxy path, a
@@ -74,6 +79,12 @@ export const SUMMARY_LINES = [
   "live-check k: ERROR: x",
 ];
 
+/** live.yml's concurrency group: one per host on a dispatch (inputs.host is required there), a pull request's own ref
+ *  otherwise, never the commit or the run (card live-runs-one-per-host). */
+export const LIVE_GROUP = "live-${{ inputs.host || github.ref }}";
+/** The cancel-in-progress values that never cancel a dispatched run. */
+export const LIVE_CANCEL = Object.freeze(["false", "${{ github.event_name == 'pull_request' }}"]);
+
 /** The problems with live.yml's own shape. */
 export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => existsSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`))) {
   const file = ".github/workflows/live.yml";
@@ -82,6 +93,15 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
     if (!s) p.push(`${file}: ${what}`);
   };
   want(/^on:\s*\n(?:.*\n)*?\s+workflow_dispatch:/m.test(text), "no workflow_dispatch trigger");
+  const conc = blocks(text, "concurrency").find((b) => b.indent === 0);
+  if (!conc) p.push(`${file}: no top-level concurrency block: two runs on one host read it at once (want group: ${LIVE_GROUP})`);
+  else {
+    const val = (k) => conc.lines.find((l) => l.startsWith(`${k}:`))?.slice(k.length + 1).trim();
+    const group = val("group");
+    const cancel = val("cancel-in-progress");
+    want(group === LIVE_GROUP, `the concurrency group is ${group ?? "missing"}, want ${LIVE_GROUP}: one queue per host, so a run never reads a host another run is reading`);
+    want(LIVE_CANCEL.includes(cancel), `cancel-in-progress is ${cancel ?? "missing"}, want ${LIVE_CANCEL.join(" or ")}: a second run on a host waits, it never cancels the first`);
+  }
   const host = /^ {6}host:\n(?: {8}.*\n)*/m.exec(text)?.[0] ?? "";
   const options = /options:\s*\[([^\]]*)\]/.exec(host)?.[1].split(",").map((s) => s.trim()).sort().join(",");
   want(options === [...hosts].sort().join(","), `the host input's options are ${options ?? "missing"}, want ${[...hosts].sort().join(",")}`);

@@ -543,3 +543,19 @@ test("planted: live.yml that runs a serial group's checks as one single check, d
   assert.ok(has(liveProblems(LIVE.replace("GROUP: ${{ matrix.group }}", "GROUP: ${{ matrix.key }}")), /does not run a serial group's checks/), "the group is not the matrix's");
   assert.ok(has(liveProblems(LIVE.replace("timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}", "timeout-minutes: 20")), /a serial group's job has no longer limit/), "a group of about 11 minutes of checks cannot be held to 20");
 });
+
+test("planted (card live-runs-one-per-host): a live.yml whose dispatched runs do not share one queue per host is refused: no concurrency block, a group that names the commit or the run, a group shared by every host, cancel-in-progress true", () => {
+  const conc = /^concurrency:\n(?: {2}.*\n)+/m;
+  assert.ok(conc.test(LIVE), "live.yml has a top-level concurrency block");
+  const at = (block) => liveProblems(LIVE.replace(conc, block));
+  assert.ok(has(at(""), /no top-level concurrency/), "missing");
+  const group = (g) => at(`concurrency:\n  group: ${g}\n  cancel-in-progress: \${{ github.event_name == 'pull_request' }}\n`);
+  assert.ok(has(group("live-${{ github.workflow }}-${{ github.ref }}-${{ inputs.host }}-${{ inputs.commit }}"), /concurrency group/), "main's group before this card: one run per commit, so two runs on one host read it at once");
+  assert.ok(has(group("live-${{ inputs.host }}-${{ github.run_id }}"), /concurrency group/), "a group per run");
+  assert.ok(has(group("live"), /concurrency group/), "one group for every host");
+  assert.deepEqual(group("live-${{ inputs.host || github.ref }}"), []);
+  const cancel = (c) => at(`concurrency:\n  group: live-\${{ inputs.host || github.ref }}\n  cancel-in-progress: ${c}\n`);
+  assert.ok(has(cancel("true"), /cancel-in-progress/), "a second run cancels the first");
+  assert.ok(has(cancel("${{ github.event_name == 'workflow_dispatch' }}"), /cancel-in-progress/), "true on a dispatch");
+  assert.deepEqual(cancel("false"), []);
+});
