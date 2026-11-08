@@ -498,7 +498,9 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   const top = { lamportsPerByte: 6_960n, factor: 1n } as SolanaSellSurplus["rent"];
   const topLamports = 5_000n + solanaDepositRents(top, SOL_READS, held, false) + solanaSellAfterFull(top, 2) + surplus;
   assert.equal(sell(-surplus, { ...P, rent: top, owed: 2, lamports: topLamports }).back, floor + surplus);
-  assert.throws(() => sell(-surplus, { ...P, rent: { lamportsPerByte: 3_481n, factor: 2n } as SolanaSellSurplus["rent"], owed: 2, lamports: topLamports }), refusedAs("reserve"));
+  // the bound is on the rate the rent is paid at, the byte price times its factor: 3,481 x 2 is over it
+  const twice = { lamportsPerByte: 3_481n, factor: 2n } as SolanaSellSurplus["rent"];
+  assert.throws(() => sell(-surplus, { ...P, rent: twice, owed: 2, lamports: 5_000n + solanaDepositRents(twice, SOL_READS, held, false) + solanaSellAfterFull(twice, 2) + surplus }), refusedAs("reserve"));
   // over the cap: what the keep holds over rent(0) the rent back's sweep carries into the user's note, so the cap leaves it
   // out, only when the reserve is priced exactly with that keep (two owed claims: 7,689,840 kept)
   const keep2 = solanaSellAfterFull(rent, 2);
