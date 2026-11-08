@@ -852,7 +852,7 @@ test("F2: the sweep's pace backs off on each failure (doubling, capped) and send
   s.store.close();
 });
 
-test("F4: a registration read as ran that does not read registered on both providers is no landing: in_flight, never a second payment within OWN_SETTLE_MS (a restart included); after it one new one goes", async () => {
+test("F4: a registration read as ran that does not read registered on both providers is no landing: in_flight, never a second payment within OWN_SETTLE_MS (a restart included); after it a failure, one new one after its backoff", async () => {
   const dir = mkdtempSync(join(tmpdir(), "intents-"));
   let chain!: Chain;
   let lie = true;
@@ -878,9 +878,15 @@ test("F4: a registration read as ran that does not read registered on both provi
   assert.equal(await c2.registerSeen(u), "in_flight");
   await c2.sweep();
   assert.equal(r2.sent.length, 0, "after a restart, within the settle time: nothing sent");
+  // delta review F1: past the settle time a ran one still unregistered is a failure for the backoff, never paid at once
   clock.ms = NOW + 1_000 + OWN_SETTLE_MS + 1;
+  assert.equal(await c2.registerSeen(u), "registration_failed");
+  assert.equal(r2.sent.length, 0, "past the settle time: no payment before the backoff step");
+  assert.deepEqual(store.owed(u), { signer: u, tries: 1, next_ms: clock.ms + 2 * SWEEP_MS });
+  assert.equal(store.signer(u).failed, 0, "never a strike");
+  clock.ms += 2 * SWEEP_MS;
   assert.equal(await c2.registerSeen(u), "registered");
-  assert.deepEqual(r2.sent.map((x) => x.action.method), ["storage_deposit"], "one new one, past the settle time");
+  assert.deepEqual(r2.sent.map((x) => x.action.method), ["storage_deposit"], "one new one, after its backoff step");
   assert.equal(store.signer(u).own ?? null, null);
   assert.equal(store.owed(u), null);
   store.close();
@@ -908,6 +914,119 @@ test("M14: after a restart, U's own registration whose tx is not read yet (unkno
   clock.ms += 10 * SWEEP_MS;
   assert.equal(await c2.registerSeen(u), "registered");
   assert.deepEqual(r2.sent.map((x) => x.action.method), ["storage_deposit"], "the dropped one replaced by one new one");
+  store.close();
+});
+
+// the reviewer's probe (delta review F1), ported: each registration runs, then U's owner unregisters it (or a provider
+// reports a final behind it), so U reads null on both after every landing
+test("delta review F1: U's owner unregisters U after each landing: over 60 minutes of sweeps at most 5 storage_deposits, each one backoff step after the last, never a strike", async () => {
+  const s = setup(); // every storage_deposit runs; U's storage stays null
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const paidAt: number[] = [];
+  const send = s.r.send;
+  s.r.send = async (...a) => (paidAt.push(s.clock.ms), send(...a));
+  await s.carry.registerSeen(u);
+  for (let m = 1; m <= 60; m++) {
+    s.clock.ms = NOW + m * 60_000;
+    await s.carry.sweep();
+  }
+  assert.ok(paidAt.length >= 2 && paidAt.length <= 5, `${paidAt.length} storage_deposits in 60 min`);
+  for (let k = 1; k < paidAt.length; k++) assert.ok(paidAt[k]! - paidAt[k - 1]! >= OWN_SETTLE_MS + SWEEP_MS * 2 ** k, `pay ${k + 1} waited its backoff step`);
+  assert.ok(s.store.owed(u)!.tries >= paidAt.length - 1, "each ran-but-unregistered landing is a try");
+  assert.equal(s.store.signer(u).failed, 0);
+  s.store.close();
+});
+
+test("H1 (moving clock): a U that never reads registered is paid once per backoff step, whatever it sends: no intent carried, at most 5 storage_deposits in 60 minutes", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  for (let m = 0; m < 60; m++) {
+    s.clock.ms = NOW + m * 60_000;
+    await s.carry.carry(signedIntent(u, withdraw("alice.near")));
+    await s.carry.carry(signedIntent(u, withdraw("alice.near")));
+    await s.carry.idle();
+    await s.carry.sweep();
+  }
+  const m = s.r.sent.map((x) => x.action.method);
+  assert.equal(m.filter((x) => x === "execute_intents").length, 0, "nothing carried for an unregistered U");
+  const own = m.filter((x) => x === "storage_deposit").length;
+  assert.ok(own >= 2 && own <= 5, `${own} storage_deposits in 60 min`);
+  assert.equal(s.store.signer(u).failed, 0);
+  s.store.close();
+});
+
+test("delta review F3: a claim written but never broadcast (a crash after before()), then a restart: the same signed bytes go out once, never while the token is held; no new registration is signed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const s = setup({ dir });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const claimed: TxRef = { tx_hash: base58(randomBytes(32)), nonce: "9", height: "221603850", block_hash: base58(Buffer.alloc(32, 7)), signed_tx: "c2lnbmVk" };
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: claimed } });
+  s.store.close();
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain = s.chain;
+  const r2 = relayer(() => "ran");
+  const resent: string[] = [];
+  const resends: boolean[] = [];
+  r2.resolve = async (tx: TxRef, o: { resend: boolean }) => {
+    resends.push(o.resend);
+    if (!o.resend || resent.length > 0) return resent.includes(tx.tx_hash) ? { kind: "final", tx_hash: tx.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] } : { kind: "unknown", tx_hash: tx.tx_hash, why: "not found" };
+    resent.push(tx.tx_hash); // the same bytes broadcast; they land
+    chain.storage.set(`${USDC}/${u}`, "registered");
+    return { kind: "unknown", tx_hash: tx.tx_hash, why: "sent again" };
+  };
+  const clock = { ms: NOW + 1_000 };
+  const c2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r2, held: async () => chain.paused === true, now: () => clock.ms, resolveEveryMs: 1 });
+  chain.paused = true;
+  assert.equal(await c2.registerSeen(u), "in_flight");
+  await c2.sweep();
+  assert.deepEqual([resent, resends.every((x) => x === false)], [[], true], "held: read only, never sent again");
+  chain.paused = false;
+  assert.equal(await c2.registerSeen(u), "in_flight");
+  assert.deepEqual(resent, [claimed.tx_hash], "the claimed bytes sent again once");
+  assert.equal(await c2.registerSeen(u), "registered");
+  assert.deepEqual(resent, [claimed.tx_hash], "once only");
+  assert.equal(r2.sent.length, 0, "no new registration signed");
+  store.close();
+});
+
+test("delta review F3 (every path): a receiver's registration claimed but never broadcast is sent again once after a restart, never while held, then the intent is carried", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const s = setup({ dir });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const claimed: TxRef = { tx_hash: base58(randomBytes(32)), nonce: "9", height: "221603850", block_hash: base58(Buffer.alloc(32, 7)), signed_tx: "c2lnbmVk" };
+  s.store.putSigner({ ...s.store.signer(u), registration: { receiver: "fresh.near", state: "pending", tx: claimed } });
+  s.store.close();
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain = s.chain;
+  const r2 = relayer(() => "ran");
+  const resent: string[] = [];
+  r2.resolve = async (tx: TxRef, o: { resend: boolean }) => {
+    if (tx.tx_hash !== claimed.tx_hash) return { kind: "final", tx_hash: tx.tx_hash, receipts: [{ executor: "intents.near", ok: true, failure: "", height: 1n }] };
+    if (o.resend && resent.length === 0) {
+      resent.push(tx.tx_hash);
+      chain.storage.set(`${USDC}/fresh.near`, "registered");
+    }
+    return resent.length > 0 ? { kind: "final", tx_hash: tx.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] } : { kind: "unknown", tx_hash: tx.tx_hash, why: "not found" };
+  };
+  const c2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r2, held: async () => chain.paused === true, now: () => NOW, resolveEveryMs: 1 });
+  chain.paused = true;
+  const a = await c2.carry(signedIntent(u, withdraw("fresh.near")));
+  assert.equal(code(a), "in_flight");
+  assert.deepEqual(resent, [], "held: never sent again");
+  chain.paused = false;
+  const b = await c2.carry(signedIntent(u, withdraw("fresh.near")));
+  await c2.idle();
+  assert.deepEqual(resent, [claimed.tx_hash], "the claimed bytes sent again once");
+  assert.equal(code(b), "sent");
+  assert.deepEqual(r2.sent.map((x) => x.action.method), ["execute_intents"], "no new registration; the intent carried");
   store.close();
 });
 

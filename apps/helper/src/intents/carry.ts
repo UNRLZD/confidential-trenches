@@ -280,9 +280,10 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     const used = (g: Registration | null) => g !== null && (g.receiver !== account || g.state === "landed");
     const was = store.signer(signer).registration;
     if (used(was)) return no("receiver_not_registered");
-    // an earlier registration of this receiver whose outcome was not read: read it before any new one
+    // an earlier registration of this receiver whose outcome was not read: read it before any new one, its same bytes
+    // sent again unless the token is held (delta review F3, as U's own below)
     if (was !== null && was.tx !== null) {
-      const o = await relayer.resolve(was.tx, { resend: false });
+      const o = await relayer.resolve(was.tx, { resend: !(await holds()) });
       if (o.kind === "unknown") return no("in_flight");
       const r = store.signer(signer);
       if (ran(o)) {
@@ -318,9 +319,10 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
   /**
    * The signer's own registration on USDC (9): null once storage_balance_of(signer) reads registered on both providers
    * at their final block, else the answer. A transaction of an earlier one decides only whether a new one may go:
-   * unknown, or read ran less than OWN_SETTLE_MS ago, holds it (a restart never pays twice); failed, dropped, or ran but
-   * still unread on both after OWN_SETTLE_MS frees it. Nothing is sent while the token watch holds; a failure is never
-   * counted toward the signer's strikes.
+   * its same signed bytes go out again while the token is not held (they land at most once); unknown, or read ran less
+   * than OWN_SETTLE_MS ago, holds it (a restart never pays twice); failed or dropped frees it; ran but still unregistered
+   * on both after OWN_SETTLE_MS is registration_failed, so the next payment waits the backoff (ownStep). Nothing new is
+   * sent while the token watch holds; a failure is never counted toward the signer's strikes.
    */
   const registerOwn = async (signer: string, untilMs: number): Promise<IntentsAnswer | null> => {
     let st: "registered" | "none";
@@ -333,12 +335,18 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     const key = `own/${signer}`;
     const was = store.signer(signer).own ?? null;
     if (was !== null && was.tx !== null) {
-      const o = await relayer.resolve(was.tx, { resend: false });
+      // the same signed bytes go out again unless the token is held (as the deposit carry, bind/send.ts): they land
+      // at most once, so a crash between the claim and the broadcast never leaves U unregistered (delta review F3)
+      const o = await relayer.resolve(was.tx, { resend: !(await holds()) });
       if (o.kind === "unknown") return no("in_flight");
       if (ran(o)) {
         const at = was.at ?? now();
         if (was.at === undefined) store.putSigner({ ...store.signer(signer), own: { ...was, state: "landed", at } });
         if (now() - at < OWN_SETTLE_MS) return no("in_flight");
+        // ran, yet U still reads unregistered on both providers past the settle time (its owner unregistered it, or a
+        // provider lags): a failure for the backoff, so the next payment waits its step (delta review F1)
+        store.putSigner({ ...store.signer(signer), own: null });
+        return no("registration_failed");
       }
       store.putSigner({ ...store.signer(signer), own: null });
     }
