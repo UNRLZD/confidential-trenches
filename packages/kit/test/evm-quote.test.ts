@@ -9,9 +9,12 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import * as kit from "../src/index.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
-import { evmPoolBuyQuoteWith, evmProviders, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { evmPoolBuyQuoteWith, evmProviders, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
 import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
+// the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
+// for call: these replays send 6 a call (the kit sends 64, card evm-buy-quote-in-window: QE9)
+evmReadsPerCall(6);
 // the module path as a string: the red run before card evm-buy-hookdata-fee's fold 1 reads it where quoted.ts is not there yet
 const QUOTED_TS: string = "../src/trade/evm/quoted.ts";
 

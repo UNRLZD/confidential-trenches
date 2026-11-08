@@ -6,8 +6,11 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
-import { EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
+// the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
+// for call: these replays send 6 a call (the kit sends 64, card evm-buy-quote-in-window: QE9)
+evmReadsPerCall(6);
 
 type Answer = { result?: Record<string, unknown> | string } & Record<string, unknown>;
 type Exchange = { calls: EvmRpcCall[]; answers: Answer[] };
