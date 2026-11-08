@@ -22,6 +22,8 @@
 import { armAccount, freshWallet, refundId, returnId, type Chain } from "../derive/index.ts";
 import type { NoteRestore } from "../notes/restore.ts";
 import { arrivalOf } from "../withdraw/arrival.ts";
+import type { NearNetwork, NearRpc } from "../deposit/account.ts";
+import { openRestorePass, type PassOpts, type RestorePass } from "./id-reader.ts";
 import { ARM_TAGS, type HistoryChain, type WalletRestore } from "./wallets.ts";
 
 /** A balance read: "usdc" ft_balance_of on the vault's token, "near" the account's NEAR, "intents" its intents.near holdings. */
@@ -125,6 +127,14 @@ const pair = (xs: unknown, name: string): [number, number] => {
 /** The first block past the second scan's height bound: the higher restore height plus SECOND_SCAN_BLOCKS plus one. */
 export function secondScanBoundHeight(at: Pick<FinalPair, "heights">): number {
   return Math.max(...pair(at?.heights, "at.heights")) + SECOND_SCAN_BLOCKS + 1;
+}
+
+/**
+ * The second scan's own pass (review P1): it exists to see money that lands after the bound, so a pass whose block is
+ * not above secondScanBoundHeight(at) is refused, and the restore's own pass is never reused for it.
+ */
+export function openSecondScanPass(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], at: Pick<FinalPair, "heights">, opts: Omit<PassOpts, "after"> = {}): Promise<RestorePass> {
+  return openRestorePass(network, rpcs, { ...opts, after: secondScanBoundHeight(at) });
 }
 
 /**

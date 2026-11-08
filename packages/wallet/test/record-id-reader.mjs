@@ -36,13 +36,13 @@ const pass = await openRestorePass("mainnet", rpcs);
 const states = {};
 for (const [name, id] of Object.entries(IDS)) {
   states[name] = [];
-  for (const f of [0, 1]) states[name].push(await nearIdReader("mainnet", rpcs, pass, { first: () => f })(id));
+  for (const f of [0, 1]) states[name].push(await (await nearIdReader("mainnet", rpcs, pass, { first: () => f }))(id));
 }
 // step 5's R/V/A balance reads (nearBalanceReader) the test replays
 const balances = {};
 for (const [what, name] of [["usdc", "money_usdc"], ["near", "used_account"], ["near", "never_used"], ["intents", "money_intents"]]) {
   balances[`${what} ${name}`] = [];
-  for (const f of [0, 1]) balances[`${what} ${name}`].push(String(await nearBalanceReader("mainnet", rpcs, pass, { first: () => f })(what, IDS[name])));
+  for (const f of [0, 1]) balances[`${what} ${name}`].push(String(await (await nearBalanceReader("mainnet", rpcs, pass, { first: () => f }))(what, IDS[name])));
 }
 // the intents branch: money_intents also holds USDC, so the reader stops at ft_balance_of; its intents.near views are
 // recorded on their own (the replay serves them for an id whose token views are never_used's)

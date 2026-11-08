@@ -11,7 +11,8 @@ import { vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { RESTORE_GAP, RESTORE_LANES, type NoteRestore, type RestoredNote } from "../src/notes/restore.ts";
-import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReaderAt, openRestorePass, PASS_TRIES, PASS_WAIT_MS, type RestorePass } from "../src/restore/id-reader.ts";
+import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReaderAt, openRereadPass, openRestorePass, PASS_TRIES, PASS_WAIT_MS, type RestorePass } from "../src/restore/id-reader.ts";
+import { openSecondScanPass } from "../src/restore/arms.ts";
 import { afterRestore, DEPOSIT_ID_MARGIN, restoreDepositIds as depositIds, type IdReader } from "../src/restore/wallets.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
@@ -49,14 +50,19 @@ for (const xs of Object.values(REC.answers)) for (const a of xs as { result?: { 
 const argsOf = (p: Record<string, unknown>): Record<string, unknown> => (typeof p.args_base64 === "string" ? JSON.parse(Buffer.from(p.args_base64, "base64").toString()) : {});
 
 // a provider that answers from the recorded mainnet answers, by its URL and the exact params: a request asked more than
-// once gets the recorded answers in their order, then the last again (the pass's final reads repeat while one catches up)
+// once gets the recorded answers in their order, then the last again (the pass's final reads repeat while one catches
+// up). One object per URL, as a pass holds its two providers by identity; each test sets its log and swap.
 const served = new Map<string, number>();
+const replays = new Map<string, { rpc: NearRpc; log: string[]; swap: (p: Record<string, unknown>) => unknown }>();
 function replay(url: string, log: string[] = [], swap: (p: Record<string, unknown>) => unknown = () => undefined): NearRpc {
+  const had = replays.get(url);
+  if (had) return Object.assign(had, { log, swap }).rpc;
+  const me = { rpc: undefined as unknown as NearRpc, log, swap };
   const rpc: NearRpc = {
     name: url,
     query: async (params) => {
-      log.push(`${url.replace("https://", "")} ${String(params.method_name ?? params.request_type)}`);
-      const s = swap(params);
+      me.log.push(`${url.replace("https://", "")} ${String(params.method_name ?? params.request_type)}`);
+      const s = me.swap(params);
       if (s !== undefined) return s;
       const k = `${url} ${JSON.stringify(params)}`;
       const xs = REC.answers[k];
@@ -66,6 +72,8 @@ function replay(url: string, log: string[] = [], swap: (p: Record<string, unknow
       return xs[Math.min(n, xs.length - 1)];
     },
   };
+  me.rpc = rpc;
+  replays.set(url, me);
   REPLAYED.add(rpc);
   return rpc;
 }
@@ -90,17 +98,18 @@ test("each rule on mainnet's answers: never used, used by storage on the token, 
   // never used: both providers read in full (storage, tokens, account on each); money: one provider, and no more
   const log: string[] = [];
   await nearIdReader("mainnet", [replay(FAST, log), replay(DRPC, log)], { first: () => 0, tries: 1 })(REC.ids.never_used!);
-  assert.deepEqual(log, ["rpc.mainnet.fastnear.com storage_balance_of", "rpc.mainnet.fastnear.com mt_tokens_for_owner", "rpc.mainnet.fastnear.com view_account", "near.drpc.org storage_balance_of", "near.drpc.org mt_tokens_for_owner", "near.drpc.org view_account"]);
+  const FRESH = ["rpc.mainnet.fastnear.com view_account", "near.drpc.org view_account"]; // the reader's two finals (P1)
+  assert.deepEqual(log, [...FRESH, "rpc.mainnet.fastnear.com storage_balance_of", "rpc.mainnet.fastnear.com mt_tokens_for_owner", "rpc.mainnet.fastnear.com view_account", "near.drpc.org storage_balance_of", "near.drpc.org mt_tokens_for_owner", "near.drpc.org view_account"]);
   log.length = 0;
   await nearIdReader("mainnet", [replay(FAST, log), replay(DRPC, log)], { first: () => 1, tries: 1 })(REC.ids.money_usdc!);
-  assert.deepEqual(log, ["near.drpc.org storage_balance_of", "near.drpc.org ft_balance_of"]);
+  assert.deepEqual(log, [...FRESH, "near.drpc.org storage_balance_of", "near.drpc.org ft_balance_of"]);
 });
 
 test("the intents.near branch on mainnet's answers: tokens listed above zero are money", async () => {
   // never_used's token views and account, with money_intents's real intents.near answers in place of its own
   const u = REC.ids.never_used!;
   const intents = (url: string) => (p: Record<string, unknown>) => {
-    if (p.account_id !== "intents.near") return undefined;
+    if (p.account_id !== "intents.near" || p.request_type === "view_account") return undefined; // the reader's finals are their own
     assert.deepEqual(argsOf(p).account_id, u);
     const rec = REC.intents[url]!;
     // recorded at their own block: served as of the block asked, as the reader pins every view of an id to one
@@ -281,8 +290,8 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
     const liar = chain(FAST, [950, 1000]), honest = chain(DRPC, [1000]);
     const pass = await openRestorePass("mainnet", [liar, honest], { sleep: noSleep, tries: 1 });
     assert.equal(pass.h, 1000);
-    assert.equal(await idReaderAt("mainnet", [liar, honest], pass, { first: () => f, sleep: noSleep, tries: 1 })(U1), "money");
-    assert.equal(await balanceAt("mainnet", [liar, honest], pass, { first: () => f, sleep: noSleep, tries: 1 })("usdc", U1), 9n);
+    assert.equal(await (await idReaderAt("mainnet", [liar, honest], pass, { first: () => f, sleep: noSleep, tries: 1 }))(U1), "money");
+    assert.equal(await (await balanceAt("mainnet", [liar, honest], pass, { first: () => f, sleep: noSleep, tries: 1 }))("usdc", U1), 9n);
   }
   // a liar's high final (1050) the honest one never reaches: refused after PASS_TRIES re-reads, PASS_WAIT_MS apart
   assert.equal(PASS_TRIES, 10);
@@ -306,6 +315,52 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
   const a = chain(FAST, [1000]), b = chain(DRPC, [1000]);
   assert.throws(() => idReaderAt("mainnet", [a, b], { network: "mainnet", rpcs: [FAST, DRPC], h: 800, hash: hashOf(800) }), /not one openRestorePass opened/);
   assert.throws(() => balanceAt("mainnet", [b, a], lag), /opened on other RPCs/);
+});
+
+// review P1 and P2 (the reviewer's probe3): a pass at 1000, money landing at 1100, the chain at 1700. A reader built on
+// the old pass would read the chain before the money with nothing erroring until the providers drop block 1000; a scan
+// that exists to see money after a height opens its own pass above it; a pass holds its two providers by identity.
+test("a stale pass is refused; a fresh one reads money; the second scan's and the re-reads' passes are above their heights; providers by identity", async () => {
+  let tip = 1000;
+  const chain = (url: string): NearRpc => ({
+    name: url,
+    query: async (p) => {
+      const h = p.finality === "final" ? tip : heightOf(p);
+      if (p.account_id === "intents.near" && p.request_type === "view_account") return { jsonrpc: "2.0", result: { amount: "1", block_height: h, block_hash: hashOf(h) } };
+      const a = answer(h >= 1100 ? W({ [U1]: { usdc: 9n, storage: true } }) : W({}), p) as { result?: Record<string, unknown> };
+      if (a.result) Object.assign(a.result, { block_height: h, block_hash: hashOf(h) });
+      return a;
+    },
+  });
+  const rpcs = [chain(FAST), chain(DRPC)] as const;
+  const o = { sleep: noSleep, tries: 1 };
+  const old = await openRestorePass("mainnet", rpcs, o);
+  assert.equal(old.h, 1000);
+  tip = 1700;
+  const stale = new RegExp(`^Error: the pass at block 1000 is stale: the RPCs' finals are at 1700 and 1700, over 120 blocks past it; open a fresh pass$`);
+  await assert.rejects(idReaderAt("mainnet", rpcs, old, { ...o, first: () => 0 }), stale);
+  await assert.rejects(balanceAt("mainnet", rpcs, old, { ...o, first: () => 0 }), stale);
+  const now = await openRestorePass("mainnet", rpcs, o);
+  assert.equal(await (await idReaderAt("mainnet", rpcs, now, { ...o, first: () => 0 }))(U1), "money");
+  assert.equal(await (await balanceAt("mainnet", rpcs, now, { ...o, first: () => 0 }))("usdc", U1), 9n);
+  // 120 blocks past the pass is still fresh; 121 is not
+  tip = 1820;
+  await idReaderAt("mainnet", rpcs, now, o);
+  tip = 1821;
+  await assert.rejects(idReaderAt("mainnet", rpcs, now, o), /the pass at block 1700 is stale/);
+  // the second scan: its pass must be above secondScanBoundHeight (restore finals 1000 and 990: 1000 + 600 + 1 = 1601)
+  tip = 1601;
+  await assert.rejects(openSecondScanPass("mainnet", rpcs, { heights: [1000, 990] }, o), /^Error: the pass at block 1601 is not past block 1601; read again once the chain is past it$/);
+  tip = 1602;
+  assert.equal((await openSecondScanPass("mainnet", rpcs, { heights: [1000, 990] }, o)).h, 1602);
+  // the open's re-reads: their pass must be above the restore's
+  tip = 1000;
+  await assert.rejects(openRereadPass("mainnet", rpcs, old, o), /the pass at block 1000 is not past block 1000/);
+  tip = 1001;
+  assert.equal((await openRereadPass("mainnet", rpcs, old, o)).h, 1001);
+  // P2: an object named as the release URL but not the one the pass was opened on is refused
+  const lookalike: NearRpc = { name: FAST, query: rpcs[0].query };
+  assert.throws(() => idReaderAt("mainnet", [lookalike, rpcs[1]], now, o), /the pass was opened on other RPCs/);
 });
 
 // ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------

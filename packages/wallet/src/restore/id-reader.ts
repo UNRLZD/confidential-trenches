@@ -28,6 +28,10 @@
 //   provider picks the block: a low final changes nothing (the floor is the higher), a high one the other cannot reach
 //   refuses the pass (a stop, never a wrong answer), and a fake hash fails the agreement. Money that lands after the
 //   pinned block is step 7's 72-h re-reads' (./wallets.ts afterRestore), as anything after the restore.
+// - A pass is used only while fresh and only on the providers it was opened on (review P1, P2): building a reader reads
+//   both finals once and refuses a pass more than VAULT_SYNC_LAG_MAX below the lower of them; a scan that exists to see
+//   money after a height opens its own pass above it (openRereadPass, arms.ts openSecondScanPass); and the pass keeps
+//   its two provider objects, matched by identity, never by name.
 // - An indexer (NearBlocks, the intents explorer) is a server's word: it may turn an id both providers see as unused
 //   into "used" (`indexer` answers true), never anything into "unused"; a failed or false answer changes nothing.
 //
@@ -83,7 +87,8 @@ type Block = { h: number; hash: string };
 type Ask = "final" | { height: number } | Block;
 /** The restore pass's one block, read and agreed on both providers by openRestorePass; only its own are taken. */
 export type RestorePass = { readonly network: NearNetwork; readonly rpcs: readonly [string, string]; readonly h: number; readonly hash: string };
-const PASSES = new WeakSet<RestorePass>();
+// each pass openRestorePass opened, with the two provider objects it was opened on (matched by identity, review P2)
+const PASSES = new WeakMap<RestorePass, readonly [NearRpc, NearRpc]>();
 
 /** The view's answer and its block, or null for an account the provider says does not exist (view_account only). */
 async function view(rpc: NearRpc, params: Obj, what: string, ask: Ask): Promise<{ v: unknown; b: Block | null }> {
@@ -149,28 +154,33 @@ function setup(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Id
       }
     }
   };
-  return { token, retried, first, sleep };
+  // one provider's block for a view of intents.near's account (the pass's finals and its block)
+  const blockOf = async (rpc: NearRpc, ask: Ask, what: string): Promise<Block> => {
+    const { b } = await retried(rpc, INTENTS_ACCOUNT, what, ask);
+    if (b === null) throw new Error(`${rpc.name}: ${what}: no block`);
+    return b;
+  };
+  return { token, retried, first, sleep, blockOf };
 }
-type Retried = ReturnType<typeof setup>["retried"];
+type Retried = (rpc: NearRpc, params: Obj, what: string, ask: Ask) => Promise<{ v: unknown; b: Block | null }>;
 const INTENTS_ACCOUNT: Obj = { request_type: "view_account", account_id: INTENTS };
 
 /**
  * Opens the restore pass (review N1's fold): both providers' finals within VAULT_SYNC_LAG_MAX, the provider behind
  * re-read until it reaches the higher (PASS_TRIES reads, PASS_WAIT_MS apart), and that block's hash read on both by its
- * height and agreed. Every id and balance read of the pass is at that block. Refused by name otherwise; a bad network,
- * pair or option throws at once.
+ * height and agreed. Every id and balance read of the pass is at that block. `after`: a pass whose block is not above
+ * it is refused (a scan that exists to see money after a height: openRereadPass, arms.ts openSecondScanPass; review
+ * P1). Refused by name otherwise; a bad network, pair or option throws at once.
  */
-export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Omit<IdReaderOpts, "indexer" | "first"> & { passTries?: number; passWaitMs?: number } = {}): Promise<RestorePass> {
-  const { retried, sleep } = setup(network, rpcs, opts);
+export type PassOpts = Omit<IdReaderOpts, "indexer" | "first"> & { passTries?: number; passWaitMs?: number; after?: number };
+export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: PassOpts = {}): Promise<RestorePass> {
+  const { sleep, blockOf } = setup(network, rpcs, opts);
+  if (opts.after !== undefined && (!Number.isSafeInteger(opts.after) || opts.after < 0)) throw new Error("after is a block height");
   const passTries = opts.passTries ?? PASS_TRIES;
   const passWait = opts.passWaitMs ?? PASS_WAIT_MS;
   if (!Number.isSafeInteger(passTries) || passTries < 1) throw new Error("passTries is a count above 0");
   if (!Number.isSafeInteger(passWait) || passWait < 0) throw new Error("passWaitMs is a time in ms");
-  const at = async (k: number, ask: Ask, what: string): Promise<Block> => {
-    const { b } = await retried(rpcs[k]!, INTENTS_ACCOUNT, what, ask);
-    if (b === null) throw new Error(`${rpcs[k]!.name}: ${what}: no block`);
-    return b;
-  };
+  const at = (k: number, ask: Ask, what: string): Promise<Block> => blockOf(rpcs[k]!, ask, what);
   return (async () => {
     const fin = await Promise.all([at(0, "final", "the pass's final"), at(1, "final", "the pass's final")]);
     if (Math.abs(fin[0].h - fin[1].h) > VAULT_SYNC_LAG_MAX) throw new Error(`the RPCs' final heights ${fin[0].h} and ${fin[1].h} are over ${VAULT_SYNC_LAG_MAX} blocks apart; the restore does not start`);
@@ -183,25 +193,42 @@ export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, N
     }
     const [x, y] = await Promise.all([at(0, { height: floor }, "the pass's block"), at(1, { height: floor }, "the pass's block")]);
     if (x.hash !== y.hash) throw new Error(`the RPCs' blocks at ${floor} differ (${x.hash}, ${y.hash}); the restore does not start`);
+    if (opts.after !== undefined && floor <= opts.after) throw new Error(`the pass at block ${floor} is not past block ${opts.after}; read again once the chain is past it`);
     const pass: RestorePass = Object.freeze({ network, rpcs: Object.freeze([rpcs[0].name, rpcs[1].name]) as readonly [string, string], h: floor, hash: x.hash });
-    PASSES.add(pass);
+    PASSES.set(pass, rpcs);
     return pass;
   })();
 }
 
-// a pass openRestorePass gave, on this network and these providers
+/** A pass for the open's step 7 re-reads (./wallets.ts afterRestore): they exist to see money after the restore's pass. */
+export function openRereadPass(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], restored: RestorePass, opts: Omit<PassOpts, "after"> = {}): Promise<RestorePass> {
+  if (!PASSES.has(restored)) throw new Error("the pass is not one openRestorePass opened");
+  return openRestorePass(network, rpcs, { ...opts, after: restored.h });
+}
+
+// a pass openRestorePass gave, on this network and these very providers (review P2: by identity, never by name)
 function pinOf(pass: RestorePass, network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): Block {
-  if (!PASSES.has(pass)) throw new Error("the pass is not one openRestorePass opened");
-  if (pass.network !== network || pass.rpcs[0] !== rpcs[0].name || pass.rpcs[1] !== rpcs[1].name) throw new Error("the pass was opened on other RPCs");
+  const own = PASSES.get(pass);
+  if (own === undefined) throw new Error("the pass is not one openRestorePass opened");
+  if (pass.network !== network || own[0] !== rpcs[0] || own[1] !== rpcs[1]) throw new Error("the pass was opened on other RPCs");
   return { h: pass.h, hash: pass.hash };
+}
+
+// review P1: a reader is built on a pass only while it is fresh: its block no more than VAULT_SYNC_LAG_MAX below the
+// lower of both providers' finals now. An old pass reads a chain from before money landed, and nothing errors until
+// the providers drop its block.
+async function fresh(pass: RestorePass, rpcs: readonly [NearRpc, NearRpc], blockOf: (rpc: NearRpc, ask: Ask, what: string) => Promise<Block>): Promise<void> {
+  const [a, b] = await Promise.all([blockOf(rpcs[0], "final", "the reader's final"), blockOf(rpcs[1], "final", "the reader's final")]);
+  if (pass.h < Math.min(a.h, b.h) - VAULT_SYNC_LAG_MAX)
+    throw new Error(`the pass at block ${pass.h} is stale: the RPCs' finals are at ${a.h} and ${b.h}, over ${VAULT_SYNC_LAG_MAX} blocks past it; open a fresh pass`);
 }
 
 /**
  * The IdReader of step 5 on the network's token and intents.near, through one FastNEAR RPC and the dRPC RPC of that
  * network (nearPairNetwork), in either order, every view at the pass's block (openRestorePass).
  */
-export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: IdReaderOpts = {}): IdReader {
-  const { token, retried, first } = setup(network, rpcs, opts);
+export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: IdReaderOpts = {}): Promise<IdReader> {
+  const { token, retried, first, blockOf } = setup(network, rpcs, opts);
   const at = pinOf(pass, network, rpcs);
 
   // the strongest answer one provider gives of U at the pass's block
@@ -216,7 +243,7 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
   };
   const RANK: Record<IdState, number> = { unused: 0, used: 1, money: 2 };
 
-  return async (u: string): Promise<IdState> => {
+  return fresh(pass, rpcs, blockOf).then((): IdReader => async (u: string): Promise<IdState> => {
     if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
     const a = first() === 0 ? 0 : 1;
     const got: (IdState | Error)[] = [];
@@ -241,7 +268,7 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
       }
     }
     return state;
-  };
+  });
 }
 
 /** What intents.near holds for an account at the pass's block: the sum of its listed tokens (0 when none is listed). */
@@ -265,8 +292,8 @@ export type NearBalanceRead = "usdc" | "near" | "intents";
  * fails; a balance above 0 on either provider is enough, and 0 only when both answer 0, so a provider that hides money
  * never makes the restore pass over it. A halt ("FiatToken: paused") fails the read.
  */
-export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: Omit<IdReaderOpts, "indexer"> = {}): (what: NearBalanceRead, account: string) => Promise<bigint> {
-  const { token, retried, first } = setup(network, rpcs, opts);
+export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: Omit<IdReaderOpts, "indexer"> = {}): Promise<(what: NearBalanceRead, account: string) => Promise<bigint>> {
+  const { token, retried, first, blockOf } = setup(network, rpcs, opts);
   const at = pinOf(pass, network, rpcs);
   const readOn = async (rpc: NearRpc, what: NearBalanceRead, a: string): Promise<bigint> => {
     if (what === "usdc") return amount((await retried(rpc, call(token, "ft_balance_of", { account_id: a }), "ft_balance_of", at)).v, `${rpc.name}: ft_balance_of`);
@@ -276,7 +303,7 @@ export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc,
     }
     return intentsSum(retried, rpc, a, at);
   };
-  return async (what: NearBalanceRead, a: string): Promise<bigint> => {
+  return fresh(pass, rpcs, blockOf).then(() => async (what: NearBalanceRead, a: string): Promise<bigint> => {
     if (what !== "usdc" && what !== "near" && what !== "intents") throw new Error(`unknown read ${String(what)}`);
     if (typeof a !== "string" || !HEX64.test(a)) throw new Error("an account is a 64-hex implicit account id");
     const x = first() === 0 ? 0 : 1;
@@ -292,5 +319,5 @@ export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc,
     // 0 only when both answered 0
     if (failed !== undefined) throw failed;
     return 0n;
-  };
+  });
 }
