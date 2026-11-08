@@ -180,6 +180,13 @@ export async function restoreDepositIds(
     const unread: LaneIds["unread"] = [];
     // failed reads since the lane's last read that showed history: margin of them ends the restore with an error
     let failed = 0;
+    // the note walk counts a used id with no note as a miss: when ids with history (or unread ids, which may have it)
+    // run on past its end, a note there was never matched, so the restore stops instead of returning fewer notes. Held
+    // each time the lane's highest moves, so a reader that keeps showing history ends the lane there, never at 2^32
+    const walked = (notes.length === 0 ? lane - RESTORE_LANES : notes[notes.length - 1]!) + RESTORE_LANES * walkGap;
+    const pastWalk = (at: number): void => {
+      if (at > walked) throw new Error(`lane ${lane}: ids with history or unread ids reach index ${at}, past the note walk's end at ${walked}; walk the lane on from there`);
+    };
     let i = lane;
     for (; i <= U32 && i <= (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin; i += RESTORE_LANES) {
       const id = depositAccount(seed64, scope, i).account;
@@ -191,17 +198,15 @@ export async function restoreDepositIds(
         unread.push({ i, id, error: why(e) });
         highest = Math.max(highest ?? i, i);
         if (++failed >= margin) throw new Error(`lane ${lane}: ${failed} id reads failed with none showing history between them (the last at index ${i}: ${why(e)}); the restore stops, to be retried`);
+        pastWalk(highest);
         continue;
       }
       if (state === "unused") continue;
       (state === "money" ? money : used).push(i);
       highest = Math.max(highest ?? i, i);
       failed = 0;
+      pastWalk(highest);
     }
-    // the note walk counts a used id with no note as a miss: when ids with history run on past its end, a note there
-    // was never matched, so the restore stops instead of returning fewer notes
-    const walked = (notes.length === 0 ? lane - RESTORE_LANES : notes[notes.length - 1]!) + RESTORE_LANES * walkGap;
-    if (highest !== null && highest > walked) throw new Error(`lane ${lane}: ids with history reach index ${highest}, past the note walk's end at ${walked}; walk the lane on from there`);
     out.push({ lane, notes, money, used, unread, highest, readTo: i - RESTORE_LANES });
   }
   return out;

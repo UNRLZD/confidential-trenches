@@ -186,8 +186,26 @@ test("step 5: ids that were used and are now empty reset the margin as money doe
   // ids with history past the note walk's end may hold notes it never matched: the restore stops
   await assert.rejects(
     restoreDepositIds(SEED, SCOPE, LANES, idReader([], [], [at(4, 0), at(4, 1), at(4, 2)]).holds, { walkGap: 2 }),
-    /lane 4: ids with history reach index 20, past the note walk's end at 12; walk the lane on from there/,
+    /lane 4: ids with history or unread ids reach index 20, past the note walk's end at 12; walk the lane on from there/,
   );
+  // history exactly at the walk's last index is inside it: no stop (lane 4 walked to 12 with walkGap 2)
+  const edge = await restoreDepositIds(SEED, SCOPE, LANES, idReader([], [], [at(4, 1)]).holds, { walkGap: 2 });
+  assert.deepEqual([edge[4]!.used, edge[4]!.highest], [[at(4, 1)], at(4, 1)]);
+});
+
+// review 2: has_public_key is true for every implicit id (D15), so a reader may answer "used" for every id: the lane's
+// highest moves with each read and its margin never comes, so the walk's end must be held as the highest moves. A run
+// still going after 3 s fails the test and every later read hangs.
+test("step 5: a reader that answers used for every id ends at the note walk's end, never toward 2^32", { timeout: 5_000 }, async () => {
+  let halted = false;
+  let reads = 0;
+  const t = setTimeout(() => (halted = true), 3_000);
+  const p = restoreDepositIds(SEED, SCOPE, LANES, () => (reads++, halted ? new Promise<IdState>(() => {}) : new Promise<IdState>((res) => setImmediate(() => res("used")))), { walkGap: 50 });
+  const r = await Promise.race([p.then(() => "ended", (e: Error) => e.message), new Promise<string>((res) => setTimeout(() => res("step 5 never ended"), 3_100))]);
+  clearTimeout(t);
+  // lane 0's last note is 16: the walk ends at 16 + 8 * 50 = 416, and the first used id past it, 424, stops the restore
+  assert.equal(r, "lane 0: ids with history or unread ids reach index 424, past the note walk's end at 416; walk the lane on from there");
+  assert.equal(reads, 54, "lane 0's ids 0 .. 424, read once each");
 });
 
 // the review's case: an RPC that keeps failing (or answering 429) moved the margin with every failure, so a lane read
@@ -212,6 +230,14 @@ test("step 5: margin id reads failed with no read showing history between them e
   const fails = new Set([at(1, 0), at(1, 1), at(1, 3), at(1, 4)].map(id));
   const got = await ends(restoreDepositIds(SEED, SCOPE, LANES, (u) => later(() => (fails.has(u) ? new Error("rpc down") : u === id(at(1, 2)) ? "money" : "unused")), { margin: 3 }));
   assert.deepEqual([got[1]!.unread.map((x) => x.i), got[1]!.money, got[1]!.highest, got[1]!.readTo], [[at(1, 0), at(1, 1), at(1, 3), at(1, 4)], [at(1, 2)], at(1, 4), at(1, 7)]);
+  // review 2's R27: a read of a never-used id between failures does not restart the count, so a reader that fails every
+  // other read ends at its margin-th failure (41 reads), never toward 2^32
+  let alt = 0;
+  await assert.rejects(
+    ends(restoreDepositIds(SEED, SCOPE, LANES, () => later(() => (alt++ % 2 === 0 ? new Error("HTTP 429") : "unused")))),
+    new RegExp(`lane 0: ${DEPOSIT_ID_MARGIN} id reads failed with none showing history between them \\(the last at index ${at(0, 2 * (DEPOSIT_ID_MARGIN - 1))}: HTTP 429\\)`),
+  );
+  assert.equal(alt, 2 * DEPOSIT_ID_MARGIN - 1, "lane 0 stops at its 21st failed read, the 41st read");
 });
 
 test("step 7: the new lane's counter goes past the lost store's possible index, and every open re-reads each lane to its highest plus two for 72 h", async () => {
