@@ -1808,8 +1808,8 @@ type Venue = ReturnType<typeof venue>;
 /** How a route's price counts, the one rule for the buy and the sell (card evm-quote-exec-sim): a route with no hook,
  *  or only hooks of launchpads the venue lists in their own shapes (evmHookListed), keeps the quoter's price. A route
  *  through any other hook may be priced by a hook that lets only the quoter trade (review of edb4dbb, F4), so where the
- *  chain pins a sell delegate and the helper's sell sender it counts only once an eth_call of the exact trade from W
- *  executes it at that price, sent as the sale is sent (simmedSells: from the sender, with the sale's gas and fees, so a
+ *  chain pins a sell delegate and the helper's sell sender it counts at no more than an eth_call of the exact trade from
+ *  W pays, sent as the sale is sent (simmedSells: from the sender, with the sale's gas and fees, so a
  *  hook cannot tell the sim from the sale by tx.gasprice, tx.origin, msg.sender or its gas; review of the exec sim,
  *  HIGH 1) ("sim"); where it pins either not (none of the four since card pool-evm-deploy-mainnet pinned the mainnets'
  *  delegates), or where the pinned sender cannot pay for the sim (simmedSells: the sim is skipped, never the route), it
@@ -1832,21 +1832,29 @@ const designator = (delegate: string) => "0xef0100" + lower(delegate).slice(2);
 /** A JSON-RPC quantity: 0x and its hex digits, no leading zero. */
 const qty = (v: bigint) => "0x" + v.toString(16);
 
-/** The sell routes in `routes` whose price holds against an eth_call of W's own sell through them (simRule "sim") at
- *  the agreed block on both providers: each such route above `floor` is simmed once, with minOut its price; a route
- *  whose sim reverts is dropped. W's nonce is read at the block; each sim is its own eth_call (one call's state would
- *  carry into the next). Each call, the nonce read too, is sent as the helper sends the sale: from the pinned sell
- *  sender (tx.origin and W's msg.sender), with the sale's gas less its authorization's intrinsic cost (the gas the
- *  sale's execution is given), maxPriorityFeePerGas the sale's tip and maxFeePerGas the agreed block's base fee plus
- *  it (tx.gasprice and BASEFEE as the sale's at that base fee). The sender's balance is its own at the block, never
- *  overridden: where the sender is too low to pay the sim's gas the sim is skipped ("skipped") and every route stays at
- *  what routeSet counts it for, the lower of its quote with the hook replaced and as it is ("keep-min", as on a chain
- *  that pins no sender), so no route is dropped for the sender's funding: dropping the token's real market behind such
- *  a hook let a seeded pool beside it set the price W signs (card evm-sell-unfunded-sim-keeps-route; review a42f9c16,
- *  Low 1). `sim`: "ran" where the sim ran, "none" where no route needed it. */
+/** The sell routes in `routes` as W's own sell through them pays (simRule "sim"), from an eth_call of it at the agreed
+ *  block on both providers: each such route above `floor` is simmed once, with minOut one wei above the floor, and
+ *  counts at the lower of its keep-min value and what W gains in the sim (SIM_POOL_CODE returns it); one whose sim
+ *  reverts, W gaining no more than the floor, is dropped. So a hook that lets only the quoter trade is dropped and
+ *  freezes no sell, and a hook that pays W's sale less than its quotes counts at what W gets, never dropped for any
+ *  shortfall: dropping the token's real market let a seeded pool beside it set the price W signs (card
+ *  evm-sell-unfunded-sim-keeps-route; review of 1c31d81a, M1). W's nonce is read at the block; each sim is its own
+ *  eth_call (one call's state would carry into the next). Each call, the nonce read too, is sent as the helper sends the
+ *  sale: from the pinned sell sender (tx.origin and W's msg.sender), with the sale's gas less its authorization's
+ *  intrinsic cost (the gas the sale's execution is given), maxPriorityFeePerGas the sale's tip and maxFeePerGas the
+ *  agreed block's base fee plus it (tx.gasprice and BASEFEE as the sale's at that base fee). The sender's balance is
+ *  its own at the block, never overridden: where it is too low to pay the sim's gas, or its read does not answer, the
+ *  sim is skipped and every route stays at what routeSet counts it for, the lower of its quote with the hook replaced
+ *  and as it is ("keep-min"), as on a chain that pins no sender, so no route is dropped for the sender's funding
+ *  (review a42f9c16, Low 1). `sim`: "ran" where the sim ran, "skipped" where a route through such a hook above the
+ *  floor was priced without it (the sender too low, or no sell delegate or sender pinned), "none" where no route
+ *  needed it. */
 async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate" | "sellSender">, rpcs: readonly EvmRpc[], block: Block, w: string, token: string, amountIn: bigint, routes: Filled[], floor: bigint, signSim: EvmPoolSellQuoteRequest["signSim"]): Promise<{ routes: Filled[]; sim: EvmSellSimRun }> {
-  const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) === "sim");
-  if (toSim.length === 0) return { routes, sim: "none" };
+  const hooked = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) !== "quoter");
+  if (hooked.length === 0) return { routes, sim: "none" };
+  // a chain that pins no sell delegate or sender sims nothing: each such route counts at keep-min, unsimmed
+  const toSim = hooked.filter((r) => simRule(chain, r.route, pins) === "sim");
+  if (toSim.length === 0) return { routes, sim: "skipped" };
   if (typeof signSim !== "function") return refuse("bad_request", "a route through a hook the venue does not list needs a sim sell W signs (signSim)");
   if (block.baseFeePerGas === null) return refuse("rpc_error", `block ${block.number} has no base fee: the sim cannot be priced as the sale`);
   const [delegate, sender] = [pins.sellDelegate, pins.sellSender!];
@@ -1865,13 +1873,23 @@ async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate"
   if (n!.kind !== "out") return refuse("no_quote", "W's sell nonce does not read through the sell delegate");
   const reads: Read[] = toSim.map((r) => {
     const s = evmSellRouteOf(r.route) as EvmV4SellRoute;
-    const sim = evmPoolBuildSimSellUnpinned(chain, { w, token, amount: amountIn, hops: s.hops, minOut: r.amountOut, nonce: n!.amountOut, deadline: block.timestamp });
+    const sim = evmPoolBuildSimSellUnpinned(chain, { w, token, amount: amountIn, hops: s.hops, minOut: floor + 1n, nonce: n!.amountOut, deadline: block.timestamp });
     const sig = signSim(sim, block.timestamp);
     return { to: lower(w), data: evmSellCallData(sim, 0n, sig), override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };
   });
   const ans = await readBoth(rpcs, block.hash, reads);
-  const failed = new Set(toSim.filter((_, i) => { const a = ans[i]!; return a.kind !== "out" || a.amountOut < toSim[i]!.amountOut; }));
-  return { routes: routes.filter((r) => !failed.has(r)), sim: "ran" };
+  const kept: Filled[] = [];
+  for (const r of routes) {
+    const i = toSim.indexOf(r);
+    if (i < 0) kept.push(r);
+    else {
+      // what W gains in the sim, at most the route's keep-min value; a sim that reverts or gains no more than the floor
+      // (the sim's own minOut refuses it) drops the route
+      const a = ans[i]!;
+      if (a.kind === "out" && a.amountOut > floor) kept.push(a.amountOut < r.amountOut ? { route: r.route, amountOut: a.amountOut } : r);
+    }
+  }
+  return { routes: kept, sim: "ran" };
 }
 
 /**
@@ -2595,9 +2613,10 @@ export type EvmPoolSellQuote = {
    *  the sell builder refuses release_in_flight while any is pending. */
   readonly releases: EvmSellReleases;
   /** What W's sim of the sale did (card evm-sell-unfunded-sim-keeps-route): "ran" where a route through a hook the
-   *  venue does not list needed it and it ran; "skipped" where the pinned sell sender's balance at the block could not
-   *  pay its gas, so each such route counts at the lower of its quote with the hook replaced and as it is (keep-min),
-   *  as on a chain that pins no sender; "none" where no route needed it. */
+   *  venue does not list needed it and it ran (each such route counting at no more than W's gain in it); "skipped"
+   *  where such a route was priced without it, at the lower of its quote with the hook replaced and as it is
+   *  (keep-min): the pinned sell sender's balance at the block could not pay its gas, or did not read, or the chain
+   *  pins no sell delegate or sender; "none" where no route needed it. */
   readonly sim: EvmSellSimRun;
 };
 
@@ -2707,7 +2726,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const { routes, sim } = await simmedSells(chain, v, rpcs, block, lower(w), t, amountIn, filled, takes?.amountOut ?? 0n, req.signSim);
   // The pick: the best route the sell builder takes through listed pools. The reference: the best of every route,
   // the sell builder's or not (a pool of a hook not listed, priced at the lower of its quote with the hook replaced and
-  // as it is, or held by W's sim). A pick more than the slippage below the reference is refused, so a seeded pool is
+  // as it is, and at no more than W's sim pays). A pick more than the slippage below the reference is refused, so a seeded pool is
   // never picked over the token's real market (review of evm-sell-device-quote, H1), unless the reference's own route
   // can be the pick (below)
   const reference = bestOf(routes);
