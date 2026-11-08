@@ -132,7 +132,14 @@ function setup(o: { outcome?: (a: Extract<RelayerAction, { kind: "call" }>) => "
   const dir = o.dir ?? mkdtempSync(join(tmpdir(), "intents-"));
   const store = createIntentsStore(dir, undefined, () => NOW);
   const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW, ...o.chain };
-  const r = relayer(o.outcome ?? (() => "ran"));
+  // by default the chain is honest: a storage_deposit that ran registers its account (a lying lookup is a test's own)
+  const r = relayer(
+    o.outcome ??
+      ((a) => {
+        if (a.method === "storage_deposit") chain.storage.set(`${a.receiver}/${JSON.parse(a.args).account_id}`, "registered");
+        return "ran";
+      }),
+  );
   // the helper's clock (a test moves it); the token watch holds while the chain's USDC is paused
   const clock = { ms: NOW };
   const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => chain.paused === true, now: () => clock.ms, resolveEveryMs: 1 });
@@ -525,7 +532,10 @@ test("H1: at the intents floor (1 NEAR above the deposits') /v1/intents answers 
 test("L3: a registration that takes until the intent's deadline: expired, and no execute_intents goes out", async () => {
   const s = setup({
     outcome: (a) => {
-      if (a.method === "storage_deposit") s.chain.finalMs = Date.parse("2026-11-07T18:02:00.000Z"); // the chain reached the deadline meanwhile
+      if (a.method === "storage_deposit") {
+        s.chain.finalMs = Date.parse("2026-11-07T18:02:00.000Z"); // the chain reached the deadline meanwhile
+        s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+      }
       return "ran";
     },
   });
@@ -655,7 +665,7 @@ test("U registered first: the first intent of an unregistered U sends storage_de
   assert.equal(reg.receiver, USDC);
   assert.deepEqual(JSON.parse(reg.args), { account_id: u, registration_only: true });
   assert.equal(reg.deposit, REGISTRATION_YOCTO);
-  assert.equal(s.store.signer(u).own ?? null, null, "cleared once it reads registered on both providers");
+  assert.equal(s.store.signer(u).own?.read, true, "kept as read once it reads registered on both providers (review PROBE-1, PROBE-4)");
   assert.equal(s.store.owed(u), null, "nothing left owed");
   assert.equal(s.store.signer(u).registration, null, "its own is not the one paid receiver");
   // the second intent, from a restarted helper (no memory of this process): the chain reads U registered
@@ -888,7 +898,7 @@ test("F4: a registration read as ran that does not read registered on both provi
   clock.ms += 2 * SWEEP_MS;
   assert.equal(await c2.registerSeen(u), "registered");
   assert.deepEqual(r2.sent.map((x) => x.action.method), ["storage_deposit"], "one new one, after its backoff step");
-  assert.equal(store.signer(u).own ?? null, null);
+  assert.equal(store.signer(u).own?.read, true);
   assert.equal(store.owed(u), null);
   store.close();
 });
@@ -921,7 +931,7 @@ test("M14: after a restart, U's own registration whose tx is not read yet (unkno
 // the reviewer's probe (delta review F1), ported: each registration runs, then U's owner unregisters it (or a provider
 // reports a final behind it), so U reads null on both after every landing
 test("delta review F1: U's owner unregisters U after each landing: over 60 minutes of sweeps at most 5 storage_deposits, each one backoff step after the last, never a strike", async () => {
-  const s = setup(); // every storage_deposit runs; U's storage stays null
+  const s = setup({ outcome: () => "ran" }); // every storage_deposit runs; U's storage stays null
   const u = hex();
   await seeSigner(s.store, u);
   s.chain.storage.set(`${USDC}/${u}`, "null");
@@ -941,7 +951,7 @@ test("delta review F1: U's owner unregisters U after each landing: over 60 minut
 });
 
 test("H1 (moving clock): a U that never reads registered is paid once per backoff step, whatever it sends: no intent carried, at most 5 storage_deposits in 60 minutes", async () => {
-  const s = setup();
+  const s = setup({ outcome: () => "ran" }); // every storage_deposit's lookup reads ran; U's storage stays null
   const u = hex();
   await seeSigner(s.store, u);
   s.chain.storage.set(`${USDC}/${u}`, "null");
@@ -1168,5 +1178,198 @@ test("P1 (hold, guard): a hold that starts between the endpoint's reads and the 
   assert.equal(s.r.sent.length, 1, "nothing signed while held");
   assert.equal(s.store.signer(u).registration, null, "the claim freed");
   assert.equal(s.store.signer(u).sent ?? 0, 0, "its slot given back: nothing was signed");
+  s.store.close();
+});
+
+// ---- the fresh review of a9e9a898 (its probes PROBE-1 to PROBE-7, ported; and the survivors it named) ----
+const gateP = () => {
+  let open!: () => void;
+  const p = new Promise<void>((ok) => (open = ok));
+  return { p, open };
+};
+
+test("PROBE-1: a registerSeen waiting in its hold read while a second one registers U end to end never pays a second storage_deposit", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const r = relayer(registersOn(() => chain));
+  const g = gateP();
+  let heldCalls = 0;
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => (++heldCalls === 1 && (await g.p), false), now: () => NOW, resolveEveryMs: 1 });
+  const u = hex();
+  await seeSigner(store, u);
+  chain.storage.set(`${USDC}/${u}`, "null");
+  const b = carry.registerSeen(u); // poll 1: its token-watch read answers late
+  for (let i = 0; i < 100 && heldCalls === 0; i++) await new Promise((ok) => setTimeout(ok, 5));
+  assert.equal(heldCalls, 1, "b waits in its hold read");
+  assert.equal(await carry.registerSeen(u), "registered"); // poll 2 registers U end to end
+  g.open();
+  assert.equal(await b, "registered");
+  assert.equal(r.sent.filter((x) => x.action.method === "storage_deposit").length, 1);
+  store.close();
+});
+
+test("PROBE-2: a relayer send that throws before its signing is no failed try: no backoff, upstream, nothing signed", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  s.r.send = (async () => {
+    throw new Error("relayer: the gas account's key is not a full-access key at final");
+  }) as typeof s.r.send;
+  const codes = new Set<string>();
+  for (let k = 0; k < 12; k++) {
+    s.clock.ms = Math.max(s.clock.ms, s.store.owed(u)?.next_ms ?? 0);
+    codes.add(await s.carry.registerSeen(u));
+  }
+  assert.equal(s.r.sent.length, 0, "nothing ever signed");
+  assert.deepEqual(s.store.owed(u), { signer: u, tries: 0, next_ms: 0 }, "no backoff charged");
+  assert.deepEqual([...codes], ["upstream"]);
+  assert.equal(s.store.signer(u).own ?? null, null, "the claim freed");
+  s.store.close();
+});
+
+test("PROBE-3: the slot kept for a receiver registration's intent is reserved at its claim: a concurrent intent of the signer is signer_cap, the paid registration's intent is carried", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  for (let k = 0; k < 2; k++) {
+    assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("alice.near")))), "sent");
+    await s.carry.idle();
+  }
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const x = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  for (let i = 0; i < 100 && !s.r.sent.some((t) => t.action.method === "storage_deposit"); i++) await new Promise((ok) => setTimeout(ok, 5));
+  const y = await s.carry.carry(signedIntent(u, withdraw("alice.near")));
+  assert.equal(code(y), "signer_cap", "the last slot is the registration's intent's");
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  s.r.release();
+  assert.equal(code(await x), "sent", "the paid registration's own intent");
+  await s.carry.idle();
+  const m = s.r.sent.map((t) => t.action.method);
+  assert.deepEqual([m.filter((t) => t === "storage_deposit").length, m.filter((t) => t === "execute_intents").length], [1, 3]);
+  assert.equal(s.store.signer(u).sent, INTENTS_SENDS_MAX);
+  s.store.close();
+});
+
+test("PROBE-4: U read registered once is never paid again, after a restart too, even when it later reads unregistered", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const s = setup({ dir });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  s.chain.storage.set(`${USDC}/${u}`, "null"); // storage_unregister by U's owner
+  assert.equal(await s.carry.registerSeen(u), "registered", "same process: never read again");
+  s.store.close();
+  const t = setup({ dir, chain: { storage: s.chain.storage } });
+  assert.equal(await t.carry.registerSeen(u), "registered");
+  await t.carry.sweep();
+  assert.equal(t.r.sent.length, 0, "after a restart: nothing paid");
+  t.store.close();
+});
+
+test("PROBE-5: a crash between a slot's take and its signing never leaks the slot: a receiver claim's and an intent's are given back", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const s = setup({ dir });
+  const u = hex();
+  await seeSigner(s.store, u);
+  // what register() and step 11 write before relayer.send (the process then dies): a receiver claim with its two
+  // slots and no tx, and an intent's slot in `taking`
+  s.store.putSigner({ ...s.store.signer(u), sent: 3, taking: [nonce()], registration: { receiver: "fresh.near", state: "pending", tx: null, reserved: true } });
+  s.store.close();
+  const t = setup({ dir });
+  t.chain.storage.set(`${USDC}/fresh.near`, "null");
+  assert.equal(code(await t.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  await t.carry.idle();
+  assert.equal(t.store.signer(u).sent, t.r.sent.length, `sent ${t.store.signer(u).sent} for ${t.r.sent.length} signed`);
+  assert.deepEqual(t.store.signer(u).taking, []);
+  t.store.close();
+});
+
+test("PROBE-6: a U registered by anyone while its backoff runs reads so and its intent is carried; nothing is paid", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "failed" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.store.owe({ signer: u, tries: 10, next_ms: NOW + 12 * 3_600_000 });
+  s.chain.storage.set(`${USDC}/${u}`, "registered"); // registered by another payer
+  const to = await moveQuote(s.store, { refundTo: u, recipient: u });
+  assert.equal(code(await s.carry.carry(signedIntent(u, transfer(to)))), "sent");
+  await s.carry.idle();
+  assert.deepEqual(s.r.sent.map((x) => x.action.method), ["execute_intents"]);
+  assert.equal(s.store.owed(u), null, "owed no more");
+  s.store.close();
+});
+
+test("PROBE-7: a receiver registration one lookup reads ran, while the receiver reads unregistered on both, is no landing: no intent goes to it", async () => {
+  const s = setup({ outcome: () => "ran" }); // every lookup reads ran; the token never registers anyone
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  await s.carry.idle();
+  assert.deepEqual(s.r.sent.map((x) => x.action.method), ["storage_deposit"], "no execute_intents");
+  assert.equal(s.store.signer(u).registration?.state, "pending", "never landed on one lookup's word");
+  // past the settle time still unregistered: a failure, the reserved slot back, no strike; free for a new one
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"), { deadline: "2026-11-07T18:10:00.000Z" }))), "registration_failed");
+  assert.deepEqual([s.store.signer(u).registration, s.store.signer(u).sent, s.store.signer(u).failed], [null, 1, 0]);
+  s.store.close();
+});
+
+test("survivor pins: a held receiver registration is refused before the balance read; a token watch that throws holds", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  let balances = 0;
+  const balance = s.r.balance;
+  s.r.balance = async () => (balances++, balance());
+  s.chain.paused = true;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  assert.deepEqual([balances, s.r.sent.length], [0, 0], "held: no balance read, nothing signed");
+  s.store.close();
+  // a hold read that throws holds: nothing signed, no backoff
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const r = relayer(registersOn(() => chain));
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => { throw new Error("watch down"); }, now: () => NOW, resolveEveryMs: 1 });
+  const w = hex();
+  await seeSigner(store, w);
+  chain.storage.set(`${USDC}/${w}`, "null");
+  assert.equal(await carry.registerSeen(w), "in_flight");
+  assert.equal(r.sent.length, 0);
+  assert.deepEqual(store.owed(w), { signer: w, tries: 0, next_ms: 0 });
+  store.close();
+});
+
+test("survivor pins: two intents at once to one unregistered receiver pay one storage_deposit; an ft_withdraw of another token to U itself is a receiver's (9b), never U's own", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const g = gateP();
+  const send = s.r.send;
+  let first = true;
+  s.r.send = async (...a) => {
+    if (first) {
+      first = false;
+      await g.p; // the first registration waits in the relayer's queue, its claim written, nothing signed yet
+    }
+    return send(...a);
+  };
+  const one = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  for (let i = 0; i < 100 && s.store.signer(u).registration === null; i++) await new Promise((ok) => setTimeout(ok, 5));
+  const two = await s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  assert.equal(code(two), "in_flight", "the second waits on the first's claim");
+  g.open();
+  assert.equal(code(await one), "sent");
+  await s.carry.idle();
+  assert.equal(s.r.sent.filter((x) => x.action.method === "storage_deposit").length, 1);
+  // another token to U itself: U's own on USDC does not cover it; that token's registration is not ours to pay
+  s.chain.storage.set(`other.near/${u}`, "null");
+  const a = await s.carry.carry(signedIntent(u, { intent: "ft_withdraw", token: "other.near", receiver_id: u, amount: "5" }));
+  assert.equal(code(a), "receiver_not_registered");
   s.store.close();
 });

@@ -41,16 +41,23 @@ export type QuoteRecord = {
 /** Failed sends that strike a signer on this endpoint (bind/send.ts MAX_FAILED_SENDS, R3's three). */
 export const STRUCK_AT = 3;
 
-/** The registration the relayer pays a signer, once: pending while its storage_deposit is out, landed once it ran. */
-export type Registration = { receiver: string; state: "pending" | "landed"; tx: TxRef | null; at?: number };
+/**
+ * The registration the relayer pays a signer, once: pending while its storage_deposit is out, landed once it ran and
+ * reads registered on both providers. `at`: when its outcome first read ran. `reserved` (a receiver's): the slot its
+ * claim holds for the intent it is paid for, under carry.ts INTENTS_SENDS_MAX, until that intent spends it. `read` (the
+ * signer's own): read registered on both providers, so never paid again, a restart included.
+ */
+export type Registration = { receiver: string; state: "pending" | "landed"; tx: TxRef | null; at?: number; reserved?: boolean; read?: boolean };
 /** A signer still owed its own registration on USDC (card intents-u-registered-first, review F2): written at first
  *  sight, kept apart from the quote records (never swept with them), removed once it reads registered. `tries`: its
  *  failed registrations; `next_ms`: when the next may go (carry.ts SWEEP_MS backoff). */
 export type OwedRecord = { signer: string; tries: number; next_ms: number };
-/** `sent`: the execute_intents and receiver registrations this endpoint signed for the signer, landed or not (carry.ts
- *  signer_cap). `own`: the
+/** `sent`: the slots taken under carry.ts INTENTS_SENDS_MAX: the execute_intents and receiver registrations this
+ *  endpoint signed for the signer, landed or not, a receiver registration's reserved slot, and `taking`'s. `taking`: the
+ *  nonces of intents whose slot is taken and whose transaction is not signed yet; one a process left there (it stopped
+ *  before the signing) is given back (review PROBE-5). `own`: the
  *  signer's own registration on the release's USDC (card intents-u-registered-first), its receiver the signer itself. */
-export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number; own?: Registration | null };
+export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number; own?: Registration | null; taking?: string[] };
 
 export type IntentsStore = {
   quote(depositAddress: string): QuoteRecord | null;
