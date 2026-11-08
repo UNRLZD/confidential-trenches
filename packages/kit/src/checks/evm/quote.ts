@@ -504,13 +504,15 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   ];
   const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
   // Each batch is agreed on its own (card evm-buy-quote-ends-on-node): its two answers from the first two providers,
-  // and a spare asked only for a batch whose own answer is late or failed, timed from the moment its request left the
-  // provider's gate. Agreed a round at a time, one slow batch sent the whole round to the next spare: a cold Robinhood
-  // WETH-USDG quote asked each of its 4,130 reads 5.3 times on average over five providers and ran past 50 s
-  // (2026-11-08 11:0xZ). No batch goes twice to one provider, and every answer used is one two providers gave.
-  // Spares for late answers are budgeted, as a retry budget is (Finagle's RetryBudget, gRPC's retry throttling): two,
-  // plus one per five batches, so a provider slowed by the quote's own load is not handed the load again; a batch
-  // whose answer failed or differs asks its spare whatever the budget.
+  // and the next provider asked only for a batch whose own answer is late or failed. Agreed a round at a time, one slow
+  // batch sent the whole round to the next spare: a cold Robinhood WETH-USDG quote asked each of its 4,130 reads 5.3
+  // times on average over five providers and ran past 50 s (2026-11-08 11:0xZ). No batch goes twice to one provider,
+  // and every answer used is one two providers gave. A late batch still queued behind a stalled provider's requests
+  // moves to the next provider unsent (agreeing's `moving`), so a provider that stops answering holds no batch; one
+  // queued behind a provider that answers waits its turn. Spares for answers sent and late are budgeted, as a retry
+  // budget is (Finagle's RetryBudget, gRPC's retry throttling): two, plus one per five batches, so a provider slowed by
+  // the quote's own load is not handed the load again; a batch whose answer failed or differs asks the next provider
+  // whatever the budget.
   const n = Math.ceil(calls.length / CALLS_PER_BATCH);
   let spares = 2 + Math.ceil(n / 5);
   const late = () => spares > 0 && (spares--, true);
@@ -519,8 +521,8 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     Array.from({ length: n }, async (_, n) => {
       const c0 = n * CALLS_PER_BATCH;
       const batch = calls.slice(c0, c0 + CALLS_PER_BATCH);
-      const answersOf = async (rpc: EvmRpc, p: number, sent: () => void): Promise<[number, Answer][]> => {
-        const b = await askAt(rpc, batch, sent);
+      const answersOf = async (rpc: EvmRpc, p: number, gate: Gated): Promise<[number, Answer][]> => {
+        const b = await askAt(rpc, batch, gate);
         return batch.flatMap((_, j) => decode[c0 + j]!(b[j], `provider ${p + 1}`));
       };
       const { a } = await agreeing(
@@ -554,16 +556,17 @@ export const EVM_HEDGE_MS = 400;
 const HOLD = new WeakMap<EvmRpc, () => void>();
 function agreeing<T>(
   rpcs: readonly EvmRpc[],
-  one: (rpc: EvmRpc, k: number, sent: () => void) => Promise<T>,
+  one: (rpc: EvmRpc, k: number, gate: Gated) => Promise<T>,
   same: (a: T, b: T) => boolean,
   differ: (a: T, b: T) => never,
   vote = true,
   // which answers that differ from the two used are held (by default, any that is `same` as neither)
   held: (x: T, a: T, b: T) => boolean = (x, a, b) => !same(a, x) && !same(b, x),
-  // `one` calls its third argument when its request leaves the provider's gate: a request is late only from then, so a
-  // request queued behind its provider's others is never hedged for the queue (card evm-buy-quote-ends-on-node)
-  timedFromSend = false,
-  // whether a spare may be asked for an answer that is late (not one that failed or differs): false spends no spare
+  // Spares moved, not added (card evm-buy-quote-ends-on-node): a late request still queued in its provider's gate
+  // behind others moves to the next provider, never sent to its own, where that provider is stalled (gated: requests
+  // out, none answered for 4 x EVM_HEDGE_MS), and waits its turn where the provider answers; a late request already sent
+  // asks a spare only where `late` gives one (the caller's budget). `one` passes `gate` to the provider's call.
+  moving = false,
   late?: () => boolean,
 ): Promise<{ a: T; b: T; i: number; j: number }> {
   const list = [...rpcs];
@@ -610,26 +613,39 @@ function agreeing<T>(
       resolve({ a: g.v, b: h.v, i: g.k, j: h.k });
     };
     const t0: number[] = [];
+    // each request's state in `moving`: sent out of its gate, moved before it was, or settled
+    const sentK: boolean[] = [];
+    const movedK: boolean[] = [];
+    const settledK: boolean[] = [];
     let first = -1;
+    const fire = () => {
+      if (done) return;
+      if (!moving) return start();
+      const ks = Array.from({ length: started }, (_, n) => started - 1 - n).filter((n) => !sentK[n] && !movedK[n] && !settledK[n]);
+      const stuck = ks.find((n) => STALLED.get(list[n]!)?.() === true);
+      if (stuck !== undefined) {
+        movedK[stuck] = true;
+        return start();
+      }
+      if (ks.length > 0) return arm();
+      if (late?.() !== false) start();
+    };
     const arm = () => {
       clearTimeout(timer);
       if (started < list.length) {
-        timer = setTimeout(() => (done || late?.() === false ? undefined : start()), first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
+        timer = setTimeout(fire, first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
         (timer as { unref?: () => void }).unref?.();
       }
     };
     const start = () => {
       if (done || started >= list.length) return;
       const k = started++;
-      if (!timedFromSend) t0[k] = performance.now();
-      const sent = () => {
-        if (!timedFromSend || t0[k] !== undefined) return;
-        t0[k] = performance.now();
-        if (!done && started >= 2) arm();
-      };
-      one(list[k]!, k, sent).then(
+      t0[k] = performance.now();
+      const gate: Gated = { sent: () => void (sentK[k] = true), moved: () => movedK[k] === true };
+      one(list[k]!, k, gate).then(
         (v) => {
           settled++;
+          settledK[k] = true;
           if (done) return;
           const now = { k, v };
           got.push(now);
@@ -649,6 +665,9 @@ function agreeing<T>(
         },
         (e) => {
           settled++;
+          settledK[k] = true;
+          // a request moved to the next provider is no failure: the next was asked in its place
+          if (movedK[k]) return done ? undefined : end();
           fails++;
           failed ??= { e };
           if (done) return;
@@ -656,31 +675,38 @@ function agreeing<T>(
           end();
         },
       );
-      if (started >= 2 && !timedFromSend) arm();
+      if (started >= 2) arm();
     };
     start();
     start();
   });
 }
 
-// a gated provider's call that says when its request leaves the gate (gated, ask)
-const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], sent?: () => void) => Promise<readonly unknown[]>>();
+/** A request's hooks in its provider's gate (agreeing's `moving`): `sent` as it leaves the gate, and `moved`, read as it
+ *  would leave: true, it is not sent (MOVED). */
+type Gated = { readonly sent: () => void; readonly moved: () => boolean };
+const MOVED = new Error("moved to the next provider before it was sent");
+// a gated provider's call with a request's hooks, and whether the provider is stalled (gated, ask)
+const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], gate?: Gated) => Promise<readonly unknown[]>>();
+const STALLED = new WeakMap<EvmRpc, () => boolean>();
 
 /** One provider's answer to `calls`, asked up to 3 more times 0.5, 1 and 1.5 s apart while it answers 429 (Too Many
  *  Requests: rpc.mainnet.chain.robinhood.com, 2026-11-04 06:53Z, to the reads of one quote), a call's error names its
  *  rate limit ("25/second request limit reached", mainnet.base.org, 07:4xZ) or no connection is made (Unreachable: a
  *  read is asked again, as it sends nothing); any other failure, or a fourth, refuses. */
-async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], sent?: () => void): Promise<readonly unknown[]> {
+async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   let out: unknown;
   for (let i = 0; ; i++) {
     try {
       // a gated provider says when the request leaves its gate; any other sends it now
       const g = GATED.get(rpc);
-      if (g === undefined) sent?.();
-      out = await (g === undefined ? rpc(calls) : g(calls, sent));
+      if (g === undefined) gate?.sent();
+      out = await (g === undefined ? rpc(calls) : g(calls, gate));
       if (i < 3 && Array.isArray(out) && out.some(limited)) throw new RateLimited("a call's error names the provider's rate limit");
       break;
     } catch (e) {
+      // moved, or the quote's deadline passed in the gate (gated): nothing was sent
+      if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
       if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {
         throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
@@ -695,9 +721,9 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], sent?: () => void)
  *  hold the block yet: a provider behind a load balancer can send a call to a node one block behind the one that gave
  *  the head ("block not found: canonical hash", base-rpc.publicnode.com, 2026-11-03 19:09Z; "Unknown state. First
  *  available …", robinhood.drpc.org, 20:30Z, and on 8 of one quote's batches 2026-11-04 06:52Z). */
-async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], sent?: () => void): Promise<readonly unknown[]> {
+async function askAt(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   for (let i = 0; ; i++) {
-    const out = await ask(rpc, calls, sent);
+    const out = await ask(rpc, calls, gate);
     if (!out.some(notYet) || i === 3) return out;
     await new Promise((r) => setTimeout(r, FRESH_RETRY_MS * (i + 1)));
   }
@@ -1165,7 +1191,7 @@ class ScanStop extends EvmQuoteError {}
 /** The scan provider answered, short of the logs: an error in the answer, an HTTP status other than 429 or 5xx, a body
  *  that is not a batch or past its size (BadAnswer). The scan asks its halves on the same provider, never the next. */
 class ScanAnswered extends EvmQuoteError {}
-function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanGate {
+function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadline?: Deadline): ScanGate {
   let limit = parallel;
   // the limit up to which each answer adds 1, half the limit at the last congestion; past it an answer adds 1 / limit
   let sst = parallel;
@@ -1179,12 +1205,16 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false): ScanG
   const nap = (ms: number) => new Promise((r) => setTimeout(r, Math.max(0, Math.min(ms, untilMs - performance.now()))));
   const past = () => new EvmQuoteError("rpc_error", `the scan provider did not answer within the quote's bound of ${scanBoundMs} ms`);
   const slow = () => new ScanRefused("rpc_error", `the scan provider did not answer within ${EVM_SCAN_HOLD_MS} ms`);
+  // past the quote's deadline (gated) no scan request is sent either, nor one waited for that would go past it
+  const stale = () => new ScanStop("stale_quote", `the quote's block is more than ${EVM_QUOTE_MAX_AGE_MS / 1000} s old: no more scans are sent`);
+  const left = () => (deadline === undefined ? Infinity : deadline.until - deadline.now());
   // every request waiting looks again: one sent, an answer back, a wait ended
   const wake = () => waiting.splice(0).forEach((r) => r());
   // a slot, once the provider's wait is over
   const take = async (fast: boolean) => {
     for (;;) {
       const now = performance.now();
+      if (left() < 0 || resumeAt - now > left()) throw stale();
       if (now >= untilMs) throw past();
       if (resumeAt > untilMs) {
         const m = `the scan provider limited its rate past the quote's bound of ${scanBoundMs} ms`;
@@ -1685,16 +1715,48 @@ function checkAsk(nowMs: number, rpcsIn: unknown, amountIn: unknown, slippageBps
 /** The two providers, every request of a quote to each (its head, its block's confirmation and its reads) at most the
  *  scan provider's limit at once: on each chain one of the two providers is the scan provider's host (Base's publicnode
  *  takes 20 at once, Robinhood's own RPC answers 429 to 4). */
-function gated(rpcsIn: readonly EvmRpc[], parallel: number): readonly EvmRpc[] {
-  return rpcsIn.map((rpc) => {
+function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline): readonly EvmRpc[] {
+  // past the quote's deadline no request leaves the gate: the quote refuses stale_quote (card evm-buy-quote-ends-on-node)
+  const past = () => {
+    if (deadline !== undefined && deadline.now() > deadline.until) refuse("stale_quote", `the quote's block is more than ${EVM_QUOTE_MAX_AGE_MS / 1000} s old: no more reads are sent`);
+  };
+  const list = rpcsIn.map((rpc) => {
     const g = gateOf(parallel);
-    const f = (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));
-    GATED.set(f as unknown as EvmRpc, (calls, sent) => g(() => (sent?.(), rpc(calls))));
+    // stalled: requests out and none answered for 4 x EVM_HEDGE_MS (agreeing moves a request queued behind them)
+    let flying = 0;
+    let lastAt = 0;
+    const out = async (calls: readonly EvmRpcCall[]) => {
+      if (flying++ === 0) lastAt = performance.now();
+      try {
+        return await rpc(calls);
+      } finally {
+        flying--;
+        lastAt = performance.now();
+      }
+    };
+    const f = (calls: readonly EvmRpcCall[]) => g(() => (past(), out(calls)));
+    GATED.set(f as unknown as EvmRpc, (calls, gate) =>
+      g(() => {
+        if (gate?.moved() === true) return Promise.reject(MOVED);
+        past();
+        gate?.sent();
+        return out(calls);
+      }),
+    );
+    STALLED.set(f as unknown as EvmRpc, () => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);
     const hold = HOLD.get(rpc);
     if (hold !== undefined) HOLD.set(f as unknown as EvmRpc, hold);
     return f;
   }) as unknown as readonly EvmRpc[];
+  if (deadline !== undefined) DEADLINE.set(list, deadline);
+  return list;
 }
+/** A quote's deadline on its gated providers: the device's clock now, and the time past which no request is sent, set
+ *  once the block is agreed to that block's time plus EVM_QUOTE_MAX_AGE_MS (routeSet). Every quote past it is refused
+ *  stale_quote when made (quoted.ts), so a read sent after it is load on the providers for nothing: a cold Robinhood
+ *  quote went on asking its providers until it ended rpc_error 51 s in (2026-11-08 11:0xZ). */
+type Deadline = { until: number; readonly now: () => number };
+const DEADLINE = new WeakMap<readonly EvmRpc[], Deadline>();
 
 /** The reads at the agreed block's hash and that block's confirmation in one round; the confirmation is judged first,
  *  so nothing read is used before it passes. */
@@ -1724,7 +1786,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   if (route.venue === "uniswap-v4" && route.hops.some((h) => h.hookData !== "0x")) return refuse("bad_request", "a buy's hook data is the device's own: empty");
   if (!isAddress(token) || lower(token) === NATIVE) return refuse("bad_request", "the token is not an address");
   const v = venue(chain);
-  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2);
+  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) });
   const { token: buys } = evmPoolRouteDataQuoted(chain, route);
   if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);
   // the pools this device banned for the token, the sale's and the buy's alike (card evm-buy-hook-converge)
@@ -2242,7 +2304,7 @@ async function routeSet(a: {
   const t0 = performance.now();
   const firstOn = (v.scan === undefined ? [] : [v.scan, ...(v.scan.spares ?? [])])
     .slice(0, scanRpcs.length)
-    .reduceRight<ScanOn | undefined>((next, c, i) => ({ rpc: scanRpcs[i]!, gate: scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined), span: c.span, parallel: c.parallel, orSpan: c.orSpan, next }), undefined);
+    .reduceRight<ScanOn | undefined>((next, c, i) => ({ rpc: scanRpcs[i]!, gate: scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs)), span: c.span, parallel: c.parallel, orSpan: c.orSpan, next }), undefined);
   let scanFrom: Promise<ScanFrom> | undefined;
   // the head, read once per quote on the first; where it answers none, on the next in the list that does. The
   // requests stay on the first, the rest behind each (review of 22e29c9, B1: a head answered after 2 s sent a whole
@@ -2274,6 +2336,9 @@ async function routeSet(a: {
   for (const e of early) e?.catch(() => {});
   const scanned = await scanOf([lower(token)], "all");
   const { block, confirm } = await agreedOnce();
+  // from here no request is sent past the block's time plus EVM_QUOTE_MAX_AGE_MS (gated)
+  const deadline = DEADLINE.get(rpcs);
+  if (deadline !== undefined) deadline.until = Number(block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;
   a.atBlock?.(block);
   // a pool's hook is trusted as it is only where the sell builder takes it: a listed launchpad's hook with that
   // launchpad's own fee and tick spacing (evmHookListed, the one rule for both; card evm-route-parity); any other hook
@@ -2897,7 +2962,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   // the device's releases on their way to W, read once into a copy (card evm-sell-no-release-in-flight)
   const sent = evmSellSentOf(req.sent) ?? refuse("bad_request", "a sell quote takes `sent`, a list of the device's releases to W, each a note, a nullifier and a deadline");
   if (v.pool === undefined) return refuse("no_quoter", `${chain} pins no pool: W's releases cannot be read`);
-  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2);
+  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) });
   const t = lower(token);
 
   const reads: Read[] = [];
@@ -2905,7 +2970,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;
   const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
   // W's releases at the agreed block, read beside the rest of the quote and awaited before it is made
-  const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2), block, v.maxLag, sent, { token: t, block: boughtBlock }, () => nowMs + Math.max(0, mono() - start));
+  const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs)), block, v.maxLag, sent, { token: t, block: boughtBlock }, () => nowMs + Math.max(0, mono() - start));
   releasesP.catch(() => {});
   // a route through a pool this device banned is neither simmed, picked nor a reference: routeSet leaves every banned
   // pool out before it picks X's market or the token's pool with X (review of 919742f5, F1); this holds it once more
