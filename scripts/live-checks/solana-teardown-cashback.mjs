@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card solana-teardown-cashback on SIGN_HOST (https://sign.confidential.unrealized.trade). The signing
+// Live check of card solana-teardown-cashback on SIGN_HOST (https://confidential.unrealized.trade). The signing
 // page's pool sell runs the kit's teardown after a full sell (packages/signpage/src/pool-sell.ts rentBack, checked by
 // rules/pool.ts checkSolanaTeardownFrames, the kit's checkSolanaTeardown), so the teardown a device signs is the one
 // SIGN_HOST serves. What it proves, and only that: the served /app.js is the one index.html pins (its sha384), and its
@@ -27,7 +27,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "solana-teardown-cashback";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name
