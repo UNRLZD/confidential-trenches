@@ -17,6 +17,7 @@
 #      followed until the spends row shows it paid to that account on both RPCs.
 # Stopped anywhere (Ctrl-C, a lost connection, a closed lid): paste the same line again. It restores the run's notes
 # from its seed and the vault's pages and goes on from where it stopped; keep the folder as it is.
+# It runs only from a clean checkout whose HEAD is pushed (source-gate.mjs); a changed or untracked path stops it.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
@@ -24,4 +25,5 @@ cd "$ROOT"
 DIR="$HOME/.confidential-trenches/runs"
 mkdir -p "$DIR"
 chmod 700 "$DIR"
+node contracts/vault/scripts/source-gate.mjs
 exec node contracts/vault/scripts/mainnet-money.ts run --state "$DIR/vault-mainnet-money" --to "$1"

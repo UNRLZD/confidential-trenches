@@ -12,8 +12,10 @@
 #      storage_balance_bounds (min = max, read on both RPCs). Registered: nothing.
 # Each tx is read back FINAL on both RPCs, every receipt a success, and kept in the run's open-u.json for the record.
 # Rerun it at any time: it sends only what U still lacks.
+# It runs only from a clean checkout whose HEAD is pushed (source-gate.mjs); a changed or untracked path stops it.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
+node contracts/vault/scripts/source-gate.mjs
 exec node contracts/vault/scripts/mainnet-money.ts open-u --state "$HOME/.confidential-trenches/runs/vault-mainnet-money" \
   --payer confidential.unrlzd.near --key-file "$HOME/.confidential-trenches/keys/confidential.unrlzd.near.json"

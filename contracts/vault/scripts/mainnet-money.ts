@@ -59,6 +59,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule } from "../../../packages/kit/src/near/networks.ts";
 import { depositId } from "../../../packages/wallet/src/derive/keys.ts";
+import { treeProblems } from "./source-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../../..");
@@ -476,8 +477,17 @@ async function check(argv: string[]) {
 
 // ---- run / resume: plan, U's USDC, the deposit, the withdrawal to --to; every stop goes on from the chain ----
 
+/** A mainnet command that signs (run, resume, open-u, sweep-u) runs only from a clean checkout whose HEAD is on a branch
+ * or tag of the public repo (source-gate.mjs: deploy.mjs's sourceProblems), so what signed is what anyone can read. */
+function sourceGate(network: Network): void {
+  if (network !== "mainnet") return;
+  const p = treeProblems(ROOT);
+  if (p.length) throw new Error(`refused, nothing signed: ${p.join("; ")}`);
+}
+
 async function go(argv: string[], create: boolean) {
   const v = flags(argv, ["--state", "--to"], ["--network", "--bind-relayer"]);
+  sourceGate(networkOf(v));
   const o = await opened(networkOf(v), v["--bind-relayer"]);
   const { rpcs, vault, token, scope, relayers, network, minDeposit } = o;
   const to = await checkRecipient(o, v["--to"]);
@@ -762,6 +772,7 @@ export function relayerTxProblems(kind: "deposit" | "withdraw", t: any, want: Ru
 
 async function openU(argv: string[]) {
   const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network", "--bind-relayer", "--register"]);
+  sourceGate(networkOf(v));
   const o = await opened(networkOf(v), v["--bind-relayer"]);
   const { repoRoots, loadKey } = await import("./deploy.mjs");
   const { act } = await import("./testnet-usdc.mjs");
@@ -807,6 +818,7 @@ async function openU(argv: string[]) {
 
 async function sweepU(argv: string[]) {
   const v = flags(argv, ["--state"], ["--network", "--bind-relayer"]);
+  sourceGate(networkOf(v));
   const o = await opened(networkOf(v), v["--bind-relayer"]);
   const { repoRoots } = await import("./deploy.mjs");
   const { act } = await import("./testnet-usdc.mjs");

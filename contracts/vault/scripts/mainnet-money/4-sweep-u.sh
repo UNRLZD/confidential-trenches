@@ -6,7 +6,9 @@
 # struck U, or USDC reached U after the deposit (a second transfer): paste 1 deposits one transfer, so send one
 # transfer of the whole amount. U's 0.01 NEAR pays the gas. Not while paste 1 is waiting to deposit: a sweep then takes
 # the USDC that deposit would use. The tx is read back FINAL on both RPCs and kept in the run's sweep.json for the record.
+# It runs only from a clean checkout whose HEAD is pushed (source-gate.mjs); a changed or untracked path stops it.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
+node contracts/vault/scripts/source-gate.mjs
 exec node contracts/vault/scripts/mainnet-money.ts sweep-u --state "$HOME/.confidential-trenches/runs/vault-mainnet-money"
