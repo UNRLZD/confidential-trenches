@@ -12,7 +12,8 @@
 #     left at U, or "nothing to sweep"), then record --network testnet with the funding tx: every tx read back FINAL on
 #     both RPCs, into the run's folder, copied into this checkout's scripts/live-checks/ for the job's copy-back.
 # The clone: a new folder holding one commit of this checkout's HEAD tree, made with fixed names and dates, so the plan
-# job and the finish job (each its own clone) name the same commit. It is not on main (the reviewed commit is merged
+# job and the finish job (each its own clone) name the same commit. Only the tree's own objects are copied in, never a
+# commit or its history, so a shallow checkout still gives a whole clone with no .git/shallow. It is not on main (the reviewed commit is merged
 # only after this rehearsal): --not-on-main skips only the gate's origin and main check, and the driver and the gate
 # refuse it on mainnet. Every other check of the mainnet pastes holds: the clone's own config, every file the commit's,
 # node_modules from the lockfile resolving inside it, the commit held again before each signature and in each step file.
@@ -33,7 +34,7 @@ esac
 TREE=$(git -C "$ROOT" rev-parse 'HEAD^{tree}')
 CLONE=$(mktemp -d "${TMPDIR:-/tmp}/vmm-rehearse.XXXXXX")
 git -c init.defaultBranch=main init -q "$CLONE"
-git -C "$CLONE" fetch -q "$ROOT" HEAD
+git -C "$ROOT" rev-list --objects "$TREE" | git -C "$ROOT" pack-objects -q --stdout | git -C "$CLONE" unpack-objects -q
 C=$(env GIT_AUTHOR_NAME=rehearsal GIT_AUTHOR_EMAIL=rehearsal@invalid GIT_COMMITTER_NAME=rehearsal GIT_COMMITTER_EMAIL=rehearsal@invalid \
   GIT_AUTHOR_DATE=2026-11-08T00:00:00Z GIT_COMMITTER_DATE=2026-11-08T00:00:00Z git -C "$CLONE" commit-tree "$TREE" -m "vault-mainnet-money rehearsal")
 git -C "$CLONE" -c advice.detachedHead=false checkout -q --detach "$C"

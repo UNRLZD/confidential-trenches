@@ -208,6 +208,8 @@ test("rehearse-testnet.sh plan: from a fresh clone of this checkout's tree, the 
   assert.equal(path.dirname(clone), w.root);
   assert.equal(git(clone, "rev-parse", "HEAD"), C);
   assert.equal(git(clone, "rev-parse", "HEAD^{tree}"), git(w.src, "rev-parse", "HEAD^{tree}"), "the clone's commit holds this checkout's tree");
+  const own = spawnSync("git", ["-C", clone, "cat-file", "-e", git(w.src, "rev-parse", "HEAD")], { env: { ...w.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
+  assert.notEqual(own.status, 0, "only the tree is copied in: the checkout's own commit and its history stay out of the clone");
   const NET = `--network testnet --bind-relayer ${G} --commit ${C} --not-on-main`;
   assert.deepEqual(c.map((l) => l.replace(/ @ .*$/, "")), [
     "pnpm install --frozen-lockfile",
@@ -224,6 +226,20 @@ test("rehearse-testnet.sh plan: from a fresh clone of this checkout's tree, the 
   assert.ok(!calls(w).some((l) => l.includes("--register")), calls(w).join("\n"));
   assert.equal(commitOf(calls(w)[1]), C);
   assert.notEqual(calls(w)[0].match(/ @ (.*)$/)[1], clone);
+});
+
+test("rehearse-testnet.sh plan from a shallow checkout (CI's kind): the clone is whole, with no .git/shallow, and the gate passes it", () => {
+  const w = world({ runExit: 124 });
+  const shallow = path.join(w.root, "shallow");
+  git(w.root, "clone", "-q", "--depth", "1", `file://${w.src}`, shallow);
+  assert.ok(existsSync(path.join(shallow, ".git", "shallow")));
+  const r = spawnSync("/bin/sh", [path.join(shallow, "contracts/vault/scripts/mainnet-money/rehearse-testnet.sh"), "plan"], { encoding: "utf8", timeout: 60_000, env: { ...w.env, TMPDIR: w.root } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const c = calls(w);
+  const clone = c[0].match(/ @ (.*)$/)[1];
+  assert.ok(!existsSync(path.join(clone, ".git", "shallow")));
+  assert.equal(git(clone, "rev-parse", "HEAD"), commitOf(c[1]));
+  assert.equal(git(clone, "rev-parse", "HEAD^{tree}"), git(shallow, "rev-parse", "HEAD^{tree}"));
 });
 
 test("rehearse-testnet.sh plan stops when the run ends before its wait (a refusal): nothing opened", () => {
