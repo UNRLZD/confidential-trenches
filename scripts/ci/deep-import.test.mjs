@@ -596,8 +596,9 @@ test("a symlink into the kit's internals is refused", () => {
 
 // The kit's own packages/ folder as this tree has it (not the planted KIT above): the terminal's import of the bare
 // name must resolve to the public entry with no build, the wallet core stays refused from apps/, and the Blindfill
-// packages that need the wallet core (the exit tool, the signing page, the device's quote checks) reach it from inside
-// packages/ (merge note M304 D-5, D-6).
+// packages that need the wallet core (the exit tool, the signing page) reach it from inside packages/ (merge note M304
+// D-5, D-6). No file of the kit but core.ts reaches core or the wallet (kit-entry-never-core): the device's quote
+// checks sit in the public entry's graph, so a reach from them would hand every app the seed tools.
 function ownPackages() {
   const files = {};
   const walk = (rel) => {
@@ -650,13 +651,12 @@ test("the kit's own ./core entry is refused from apps/ by the public-entry rule"
   }
 });
 
-test("packages/exit, packages/signpage and packages/kit/src/checks reach the kit's ./core and pass", () => {
+test("packages/exit and packages/signpage reach the kit's ./core and pass", () => {
   const dir = tree({
     ...ownPackages(),
     ...TERMINAL_MAIN,
     "packages/exit/src/index.ts": 'import * as core from "@blindfill/kit/core";\nexport const c = core;\n',
     "packages/signpage/src/main.ts": 'import * as core from "@blindfill/kit/core";\nexport const c = core;\n',
-    "packages/kit/src/checks/quote.ts": 'import * as core from "../core";\nexport const c = core;\n',
   });
   try {
     const r = check(dir);
@@ -664,7 +664,31 @@ test("packages/exit, packages/signpage and packages/kit/src/checks reach the kit
     for (const from of ["packages/exit/src/index.ts", "packages/signpage/src/main.ts"]) {
       assert.deepEqual(targets(dir, from), [{ name: "@blindfill/kit/core", to: "packages/kit/src/core.ts", unresolved: false }], from);
     }
-    assert.deepEqual(targets(dir, "packages/kit/src/checks/quote.ts"), [{ name: "../core", to: "packages/kit/src/core.ts", unresolved: false }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Card exit-note-scan (review F1): every way a kit file other than core.ts could reach core or the wallet, the kit's
+// own package name included, is refused by name; core.ts itself and the kit's tests reach them and pass.
+const KIT_SELF = (f) => readFileSync(join(ROOT, f), "utf8");
+const KIT_REACHES = {
+  "packages/kit/src/index.ts": `${KIT_SELF("packages/kit/src/index.ts")}export { typedSeed } from "@blindfill/kit/core";\n`,
+  "packages/kit/src/near/networks.ts": `${KIT_SELF("packages/kit/src/near/networks.ts")}export const loadCore = () => import("@blindfill/kit/core");\n`,
+  "packages/kit/src/checks/oneclick.ts": `${KIT_SELF("packages/kit/src/checks/oneclick.ts")}export { restoreNotes } from "../core.ts";\n`,
+  "packages/kit/src/freeze.ts": `${KIT_SELF("packages/kit/src/freeze.ts")}export type { NoteRef } from "../../wallet/src/notes/secrets.ts";\n`,
+  "packages/kit/zk/core-use.mjs": 'export const c = await import("../src/core.ts");\n',
+};
+
+test("a kit file other than core.ts that reaches core or the wallet, by package name, relative path or import(), is refused", () => {
+  const dir = tree({ ...ownPackages(), ...TERMINAL_MAIN, ...KIT_REACHES });
+  try {
+    const r = check(dir);
+    assert.notEqual(r.rc, 0, r.out);
+    for (const f of Object.keys(KIT_REACHES)) {
+      assert.match(r.out, new RegExp(`error kit-entry-never-core: ${f.replace(/\./g, "\\.")} → packages/(kit/src/core\\.ts|wallet/)`), f);
+    }
+    assert.doesNotMatch(r.out, /kit-entry-never-core: packages\/kit\/(src\/core\.ts|test\/)/, "core.ts and the kit's tests pass");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

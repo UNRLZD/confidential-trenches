@@ -1,0 +1,730 @@
+{
+  "good": {
+    "check": "deposit-to-pool",
+    "at": "2026-11-08T03:15:43.896Z",
+    "source": "harness, terminal build of card/deposit-to-pool (86e58a1c, on main 382115dc), the stand-in shell signed in",
+    "browser": "157.0.8103.38",
+    "runs": [
+      {
+        "width": "phone",
+        "scheme": "dark",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [
+          {
+            "dest": "near",
+            "name": "NEAR",
+            "on": "true",
+            "fundable": "yes",
+            "img": "/assets/near-r3ZkGNCQ.png",
+            "loaded": true
+          },
+          {
+            "dest": "solana",
+            "name": "Solana",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/solana-BJOXkE6i.svg",
+            "loaded": true
+          },
+          {
+            "dest": "base",
+            "name": "Base",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/base-Cq6sCJBo.svg",
+            "loaded": true
+          },
+          {
+            "dest": "robinhood",
+            "name": "Robinhood",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/robinhood-CY6OFotH.png",
+            "loaded": true
+          }
+        ],
+        "pools": {
+          "solana": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "solana",
+            "asked": []
+          },
+          "base": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "base",
+            "asked": []
+          },
+          "robinhood": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "robinhood",
+            "asked": []
+          }
+        },
+        "tapError": null,
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      },
+      {
+        "width": "phone",
+        "scheme": "light",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [
+          {
+            "dest": "near",
+            "name": "NEAR",
+            "on": "true",
+            "fundable": "yes",
+            "img": "/assets/near-r3ZkGNCQ.png",
+            "loaded": true
+          },
+          {
+            "dest": "solana",
+            "name": "Solana",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/solana-BJOXkE6i.svg",
+            "loaded": true
+          },
+          {
+            "dest": "base",
+            "name": "Base",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/base-Cq6sCJBo.svg",
+            "loaded": true
+          },
+          {
+            "dest": "robinhood",
+            "name": "Robinhood",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/robinhood-CY6OFotH.png",
+            "loaded": true
+          }
+        ],
+        "pools": {
+          "solana": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "solana",
+            "asked": []
+          },
+          "base": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "base",
+            "asked": []
+          },
+          "robinhood": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "robinhood",
+            "asked": []
+          }
+        },
+        "tapError": null,
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      },
+      {
+        "width": "desktop",
+        "scheme": "dark",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [
+          {
+            "dest": "near",
+            "name": "NEAR",
+            "on": "true",
+            "fundable": "yes",
+            "img": "/assets/near-r3ZkGNCQ.png",
+            "loaded": true
+          },
+          {
+            "dest": "solana",
+            "name": "Solana",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/solana-BJOXkE6i.svg",
+            "loaded": true
+          },
+          {
+            "dest": "base",
+            "name": "Base",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/base-Cq6sCJBo.svg",
+            "loaded": true
+          },
+          {
+            "dest": "robinhood",
+            "name": "Robinhood",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/robinhood-CY6OFotH.png",
+            "loaded": true
+          }
+        ],
+        "pools": {
+          "solana": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "solana",
+            "asked": []
+          },
+          "base": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "base",
+            "asked": []
+          },
+          "robinhood": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "robinhood",
+            "asked": []
+          }
+        },
+        "tapError": null,
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      },
+      {
+        "width": "desktop",
+        "scheme": "light",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [
+          {
+            "dest": "near",
+            "name": "NEAR",
+            "on": "true",
+            "fundable": "yes",
+            "img": "/assets/near-r3ZkGNCQ.png",
+            "loaded": true
+          },
+          {
+            "dest": "solana",
+            "name": "Solana",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/solana-BJOXkE6i.svg",
+            "loaded": true
+          },
+          {
+            "dest": "base",
+            "name": "Base",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/base-Cq6sCJBo.svg",
+            "loaded": true
+          },
+          {
+            "dest": "robinhood",
+            "name": "Robinhood",
+            "on": "false",
+            "fundable": "no",
+            "img": "/assets/robinhood-CY6OFotH.png",
+            "loaded": true
+          }
+        ],
+        "pools": {
+          "solana": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "solana",
+            "asked": []
+          },
+          "base": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "base",
+            "asked": []
+          },
+          "robinhood": {
+            "state": "pool-off",
+            "getOff": true,
+            "pressed": "robinhood",
+            "asked": []
+          }
+        },
+        "tapError": null,
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      }
+    ]
+  },
+  "bad": {
+    "check": "deposit-to-pool",
+    "at": "2026-11-08T03:19:19.330Z",
+    "source": "harness, terminal build of main 382115dc (release-91) before this card, the stand-in shell signed in",
+    "browser": "157.0.8103.38",
+    "runs": [
+      {
+        "width": "phone",
+        "scheme": "dark",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [],
+        "pools": {
+          "solana": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "no box"
+          },
+          "base": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "no box"
+          },
+          "robinhood": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "no box"
+          }
+        },
+        "tapError": "no box",
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      },
+      {
+        "width": "phone",
+        "scheme": "light",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [],
+        "pools": {
+          "solana": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "no box"
+          },
+          "base": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "no box"
+          },
+          "robinhood": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "no box"
+          }
+        },
+        "tapError": "no box",
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      },
+      {
+        "width": "desktop",
+        "scheme": "dark",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [],
+        "pools": {
+          "solana": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "locator.click: Timeout 3000ms exceeded."
+          },
+          "base": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "locator.click: Timeout 3000ms exceeded."
+          },
+          "robinhood": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "locator.click: Timeout 3000ms exceeded."
+          }
+        },
+        "tapError": "locator.click: Timeout 3000ms exceeded.",
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      },
+      {
+        "width": "desktop",
+        "scheme": "light",
+        "framed": true,
+        "opened": 1,
+        "totalBefore": "$0.00",
+        "tiles": [],
+        "pools": {
+          "solana": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "locator.click: Timeout 3000ms exceeded."
+          },
+          "base": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "locator.click: Timeout 3000ms exceeded."
+          },
+          "robinhood": {
+            "state": "S4.3",
+            "getOff": false,
+            "pressed": null,
+            "asked": [],
+            "error": "locator.click: Timeout 3000ms exceeded."
+          }
+        },
+        "tapError": "locator.click: Timeout 3000ms exceeded.",
+        "dry": [
+          {
+            "origin_asset": "nep141:wrap.near",
+            "amount": "15"
+          }
+        ],
+        "quoteState": "S4.3",
+        "quote": {
+          "origin_asset": "nep141:wrap.near",
+          "amount": "15"
+        },
+        "addressState": "S4.13",
+        "address": "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
+        "stages": [
+          "S4.14",
+          "S4.15",
+          "S4.15",
+          "S4.15",
+          "S4.18",
+          "S4.17",
+          "refund-move",
+          "held",
+          "held-halted",
+          "S4.20",
+          "S4.16"
+        ],
+        "balances": [
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$0.00",
+          "$73.18"
+        ],
+        "credited": "73.18",
+        "closed": true,
+        "totalAfter": "$73.18"
+      }
+    ]
+  }
+}

@@ -74,7 +74,7 @@ const RELEASE_FIELDS = 130;
 /** One transaction read on one RPC, at finalized: "none" when the RPC holds none under `sig`, "skip" when it is no
  *  landed pool instruction naming the note's nullifier hash (failed, or another kind, or another note's), else the
  *  spend and whether it is this attempt's. */
-async function spendIn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, sig: string): Promise<"none" | "skip" | { sig: string; mine: boolean }> {
+async function spendIn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, sig: string): Promise<"none" | "skip" | Spend> {
   const r = await rpc("getTransaction", [sig, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
   if (r === null) return "none";
   const t = isObj(r) ? r.transaction : undefined;
@@ -108,15 +108,15 @@ async function spendIn(rpc: SolanaRpc, pin: SolanaPoolPin, w: string, nullifierH
     // payer at 2, then the fields' relay fee cap, tip cap, deadline and salt; buy.rs release_and_buy reads tag 3's
     // fields at 2 + its proof, the same 130 bytes as tag 2), so tag 3's are read from its own data as tag 2's
     const acc = ix.accounts.map((i) => keys[i]);
-    if (acc.length < 3 || acc.some((k) => k === undefined) || acc[1] !== w) return { sig, mine: false };
+    if (acc.length < 3 || acc.some((k) => k === undefined) || acc[1] !== w) return { sig, mine: false, accounts: [] };
     try {
       const rel = solanaDecodePoolRelease(d[0] === SOLANA_POOL_TAG_RELEASE ? d : Uint8Array.of(SOLANA_POOL_TAG_RELEASE, ...new Uint8Array(SOLANA_POOL_PROOF_BYTES), ...d.subarray(fieldsAt, fieldsAt + RELEASE_FIELDS)));
       const q: SolanaReleaseRequest = {
         program: pin.program, pool: acc[0]!, recipient: acc[1]!, feePayer: acc[2]!, relayFee: rel.relayFee, relayFeeCap: rel.relayFeeCap, tipCap: rel.tipCap, deadlineMs: rel.deadlineMs, salt: hex(rel.salt),
       };
-      return { sig, mine: solanaContextOf(q, scope).toString() === context };
+      return { sig, mine: solanaContextOf(q, scope).toString() === context, accounts: acc as string[] };
     } catch {
-      return { sig, mine: false };
+      return { sig, mine: false, accounts: [] };
     }
   }
   return "skip";
@@ -143,7 +143,7 @@ const placeOf = (places: HistoryPlaces, at: string): Place => {
 /** One RPC's word on the spend, from W's history (newest first): the landed transaction whose pool instruction names
  *  the nullifier hash, and whether it is this attempt's; null when this pass found none (the history read to its end,
  *  or this pass's share of it read and the rest left for the next). */
-async function spendOn(rpc: SolanaRpc, place: Place, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number): Promise<{ sig: string; mine: boolean } | null> {
+async function spendOn(rpc: SolanaRpc, place: Place, pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number): Promise<Spend | null> {
   if (place.found !== undefined) {
     const again = await spendIn(rpc, pin, w, nullifierHash, context, place.found);
     if (typeof again === "object") return again;
@@ -176,9 +176,13 @@ async function spendOn(rpc: SolanaRpc, place: Place, pin: SolanaPoolPin, w: stri
   return null;
 }
 
+/** One RPC's read of the spend: its signature, whether it is this attempt's, and the release instruction's accounts
+ *  (the send onward refuses each as its To: card pool-senders-next-page, review LOW 4). */
+type Spend = { sig: string; mine: boolean; accounts: string[] };
 /** Whose spend it is: this attempt's, with the signature of the transaction that spent the note (the one a filled
- *  answer names); another's; or not known yet. */
-export type SpendOwner = { mine: string } | "other" | null;
+ *  answer names) and its release's accounts as both RPCs read them (their union: a To either names is refused);
+ *  another's; or not known yet. */
+export type SpendOwner = { mine: string; accounts: string[] } | "other" | null;
 
 /** Whose release spent the note (round-3 review LOW 1): two devices on the same 12 words derive the same note and the
  *  same W, so a spent note and a full W never say it.
@@ -194,7 +198,7 @@ export type SpendOwner = { mine: string } | "other" | null;
 export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: SolanaPoolPin, w: string, nullifierHash: bigint, context: string, minSlot: number, release: string | undefined, places: HistoryPlaces): Promise<SpendOwner> {
   if (release !== undefined && release !== "") {
     const own = await Promise.all(rpcs.map((rpc) => spendIn(rpc, pin, w, nullifierHash, context, release)));
-    if (own.every((o) => typeof o === "object" && o.mine)) return { mine: release };
+    if (own.every((o) => typeof o === "object" && o.mine)) return { mine: release, accounts: [...new Set(own.flatMap((o) => (typeof o === "object" ? o.accounts : [])))] };
   }
   const at = rpcs.map((_, i) => placeOf(places, `${i}:${w}:${nullifierHash}:${context}`));
   const [a, b] = await Promise.all(rpcs.map((rpc, i) => spendOn(rpc, at[i]!, pin, w, nullifierHash, context, minSlot)));
@@ -204,5 +208,5 @@ export async function spendOwner(rpcs: readonly [SolanaRpc, SolanaRpc], pin: Sol
     for (const p of at) delete p.found;
     return null;
   }
-  return a.mine ? { mine: a.sig } : "other";
+  return a.mine ? { mine: a.sig, accounts: [...new Set([...a.accounts, ...b.accounts])] } : "other";
 }

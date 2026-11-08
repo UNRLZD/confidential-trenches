@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/rpc.ts src/setup.ts scripts/record-pages.ts test/rpc.test.ts test/setup.test.ts test/replay.ts"
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/rpc.ts src/setup.ts src/scan.ts scripts/record-pages.ts test/rpc.test.ts test/setup.test.ts test/replay.ts test/scan.test.ts"
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*"

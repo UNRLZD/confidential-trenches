@@ -20,9 +20,9 @@
 // out one, which is asked at most once; it fails if any is refused.
 //   node scripts/live-checks/evm-transfer-rpc-spares.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
-// --record writes every provider answer read, as the good run of evm-transfer-rpc-spares.answers.json, and its bad
-// run: the same answers with every answer of Base's pool list but its first provider's a quota 429 too (one left, no
-// pair).
+// --record writes every provider answer read, each with the case it was read in (ctx, the replay's context), as the
+// good run of evm-transfer-rpc-spares.answers.json, and its bad run: the same answers with every answer of Base's pool
+// list but its first provider's a quota 429 too (one left, no pair).
 // Runs: once, it reads no host: the wallet at the checkout against public RPCs; the wallet tests hold the swap rule
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
@@ -49,13 +49,17 @@ const host = (u) => new URL(u).host;
 const operator = (u) => new URL(u).hostname.split(".").slice(-2).join(".");
 const THIRDWEB = (u) => operator(u) === "thirdweb.com";
 
-/** The check: { ok, lines }. `transport(network, url, method, params)` reaches the providers (live, or a replay). */
-export async function spares(transport, { wait = true } = {}) {
+/** The check: { ok, lines }. `transport(network, url, method, params, ctx)` reaches the providers (live, or a replay);
+ * `ctx` names the case each call is read in (its line's label: "<list>, every provider live" or "<list>, <host> out"),
+ * so a recording answers each case's reads with that case's own answers whatever order the cases run in (card
+ * spares-replay-order). `order` orders the lists and each list's cases (the replay's test shuffles them). */
+export async function spares(transport, { wait = true, order = (xs) => xs } = {}) {
   const lines = [];
   let ok = true;
-  for (const l of LISTS) {
+  const inCase = (ctx) => (network, url, method, params) => transport(network, url, method, params, ctx);
+  for (const l of order(LISTS)) {
     const job = { network: l.network, w: W, back: BACK, ...(l.pool ? { pool: l.pool } : {}) };
-    const all = await check(transport, { wait, jobs: [job] });
+    const all = await check(inCase(`${l.label}, every provider live`), { wait, jobs: [job] });
     const rep0 = all.reports[0];
     if (rep0 === null) {
       ok = false;
@@ -70,15 +74,16 @@ export async function spares(transport, { wait = true } = {}) {
     }
     if (new Set(list.map(operator)).size !== list.length) (ok = false), lines.push(`${l.label}: the list ${list.map(host).join(", ")} repeats an operator`);
     lines.push(`${l.label}, every provider live: ${rep0.urls.map(host).join(" and ")} read alike from block ${rep0.from} to ${rep0.anchor.number}`);
-    for (const out of list.filter((u) => !THIRDWEB(u))) {
+    for (const out of order(list.filter((u) => !THIRDWEB(u)))) {
       if (list.length < 3) {
         lines.push(`${l.label}, ${host(out)} out: skipped: the list is two providers and ${l.network} has no third keyless operator`);
         continue;
       }
       let asked = 0, thirdwebOut = false;
+      const live = inCase(`${l.label}, ${host(out)} out`);
       const t = async (net, url, method, params) => {
         if (url === out) return (asked++, { ...QUOTA });
-        const a = await transport(net, url, method, params);
+        const a = await live(net, url, method, params);
         if (THIRDWEB(url) && "error" in a && /\b429\b/.test(a.error)) thirdwebOut = true;
         return a;
       };
@@ -100,7 +105,7 @@ export async function spares(transport, { wait = true } = {}) {
 /** The bad run kept beside a good one: every answer of Base's pool list but its first provider's a quota 429 too. */
 export const SPOILED = Object.freeze(LISTS[0].pool.slice(1));
 export function spoil(log) {
-  return log.map((e) => (SPOILED.includes(e.url) ? { network: e.network, url: e.url, method: e.method, params: e.params, ...QUOTA } : e));
+  return log.map((e) => (SPOILED.includes(e.url) ? { ...(e.ctx === undefined ? {} : { ctx: e.ctx }), network: e.network, url: e.url, method: e.method, params: e.params, ...QUOTA } : e));
 }
 
 async function main(argv) {

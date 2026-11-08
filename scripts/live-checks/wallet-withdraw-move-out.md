@@ -1,0 +1,16 @@
+CARD wallet-withdraw-move-out / live: PASS
+Money path: yes
+Tx: near-testnet 5z23FTxpQXJAcfkQwGVDxpJPQE4bR8FMQHxrJGPFekVD bf-vt-20261102t071444.testnet
+Tx: near-testnet BQVn9eaSEAEbi6YDxVEtPPqnwCJsqRtZmy2YqRu1jN1h 4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a
+Tx: near-testnet 5r1X6VtWX6DEc7n2mHX5JwCe6782x5xsE6KxgHp5R3by 4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a
+Tx: near-testnet HenoUNjNqZ5JGVhmid3z5MujNgZN9UhtuFL6Xr4Hpge4 relay-bdc0022c.bf-vt-20261102t071444.testnet
+Tx: near-testnet D5MfoZm45SrUqTN8LK1iUjuoo8yHtbYQE6ahJojcPcgE relay-bdc0022c.bf-vt-20261102t071444.testnet
+
+The run: contracts/vault/scripts/testnet-withdraw-typed.ts on NEAR testnet, the keyless vault vault.bf-vt-20261102t071444.testnet on the team's test USDC bf-usdc-20261101t022248.testnet. The device's side is the signing page's and the wallet's own withdraw code run in node as the testnet build: this run's 12 words and one note planned in the note store (fake-indexeddb) and deposited by D; the hand-off's own steps (askWithdrawFee, the trees by vaultSync, lowerFinalTime, withdrawRequest with the typed account, relayWithdraw, withdrawArrival); then the settle pass a reload runs (withdrawSettle). withdrawHandoff itself pins the release's testnet relayer, whose key is not held, so its steps run with this run's relayer. The relayer's side is the helper's own GET /v1/withdraw/fee quote and POST /v1/withdraw carryWithdraw with outcomeRound every 10 s, in process with R's key, reached through the page's fetchFn at the release's URLs, because the deployed helper carries with the release's R only.
+Stand-ins: check 10's token watch answered a caught-up, open token; the prover was snarkjs in node on the pinned setup files (single thread), not the page's worker.
+Accounts: P bf-vt-20261102t071444.testnet (makes W), D 4b6c00c36c05f3bc849f158da640409a0d4b395354ba07fdcd94f9316234599a (T04's depositor, deposits the note), R relay-bdc0022c.bf-vt-20261102t071444.testnet (relayer-withdraw-send's relayer, also the fee recipient), W wt-d7eabb32.bf-vt-20261102t071444.testnet (the typed account: named, no key, not registered on the token before the withdrawal).
+The request as sent: recipient wt-d7eabb32.bf-vt-20261102t071444.testnet, fund_recipient false, register_deposit 1250000000000000000000 (the token's storage minimum, read naming no account), relay_fee 184062 to R, amount 815938 to W (the note 1000000 at leaf 11 less the fee: the form's checkAmount and checkRecipient passed first); request body 1542 bytes; proof 4821 ms.
+The withdrawal ended arrived (withdrawArrival) in 22708 ms from the tap; POST /v1/withdraw answers 200; the reload's settle pass after it: {}, with no POST.
+Every Tx above read back FINAL on https://test.rpc.fastnear.com and https://near-testnet.drpc.org, every receipt a success.
+Before (2026-11-08T04:52:47.609Z): W USDC 0, W registration null, R USDC 206353, vault USDC 1500000, R NEAR 1988029007297417899999998, totals {"deposited":"8000000","spent":"8400000","returned":"1900000"}.
+After (2026-11-08T04:53:39.505Z): W USDC 815938, W registration {"total":"1250000000000000000000","available":"0"}, R USDC 390415, vault USDC 500000, R NEAR 1974833380754339999999996, totals {"deposited":"8000000","spent":"9400000","returned":"1900000"}.

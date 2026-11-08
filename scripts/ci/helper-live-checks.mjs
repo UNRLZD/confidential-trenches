@@ -63,6 +63,8 @@ export const LIVE_CHECKS = [
   "helper-mainnet-vault-env",
   "helper-bind-relayer-mainnet",
   "relayer-cost-guards",
+  "deposit-sheet-oneclick-budget",
+  "pool-senders-next-page-helper",
 ];
 
 // `{commit}` is the deployed commit

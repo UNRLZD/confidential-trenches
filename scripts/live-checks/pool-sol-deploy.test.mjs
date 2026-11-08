@@ -182,3 +182,18 @@ test("card live-check-devnet-pair: the checks' devnet list is solana's first, on
     assert.match(src, /onTwoOperators\(/, f);
   }
 });
+
+// Card pool-senders-next-page: the devnet pool on the pinned build (pool-sol-deploy.devnet.json, program 9Z6Yi2Vc..., the
+// pinned c86fc7fc code, authority none), read by the live check on its two devnet RPCs at 23:16Z 7 Nov
+// (pool-sol-deploy.devnet-answers.json): PASS; the same answers against the old record (another program) FAIL.
+test("the devnet record on the pinned build replays its recorded answers: PASS; another record over them: FAIL", async () => {
+  const dev = JSON.parse(readFileSync(new URL("./pool-sol-deploy.devnet.json", import.meta.url), "utf8"));
+  const answers = JSON.parse(readFileSync(new URL("./pool-sol-deploy.devnet-answers.json", import.meta.url), "utf8"));
+  const rpcs = [...new Set(answers.map((a) => a.url))];
+  const r = await check({ deployment: dev, fetchFn: replay(answers), rpcs, sleep: async () => {} });
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(dev.program_id, "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8");
+  assert.equal(dev.so_sha256, "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162");
+  const other = await check({ deployment: { ...dev, so_sha256: "9539c9d105fc8960d864e4c59ff47fd44258324627a67b01e1d71d40c3a5ba01" }, fetchFn: replay(answers), rpcs, sleep: async () => {} }).catch((e) => ({ ok: false, lines: [String(e)] }));
+  assert.equal(other.ok, false);
+});

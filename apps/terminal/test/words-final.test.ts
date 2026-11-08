@@ -25,8 +25,10 @@ const ROWS = JSON.parse(readFileSync(new URL("./words-final.json", import.meta.u
 const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep"];
 // the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name, Discover's list age
 // line (card app-list-age, on the owner's next picks page), Portfolio's export label and wallets heading (card
-// app-export-every-wallet, on the owner's next picks page)
-const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: ["updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: [], verify: [], withdraw: [] };
+// app-export-every-wallet, on the owner's next picks page), the chart menus' rows R5 does not draw (card
+// app-chart-controls, on the owner's next picks page), the deposit sheet's To label (card deposit-to-pool, on the
+// owner's next picks page)
+const STILL_DRAFT: Record<string, string[]> = { deposit: ["to"], discover: ["updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: ["gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine"], verify: [], withdraw: [] };
 
 test("the list: 103 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 103);

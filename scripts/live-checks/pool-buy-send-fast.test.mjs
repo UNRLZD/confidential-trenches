@@ -11,6 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BASE, judge, PACE_P50_MS, POOL_READS, read, SIGN } from "./pool-buy-send-fast.mjs";
+import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "pool-buy-send-fast.answers.json"), "utf8"));
@@ -27,6 +28,7 @@ const replay = (run) => async (url, init) => {
   assert.equal(body.method, r.method);
   return new Response(r.body, { status: r.status, headers: r.headers });
 };
+// each recording is read again, and judged, on today's pin (pool-sol-deploy.devnet.json), as a live run is
 const run = async (rec) => judge(await read(BASE, replay(rec)));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (rec, f) => ({ ...rec, reads: rec.reads.map((x, i) => f(x, i) ?? x) });
@@ -90,4 +92,22 @@ test("made from the good run: a 1-request-a-second provider, a mainnet read, a r
   assert.equal(judge(star).ok, false);
   const noCommit = edit(g, (x, i) => (i === 0 ? { ...x, headers: { ...x.headers, "x-helper-commit": "dev" } } : undefined));
   assert.equal(judge(noCommit).ok, false);
+});
+
+test("the pin is today's: the good recording is of today's pool; its pool read owned by the program before the re-pin (5V9iJECf) FAILs, whatever record it carries", async () => {
+  const now = devnetPin();
+  assert.equal(A.good_local.deployment.program_id, now.program);
+  assert.equal(A.good_local.deployment.pool, now.pool);
+  assert.equal((await run(A.good_local)).ok, true);
+  const BEFORE = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+  const before = edit(A.good_local, (x) => (x.kind === "owner" ? { ...x, body: x.body.replaceAll(now.program, BEFORE) } : undefined));
+  for (const deployment of [now.record, { ...now.record, program_id: BEFORE }]) {
+    const r = await run({ ...before, deployment });
+    assert.equal(r.ok, false);
+    const b = bad(r);
+    assert.equal(b.length, 1, b.join("\n"));
+    assert.ok(b[0].startsWith(`BAD [solana-devnet getAccountInfo] the devnet pool ${now.pool}, owned by ${now.program}: 200 ${BEFORE}`), b[0]);
+  }
+  // a live run's reads name today's pool and program
+  assert.ok(JSON.stringify(POOL_READS).includes(now.pool) && JSON.stringify(POOL_READS).includes(now.program));
 });
