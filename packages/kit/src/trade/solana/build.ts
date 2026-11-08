@@ -713,7 +713,8 @@ export function solanaWithBlockhash(a: SolanaAssembled, chain: { blockhash: stri
 // The teardown frames (row M1.4; 06c §3.1 S-4, S-5), built after the full sell has landed, from solanaTeardownPlan
 // over the device's own reads; checkSolanaTeardown judges them before they are signed. S-4: per token account the plan
 // closes, HarvestWithheldTokensToMint (mint, account) right before it when the account has Token-2022's transfer-fee
-// extension, then CloseAccount (account, the wallet, the wallet). S-5: close_user_volume_accumulator under each pump
+// extension, Burn (account, mint, the wallet) of the balance the plan burns, then CloseAccount (account, the wallet, the
+// wallet). S-5: close_user_volume_accumulator under each pump
 // program whose volume account the plan closes. S-4 and S-5 are separate frames, so a pump change that breaks S-5 never
 // holds back the token closes; S-4 splits into more frames when one would pass 1,232 bytes. Owed cashback (card
 // solana-teardown-cashback): each claim, with its volume account's close right after it, rides at the end of the last
@@ -749,9 +750,11 @@ export function buildSolanaTeardown(wallet: string, plan: SolanaTeardownPlan, ch
     if (h.kind !== "token" || unwrapped.has(h.address)) continue;
     const group = [
       ...(h.harvest ? [ix(SOLANA_TOKEN_2022_PROGRAM, [acc(h.mint, false, true), acc(h.address, false, true)], [26, 4])] : []),
+      // a balance the plan burns (card sol-rent-back-dust-burn): all of it, of the account's own mint, the wallet signing
+      ...(h.burn !== undefined ? [ix(h.program, [acc(h.address, false, true), acc(h.mint, false, true), acc(wallet, true, false)], [8, ...u64le(h.burn)])] : []),
       ix(h.program, [acc(h.address, false, true), acc(wallet, false, true), acc(wallet, true, false)], [9]),
     ];
-    const groupCu = SOLANA_TEARDOWN_CU.close + (h.harvest ? SOLANA_TEARDOWN_CU.harvest : 0);
+    const groupCu = SOLANA_TEARDOWN_CU.close + (h.harvest ? SOLANA_TEARDOWN_CU.harvest : 0) + (h.burn !== undefined ? SOLANA_TEARDOWN_CU.burn : 0);
     if (body.length) {
       try {
         frame([...body, ...group], cu + groupCu);
@@ -835,13 +838,14 @@ export async function solanaTeardownChecked(
   lamports: readonly [bigint, bigint],
   chain: { blockhash: string; lastValidBlockHeight: number },
   simulate: (frames: readonly SolanaAssembled[]) => Promise<SolanaTeardownReads["simulations"]>,
+  burn: readonly string[] = [],
 ): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; wires: Uint8Array[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
   const once = async (p: SolanaTeardownPlan, unclaimed?: SolanaTeardownUnclaimed) => {
     const frames = buildSolanaTeardown(wallet, p, chain);
     // the bytes checked are copies taken before the first await and handed to no one (card signers-own-bytes): the
     // caller signs only these (own-wires.ts), so a change to a frame while it simulates is never signed
     const wires = frames.map((f) => Uint8Array.from(f.wire));
-    const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }) };
+    const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }), ...(burn.length ? { burn } : {}) };
     // the bytes simulated are the bytes checked and signed: a frame changed while it simulated is refused (review 5 F6)
     frames.forEach((f, i) => {
       const w = f.wire;
@@ -855,7 +859,7 @@ export async function solanaTeardownChecked(
   for (let i = 0; i < 2; i++) {
     const off = solanaTeardownUnclaimed(t.verdict, t.wires, t.reads.simulations, t.reads.unclaimed);
     if (off === null || Object.keys(off).length === Object.keys(t.reads.unclaimed ?? {}).length) return t;
-    t = await once(solanaTeardownPlan(wallet, accounts, off), off);
+    t = await once(solanaTeardownPlan(wallet, accounts, off, burn), off);
   }
   return t;
 }

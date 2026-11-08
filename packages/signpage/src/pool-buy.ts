@@ -366,8 +366,8 @@ export async function readBackFailure(rpc: SolanaRpc, signature: string, signed:
 /** readBack, with the transaction's meta when it is this very transaction (the token balances the fill is read from),
  *  and `mine`: the RPC answered this very transaction's bytes under the signature (ok, failed, or a meta that says
  *  nothing), the read that lets an answer name it. */
-async function readBackMeta(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<{ got: "none" | "ok" | "failed" | "other"; mine?: true; meta?: Record<string, unknown> }> {
-  const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: { err?: unknown } } | null;
+export async function readBackMeta(rpc: SolanaRpc, signature: string, signed: Uint8Array, commitment: "confirmed" | "finalized" = "confirmed"): Promise<{ got: "none" | "ok" | "failed" | "other"; mine?: true; meta?: Record<string, unknown> }> {
+  const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment, maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: { err?: unknown } } | null;
   if (r === null) return { got: "none" };
   const t = r?.transaction;
   if (!Array.isArray(t) || t[1] !== "base64" || typeof t[0] !== "string") return { got: "other" };
