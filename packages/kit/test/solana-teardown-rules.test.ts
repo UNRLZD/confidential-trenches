@@ -24,6 +24,7 @@ import {
   type SolanaTeardownSimulation,
 } from "../src/checks/solana/checks.ts";
 import { solanaAta } from "../src/checks/solana/message.ts";
+import { buildSolanaTeardown } from "../src/trade/solana/build.ts";
 
 type RawAcc = { owner: string; lamports: number; data: [string, string] } | null;
 const F = JSON.parse(readFileSync(new URL("./fixtures/solana-teardown.json", import.meta.url), "utf8")) as {
@@ -254,4 +255,87 @@ test("harvest frames: the honest one passes FRAME and COVER; each misplaced harv
 
 test("the plan refuses an SPL Token account longer than 165 bytes", () => {
   assert.throws(() => planOf(token({ program: SOLANA_TOKEN_PROGRAM, len: 166 })), /166 bytes is not a token account/);
+});
+
+// ---- burns (card sol-rent-back-dust-burn): a balance the caller names burned, exactly, right before its close
+
+const DUST_MINT = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
+const DUST = solanaAta(W, DUST_MINT, T22);
+const SPL_DUST = solanaAta(W, DUST_MINT, SOLANA_TOKEN_PROGRAM);
+const OTHER_MINT = "So11111111111111111111111111111111111111112";
+const OTHER = solanaAta(W, NOFEE_MINT, T22);
+const dust = (o: Parameters<typeof token>[0] = {}) => token({ mint: DUST_MINT, amount: 1n, exts: [[7, []]], ...o });
+const burnIx = (acc: string, mint: string, n: bigint, o: { program?: string; auth?: string; signer?: boolean } = {}): I => ({
+  program: o.program ?? T22,
+  accounts: [a(acc, false, true), a(mint, false, true), a(o.auth ?? W, o.signer ?? true, false)],
+  data: [8, ...u64(n)],
+});
+const DUST_READS = { [DUST]: [dust(), dust()] as const, [OTHER]: [token({ amount: 1n, exts: [[7, []]] }), token({ amount: 1n, exts: [[7, []]] })] as const };
+// Honest simulations: DUST gone, the wallet up by its rent less the fee.
+const burnSims = (n = 1): [SolanaTeardownSimulation, SolanaTeardownSimulation][] => {
+  const s: SolanaTeardownSimulation = { err: null, wallet: W0 + 2_039_280n - 5_000n, accounts: { [DUST]: null } };
+  return Array.from({ length: n }, () => [s, s]);
+};
+const burnRun = (ixs: I[][], o: Partial<SolanaTeardownReads> = {}) => checkSolanaTeardown(ixs.map((f) => wire(f)), W, { accounts: DUST_READS, wallet: [W0, W0], simulations: burnSims(ixs.length), burn: [DUST], ...o });
+const BURN_OK = (): I[] => [limit(14_600), burnIx(DUST, DUST_MINT, 1n), t22close(DUST)];
+
+test("the plan burns only a balance the caller names, on an account that would close but for it", () => {
+  const at = (x: SolanaHeldRead, burn: string[], addr = DUST) => solanaTeardownPlan(W, { [addr]: [x, x] }, undefined, burn);
+  // named: burned exactly, then closed; not named: kept holding it, as before
+  assert.deepEqual(at(dust(), [DUST]).close.map((h) => h.kind === "token" && h.burn), [1n]);
+  assert.deepEqual(at(dust(), []).keep.map((k) => k.why), [`holds 1 of ${DUST_MINT}`]);
+  assert.deepEqual(at(dust({ amount: 123_456n }), [DUST]).close.map((h) => h.kind === "token" && h.burn), [123_456n]);
+  // SPL Token, no extensions at all
+  assert.deepEqual(at(dust({ program: SOLANA_TOKEN_PROGRAM, exts: [] }), [SPL_DUST], SPL_DUST).close.map((h) => h.kind === "token" && h.burn), [1n]);
+  // an empty account named burns nothing (it closes as before)
+  assert.deepEqual(at(dust({ amount: 0n }), [DUST]).close.map((h) => h.kind === "token" && h.burn), [undefined]);
+  // Token-2022 with any extension but ImmutableOwner: kept, with the extension named (a fee 2, a hook account 15,
+  // a memo 8, a CPI guard 11, a non-transferable 13, a paused 27 account)
+  for (const t of [2, 8, 11, 13, 15, 27]) assert.deepEqual(at(dust({ exts: [[7, []], [t, t === 2 ? u64(0n) : [0]]] }), [DUST]).keep.map((k) => k.why), [`holds 1 of ${DUST_MINT} (no burn: Token-2022 extension ${t})`], `extension ${t}`);
+  // frozen, another close authority, a confidential balance: kept as before
+  assert.deepEqual(at(dust({ state: 2 }), [DUST]).keep.map((k) => k.why), ["frozen"]);
+  assert.deepEqual(at(dust({ closeAuth: STRANGER }), [DUST]).keep.map((k) => k.why), [`close authority ${STRANGER}`]);
+  // the wallet's account a cashback claim pays into (USDC under SPL Token) is never burned
+  const usdc = solanaAta(W, MINT, SOLANA_TOKEN_PROGRAM);
+  assert.deepEqual(at(token({ program: SOLANA_TOKEN_PROGRAM, amount: 1n }), [usdc], usdc).keep.map((k) => k.why), [`holds 1 of ${MINT}`]);
+  // a native (wSOL) account named closes with its lamports, nothing burned
+  assert.deepEqual(at(token({ program: SOLANA_TOKEN_PROGRAM, native: true, amount: 5n, mint: OTHER_MINT }), [DUST]).close.map((h) => h.kind === "token" && h.burn), [undefined]);
+});
+
+test("burn frames: the honest one passes every check; the builder makes it", () => {
+  assert.deepEqual(burnRun([BURN_OK()]).results.filter((r) => !r.ok), []);
+  const plan = solanaTeardownPlan(W, DUST_READS, undefined, [DUST]);
+  const built = buildSolanaTeardown(W, plan, { blockhash: R.chain.blockhash, lastValidBlockHeight: 1 });
+  assert.equal(built.length, 1);
+  const v = checkSolanaTeardown(built.map((f) => f.wire), W, { accounts: DUST_READS, wallet: [W0, W0], simulations: burnSims(), burn: [DUST] });
+  assert.deepEqual(v.results.filter((r) => !r.ok), []);
+  assert.equal(built[0]!.cuLimit, 14_600);
+});
+
+const BURN_CASES: [string, () => I[][], string, RegExp][] = [
+  ["a burn over the balance", () => [[limit(14_600), burnIx(DUST, DUST_MINT, 2n), t22close(DUST)]], "FRAME", /burn of 2 from/],
+  ["a burn under the balance", () => [[limit(14_600), burnIx(DUST, DUST_MINT, 0n), t22close(DUST)]], "FRAME", /burn of 0 from/],
+  ["a burn naming another mint", () => [[limit(14_600), burnIx(DUST, OTHER_MINT, 1n), t22close(DUST)]], "FRAME", /burn of 1 from .* of So111/],
+  ["a burn of another of the wallet's accounts", () => [[limit(22_600), burnIx(OTHER, NOFEE_MINT, 1n), burnIx(DUST, DUST_MINT, 1n), t22close(DUST)]], "FRAME", new RegExp(`burn of 1 from ${OTHER}`)],
+  ["a burn of a stranger's account", () => [[limit(22_600), burnIx(STRANGER, DUST_MINT, 1n), burnIx(DUST, DUST_MINT, 1n), t22close(DUST)]], "FRAME", new RegExp(`burn of 1 from ${STRANGER}`)],
+  ["a burn under the other token program", () => [[limit(14_600), burnIx(DUST, DUST_MINT, 1n, { program: SOLANA_TOKEN_PROGRAM }), t22close(DUST)]], "FRAME", /burn of 1 from/],
+  ["a burn a stranger signs", () => [[limit(14_600), burnIx(DUST, DUST_MINT, 1n, { auth: STRANGER }), t22close(DUST)]], "FRAME", /burn of 1 from/],
+  ["a burn not right before its close", () => [[limit(22_600), burnIx(DUST, DUST_MINT, 1n), burnIx(DUST, DUST_MINT, 1n), t22close(DUST)]], "FRAME", /burn of 1 from/],
+  ["a close with no burn first", () => [[limit(6_600), t22close(DUST)]], "COVER", new RegExp(`${DUST} burned 0 times`)],
+];
+for (const [name, frames, id, detail] of BURN_CASES) {
+  test(`${id} refuses ${name}`, () => {
+    const v = burnRun(frames());
+    assert.match(failing(v, id), detail, JSON.stringify(v.results));
+  });
+}
+
+test("FRAME refuses a burn the plan has not asked for: none named, or a Token-2022 account with a hook or a fee extension", () => {
+  assert.match(failing(burnRun([BURN_OK()], { burn: [] }), "FRAME"), new RegExp(`burn of 1 from ${DUST}`));
+  for (const ext of [[15, [0]], [2, u64(0n)]] as [number, number[]][]) {
+    const x = dust({ exts: [[7, []], ext] });
+    const v = burnRun([BURN_OK()], { accounts: { [DUST]: [x, x] } });
+    assert.match(failing(v, "FRAME"), new RegExp(`burn of 1 from ${DUST}`), `extension ${ext[0]}`);
+    assert.match(failing(v, "FRAME"), new RegExp(`close of ${DUST}`), `extension ${ext[0]}`);
+  }
 });
