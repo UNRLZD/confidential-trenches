@@ -15,6 +15,7 @@
 // and its mutants in test/evm-quote-mutants.mjs); that the served files are that commit's build is signpage-release's.
 // The recorded answers: SIGN_HOST as served (good, no builder), the kit's sell builder bundled at this card's commit
 // (good, the builder and the guard) and at the commit before it (bad, the builder alone), and planted bundles.
+// After: sign
 //   node scripts/live-checks/evm-sell-no-release-in-flight.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

@@ -7,6 +7,8 @@
 // provider swap whose origin a page's policy misses fails this check; a path on a provider (one that may carry a key)
 // is never named, only its origin. app-host-gate and signpage-skeleton pin each page's whole connect-src with these
 // origins in it, and their CI tests hold each _headers file to its pin.
+// After: app --host app
+// After: sign --host sign
 //   node scripts/live-checks/page-evm-rpc-csp.mjs [--host app|sign] [--app <url>] [--sign <url>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --host reads that host alone (each host's deploy runs its own, so a host that lags does not fail the other's deploy);

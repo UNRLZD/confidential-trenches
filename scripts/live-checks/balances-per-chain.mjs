@@ -15,6 +15,7 @@
 //   - no CSP violation, no console error and no page error in the terminal's frame (one with no address counts).
 // It passes on the deployed host once Portfolio is mounted on /portfolio (card app-portfolio-mount) and this card is
 // deployed. A screenshot of each width is kept.
+// After: app
 //   node scripts/live-checks/balances-per-chain.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST as it is served (only SIGN_HOST's name is answered by the stand-in shell)
 //   node scripts/live-checks/balances-per-chain.mjs --harness [--build <dir>] ...

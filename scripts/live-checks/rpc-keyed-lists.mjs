@@ -15,6 +15,7 @@
 //     A run that fails only on such states reads the health again every 30 s for up to 3 min (the helper reads a URL
 //     that did not answer again each minute, rpc.ts KEYED_RETRY_MS), so a passing 429 or timeout does not undo a deploy.
 // The keys exist only on the helper box: this check reads the health alone, never a provider.
+// After: helper
 //   node scripts/live-checks/rpc-keyed-lists.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

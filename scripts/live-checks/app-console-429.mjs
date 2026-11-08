@@ -7,6 +7,7 @@
 // its Retry-After, so a FAIL says which route refused (the helper's own log says which limit: "refused <route> <why>").
 // From one machine the helper sees one client: CROWD x 4 + 4 stays under its 120 a client a window (server.ts
 // API_RATE_MAX), so a 429 here is never this check's own window.
+// After: app helper
 //   node scripts/live-checks/app-console-429.mjs [--base <url>] [--crowd <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

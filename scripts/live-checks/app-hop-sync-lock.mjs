@@ -7,6 +7,7 @@
 // the real shell does and never drawing a screen, which holds that moment open. At 390 x 844 (phone, dpr 2, touch) and
 // 1440 x 900 (desktop, dpr 1): Sign in, then the passkey way; once the shell has answered, the same way again. Want one
 // signin.open, the way still locked, and no line under it.
+// After: app
 //   node scripts/live-checks/app-hop-sync-lock.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-hop-sync-lock.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

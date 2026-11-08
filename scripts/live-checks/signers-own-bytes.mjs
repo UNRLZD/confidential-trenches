@@ -15,6 +15,7 @@
 // It does not prove those lines run or refuse: that is the kit's tests at the released commit
 // (packages/kit/test/solana-flow.test.ts, the hostile test of card signers-own-bytes; test/solana-flow-replay.test.ts),
 // and that the served files are that commit's build is signpage-release's.
+// After: sign
 //   node scripts/live-checks/signers-own-bytes.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

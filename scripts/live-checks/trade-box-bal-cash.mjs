@@ -10,6 +10,7 @@
 //   - cash: the box is on the vault's path and its Bal equals the header's, which is the account's Cash ($67.87);
 //   - pool: the box is on the pool's path and its Bal is not the header's Cash (the pool's, "—" until it is priced).
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
+// After: app
 //   node scripts/live-checks/trade-box-bal-cash.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/trade-box-bal-cash.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

@@ -14,6 +14,7 @@
 // The two next-page forms pass every check the helper makes on the bytes and reach its simulation, which refuses the
 // junk proof (422 simulation_failed); a helper that predates the card refuses them on the bytes (422 not_pool). The
 // tenth account is refused on the bytes (422 not_pool) by both. Nothing is signed by the fee payer and nothing is sent.
+// After: helper
 //   node scripts/live-checks/pool-senders-next-page-helper.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

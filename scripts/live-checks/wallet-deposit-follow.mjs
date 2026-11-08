@@ -13,6 +13,7 @@
 // way (a 405, a 404, another address) leaves the device reading nothing, so no deposit moves past waiting.
 // The recorded answers: facts() over this card's committed SIGN_HOST build (packages/signpage/index.html and
 // public/app.js) and the helper's live answer; the bad one SIGN_HOST as served before the card and the helper asked by GET.
+// After: sign
 //   node scripts/live-checks/wallet-deposit-follow.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

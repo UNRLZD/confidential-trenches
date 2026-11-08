@@ -12,6 +12,7 @@
 //      run's deposit is read back on two devnet RPCs by the money gate (pool-ready-no-flicker.md's Tx lines).
 // Not read here, and why: SIGN_HOST's mainnet build pins no pool yet (card pool-sol-deploy-mainnet), so no deployed
 // page holds a ready proof to watch; the devnet run is the testnet build of the same code.
+// After: sign
 //   node scripts/live-checks/pool-ready-no-flicker.mjs [--harness] [--record <file>]
 //     --harness: this checkout's bundle stands for SIGN_HOST's /app.js
 //     PASS exit 0, FAIL exit 1, error exit 2

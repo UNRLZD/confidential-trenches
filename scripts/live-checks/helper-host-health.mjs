@@ -18,6 +18,7 @@
 //     number is up from it. Without --since the comparison is not made, and the run says so;
 //   - every answer says ready: true (card helper-ready-gate): the deployed helper has warmed (its lists, a token page
 //     and its holders answer 200) before it took this read, so the first live run after a redeploy needs no warm-up wait.
+// After: helper --commit {commit}
 //   node scripts/live-checks/helper-host-health.mjs [--base <url>] [--commit <sha>] [--since <record>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

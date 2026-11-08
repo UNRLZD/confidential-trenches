@@ -80,7 +80,7 @@ const listFile = (checks) => `console.log(JSON.stringify({ checks: ${JSON.string
 // a copy of the repository files the plan reads, to plant a failure in
 function fixture(edit) {
   const root = mkdtempSync(path.join(tmpdir(), "live-plan-"));
-  for (const f of ["scripts/ci/live-plan.mjs", "scripts/browsers.mjs", "scripts/ci/helper-live-checks.mjs"]) {
+  for (const f of ["scripts/ci/live-plan.mjs", "scripts/ci/live-after.mjs", "scripts/browsers.mjs", "scripts/ci/helper-live-checks.mjs"]) {
     mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
     cpSync(path.join(ROOT, f), path.join(root, f));
   }
@@ -119,57 +119,25 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's fifty-three checks (signpage-shell runs four ways, hosts-main-on-top, terminal-harness-sign-spa, held-deposit-way-out, pool-deposit-follow, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole, solana-legs-checked and signers-own-bytes the newest) and every app check, with the network a testnet build names", async () => {
+test("each host's jobs are its listed checks' runs, counted from its list, and the network a testnet build names", async () => {
+  for (const host of Object.keys(HOSTS)) {
+    const list = listOf(host, ROOT, { commit: COMMIT, network: "mainnet" });
+    assert.ok(list.checks.length > 0, `${host} lists checks`);
+    assert.equal(new Set(list.checks).size, list.checks.length, `${host} lists no check twice`);
+  }
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 53);
-  assert.ok(sign.include.some((e) => e.key === "pool-senders-next-page" && !e.chrome && e.args === ""), "pool-senders-next-page runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "held-deposit-way-out" && !e.chrome && e.args === ""), "held-deposit-way-out runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-deposit-address" && !e.chrome && e.args === ""), "pool-deposit-address runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-deposit-follow" && !e.chrome && e.args === ""), "pool-deposit-follow runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "wallet-withdraw-move-out" && !e.chrome && e.args === ""), "wallet-withdraw-move-out runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "wallet-near-prepay-taken" && !e.chrome && e.args === ""), "wallet-near-prepay-taken runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "evm-sell-no-release-in-flight" && !e.chrome && e.args === ""), "evm-sell-no-release-in-flight runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "solana-release-reads-paced" && !e.chrome && e.args === ""), "solana-release-reads-paced runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-deposit-sent-end" && !e.chrome && e.args === ""), "pool-deposit-sent-end runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "solana-written-accounts-whole" && !e.chrome && e.args === ""), "solana-written-accounts-whole runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "solana-legs-checked" && !e.chrome && e.args === ""), "solana-legs-checked runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "signers-own-bytes" && !e.chrome && e.args === ""), "signers-own-bytes runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "oneclick-fee-path-own-key" && !e.chrome && e.args === ""), "oneclick-fee-path-own-key runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "hosts-main-on-top" && !e.chrome && e.args === ""), "hosts-main-on-top (SIGN_HOST's DNS: no child, no wildcard) runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "terminal-harness-sign-spa" && e.args === ""), "terminal-harness-sign-spa (SIGN_HOST's answer to a path with no file, as the terminal's harness serves it) runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "signpage-withdraw-handoff" && !e.chrome && e.args === ""), "signpage-withdraw-handoff runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "wallet-deposit-follow" && !e.chrome && e.args === ""), "wallet-deposit-follow runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "kit-oneclick-pins-frozen" && !e.chrome && e.args === ""), "kit-oneclick-pins-frozen runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-deposits" && !e.chrome && e.args === ""), "pool-deposits runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-answer-unknown" && !e.chrome && e.args === ""), "pool-answer-unknown runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "kit-frame-version" && !e.chrome && e.args === ""), "kit-frame-version runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "kit-deposit-assets-dry" && e.chrome && e.args === ""), "kit-deposit-assets-dry runs after every sign deploy, in Chrome");
-  assert.ok(sign.include.some((e) => e.key === "kit-deposit-calls" && !e.chrome && e.args === ""), "kit-deposit-calls runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "evm-pool-sync-wide-pages" && !e.chrome && e.args === ""), "evm-pool-sync-wide-pages runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-restore-wired" && e.chrome && e.args === ""), "pool-restore-wired runs after every sign deploy, in Chrome");
-  assert.ok(sign.include.some((e) => e.key === "pool-read-down" && !e.chrome && e.args === ""), "pool-read-down runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "sol-buy-rent-back" && !e.chrome && e.args === ""), "sol-buy-rent-back runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "pool-ready-no-flicker" && !e.chrome && e.args === ""), "pool-ready-no-flicker runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "signpage-pool-mainnet" && e.chrome && e.args === ""), "signpage-pool-mainnet runs after every sign deploy, in Chrome");
-  assert.ok(sign.include.some((e) => e.key === "signpage-pool-pins" && !e.chrome && e.args === ""), "signpage-pool-pins runs after every sign deploy");
-  assert.ok(sign.include.some((e) => e.key === "kit-renewal-read-bounded" && e.args === ""), "kit-renewal-read-bounded runs after every sign deploy");
+  const signList = listOf("sign", ROOT, { commit: COMMIT, network: "mainnet" });
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, signList.checks.length, "each listed sign check has a job");
+  assert.equal(sign.include.length, signList.checks.flatMap((k) => signList.runs[k]).length, "one job for each run of each sign check");
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
+  assert.ok(sign.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host sign"), "page-evm-rpc-csp reads SIGN_HOST alone after every sign deploy");
   const app = await planFor("app", { commit: COMMIT });
-  assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 38, "the app's thirty-eight checks, app-deposit-mount, page-evm-rpc-csp, evm-sell-hook-intrablock, app-quick-buy-one-tap, app-toast-clears-sheet-head, app-chart-controls and deposit-to-pool the newest");
-  assert.ok(app.include.some((e) => e.key === "app-deposit-mount" && e.chrome && e.args === ""), "app-deposit-mount runs on APP_HOST in Chrome");
-  assert.ok(app.include.some((e) => e.key === "deposit-to-pool" && e.chrome && e.args === ""), "deposit-to-pool runs on APP_HOST in Chrome");
+  const appList = listOf("app", ROOT, { commit: COMMIT, network: "mainnet" });
+  assert.equal(app.include.length, appList.checks.length, "each app check is one job");
+  assert.equal(app.include.length, appList.checks.flatMap((k) => appList.runs[k]).length, "one job for each run of each app check");
   assert.ok(app.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host app"), "page-evm-rpc-csp reads APP_HOST alone after every app deploy");
-  assert.ok(app.include.some((e) => e.key === "rh-cold-quote" && e.args === ""), "rh-cold-quote runs after every app deploy");
-  assert.ok(app.include.some((e) => e.key === "token-page-fills-after" && e.chrome && e.args === ""), "token-page-fills-after runs after every app deploy, in Chrome");
-  assert.ok(app.include.some((e) => e.key === "app-chart-live"), "app-chart-live runs after every app deploy");
-  assert.ok(app.include.some((e) => e.key === "evm-quote-warm-round" && e.args === ""), "evm-quote-warm-round runs after every app deploy");
-  assert.ok(app.include.some((e) => e.key === "evm-sell-hook-intrablock" && !e.chrome && e.args === ""), "evm-sell-hook-intrablock runs after every app deploy");
-  assert.ok(app.include.some((e) => e.key === "balances-per-chain" && e.chrome && e.args === ""), "balances-per-chain runs on APP_HOST in Chrome");
-  assert.ok(app.include.some((e) => e.key === "app-export-every-wallet" && e.chrome && e.args === ""), "app-export-every-wallet runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "app-verify-mount" && e.args === "--network mainnet"));
-  assert.ok((await planFor("app", { commit: COMMIT, network: "testnet" })).include.some((e) => e.args === "--network testnet"));
+  assert.ok((await planFor("app", { commit: COMMIT, network: "testnet" })).include.some((e) => e.key === "app-verify-mount" && e.args === "--network testnet"));
 });
 
 test("the helper's skipped checks are the ones the runner cannot run, with the reason the check itself gives", async () => {

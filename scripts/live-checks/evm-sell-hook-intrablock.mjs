@@ -17,6 +17,7 @@
 // It passes when at least 3 transactions were read and every read and replay holds. It runs after every app deploy
 // (apps/terminal/scripts/deploy.mjs LIVE_CHECKS): the kit ships in the app's bundle and its bans fail open, so a pin
 // that changes or a provider that stops serving traces would turn Robinhood's trace evidence off without a sound.
+// After: app
 //   node scripts/live-checks/evm-sell-hook-intrablock.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. Reads only.
 import "../net-window.mjs";

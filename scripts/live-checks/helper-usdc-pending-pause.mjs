@@ -19,6 +19,7 @@
 // complete and agreed, and either no request that may be pending is stored, or one is and the carry sends nothing
 // (token_halted, token_not_accepted or relayer_low). A request that may be pending while the carry runs its checks is
 // the bad end state. /v1/token-status is not read: the request hold gates only the deposit carry.
+// After: helper
 //   node scripts/live-checks/helper-usdc-pending-pause.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

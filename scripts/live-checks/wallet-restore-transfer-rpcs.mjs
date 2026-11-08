@@ -27,6 +27,7 @@
 // (the URL's host, never a key; the method, the block range, its try, and the Retry-After the provider named and the
 // time waited since its last answer). Run 42146750370's job was cancelled at 20 min with no line: four reads one after
 // another, printed only at the end, the Base one at 78-block pages (EVM_LOG_CEILING_PAGES in the wallet's evm.ts).
+// After: helper
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run: the

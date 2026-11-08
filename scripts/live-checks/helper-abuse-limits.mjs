@@ -18,6 +18,7 @@
 // A second client in the same window is not read here: from one machine the helper sees one client (Caddy writes
 // X-Forwarded-For from the peer it saw). apps/helper/src/server.test.ts reads it on a real socket with two forwarded
 // addresses.
+// After: helper
 //   node scripts/live-checks/helper-abuse-limits.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

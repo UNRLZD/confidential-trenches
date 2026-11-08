@@ -12,6 +12,7 @@
 //   - at that hash, on each provider alone: every chain fee read (the kit's evmPoolChainFeeReads) and, where the chain
 //     pins a pool, the pool's currentTreeDepth(), each answered with a word.
 // Any error, a missing answer or two hashes fails it.
+// After: helper
 //   node scripts/live-checks/evm-buy-hookdata-fee.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // The block 600 s back is the oldest epoch's first block a proof's fee is read at, so a provider that keeps it keeps
