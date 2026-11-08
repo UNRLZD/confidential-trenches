@@ -24,6 +24,7 @@
 // Runs: once, it reads no host: the wallet's pool sync at the checkout against the testnets' public RPCs; the wallet tests hold its pager
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
+import { STILL_CLOCK } from "./wallet-restore-transfer-rpcs.mjs";
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -155,7 +156,7 @@ function runSync(name, c, fromBlock, transport, wait, deadlineMs) {
   return new Promise((resolve, reject) => {
     const args = { network: name, pool: c.pool, fromBlock: fromBlock.toString(), urls: c.rpcs, wait };
     const t0 = Date.now();
-    const child = spawn(process.execPath, [SYNC, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [...(wait ? [] : STILL_CLOCK), SYNC, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "", err = "", settled = false, calls = 0;
     const open = new Map(); // id -> the call, asked at
     const tries = new Map(); // [url, method, params] -> times asked
