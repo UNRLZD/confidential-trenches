@@ -12,6 +12,7 @@
 //     sheet on the phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
 //     no sheet (its screen is another card's).
 // A screenshot of each width and scheme is kept.
+// After: app
 //   node scripts/live-checks/app-portfolio-mount.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-portfolio-mount.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

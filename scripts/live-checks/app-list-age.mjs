@@ -9,6 +9,7 @@
 // The page re-reads every 12 s, so a drawn age is taken as right when it is listAge of the last lists answer the page
 // read at the time of the reading, or 12 s before it.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
+// After: app
 //   node scripts/live-checks/app-list-age.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-list-age.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

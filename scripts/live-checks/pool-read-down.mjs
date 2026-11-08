@@ -12,6 +12,7 @@
 // What each does is held by the card's tests (packages/signpage/test/pool-kinds, pool-buy, pool-sell, pool-deposit and
 // deposit-wire, each "card pool-read-down"); the recorded answers are facts() over each tree's packages/signpage/
 // index.html and public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/pool-read-down.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

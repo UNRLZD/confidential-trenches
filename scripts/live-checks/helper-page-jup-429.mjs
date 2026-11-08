@@ -17,6 +17,7 @@
 //   - a re-read within REREAD_MS of the first send (one of Jupiter's windows) holds its Jupiter row read for it
 //     (risk.holders src "jupiter", as_of_ms at or after the first send less SKEW_MS): the search went at the page
 //     lane's next free send and was held for the next read.
+// After: helper
 //   node scripts/live-checks/helper-page-jup-429.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

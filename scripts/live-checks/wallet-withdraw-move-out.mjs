@@ -11,6 +11,7 @@
 //     (a pattern, HANDOFF_RE: a build that drops `to: w.recipient` from the hand-off fails).
 // The mainnet build offers no hand-off until the release names mainnet's relayer (handoff.ts withdrawHandoff: null);
 // the code that pays the typed account is in the bundle either way, which is what this reads.
+// After: sign
 //   node scripts/live-checks/wallet-withdraw-move-out.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-withdraw-move-out.mjs --local [--record <file>]   this tree's committed build
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each

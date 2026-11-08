@@ -25,6 +25,7 @@
 //   - tap: the shell sends a signed-out state and refuses every open (not_allowed); Sign in, then Use passkey, shows the
 //     line in place of the tap (refused, no Retry, in the sheet) within the kit's 5,000 ms for an open plus 1,500 ms,
 //     the top window stays on SIGN_HOST, and no pop-up opens (card app-hop-refused's rule: a tap never ends in nothing).
+// After: app --engines chromium,firefox,webkit
 //   node scripts/live-checks/app-in-shell.mjs [--engines chromium,firefox,webkit] [--shots <dir>] [--record <file>]
 //     [--expect in|out]   the live hosts; a fresh browser is signed out, so live runs read --expect out (default)
 //   --engines: the engines run and judged, each in full (default all three; CI's browser job runs Chromium only)

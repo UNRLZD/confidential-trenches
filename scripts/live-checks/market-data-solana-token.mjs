@@ -19,6 +19,7 @@
 //     grid, oldest first, USD values decimal strings. src is "geckoterminal" for a mint the lists do not hold, else
 //     "chain" or "chain,geckoterminal" (the helper's own bars, the vendor's only before them,
 //     apps/helper/src/data/solana/trades.ts); when the bars include ours, own_from_s (before as_of_ms) is our first bar.
+// After: helper
 //   node scripts/live-checks/market-data-solana-token.mjs [--base <url>] [--token <mint>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more page reads.
 import "../net-window.mjs";

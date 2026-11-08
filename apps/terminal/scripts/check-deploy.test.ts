@@ -309,8 +309,6 @@ test("deploy.mjs's live runs name every live check that reads APP_HOST, and its 
   const t = mkdtempSync(join(tmpdir(), "check-deploy-testnet-"));
   writeFileSync(join(t, "_headers"), headersFor("testnet", readFileSync(join(BUILD, "_headers"), "utf8")));
   assert.deepEqual([networkOfBuild(BUILD), networkOfBuild(t)], ["mainnet", "testnet"]);
-  const { LIVE_CHECKS } = await import("./deploy.mjs");
-  assert.deepEqual(LIVE_CHECKS.filter((k: string) => !keys.includes(k)), ["signpage-release", "trade-box-pool", "trade-box-bal-cash", "signpage-pool-price", "signpage-buy-route-events", "balances-per-chain", "evm-quote-warm-round", "evm-quote-lag-held", "evm-sell-hook-intrablock", "rh-cold-quote", "token-page-fills-after", "page-evm-rpc-csp", "deposit-to-pool"], "LIVE_CHECKS holds the app-* checks, signpage-release, trade-box-pool, trade-box-bal-cash, signpage-pool-price, signpage-buy-route-events, balances-per-chain, evm-quote-warm-round and evm-quote-lag-held (the kit's EVM quote the app's bundle runs), evm-sell-hook-intrablock (the trace pair the kit's Robinhood bans read), rh-cold-quote, token-page-fills-after (the token page's re-read), and page-evm-rpc-csp (the policy lets the page reach the kit's EVM providers)");
   assert.ok(out.includes("scripts/live-checks/page-evm-rpc-csp.mjs --host app"), `the success line does not run page-evm-rpc-csp on APP_HOST alone: ${out}`);
 });
 

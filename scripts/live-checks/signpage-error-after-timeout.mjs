@@ -13,6 +13,7 @@
 // pool-buy, pool-sell, pool-deposit, pool-kinds, api: a refusal through the api reaches the app as progress refused).
 // The recorded answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg) of each tree (mainnet, as
 // SIGN_HOST serves; this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/signpage-error-after-timeout.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

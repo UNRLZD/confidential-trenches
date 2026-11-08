@@ -11,6 +11,7 @@
 //     access-control-allow-origin of * or that origin and content-type allowed, and its answer to a POST from there
 //     carries the same allow-origin: the device runs the quote in the browser, and a provider without them is one it
 //     never reaches (review of bc189de, L-5: base-public.nodies.app; re-review of fd9dd16, LOW-3: the POST's own).
+// After: app
 //   node scripts/live-checks/evm-quote-warm-round.mjs [--record <file>] [--only <case,...>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (each quote's time and outcome) to <file>, for the
 // test's replay (evm-quote-warm-round.answers.json);

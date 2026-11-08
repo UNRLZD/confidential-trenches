@@ -26,6 +26,7 @@
 // reads; and at least one burn round read the supply moved, which is the read main's kit before this card refused
 // (it compared the mint byte for byte). A run in which no burn landed between two reads proves nothing either way: it
 // says so and exits 2, never PASS.
+// After: helper
 //   node scripts/live-checks/solana-mint-supply-moves.mjs [--base <helper origin>] [--token <mint>] [--burn <mint>] [--rounds <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, no burn seen or error exit 2. --record writes every answer the run read, so the test
 //   can replay it.

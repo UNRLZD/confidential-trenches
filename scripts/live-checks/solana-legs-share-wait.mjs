@@ -16,6 +16,7 @@
 // reaches a leg as its end; each leg ends in a build that assembles at most 1,232 bytes on the device's blockhash and
 // passes the quote checks on the frame (JUDGED, as solana-jupiter-build.mjs); every call answered 429 or 503 was
 // followed by the leg's next call no sooner than its Retry-After; and the run ended inside the trade's bound.
+// After: helper
 //   node scripts/live-checks/solana-legs-share-wait.mjs [--base <helper origin>] [--token <mint>] [--legs <n>] [--record <file>] [--no-wait]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes every answer the run read, so the test can replay it.
 //   --legs runs more legs than 6 (at most the kit's 64): 16 is past what the helper lends one client in a minute (about

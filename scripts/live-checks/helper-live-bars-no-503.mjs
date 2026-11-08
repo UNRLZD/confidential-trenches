@@ -12,6 +12,7 @@
 // It passes only when at least HELD_MIN tokens are held and every live read answers 200 JSON { tf: "15m", candles: [1 or
 // 2 bars], src, as_of_ms }. A failing read is named by its token, status and time; the answers' age (read time less
 // as_of_ms) is printed, so a stale serve stays on record.
+// After: helper
 //   node scripts/live-checks/helper-live-bars-no-503.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

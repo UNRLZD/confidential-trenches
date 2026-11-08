@@ -10,6 +10,7 @@
 // none in WAIT_MS is named and proves nothing.
 // PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] }; FAIL
 // when one answers otherwise (a 404 is the bug) or a lists read fails; INCONCLUSIVE (exit 3) when no chain dropped one.
+// After: helper
 //   node scripts/live-checks/robinhood-listed-tape-opens.mjs [--base <url>] [--wait-ms <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test.
 import "../net-window.mjs";

@@ -10,6 +10,7 @@
 //   - no HTTP 429 and no other failed answer;
 //   - each W's holdings equal on both RPCs.
 // It prints, per W, the address, the slot or block and the holdings.
+// After: helper
 //   node scripts/live-checks/wallet-per-buy.mjs [--helper <origin>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

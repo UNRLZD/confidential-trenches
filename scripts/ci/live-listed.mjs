@@ -2,36 +2,27 @@
 // Every live check runs after the deploy it covers, or says why not (card live-checks-listed). A check in no host's
 // after-deploy list is never run, so a card that goes Live on it rests on nothing: balances-per-chain covered the deployed
 // Portfolio screen and had never run after a deploy. Each scripts/live-checks/<key>.mjs (not its .test.mjs) is either:
-//   - in a host's list, the ones live.yml runs (scripts/ci/live-plan.mjs HOSTS: the app's and the signing page's
-//     deploy.mjs LIVE_CHECKS, scripts/ci/helper-live-checks.mjs), read the way the plan reads them (listOf); or
+//   - in a host's list, the ones live.yml runs: a `// After: <host> [<args>]` line in its leading comment block for each
+//     run (scripts/ci/live-after.mjs, the one parser, which the app's and the signing page's deploy.mjs and
+//     scripts/ci/helper-live-checks.mjs make their LIVE_CHECKS from); or
 //   - not in any, with one line in its leading comment block that says why, the one place that reason is written:
 //       // Runs: once, <why>          it checks what a host deploy cannot change (a contract deploy, a kit freeze, the
 //                                    money gate's own records), or it is no check (a module the checks share, a tool)
 //       // Runs: pending <card>[, <why>]   it fails on what is deployed today, so a list would undo the next deploy;
 //                                    <card> is the key of the card that fixes it, and the check joins a list there
 // A check in a list has no Runs line: the two would disagree the day one changes. A check may sit in two lists when it
-// covers both hosts (signpage-release runs with --host app and --host sign).
+// covers both hosts (signpage-release runs with --host app and --host sign). An After line that names no host, or a
+// word that is not one (app, sign, helper), is refused here, and every host's list refuses to load past it.
 //   node scripts/ci/live-listed.mjs      PASS exit 0; the problems and exit 1
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import path from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HOSTS, ROOT, listOf } from "./live-plan.mjs";
+import { AFTER_HOSTS, CHECKS_DIR as DIR, afterOf, headerLines, readChecks } from "./live-after.mjs";
+import { ROOT } from "./live-plan.mjs";
 
-const DIR = "scripts/live-checks";
 const CARD = /^[a-z0-9]+(?:-[a-z0-9]+)+$/; // a card key, as the board names one: two words at least
-const COMMIT = "0".repeat(40);
 
 /** The Runs lines of a check's leading comment block (its shebang and the `//` lines before the first line of code). */
-export function runsLines(text) {
-  const out = [];
-  for (const line of text.split("\n")) {
-    if (line.startsWith("#!")) continue;
-    if (!line.startsWith("//")) break;
-    const m = /^\/\/\s*Runs:(.*)$/.exec(line);
-    if (m) out.push(m[1].trim());
-  }
-  return out;
-}
+export const runsLines = (text) => headerLines(text, "Runs");
 
 /** What is wrong with one Runs line's text (after "Runs:"), or null. */
 export function runsProblem(value) {
@@ -42,40 +33,44 @@ export function runsProblem(value) {
   return `a Runs line is "once, <why>" or "pending <card>", not: ${value}`;
 }
 
+/** Each key whose After lines name a host, to those hosts. */
+export function listedOf(checks) {
+  const listed = new Map();
+  for (const [key, text] of Object.entries(checks)) {
+    const hosts = Object.keys(afterOf(text).runs);
+    if (hosts.length) listed.set(key, AFTER_HOSTS.filter((h) => hosts.includes(h)));
+  }
+  return listed;
+}
+
 /**
  * The problems of a set of checks: `checks` maps each key to its file's text, `listed` maps each key a host lists to the
- * hosts that list it. [] when every check is listed or says why it is not, and none does both.
+ * hosts that list it (by default, the checks' own After lines). [] when every check is listed or says why it is not, and
+ * none does both.
  */
-export function listedProblems(checks, listed) {
+export function listedProblems(checks, listed = listedOf(checks)) {
   const p = [];
   for (const [key, text] of Object.entries(checks).sort(([a], [b]) => a.localeCompare(b))) {
     const lines = runsLines(text);
     const hosts = listed.get(key) ?? [];
     const file = `${DIR}/${key}.mjs`;
+    for (const bad of afterOf(text).problems) p.push(`${file}: ${bad}`);
     if (lines.length > 1) p.push(`${file} has ${lines.length} Runs lines: one says why it runs after no deploy`);
     for (const l of lines) {
       const bad = runsProblem(l);
       if (bad) p.push(`${file}: ${bad}`);
     }
-    if (hosts.length && lines.length) p.push(`${file} is in ${hosts.join(" and ")}'s list and says Runs: ${lines[0]}: drop the line, or take it out of the list`);
-    if (!hosts.length && !lines.length) p.push(`${file} is in no host's list (${Object.values(HOSTS).join(", ")}) and has no Runs line: add it to the list of the host it reads, or write "// Runs: once, <why>" or "// Runs: pending <card>" in its header`);
+    if (hosts.length && lines.length) p.push(`${file} is in ${hosts.join(" and ")}'s list (After) and says Runs: ${lines[0]}: drop one of the two lines`);
+    if (!hosts.length && !lines.length) p.push(`${file} is in no host's list and has no Runs line: write "// After: <host> [<args>]" (${AFTER_HOSTS.join(", ")}) for each run after the deploy of the host it reads, or "// Runs: once, <why>" or "// Runs: pending <card>", in its header`);
   }
   for (const key of listed.keys()) if (!(key in checks)) p.push(`${[...listed.get(key)].join(" and ")} list ${key}, which is no file in ${DIR}`);
   return p;
 }
 
-/** The checks under `root` ({ key: text }) and the hosts' lists (key to hosts), as live.yml's plan reads them. */
+/** The checks under `root` ({ key: text }) and the hosts' lists (key to hosts), from each check's After lines. */
 export function readTree(root = ROOT) {
-  const checks = Object.fromEntries(
-    readdirSync(path.join(root, DIR))
-      .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"))
-      .map((f) => [f.slice(0, -4), readFileSync(path.join(root, DIR, f), "utf8")]),
-  );
-  const listed = new Map();
-  for (const host of Object.keys(HOSTS)) {
-    for (const key of listOf(host, root, { commit: COMMIT, network: "mainnet" }).checks) listed.set(key, [...(listed.get(key) ?? []), host]);
-  }
-  return { checks, listed };
+  const checks = readChecks(root);
+  return { checks, listed: listedOf(checks) };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

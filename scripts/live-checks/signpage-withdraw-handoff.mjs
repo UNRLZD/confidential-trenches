@@ -12,6 +12,7 @@
 //     its relay_fee is a u128 at or below the device's own fee_max at the token's storage minimum. A helper that quotes
 //     above the device's cap, or names another relayer, fails it: the form would show the fee unread and hand off nothing.
 // The testnet withdrawal itself (the hand-off from the testnet build's form to settled) is a money run, not this check.
+// After: sign
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs [--record <file>]
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs --local [--record <file>]
 //     the same with this tree's committed build (index.html, public/app.js, public/_headers) in place of SIGN_HOST's;

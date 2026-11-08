@@ -29,6 +29,7 @@
 //   broken store: signin.open opens the passkey page; a seed record that decrypts but fails checkSeed is put in the
 //     store; Cancel still goes back to the app.
 //   Every press waits out the page's 500 ms activation guard first, which each layer opening restarts.
+// After: sign
 //   node scripts/live-checks/signpage-signin-kinds.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-signin-kinds.mjs --harness [--site <dir>] ...   the same steps on the app's
 //     browser harness (apps/terminal/test/harness) with SIGN_HOST's and APP_HOST's real names mapped to it, serving

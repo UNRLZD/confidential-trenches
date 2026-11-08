@@ -33,6 +33,7 @@
 //   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
 //   - the deployed helper's read HISTORY_BACK blocks back answers 200 with a result list on each chain;
 //   - each maker list holds MIN_MAKERS on hosts of their own, and each spare past the second answers both reads.
+// After: helper
 //   node scripts/live-checks/evm-rpc-spare-list.mjs [--base <url>] [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-rpc-spare-list.answers.json).
 // Reads only: no key, no transaction, no money moves.

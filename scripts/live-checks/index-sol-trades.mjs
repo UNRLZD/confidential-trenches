@@ -13,6 +13,7 @@
 //   - the fresh trade's signature is on the tape in a read that answered within 2 s of the check holding the trade, with
 //     its side, its time (the event's clock) and its trader (the event's user);
 //   - the 1s candles hold a bar at the trade's second with a volume above 0.
+// After: helper
 //   node scripts/live-checks/index-sol-trades.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

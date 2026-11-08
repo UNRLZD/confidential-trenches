@@ -15,6 +15,7 @@
 //   - no horizontal scroll, no text under 11 px, and on the phone no tap target under 44 px (BAR-10, app.md:1108; the
 //     tests of R5's design/proto/tools/shoot.mjs:68, :76-91, :92-108).
 // A screenshot of every load is kept at both widths.
+// After: app
 //   node scripts/live-checks/app-shell.mjs [--url <origin>] [--shots <dir>] [--record <file>]
 //   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] ...   the hosts' real names answered from local
 //     files by Playwright's route, as app-in-shell.mjs --harness does: APP_HOST the terminal's build (apps/terminal/dist

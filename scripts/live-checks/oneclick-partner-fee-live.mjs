@@ -18,6 +18,7 @@
 //     to $1 (a floor of about $0.10 on what 1Click prices near $19, so the price floor does not refuse it: this check
 //     holds the fee entry, not the price, which the device reads on its own).
 // A kit that pins another fee for a route than 1Click charges a keyed partner fails here ("app-fees").
+// After: helper
 //   node scripts/live-checks/oneclick-partner-fee-live.mjs [--base <url>] [--record <file>]
 //   node scripts/live-checks/oneclick-partner-fee-live.mjs --answer <file>     judge a recorded answer, no network
 // --record writes what the run read (the requests, each answer's status and body, the time), so the test can replay it,

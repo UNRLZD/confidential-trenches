@@ -13,6 +13,7 @@
 // Base Sepolia at a 0.005 gwei base fee was the one-step floor, 1e13 wei, under 2 x 0.005 gwei x G(4) = 1.477e13.
 // The buy's gas cap (EVM_BUY_GAS_MAX = G(32)) is not visible from outside: its proof is apps/helper/src/pool/
 // evm-buy-gas-depth.test.ts.
+// After: helper
 //   node scripts/live-checks/evm-buy-gas-depth.mjs [--base <helper url>] [--record <file> --as good|bad] [--local]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --local answers the fee from this tree's helper code in process (evmPoolSendersFromEnv with a throwaway sender key

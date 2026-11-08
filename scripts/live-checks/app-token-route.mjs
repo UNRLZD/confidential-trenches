@@ -12,6 +12,7 @@
 //   - an unknown id, APP_HOST/token/solana/<a made-up id>: the page's not-found state (data-token-page="empty", no
 //     token drawn), its token read answered 404.
 // A screenshot of every load is kept.
+// After: app
 //   node scripts/live-checks/app-token-route.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the

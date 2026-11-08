@@ -9,6 +9,7 @@
 //   - the footer's links are exactly Terms, Privacy and Verify, each a route the app has;
 //   - no price is drawn: signed out the signing page reads none, so a price there would be one the app did not read.
 // A screenshot of the page and of the footer at each read is kept.
+// After: app
 //   node scripts/live-checks/app-footer-bar.mjs [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST as it is served, signed out
 //   node scripts/live-checks/app-footer-bar.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

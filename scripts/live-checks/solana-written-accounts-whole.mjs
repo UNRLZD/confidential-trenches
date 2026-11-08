@@ -16,6 +16,7 @@
 // served files are that commit's build is signpage-release's (the release list against a fresh build). A check that ran
 // the served S11 itself would need to execute the page's bundle outside its page; no sha of one release is pinned here,
 // since every later release changes app.js. The recorded planted bundles with a mark's line changed or gone each FAIL.
+// After: sign
 //   node scripts/live-checks/solana-written-accounts-whole.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

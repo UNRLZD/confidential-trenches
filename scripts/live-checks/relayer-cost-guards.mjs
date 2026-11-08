@@ -22,6 +22,7 @@
 //   Every answer carries a full-sha X-Helper-Commit, equal to --commit when given.
 // Not readable live: check 7's refusal of a register_deposit other than the minimum (only a valid proof reaches check 7;
 // apps/helper/src/withdraw/send.test.ts holds it).
+// After: helper --commit {commit}
 //   node scripts/live-checks/relayer-cost-guards.mjs [--commit <sha>] [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
