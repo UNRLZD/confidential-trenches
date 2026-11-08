@@ -127,3 +127,27 @@ test("a receipt answered null or with a rate limit once, then present, passes; n
   assert.equal(err.chains.base.spans[i].receipts[1][1].tries, 1);
   bad(err, /base .*reader 2 answered \d+ of/);
 });
+
+test("the waits are the kit's (1, 2 then 4 s): a receipt null on tries 1-3, then present, passes; null on every try fails", async () => {
+  const u = A.good.chains.base.index.readers[1];
+  const i = A.good.chains.base.spans.findIndex((x) => x.txs?.length > 0);
+  const tx = A.good.chains.base.spans[i].txs[0];
+  let asked = 0;
+  const waits = [];
+  const late = await read(venuesOf(A.good), replayFetch(A.good, () => false, (url, x) => (url === u && x === tx && asked++ < 3 ? { result: null } : undefined)), async (ms) => void waits.push(ms));
+  const v = judge(late);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.equal(late.chains.base.spans[i].receipts[1][0].tries, 4);
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+  const never = await read(venuesOf(A.good), replayFetch(A.good, () => false, (url, x) => (url === u && x === tx ? { result: null } : undefined)), async () => {});
+  assert.equal(never.chains.base.spans[i].receipts[1][0].tries, TRIES);
+  bad(never, /base .*reader 2 answered \d+ of/);
+  // a span's last block: the same waits
+  const r = A.good.chains.robinhood.index.readers[1];
+  const b = A.good.chains.robinhood.spans[0].b;
+  let behind = 0;
+  const spanWaits = [];
+  const caught = await read(venuesOf(A.good), replayFetch(A.good, (url, x) => url === r && x === b && behind++ < 3), async (ms) => void spanWaits.push(ms));
+  assert.equal(judge(caught).pass, true);
+  assert.deepEqual(spanWaits, [1_000, 2_000, 4_000]);
+});
