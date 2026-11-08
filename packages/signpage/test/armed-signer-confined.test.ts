@@ -48,8 +48,12 @@ test("trade.ts hands the blind signer's sign to the kit's runSolanaTrade alone, 
   assert.match(src, /const run = host\.run \?\? runSolanaTrade;/);
   assert.match(src, /import \{ runSolanaTrade,[^}]*\} from "\.\.\/\.\.\/kit\/src\/trade\/solana\/flow\.ts";/);
   // the page builds the one trade host, with the store, the seed and the release's deps alone: no run of its own
-  const makers = ["packages", "apps"].flatMap((d) => code(d)).filter((f) => /(?<![\w$.])tradeKind\(/.test(uncommented(readFileSync(path.join(ROOT, f), "utf8")))).sort();
+  // any naming of it (a call, `T.tradeKind(`, `import { tradeKind as tk }`), in code outside tests: main.ts and trade.ts only
+  const makers = ["packages", "apps", "scripts"].flatMap((d) => code(d)).filter((f) => /\btradeKind\b/.test(uncommented(readFileSync(path.join(ROOT, f), "utf8")))).sort();
   assert.deepEqual(makers, ["packages/signpage/src/main.ts", "packages/signpage/src/trade.ts"]);
   const main = uncommented(readFileSync(path.join(ROOT, "packages/signpage/src/main.ts"), "utf8"));
   assert.deepEqual(main.match(/tradeKind\([^;]*\);/g), ["tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });"]);
+  // main.ts names it twice: its import, under its own name, and that one call
+  assert.equal(main.match(/\btradeKind\b/g)?.length, 2);
+  assert.match(main, /import \{ releaseTradeDeps, tradeKind \} from "\.\/trade\.ts";/);
 });
