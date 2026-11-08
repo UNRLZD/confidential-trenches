@@ -1182,10 +1182,14 @@ export type SolanaHeld =
 /**
  * One cashback claim: `amount` of `mint` from the volume account's own account `from` to the wallet's `to`, opened
  * first when `open` (it does not exist), closed to the wallet right after when `unwrap` (WSOL: the claim comes back as
- * lamports). `fromAmount` and `toAmount` are the two accounts' token amounts as read.
+ * lamports). `fromAmount` and `toAmount` are the two accounts' token amounts as read. `prefund`: the lamports both
+ * providers read at `to` before an `open` claim makes it (anyone may send lamports to an address not yet made; the ATA
+ * program keeps them and the wallet pays only the rest of the rent), 0n otherwise (review 6 of 13898c19, F1).
  */
-export type SolanaClaim = { program: string; uva: string; mint: string; from: string; to: string; amount: bigint; open: boolean; unwrap: boolean; fromAmount: bigint; toAmount: bigint };
-export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string }[] };
+export type SolanaClaim = { program: string; uva: string; mint: string; from: string; to: string; amount: bigint; open: boolean; unwrap: boolean; fromAmount: bigint; toAmount: bigint; prefund: bigint };
+/** `keep[].cashback`: the account stays open only for cashback a claim could not take this time (card sol-w-sweep: the
+ *  wallet then keeps what that claim needs later, and nothing more). */
+export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string; cashback?: true }[] };
 /** The accounts a claim under `program` moves between: the volume account's and the wallet's, of the claim's mint. */
 export function solanaCashbackAccounts(wallet: string, program: string): { uva: string; mint: string; from: string; to: string } {
   const mint = program === SOLANA_PUMP_AMM_PROGRAM ? SOLANA_SOL_MINT : SOLANA_PUMP_STABLE_MINT;
@@ -1209,14 +1213,28 @@ export function solanaTeardownAddresses(wallet: string, mints: readonly { mint: 
   return [...new Set(out)];
 }
 
+/** What a claim of a wallet's volume account (its UserVolumeAccumulator data, owned by `owner`) pays out: PumpSwap's
+ *  cashback (cashback_earned @74 over total_cashback_claimed @82, paid in WSOL) or pump's stable cashback
+ *  (stable_cashback_earned @90 over total_stable_cashback_claimed @98, paid in USDC); 0n for any other owner or a
+ *  shorter account. Pump's other cashback is paid from the account's own lamports, which its close returns. */
+export function solanaVolumeClaimable(owner: string, v: Uint8Array): bigint {
+  if (owner === SOLANA_PUMP_AMM_PROGRAM && v.length >= 90 && u64(v, 74) > u64(v, 82)) return u64(v, 74) - u64(v, 82);
+  if (owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98)) return u64(v, 90) - u64(v, 98);
+  return 0n;
+}
 /**
  * What the teardown closes and what stays, from the device's own reads of the wallet's accounts on two providers.
  * Throws when the providers disagree on any account (the caller re-reads) or an address is not the wallet's.
  * `unclaimed`: claims off by pump program (solanaTeardownUnclaimed: the frame carrying the claims failed its simulation on
  * both providers); each volume account owed under a program named stays open with that program's reason, and every
  * other account, the other program's claim included, is planned as before.
+ * A System-owned account with no data at one of the wallet's addresses (lamports anyone may send to an address not yet
+ * made) is no account here: the wallet can neither close nor spend it, and the program that makes the account there
+ * takes it as it is (review 5 of 38e59182, M1: such lamports at an unused volume address refused every plan).
  */
-export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: SolanaTeardownUnclaimed): SolanaTeardownPlan {
+export function solanaTeardownPlan(wallet: string, given: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: SolanaTeardownUnclaimed): SolanaTeardownPlan {
+  const none = (x: SolanaHeldRead | null): SolanaHeldRead | null => (x !== null && x.owner === SOLANA_SYSTEM_PROGRAM && x.data.length === 0 ? null : x);
+  const accounts = Object.fromEntries(Object.entries(given).map(([k, [a, b]]) => [k, [none(a), none(b)] as const]));
   const plan: SolanaTeardownPlan = { close: [], claim: [], keep: [] };
   const volumes = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [solanaVolumeAccumulator(wallet, p), p]));
   const cash = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [p, solanaCashbackAccounts(wallet, p)]));
@@ -1251,9 +1269,8 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
       if (v[40] !== 0 || u64(v, 41) > 0n) other.push(`unclaimed incentive tokens ${u64(v, 41)}`);
       if (u64(v, 57) > 0n) other.push(`volume ${u64(v, 57)} not settled`);
       // What a claim pays: PumpSwap's cashback (WSOL), pump's stable cashback (USDC); resolved after every read.
-      const amm = a.owner === SOLANA_PUMP_AMM_PROGRAM && u64(v, 74) > u64(v, 82);
-      const stable = a.owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98);
-      const amount = amm ? u64(v, 74) - u64(v, 82) : stable ? u64(v, 90) - u64(v, 98) : 0n;
+      const amount = solanaVolumeClaimable(a.owner, v);
+      const amm = a.owner === SOLANA_PUMP_AMM_PROGRAM && amount > 0n;
       owes.set(address, { program: a.owner, amount, why: amm ? `cashback ${amount} unclaimed` : `stable cashback ${amount} unclaimed`, other, lamports: a.lamports });
       continue;
     }
@@ -1308,7 +1325,14 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
       if (stop) why.push(`${o.why} (${stop})`);
       else {
         const toAmount = toRead ? u64(toRead.data, 64) : 0n;
-        plan.claim.push({ program: o.program, uva: address, mint: c.mint, from: c.from, to: c.to, amount: o.amount, open: toRead === null, unwrap: o.program === SOLANA_PUMP_AMM_PROGRAM, fromAmount: has as bigint, toAmount });
+        // the lamports at an unmade `to`, alike on both providers' raw reads: the account the claim opens keeps them
+        let prefund = 0n;
+        if (toRead === null) {
+          const [ra, rb] = (given[c.to] as readonly [SolanaHeldRead | null, SolanaHeldRead | null]).map((x) => x?.lamports ?? 0n);
+          if (ra !== rb) throw new Error(`the providers disagree on ${c.to}: ${ra}/${rb} lamports`);
+          prefund = ra as bigint;
+        }
+        plan.claim.push({ program: o.program, uva: address, mint: c.mint, from: c.from, to: c.to, amount: o.amount, open: toRead === null, unwrap: o.program === SOLANA_PUMP_AMM_PROGRAM, fromAmount: has as bigint, toAmount, prefund });
         // The wallet's USDC account takes the stable cashback and keeps it: never closed in this teardown.
         if (o.program === SOLANA_PUMP_PROGRAM) {
           plan.close = plan.close.filter((h) => h.address !== c.to);
@@ -1316,7 +1340,7 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
         }
       }
     }
-    if (why.length) plan.keep.push({ address, why: why.join(", ") });
+    if (why.length) plan.keep.push({ address, why: why.join(", "), ...(o.other.length === 0 && o.amount > 0n ? { cashback: true as const } : {}) });
     else plan.close.push({ kind: "volume", address, program: o.program, lamports: o.lamports });
   }
   return plan;
@@ -1486,9 +1510,10 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
   const sim: string[] = [];
   if (reads.simulations.length !== frames.length) sim.push(`${reads.simulations.length} simulations for ${frames.length} frames`);
   for (const [f, fr] of frames.entries()) {
-    // The wallet gains the lamports of what the frame closes and every WSOL claim, less the fee and the rent of a
-    // USDC account the frame opens for a claim (that account the wallet's own, holding the claim).
-    const gain = fr.closes.reduce((s, x) => s + (byAddress.get(x) as SolanaHeld).lamports, 0n) + fr.claims.reduce((s, c) => s + (c.unwrap ? c.amount : 0n), 0n);
+    // The wallet gains the lamports of what the frame closes and every WSOL claim (with the lamports at the WSOL
+    // account it opens, which its close after the claim brings to the wallet), less the fee and what the wallet pays
+    // of the rent of a USDC account the frame opens for a claim (that account the wallet's own, holding the claim).
+    const gain = fr.closes.reduce((s, x) => s + (byAddress.get(x) as SolanaHeld).lamports, 0n) + fr.claims.reduce((s, c) => s + (c.unwrap ? c.amount + c.prefund : 0n), 0n);
     for (const [p, s] of (reads.simulations[f] ?? [null, null]).entries()) {
       const at = `frame ${f} provider ${p === 0 ? "A" : "B"}`;
       if (!s) { sim.push(`${at}: no simulation`); continue; }
@@ -1508,8 +1533,9 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
         if (to !== c.toAmount + c.amount) sim.push(`${at}: ${c.to} holds ${to ?? "nothing read"} after the claim (want ${c.toAmount + c.amount})`);
         const lam = Object.hasOwn(s.accounts, c.to) ? s.accounts[c.to] : undefined;
         if (c.open) {
-          if (typeof lam !== "bigint" || lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim.push(`${at}: ${c.to} opened with ${lam ?? "nothing read"} lamports (want at most ${SOLANA_TOKEN_ACCOUNT_RENT_MAX})`);
-          else rent += lam;
+          // the lamports already there stay in it, so the wallet pays only the rest
+          if (typeof lam !== "bigint" || lam < c.prefund || lam - c.prefund > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim.push(`${at}: ${c.to} opened with ${lam ?? "nothing read"} lamports (want ${c.prefund} there before and at most ${SOLANA_TOKEN_ACCOUNT_RENT_MAX} more)`);
+          else rent += lam - c.prefund;
         }
       }
       if (s.wallet - reads.wallet[0] !== gain - fr.fee - rent) sim.push(`${at}: the wallet gains ${s.wallet - reads.wallet[0]} (want ${gain} less the fee ${fr.fee}${rent ? ` and the rent ${rent}` : ""})`);

@@ -108,12 +108,15 @@ export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
 /** The most one transaction W signs alone can cost W: one signature and the priority fee at the compute and price caps
  *  above (5,000 + 1,400,000 lamports). */
 export const SOLANA_POOL_TX_FEE_MAX = SOLANA_LAMPORTS_PER_SIGNATURE + (BigInt(SOLANA_POOL_CU_LIMIT_MAX) * SOLANA_CU_PRICE_MAX) / 1_000_000n;
-/** The most rent per byte the sell's reserve cap allows: the Rent sysvar's long-standing rate, 3,480 lamports a
- *  byte-year exempt at 2 years (6,960 lamports a byte; devnet asks less). */
+/** The most rent per byte the sell's reserve cap allows (the rule refuses a rate over it): 3,480 lamports a byte-year
+ *  exempt at 2 years, 6,960 a byte. The Rent sysvar read 5,080 a byte on mainnet and devnet alike (review 3 of
+ *  446d830f, 8 Nov), 27% under it. */
 export const SOLANA_RENT_PER_BYTE_MAX = 6_960n;
 /** The most a sell may keep on W, out of the pool: its worst legitimate cost on W beyond what W holds as the buy and
- *  sell rules leave it (src/pool-sell.ts: W holds the sell's own need before it, and keeps rent(0) after a whole sale
- *  or the next sell's need after a partial one), so the cap refuses only an illegitimate short, never a funded W:
+ *  sell rules leave it (src/pool-sell.ts: W holds the sell's own need before it, and keeps at least rent(0) after a
+ *  whole sale (solanaSellAfterFull, whose part over rent(0) the rent back's sweep carries into the user's note, so
+ *  the cap leaves that part out) or the next sell's need after a partial one), so the cap refuses only an illegitimate
+ *  short, never a funded W:
  *  the sell's fee at its cap, the rent of the precommitment's mark (17 bytes) and, at a page boundary of both trees,
  *  of a new page on each (a 16-byte header and one 72-byte entry), every account's rent being (128 + bytes) × rate:
  *      1,405,000   SOLANA_POOL_TX_FEE_MAX
@@ -538,6 +541,12 @@ export function checkSolanaBuy(
   return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: release.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
 }
 
+/** The device's own reads a sell's reserve under 0 is priced from (solanaSellReserve in src/pool-sell.ts): whether the
+ *  sell empties W's holding, W's lamports (the lower of both RPCs), the fee both RPCs price the message at, what the
+ *  sell makes at W's cost, the rent rate, the deposit's three accounts' lamports and its form (`next`: the eight), and
+ *  the volume accounts owed a claim after the sell. */
+export type SolanaSellSurplus = { full: boolean; lamports: bigint; fee: bigint; made: bigint; rent: SolanaRent; held: SolanaDepositHeld; next: boolean; owed: number };
+
 /** A Solana pool sell: the kit's venue sell of the request's amount from W at a min out no lower than the device's
  *  floor, then, last, by W, the deposit into the pinned pool of exactly that min out less `reserve`, the lamports the
  *  device keeps on W for the sell's own fees (its own number, never a server's); the draw shows that deposit. */
@@ -550,6 +559,7 @@ export function checkSolanaSell(
   slot: number,
   reads: SolanaPoolReads,
   reserve: bigint,
+  surplus?: SolanaSellSurplus,
 ): PoolDraw {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
@@ -581,7 +591,35 @@ export function checkSolanaSell(
     if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");
     if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
   }
-  if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");
+  if (typeof reserve !== "bigint" || reserve >= minOut) return refuse("reserve");
+  // A sell that empties W's holding (card sol-w-sweep; `surplus.full`) is priced exactly as the device prices it
+  // (solanaSellReserve), at any reserve: what W holds (`lamports`, the lower of both RPCs) against the fee, what the
+  // sell makes, the deposit's rents and what W keeps for the rent back, solanaSellAfterFull for the volume accounts owed
+  // a claim; rent(0) instead only where the device falls back, re-derived here: that keep's reserve over the cap (less
+  // what the sweep carries on), at or over the min out, or leaving the note under the sweep's floor (at least the pool's
+  // least deposit). A reserve under 0 (W's surplus in the note) is only that. What the keep holds over rent(0) the rent
+  // back's sweep carries into the user's note, so the cap, which bounds what is held out of the user's notes, leaves it
+  // out. Review L1 of 38faee89: the old bound, -reserve <= lamports, passed a sell keeping nothing and a partial sell's
+  // surplus; review 2 L1 of 911d7e25: exact only outside [0, cap] passed a full sell held back a million more, and
+  // rent(0) far over the floor; L2: the rent rate is the cap's at most, so what is held back stays bounded.
+  let swept = 0n;
+  const p = surplus;
+  if (p !== undefined && p.full === true) {
+    if (typeof p.lamports !== "bigint" || typeof p.fee !== "bigint" || typeof p.made !== "bigint" || p.fee < 0n || p.made < 0n || typeof p.next !== "boolean") return refuse("reserve");
+    if (typeof p.rent?.lamportsPerByte !== "bigint" || typeof p.rent.factor !== "bigint" || p.rent.lamportsPerByte < 0n || p.rent.factor < 0n || p.rent.lamportsPerByte * p.rent.factor > SOLANA_RENT_PER_BYTE_MAX) return refuse("reserve");
+    if (!Number.isSafeInteger(p.owed) || p.owed < 0 || p.owed > SOLANA_SWEEP_OWED_MAX) return refuse("reserve");
+    const short = p.fee + p.made + solanaDepositRents(p.rent, reads, p.held, p.next) - p.lamports;
+    const full = solanaSellAfterFull(p.rent, p.owed);
+    const r0 = solanaRentMin(p.rent, 0);
+    const floor = solanaSweepFloor(p.rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(p.rent) : SOLANA_POOL_MIN_DEPOSIT;
+    const keep = short + full;
+    const keeps = keep - (full - r0) <= SOLANA_POOL_SELL_RESERVE_MAX && keep < minOut && minOut - keep >= floor;
+    if (reserve !== (keeps ? keep : short + r0)) return refuse("reserve");
+    if (keeps) swept = full - r0;
+  } else if (reserve < 0n) return refuse("reserve");
+  // the note is one the pool takes, on every path (review 3 L-a of 446d830f: on the fallback a 999,999 note passed
+  // here, refused by the device and the program, deposit.rs's least deposit)
+  if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return refuse("reserve");
   const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);
@@ -647,6 +685,37 @@ export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number;
 }
 
 /**
+ * What a sweep leaves on W for `owed` volume accounts kept only for cashback a claim could not take this time (card
+ * sol-w-sweep; review L4 of 0068524a: W keeps what claiming them later costs): per account one frame's fee and the rent
+ * of the claim account its claim opens (rent(165)), and rent(0), so W stays an account; none when nothing is owed.
+ */
+export const SOLANA_SWEEP_OWED_MAX = 2;
+export const solanaSweepKeep = (rent: SolanaRent, owed: number): bigint =>
+  owed === 0 ? 0n : solanaRentMin(rent, 0) + BigInt(owed) * (SOLANA_LAMPORTS_PER_SIGNATURE + solanaRentMin(rent, 165));
+
+/**
+ * What a sell that empties W's holding leaves on W (card sol-w-sweep): enough that the rent back's sweep, once the
+ * teardown has closed W's token account to W (its rent at least rent(165)), makes a note a withdraw can spend: the
+ * sweep's floor (solanaSweepFloor, at least the program's least deposit), its own fee, its mark's rent and, on each
+ * tree, a new page's opening (its header and one entry, rent(16 + 72): a sweep at a page boundary pays that, not one
+ * entry's growth, review L2 of 38faee89; off a boundary the difference goes into the sweep's note), and the first
+ * teardown frame's fee (every frame closes an account worth more than its fee, so each later frame pays for itself);
+ * at least rent(0), the runtime's floor. Every lamport over it goes into the sell's own note, and the rest, with the
+ * rents the teardown closes, into the sweep's: W ends at 0. At mainnet's rent (5,080 a byte) 4,052,720. For each of
+ * W's volume accounts owed a claim after the sell (`owed`: owed cashback already there, or the cashback a cashback
+ * coin's sell earns; review L3 of 38faee89), also what that claim needs later (solanaSweepKeep), so the sweep still
+ * reaches the floor while W keeps the claims' cost; when a claim goes, the sweep takes it too.
+ */
+export function solanaSellAfterFull(rent: SolanaRent, owed = 0): bigint {
+  const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+  const page = solanaRentMin(rent, SWEEP_PAGE_HEADER + SWEEP_PAGE_ENTRY);
+  const sweep = SOLANA_LAMPORTS_PER_SIGNATURE + solanaRentMin(rent, SWEEP_MARK_LEN) + 2n * page;
+  const need = floor + sweep + SOLANA_LAMPORTS_PER_SIGNATURE - solanaRentMin(rent, 165) + solanaSweepKeep(rent, owed);
+  const r0 = solanaRentMin(rent, 0);
+  return need > r0 ? need : r0;
+}
+
+/**
  * W's sweep after a full sell and its teardown (card sol-buy-rent-back): every lamport W holds back into the pinned pool
  * as one tag 1 deposit, W the depositor and the only signer, the device's precommitment (W's next return note), no
  * compute budget (W's fee is its one signature, SOLANA_LAMPORTS_PER_SIGNATURE), nothing else. The value is exactly
@@ -655,14 +724,15 @@ export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number;
  * left on it or sent anywhere but the user's own note. Under the smallest note the device spends (solanaSweepFloor),
  * refused: those lamports stay on W.
  */
-export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld): bigint {
+export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, owed = 0): bigint {
   const pin = pinOf(ctx);
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
   if (head(d.ixs) !== 0 || d.ixs.length !== 1) return refuse("instructions");
   const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
   if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
-  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents(rent, reads, held) !== lamports) return refuse("sweep_amount");
+  if (!Number.isSafeInteger(owed) || owed < 0 || owed > SOLANA_SWEEP_OWED_MAX) return refuse("sweep_reads");
+  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents(rent, reads, held) + solanaSweepKeep(rent, owed) !== lamports) return refuse("sweep_amount");
   if (value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
   passedWire(wire);
   return value;

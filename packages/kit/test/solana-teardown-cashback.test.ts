@@ -96,7 +96,7 @@ test("recorded: GATRKVEP…'s PumpSwap volume account is owed 12,742,862 of WSOL
   assert.ok(UVA_A.startsWith("12FzhSyn"), UVA_A);
   const plan = solanaTeardownPlan(W, ACCOUNTS);
   const c = solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM);
-  assert.deepEqual(plan.claim, [{ program: SOLANA_PUMP_AMM_PROGRAM, uva: UVA_A, mint: SOLANA_SOL_MINT, from: c.from, to: WSOL_W, amount: 12_742_862n, open: true, unwrap: true, fromAmount: 12_742_862n, toAmount: 0n }]);
+  assert.deepEqual(plan.claim, [{ program: SOLANA_PUMP_AMM_PROGRAM, uva: UVA_A, mint: SOLANA_SOL_MINT, from: c.from, to: WSOL_W, amount: 12_742_862n, open: true, unwrap: true, fromAmount: 12_742_862n, toAmount: 0n, prefund: 0n }]);
   assert.deepEqual(plan.close.map((h) => h.address).sort(), [UVA_A, UVA_P].sort());
   assert.deepEqual(plan.keep, []);
 });
@@ -246,7 +246,7 @@ test("stable cashback: the plan claims it to the wallet's own USDC account (open
   const accounts = stableWorld();
   const plan = solanaTeardownPlan(W, accounts);
   const sc = plan.claim.find((c) => c.program === SOLANA_PUMP_PROGRAM)!;
-  assert.deepEqual(sc, { program: SOLANA_PUMP_PROGRAM, uva: UVA_P, mint: SOLANA_PUMP_STABLE_MINT, from: STABLE.from, to: solanaAta(W, SOLANA_PUMP_STABLE_MINT, SOLANA_TOKEN_PROGRAM), amount: 500_000n, open: true, unwrap: false, fromAmount: 500_000n, toAmount: 0n });
+  assert.deepEqual(sc, { program: SOLANA_PUMP_PROGRAM, uva: UVA_P, mint: SOLANA_PUMP_STABLE_MINT, from: STABLE.from, to: solanaAta(W, SOLANA_PUMP_STABLE_MINT, SOLANA_TOKEN_PROGRAM), amount: 500_000n, open: true, unwrap: false, fromAmount: 500_000n, toAmount: 0n, prefund: 0n });
   assert.deepEqual(plan.keep, [{ address: STABLE.to, why: `takes stable cashback 500000 of ${SOLANA_PUMP_STABLE_MINT}` }]);
   const frames = buildSolanaTeardown(W, plan, R.chain);
   assert.equal(frames.length, 1);
@@ -272,6 +272,8 @@ test("stable cashback: an existing USDC account of the wallet takes it without a
   const plan = solanaTeardownPlan(W, stableWorld({ to: usdc }));
   const sc = plan.claim.find((c) => c.program === SOLANA_PUMP_PROGRAM)!;
   assert.equal(sc.open, false);
+  // a made account carries no prefund: only lamports at an unmade one are (delta review 7 of 08290868, plant P7)
+  assert.equal(sc.prefund, 0n);
   assert.equal(sc.toAmount, 7n);
   assert.ok(plan.close.some((h) => h.address === UVA_P));
   const frozen = solanaTeardownPlan(W, stableWorld({ to: tokenAccount(SOLANA_PUMP_STABLE_MINT, W, 0n, 2) }));
@@ -535,6 +537,36 @@ test("L2: nothing planned around when the plan claims nothing, or when a check o
   const simOnly = { ...v, ok: false, results: v.results.map((x) => (x.id === "SIM" ? { ...x, ok: false } : x)) };
   const long = { err: "y".repeat(500), wallet: 0n, accounts: {} };
   assert.equal(solanaTeardownUnclaimed(simOnly, wires, [[long, long]])?.[SOLANA_PUMP_AMM_PROGRAM], `its claim did not simulate on either provider: A "${"y".repeat(119)}, B "${"y".repeat(119)}`);
+});
+
+// Review 6 of 13898c19, F1: a stranger's lamports at the wallet's unmade WSOL or USDC account, which a claim opens. The
+// ATA program keeps them in the account it makes there and the wallet pays only the rest of the rent, so the wallet
+// ends that much richer (WSOL: the close after the claim brings them back) and the check, which wanted the wallet's
+// gain without them, refused every teardown: the cashback could never be claimed. The plan now carries them.
+test("a stranger's lamports at the wallet's unmade WSOL and USDC accounts: each claim carries them, the check takes the wallet's gain with them, and a gain without them is refused", () => {
+  const X = 1n;
+  // more than a token account's rent at the USDC address, so the ATA program moves nothing and the wallet pays no rent:
+  // the account opens holding Y alone, over the rent bound, and only the prefund keeps it in (delta review 7, plant P9)
+  const Y = 2_039_281n;
+  const sys = (lamports: bigint): SolanaHeldRead => ({ owner: SOLANA_SYSTEM_PROGRAM, lamports, data: new Uint8Array(0) });
+  const accounts = { ...stableWorld({ to: sys(Y) }), [WSOL_W]: [sys(X), sys(X)] as const };
+  const plan = solanaTeardownPlan(W, accounts);
+  const sc = plan.claim.find((c) => c.program === SOLANA_PUMP_PROGRAM)!;
+  const ac = plan.claim.find((c) => c.program === SOLANA_PUMP_AMM_PROGRAM)!;
+  assert.deepEqual([ac.open, ac.prefund, sc.open, sc.prefund], [true, X, true, Y]);
+  const frames = buildSolanaTeardown(W, plan, R.chain).map((f) => f.wire);
+  const base = { accounts, wallet: [W0, W0] as const };
+  // as the programs run it: WSOL's X comes back with the close, the USDC account keeps Y and the wallet pays no rent
+  const real = stableSims(plan, 0n, { rent: Y });
+  const s = { ...real[0][0], wallet: real[0][0].wallet + X };
+  assert.deepEqual(failed(checkSolanaTeardown(frames, W, { ...base, simulations: [[s, s]] })), []);
+  // a wallet that gains the lamports twice, or not at all, is refused
+  for (const wallet of [s.wallet + X, s.wallet - X, s.wallet + Y]) assert.match(failed(checkSolanaTeardown(frames, W, { ...base, simulations: [[{ ...s, wallet }, { ...s, wallet }]] })).join(" | "), /SIM .*the wallet gains/);
+  // a USDC account opened with less than the lamports there before is refused
+  const less = { ...s, accounts: { ...s.accounts, [sc.to]: Y - 1n } };
+  assert.match(failed(checkSolanaTeardown(frames, W, { ...base, simulations: [[less, less]] })).join(" | "), new RegExp(`opened with ${Y - 1n} lamports`));
+  // the two providers' raw reads of an unmade account must agree on its lamports
+  assert.throws(() => solanaTeardownPlan(W, { ...accounts, [WSOL_W]: [sys(X), null] as const }), /the providers disagree on .*: 1\/0 lamports/);
 });
 
 // Card signers-own-bytes: the bytes solanaTeardownChecked checks are copies taken before it simulates and handed to no
