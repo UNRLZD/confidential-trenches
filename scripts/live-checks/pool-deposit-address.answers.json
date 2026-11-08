@@ -5,8 +5,8 @@
   "liveBefore": "SIGN_HOST read at 2026-11-08 before this card's deploy: FAIL, each mark named"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-s0TkWqfiToaDtSfjZ2oz+FFHpLQ/nn2PQ1iHQMxDIT+V+4QTXviOp/x97PoJNjuu\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-s0TkWqfiToaDtSfjZ2oz+FFHpLQ/nn2PQ1iHQMxDIT+V+4QTXviOp/x97PoJNjuu",
   "namerPools": true,
   "namesEach": true,
   "namesRecord": true,

@@ -7,7 +7,11 @@
 //     a quote is refused "floor" when its context floor is under the rung or its min out (not its amount out) is under the
 //     floor, after the kit's check;
 //   - the wiring (main.ts): pool.address is handed the price, that floor read and the follow's `quoted`, and the follow's
-//     page deps run pool.deposit on Solana with the refund mover;
+//     page deps run pool.deposit on Solana through the flow's depositFrom with the op's own U_{s,i}, and the
+//     refund mover;
+//   - from U_X alone (review H1): runPoolDeposit with a fixed source takes U_{s,i}'s planned deposit note or its next
+//     arrival, never the newest-used-or-planned pick, and refuses a U the store never planned; depositFrom checks the
+//     request by the pool rule before the kind runs;
 //   - chain first (pool-deposit-follow.ts): U_X's balance is read at finalized on both RPCs, the lower one counts, the
 //     follow deposits only once that is at or over the floor and counts only filled or part_filled as landed, and the
 //     1Click status is read with the op's own refund id;
@@ -56,7 +60,7 @@ const FLOOR_WIRE = (u) =>
 const FOLLOW_INST = (f) => new RegExp(`[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\)\\}\\)`);
 const FOLLOW_DEPS = (d) =>
   new RegExp(
-    `[,;]${esc(d)}=\\(${N},${N}\\)=>\\{let (${N})=${N}\\(\\);if\\(${N}\\.chain!==${Q}solana${Q}\\|\\|\\1===null\\|\\|${N}===void 0\\)return null;let ${N}=${N}\\.program;return (${N})\\(\\{rpcs:\\1,program:${N},deposit:\\(${N},(${N}),(${N})\\)=>${N}\\(${N}\\[${Q}pool\\.deposit${Q}\\],${Q}solana${Q},${N}\\.SOL,\\3,\\4\\),refund:${N}\\(\\{`,
+    `[,;]${esc(d)}=\\(${N},${N}\\)=>\\{let (${N})=${N}\\(\\);if\\(${N}\\.chain!==${Q}solana${Q}\\|\\|\\1===null\\|\\|${N}===void 0\\)return null;let ${N}=${N}\\.program;return (${N})\\(\\{rpcs:\\1,program:${N},deposit:\\((${N}),(${N}),(${N})\\)=>${N}\\(\\((${N}),(${N})\\)=>(${N})===null\\?null:\\8\\.depositFrom\\(\\6,\\{s:BigInt\\(\\3\\.s\\),i:\\3\\.i\\},\\7\\),${Q}solana${Q},${N}\\.SOL,\\4,\\5\\),refund:${N}\\(\\{`,
   );
 // pool-deposit-follow.ts solanaPoolFollowDeps: both RPCs; the status with the refund id; the balance at finalized; the floor.
 const READS =
@@ -67,7 +71,20 @@ const READS =
   );
 // followPoolQuote: the lower balance; at or over the floor, the deposit; filled or part_filled counts as landed.
 const LOOP = new RegExp(
-  `let\\[(${N}),(${N})\\]=await (${N})\\.balances\\((${N})\\),(${N})=\\1<\\2\\?\\1:\\2,(${N})=await \\3\\.costs\\(\\4\\);if\\(\\5>=\\6\\.floor\\)\\{let (${N})=${N}\\(\\3\\.ladder,\\5,\\6\\.perRung,\\6\\.keep\\);if\\(\\7>0n\\)\\{let (${N})=await \\3\\.deposit\\(\\4,\\7,\\3\\.signal\\);\\(\\8===${Q}filled${Q}\\|\\|\\8===${Q}part_filled${Q}\\)&&`,
+  `let\\[(${N}),(${N})\\]=await (${N})\\.balances\\((${N})\\),(${N})=\\1<\\2\\?\\1:\\2,(${N})=\\5>=\\3\\.ladder\\.min\\?await \\3\\.costs\\(\\4\\):null;if\\(\\6!==null&&\\5>=\\6\\.floor\\)\\{let (${N})=${N}\\(\\3\\.ladder,\\5,\\6\\.perRung,\\6\\.keep\\);if\\(\\7>0n\\)\\{let (${N})=await \\3\\.deposit\\(\\4,\\7,\\3\\.signal\\);\\(\\8===${Q}filled${Q}\\|\\|\\8===${Q}part_filled${Q}\\)&&`,
+);
+// pool-deposit.ts runPoolDeposit's fixed source (review H1): U_{s,i}'s own deposit note or its next arrival, a U the
+// store never planned refused, and the newest-used-or-planned fallback skipped; pool-testnet.ts depositFrom: the request
+// checked by the pool rule as a deposit, then the Solana kind run with the fixed source.
+const FIXED = new RegExp(
+  `if\\((${N})!==void 0\\)\\{if\\(\\1\\.s!==${N}\\)return\\{error:${Q}not_allowed${Q}\\};if\\(${N}\\.has\\(\\1\\.i\\)\\)return\\{stage:${Q}not_landed${Q},txs:\\[\\]\\};` +
+    `let (${N})=${N}\\.find\\((${N})=>\\3\\.ref\\.kind===${Q}deposit${Q}&&\\3\\.ref\\.s===\\1\\.s&&\\3\\.ref\\.i===\\1\\.i\\);if\\(\\2===void 0\\)return\\{error:${Q}not_allowed${Q}\\};` +
+    `(${N})=\\{s:\\1\\.s,i:\\1\\.i\\},(${N})=\\2\\.state===${Q}PLANNED${Q}\\?\\2\\.ref:${N}\\(\\1\\.i\\)\\}` +
+    `[^]{0,4000}?if\\(\\1===void 0&&${N}===0&&\\4\\.i===${N}&&${N}\\.ref\\.kind===${Q}second${Q}\\)\\{\\4=null,\\5=null;continue\\}`,
+);
+const FROM_ENTRY = new RegExp(
+  `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
+    `return \\4\\.chain!==${Q}solana${Q}\\|\\|${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\)\\}`,
 );
 // rules/refund.ts checkPoolRefundQuote, and the mover's key open (poolRefundMover).
 const REFUND_RULE = new RegExp(
@@ -91,6 +108,7 @@ export function facts(index, js) {
     floorRead: !!rd && COSTS(rd[7]).test(js),
     wired: !!wired && FLOOR_WIRE(wired[1]).test(js) && !!deps,
     chainFirst: READS.test(js) && LOOP.test(js),
+    fromUX: FIXED.test(js) && FROM_ENTRY.test(js),
     refundCarry: REFUND_HEAD.test(js) && REFUND_RULE.test(js) && REFUND_KEY.test(js),
   };
 }
@@ -100,6 +118,7 @@ export const WHY = {
   floorRead: "the floor is not read at quote time from the fee on both RPCs (the higher) and the rent",
   wired: "pool.address is not handed the floor read and the follow's quoted, or the follow's deps do not run pool.deposit on Solana with the refund mover",
   chainFirst: "the follow does not read U_X's balance at finalized on both RPCs (the lower counting), deposit only at or over the floor, count only filled or part_filled, or read the status with the op's refund id",
+  fromUX: "the follow's deposit does not run from U_X alone (its own deposit note or next arrival, never the newest used or the planned U), or the page's depositFrom does not check the request by the pool rule first",
   refundCarry: "a refund's move is not held to X's own coin, to U_X, refunding to U_{s,i}, with min out at least the floor, or its key is not the op's own refund id",
 };
 

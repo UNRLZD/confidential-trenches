@@ -1,25 +1,27 @@
 {
  "_note": {
-  "good": "facts() over this card's build (packages/signpage/index.html and public/app.js at the follow and its floor): PASS",
-  "bad": "facts() over origin/main 6616059d's build (release-91, before this card): FAIL, each mark named",
-  "liveBefore": "SIGN_HOST read at 2026-11-08 05:12Z, before this card's deploy: FAIL, each mark named"
+  "good": "facts() over this card's build (the follow from U_X alone, its floor and the refund carry, on main 1ffffdf0): PASS",
+  "bad": "facts() over origin/main 1ffffdf0's build (release-92, before this card): FAIL, each mark named",
+  "liveBefore": "SIGN_HOST read at 2026-11-08 05:52Z, before this card's deploy: FAIL, each mark named"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-HjlQhMlhruONYKdLxZSiKdDY041V1f8IEEiyfHKMQ0mbGZexqVSOyMLss+WF0u9B",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-s0TkWqfiToaDtSfjZ2oz+FFHpLQ/nn2PQ1iHQMxDIT+V+4QTXviOp/x97PoJNjuu\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-s0TkWqfiToaDtSfjZ2oz+FFHpLQ/nn2PQ1iHQMxDIT+V+4QTXviOp/x97PoJNjuu",
   "floor": true,
   "floorRead": true,
   "wired": true,
   "chainFirst": true,
+  "fromUX": true,
   "refundCarry": true
  },
  "bad": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-V8NImw+FhFfqQjn2h07k2rK4FnVRXC1ZBneZmt+pgkKcSyRFbXXTs3iQrx2/Zh63\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-V8NImw+FhFfqQjn2h07k2rK4FnVRXC1ZBneZmt+pgkKcSyRFbXXTs3iQrx2/Zh63",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL",
   "floor": false,
   "floorRead": false,
   "wired": false,
   "chainFirst": false,
+  "fromUX": false,
   "refundCarry": false
  },
  "liveBefore": {
@@ -29,6 +31,7 @@
   "floorRead": false,
   "wired": false,
   "chainFirst": false,
+  "fromUX": false,
   "refundCarry": false
  }
 }
