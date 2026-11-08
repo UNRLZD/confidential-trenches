@@ -1,0 +1,237 @@
+{
+ "_note": "bad: the deployed helper (HELPER_HOST, image 0beea09b, read 2026-11-08 02:46Z from the Mac): the sheet answered, the share read 2 (tokens 1, 2 and 5 of 5 answered 429 with the helper idle): FAIL. bad_base: a local helper from a0726204 (apps/helper/src/server.ts handler, keyless, 1Click real), read 02:47Z: FAIL the same way (tokens 3 to 5 of 5). good: a local helper from this card's tree (808c249c), keyless, 1Click real, read 02:46Z: every call answered: PASS.",
+ "bad": {
+  "base": "https://api.confidential.unrealized.trade",
+  "at": "2026-11-08T02:46:22.108Z",
+  "sheet": [
+   {
+    "what": "tokens",
+    "status": 200,
+    "ms": 1144,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 1 (10 USDC, nep141:17208628f84f5d6ad)",
+    "status": 201,
+    "ms": 779,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 2 (10 USDC, nep141:sol-5ce3bf3a31af1)",
+    "status": 201,
+    "ms": 1083,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 3 (10 USDC, nep141:base-0x833589fcd6)",
+    "status": 201,
+    "ms": 1026,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 4 (25 USDC from Solana)",
+    "status": 201,
+    "ms": 676,
+    "cause": null,
+    "retryAfter": null
+   }
+  ],
+  "share": [
+   {
+    "what": "tokens 1 of 5",
+    "status": 429,
+    "ms": 593,
+    "cause": null,
+    "retryAfter": "9"
+   },
+   {
+    "what": "tokens 2 of 5",
+    "status": 429,
+    "ms": 591,
+    "cause": null,
+    "retryAfter": "9"
+   },
+   {
+    "what": "tokens 3 of 5",
+    "status": 200,
+    "ms": 1105,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 4 of 5",
+    "status": 200,
+    "ms": 1105,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 5 of 5",
+    "status": 429,
+    "ms": 593,
+    "cause": null,
+    "retryAfter": "9"
+   }
+  ]
+ },
+ "bad_base": {
+  "base": "http://127.0.0.1:18432",
+  "at": "2026-11-08T02:47:22.433Z",
+  "sheet": [
+   {
+    "what": "tokens",
+    "status": 200,
+    "ms": 1273,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 1 (10 USDC, nep141:17208628f84f5d6ad)",
+    "status": 201,
+    "ms": 447,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 2 (10 USDC, nep141:sol-5ce3bf3a31af1)",
+    "status": 201,
+    "ms": 958,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 3 (10 USDC, nep141:base-0x833589fcd6)",
+    "status": 201,
+    "ms": 958,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 4 (25 USDC from Solana)",
+    "status": 201,
+    "ms": 1018,
+    "cause": null,
+    "retryAfter": null
+   }
+  ],
+  "share": [
+   {
+    "what": "tokens 1 of 5",
+    "status": 200,
+    "ms": 1431,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 2 of 5",
+    "status": 200,
+    "ms": 1430,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 3 of 5",
+    "status": 429,
+    "ms": 5,
+    "cause": null,
+    "retryAfter": "9"
+   },
+   {
+    "what": "tokens 4 of 5",
+    "status": 429,
+    "ms": 5,
+    "cause": null,
+    "retryAfter": "9"
+   },
+   {
+    "what": "tokens 5 of 5",
+    "status": 429,
+    "ms": 5,
+    "cause": null,
+    "retryAfter": "9"
+   }
+  ]
+ },
+ "good": {
+  "base": "http://127.0.0.1:18431",
+  "at": "2026-11-08T02:46:52.201Z",
+  "sheet": [
+   {
+    "what": "tokens",
+    "status": 200,
+    "ms": 1828,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 1 (10 USDC, nep141:17208628f84f5d6ad)",
+    "status": 201,
+    "ms": 741,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 2 (10 USDC, nep141:sol-5ce3bf3a31af1)",
+    "status": 201,
+    "ms": 1023,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 3 (10 USDC, nep141:base-0x833589fcd6)",
+    "status": 201,
+    "ms": 925,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "quote 4 (25 USDC from Solana)",
+    "status": 201,
+    "ms": 830,
+    "cause": null,
+    "retryAfter": null
+   }
+  ],
+  "share": [
+   {
+    "what": "tokens 1 of 5",
+    "status": 200,
+    "ms": 1199,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 2 of 5",
+    "status": 200,
+    "ms": 1199,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 3 of 5",
+    "status": 200,
+    "ms": 1199,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 4 of 5",
+    "status": 200,
+    "ms": 1199,
+    "cause": null,
+    "retryAfter": null
+   },
+   {
+    "what": "tokens 5 of 5",
+    "status": 200,
+    "ms": 1199,
+    "cause": null,
+    "retryAfter": null
+   }
+  ]
+ }
+}
