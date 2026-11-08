@@ -17,7 +17,7 @@ function parse(v: string | null | undefined): { n: number; s: string } | null {
 
 /** Below 1: four places from 0.01; under that the zero count, as UNRLZD: 0.00123, then 0.0₅123. Read from the
  *  string, so a tiny price keeps its digits (cut, never rounded up). */
-function small(p: { n: number; s: string }): string {
+export function small(p: { n: number; s: string }): string {
   if (p.n >= 0.01) return p.n.toFixed(4).replace(/0+$/, "").replace(/\.$/, ".0");
   const frac = p.s.split(".")[1] ?? "";
   const zeros = frac.length - frac.replace(/^0+/, "").length;
