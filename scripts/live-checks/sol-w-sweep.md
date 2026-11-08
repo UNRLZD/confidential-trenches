@@ -8,7 +8,8 @@ Tx: solana-devnet 2MaYtL9LPc7npeBcu7JjrZWqYin4JTm7XuXBvehiG5DN2UMV1VJ2syn9hcWetZ
 Tx: solana-devnet 5RiNsutM7A6ZnsrsgiBmEMGjUHStTunrHvcmRbnj6kB6QFHbYGsEw8ApDnhdq3k5Q3VbhuFQxFsCo62FbT6ws4fi
 Tx: solana-devnet 36Q79n8vjSHNeZAqKa9f2FJJvtvNcLC5Adhm1Q1Pkj1eKHsUyapcUQ9k8HGe1V5yrrgFPkHkkBvE9Eo8atyet1eS
 
-The run, on Solana devnet, 2026-11-08 07:48-07:53Z, from the sol-w-sweep worktree at 38faee89 (release-96): packages/signpage/scripts/pool-flow-devnet.mjs on table 6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ, coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P (venue pump-curve, cashback false), pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr, spend max. The Tx lines above, in order:
+The run, on Solana devnet, 2026-11-08 07:48-07:53Z, from the sol-w-sweep worktree at 38faee89 (release-96): packages/signpage/scripts/pool-flow-devnet.mjs on table 6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ, coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P (venue pump-curve, cashback false), pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr, spend max.
+In the order of the lines above:
 1. Our devnet wallet D funds the run's U (JBy5SFeTsCSHA5ZkxC5x767fp7vZA33YL8z2WPP15L41) with 11473120 lamports, the exact need the run printed: U 0 to 11473120.
 2. The pool deposit of 0.01 SOL from U: U 11473120 to 0; the note UNSPENT at leaf 7.
 3. The pool buy at the max spend, 4346520 lamports, through the helper's POST /v1/pool/solana/send: W (BwuzJHjTcfJSQMFg25afAuumCrAXwXPLJKhXsTNx7W3m) 0 to 1493440, the sell's need on any venue the coin sells on; the note SPENT, change 0 at leaf 8.
