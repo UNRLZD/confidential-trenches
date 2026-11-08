@@ -447,5 +447,111 @@
   ],
   "shots": "live-bad5",
   "browser": "157.0.8103.38"
+ },
+ "flake": {
+  "source": "live, APP_HOST at main 1ffffdf0: app live run 42453338800 attempt 1, job 128647061213 (06:06:43-06:08:45Z), rebuilt from its log: \"20 listed candidates on solana and base; 3 picks\", each pick \"no candidate probe moved\" with nothing watched; the run kept no record, so the symbols and the probe counts are not known",
+  "at": "2026-11-08T06:06:43Z",
+  "candidates": [
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "solana",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   },
+   {
+    "chain": "base",
+    "symbol": null
+   }
+  ],
+  "attempts": [
+   {
+    "pick": null,
+    "helper": [],
+    "tape": [],
+    "loads": []
+   },
+   {
+    "pick": null,
+    "helper": [],
+    "tape": [],
+    "loads": []
+   },
+   {
+    "pick": null,
+    "helper": [],
+    "tape": [],
+    "loads": []
+   }
+  ]
  }
 }
