@@ -162,3 +162,42 @@ test("D5: Not moved · Retry on a move's account that no longer exists (no-accou
   assert.deepEqual(f.calls, [null], "the wallet's move is never called for the account");
   assert.equal(f.page.find((e) => e.dataset.for === "to")!.dataset.refusal, "no-account");
 });
+
+// owner 8 Nov 07:55Z kept every held.* word and Busy · Retry and Invalid address (the 8 Nov words page): no element of the
+// page carries a draft mark except the To label, which the page does not hold.
+test("no draft mark on the kept words: the button, the link line, each outcome and each refusal; the To label keeps its own", async () => {
+  const marked = (f: ReturnType<typeof drawn>) => {
+    const out: string[] = [];
+    const walk = (e: El) => { for (const c of e.children) if (typeof c !== "string") { if (c.dataset.draftCopy) out.push(c.dataset.draftCopy); walk(c); } };
+    walk(f.page as unknown as El);
+    return out;
+  };
+  const f = drawn(() => ({ kind: "empty" }));
+  await f.steps();
+  assert.deepEqual(marked(f), ["to"], "To is a draft; Move out and This links your deposit to this account. carry no mark");
+  for (const [answer, outcome, text] of [
+    [{ kind: "empty" }, "empty", HELD_WORDS.empty],
+    [{ kind: "moved", to: "alice.near", amount: 1n, hash: "h" }, "moved", HELD_WORDS.moved],
+    [{ kind: "sent", to: "alice.near", amount: 1n, hash: "h" }, "sent", HELD_WORDS.sent],
+    [{ kind: "failed", to: "alice.near", amount: 1n, hash: "h" }, "failed", HELD_WORDS.failed],
+    [{ kind: "gas", need: 1n, u: U }, "gas", ""],
+    [{ kind: "unread" }, "unread", "Busy · Retry"],
+  ] as const) {
+    const g = drawn(() => answer as MoveOutOutcome);
+    await g.steps();
+    g.type("alice.near");
+    await settle();
+    await g.tap();
+    assert.equal(g.page.dataset.outcome, outcome);
+    assert.ok(g.page.find((e) => e.dataset.outcomeLine === "")!.text().includes(text), outcome);
+    assert.deepEqual(marked(g), ["to"], `${outcome}: no draft mark on the outcome line`);
+  }
+  for (const to of ["Alice!", "nobody.near"]) {
+    const g = drawn(() => ({ kind: "empty" }));
+    await g.steps();
+    g.type(to);
+    await settle();
+    assert.equal(g.page.dataset.state, "refused", to);
+    assert.deepEqual(marked(g), ["to"], `${to}: Invalid address carries no draft mark`);
+  }
+});

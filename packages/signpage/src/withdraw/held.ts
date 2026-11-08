@@ -14,22 +14,23 @@
 //   (main.ts's run() drops a step while its opening step is busy: review of d791adda, H1), and the tap waits for it.
 // - Every answer that names an account (moved, sent, failed) writes that account into the field, read-only: the move's
 //   account is the one shown, whatever was typed (a reload, another tab). After failed, the tap signs anew to it.
-// - Every word is a draft until the owner picks it (data-draft-copy names its key in HELD_WORDS or WITHDRAW_WORDS).
+// - Every word of HELD_WORDS, and Invalid address and Busy · Retry, were kept as drafted (owner 8 Nov 07:55Z, the 8 Nov words
+//   page) and carry no data-draft-copy; the To label is still a draft (form.ts WITHDRAW_DRAFT).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import type { MoveOutOutcome, MoveOutRecord } from "../../../wallet/src/deposit/moveout.ts";
 import { type AddressCode, checkRecipient, type RecipientCheck } from "./checks.ts";
-import { CHECK_IDLE_MS, refusalWords, WITHDRAW_WORDS } from "./form.ts";
+import { CHECK_IDLE_MS, markDraft, refusalWords, WITHDRAW_DRAFT, WITHDRAW_WORDS } from "./form.ts";
 
-// DRAFT COPY, new with this card: every word below is the owner's pick to make.
+// Kept as drafted, owner 8 Nov 07:55Z (held.moveOut, held.links, held.moved, held.sending, held.nothing, held.notMoved, held.gas).
 export const HELD_WORDS = {
-  "move-out": "Move out", // the button
-  link: "This links your deposit to this account.", // W:469: the move links the 1Click send to the typed account
-  moved: "Moved",
-  sent: "Sending",
-  gas: "Send NEAR to the deposit account from the account you typed:", // then the amount and U's id (W:469, W:934: from the typed account only)
-  empty: "Nothing to move",
-  failed: "Not moved · Retry",
+  "move-out": "Move out", // the button; owner 8 Nov 07:55Z, kept
+  link: "This links your deposit to this account.", // W:469: the move links the 1Click send to the typed account; owner 8 Nov 07:55Z, kept
+  moved: "Moved", // owner 8 Nov 07:55Z, kept
+  sent: "Sending", // owner 8 Nov 07:55Z, kept
+  gas: "Send NEAR to the deposit account from the account you typed:", // then the amount and U's id (W:469, W:934: from the typed account only); owner 8 Nov 07:55Z, kept
+  empty: "Nothing to move", // owner 8 Nov 07:55Z, kept
+  failed: "Not moved · Retry", // owner 8 Nov 07:55Z, kept
 } as const;
 
 export interface HeldDeps {
@@ -59,7 +60,7 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
   const label = doc.createElement("label");
   const name = doc.createElement("span");
   name.textContent = WITHDRAW_WORDS.to;
-  name.dataset.draftCopy = "to";
+  markDraft(name, "to", WITHDRAW_DRAFT);
   const input = doc.createElement("input");
   input.type = "text";
   input.dataset.input = "to";
@@ -72,13 +73,11 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
   line.dataset.for = "to";
   line.hidden = true;
   const link = doc.createElement("p");
-  link.dataset.draftCopy = "link";
   link.textContent = HELD_WORDS.link;
   const outcome = doc.createElement("p");
   outcome.dataset.outcomeLine = "";
   outcome.hidden = true;
   const go = button("move-out", HELD_WORDS["move-out"], () => run(move));
-  go.dataset.draftCopy = "move-out";
   go.disabled = true;
   page.append(label, line, link, go, outcome);
 
@@ -94,7 +93,6 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
     line.hidden = code === null;
     if (code === null) return void (delete line.dataset.refusal, line.replaceChildren());
     line.dataset.refusal = code;
-    line.dataset.draftCopy = code === "unread" ? "busy" : "invalid-address";
     line.textContent = refusalWords(code);
   };
   const draw = (c: RecipientCheck | null, blank: boolean): void => {
@@ -131,7 +129,6 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
     outcome.hidden = false;
     outcome.replaceChildren();
     if (o.kind === "gas") {
-      outcome.dataset.draftCopy = "gas";
       const amount = doc.createElement("strong");
       amount.textContent = `${nearUp(o.need)} NEAR`;
       const id = doc.createElement("code");
@@ -139,8 +136,6 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
       outcome.append(HELD_WORDS.gas, " ", amount, " ", id);
       return;
     }
-    const key = o.kind === "unread" ? "busy" : o.kind;
-    outcome.dataset.draftCopy = key;
     outcome.textContent = o.kind === "unread" ? WITHDRAW_WORDS.busy : HELD_WORDS[o.kind];
   };
 

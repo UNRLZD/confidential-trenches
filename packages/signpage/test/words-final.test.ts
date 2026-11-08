@@ -54,3 +54,56 @@ test("no note calls a picked word a draft", () => {
     assert.ok(!open.includes(`[draft copy: ${text}]`), `src/pages/open.ts: [draft copy: ${text}]`);
   }
 });
+
+// Card words-nov8-final: the signing page's held-deposit and withdraw words the owner kept on the 8 Nov words page
+// (owner 8 Nov 07:55Z, held.* and pw.*). Each reads its text byte for byte, names its pick on its own line, and no element
+// that draws it carries data-draft-copy: the only marks left in these three files are To and Amount (not on the page),
+// Min $ and the unmatched notice (the vault form's own).
+const NOV8 = "owner 8 Nov 07:55Z, kept";
+const nov8 = await Promise.all([import("../src/withdraw/held.ts"), import("../src/withdraw/form.ts"), import("../src/withdraw/pool-form.ts")]);
+const [held, form, pool] = nov8;
+const NOV8_ROWS: readonly (readonly [string, Record<string, string>, string, string])[] = [
+  ["held.moveOut", held.HELD_WORDS, "move-out", "Move out"],
+  ["held.links", held.HELD_WORDS, "link", "This links your deposit to this account."],
+  ["held.moved", held.HELD_WORDS, "moved", "Moved"],
+  ["held.sending", held.HELD_WORDS, "sent", "Sending"],
+  ["held.nothing", held.HELD_WORDS, "empty", "Nothing to move"],
+  ["held.notMoved", held.HELD_WORDS, "failed", "Not moved · Retry"],
+  ["held.gas", held.HELD_WORDS, "gas", "Send NEAR to the deposit account from the account you typed:"],
+  ["pw.withdraw", form.WITHDRAW_WORDS, "withdraw", "Withdraw"],
+  ["pw.invalidAddress", form.WITHDRAW_WORDS, "invalid-address", "Invalid address"],
+  ["pw.invalidAmount", form.WITHDRAW_WORDS, "invalid-amount", "Invalid amount"],
+  ["pw.insufficient", form.WITHDRAW_WORDS, "insufficient", "Insufficient"],
+  ["pw.busy", form.WITHDRAW_WORDS, "busy", "Busy · Retry"],
+  ["pw.maxFee", pool.POOL_WITHDRAW_WORDS, "max-fee", "Max fee"],
+  ["pw.min", pool.POOL_WITHDRAW_WORDS, "min", "Min "],
+  ["pw.tryTwo", pool.POOL_WITHDRAW_WORDS, "try", "Try "],
+  ["pw.tryTwo", pool.POOL_WITHDRAW_WORDS, "or", " or "],
+  ["pw.feeRose", pool.POOL_WITHDRAW_WORDS, "fee-rose", "Network fee rose. New max fee: "],
+  ["pw.feeRoseSend", pool.POOL_WITHDRAW_WORDS, "fee-redraw", "Send at new fee"],
+];
+
+test("words-nov8-final: each kept word reads its text, and its source line names the pick", () => {
+  const srcOf = (t: Record<string, string>) => readFileSync(new URL(t === held.HELD_WORDS ? "../src/withdraw/held.ts" : t === form.WITHDRAW_WORDS ? "../src/withdraw/form.ts" : "../src/withdraw/pool-form.ts", import.meta.url), "utf8").split("\n");
+  const bad: string[] = [];
+  for (const [id, table, key, text] of NOV8_ROWS) {
+    if (table[key] !== text) bad.push(`${id}: ${key} reads ${JSON.stringify(table[key])}, want ${JSON.stringify(text)}`);
+    const re = new RegExp(`^  ("${esc(key)}"|${esc(key)}): .*// .*${esc(NOV8)}`);
+    if (!srcOf(table).some((l) => re.test(l))) bad.push(`${id}: no line for ${key} naming ${NOV8}`);
+  }
+  assert.deepEqual(bad, [], bad.join("\n"));
+});
+
+test("words-nov8-final: no draft mark is written for a kept word, in any of the three screens' sources", () => {
+  const marks = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8").split("\n").filter((l) => /draftCopy\s*=/.test(l));
+  // held.ts writes none itself (its To label goes through markDraft); form.ts's and pool-form.ts's only write is markDraft's
+  assert.deepEqual(marks("../src/withdraw/held.ts"), []);
+  assert.deepEqual(marks("../src/withdraw/pool-form.ts"), []);
+  assert.deepEqual(marks("../src/withdraw/form.ts").map((l) => l.trim()), ["if (drafts.has(key)) el.dataset.draftCopy = key;"]);
+  assert.deepEqual([...form.WITHDRAW_DRAFT].sort(), ["amount", "min", "to", "unmatched"]);
+  assert.deepEqual([...pool.POOL_DRAFT].sort(), ["amount", "to"]);
+  for (const [id, , key] of NOV8_ROWS) {
+    assert.ok(!form.WITHDRAW_DRAFT.has(key) || key === "min", `${id}: ${key} is marked a draft`);
+    assert.ok(!pool.POOL_DRAFT.has(key), `${id}: ${key} is marked a draft`);
+  }
+});

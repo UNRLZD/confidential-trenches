@@ -19,23 +19,36 @@
 //   and nothing goes on until the next tap.
 // - A vault withdrawal the page's settle pass left "unmatched" is shown above the fields (data-notice), read at open and
 //   at every tap's reads.
-// - Every word is a draft until the owner picks it (data-draft-copy names its key in WITHDRAW_WORDS).
+// - A word the owner has not picked is drawn with data-draft-copy naming its key in WITHDRAW_WORDS (WITHDRAW_DRAFT
+//   lists them); the rest were kept as drafted (owner 8 Nov 07:55Z) and carry no mark.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import { type AddressCode, type AmountCheck, type AmountCode, checkAmount, checkRecipient, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
 
-// DRAFT COPY: every word here is drawn with data-draft-copy until the owner picks it, each with its source on its line.
+// Withdraw, Invalid address, Invalid amount, Insufficient and Busy · Retry were kept as drafted (owner 8 Nov 07:55Z, the 8 Nov
+// words page: pw.withdraw, pw.invalidAddress, pw.invalidAmount, pw.insufficient, pw.busy), so their elements carry no
+// data-draft-copy.
+// DRAFT COPY: every other word here is drawn with data-draft-copy until the owner picks it, each with its source on its line.
 export const WITHDRAW_WORDS = {
   to: "To", // CN-24, signed for the APP drawer's field (09-design-brief.md:1391); new on SIGN_HOST
   amount: "Amount", // CN-24, the same
-  withdraw: "Withdraw", // F4 step 1's draft (09-design-brief.md:1781)
-  "invalid-address": "Invalid address", // S12.5's draft (09-design-brief.md:1401)
-  "invalid-amount": "Invalid amount", // brief: an amount that is not a number; new, after S12.5
-  insufficient: "Insufficient", // S12.6's draft (09-design-brief.md:1402)
+  withdraw: "Withdraw", // F4 step 1 (09-design-brief.md:1781); owner 8 Nov 07:55Z, kept
+  "invalid-address": "Invalid address", // S12.5 (09-design-brief.md:1401); owner 8 Nov 07:55Z, kept
+  "invalid-amount": "Invalid amount", // brief: an amount that is not a number, after S12.5; owner 8 Nov 07:55Z, kept
+  insufficient: "Insufficient", // S12.6 (09-design-brief.md:1402); owner 8 Nov 07:55Z, kept
   min: "Min $", // S12.7's draft "Min $X" (09-design-brief.md:1403), X the smallest amount above the fee
-  busy: "Busy · Retry", // S12.10's draft (09-design-brief.md:1405), for a check the RPCs could not answer
+  busy: "Busy · Retry", // S12.10 (09-design-brief.md:1405), for a check the RPCs could not answer; owner 8 Nov 07:55Z, kept
   unmatched: "Withdrawal unmatched", // new, card wallet-withdraw-move-out: a settle pass's drift note left RESERVED; the owner picks
 } as const;
+
+/** The keys of WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
+export const WITHDRAW_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "min", "unmatched"]);
+
+/** Sets data-draft-copy on an element drawing `key` when `key` is in `drafts`, and takes it off otherwise. */
+export function markDraft(el: HTMLElement, key: string, drafts: ReadonlySet<string>): void {
+  if (drafts.has(key)) el.dataset.draftCopy = key;
+  else delete el.dataset.draftCopy;
+}
 
 /** The quiet time after the last keystroke before a check runs. */
 export const CHECK_IDLE_MS = 300;
@@ -112,7 +125,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     const label = doc.createElement("label");
     const name = doc.createElement("span");
     name.textContent = WITHDRAW_WORDS[key];
-    name.dataset.draftCopy = key;
+    markDraft(name, key, WITHDRAW_DRAFT);
     const input = doc.createElement("input");
     input.type = "text";
     input.dataset.input = key;
@@ -130,11 +143,10 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   const to = field("to");
   const amount = field("amount");
   const go = button("withdraw", WITHDRAW_WORDS.withdraw, () => run(withdraw));
-  go.dataset.draftCopy = "withdraw";
   if (!deps.handoff) go.dataset.pending = "withdraw-relay";
   const notice = doc.createElement("p");
   notice.dataset.notice = "unmatched";
-  notice.dataset.draftCopy = "unmatched";
+  markDraft(notice, "unmatched", WITHDRAW_DRAFT);
   notice.textContent = WITHDRAW_WORDS.unmatched;
   const drift = (): void => void (notice.hidden = !((deps.unmatched?.() ?? 0) > 0));
   drift();
@@ -166,7 +178,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
       return void p.replaceChildren();
     }
     p.dataset.refusal = code;
-    p.dataset.draftCopy = code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "insufficient" || code === "min" ? code : "invalid-address";
+    markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "insufficient" || code === "min" ? code : "invalid-address", WITHDRAW_DRAFT);
     if (code !== "unread") return void (p.textContent = refusalWords(code, min));
     // Busy · Retry: a tap checks again now
     const again = doc.createElement("button");
