@@ -32,6 +32,14 @@ test("recorded answer beforeFold (08290868's build): FAIL on the seen and own-co
   assert.deepEqual(v.lines, [ALL[11], ALL[26]]);
 });
 
+// Delta review 8 of 5697d7a1: with no buy record, that build swept W on the page's holdings (the helper's word on
+// mainnet), and hashed them into what W read as: FAIL on the seen and own-coin rules alone
+test("recorded answer beforeFold8 (5697d7a1's build): FAIL on the seen and own-coin rules alone", () => {
+  const v = judge(ANSWERS.beforeFold8);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [ALL[11], ALL[26]]);
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -53,7 +61,7 @@ const JS = [
   "function qR(e){return e.length>2||e.some(e=>e.cashback!==!0)?null:e.length}",
   "if(T<x)return{end:i>0?`owed`:`floor`,detail:``};",
   "async function JR(e,t,n){let r=[];}",
-  "async function XR(e){let t=[e.w.address,...jf(e.w.address,e.mints)],[n,r]=(await TR(e.rpcs,e=>DR(e,t))).map(e=>e.map(e=>e===null?`-`:`${e.owner}:${e.lamports}:${L.encode(e.data)}`).join(`|`));if(n!==r)return;let i=e.buy===null?`#${[...e.w.holdings.tokens].filter(([,e])=>e.amount>0n).map(([e])=>e).sort().join(`,`)}`:``;return L.encode(pt(new TextEncoder().encode(`${n}${i}#${e.rent.lamportsPerByte}:${e.rent.factor}#1`)))}async function ZR(e,t,n,r){let i=await Promise.resolve(e.bought?.get(t.w.address)).catch(()=>void 0),a=i?{...t,mints:iz(t.mints,[i]),buy:i}:{...t,buy:null},o=await XR(a).catch(()=>void 0);if(o!==void 0&&o===n.seen)return;let s=await JR(e,a,r);await QR(e,n,s.end,s.steady?o:void 0)}async function QR(e,t,n,r){try{if(n===`nothing`)return await e.owed?.drop(t.address);let i=(await e.owed?.list())?.find(e=>e.address===t.address)??t,{seen:a,...o}=i;await e.owed?.put({...o,mints:iz(i.mints,t.mints),passes:i.passes+1,...r!==void 0&&(n===`floor`||n===`holds`||n===`kept`||n===`refused`)?{seen:r}:{}})}catch{}}async function $R(e,t=globalThis.navigator?.locks??null){if(!t||!e.owed)return;let n=await e.owed.list();if(n.length===0)return;let r=e.pin.program,{pool:i,scope:a}=oC(r),o=e.rpcs,s=e.wait??(e=>new Promise(t=>setTimeout(t,e))),c;try{c={store:await e.notes(),sync:xC(o,r),rent:await oy(o),wallets:await e.wallets()}}catch(r){for(let{address:i}of n)if(!await rz(t,i,!0,s,async()=>{let t=(await e.owed.list()).find(e=>e.address===i);t&&(e.told?.({address:i,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${GR(r)}`}),await QR(e,t,`gave_up`))}))return;return}let{store:l,sync:u,rent:d,wallets:f}=c;for(let{address:c}of n)if(!await rz(t,c,!0,s,async t=>{let n=(await e.owed.list()).find(e=>e.address===c),p=n&&f.find(e=>e.chain===`sol`&&e.address===n.address&&e.l.toString()===n.l&&e.j===n.j);n&&p&&await ZR(e,{rpcs:o,program:r,pool:i,scope:a,rent:d,store:l,sync:u,w:p,mints:n.mints,wait:s,...n.sell?{sell:n.sell}:{}},n,t)}))return}var ez=Error(`a sell took the sell lock`),tz=1n<<62n;function nz(e,t,n){return new Promise((r,i)=>{e.request(t,n?{mode:`exclusive`,ifAvailable:!0}:{mode:`exclusive`},e=>e?new Promise(e=>r(e)):void r(null)).catch(i)})}async function rz(e,t,n,r,i){if(!e)return await i(),!0;let a=await nz(e,fR(t),n);if(!a)return!0;try{let t=await nz(e,uR,n);if(!t)return!1;let a={release:()=>{t?.(),t=null},nap:async n=>(a.release(),await r(n),t=await nz(e,uR,!0),t!==null)};try{await i(a)}finally{a.release()}return!0}finally{a()}}function iz(e,t){let n=[...e??[]];for(let e of t)n.some(t=>t.mint===e.mint)||n.push(e);return n}function az(e,t){return e===null||t===null?e===t:e.owner===t.owner&&e.lamports===t.lamports&&e.data.length===t.data.length&&e.data.every((e,n)=>e===t.data[n])}",
+  "async function XR(e){let t=[e.w.address,...jf(e.w.address,e.mints)],[n,r]=(await TR(e.rpcs,e=>DR(e,t))).map(e=>e.map(e=>e===null?`-`:`${e.owner}:${e.lamports}:${L.encode(e.data)}`).join(`|`));if(n===r)return L.encode(pt(new TextEncoder().encode(`${n}#${e.rent.lamportsPerByte}:${e.rent.factor}#1`)))}async function ZR(e,t,n,r){let i=await Promise.resolve(e.bought?.get(t.w.address)).catch(()=>void 0),a=i?{...t,mints:iz(t.mints,[i]),buy:i}:{...t,buy:null},o=await XR(a).catch(()=>void 0);if(o!==void 0&&o===n.seen)return;let s=await JR(e,a,r);await QR(e,n,s.end,s.steady?o:void 0)}async function QR(e,t,n,r){try{if(n===`nothing`)return await e.owed?.drop(t.address);let i=(await e.owed?.list())?.find(e=>e.address===t.address)??t,{seen:a,...o}=i;await e.owed?.put({...o,mints:iz(i.mints,t.mints),passes:i.passes+1,...r!==void 0&&(n===`floor`||n===`holds`||n===`kept`||n===`refused`)?{seen:r}:{}})}catch{}}async function $R(e,t=globalThis.navigator?.locks??null){if(!t||!e.owed)return;let n=await e.owed.list();if(n.length===0)return;let r=e.pin.program,{pool:i,scope:a}=oC(r),o=e.rpcs,s=e.wait??(e=>new Promise(t=>setTimeout(t,e))),c;try{c={store:await e.notes(),sync:xC(o,r),rent:await oy(o),wallets:await e.wallets()}}catch(r){for(let{address:i}of n)if(!await rz(t,i,!0,s,async()=>{let t=(await e.owed.list()).find(e=>e.address===i);t&&(e.told?.({address:i,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${GR(r)}`}),await QR(e,t,`gave_up`))}))return;return}let{store:l,sync:u,rent:d,wallets:f}=c;for(let{address:c}of n)if(!await rz(t,c,!0,s,async t=>{let n=(await e.owed.list()).find(e=>e.address===c),p=n&&f.find(e=>e.chain===`sol`&&e.address===n.address&&e.l.toString()===n.l&&e.j===n.j);n&&p&&await ZR(e,{rpcs:o,program:r,pool:i,scope:a,rent:d,store:l,sync:u,w:p,mints:n.mints,wait:s,...n.sell?{sell:n.sell}:{}},n,t)}))return}var ez=Error(`a sell took the sell lock`),tz=1n<<62n;function nz(e,t,n){return new Promise((r,i)=>{e.request(t,n?{mode:`exclusive`,ifAvailable:!0}:{mode:`exclusive`},e=>e?new Promise(e=>r(e)):void r(null)).catch(i)})}async function rz(e,t,n,r,i){if(!e)return await i(),!0;let a=await nz(e,fR(t),n);if(!a)return!0;try{let t=await nz(e,uR,n);if(!t)return!1;let a={release:()=>{t?.(),t=null},nap:async n=>(a.release(),await r(n),t=await nz(e,uR,!0),t!==null)};try{await i(a)}finally{a.release()}return!0}finally{a()}}function iz(e,t){let n=[...e??[]];for(let e of t)n.some(t=>t.mint===e.mint)||n.push(e);return n}function az(e,t){return e===null||t===null?e===t:e.owner===t.owner&&e.lamports===t.lamports&&e.data.length===t.data.length&&e.data.every((e,n)=>e===t.data[n])}",
   ";lR=1e3,uR=`ct-pool/sell`,dR=120*lR,fR=e=>`ct-pool/back/${e}`,pR=22;",
   ";u=async e=>{if(!n)return t.wait(e);if(!await n.nap(e))throw ez};",
   "if(n.plan.close.length>0)return{end:`gave_up`,detail:`still open after the teardown: ${n.plan.close.map(e=>e.address).join(`, `)}`};let[d,f]=n.held.map(e=>e[0]?.lamports??0n);if(d!==f)throw Error(`W's lamports differ on the two RPCs`);let p=d;if(p===0n)return{end:r>0?`owed`:`nothing`,",
@@ -71,8 +79,11 @@ const JS = [
   ";if(n.k===`refused`)return{end:`refused`,detail:n.why};let a=YR(n.plan.keep)",
   ";for(let n=0;n<30&&(n===0||f()<p);n++){n>0&&await u(lR);try{return{ok:await",
   ";e++){e>0&&await u(lR);for(let e of[...h]){let t=await TR(s,t=>zP(t,e.signature,e.wire))",
-  ";try{let n=new Set(t.mints.map(e=>e.mint));if(t.buy===null&&[...c.holdings.tokens].some(([e,t])=>!n.has(e)&&t.amount>0n))return g(`holds`,`W holds a token and no buy of W's is recorded`);",
+  ";try{if(!t.buy)return g(`holds`,`no buy of W's is recorded`);let n=jf(c.address,t.mints);",
   ";return await e.bought?.put(P.address,{mint:C.mint,program:C.tokenProgram}),await QP(e,D,O,l,te,w.lastHeight,o,{token:c,minOut:T,tell:s,bound:F})}",
+  "KR=e=>{let t=`owed/buy-sol`;return{get:async n=>{let r=await(await e()).get(`meta`,t)??{};return Object.hasOwn(r,n)?r[n]:void 0},put:async(n,r)=>void await(await e()).update(`meta`,t,e=>({...e??{},[n]:{mint:r.mint,program:r.program}}))}};",
+  "take:async(e,t)=>(await n()).take(e,t),seed64:e.seed64,bought:KR(e.store),send:(e,n)=>hB(e,n,t.fetch),",
+  "{r.fill(0)}},owed:GR(e.store),bought:KR(e.store),told:e=>console.warn(`rent back`),",
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
   assert.deepEqual(Object.values(facts("", JS).carries), Object.keys(MARKS).map(() => true));
@@ -109,14 +120,19 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("ad=1000000n", "ad=2000000n"), 6],
     [JS.replace("sd=5000n", "sd=0n"), 6],
     [JS.replace("if(o!==void 0&&o===n.seen)return;", ""), 11],
-    [JS.replace("if(n!==r)return;", ""), 11],
-    // delta review 7 of 08290868: with no buy record, the page's holdings are part of what W read as; the buy record is
-    // read into the pass's mints
-    [JS.replace("e.buy===null?`#", "!1?`#"), 11],
+    [JS.replace("if(n===r)return L.encode(", "return L.encode("), 11],
+    // delta review 7 of 08290868: the buy record is read into the pass's mints; delta review 8 of 5697d7a1: the page's
+    // holdings no part of what W read as
     [JS.replace("a=i?{...t,mints:iz(t.mints,[i]),buy:i}:{...t,buy:null}", "a={...t,buy:null}"), 11],
-    // W's own coin holds the pass: the fallback with no record, and the buy's record written before its send
-    [JS.replace("if(t.buy===null&&[...c.holdings.tokens]", "if([...c.holdings.tokens]"), 26],
+    [JS.replace("`${n}#${e.rent.lamportsPerByte}", "`${n}#${[...e.w.holdings.tokens]}#${e.rent.lamportsPerByte}"), 11],
+    // W's own coin holds the pass: with no record it holds (review 8: not on the page's holdings), the buy's record
+    // written before its send, and the page's buy and sell hosts wired to the one record in its store
+    [JS.replace("if(!t.buy)return g(`holds`", "if(!t.buy&&[...c.holdings.tokens].length>0)return g(`holds`"), 26],
     [JS.replace("return await e.bought?.put(P.address,{mint:C.mint,program:C.tokenProgram}),await QP(", "return await QP("), 26],
+    [JS.replace("return Object.hasOwn(r,n)?r[n]:void 0}", "return void 0}"), 26],
+    [JS.replace("seed64:e.seed64,bought:KR(e.store),send:", "seed64:e.seed64,send:"), 26],
+    [JS.replace("owed:GR(e.store),bought:KR(e.store),told:", "owed:GR(e.store),told:"), 26],
+    [JS.replace("seed64:e.seed64,bought:KR(e.store),send:", "seed64:e.seed64,bought:YR(e.store),send:"), 26],
     [JS.replace("#${e.rent.lamportsPerByte}:${e.rent.factor}#1", "#1"), 11],
     [JS.replace("let t=[e.w.address,...jf(e.w.address,e.mints)],[n,r]", "let t=[e.w.address],[n,r]"), 11],
     [JS.replace("if(n===`nothing`)return await e.owed?.drop(t.address)", "if(n!==`floor`)return await e.owed?.drop(t.address)"), 12],
