@@ -45,6 +45,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-buy-gas-depth.mjs",
   "scripts/live-checks/evm-buy-gas-floor.mjs",
   "scripts/live-checks/evm-buy-hookdata-fee.mjs",
+  "scripts/live-checks/evm-buy-quote-ends-on-node.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
