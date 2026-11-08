@@ -98,6 +98,8 @@ function provider(head: Head, price: (p: Pool, hash: string) => bigint | null, b
       assert.equal(c.method, "eth_call");
       const { to, data } = c.params[0] as { to: string; data: string };
       const hash = (c.params[1] as { blockHash: string }).blockHash;
+      // the pool's own buySwap (card evm-buy-gas-floor): a swap that ran, in this model of quotes alone
+      if (data.startsWith("0x" + SEL_BUY_SWAP)) return { jsonrpc: "2.0", id, result: "0x" + W(1n) };
       if (to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11") {
         return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map((d) => price(poolOf(d), hash))) };
       }
@@ -308,7 +310,8 @@ type Sees = { seq: boolean; hist: boolean; beacon: boolean; baseFee: boolean; ra
 // direction (its zeroForOne: currency1 out, else currency0)
 // `deltaFee`: where its `exec` fails the trade, it does so by a fee taken through a delta (the miss shows at minOut), not
 // by its hook reverting, so the trade's trace shows no errored frame into the hook
-type ModelPool = { deltaFee?: true; key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; lieAt?: (a: bigint, ctx: SimCtx) => bigint | null; exec?: (a: bigint, ctx: SimCtx) => bigint | null; neutral?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; mostOf?: Record<string, bigint>; over?: 0 | 1 | "both"; plainOn?: 0 | 1 | "both" };
+// `gas`: what a swap through the pool spends in the pool's own buySwap (default SWAP_HOP_GAS; card evm-buy-gas-floor)
+type ModelPool = { gas?: bigint; deltaFee?: true; key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; lieAt?: (a: bigint, ctx: SimCtx) => bigint | null; exec?: (a: bigint, ctx: SimCtx) => bigint | null; neutral?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; mostOf?: Record<string, bigint>; over?: 0 | 1 | "both"; plainOn?: 0 | 1 | "both" };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -429,7 +432,9 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       if (nitro && c.method === "eth_call" && Object.keys((c.params[2] ?? {}) as object).some((k) => k.toLowerCase() === ARBOS)) return { jsonrpc: "2.0", id, error: { code: -32000, message: "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed" } };
       const { to, data } = c.params[0] as { to: string; data: string };
       const overridden = new Set(Object.keys((c.params[2] as Record<string, unknown> | undefined) ?? {}).map((x) => x.toLowerCase()));
-      if (overridden.size > 0 && overrides !== undefined) {
+      // the swap-gas read's one override is the pool's balance (card evm-buy-gas-floor; GF5 holds it): `overrides` keeps
+      // the hooks' replacements
+      if (overridden.size > 0 && overrides !== undefined && !data.startsWith("0x" + SEL_BUY_SWAP)) {
         const ds = to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11" ? decodeAggregate(data) : [data.slice(2)];
         overrides.push({ replaces: [...overridden], hooks: ds.filter((d) => d.startsWith("ca253dc9")).map((d) => poolOf(d).hooks.map((h) => h.toLowerCase())) });
       }
@@ -446,6 +451,12 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         const n = Number(BigInt("0x" + data.slice(74, 138)));
         const words = Array.from({ length: n }, (_, k) => slots.get(data.slice(138 + 64 * k, 202 + 64 * k)) ?? 0n);
         return { jsonrpc: "2.0", id, result: "0x" + W(32n) + W(BigInt(n)) + words.map(W).join("") };
+      }
+      // the pool's own buySwap, sent from the pool (card evm-buy-gas-floor): the swap capped at the call's gas
+      if (data.startsWith("0x" + SEL_BUY_SWAP)) {
+        const o = swapRun(to.toLowerCase(), data.slice(2), c.params[0] as CallArgs & { data: string }, (c.params[2] ?? {}) as Record<string, { balance?: string }>, overridden);
+        if (o === OUT_OF_GAS) return { jsonrpc: "2.0", id, error: who === 0 ? { code: -32000, message: "out of gas" } : { code: -32003, message: "out of gas: gas required exceeds: 600000" } };
+        return o === null ? { jsonrpc: "2.0", id, error: { code: 3, message: "execution reverted" } } : { jsonrpc: "2.0", id, result: "0x" + W(o) };
       }
       const asW = (c.params[2] as Record<string, { code?: string }> | undefined)?.[SELL_W]?.code;
       const isSim = to.toLowerCase() === SELL_W && asW?.startsWith("0xef0100");
@@ -493,6 +504,41 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       if (p === undefined) return null;
       const next = p.key.hooks !== NATIVE && overridden.has(p.key.hooks) ? (p.neutral !== undefined ? p.neutral(got, ctx) : p.give(got)) : p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "buy" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
       if (next === null) return erred(p, ctx, overridden);
+      [from, got] = [cur, next];
+    }
+    assert.equal(from, token.toLowerCase(), "the route buys the Buy's token");
+    return got < minOut ? null : got;
+  }
+  // PrivacyPoolSimple.buySwap(buy, recipient, amount) at `pool` (card evm-buy-gas-floor): only the pool may call it, with the
+  // pool's balance covering the amount (eth_call's state override); its execution is the call's gas less 21,000 and the
+  // calldata's cost, and the swap spends SWAP_BASE_GAS and each hop's pool `gas` (SWAP_HOP_GAS by default), else it runs
+  // out of gas; then hop by hop as buyRun, the token checked, reverting below minOut
+  function swapRun(pool: string, d: string, a: CallArgs & { data: string }, o: Record<string, { balance?: string }>, overridden: Set<string>): bigint | null | typeof OUT_OF_GAS {
+    assert.equal(a.from?.toLowerCase(), pool, "buySwap is the pool's own call");
+    const w = (i: number) => BigInt("0x" + d.slice(8 + 64 * i, 72 + 64 * i));
+    const amount = w(2);
+    const bal = Object.entries(o).find(([k]) => k.toLowerCase() === pool)?.[1]?.balance;
+    if (bal === undefined || BigInt(bal) < amount) return null;
+    let cost = 21_000n;
+    for (let k = 2; k < a.data.length; k += 2) cost += a.data.slice(k, k + 2) === "00" ? 4n : 16n;
+    const exec = BigInt(a.gas!) - cost;
+    const b = Number(w(0)) / 32;
+    const [minOut, token] = [w(b + 2), "0x" + W(w(b + 3)).slice(24)];
+    const at = b + Number(w(b + 1)) / 32 + 1;
+    const arr = at + Number(w(at + 1)) / 32;
+    const n = Number(w(arr));
+    const ctx: SimCtx = { origin: pool, sender: pool, gas: exec, gasPrice: 0n };
+    let [from, got, spent] = ["0x" + W(w(at)).slice(24), amount, SWAP_BASE_GAS];
+    for (let i = 0; i < n; i++) {
+      const e = arr + 1 + Number(w(arr + 1 + i)) / 32;
+      const [cur, fee, ts, hooks] = ["0x" + W(w(e)).slice(24), Number(w(e + 1)), Number(w(e + 2)), "0x" + W(w(e + 3)).slice(24)];
+      const k = keyOf(cur, from, fee, ts, hooks);
+      const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
+      if (p === undefined) return null;
+      spent += p.gas ?? SWAP_HOP_GAS;
+      if (spent > exec) return OUT_OF_GAS;
+      const next = p.exec !== undefined ? p.exec(got, { ...ctx, over: overridden, dir: "buy" }) : p.key.hooks !== NATIVE && p.lie !== undefined ? p.lie(got) : p.give(got);
+      if (next === null) return null;
       [from, got] = [cur, next];
     }
     assert.equal(from, token.toLowerCase(), "the route buys the Buy's token");
@@ -5434,6 +5480,11 @@ const BUY_FEE = 3n * 10n ** 15n;
 // one limit the buy and its replay both run at; the helper's sizing is card evm-buy-gas-depth's
 const [BUY_SWAP_GAS, BUY_FAIL_GAS, BUY_RELEASE_GAS, BUY_GAS] = [500_000n, 150_000n, 600_000n, 1_400_000n];
 const SWAP_GAS_TOO_LOW = Symbol("SwapGasTooLow");
+const OUT_OF_GAS = Symbol("OutOfGas");
+const SEL_BUY_SWAP = Buffer.from(keccak_256(new TextEncoder().encode("buySwap((address,bytes,uint256,address),address,uint256)"))).toString("hex").slice(0, 8);
+// what the model's buySwap spends before its hops, and through a hop whose pool names no `gas` (Base's v4 one-hop
+// swaps ran 115,591 to 158,981 at 07:07Z on 2026-11-08)
+const [SWAP_BASE_GAS, SWAP_HOP_GAS] = [80_000n, 50_000n];
 const SEL_SWAP_GAS_TOO_LOW = "0x" + Buffer.from(keccak_256(new TextEncoder().encode("SwapGasTooLow()"))).toString("hex").slice(0, 8);
 // the pool's events (IPrivacyPool.sol), hashed here: the kit holds them as literals
 const topicOf = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex");
@@ -5845,22 +5896,26 @@ test("review of 72e28658, M2 (sell) the same on a sale: a hooked reference at th
   assert.equal(q.minOut, ((2n * AMOUNT - (2n * AMOUNT) / 200n) * 9900n) / 10000n, show(q));
 });
 
-test("review of 72e28658, M3 (buy) a buy runs at its own gas, which only main's pool bounds: below its floor it reverts SwapGasTooLow and bans nothing; above it, an honest hook a hostile sender gave too little swap gas is banned, a ban that expires (the helper sends a buy only after its eth_call at that gas answers true; review of a2d82dc6, F1)", async () => {
+test("review of 72e28658, M3 (buy) a buy runs at its own gas, which only main's pool bounds: below its floor it reverts SwapGasTooLow and bans nothing; a hook that needs more of the swap's gas than the pool guarantees is refused at the quote (card evm-buy-gas-floor), so no sender's gas past the floor fails a quoted route (review of a2d82dc6, F1)", async () => {
   const token = "0x00000000000000000000000000000000000d1d0b";
-  // an honest hook whose work needs 600,000 of the swap's gas: the model's buy (BUY_GAS) gives the swap 650,000
-  const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(11)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 600_000n ? null : (a * 95n) / 100n) };
+  const route = v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: RH(11) }]);
+  // an honest hook whose work needs 600,000 of the swap's gas, past the pool's 500,000: refused, the next route named
+  // (before card evm-buy-gas-floor it was quoted, and a sender that gave the swap less than 600,000 failed it)
+  const heavy: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(11)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (ctx.gas < 600_000n ? null : (a * 95n) / 100n) };
+  const r = await hbQuote([seeded(token), heavy], token, [{ key: heavy.key, at: 4_500_001 }], route);
+  assert.ok("code" in r && r.code === "over_gas_floor" && r.reference !== null && r.reference.route.venue === "uniswap-v4" && r.reference.route.hops[0]!.hooks === NATIVE, show(r));
+  // one that needs 450,000 fits: quoted, and its buy lands at the helper's gas and at the least gas past SwapGasTooLow
+  const honest: ModelPool = { ...heavy, exec: (a, ctx) => (ctx.gas < 450_000n ? null : (a * 95n) / 100n) };
   const pools = [seeded(token), honest];
-  const q = await hbQuote(pools, token, [{ key: honest.key, at: 4_500_001 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: RH(11) }]));
+  const q = await hbQuote(pools, token, [{ key: honest.key, at: 4_500_001 }], route);
   assert.ok(!("code" in q), show(q));
   assert.equal(SALES.get(await landBuy(pools, q))!.bought, true, "at the helper's gas the buy lands");
   // below the pool's floor (the release and BUY_SWAP_GAS + BUY_FAIL_GAS + 1,000) the buy reverts: no evidence
   const low = await landBuy(pools, q, HEAD_NO + 1, { gas: BUY_RELEASE_GAS + BUY_SWAP_GAS + BUY_FAIL_GAS });
   assert.equal(SALES.get(low)!.status, "0x0", "SwapGasTooLow");
   assert.deepEqual(await buyProved(pools, q, low), []);
-  // above the floor with too little for the hook: the swap fails, its replay at the same gas fails, the no-op's succeeds
-  const thin = await landBuy(pools, q, HEAD_NO + 1, { gas: 1_300_000n });
-  assert.deepEqual({ status: SALES.get(thin)!.status, bought: SALES.get(thin)!.bought }, { status: "0x1", bought: false });
-  assert.deepEqual(await buyProved(pools, q, thin), [hcPid(honest.key)]);
+  const least = await landBuy(pools, q, HEAD_NO + 1, { gas: BUY_RELEASE_GAS + BUY_SWAP_GAS + BUY_FAIL_GAS + 1000n });
+  assert.deepEqual({ status: SALES.get(least)!.status, bought: SALES.get(least)!.bought }, { status: "0x1", bought: true });
 });
 
 test("review of 72e28658, M3 (sell) a sale is evidence only at the gas the device pins and its sim ran at (EVM_POOL_SELL_GAS): one sent with less, whose honest hook ran out, bans nothing (review of a2d82dc6, F1)", async () => {
@@ -6847,4 +6902,120 @@ test("review of 6e8d18ad, nit (buy, Robinhood) a stored-fee pair yields to every
   assert.ok(!("code" in q), show(q));
   const h = await landBuy(pools, q, HEAD_NO + 1, {}, {}, RH_NET);
   assert.deepEqual([...(await buyProved(pools, q, h, undefined, RH_NET))].sort(), [hcPid(pools[1]!.key), hcPid(pools[2]!.key)].sort(), "the hostile pool banned, beside the honest one the reads cannot tell apart");
+});
+
+// ======================= card evm-buy-gas-floor (audit I-4): the pool's swap gas =======================
+// The pool gives a buy's swap at least BUY_SWAP_GAS (500,000) and promises no more: the device runs each route's swap as
+// the pool runs it (buySwap, from the pool) capped at EVM_BUY_SWAP_FIT, and takes, names or prices against only routes
+// that fit. The model's buySwap spends SWAP_BASE_GAS and each hop pool's `gas`.
+const GF_FIT = 476_190n; // EVM_BUY_SWAP_FIT: 500,000 / 1.05
+const gfMarket = (token: string, gas?: bigint): ModelPool => ({ key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a, ...(gas !== undefined ? { gas } : {}) });
+const gfSeeded = (token: string, gas?: bigint): ModelPool => ({ ...seeded(token), ...(gas !== undefined ? { gas } : {}) });
+const gfSeededRoute = (token: string) => v4Route([{ currency: token, fee: 10000, tickSpacing: 200, hooks: NATIVE }]);
+
+test("GF1 a route whose swap needs more gas than the pool guarantees is refused over_gas_floor, naming the next route that fits, which a re-quote takes", async () => {
+  const token = "0x00000000000000000000000000000000000f1f01";
+  const pools = [gfMarket(token, 500_000n), gfSeeded(token)];
+  const r = await hbQuote(pools, token, [], marketRoute(token));
+  assert.ok("code" in r && r.code === "over_gas_floor", show(r));
+  assert.deepEqual(r.reference, { amountOut: AMOUNT / 10n, route: gfSeededRoute(token) }, "the next route, the seeded pool's");
+  const q = await hbQuote(pools, token, [], r.reference!.route);
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT / 10n);
+});
+
+test("GF2 a route whose swap fits is taken at its own price, its reference the route itself", async () => {
+  const token = "0x00000000000000000000000000000000000f1f02";
+  const q = await hbQuote([gfMarket(token, 300_000n), gfSeeded(token)], token, [], marketRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT, route: marketRoute(token) });
+});
+
+test("GF3 a better route whose swap does not fit sets no price: the route that fits is taken, not refused below_reference, and its reference is the best that fits", async () => {
+  const token = "0x00000000000000000000000000000000000f1f03";
+  const q = await hbQuote([gfMarket(token, 500_000n), gfSeeded(token)], token, [], gfSeededRoute(token));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT / 10n);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT / 10n, route: gfSeededRoute(token) });
+});
+
+test("GF4 no route fits: the buy says so (over_gas_floor, no reference), whichever route is asked", async () => {
+  const token = "0x00000000000000000000000000000000000f1f04";
+  const pools = [gfMarket(token, 500_000n), gfSeeded(token, 450_000n)];
+  for (const route of [marketRoute(token), gfSeededRoute(token)]) {
+    const r = await hbQuote(pools, token, [], route);
+    assert.deepEqual(r, { code: "over_gas_floor", reference: null }, show(r));
+  }
+});
+
+test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its one override the pool's balance at the amount; out of gas in geth's and op-geth's words is no fit, any other error refuses", async () => {
+  const token = "0x00000000000000000000000000000000000f1f05";
+  const pool = builder.evmPoolVenues().base.pool!.toLowerCase();
+  const pools = [gfMarket(token), gfSeeded(token)];
+  const seen: EvmRpcCall[] = [];
+  const spy = (rpc: EvmRpc, err?: { code: number; message: string }): EvmRpc => async (calls) => {
+    const out = (await rpc(calls)) as unknown[];
+    return calls.map((c, i) => {
+      if (!String((c.params[0] as { data?: string }).data).startsWith("0x" + SEL_BUY_SWAP)) return out[i];
+      seen.push(c);
+      return err === undefined ? out[i] : { jsonrpc: "2.0", id: i, error: err };
+    });
+  };
+  const run = (err?: { code: number; message: string }) =>
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [spy(chain(pools, 0), err), spy(chain(pools, 1), err)], NOW, scanner(5_000_000, []));
+  await run();
+  assert.ok(seen.length >= 2, "both providers ran the swap");
+  for (const c of seen) {
+    const [tx, , over] = c.params as [{ from: string; to: string; data: string; gas: string }, unknown, Record<string, Record<string, string>>];
+    assert.deepEqual([tx.from.toLowerCase(), tx.to.toLowerCase()], [pool, pool]);
+    assert.deepEqual(over, { [pool]: { balance: "0x" + AMOUNT.toString(16) } });
+    let cost = 21_000n;
+    for (let k = 2; k < tx.data.length; k += 2) cost += tx.data.slice(k, k + 2) === "00" ? 4n : 16n;
+    assert.equal(BigInt(tx.gas) - cost, GF_FIT, "the swap's execution capped at EVM_BUY_SWAP_FIT");
+    assert.equal(quoteMod.EVM_BUY_SWAP_FIT, GF_FIT);
+  }
+  for (const err of [{ code: -32000, message: "out of gas" }, { code: -32003, message: "out of gas: gas required exceeds: 476190" }]) {
+    await assert.rejects(run(err), (e: unknown) => e instanceof EvmQuoteError && e.code === "over_gas_floor" && e.reference === null, err.message);
+  }
+  for (const err of [{ code: -32000, message: "execution timeout" }, { code: -32000, message: "out of gas or something" }]) {
+    await assert.rejects(run(err), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error", err.message);
+  }
+});
+
+test("GF6 a swap that needs exactly EVM_BUY_SWAP_FIT fits; one more gas does not", async () => {
+  const token = "0x00000000000000000000000000000000000f1f06";
+  const at = (gas: bigint) => hbQuote([gfMarket(token, gas), gfSeeded(token, 500_000n)], token, [], marketRoute(token));
+  const ok = await at(GF_FIT - SWAP_BASE_GAS);
+  assert.ok(!("code" in ok), show(ok));
+  assert.deepEqual(await at(GF_FIT - SWAP_BASE_GAS + 1n), { code: "over_gas_floor", reference: null });
+});
+
+test("GF7 a route through a pool the scan found fits, but no standard pool's route does: refused over_gas_floor, no reference, never priced against nothing", async () => {
+  const token = "0x00000000000000000000000000000000000f1f07";
+  const found: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
+  const r = await hbQuote([found, gfMarket(token, 500_000n), gfSeeded(token, 500_000n)], token, [{ key: found.key, at: 4_500_000 }], v4Route([{ currency: token, fee: 2500, tickSpacing: 50, hooks: NATIVE }]));
+  assert.deepEqual(r, { code: "over_gas_floor", reference: null }, show(r));
+});
+
+test("GF8 on Robinhood a native pool whose swap does not fit does not hold a WETH route to native_first: the WETH launchpad route that fits is bought, held to the best native route that fits", async () => {
+  const token = "0x00000000000000000000000000000000000f1f08";
+  const native: ModelPool = { key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => a, gas: 500_000n };
+  const doppler: ModelPool = { key: keyOf(token, RH_WETH, 0x800000, 200, DOPPLER), give: (a) => a / 2n };
+  const q = await onRobinhood([native, doppler], token, dopplerRoute(token));
+  assert.ok(q.route.venue === "uniswap-v4" && q.route.currencyIn === RH_WETH, JSON.stringify(q.route));
+  assert.equal(q.amountOut, AMOUNT / 2n);
+  // beside a native route that fits and quotes less (a quarter): the WETH route is held to that one alone, and beats it
+  const fits: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 4n };
+  const q2 = await onRobinhood([native, fits, doppler], token, dopplerRoute(token));
+  assert.equal(q2.amountOut, AMOUNT / 2n);
+});
+
+test("GF9 a route through an unlisted hook is held only to listed routes that fit: one within the slippage whose swap does not fit refuses nothing", async () => {
+  const token = "0x00000000000000000000000000000000000f1f09";
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => a, lie: (a) => a - a / 10n };
+  const pools = [hooked, { ...gfMarket(token, 500_000n), give: (a: bigint) => a - a / 10n }, gfSeeded(token)];
+  const q = await hbQuote(pools, token, [{ key: hooked.key, at: 4_500_000 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED }]));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, AMOUNT - AMOUNT / 10n);
 });

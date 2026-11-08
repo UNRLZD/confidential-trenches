@@ -28,6 +28,7 @@ import { evmPoolBuildSimSellUnpinned, pinnedBuildSell } from "../../kit/src/trad
 import { evmPoolBuyQuoteWith, type EvmPoolBuyQuote, type EvmRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
 import { evmQuotedBuy, evmQuotedSell } from "../../kit/src/trade/evm/quoted.ts";
 import { flat, provider as sellModel, req as sellReq, sellQuoteWith } from "../../kit/test/evm-sell-quote-fx.ts";
+import { gasRoundAnswers } from "../../kit/test/evm-quote-gas-fx.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
 import {
@@ -496,7 +497,7 @@ const v3 = (tokens: string[]) => ({ venue: "uniswap-v3" as const, tokens, fees: 
 // USDC through a v3 pool), at the recording's clock
 type Exchange = { calls: EvmRpcCall[]; answers: unknown[] };
 const QF = (JSON.parse(readFileSync(new URL("../../kit/test/fixtures/evm-quote.json", import.meta.url), "utf8")) as Record<string, { request: Record<string, unknown>; now: number; exchanges: [Exchange[], Exchange[]] }>)["base-ok"]!;
-const replay = (ex: Exchange[]): EvmRpc => async (calls) => structuredClone(ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls))!.answers);
+const replay = (ex: Exchange[]): EvmRpc => async (calls) => structuredClone(ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls))?.answers ?? gasRoundAnswers(ex, calls)!);
 const buyQuote = (): Promise<EvmPoolBuyQuote> => {
   const { buys, amountIn, ...rest } = QF.request;
   return evmPoolBuyQuoteWith({ ...(rest as object), token: buys as string, amountIn: BigInt(amountIn as string) } as never, [replay(QF.exchanges[0]), replay(QF.exchanges[1])], QF.now);
