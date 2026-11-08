@@ -24,8 +24,8 @@ import "./deposit.css";
 // SIGN_HOST's own form, W:684). No dialog before a step and no timer: every change is an answer or an event.
 // The To row (card deposit-to-pool, v2 A3) names where the money goes: the NEAR vault, the cash home, and the Solana,
 // Base and Robinhood pools, each by its chain's mark (market/pads.ts). Only the vault takes a deposit from the sheet
-// today (model.ts destFundable): a pool picked asks no quote and shows no address, Not available, until the kit answers
-// a pool's deposit address (card pool-deposit-address).
+// today (model.ts destFundable): a pool picked asks no quote and shows no address, Not available, until the kit follows
+// money sent to a pool's address on into the pool (card pool-deposit-follow).
 
 export const SHEET_ID = "deposit";
 

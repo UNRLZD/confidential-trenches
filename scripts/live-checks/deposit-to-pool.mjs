@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Live check of card deposit-to-pool (v2 A3): the deposit sheet's To row names where the money goes, the NEAR vault (the
 // cash home) and the Solana, Base and Robinhood pools, and the sheet puts money only where the kit can land it. The kit's
-// deposit.quote lands only in the NEAR vault, and no kit kind answers a pool's deposit address yet (card
-// pool-deposit-address), so each pool picked must ask nothing and show no address. APP_HOST's terminal is framed by the
+// deposit.quote lands only in the NEAR vault, and the pool's address (pool.address, card pool-deposit-address) has
+// nothing yet that carries money sent to it on into the pool (card pool-deposit-follow), so each pool picked must ask
+// nothing and show no address. APP_HOST's terminal is framed by the
 // stand-in shell of app-deposit-mount.mjs (routeFor: one signed-in account, backup saved, nothing in the vault, the
 // deposit reads answered as the real page answers them after its 1Click reads), which posts the deposit's stages under
 // the quote's request id as the real page does; no check can sign a real account in or send a real deposit. Headless

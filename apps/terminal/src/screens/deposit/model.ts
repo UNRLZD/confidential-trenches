@@ -44,10 +44,11 @@ export const DESTS: readonly Dest[] = Object.freeze(["near", ...POOL_CHAINS]);
 
 /**
  * Whether the sheet can put money into a destination today. The kit's deposit.quote and deposit.dry quote a deposit that
- * lands only in the NEAR vault (messages.ts deposit.quote, deposit.dry), and the kit has no kind that answers a pool's
- * deposit address: pool.deposit moves only money the device already holds at its one-time wallet on that chain. A pool
- * turns fundable here when the kit answers its address (card pool-deposit-address); until then a pool picked asks
- * nothing and shows no address, so no money is ever sent where it cannot land.
+ * lands only in the NEAR vault (messages.ts deposit.quote, deposit.dry). pool.address answers a pool's one-time address
+ * U_X (card pool-deposit-address), but nothing yet carries money that reaches U_X on into the pool, and the kit has no
+ * pool stages (in the pool, ready to buy) to follow it by: both are card pool-deposit-follow. A pool turns fundable here
+ * with that card; until then a pool picked asks nothing and shows no address, so no money is sent where nothing
+ * follows it.
  */
 export function destFundable(d: Dest): boolean {
   return d === "near";

@@ -212,8 +212,8 @@ test("Recent: the account's deposits from state.ops, newest first, three at most
 });
 
 // card deposit-to-pool (v2 A3): where the money goes. The sheet's To row names the NEAR vault (the cash home) and the
-// three pools (the kit's POOL_CHAINS). The kit's deposit.quote and deposit.dry land only in the NEAR vault, and no kit
-// kind yet answers a pool's deposit address (card pool-deposit-address), so a pool picked is its own state: no quote,
+// three pools (the kit's POOL_CHAINS). The kit's deposit.quote and deposit.dry land only in the NEAR vault, and nothing
+// yet follows money sent to a pool's address on into the pool (card pool-deposit-follow), so a pool picked is its own state: no quote,
 // no address, Get address off, whatever the amount and the dry quote say.
 
 test("the To row: the NEAR vault first, then the kit's three pools; only the vault takes a deposit from the sheet", () => {
