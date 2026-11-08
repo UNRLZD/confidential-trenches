@@ -190,8 +190,10 @@ test("the recorded buy and sell replay through every check, with S12's two refer
 // Review L2 of 11c963f9: no replay took the teardown's fallback, so a mutant that refused whenever claims went off
 // passed. A sell wallet's PumpSwap volume account owed cashback (its WSOL in the account's own WSOL account), whose
 // claim's frame errs on both providers: the teardown plans around it, claims off, passes, and keeps the owed volume
-// account with the reason (the volume close no longer framed).
-test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot take (its frame erring on both providers): the teardown plans around it and passes, the owed account kept with its reason", async () => {
+// account with the reason (the volume close no longer framed). Review L1 of 4dbf5e77: W's token account of the sold
+// mint reads empty, so the fallback's plan still closes it, and that close is framed and signed (flow.ts teardownOnce):
+// a fallback that framed nothing would leave W's rent in the token account.
+test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot take (its frame erring on both providers): the teardown plans around it and passes, the owed account kept with its reason, W's emptied token account still closed in one signed frame", async () => {
   const CASHBACK = 12_742_862n;
   const w = request(SELL).legs[0]!.wallet;
   const uva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
@@ -200,14 +202,42 @@ test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot
   // the teardown's read: W and its addresses (under either token program), ten to a call (flow.ts readAccounts)
   const lists = [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((program) => [w, ...solanaTeardownAddresses(w, [{ mint: request(SELL).token, program }])]);
   const teardownRead = (keys: readonly string[]) => lists.some((l) => l.some((_x, i) => i % 10 === 0 && JSON.stringify(l.slice(i, i + 10)) === JSON.stringify(keys)));
+  // W's token account of the sold mint, under either token program (the recording holds it under one)
+  const atas = [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((program) => solanaAta(w, request(SELL).token, program));
+  const torn = new Set(lists.flat());
+  const TOKEN = new Set([SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]);
+  const BUDGET = "ComputeBudget111111111111111111111111111111";
+  // a teardown frame: W pays, and every instruction is a compute budget, a token program's or a pump program's 8-byte one
+  const isTeardown = (m: ReturnType<typeof solanaDecodeMessage>) => m.staticKeys[0] === w && m.instructions.every((x) => {
+    const pid = m.staticKeys[x.programIndex];
+    return pid === BUDGET || TOKEN.has(pid!) || ((pid === SOLANA_PUMP_PROGRAM || pid === SOLANA_PUMP_AMM_PROGRAM) && x.data.length === 8);
+  });
+  const framed: ReturnType<typeof solanaDecodeMessage>[] = [];
   let erred = 0;
-  const plant = (r: (typeof d.providers)[number]) => Object.assign(async (method: string, params: readonly unknown[]): Promise<unknown> => {
+  const plant = (r: (typeof d.providers)[number]) => {
+    // this provider's teardown read, as planted: the before-state its simulations answer from
+    const before = new Map<string, { data: [string, string]; lamports: number; owner: string } | null>();
+    return Object.assign(async (method: string, params: readonly unknown[]): Promise<unknown> => {
     if (method === "simulateTransaction") {
       const m = solanaDecodeMessage(base64.decode(params[0] as string).subarray(65));
       const i = m.instructions.findIndex((x) => m.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM && x.data.length === 8 && x.data.every((b, j) => b === [37, 58, 35, 126, 190, 53, 228, 197][j]));
       if (i >= 0) {
         erred++;
         return { context: { slot: 1 }, value: { err: { InstructionError: [i, { Custom: 6000 }] }, accounts: null } };
+      }
+      if (isTeardown(m)) {
+        framed.push(m);
+        // the frame's after-state: each closed token account gone, its lamports to W less the frame's fee
+        const closed = m.instructions.filter((x) => TOKEN.has(m.staticKeys[x.programIndex]!) && x.data.length === 1 && x.data[0] === 9).map((x) => m.staticKeys[x.accounts[0]!]!);
+        const group = (params[1] as { accounts?: { addresses: string[] } }).accounts?.addresses;
+        if (!group) return { context: { slot: 1 }, value: { err: null, accounts: null, unitsConsumed: 3_000 } };
+        const back = closed.reduce((n, c) => n + (before.get(c)?.lamports ?? 0), 0);
+        const after = group.map((x) => {
+          if (closed.includes(x)) return null;
+          const b = before.get(x) ?? null;
+          return x === w && b ? { ...b, lamports: b.lamports + back - 5_000 } : b;
+        });
+        return { context: { slot: 1 }, value: { err: null, accounts: after, unitsConsumed: 3_000 } };
       }
     }
     const a = (await r(method, params)) as { context: unknown; value: ({ data: [string, string]; lamports: number; owner: string } | null)[] };
@@ -222,6 +252,12 @@ test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot
           dv.setBigUint64(74, dv.getBigUint64(82, true) + CASHBACK, true);
           return { ...x, data: [base64.encode(v), "base64"] };
         }
+        if (atas.includes(keys[k]!) && x) {
+          // the sell took every token: W's token account reads empty
+          const v = base64.decode(x.data[0]);
+          new DataView(v.buffer, v.byteOffset).setBigUint64(64, 0n, true);
+          return { ...x, data: [base64.encode(v), "base64"] };
+        }
         if (keys[k] === src) {
           const t = new Uint8Array(165);
           t.set(base58.decode(SOLANA_SOL_MINT), 0);
@@ -233,9 +269,11 @@ test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot
         }
         return x;
       });
+      keys.forEach((x, k) => { if (torn.has(x) || x === w) before.set(x, a.value[k] ?? null); });
     }
     return a;
   }, { asks: r.asks, times: r.times });
+  };
   const r = await runSolanaTrade(request(SELL), { ...d, providers: [plant(d.providers[0]), plant(d.providers[1])] });
   const leg = r.legs.find((l) => l.wallet === w)!;
   assert.equal(leg.refused, undefined, leg.refused);
@@ -245,10 +283,18 @@ test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot
   assert.deepEqual(t.verdict.plan!.claim, []);
   const kept = t.verdict.plan!.keep.find((k) => k.address === uva);
   assert.match(kept?.why ?? "", /^cashback 12742862 unclaimed \(its claim did not simulate on either provider: A .*6000.*, B .*6000/);
-  // the dry run reads W before its sell, still holding the token: with the owed account kept, nothing is left to close
-  assert.equal(t.frames, 0);
   assert.equal(t.refused, undefined);
   assert.ok(!t.verdict.plan!.close.some((h) => h.address === uva), "the owed account is not closed");
+  // the emptied token account is still closed: one frame, signed and simulated on both providers (the dry run's send)
+  const ata = atas.find((x) => t.verdict.plan!.close.some((h) => h.address === x));
+  assert.ok(ata, "the fallback's plan closes W's emptied token account");
+  assert.equal(t.frames, 1);
+  assert.equal(t.dry?.length, 1);
+  assert.equal(t.dry![0]!.state, "simulated");
+  const sent = framed.at(-1)!;
+  const closes = sent.instructions.filter((x) => TOKEN.has(sent.staticKeys[x.programIndex]!) && x.data.length === 1 && x.data[0] === 9).map((x) => sent.staticKeys[x.accounts[0]!]);
+  assert.deepEqual(closes, [ata], "the signed frame closes the token account");
+  assert.ok(!sent.instructions.some((x) => x.accounts.some((k) => sent.staticKeys[k] === uva)), "the signed frame names no volume account");
   // the other sell legs tear down as before
   for (const l of r.legs.filter((x) => x.wallet !== w)) assert.equal(l.teardown?.verdict.ok, true, l.teardown?.refused);
 });
