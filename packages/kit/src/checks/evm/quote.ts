@@ -398,12 +398,18 @@ const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 // 50M caps, answered a starved read with data where blastapi, 550M, answered it empty, Base block 54,819,255). So
 // every aggregate3 call runs this code at Multicall3's address (eth_call's state override), with the call's gas set to
 // EVM_READ_CALL_GAS, under every pinned provider's cap: aggregate3's calldata and answer as Multicall3 has them, each
-// read run with the same gas, L = ((gas at the start - 100,000) / n - 30,000) x 63/64, the per-call gas limit of
-// Uniswap's UniswapInterfaceMulticall (its multicall((address,uint256,bytes)[])), and its success word:
+// read run with its own gas, L = (gas left - r x S/2 - 130,000) x 63/64 where S = (gas at the start - 100,000) / n
+// and r the reads after it: all the call's gas but half a share kept for each read after it, so a read is given about
+// (S/2 - 30,000) x 63/64 at least whatever the reads before it took, and as much as the call has where they took little
+// (a hookless route's reads at 100 ETH on Base take 4.1M to 9.0M gas, more than half the even share of 6 a call,
+// 6.6M, so the even share answered 20 of their 90 reads 2 and they were read again alone on every quote: the warm
+// p95 went from 683 ms to 1,440 ms, live check evm-quote-warm-round, run 42521476520; 2026-11-08 21:2xZ), and its
+// success word:
 //   1  the read returned;
 //   0  it reverted having used less than L/2;
 //   2  it failed having used L/2 or more, or was not run because less than L + L/63 + 10,000 gas was left (a provider
-//      that gave the call less gas than it was sent with): a read that may have run out of gas. An out-of-gas frame
+//      that gave the call less gas than it was sent with, or reads before it that took it): a read that may have run out
+//      of gas. An out-of-gas frame
 //      inside the read, given all but 1/64 of its caller's gas as the quoters and the PoolManager give it, leaves the
 //      read d/64 of L at most at depth d, so it uses L/2 or more down to a depth of 44 (measured on the nine
 //      pinned providers, review of fe9f5ec3);
@@ -413,13 +419,15 @@ const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 // no answer without it (unaggregate): a provider that stopped applying code overrides is refused by name, never read
 // as Multicall3's shared gas (review of fe9f5ec3, finding 3). Multicall3.getEthBalance(address) answers as
 // Multicall3's (BALANCE), any other selector reverts. A read answered 2 in a call of more than READ_AGAIN_PER_CALL is
-// read again in calls of that many (L about 6.5M), and one still 2 in a call of several alone, at the same block
+// read again in calls of that many (L 3.2M at least), and one still 2 in a call of several alone, at the same block
 // (readBoth); one answered 2 alone prices nothing (`gas`). Assembled (two-pass, labels as PUSH2) from:
 //   dispatch    selector 4d2301cc: mstore(0, balance(calldataload(4))), return 32; 82ad56cb: aggregate; else revert
 //   aggregate   m[0] = n (1 to 1,024, else revert); revert unless gas >= 100,000 and S = (gas - 100,000) / n >= 30,000;
-//               m[0x20] = L; the answer at 0x100: 0x20, n, n offsets (32n + 192i), n elements of 192 bytes each
+//               m[0xa0] = S/2; the answer at 0x100: 0x20, n, n offsets (32n + 192i), n elements of 192 bytes each
 //               (success, 0x40, length, three words); m[0x80] = the read's calldata at 0x140 + 224n
-//   each read   calldatacopy its data to m[0x80]; if gas < L + L/63 + 10,000: success 2, length 0; else
+//   each read   calldatacopy its data to m[0x80]; r = n - i - 1, T = r S/2 + 140,000; if gas < T + 100: success 2,
+//               length 0; else m[0x20] = L = (gas - T + 10,000) x 63/64; if gas < L + L/63 + 10,000: success 2,
+//               length 0; else
 //               g = gas, ok = call(L, target, 0, data), used = g - gas; success = ok ? 1 : used >= L/2 ? 2 : 0;
 //               length = min(returndatasize, 96), returndatacopy(element + 96, 0, length)
 //   end         mstore(0x140 + 224n, READ_MARKER), return(0x100, 96 + 224n)
@@ -428,11 +436,13 @@ const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 // base.api.pocket.network, robinhood-rpc.publicnode.com, robinhood.drpc.org, rpc.mainnet.chain.robinhood.com,
 // robinhood.rpc.blxrbdn.com and rpc-robinhood.globalstake.io, the same answers on all nine at 40,000,000 gas: [returns 7, loops forever, returns 7, reverts 0xaa, calls the loop with all its gas then reverts 0xee,
 // returns 7] answered [1 7, 2 empty, 1 7, 0 0xaa, 2 0xee, 1 7] (through Multicall3 itself the loop and the 0xee read
-// answered 0); 64 reads, the loop first, answered 2 then 63 of 1, each answer ending in READ_MARKER; before the
+// answered 0); 64 reads, the loop first, answered 2 then 63 of 1; six reads, the first a revert after 5M gas, answered
+// [0 0xbb, then five of 1 7] (2026-11-08 21:30Z; the even share before it answered the first 2); each answer ending in
+// READ_MARKER; before the
 // marker (2026-11-08 16:4xZ) the loop alone answered 2, getEthBalance(0x…dEaD) as Multicall3's, selector 12345678
 // reverted.
 export const EVM_READ_GAS_CODE =
-  "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101a4565b506004353160005260206000f35b602435600052600051156101a457610400600051116101a457620186a05a106101a457600051620186a05a030480617530116101a4576175309003603f0260061c6020526020610100526000516101205260005160e0026101400160805260006040525b600051604051101561016a5760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a1061013d575a606052600060008260805160008735602051f15a60605103906101265760205160011c111560011b61012a565b5060015b3d80606111610137575060605b90610142565b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610091565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160e002610140015260005160e002606001610100f35b600080fd";
+  "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101ca565b506004353160005260206000f35b602435600052600051156101ca57610400600051116101ca57620186a05a106101ca57600051620186a05a030480617530116101ca5760021c60a0526020610100526000516101205260005160e0026101400160805260006040525b60005160405110156101905760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b604401356044018060400135810180358082602001608051376001604051600051030360a05102620222e001806064015a10610161575a0361271001603f0260061c60205260205180603f900401612710015a10610163575a606052600060008260805160008735602051f15a606051039061014a5760205160011c111560011b61014e565b5060015b3d8060611161015b575060605b90610168565b505b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610089565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160e002610140015260005160e002606001610100f35b600080fd";
 /** keccak256("blindfill.read.gas.v1"): the word EVM_READ_GAS_CODE writes after its answer */
 const READ_MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
 // a call's reads answered 2 are read again this many to a call first, then alone (review of fe9f5ec3, finding 2: at

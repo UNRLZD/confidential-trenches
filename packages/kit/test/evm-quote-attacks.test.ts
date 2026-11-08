@@ -73,6 +73,11 @@ function decodeAggregate(data: string): string[] {
 const RAN_OUT = Symbol("NotEnoughLiquidity");
 // EVM_READ_GAS_CODE's success word 2: a read that failed having used half its gas or more (card evm-quote-read-gas-starve)
 const STARVED = Symbol("starved");
+// EVM_READ_GAS_CODE as merged at 206d625f, which gave each of a call's n reads the same share, L = ((gas - 100,000) / n
+// - 30,000) x 63/64: the model answers a call sent with it as that code did, and one sent with the kit's code as the kit's
+// does (each read all the gas left but a quarter share for each read after it), so a test of the warm reads tells them
+// apart (GS15)
+const EVEN_SHARE_CODE = "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101a4565b506004353160005260206000f35b602435600052600051156101a457610400600051116101a457620186a05a106101a457600051620186a05a030480617530116101a4576175309003603f0260061c6020526020610100526000516101205260005160e0026101400160805260006040525b600051604051101561016a5760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a1061013d575a606052600060008260805160008735602051f15a60605103906101265760205160011c111560011b61012a565b5060015b3d80606111610137575060605b90610142565b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610091565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160e002610140015260005160e002606001610100f35b600080fd";
 // v4-core's SafeCastOverflow(), wrapped in V4Quoter's UnexpectedRevertBytes(bytes): the output needs more than 2^127 in
 const OVERFLOW = Symbol("SafeCastOverflow");
 // `mark`: EVM_READ_GAS_CODE's marker after the last result (card evm-quote-read-gas-starve); Multicall3's own has none
@@ -476,10 +481,25 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         const ds = decodeAggregate(data);
         const sent = (c.params[0] as { gas?: string }).gas;
         let left = sent !== undefined ? Number(BigInt(sent)) : GAS_CAPS[who];
-        const L = Math.floor((Math.floor((left - 100_000) / ds.length) - 30_000) * 63 / 64);
+        const S = Math.floor((left - 100_000) / ds.length);
+        const even = Object.entries(over).some(([a, o]) => a.toLowerCase() === MC3 && o.code === EVEN_SHARE_CODE);
+        const evenL = Math.floor((S - 30_000) * 63 / 64);
         return { jsonrpc: "2.0", id, result: encodeAggregate(ds.map((d, i) => {
           const need = readGasOf(d, overridden);
-          if (bounded) return need > L ? (STARVED as typeof STARVED) : one(tos[i]!, d, overridden);
+          if (bounded || even) {
+            // the read's own gas: an even share (206d625f), or all that is left but a quarter share for each read after it
+            const T = (ds.length - 1 - i) * Math.floor(S / 4) + 140_000;
+            if (!even && left < T + 100) return STARVED as typeof STARVED;
+            const L = even ? evenL : Math.floor((left - T + 10_000) * 63 / 64);
+            if (need > L) {
+              left -= L;
+              return STARVED as typeof STARVED;
+            }
+            left -= need;
+            const a = one(tos[i]!, d, overridden);
+            // a read that reverts having used half its gas or more answers 2 (it may have caught an inner out of gas)
+            return typeof a === "bigint" || 2 * need < L ? a : (STARVED as typeof STARVED);
+          }
           const given = Math.floor((left * 63) / 64);
           if (need > given) {
             left -= given;
@@ -7624,6 +7644,31 @@ test("GS5 a provider that answers a read that ran out of gas as a revert is not 
   assert.deepEqual(await gasQuote(pools, token, seededRoute(token), [chain(pools, 0), hides]), { accepted: false, code: "rpc_disagree" });
 });
 
+// After 206d625f's deploy the warm quote of base-partial-v4 went from p95 683 ms to 1,440 ms (live check
+// evm-quote-warm-round, run 42521476520): its hookless reads at 100 ETH revert after 4.1M to 9.0M gas, more than half
+// an even share of a call of 6 (6.6M), so 20 of its 90 reads answered 2, were read again alone, and were sent alone on
+// every quote after. A read now gets all the gas the reads before it left, but a quarter share for each read after it.
+test("GS15 a hookless route's warm quote, its reads reverting after 4.5M gas, sends the same reads as one whose reads take 100,000: none is read again alone", async () => {
+  // the token's better hookless pool at (3000, 60): its quote at the amount fills, at twice the amount it reverts, as a
+  // pool that runs out does
+  const pools = (token: string, readGas: number): ModelPool[] => [seeded(token), { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: ((a: bigint) => (a > AMOUNT ? null : a)) as (a: bigint) => bigint, readGas }];
+  const warm = async (token: string, readGas: number) => {
+    const ps = pools(token, readGas);
+    const n: number[] = [];
+    const rpcs: [EvmRpc, EvmRpc] = [readsPerAsk(chain(ps, 0), n), chain(ps, 1)];
+    const cold = await stdQuote(ps, token, rpcs);
+    n.length = 0;
+    return { cold, warm: await stdQuote(ps, token, rpcs), calls: [...n] };
+  };
+  const light = await warm("0x00000000000000000000000000000000000a5a5c", 100_000);
+  assert.deepEqual(light.warm, below, "control: the seeded route is held to the better pool");
+  const heavy = await warm("0x00000000000000000000000000000000000a5a5d", 4_500_000);
+  assert.deepEqual([heavy.cold, heavy.warm], [below, below]);
+  // the warm quote's aggregate3 calls, by their read counts: the same as the light pool's (before: two calls of 1 more,
+  // the heavy reverts kept alone after the cold quote read them again alone)
+  assert.deepEqual(heavy.calls, light.calls, `heavy ${heavy.calls.join(",")}, light ${light.calls.join(",")}`);
+});
+
 // Review of fe9f5ec3, finding 1: about 2,000 initialized ticks just past the 1x end price in the token's best v3 pool
 // make that route's read at twice the amount run out of gas, alone too. Multicall3 answered it as a revert, which a v3
 // route reads as a partial fill, so the best route was dropped and a worse one won; EVM_READ_GAS_CODE answers it 2.
@@ -7681,12 +7726,14 @@ test("GS8 a provider that drops the per-read gas code's override is refused by n
   );
 });
 
+// the token's four hookless pools, the seeded one among them, each quote through them taking 7M gas (GS11)
+const heavyFour = (token: string): ModelPool[] => [{ ...seeded(token), readGas: 7_000_000 }, betterAt(token, 7_000_000), { ...spamAt(token), give: (a) => a / 2n, readGas: 7_000_000 }, { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a) => a / 2n, readGas: 7_000_000 }];
 test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 6 first, none alone where 6 a call fits them", async () => {
   // review of fe9f5ec3, finding 2: at Robinhood's 64 a call (L about 583,000) every heavy read was read again alone on
-  // each provider. The better pool's quote takes 5.5M gas: more than a read's share of the round's calls of 8 to 16 (cut by
-  // bytes), inside its share of 6
+  // each provider. Four hookless pools whose quotes take 7M gas each: their eight reads, 56M, are more than a call of 8
+  // to 16 (cut by bytes) has, so the last of them in a call run out; in calls of 6 they fit
   const token = "0x00000000000000000000000000000000000a5a5b";
-  const pools = [seeded(token), betterAt(token, 5_500_000)];
+  const pools = heavyFour(token);
   quoteMod.evmReadsPerCall(64);
   try {
     const n: number[] = [];
@@ -7700,8 +7747,10 @@ test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 
 
 test("GS12 a read that needed fewer a call is sent that many a call in the next quote: a warm quote reads no 2 again", async () => {
   // review of fe9f5ec3, finding 2: rh-cold-quote's warm median went from 1.34 s to 2.17 s on the re-read's round trips
-  const token = "0x00000000000000000000000000000000000a5a5c";
-  const pools = [seeded(token), betterAt(token, 5_500_000)];
+  // the better pool's quote takes 35M gas: more than any read of a call of several is given (31M at most in a call of 6),
+  // inside a read's gas alone (39.4M)
+  const token = "0x00000000000000000000000000000000000a5a5e";
+  const pools = [seeded(token), betterAt(token, 35_000_000)];
   // each aggregate3 answer's reads answered 2, as `rpc` answers them
   const twos = (rpc: EvmRpc, into: number[]): EvmRpc => async (calls) => {
     const out = (await rpc(calls)) as { result?: string }[];
