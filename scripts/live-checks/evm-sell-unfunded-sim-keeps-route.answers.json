@@ -1,0 +1,30 @@
+{
+  "_note": "good: SIGN_HOST as served, read 8 Nov 04:43Z with --record (its bundle carries no EVM sell quote: the page's EVM flows land with signpage-evm-pool-trade). good_quote: the kit's sell quote (packages/kit/src/checks/evm/quote.ts evmPoolSellQuote as an entry, rolldown 1.2.15, minified) bundled at 1a8a3b98, this card's fix, with an index pinning it: the quote and every line of the guard. bad: the same bundle at 3a57948a, the commit before this card: the quote with the balance read and its short branch dropping the routes that needed the sim.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-V8NImw+FhFfqQjn2h07k2rK4FnVRXC1ZBneZmt+pgkKcSyRFbXXTs3iQrx2/Zh63\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-V8NImw+FhFfqQjn2h07k2rK4FnVRXC1ZBneZmt+pgkKcSyRFbXXTs3iQrx2/Zh63",
+    "quotes": false,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": false,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": false
+    }
+  },
+  "good_quote": {
+    "index": "<!doctype html>\n<script type=\"module\" src=\"/app.js\" integrity=\"sha384-Hf+VbmTExw8I1xMf1iz2bZrVakQmL+lJoQ9VqBHmgiA6WrfnyLcqLKi0C2lOnAaf\"></script>\n",
+    "sha384": "sha384-Hf+VbmTExw8I1xMf1iz2bZrVakQmL+lJoQ9VqBHmgiA6WrfnyLcqLKi0C2lOnAaf",
+    "quotes": true,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": true,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<script type=\"module\" src=\"/app.js\" integrity=\"sha384-LLYOlz2PwEJkvH64N7JzOwYozX70lX/el6fe6kCXD3zWzxCmwSdVyD+R+cdkERuc\"></script>\n",
+    "sha384": "sha384-LLYOlz2PwEJkvH64N7JzOwYozX70lX/el6fe6kCXD3zWzxCmwSdVyD+R+cdkERuc",
+    "quotes": true,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": true,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": false
+    }
+  }
+}
