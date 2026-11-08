@@ -13,7 +13,7 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
-import { base64 } from "@scure/base";
+import { base58, base64, hex } from "@scure/base";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
@@ -132,6 +132,20 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "not in this test" } }), { status: 200 });
 };
 
+/** One request of `type` with `params` from APP_HOST; its posted answer. */
+async function askKind(type: string, params: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> {
+  const id = crypto.randomUUID();
+  const e = new Event("message");
+  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type, ...params } } });
+  win.dispatchEvent(e);
+  for (let t = 0; t < 500; t++) {
+    const a = posted.find((m) => m.id === id);
+    if (a) return a as { ok?: boolean; result?: unknown; error?: { code: string } };
+    await new Promise((ok) => setTimeout(ok, 10));
+  }
+  throw new Error(`no answer to ${type}`);
+}
+
 async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
   const id = crypto.randomUUID();
   // the app on this kit names its version before it asks, as the kit's client does (card kit-frame-version)
@@ -181,6 +195,23 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   assert.deepEqual([pool?.price?.price, pool?.price?.expo], [PRICE.price.toString(), PRICE.expo], "the page's own price");
   assert.equal(pool?.tap_max, want, "tap_max from the Rent sysvar read on the page's pair");
   assert.ok(rentReads.length >= 2 && new Set(rentReads.map((u) => new URL(u).host)).size === 2, `the Rent read on two hosts: ${rentReads.join(", ")}`);
+
+  // card pool-deposit-address (review F4, F2): pool.address on the testnet build answers the devnet pool's U_X from the
+  // record the page's namer wrote under the pool's own scope (base58 of U_{s,i} on Solana: main.ts pagePoolScopes into
+  // the namer and the host), and refuses a quote: 1Click pays out on mainnet only
+  const same = await askKind("pool.address", { chain: "solana" });
+  const rec = (await w.get("meta", `deposit/${SCOPE}`)) as { scope: string; index: number; id: string; evm?: string } | undefined;
+  assert.ok(rec !== undefined, "the page named the devnet pool's U_X under its scope");
+  assert.equal(rec.scope, SCOPE.toString());
+  assert.match(rec.id, /^[0-9a-f]{64}$/);
+  assert.equal(rec.evm, undefined, "a Solana pool's record carries no EVM address");
+  assert.equal(same.ok, true, JSON.stringify(same));
+  assert.deepEqual(same.result, { chain: "solana", address: base58.encode(hex.decode(rec.id)), asset: "SOL" });
+  const quoted = await askKind("pool.address", { chain: "solana", origin_asset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", amount: "25" });
+  assert.equal(quoted.ok, false);
+  assert.equal(quoted.error?.code, "not_allowed");
+  const unpinned = await askKind("pool.address", { chain: "robinhood" });
+  assert.equal(unpinned.error?.code, "not_allowed", "a chain this build pins no pool of");
 
   // a notes read that fails (a record the store refuses) still answers the state, signed in and without pools,
   // as withPools answers any failed read: the read inside the queue's readyWith never throws past it

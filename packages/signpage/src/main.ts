@@ -64,6 +64,7 @@ import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
+import { poolAddressHost } from "./pool-deposit-address.ts";
 import { depositFollows } from "./deposit-follow.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
@@ -223,6 +224,9 @@ else {
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts(),
+      // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
+      // page; a quote from another chain waits for the follow that carries it into the pool (no `checked`: refused)
+      "pool.address": poolAddressHost({ pools: pagePoolScopes, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named() }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -591,9 +595,15 @@ const topLevelOnly = (): void => {
 function pageScope(): bigint | null {
   return vaultScope(PAGE_NETWORK);
 }
+// each pool the network pins is named the same way, under its own scope (card pool-deposit-address): pool.address
+// answers its U_X from that record
+function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
+  return PAGE_POOLS.flatMap((p) => (p.chain === "near" ? [] : [{ chain: p.chain, scope: p.scope }]));
+}
 const namer = depositNamer({
   top: !framed,
   scope: pageScope,
+  pools: pagePoolScopes,
   open,
   startup: () => startup,
   resyncing: () => resyncing,
@@ -609,7 +619,7 @@ async function pageNotes(): Promise<NoteRecord[]> {
 const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => pageNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
-  if (!shell || pageScope() === null || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
+  if (!shell || (pageScope() === null && PAGE_POOLS.length === 0) || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;
   void readSeed()
     .then((s) => {
       if (!s) return;
