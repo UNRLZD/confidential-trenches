@@ -404,7 +404,7 @@ async function checkRecipient(o: Opened, to: unknown, others: string[] = []): Pr
 }
 
 /** The run's seed64 from its words (16 bytes of entropy from the seed, testnet-t02.ts entropyOf's rule, its own tag). */
-async function seed64Of(seed: Buffer): Promise<Uint8Array> {
+export async function seed64Of(seed: Buffer): Promise<Uint8Array> {
   const { entropyToWords, wordsToSeed64 } = await wallet("derive/index.ts");
   const entropy = Uint8Array.from(createHash("sha256").update(seed).update("vault-mainnet-money/words").digest().subarray(0, 16));
   const s: Uint8Array = wordsToSeed64(entropyToWords(entropy));

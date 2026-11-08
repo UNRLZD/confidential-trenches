@@ -258,6 +258,25 @@ test("M1: a deposit or withdrawal tx named for the record must be the run's: sig
   assert.ok(relayerTxProblems("deposit", null, RUN).length > 0);
 });
 
+test("LB: a deposit tx is the run's only as U's one delegate to the token, of one ft_transfer_call, by U as depositor", () => {
+  const da = (t: any) => t.actions[0].Delegate.delegate_action;
+  const toOther = depTx();
+  da(toOther).receiver_id = "other.near";
+  const fromOther = depTx();
+  da(fromOther).sender_id = "d".repeat(64);
+  const twoInner = depTx();
+  da(twoInner).actions = [da(depTx()).actions[0], da(depTx()).actions[0]];
+  const twoOuter = { ...depTx(), actions: [depTx().actions[0], depTx().actions[0]] };
+  const otherDepositor = depTx({}, {}, { msg: JSON.stringify({ precommitment: RUN.P, depositor: "d".repeat(64) }) });
+  for (const [name, t] of [["the delegate to another contract", toOther], ["another sender's delegate", fromOther], ["two calls in the delegate", twoInner], ["two actions", twoOuter], ["another depositor", otherDepositor]] as const)
+    assert.ok(relayerTxProblems("deposit", t, RUN).length > 0, name);
+});
+
+test("LB: the balances are asked up to 5 times; a deposit that lands mid-wait is restored into a fresh store of the lane", () => {
+  assert.match(SRC, /const balances = async[\s\S]{0,700}\}, 5\)\) \?\? \{ at: new Date\(\)\.toISOString\(\), unread: true \};/);
+  assert.match(SRC, /ns\.close\(\);\n\s+w\.close\(\);\n\s+\(\{ w, ns \} = await storeOfLane\(i % LANES\)\);\n\s+await writeRestored\(ns, await restoreNotes\(/);
+});
+
 test("M1: record takes --deposit-tx and --withdraw-tx, checks every relayer tx against the run, and open-u keeps its hash before the send", () => {
   assert.match(SRC, /a === "--fund-tx" \|\| a === "--settle-tx" \|\| a === "--deposit-tx" \|\| a === "--withdraw-tx"/);
   assert.match(SRC, /relayerTxProblems\("deposit", t, want\)/);
