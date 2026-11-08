@@ -80,9 +80,11 @@
 .srch-cchip[aria-pressed="true"] { background: var(--border-strong); color: var(--text-1); box-shadow: none; }
 .srch-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 6px calc(12px + env(safe-area-inset-bottom)); }
 
-/* The account side keeps one width from the first paint (as the footer's parts do, shell.css .ft): its skeleton, Sign in
-   and the signed-in cluster each draw inside a box at least as wide as the widest of them (a balance up to 11
-   characters), drawn at its end. The chain chip and the search sit before that box, so the account landing moves
-   neither (BAR-10 CLS 0). */
-.tb-acct { flex: none; min-width: 264px; display: flex; justify-content: flex-end; }
-.phh-acct { flex: none; min-width: 148px; display: flex; justify-content: flex-end; }
+/* The account side's box (card app-header-first-paint-auth): signed in, it keeps one width from the first paint (as the
+   footer's parts do, shell.css .ft), the skeleton and the signed-in cluster drawn inside a box at least as wide as the
+   widest of them (a balance up to 11 characters), at its end; signed out it is Sign in's own width, the skeleton drawn
+   at that width (Account.tsx). The shape is the stored sign-in hint until the state lands (signin/hint.ts), so the chip
+   and the search before the box move for neither (BAR-10 CLS 0), and signed out they sit at R5's room before Sign in. */
+.tb-acct, .phh-acct { flex: none; display: flex; justify-content: flex-end; }
+.tb-acct[data-shape="in"] { min-width: 264px; }
+.phh-acct[data-shape="in"] { min-width: 148px; }

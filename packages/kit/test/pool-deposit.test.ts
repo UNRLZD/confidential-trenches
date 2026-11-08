@@ -23,7 +23,10 @@ import {
   solanaPoolTreeSizes,
   solanaPoolPage,
   VAULT_FIELD_P,
+  type SolanaRent,
 } from "@blindfill/kit";
+// the floor read through the namespace, so this file loads where the kit has none (the S-01 tests' red run at c7778df0)
+import * as kit from "@blindfill/kit";
 import { solanaDecodeMessage } from "../src/checks/solana/message.ts";
 
 const json = (u: string) => JSON.parse(readFileSync(new URL(u, import.meta.url), "utf8"));
@@ -95,7 +98,7 @@ test("Solana: the kit's tag 1 is the landed deposit's instruction byte for byte 
   const precommitment = beInt(got.data.subarray(9, 41));
   const depositor = got.accounts[1]!.key;
   // the pool's first deposit: both trees at size 0
-  const built = solanaPoolDepositIx(DEVNET.program, depositor, { value, precommitment }, { stateSize: 0, labelSize: 0 });
+  const built = solanaPoolDepositIx(DEVNET.program, depositor, { value, precommitment }, { stateSize: 0, labelSize: 0 }, RENT);
   assert.equal(built.program, got.program);
   // the landed deposit predates the next pages (d3edab1): its six are the kit's first six; the kit names pages 1 after
   assert.deepEqual(built.accounts.slice(0, 6), got.accounts);
@@ -115,7 +118,7 @@ test("Solana: the tree sizes come from the pool account (both RPCs' bytes), the 
   // one deposit landed: one leaf on each tree
   const sizes = solanaPoolTreeSizes(a!, DEVNET.program);
   assert.deepEqual(sizes, { stateSize: 1, labelSize: 1 });
-  const ix = solanaPoolDepositIx(DEVNET.program, "11111111111111111111111111111112", { value: 10_000_000n, precommitment: 7n }, sizes);
+  const ix = solanaPoolDepositIx(DEVNET.program, "11111111111111111111111111111112", { value: 10_000_000n, precommitment: 7n }, sizes, RENT);
   assert.equal(ix.accounts[2]!.key, DEVNET.addresses.state0); // entry 1 is still on page 0
   // read later: the trees at different sizes (releases add state leaves only), each read from its own offset
   const [n0, n1] = SOL.now.map((x) => ({ owner: x.pool.owner, data: base64.decode(x.pool.data) }));
@@ -151,7 +154,7 @@ test("Solana: a mark's read: no account or a funded system account is no mark; t
 
 test("Solana: the unsigned v0 tx carries exactly the one tag 1, the depositor its one signer and payer, the signature slot zeroed", () => {
   const blockhash = "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM";
-  const { message, wire } = solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 20_000_000n, precommitment: 9n }, { stateSize: 1, labelSize: 1 }, blockhash);
+  const { message, wire } = solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 20_000_000n, precommitment: 9n }, { stateSize: 1, labelSize: 1 }, blockhash, RENT);
   assert.equal(wire[0], 1);
   assert.ok(wire.subarray(1, 65).every((x) => x === 0));
   assert.equal(hex(wire.subarray(65)), hex(message));
@@ -163,14 +166,65 @@ test("Solana: the unsigned v0 tx carries exactly the one tag 1, the depositor it
   assert.equal(hex(m.instructions[0]!.data), hex(Uint8Array.of(1, ...[0, 0x2d, 0x31, 1, 0, 0, 0, 0], ...new Uint8Array(31), 9)));
 });
 
-test("Solana: a value below MIN_DEPOSIT or past u64, a precommitment of 0 or at p, or a size not a u32 is refused before any bytes", () => {
-  const ok = { value: SOLANA_POOL_MIN_DEPOSIT, precommitment: 1n };
+test("Solana: a value below MIN_DEPOSIT or past u64, a precommitment of 0 or at p, a size not a u32, or a rent not a sysvar read is refused before any bytes", () => {
+  const ok = { value: kit.solanaPoolNoteFloor(RENT), precommitment: 1n };
   const s = { stateSize: 0, labelSize: 0 };
-  assert.doesNotThrow(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, s));
+  assert.doesNotThrow(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, s, RENT));
   for (const note of [{ ...ok, value: SOLANA_POOL_MIN_DEPOSIT - 1n }, { ...ok, value: 1n << 64n }, { ...ok, precommitment: 0n }, { ...ok, precommitment: VAULT_FIELD_P }, { ...ok, value: 5 as never }])
-    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, note, s), SolanaPoolDepositError);
+    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, note, s, RENT), SolanaPoolDepositError);
   for (const bad of [{ stateSize: -1, labelSize: 0 }, { stateSize: 0, labelSize: 2 ** 32 }, { stateSize: 0.5, labelSize: 0 }])
-    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, bad), SolanaPoolDepositError);
+    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, bad, RENT), SolanaPoolDepositError);
+  // no rent, or one no Rent sysvar holds (solanaRentOf reads only 1.0 or 2.0 as the factor): never priced as 0
+  for (const rent of [undefined, null, {}, { lamportsPerByte: -1n, factor: 1n }, { lamportsPerByte: 5_080n, factor: 3n }, { lamportsPerByte: 5_080, factor: 1n }] as never[])
+    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, s, rent), /the rent is not a Rent sysvar read/);
+});
+
+test("S-01 review: a rent rate solanaRentOf would refuse (0, or over 1,000,000 a byte) is refused, so a zero rate never drops the floor to MIN_DEPOSIT", () => {
+  const ok = { value: SOLANA_POOL_MIN_DEPOSIT, precommitment: 1n };
+  for (const rent of [{ lamportsPerByte: 0n, factor: 1n }, { lamportsPerByte: 1_000_001n, factor: 1n }] as const)
+    assert.throws(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, { ...ok, value: 1n << 62n }, { stateSize: 0, labelSize: 0 }, rent), /the rent is not a Rent sysvar read/, `${rent.lamportsPerByte}`);
+  // the edges solanaRentOf takes still build
+  assert.doesNotThrow(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, ok, { stateSize: 0, labelSize: 0 }, { lamportsPerByte: 1n, factor: 1n }));
+  assert.doesNotThrow(() => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, { ...ok, value: 1n << 62n }, { stateSize: 0, labelSize: 0 }, { lamportsPerByte: 1_000_000n, factor: 2n }));
+});
+
+// Audit S-01: the program takes any note from MIN_DEPOSIT (lib.rs:78), but the smallest whole release of a note is
+// max(rent(0) + F, 2 x F) at the relay fee F (lib.rs:52-57): a note under it costs more to get out than it holds, and
+// the pool has no ragequit and no merge. F is the kit's epoch fee, the one our relay path charges on every release
+// (solanaPoolFee): 1,300,000 at mainnet rent as read 2 Nov 2026 (5,080 a byte, factor 1), so the floor is 2,600,000,
+// the signing page's withdrawNoteFloor.
+const MAINNET: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
+const S = { stateSize: 0, labelSize: 0 };
+const at = (value: bigint, rent: SolanaRent = MAINNET) => () => solanaPoolDepositIx(DEVNET.program, DEVNET.pool, { value, precommitment: 1n }, S, rent);
+
+test("S-01: a 1,000,000-lamport note, or any under the release floor at the rent read, is refused, the refusal naming the floor", () => {
+  assert.throws(at(SOLANA_POOL_MIN_DEPOSIT), { name: "SolanaPoolDepositError", message: "solana pool deposit: the value 1000000 is under the release floor of 2600000 lamports at this rent: the note would cost more to release than it holds" });
+  // the floor at the bare release cost (lib.rs:55, 2 x 1,092,040): under it
+  for (const v of [2_184_080n, 2_599_999n]) assert.throws(at(v), /under the release floor of 2600000 lamports/);
+  assert.equal(kit.solanaPoolNoteFloor(MAINNET), 2_600_000n);
+});
+
+test("S-01: a note at the release floor builds, and the tx with it: the device's own withdraw floor (2,600,000) is one", () => {
+  assert.doesNotThrow(at(2_600_000n));
+  assert.equal(new DataView(at(2_600_000n)().data.buffer).getBigUint64(1, true), 2_600_000n);
+  assert.doesNotThrow(() => solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 2_600_000n, precommitment: 9n }, S, "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", MAINNET));
+  assert.throws(() => solanaPoolDepositTx(DEVNET.program, "11111111111111111111111111111112", { value: 2_599_999n, precommitment: 9n }, S, "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", MAINNET), /under the release floor of 2600000/);
+});
+
+test("S-01: the floor follows the rent read, never a constant: a rent rise lifts it, and it is never under MIN_DEPOSIT", () => {
+  // twice mainnet's rate: F = 2,174,080 rounded up to 2,200,000, plus 200,000; the 2 Nov floor would be a note no
+  // release at the kit's fee can take
+  const twice: SolanaRent = { lamportsPerByte: 10_160n, factor: 1n };
+  assert.equal(kit.solanaPoolNoteFloor(twice), 4_800_000n);
+  assert.throws(at(2_600_000n, twice), /under the release floor of 4800000 lamports/);
+  assert.doesNotThrow(at(4_800_000n, twice));
+  // the rent before SIMD-0194 (3,480 a byte, factor 2.0): F 1,700,000
+  assert.equal(kit.solanaPoolNoteFloor({ lamportsPerByte: 3_480n, factor: 2n }), 3_400_000n);
+  // a rent so low that the release floor (2 x 300,000) is under the program's least deposit: the floor is MIN_DEPOSIT
+  assert.equal(kit.solanaPoolNoteFloor({ lamportsPerByte: 100n, factor: 1n }), SOLANA_POOL_MIN_DEPOSIT);
+  assert.doesNotThrow(at(SOLANA_POOL_MIN_DEPOSIT, { lamportsPerByte: 100n, factor: 1n }));
+  // the recorded devnet rent: the recorded deposits' 10,000,000 clears it
+  assert.ok(kit.solanaPoolNoteFloor(RENT) <= 10_000_000n);
 });
 
 test("Solana: one note's cost is what the depositor really lost in each recorded deposit, less its value", () => {

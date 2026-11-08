@@ -2474,3 +2474,23 @@ test("from a fixed U_X (review 2 L2, PROBE tamper): an op whose U_{s,i} is not i
   assert.equal(c.lamports(nv.address), 30_000_000);
   assert.equal(c.lamports(ux.address), 30_000_000);
 });
+
+test("S-01 review: the rent both RPCs read is the rent the kit's builder holds the note to: at 25,000 a byte the 0.01 SOL rung is under the release floor (11,200,000) and nothing is signed or sent; at the recorded rent it fills", async () => {
+  const high = (address: string, a: Acc): Acc => {
+    if (address !== FIX.addresses.rent) return a;
+    const d = a.data.slice();
+    new DataView(d.buffer).setBigUint64(0, 25_000n, true);
+    return { ...a, data: d };
+  };
+  {
+    const c = chain();
+    const ns = await notes();
+    c.fund((await plannedU(ns)).address, 1_000_000_000);
+    assert.deepEqual(await runPoolDeposit(host(c, ns, { rpcs: [c.rpc({ mapAccount: high }), c.rpc({ mapAccount: high })] }), ask(RUNG)), { error: "failed" });
+    assert.equal(c.sent.length, 0);
+  }
+  const c = chain();
+  const ns = await notes();
+  c.fund((await plannedU(ns)).address, 1_000_000_000);
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage: string }).stage, "filled");
+});
