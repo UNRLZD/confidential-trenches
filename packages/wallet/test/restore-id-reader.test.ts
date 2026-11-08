@@ -10,7 +10,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
-import type { NoteRestore, RestoredNote } from "../src/notes/restore.ts";
+import { RESTORE_GAP, RESTORE_LANES, type NoteRestore, type RestoredNote } from "../src/notes/restore.ts";
 import { ID_READ_TRIES, nearBalanceReader, nearIdReader } from "../src/restore/id-reader.ts";
 import { DEPOSIT_ID_MARGIN, restoreDepositIds } from "../src/restore/wallets.ts";
 
@@ -64,25 +64,19 @@ test("each rule on mainnet's answers: never used, used by storage on the token, 
   assert.deepEqual(log, ["near.drpc.org storage_balance_of", "near.drpc.org ft_balance_of"]);
 });
 
-test("the intents.near branch on mainnet's answers: tokens listed above zero are money, listed at zero are used", async () => {
+test("the intents.near branch on mainnet's answers: tokens listed above zero are money", async () => {
   // never_used's token views and account, with money_intents's real intents.near answers in place of its own
   const u = REC.ids.never_used!;
-  const intents = (url: string, zero: boolean) => (p: Record<string, unknown>) => {
+  const intents = (url: string) => (p: Record<string, unknown>) => {
     if (p.account_id !== "intents.near") return undefined;
-    const rec = REC.intents[url]!;
-    if (p.method_name === "mt_tokens_for_owner") return rec.tokens;
-    const held = structuredClone(rec.held) as { result: { result: number[] } };
-    if (zero) {
-      const n = (JSON.parse(Buffer.from(held.result.result).toString()) as string[]).length;
-      held.result.result = [...Buffer.from(JSON.stringify(Array(n).fill("0")))];
-    }
     assert.deepEqual(argsOf(p).account_id, u);
-    return held;
+    const rec = REC.intents[url]!;
+    // recorded at their own block: served as of the block asked, as the reader pins every view of an id to one
+    const a = structuredClone(p.method_name === "mt_tokens_for_owner" ? rec.tokens : rec.held) as { result: { block_height: number } };
+    if (typeof p.block_id === "number") a.result.block_height = p.block_id;
+    return a;
   };
-  for (const [zero, want] of [[false, "money"], [true, "used"]] as const) {
-    const got = await nearIdReader("mainnet", [replay(FAST, [], intents(FAST, zero)), replay(DRPC, [], intents(DRPC, zero))], { first: () => 0, tries: 1 })(u);
-    assert.equal(got, want, zero ? "listed at zero" : "listed above zero");
-  }
+  assert.equal(await nearIdReader("mainnet", [replay(FAST, [], intents(FAST)), replay(DRPC, [], intents(DRPC))], { first: () => 0, tries: 1 })(u), "money");
 });
 
 // ---------- a fake world ----------
@@ -124,7 +118,8 @@ test("unused only when both providers say so: a trace or money on either one is 
   assert.equal(await read(empty, used)(U1), "used", "the second provider shows the account the first hid");
   assert.equal(await read(empty, W({ [U1]: { usdc: 5n } }))(U1), "money");
   assert.equal(await read(W({ [U1]: { storage: true } }), empty)(U1), "used", "storage on the token, read on the first provider alone");
-  assert.equal(await read(W({ [U1]: { tokens: { "nep141:a": 0n } } }), empty)(U1), "used", "a token listed at zero");
+  // review F6 (a): a token listed at 0 is no trace (intents.near at 16d04f6 deletes a balance that falls to 0)
+  assert.equal(await read(W({ [U1]: { tokens: { "nep141:a": 0n } } }), empty)(U1), "unused", "a token listed at zero");
   assert.equal(await read(W({ [U1]: { tokens: { "nep141:a": 0n, "nep141:b": 3n } } }), empty)(U1), "money");
   // the indexer: true turns unused into used; false, a throw or a non-boolean leave it unused; it is never asked of an
   // id the chain already shows
@@ -172,16 +167,53 @@ test("retries: a view is retried with doubling backoff on its provider, then the
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, empty, down), provider(DRPC, empty)], { first: () => 0, sleep: noSleep })(U1), /rpc\.mainnet\.fastnear\.com: .*HTTP 503|HTTP 503/);
   // but money or a trace on the provider that answers is enough
   assert.equal(await nearIdReader("mainnet", [provider(FAST, W({ [U1]: { usdc: 1n } }), down), provider(DRPC, W({ [U1]: { usdc: 1n } }))], { first: () => 0, sleep: noSleep })(U1), "money");
-  assert.equal(await nearIdReader("mainnet", [provider(FAST, W({ [U2]: { account: true } })), provider(DRPC, W({}), down)], { first: () => 1, sleep: noSleep })(U2), "used");
+  // a trace alone is not enough with the other provider down: it may hide money there (review F1)
+  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({ [U2]: { account: true } })), provider(DRPC, W({}), down)], { first: () => 1, sleep: noSleep })(U2), /HTTP 503/);
+});
+
+// review F1: a provider that hides money behind a trace (answers used) is outvoted, whichever is read first
+test("a provider hiding money behind a trace is outvoted, on either side and whichever is read first: token and intents money", async () => {
+  const honestT = W({ [U1]: { storage: true, usdc: 9n, account: true } });
+  const lieT = W({ [U1]: { storage: true, usdc: 0n, account: true } });
+  const honestI = W({ [U1]: { tokens: { "nep141:x": 5n } } });
+  const lieI = W({ [U1]: { account: true } });
+  for (const [label, liar, honest] of [["token", lieT, honestT], ["intents", lieI, honestI]] as const) {
+    for (const liarAt of [0, 1]) {
+      for (const f of [0, 1]) {
+        const worlds = liarAt === 0 ? [liar, honest] : [honest, liar];
+        const got = await nearIdReader("mainnet", [provider(FAST, worlds[0]!), provider(DRPC, worlds[1]!)], { first: () => f, sleep: noSleep, tries: 1 })(U1);
+        assert.equal(got, "money", `${label} money, the liar ${liarAt === 0 ? "FastNEAR" : "dRPC"}, ${f === liarAt ? "the liar" : "the honest one"} read first`);
+      }
+    }
+  }
+});
+
+// review F6 (b): every view of an id is read at one block, so money moving between two views never reads as used
+test("one block per id: money moved out between two views still reads as money; a view at another block fails the read", async () => {
+  // at block 10 U holds 9 USDC; at block 11 it was moved out (U's storage on the token stays)
+  const heights = [W({ [U1]: { usdc: 9n } }), W({ [U1]: { storage: true } })];
+  let tip = 10;
+  const asked: unknown[] = [];
+  const chain = (url: string, skew = 0): NearRpc => ({
+    name: url,
+    query: async (params) => {
+      asked.push(params.block_id ?? params.finality);
+      const h = params.block_id === undefined ? tip : (params.block_id as number);
+      const a = answer(heights[h - 10]!, params) as { result?: { block_height?: number } };
+      if (a.result) a.result.block_height = h + skew;
+      tip = 11; // the money moves right after the first view is answered
+      return a;
+    },
+  });
+  assert.equal(await nearIdReader("mainnet", [chain(FAST), chain(DRPC)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), "money");
+  assert.deepEqual(asked, ["final", 10], "the first view at final, the next at its block");
+  tip = 10;
+  await assert.rejects(nearIdReader("mainnet", [chain(FAST, 1), chain(DRPC, 1)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), /answered at block 12, not 11/);
 });
 
 // ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------
 test("the R/V/A balance reader on mainnet's answers, and above 0 on either provider is enough, 0 only on both", async () => {
-  const ex = (url: string) => (p: Record<string, unknown>) => {
-    if (p.account_id !== "intents.near" || argsOf(p).account_id !== REC.ids.money_intents) return undefined;
-    return p.method_name === "mt_tokens_for_owner" ? REC.intents[url]!.tokens : REC.intents[url]!.held;
-  };
-  const live = (f: number) => nearBalanceReader("mainnet", [replay(FAST, [], ex(FAST)), replay(DRPC, [], ex(DRPC))], { first: () => f, tries: 1 });
+  const live = (f: number) => nearBalanceReader("mainnet", [replay(FAST), replay(DRPC)], { first: () => f, tries: 1 });
   for (const f of [0, 1]) {
     assert.equal(await live(f)("usdc", REC.ids.money_usdc!), 3_000_668n);
     assert.equal(await live(f)("near", REC.ids.used_account!), 20_000_000_000_000_000_000_000n);
@@ -208,7 +240,11 @@ const at = (lane: number, k: number) => lane + 8 * k;
 const id = (i: number) => depositAccount(SEED, SCOPE, i).account;
 const dep = (i: number): RestoredNote => ({ ref: { kind: "deposit", s: SCOPE, i }, scope: SCOPE, precommitment: 0n, leaf: { value: 1n, label: 1n, commitment: 1n, leafIndex: 0n }, state: "UNSPENT" });
 // lane 0: a note at 0; lane 2: money at its 15th index; lane 5: a used id at its 21st and money at its 40th
-const R: Pick<NoteRestore, "notes" | "laneHighest"> = { notes: [dep(0)], laneHighest: [0, null, null, null, null, null, null, null] };
+const R: Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked"> = {
+  notes: [dep(0)],
+  laneHighest: [0, null, null, null, null, null, null, null],
+  laneWalked: Array.from({ length: RESTORE_LANES }, (_, l) => (l === 0 ? 0 : l - RESTORE_LANES) + RESTORE_LANES * RESTORE_GAP),
+};
 const WORLD = W({ [id(at(2, 14))]: { usdc: 9n }, [id(at(5, 20))]: { storage: true }, [id(at(5, 39))]: { tokens: { "nep141:wrap.near": 4n } } });
 // a seeded generator, so every run of the test fails the same reads
 function rng(seed: number): () => number {

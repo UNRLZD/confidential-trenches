@@ -3,7 +3,8 @@
 // l.335-342, "An arm with nothing visible" l.343-345, block time from the chain l.346-348). It runs after
 // restoreWallets (./wallets.ts), on what restoreNotes (../notes/restore.ts) and it found.
 //
-// - Step 5 (l.293-301): R_{c,l,j} for every wallet found, hop targets included (c the wallet's tag), and V_{l,j} for
+// - Step 5 (l.293-301): R_{c,l,j} for every wallet found or left unread (a wallet whose read failed may have history,
+//   as its hop targets are read; review F3), hop targets included (c the wallet's tag), and V_{l,j} for
 //   every withdrawal found, are read for what they hold inside intents.near (mt_tokens_for_owner) and on the vault's
 //   token (ft_balance_of, since 1Click delivers to the id's own NEAR account). A_{l,j}, for every withdrawal found, is
 //   read for its USDC on NEAR, its NEAR, and what it holds inside intents.near (a 1Click refund to A, or §8 item 10's
@@ -62,18 +63,18 @@ const idOf = (k: { id: string; secretKey: Uint8Array }): string => {
 };
 const armKey = (l: bigint, j: number): string => `${l}:${j}`;
 
-/** Step 5: R of every wallet found, V and A of every withdrawal, each read for what it holds. */
+/** Step 5: R of every wallet found or unread, V and A of every withdrawal, each read for what it holds. */
 export async function restoreArmAccounts(
   seed64: Uint8Array,
   r: Pick<NoteRestore, "spends">,
-  w: Pick<WalletRestore, "wallets">,
+  w: Pick<WalletRestore, "wallets" | "unread">,
   read: BalanceReader,
   opts: { pick?: (n: number) => number } = {},
 ): Promise<ArmRestore> {
   const pick = opts.pick ?? randomPick;
   const accounts: ArmAccount[] = [];
   const seen = new Set<string>();
-  for (const x of w.wallets) {
+  for (const x of [...w.wallets, ...w.unread]) {
     const k = `R:${x.c}:${armKey(x.l, x.j)}`;
     if (seen.has(k)) continue;
     seen.add(k);

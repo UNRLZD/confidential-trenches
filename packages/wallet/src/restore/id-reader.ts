@@ -12,12 +12,15 @@
 //   - view_account(U) answers an account: U was created (the relayer's prepay Transfer, §2.4). Read at block 223638199:
 //     a8969c04…f264e4 answers {"amount":"20000000000000000000000","storage_usage":428} with storage null and no token
 //     in intents.near; abab…ab answers UNKNOWN_ACCOUNT at block 223638171.
-//   - intents.near lists a token for U at a zero balance: it held it once.
 //   Not a trace: has_public_key(U, U's key) is true for every implicit id, used or not (D15), and intents.near's nonces
 //   are pruned (below), so neither is read.
-// - "unused": no view shows money or a trace, on BOTH providers. A provider that hides a trace would end a lane's margin
-//   early and leave money past it unseen, so "unused" needs the two operators to agree; money or a trace on either one
-//   is enough, since a false one only reads the lane further (bounded by step 5's walk end).
+// - Both providers are read and the stronger answer is taken: money over used over unused (review F1). A provider that
+//   hides money (answering used) or a trace (answering unused) is outvoted by the other; only money on the first one
+//   read ends the id's read early, as no answer is stronger. A false money or used only reads the lane further
+//   (bounded by step 5's walk end). A listed intents.near token at 0 is no trace: intents.near at 16d04f6 deletes a
+//   balance that falls to 0 (core/src/amounts.rs:137-140, its entry_or_default; crates/map-utils/src/cleanup.rs:19-20).
+// - One block per id (review F6): the first view is read at the final block, and every other view of that id, on both
+//   providers, at that block's height (block_id), so money moving between two views can never read as used.
 // - An indexer (NearBlocks, the intents explorer) is a server's word: it may turn an id both providers see as unused
 //   into "used" (`indexer` answers true), never anything into "unused"; a failed or false answer changes nothing.
 //
@@ -32,10 +35,10 @@
 // its money is still under the 12 words.
 //
 // Failures (review 2, gap 2): every view is retried on its provider with doubling backoff (ID_READ_TRIES, from
-// ID_READ_BACKOFF_MS) before that provider's read of the id fails; the id's first read falls over to the other provider;
-// the confirming read of an unused id must come from the other provider. An id whose reads still fail throws, and step 5
-// counts it as failed (restoreDepositIds): so one provider always down ends a lane with its named error, never with
-// unused ids taken on one provider's word. A view that fails with "FiatToken: paused" is a halt, never a zero: it
+// ID_READ_BACKOFF_MS) before that provider's read of the id fails (a provider a block behind catches up in that time).
+// Unless one provider shows money, both must answer: an id whose reads still fail on either throws, and step 5 counts
+// it as failed (restoreDepositIds), so one provider always down ends a lane with its named error, never with an
+// answer taken on one provider's word. A view that fails with "FiatToken: paused" is a halt, never a zero: it
 // fails the read, to be read again.
 //
 // Each request names U or the token and nothing else (§2.9 row 8); the provider read first is drawn at random per id,
@@ -62,9 +65,15 @@ const randomBit = (): number => globalThis.crypto.getRandomValues(new Uint8Array
 export type IdIndexer = (id: string) => Promise<boolean>;
 export type IdReaderOpts = { tries?: number; backoffMs?: number; sleep?: (ms: number) => Promise<void>; first?: () => number; indexer?: IdIndexer };
 
+/**
+ * The views of one read, all at one block: the first is asked at the final block and sets `at.h` from its answer; every
+ * later one is asked at that height (block_id) and must answer from it.
+ */
+export type At = { h?: number };
+
 /** The view's answer, or null for an account the provider says does not exist (view_account only). */
-async function view(rpc: NearRpc, params: Obj, what: string): Promise<unknown> {
-  const a = await rpc.query({ ...params, finality: "final" });
+async function view(rpc: NearRpc, params: Obj, what: string, at: At): Promise<unknown> {
+  const a = await rpc.query(at.h === undefined ? { ...params, finality: "final" } : { ...params, block_id: at.h });
   if (!isObj(a)) throw new Error(`${rpc.name}: ${what}: not a JSON-RPC answer`);
   const text = JSON.stringify(a.error ?? (isObj(a.result) ? a.result.error : undefined) ?? "");
   if (text.includes(HALT)) throw new Error(`${rpc.name}: ${what}: the token is halted (${HALT})`);
@@ -74,7 +83,9 @@ async function view(rpc: NearRpc, params: Obj, what: string): Promise<unknown> {
     throw new Error(`${rpc.name}: ${what}: ${String(isObj(a.error) ? (a.error.name ?? a.error.message) : "an error")}`.slice(0, 200));
   }
   const r = a.result;
-  if (!isObj(r) || r.error !== undefined || !Number.isSafeInteger(r.block_height)) throw new Error(`${rpc.name}: ${what}: not a view result`);
+  if (!isObj(r) || r.error !== undefined || !Number.isSafeInteger(r.block_height) || (r.block_height as number) <= 0) throw new Error(`${rpc.name}: ${what}: not a view result`);
+  if (at.h === undefined) at.h = r.block_height as number;
+  else if (r.block_height !== at.h) throw new Error(`${rpc.name}: ${what}: answered at block ${String(r.block_height)}, not ${at.h}`);
   if (params.request_type === "view_account") {
     if (typeof r.amount !== "string" || !DIGITS.test(r.amount)) throw new Error(`${rpc.name}: ${what}: not an account`);
     return r;
@@ -112,10 +123,10 @@ function setup(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Id
   const first = opts.first ?? randomBit;
 
   // one view on one provider, retried with doubling backoff; the last failure is its error
-  const retried = async (rpc: NearRpc, params: Obj, what: string): Promise<unknown> => {
+  const retried = async (rpc: NearRpc, params: Obj, what: string, at: At): Promise<unknown> => {
     for (let k = 0; ; k++) {
       try {
-        return await view(rpc, params, what);
+        return await view(rpc, params, what, at);
       } catch (e) {
         if (k + 1 >= tries) throw e;
         await sleep(backoff * 2 ** k);
@@ -132,48 +143,57 @@ function setup(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Id
 export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts = {}): IdReader {
   const { token, retried, first } = setup(network, rpcs, opts);
 
-  // what one provider shows of U
-  const readOn = async (rpc: NearRpc, u: string): Promise<IdState> => {
-    const storage = await retried(rpc, call(token, "storage_balance_of", { account_id: u }), "storage_balance_of");
+  // the strongest answer one provider gives of U at block at.h
+  const readOn = async (rpc: NearRpc, u: string, at: At): Promise<IdState> => {
+    const storage = await retried(rpc, call(token, "storage_balance_of", { account_id: u }), "storage_balance_of", at);
     if (storage !== null && !(isObj(storage) && typeof storage.total === "string" && DIGITS.test(storage.total))) throw new Error(`${rpc.name}: storage_balance_of: neither null nor a balance`);
     // an account with no storage on the token holds none of it (NEP-145): the balance is read only when registered
-    if (storage !== null && amount(await retried(rpc, call(token, "ft_balance_of", { account_id: u }), "ft_balance_of"), `${rpc.name}: ft_balance_of`) > 0n) return "money";
-    const listed = await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: u }), "mt_tokens_for_owner");
-    if (!Array.isArray(listed) || !listed.every((t) => isObj(t) && typeof t.token_id === "string" && t.token_id !== "")) throw new Error(`${rpc.name}: mt_tokens_for_owner: not a token list`);
-    if (listed.length > 0) {
-      const ids = listed.map((t) => (t as { token_id: string }).token_id);
-      const held = await retried(rpc, call(INTENTS, "mt_batch_balance_of", { account_id: u, token_ids: ids }), "mt_batch_balance_of");
-      if (!Array.isArray(held) || held.length !== ids.length) throw new Error(`${rpc.name}: mt_batch_balance_of: not one balance per token`);
-      return held.some((x) => amount(x, `${rpc.name}: mt_batch_balance_of`) > 0n) ? "money" : "used";
-    }
+    if (storage !== null && amount(await retried(rpc, call(token, "ft_balance_of", { account_id: u }), "ft_balance_of", at), `${rpc.name}: ft_balance_of`) > 0n) return "money";
+    if ((await intentsSum(retried, rpc, u, at)) > 0n) return "money";
     if (storage !== null) return "used";
-    return (await retried(rpc, { request_type: "view_account", account_id: u }, "view_account")) === null ? "unused" : "used";
+    return (await retried(rpc, { request_type: "view_account", account_id: u }, "view_account", at)) === null ? "unused" : "used";
   };
+  const RANK: Record<IdState, number> = { unused: 0, used: 1, money: 2 };
 
   return async (u: string): Promise<IdState> => {
     if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
     const a = first() === 0 ? 0 : 1;
-    let p = a;
-    let state: IdState;
-    try {
-      state = await readOn(rpcs[a], u);
-    } catch {
-      p = 1 - a;
-      state = await readOn(rpcs[p], u);
+    const at: At = {};
+    const got: (IdState | Error)[] = [];
+    for (const p of [a, 1 - a]) {
+      try {
+        const x = await readOn(rpcs[p]!, u, at);
+        if (x === "money") return x; // nothing is stronger
+        got.push(x);
+      } catch (e) {
+        got.push(e instanceof Error ? e : new Error("the read failed"));
+      }
     }
-    if (state !== "unused") return state;
-    // the other provider must agree it is unused; a failure here fails the id's read
-    const other = await readOn(rpcs[1 - p], u);
-    if (other !== "unused") return other;
-    if (opts.indexer) {
+    // no money on either: both must have answered, and the stronger answer is taken
+    const failed = got.find((x): x is Error => x instanceof Error);
+    if (failed) throw failed;
+    const state = (got as IdState[]).reduce((x, y) => (RANK[y] > RANK[x] ? y : x));
+    if (state === "unused" && opts.indexer) {
       try {
         if ((await opts.indexer(u)) === true) return "used";
       } catch {
         // a server's silence proves nothing
       }
     }
-    return "unused";
+    return state;
   };
+}
+
+type Retried = (rpc: NearRpc, params: Obj, what: string, at: At) => Promise<unknown>;
+/** What intents.near holds for an account at block at.h: the sum of its listed tokens (0 when none is listed). */
+async function intentsSum(retried: Retried, rpc: NearRpc, a: string, at: At): Promise<bigint> {
+  const listed = await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: a }), "mt_tokens_for_owner", at);
+  if (!Array.isArray(listed) || !listed.every((t) => isObj(t) && typeof t.token_id === "string" && t.token_id !== "")) throw new Error(`${rpc.name}: mt_tokens_for_owner: not a token list`);
+  if (listed.length === 0) return 0n;
+  const ids = listed.map((t) => (t as { token_id: string }).token_id);
+  const held = await retried(rpc, call(INTENTS, "mt_batch_balance_of", { account_id: a, token_ids: ids }), "mt_batch_balance_of", at);
+  if (!Array.isArray(held) || held.length !== ids.length) throw new Error(`${rpc.name}: mt_batch_balance_of: not one balance per token`);
+  return held.reduce((sum: bigint, x) => sum + amount(x, `${rpc.name}: mt_batch_balance_of`), 0n);
 }
 
 /** What an account holds on one read (restore/arms.ts BalanceReader): only above 0 matters to step 5. */
@@ -188,33 +208,30 @@ export type NearBalanceRead = "usdc" | "near" | "intents";
  */
 export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Omit<IdReaderOpts, "indexer"> = {}): (what: NearBalanceRead, account: string) => Promise<bigint> {
   const { token, retried, first } = setup(network, rpcs, opts);
-  const readOn = async (rpc: NearRpc, what: NearBalanceRead, a: string): Promise<bigint> => {
-    if (what === "usdc") return amount(await retried(rpc, call(token, "ft_balance_of", { account_id: a }), "ft_balance_of"), `${rpc.name}: ft_balance_of`);
+  const readOn = async (rpc: NearRpc, what: NearBalanceRead, a: string, at: At): Promise<bigint> => {
+    if (what === "usdc") return amount(await retried(rpc, call(token, "ft_balance_of", { account_id: a }), "ft_balance_of", at), `${rpc.name}: ft_balance_of`);
     if (what === "near") {
-      const acct = await retried(rpc, { request_type: "view_account", account_id: a }, "view_account");
+      const acct = await retried(rpc, { request_type: "view_account", account_id: a }, "view_account", at);
       return acct === null ? 0n : amount((acct as Obj).amount, `${rpc.name}: view_account`);
     }
-    const listed = await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: a }), "mt_tokens_for_owner");
-    if (!Array.isArray(listed) || !listed.every((t) => isObj(t) && typeof t.token_id === "string" && t.token_id !== "")) throw new Error(`${rpc.name}: mt_tokens_for_owner: not a token list`);
-    if (listed.length === 0) return 0n;
-    const ids = listed.map((t) => (t as { token_id: string }).token_id);
-    const held = await retried(rpc, call(INTENTS, "mt_batch_balance_of", { account_id: a, token_ids: ids }), "mt_batch_balance_of");
-    if (!Array.isArray(held) || held.length !== ids.length) throw new Error(`${rpc.name}: mt_batch_balance_of: not one balance per token`);
-    return held.reduce((sum: bigint, x) => sum + amount(x, `${rpc.name}: mt_batch_balance_of`), 0n);
+    return intentsSum(retried, rpc, a, at);
   };
   return async (what, a) => {
     if (what !== "usdc" && what !== "near" && what !== "intents") throw new Error(`unknown read ${String(what)}`);
     if (typeof a !== "string" || !HEX64.test(a)) throw new Error("an account is a 64-hex implicit account id");
     const x = first() === 0 ? 0 : 1;
-    let p = x;
-    let v: bigint;
-    try {
-      v = await readOn(rpcs[x], what, a);
-    } catch {
-      p = 1 - x;
-      v = await readOn(rpcs[p], what, a);
+    const at: At = {};
+    let failed: unknown;
+    for (const p of [x, 1 - x]) {
+      try {
+        const v = await readOn(rpcs[p]!, what, a, at);
+        if (v > 0n) return v;
+      } catch (e) {
+        failed = e;
+      }
     }
-    if (v > 0n) return v;
-    return readOn(rpcs[1 - p], what, a);
+    // 0 only when both answered 0
+    if (failed !== undefined) throw failed;
+    return 0n;
   };
 }

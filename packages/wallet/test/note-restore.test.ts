@@ -465,7 +465,11 @@ test("a reach: the walk reads to it before its gap counts, and a walk handed in 
   const pages = { deposits: [], spends: [], leaves: [] };
   const reach = [null, null, null, lane + 8 * TEST_GAP, null, null, null, null];
   const walks = Array.from({ length: 8 }, (_, l) => walkLane(SEED, SCOPE, l, () => false, TEST_GAP, reach[l]!));
-  assert.equal(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: walks }).laneHighest[lane], null);
+  const fine = restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: walks });
+  assert.equal(fine.laneHighest[lane], null);
+  // review F4: each lane's walk end comes back with the restore, its reach in it, so step 5 holds the ids to it
+  assert.deepEqual(fine.laneWalked, walks.map((w) => w.last));
+  assert.equal(fine.laneWalked[lane], lane + 8 * 2 * TEST_GAP);
   const short = walks.map((w, l) => (l === lane ? walkLane(SEED, SCOPE, l, () => false, TEST_GAP) : w));
   assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: short }), new RegExp(`lane 3: the walk ended at ${lane + 8 * (TEST_GAP - 1)}, not ${lane + 8 * 2 * TEST_GAP} \\(gap ${TEST_GAP} past its last note or its reach ${lane + 8 * TEST_GAP}\\)`));
   assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach: [1] }), /reach: one per lane/);
@@ -476,6 +480,7 @@ test("an empty vault: no note, every lane empty", async () => {
   const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP });
   assert.deepEqual([got.notes, got.spends, got.pendingRefunds], [[], [], []]);
   assert.deepEqual(got.laneHighest, Array(8).fill(null));
+  assert.deepEqual(got.laneWalked, Array.from({ length: 8 }, (_, l) => l - 8 + 8 * TEST_GAP), "each lane walked gap ids");
 });
 
 test("one RPC that differs stops the restore with nothing returned", async () => {

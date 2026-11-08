@@ -50,7 +50,7 @@ function reader(vals: Record<string, unknown> = {}) {
 const json = (x: unknown): string => JSON.stringify(x, (_k, v) => (typeof v === "bigint" ? String(v) : v));
 
 const TWO: Pick<NoteRestore, "spends"> = { spends: [spend(L1, 0), spend(L2, 1)] };
-const FOUND: Pick<WalletRestore, "wallets"> = { wallets: [wallet("sol", L1, 0), wallet("hop-evm", L1, 0)] };
+const FOUND: Pick<WalletRestore, "wallets" | "unread"> = { wallets: [wallet("sol", L1, 0), wallet("hop-evm", L1, 0)], unread: [] };
 
 test("step 5: R for every wallet found (hop targets included), V and A for every withdrawal, each read one account per request", async () => {
   const { read, log } = reader({ [`usdc ${A(L1, 0)}`]: 7n, [`intents ${R("hop-evm", L1, 0)}`]: 1n, [`near ${A(L2, 1)}`]: 3n });
@@ -75,9 +75,22 @@ test("step 5: R for every wallet found (hop targets included), V and A for every
   assert.ok(!json(got).includes("secret"), "no key leaves");
 });
 
+// review F3: a wallet whose history read failed may have history, so its R is read as a found wallet's is (its hop
+// targets are read the same way, wallets.ts step 4); a wallet unread on two chains gives one R
+test("step 5 (F3): R is read for every wallet left unread too, once per wallet tag", async () => {
+  const unread = (c: d.Chain, chain: UnreadWallet["chain"]): UnreadWallet => ({ c, l: L2, j: 1, address: W(c, L2, 1), chain, error: "down" });
+  const { read, log } = reader({ [`intents ${R("evm", L2, 1)}`]: 4n });
+  const got = await restoreArmAccounts(SEED, { spends: [] }, { wallets: [wallet("sol", L1, 0)], unread: [unread("evm", "base"), unread("evm", "robinhood")] }, read);
+  assert.deepEqual(got.accounts.map((a) => [a.kind, a.c, a.l, a.j, a.account, a.holds]), [
+    ["R", "sol", L1, 0, R("sol", L1, 0), []],
+    ["R", "evm", L2, 1, R("evm", L2, 1), ["intents"]],
+  ]);
+  assert.deepEqual([...log].sort(), [`intents ${R("sol", L1, 0)}`, `usdc ${R("sol", L1, 0)}`, `intents ${R("evm", L2, 1)}`, `usdc ${R("evm", L2, 1)}`].sort());
+});
+
 test("step 5: one R per wallet tag and one V and one A per withdrawal, however often they are listed", async () => {
   const { read, log } = reader();
-  const got = await restoreArmAccounts(SEED, { spends: [spend(L1, 0), spend(L1, 0)] }, { wallets: [wallet("near", L1, 0), wallet("near", L1, 0)] }, read);
+  const got = await restoreArmAccounts(SEED, { spends: [spend(L1, 0), spend(L1, 0)] }, { wallets: [wallet("near", L1, 0), wallet("near", L1, 0)], unread: [] }, read);
   assert.deepEqual(got.accounts.map((a) => a.kind), ["R", "V", "A"]);
   assert.equal(log.length, 2 + 2 + 3);
 });
@@ -90,7 +103,7 @@ test("step 5: a read that fails or answers no balance is listed in unread, never
     [`intents ${R("sol", L1, 0)}`]: 4,
     [`near ${A(L1, 0)}`]: 9n,
   });
-  const got = await restoreArmAccounts(SEED, { spends: [spend(L1, 0)] }, { wallets: [wallet("sol", L1, 0)] }, read);
+  const got = await restoreArmAccounts(SEED, { spends: [spend(L1, 0)] }, { wallets: [wallet("sol", L1, 0)], unread: [] }, read);
   const un = got.unread.map((u) => [u.kind, u.account, u.what, u.halt ?? false]).sort();
   assert.deepEqual(un, [
     ["A", A(L1, 0), "usdc", false],
@@ -106,7 +119,7 @@ test("step 5: a read that fails or answers no balance is listed in unread, never
 
 test("step 5: a FiatToken: paused answer is a halt, listed in unread with halt", async () => {
   const { read } = reader({ [`usdc ${V(L1, 0)}`]: new Error("Smart contract panicked: FiatToken: paused"), [`usdc ${A(L1, 0)}`]: new Error("timeout") });
-  const got = await restoreArmAccounts(SEED, { spends: [spend(L1, 0)] }, { wallets: [] }, read);
+  const got = await restoreArmAccounts(SEED, { spends: [spend(L1, 0)] }, { wallets: [], unread: [] }, read);
   const v = got.unread.find((u) => u.kind === "V")!;
   assert.equal(v.halt, true);
   assert.match(v.error, /FiatToken: paused/);
@@ -177,7 +190,7 @@ test("step 7: secondScanDue takes only safe positive integers, two of each", () 
 // ---------- step 7: an arm with nothing visible ----------
 const ALONE: Pick<NoteRestore, "spends"> = { spends: [spend(L1, 0)] };
 const NONE: Pick<WalletRestore, "wallets" | "unread"> = { wallets: [], unread: [] };
-const armsOf = async (r: Pick<NoteRestore, "spends">, w: Pick<WalletRestore, "wallets">, vals: Record<string, unknown> = {}): Promise<ArmRestore> =>
+const armsOf = async (r: Pick<NoteRestore, "spends">, w: Pick<WalletRestore, "wallets" | "unread">, vals: Record<string, unknown> = {}): Promise<ArmRestore> =>
   restoreArmAccounts(SEED, r, w, reader(vals).read);
 
 test("step 7: a landed arm whose A, W and V hold nothing is re-read: its three W and its V", async () => {
@@ -221,7 +234,7 @@ test("step 7: an arm with any money, any wallet found, or any read unread is lef
     assert.deepEqual(quietArms(SEED, ALONE, arms, w), [], name);
   }
   // an R of the arm that holds money or is unread leaves it out too
-  const withR = { wallets: [wallet("near", L1, 0)] };
+  const withR = { wallets: [wallet("near", L1, 0)], unread: [] };
   const armsR = await armsOf(ALONE, withR, { [`usdc ${R("near", L1, 0)}`]: new Error("down") });
   assert.deepEqual(quietArms(SEED, ALONE, armsR, { wallets: [], unread: [] }), []);
   // another arm's money or failure does not leave this one out

@@ -10,7 +10,7 @@
 //   - money_intents: 7f4aacbe…, a signer in intents.near's transactions holding tokens there.
 import { writeFileSync } from "node:fs";
 import { nearRpc } from "../src/deposit/account.ts";
-import { nearIdReader } from "../src/restore/id-reader.ts";
+import { nearBalanceReader, nearIdReader } from "../src/restore/id-reader.ts";
 
 export const IDS = {
   never_used: "ab".repeat(32),
@@ -33,7 +33,13 @@ const rpcs = [recording(URLS[0]), recording(URLS[1])];
 const states = {};
 for (const [name, id] of Object.entries(IDS)) {
   states[name] = [];
-  for (const f of [0, 1]) states[name].push(await nearIdReader("mainnet", rpcs, { first: () => f, tries: 1 })(id));
+  for (const f of [0, 1]) states[name].push(await nearIdReader("mainnet", rpcs, { first: () => f })(id));
+}
+// step 5's R/V/A balance reads (nearBalanceReader) the test replays
+const balances = {};
+for (const [what, name] of [["usdc", "money_usdc"], ["near", "used_account"], ["near", "never_used"], ["intents", "money_intents"]]) {
+  balances[`${what} ${name}`] = [];
+  for (const f of [0, 1]) balances[`${what} ${name}`].push(String(await nearBalanceReader("mainnet", rpcs, { first: () => f })(what, IDS[name])));
 }
 // the intents branch: money_intents also holds USDC, so the reader stops at ft_balance_of; its intents.near views are
 // recorded on their own (the replay serves them for an id whose token views are never_used's)
@@ -46,6 +52,6 @@ for (const url of URLS) {
   const held = await live.query({ request_type: "call_function", account_id: "intents.near", method_name: "mt_batch_balance_of", args_base64: arg({ account_id: IDS.money_intents, token_ids: ids }), finality: "final" });
   extra[url] = { tokens, held };
 }
-const out = { recorded_at: new Date().toISOString(), ids: IDS, states, answers, intents: extra };
+const out = { recorded_at: new Date().toISOString(), ids: IDS, states, balances, answers, intents: extra };
 writeFileSync(process.argv[2], JSON.stringify(out, null, 1) + "\n");
-console.log(JSON.stringify(states));
+console.log(JSON.stringify(states), JSON.stringify(balances));

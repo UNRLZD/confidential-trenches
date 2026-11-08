@@ -9,6 +9,7 @@ import { runSync } from "../../../scripts/group-run.mjs";
 const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
+const ARMS = "wallet/src/restore/arms.ts";
 const NR = ["wallet", "test/note-restore.test.ts"];
 const RW = ["wallet", "test/restore-wallets.test.ts"];
 const SENT = "precommitments: [...precommitments] };";
@@ -36,10 +37,14 @@ const M = [
   ["a used id does not reset the margin (review: money past 21 used ids)", WAL, [['      if (state === "unused") continue;', '      if (state !== "money") continue;']], RW, "step 5"],
   ["failed id reads never end a lane (review: a reader that always rejects)", WAL, [["if (++failed >= margin) throw", "if (++failed >= Infinity) throw"]], RW, "step 5"],
   ["a read showing history does not restart the failure count", WAL, [["      failed = 0;\n", ""]], RW, "step 5"],
-  ["the note walk's end not checked against the ids with history", WAL, [["      if (at > walked) throw", "      if (false) throw"]], RW, "step 5"],
-  ["review 2: the walk's end not held where history moves the highest (a reader that always answers used)", WAL, [["      failed = 0;\n      pastWalk(highest);\n", "      failed = 0;\n"]], RW, "step 5"],
+  ["the note walk's end not checked against the ids with history", WAL, [["      failed = 0;\n      if (highest > walked) {", "      failed = 0;\n      if (false) {"]], RW, "step 5"],
+  ["review F4: the walk's end taken from the default gap, not the restore's laneWalked", WAL, [["const walked = r.laneWalked[lane]!;", "const walked = (h ?? lane - RESTORE_LANES) + RESTORE_LANES * 10_000;"]], RW, "step 5"],
+  ["review F4: a walk end that is not the lane's, or below its highest note, taken", WAL, [["      throw new Error(`lane ${lane}: its walk end", "      void new Error(`lane ${lane}: its walk end"]], RW, "step 5"],
+  ["review F5: a lane past its walk's end stops the restore instead of returning what it found", WAL, [["        reach = highest;\n        break;\n      }\n    }", "        throw new Error(`lane ${lane}: past the walk's end`);\n      }\n    }"]], RW, "step 5"],
+  ["review F5: the lane's reach not returned", WAL, [["highest, readTo, reach });", "highest, readTo, reach: null });"]], RW, "step 5"],
+  ["R29: a failed id read past the walk's end does not stop the lane", WAL, [["to be retried`);\n        if (highest > walked) {", "to be retried`);\n        if (false) {"]], RW, "step 5"],
   ["review 2 R27: a never-used id restarts the failure count", WAL, [['      if (state === "unused") continue;', '      if (state === "unused") { failed = 0; continue; }']], RW, "step 5"],
-  ["review 2 R28: history at the walk's last index stops", WAL, [["      if (at > walked) throw", "      if (at >= walked) throw"]], RW, "step 5"],
+  ["review 2 R28: history at the walk's last index stops", WAL, [["      failed = 0;\n      if (highest > walked) {", "      failed = 0;\n      if (highest >= walked) {"]], RW, "step 5"],
   ["R12: an id answer that is not money, used or unused taken", WAL, [['        if (state !== "money" && state !== "used" && state !== "unused") throw new Error("the read answered neither money, used nor unused");\n', ""]], RW, "step 5"],
   ["the walk's highest not checked against the notes", WAL, [["if (h !== (notes.length === 0 ? null : notes[notes.length - 1])) throw", "if (false) throw"]], RW, "step 5"],
   ["step 7 covers the highest plus one", WAL, [["x.highest + 2 * RESTORE_LANES", "x.highest + RESTORE_LANES"]], RW, "step 7"],
@@ -48,6 +53,7 @@ const M = [
   ["the re-reads due at the window's end", WAL, [["return nowMs < plan.until ?", "return nowMs <= plan.until ?"]], RW, "step 7"],
   ["a 48 h window", WAL, [["export const REREAD_MS = 72 * 3_600_000;", "export const REREAD_MS = 48 * 3_600_000;"]], RW, "step 7"],
   ["W's secret key left in memory", WAL, [["    w.secretKey.fill(0);\n", ""]], ["wallet", "test/pool-zeroing.test.ts"], "restoreWallets zeroes"],
+  ["review F7: an R, V or A secret key left in memory", ARMS, [["  k.secretKey.fill(0);\n  return k.id;", "  return k.id;"]], ["wallet", "test/pool-zeroing.test.ts"], "restoreArmAccounts zeroes"],
   ["the counter raised from lane 0's highest", WAL, [["const mine = lanes[store.lane]!;", "const mine = lanes[0]!;"]], RW, "step 7"],
   ["R19: an unread id dropped from step 7's re-reads", WAL, [["const held = new Set([...x.notes, ...x.money]);", "const held = new Set([...x.notes, ...x.money, ...x.unread.map((u) => u.i)]);"]], RW, "step 7"],
   ["R13: the lanes' order not checked", WAL, [["|| !lanes.every((x, k) => x.lane === k)", ""]], RW, "step 7"],

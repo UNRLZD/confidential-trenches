@@ -85,6 +85,8 @@ export type NoteRestore = {
   pendingRefunds: RestoredSpend[];
   /** per lane, the highest deposit index with a note, or null for an empty lane (steps 5 and 7 start from it) */
   laneHighest: (number | null)[];
+  /** per lane, the last index the walk read (gap past its last note or its reach): step 5 holds its ids to it */
+  laneWalked: number[];
 };
 
 export type RestoreArgs = {
@@ -280,6 +282,7 @@ export function restorePages(
 
   // the deposit index walk, lane by lane
   const laneHighest: (number | null)[] = [];
+  const laneWalked: number[] = [];
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
     const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap, reach[lane]!);
     const found = Array.isArray(w?.found) ? [...w.found] : null;
@@ -296,6 +299,7 @@ export function restorePages(
       if (!asDeposit(ref)) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
     }
     laneHighest.push(found.length === 0 ? null : found[found.length - 1]!);
+    laneWalked.push(end);
   }
 
   // every note found, followed
@@ -349,7 +353,7 @@ export function restorePages(
   }
   spends.sort((x, y) => x.spend.index - y.spend.index);
   pendingRefunds.sort((x, y) => x.spend.index - y.spend.index);
-  return { notes, spends, pendingRefunds, laneHighest };
+  return { notes, spends, pendingRefunds, laneHighest, laneWalked };
 }
 
 /** A note restore found that writeRestored left as the store holds it, for the caller to act on. */
