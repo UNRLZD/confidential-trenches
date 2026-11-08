@@ -1,5 +1,5 @@
 {
- "note": "app-footer-bar.mjs collect(), headless Chromium at 1440 x 900, signed out. good: this card's build (615491b9) at the hosts' names inside the stand-in shell (--harness), a local chain at 600 ms blocks, read 8 Nov 12:11:34Z on the Mac queue: PASS. bad: the deployed APP_HOST before this card (its footer draws Terms, Privacy and Verify only), NEAR's final block read on rpc.mainnet.fastnear.com, 8 Nov 10:45:28Z on the PC box: FAIL.",
+ "note": "app-footer-bar.mjs collect(), headless Chromium at 1440 x 900, signed out. good: this card's build (615491b9) at the hosts' names inside the stand-in shell (--harness), a local chain at 600 ms blocks, read 8 Nov 12:11:34Z: PASS. bad: the deployed APP_HOST before this card (its footer draws Terms, Privacy and Verify only), NEAR's final block read on rpc.mainnet.fastnear.com, 8 Nov 10:45:28Z: FAIL.",
  "good": {
   "check": "app-footer-bar",
   "at": "2026-11-08T12:11:34.894Z",
