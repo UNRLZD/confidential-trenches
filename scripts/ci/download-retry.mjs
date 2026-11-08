@@ -14,9 +14,10 @@
 //  - a rustup toolchain install (or install, target add, component add), a cargo install or a git submodule update not
 //    run through scripts/ci/retry.sh: rustup retries a component at once with no wait (src/dist/manifestation.rs
 //    l.800 at 1.29.3, FixedInterval 0), git and cargo install not at all.
-// And a foundry-rs/foundry-toolchain step that is not a pair: the action has no retry input (src/index.ts at 908c540),
-// so the first step carries an id and continue-on-error: true, and the next foundry-toolchain step in the file, the
-// same action and version, runs only if: steps.<id>.outcome == 'failure'.
+// And (card ci-foundry-cached) any foundry-rs/foundry-toolchain step: its foundryup reads github.com/foundry-rs's
+// release pages on every run, with no cache, and they answered 504 from 8 Nov 08:45Z, past the second run card
+// ci-downloads-retry gave it (PRs #454 and #455, three runs each). Foundry's release file comes through
+// scripts/ci/fetch.sh behind a cache, as every pinned file does.
 // Card ci-cargo-near-cached: a retry does not outlast a host that answers 504 for over a minute (PR #293's
 // vault-sandbox-build, job 127307073012: seven 504s in 63 s from github.com/near/cargo-near/releases) or an apt mirror
 // that crawls at kB/s (live run 42044118472: 20 min in `playwright install --with-deps`, no check started). So a
@@ -92,18 +93,6 @@ export function runSteps(yml) {
   return steps;
 }
 
-/** The step (its lines' [number, text]) that holds line index i: from its "- " item to the next item or dedent. */
-function stepAt(lines, i) {
-  let s = i;
-  while (s >= 0 && !/^\s*- /.test(lines[s])) s--;
-  const indent = lines[s].match(/^ */)[0].length;
-  const out = [];
-  for (let j = s; j < lines.length; j++) {
-    if (j > s && lines[j].trim() && lines[j].match(/^ */)[0].length <= indent) break;
-    out.push([j + 1, lines[j]]);
-  }
-  return out;
-}
 const field = (step, key) => {
   for (const [, l] of step) {
     const m = new RegExp(`^\\s*(?:- )?${key}:\\s*(.*?)\\s*(?:#.*)?$`).exec(l);
@@ -135,52 +124,12 @@ export function refusals(yml) {
       }
     }
   }
-  out.push(...foundryPairs(yml).problems);
+  yml.split(/\r?\n/).forEach((l, i) => {
+    if (/^\s*(?:- )?uses:\s*['"]?foundry-rs\/foundry-toolchain@/.test(l)) {
+      out.push([i + 1, "a foundry-toolchain step: its foundryup reads github.com/foundry-rs's release pages on every run, with no cache; Foundry's release file goes through scripts/ci/fetch.sh behind a cache"]);
+    }
+  });
   return out.sort((a, b) => a[0] - b[0]);
-}
-
-/** The foundry-toolchain steps' pairs: problems as [line, what], and the line index of each held pair's
- * continue-on-error: true (its second run, in the same job, fails the job when the install fails twice). */
-export function foundryPairs(yml) {
-  const out = [];
-  const held = [];
-  const lines = yml.split(/\r?\n/);
-  const foundry = [];
-  lines.forEach((l, i) => /^\s*(?:- )?uses:\s*foundry-rs\/foundry-toolchain@/.test(l) && foundry.push(i));
-  for (let k = 0; k < foundry.length; k++) {
-    const first = stepAt(lines, foundry[k]);
-    const at = foundry[k] + 1;
-    const id = field(first, "id");
-    if (field(first, "if") !== null && /\.outcome\s*==\s*'failure'/.test(field(first, "if"))) {
-      out.push([at, "a foundry-toolchain retry with no first step before it"]);
-      continue;
-    }
-    if (!id || field(first, "continue-on-error") !== "true") {
-      out.push([at, "a foundry-toolchain step without an id and continue-on-error: true, so it has no second run"]);
-      continue;
-    }
-    const next = foundry[k + 1];
-    const second = next === undefined ? null : stepAt(lines, next);
-    const cond = second && field(second, "if");
-    const sameJob = next !== undefined && !lines.slice(foundry[k], next).some((l) => /^ {2}[\w-]+:\s*$/.test(l));
-    if (!second || !sameJob || !cond || !new RegExp(`^steps\\.${id}\\.outcome\\s*==\\s*'failure'$`).test(cond.replace(/^\$\{\{\s*|\s*\}\}$/g, ""))) {
-      out.push([at, `a foundry-toolchain step with no second run after it (if: steps.${id}.outcome == 'failure')`]);
-      continue;
-    }
-    if (lines[next].trim().replace(/^- /, "") !== lines[foundry[k]].trim().replace(/^- /, "") || field(second, "version") !== field(first, "version") || field(second, "continue-on-error") === "true") {
-      out.push([next + 1, "a foundry-toolchain second run that is not the same action and version, or does not fail the job"]);
-    } else held.push(first.find(([, l]) => /^\s*(?:- )?continue-on-error:\s*true\s*(?:#.*)?$/.test(l))[0] - 1);
-    k++;
-  }
-  return { problems: out, held };
-}
-
-/** The workflow's text with each held foundry-toolchain pair's continue-on-error: true turned into a comment, line
- * for line: for a gate that refuses any step that may fail (scripts/ci/test-shards.test.mjs), since a held pair's
- * second run fails the job when the install fails twice. */
-export function withoutHeldRetries(yml) {
-  const held = new Set(foundryPairs(yml).held);
-  return yml.split("\n").map((l, i) => (held.has(i) ? l.replace(/continue-on-error:\s*true/, "# a held retry") : l)).join("\n");
 }
 
 const FETCH = "scripts/ci/fetch.sh";
