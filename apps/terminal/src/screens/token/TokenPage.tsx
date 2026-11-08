@@ -15,7 +15,7 @@ import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { TradeToast } from "../trade/TradeToast.tsx";
 import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
-import { DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_SECONDS, tfsFor } from "./candles.ts";
+import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
@@ -305,9 +305,10 @@ function Menu({ id, label, open, onOpen, rows }: { id: string; label: ReactNode;
   );
 }
 
-/** R5's toolbar (token.js U.chartPanel chart-toolbar): the timeframes (1s where it is served), Indicators, Display,
+/** R5's toolbar (token.js U.chartPanel chart-toolbar): the timeframes (1s on where it is served), Indicators, Display,
  *  Price / MCap and USD / the chain's coin. A toggle with no number behind it (no supply, no coin price read) is drawn
- *  and cannot be turned on. */
+ *  and cannot be turned on. Every slot is drawn at its final width from the first paint (the coin's in a slot that
+ *  holds the longest symbol), so nothing in the row moves when the token's read lands (BAR-10 CLS). */
 function Toolbar({ c, unit }: { c: ChartState; unit: ChartUnit }) {
   const [menu, setMenu] = useState<string | null>(null);
   const onMenu = (id: string) => (o: boolean) => setMenu(o ? id : null);
@@ -322,8 +323,8 @@ function Toolbar({ c, unit }: { c: ChartState; unit: ChartUnit }) {
   );
   return (
     <div className="tkp-tfs" data-testid="chart-toolbar">
-      {tfsFor(c.chain).map((t) => (
-        <button key={t} type="button" className="tkp-tf" data-testid={`chart-tf-${t}`} aria-pressed={t === c.tf} onClick={() => c.onTf(t)}>{t}</button>
+      {CHART_TFS.map((t) => (
+        <button key={t} type="button" className="tkp-tf" data-testid={`chart-tf-${t}`} aria-pressed={t === c.tf} disabled={!tfServed(c.chain, t)} onClick={() => c.onTf(t)}>{t}</button>
       ))}
       <span className="tkp-csep" />
       <Menu id="indicators" label={<><Ic n="formula" size={14} /><W id="indicators" /></>} open={menu === "indicators"} onOpen={onMenu("indicators")} rows={[{ k: "vol", word: "vol", on: ctl.volume, set: (on) => set({ volume: on }) }, ...INDICATORS.map((i) => ind(i.id))]} />
@@ -337,7 +338,7 @@ function Toolbar({ c, unit }: { c: ChartState; unit: ChartUnit }) {
         {pair(<W id="price" />, <W id="mcap" />, unit.mc)}
       </button>
       <button type="button" className="tkp-tog" data-testid="chart-denom" data-usd={!unit.quote} aria-pressed={unit.quote} disabled={c.coin === null} onClick={() => set({ unit: { ...ctl.unit, quote: !unit.quote } })}>
-        {pair(<W id="usdUnit" />, c.chain ? QUOTE[c.chain] : "", unit.quote)}
+        {pair(<W id="usdUnit" />, <span className="tkp-quote">{c.chain ? QUOTE[c.chain] : ""}</span>, unit.quote)}
       </button>
     </div>
   );
@@ -474,8 +475,8 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
       {!phone && <BottomBar c={c} gecko={gecko} auto={auto} onAuto={onAuto} />}
       {phone && (
         <div className="tkp-tfs tkp-tfs-ph">
-          {tfsFor(c.chain).map((t) => (
-            <button key={t} type="button" className="tkp-tf" aria-pressed={t === c.tf} onClick={() => c.onTf(t)}>{t}</button>
+          {CHART_TFS.map((t) => (
+            <button key={t} type="button" className="tkp-tf" aria-pressed={t === c.tf} disabled={!tfServed(c.chain, t)} onClick={() => c.onTf(t)}>{t}</button>
           ))}
         </div>
       )}

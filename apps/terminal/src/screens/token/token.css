@@ -66,6 +66,8 @@
 .tkp-tfs { flex: none; height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border-panel); }
 .tkp-tf { height: 28px; min-width: 36px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); font: 12px var(--font-num); cursor: pointer; }
 .tkp-tf[aria-pressed="true"] { background: var(--bg-raised); color: var(--text-1); }
+/* a timeframe the helper does not serve for this chain (1s off Solana): drawn, not usable */
+.tkp-tf:disabled { opacity: 0.35; cursor: default; }
 .tkp-plot { position: relative; flex: 1; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
 .tkp-plotsk { position: absolute; inset: 14px 62px 20px 12px; }
 /* the chart (card app-token-chart): the library's canvas fills the plot, which keeps its size in every state; the CSS
@@ -92,6 +94,8 @@
 .tkp-tog [data-on="true"] { color: var(--paper, #f4f4f2); }
 /* the slash between a toggle's two units, spaced as R5's text (a flex item's own spaces are dropped) */
 .tkp-slash { padding: 0 0.3em; }
+/* the coin's slot holds the longest symbol (NEAR) before and after the chain is known, so the row never moves */
+.tkp-quote { display: inline-block; min-width: 2.75em; text-align: left; }
 .tkp-toglbl { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 .tkp-tog[aria-expanded="true"] .tkp-toglbl, .tkp-tog:hover .tkp-toglbl { color: var(--text-1); }
 .tkp-mwrap { position: relative; flex: none; display: inline-flex; }
@@ -143,7 +147,8 @@
   .tkp-plot { flex: none; height: 300px; }
   .tkp-legend { left: 16px; max-width: calc(100% - 96px); }
   .tkp-tfs-ph { height: auto; justify-content: space-between; padding: 10px 12px 0; border: 0; }
-  .tkp-tfs-ph .tkp-tf { height: 44px; min-width: 52px; border-radius: 12px; font-size: 14px; }
+  /* seven timeframes in one row at 360 (7 x 46 + the row's 24 of padding): each still a 44 px tap target */
+  .tkp-tfs-ph .tkp-tf { height: 44px; min-width: 46px; border-radius: 12px; font-size: 14px; }
   .tkp-mtiles { display: flex; gap: 8px; overflow-x: auto; padding: 16px 16px 4px; scrollbar-width: none; }
   .tkp-mtiles::-webkit-scrollbar { display: none; }
   .tkp-mtile { flex: none; width: 124px; padding: 12px; border-radius: 16px; background: var(--m-ink-panel); box-shadow: inset 0 0 0 1px var(--m-line-soft); display: flex; flex-direction: column; gap: 6px; min-width: 0; }

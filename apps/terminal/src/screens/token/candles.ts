@@ -20,8 +20,10 @@ export const CHART_TFS = Object.keys(TF_API) as ChartTf[];
  *  (apps/helper/src/data/solana/trades.ts candles); Base's and Robinhood's answer 1s as not found
  *  (apps/helper/src/data/evm/swaps.ts candles). R5 draws 1s only where it is served (token.js U.chartPanel). */
 export const TF_1S_CHAINS: readonly MarketChain[] = ["solana"];
-/** The timeframes the toolbar draws for a chain: 1s only where the helper serves it. */
-export const tfsFor = (chain: MarketChain | null): ChartTf[] => CHART_TFS.filter((t) => t !== "1s" || (chain !== null && TF_1S_CHAINS.includes(chain)));
+/** Whether the helper serves `tf` for a chain (1s only on TF_1S_CHAINS; none before the chain is known). The toolbar
+ *  draws every timeframe from its first paint and turns off the ones not served, so no button moves when the token's
+ *  chain lands (BAR-10 CLS). */
+export const tfServed = (chain: MarketChain | null, tf: ChartTf): boolean => tf !== "1s" || (chain !== null && TF_1S_CHAINS.includes(chain));
 /** 15m is the default (BRF v2.0.5, M157). */
 export const DEFAULT_TF: ChartTf = "15m";
 /** Seconds per bar, for the chart's period. */

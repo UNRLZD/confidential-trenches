@@ -16,6 +16,11 @@ export const TRADES_URL = (chain: MarketChain, token: string): string =>
   `${BASE}/v1/market/trades?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}&limit=${TRADES_LIMIT}`;
 const TIMEOUT_MS = 10_000;
 export const TRADES_POLL_MS = 3_000;
+/** The longest wait after failed reads: each failure doubles it from TRADES_POLL_MS, so a helper that cannot answer is
+ *  asked at most once in this long, never every 3 s. */
+export const TRADES_BACKOFF_MAX_MS = 30_000;
+/** The wait before the next read after `fails` failed reads in a row (0: the last read was good). */
+export const nextWait = (fails: number): number => Math.min(TRADES_BACKOFF_MAX_MS, TRADES_POLL_MS * 2 ** fails);
 const BODY_MAX = 1_000_000;
 const NAME_MAX = 128;
 const DECIMAL = /^\d{1,40}(\.\d{1,40})?$/;
@@ -79,7 +84,7 @@ const same = (a: readonly Trade[], b: readonly Trade[]): boolean =>
 
 const NONE: readonly Trade[] = [];
 
-/** The token's newest trades: read on mount and every 3 s while mounted; stopped on unmount and when the chain or the
+/** The token's newest trades: read on mount and every 3 s while mounted (longer after failed reads, none while hidden); stopped on unmount and when the chain or the
  *  token change (then the list starts empty). A failed read leaves no marks. */
 export function useTrades(chain: MarketChain | null, token: string | null): readonly Trade[] {
   const [state, setState] = useState<{ key: string; trades: readonly Trade[] }>({ key: "", trades: NONE });
@@ -88,11 +93,20 @@ export function useTrades(chain: MarketChain | null, token: string | null): read
     if (chain === null || token === null) return;
     const stop = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let fails = 0;
     const tick = async (): Promise<void> => {
+      // a page out of sight reads nothing until it is back
+      if (document.hidden) {
+        timer = setTimeout(() => void tick(), TRADES_POLL_MS);
+        return;
+      }
       const t = await readTrades(chain, token, fetch, stop.signal);
       if (stop.signal.aborted) return;
       setState((s) => (s.key === key && t !== null && same(s.trades, t) ? s : { key, trades: t ?? NONE }));
-      timer = setTimeout(() => void tick(), TRADES_POLL_MS);
+      // a failed read draws no marks and waits longer each time (nextWait), so a helper that cannot answer is not asked
+      // every 3 s; a good read goes back to TRADES_POLL_MS
+      fails = t === null ? fails + 1 : 0;
+      timer = setTimeout(() => void tick(), nextWait(fails));
     };
     void tick();
     return () => {

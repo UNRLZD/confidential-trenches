@@ -204,3 +204,11 @@ test("a Mark's key is stable across reads", () => {
   const b: Mark[] = groupMarks([trade()], bars, "15m");
   assert.equal(a[0]!.id, b[0]!.id);
 });
+
+test("a failed tape read waits longer each time, at most TRADES_BACKOFF_MAX_MS; a good one reads again at TRADES_POLL_MS", async () => {
+  const { nextWait, TRADES_POLL_MS, TRADES_BACKOFF_MAX_MS } = await import("../src/screens/token/trades.ts");
+  assert.equal(nextWait(0), TRADES_POLL_MS);
+  assert.equal(nextWait(1), 2 * TRADES_POLL_MS);
+  assert.equal(nextWait(2), 4 * TRADES_POLL_MS);
+  assert.equal(nextWait(10), TRADES_BACKOFF_MAX_MS);
+});
