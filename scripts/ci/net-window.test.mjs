@@ -165,6 +165,7 @@ export const CHANGED = [
   "scripts/live-checks/vault-review-fixes-1.mjs",
   "scripts/live-checks/vault-setup-files.mjs",
   "scripts/live-checks/vault-testnet-t02.mjs",
+  "scripts/live-checks/vault-mainnet-money.mjs",
   "scripts/live-checks/vault-skeleton.mjs",
   "scripts/live-checks/vault-testnet-usdc.mjs",
   "scripts/live-checks/vault-testnet-t01.mjs",
