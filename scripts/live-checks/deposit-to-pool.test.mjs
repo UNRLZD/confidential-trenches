@@ -7,7 +7,7 @@
 //         address off and asks nothing; the vault picked back sends one deposit.dry and deposit.quote for 15 only and
 //         draws the quote's address; every follower stage draws its own state, Deposited only at done, the balance
 //         moving only then; Done closes the sheet and Portfolio reads $73.18: PASS;
-//   bad:  main's build before this card (--harness --build of main d8aa4fb4): the sheet has no To row: FAIL.
+//   bad:  main's build before this card (--harness --build of main 382115dc, release-91): the sheet has no To row: FAIL.
 // Planted from the good run: a pool that sends a quote or keeps Get address on, a tile with another chain's mark, a row
 // out of order, the sheet opening on a pool, Deposited before done, a balance that moves early, Portfolio not updated.
 import assert from "node:assert/strict";

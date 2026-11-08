@@ -117,6 +117,7 @@ export const OUT = {
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
+  "deposit-to-pool": "a browser (its --harness run is in test-browser)",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */
