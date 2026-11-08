@@ -1,13 +1,13 @@
 {
   "_note": {
-    "good": "this card's build (mainnet) as card/sol-rent-back-dust-burn carries it, stacked on card/sol-w-sweep fd03a0bb (reviews 5, 6, 7 and 8 folded): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
+    "good": "this card's build (mainnet) as card/sol-rent-back-dust-burn carries it, stacked on card/sol-w-sweep 4dd51087 (reviews 5, 6, 7 and 8 folded, main daa758ea merged): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL",
     "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone",
     "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-q6p+iNSXn04t7qxfQhfc0oknlOi8NAWq/ujfT2QJqF2eVZVqEmiyBjRYijR6nUjL\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-q6p+iNSXn04t7qxfQhfc0oknlOi8NAWq/ujfT2QJqF2eVZVqEmiyBjRYijR6nUjL",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-T7C6S8614jkWvftSPBGJsUvWepXbfuaYNRBqEHeqFNCZlDVr/WrtOTKFGN8hRmxI\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-T7C6S8614jkWvftSPBGJsUvWepXbfuaYNRBqEHeqFNCZlDVr/WrtOTKFGN8hRmxI",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,

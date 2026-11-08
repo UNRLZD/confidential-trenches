@@ -1,13 +1,13 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet) as card/sol-rent-back-dust-burn carries it (the plan built again with the burn list): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
+    "good": "this card's SIGN_HOST build (mainnet) as card/sol-rent-back-dust-burn carries it (the plan built again with the burn list), stacked on card/sol-w-sweep 4dd51087 on main daa758ea: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
     "bad": "main 3a57948a's build (mainnet): no claims, no claim rules: FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-08T05:02:00.964Z, before this card's deploy: FAIL",
     "beforeFold": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: any SIM refusal turned every claim off and W's owed record was dropped: FAIL on the marks review M1 and L1 changed"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-q6p+iNSXn04t7qxfQhfc0oknlOi8NAWq/ujfT2QJqF2eVZVqEmiyBjRYijR6nUjL\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-q6p+iNSXn04t7qxfQhfc0oknlOi8NAWq/ujfT2QJqF2eVZVqEmiyBjRYijR6nUjL",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-T7C6S8614jkWvftSPBGJsUvWepXbfuaYNRBqEHeqFNCZlDVr/WrtOTKFGN8hRmxI\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-T7C6S8614jkWvftSPBGJsUvWepXbfuaYNRBqEHeqFNCZlDVr/WrtOTKFGN8hRmxI",
     "carries": {
       "PumpSwap's claim_cashback": true,
       "pump's claim_cashback_v2": true,
