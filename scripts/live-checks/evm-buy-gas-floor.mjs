@@ -13,7 +13,7 @@
 //     (the kit's EVM_OUT_OF_GAS_WORDS, its answerOf's), never another error the kit would refuse on.
 // Nothing deployed quotes a buy yet: the signing page's bundle carries no EVM buy quote (build-app at 87f280e2 matches a
 // fresh build with this card in it). The kit's public buy quote is not run here: on Node it does not end (it asked 583
-// requests in 45 s on Base before this card too, at 7b4e5113), a finding for the CO. That the floor refuses, names the
+// requests in 45 s on Base before this card too, at 7b4e5113), an open finding. That the floor refuses, names the
 // next route and prices against routes that fit is the kit's test (test/evm-quote-attacks.test.ts GF1-GF9 and their
 // mutants in test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-buy-gas-floor.mjs [--record <file> --as good|bad [--from <note>] [--sender <address>]]
