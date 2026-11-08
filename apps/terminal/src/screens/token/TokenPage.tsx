@@ -74,8 +74,8 @@ const ICONS: Record<string, readonly (string | readonly [string, Record<string, 
   copy: [["rect", { x: 4, y: 4, width: 6.5, height: 6.5, rx: 1.2 }], "M8 4V2.7c0-.7-.5-1.2-1.2-1.2H2.7c-.7 0-1.2.5-1.2 1.2v4.1c0 .7.5 1.2 1.2 1.2H4"],
   share: ["M6 7.5V1.5M3.5 4L6 1.5 8.5 4", "M2 7v2.5c0 .6.4 1 1 1h6c.6 0 1-.4 1-1V7"],
   back: ["M7.5 2.5L4 6l3.5 3.5"],
-  // the chart toolbar's (R5 token.js TOOL.fx, app.js I.chevDown)
-  fx: ["M7 1.5c-1.5 0-2 1-2 2.5v5c0 1.5-.5 2-2 2", "M3 5h4.5", "M8 7l2.5 3M10.5 7L8 10"],
+  // the chart toolbar's (R5 token.js TOOL's formula icon, app.js I.chevDown)
+  formula: ["M7 1.5c-1.5 0-2 1-2 2.5v5c0 1.5-.5 2-2 2", "M3 5h4.5", "M8 7l2.5 3M10.5 7L8 10"],
   chevDown: ["M3 4.5l3 3 3-3"],
 };
 function Ic({ n, size = 13, stroke = 1.25, filled = false }: { n: keyof typeof ICONS; size?: number; stroke?: number; filled?: boolean }) {
@@ -326,7 +326,7 @@ function Toolbar({ c, unit }: { c: ChartState; unit: ChartUnit }) {
         <button key={t} type="button" className="tkp-tf" data-testid={`chart-tf-${t}`} aria-pressed={t === c.tf} onClick={() => c.onTf(t)}>{t}</button>
       ))}
       <span className="tkp-csep" />
-      <Menu id="indicators" label={<><Ic n="fx" size={14} /><W id="indicators" /></>} open={menu === "indicators"} onOpen={onMenu("indicators")} rows={[{ k: "vol", word: "vol", on: ctl.volume, set: (on) => set({ volume: on }) }, ...INDICATORS.map((i) => ind(i.id))]} />
+      <Menu id="indicators" label={<><Ic n="formula" size={14} /><W id="indicators" /></>} open={menu === "indicators"} onOpen={onMenu("indicators")} rows={[{ k: "vol", word: "vol", on: ctl.volume, set: (on) => set({ volume: on }) }, ...INDICATORS.map((i) => ind(i.id))]} />
       <Menu id="display" label={<><W id="display" /><Ic n="chevDown" size={12} /></>} open={menu === "display"} onOpen={onMenu("display")} rows={[
         { k: "trades", word: "trades", on: ctl.trades, set: (on) => set({ trades: on }) },
         { k: "grid", word: "gridLines", on: ctl.grid, set: (on) => set({ grid: on }) },
