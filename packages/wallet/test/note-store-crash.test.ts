@@ -267,7 +267,7 @@ test("P-01 (store part): a kill after every single step, then reopen: no double 
 });
 
 // card fresh-run-margin: the default run takes the seeded sequence's first 30 runs; FULL_RUNS=1 (the package's
-// test:mutants script, CI's test-wallet job) all 300
+// test:mutants script, run by CI's test-mutants split) all 300
 const RUNS = process.env.FULL_RUNS === "1" ? 300 : 30;
 test(`P-01 (store part): kills at random steps, several per run, ${RUNS} runs`, async () => {
   let seed = 0x5eed;

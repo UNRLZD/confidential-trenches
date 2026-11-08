@@ -9,7 +9,7 @@ infinitely slow, so it is in n and never improves a percentile.
 
 ## solana-phone-2026-10-26
 
-Solana, mainnet, 2026-10-26, signed by: phone browser. Record: `proofs/g1-phone-trade/results/live-2026-10-26T11-29-51-268Z.json`.
+Solana, mainnet, 2026-10-26, signed by: phone browser. Record: `perf/runs/solana-phone-2026-10-26.json`.
 
 Signed in a phone browser with the device's checks. Fee is meta.fee plus the send tips, read on two RPCs.
 
@@ -36,7 +36,7 @@ Sell, every sample:
 
 ## solana-intents-2026-10-19
 
-Solana, mainnet, 2026-10-19, signed by: test script. Record: `proofs/p1-private-balance/runs/2026-10-19T22-53-44-913Z-live.json`.
+Solana, mainnet, 2026-10-19, signed by: test script. Record: `perf/runs/solana-intents-2026-10-19.json`.
 
 One leg of the P1 live run through NEAR Intents (1Click): request to the balance visible. Fee is 1Click's quoted fee in USD.
 
@@ -56,7 +56,7 @@ Money out to a fresh wallet (NEAR Intents), every sample:
 
 ## solana-script-2026-10-19
 
-Solana, mainnet, 2026-10-19, signed by: test script. Record: `proofs/p4-speed/solana/results`.
+Solana, mainnet, 2026-10-19, signed by: test script. Record: `perf/runs/solana-script-2026-10-19.json`.
 
 Keys held by the test script, self mode, records live-2026-10-19T23-32-14-314Z.json, live-2026-10-19T23-33-50-203Z.json, live-2026-10-20T00-02-08-517Z.json. Fee is meta.fee plus the send tips, read on two RPCs.
 
@@ -114,7 +114,7 @@ Sell, every sample:
 
 ## solana-intents-out-2026-10-26
 
-Solana, mainnet, 2026-10-26, signed by: test script. Record: `proofs/g1-money-loop/runs`.
+Solana, mainnet, 2026-10-26, signed by: test script. Record: `perf/runs/solana-intents-out-2026-10-26.json`.
 
 NEAR to SOL on a fresh Solana wallet through NEAR Intents (1Click), request to arrival read on two RPCs. Fee is 1Click's quoted fee in USD.
 
@@ -129,7 +129,7 @@ Money out to a fresh wallet (NEAR Intents), every sample:
 
 ## base-intents-2026-10-19
 
-Base, mainnet, 2026-10-19, signed by: test script. Record: `proofs/p1-private-balance/runs/2026-10-19T22-53-44-913Z-live.json`.
+Base, mainnet, 2026-10-19, signed by: test script. Record: `perf/runs/base-intents-2026-10-19.json`.
 
 One leg of the P1 live run through NEAR Intents (1Click): request to the balance visible. Fee is 1Click's quoted fee in USD.
 
@@ -143,7 +143,7 @@ Money out to a fresh wallet (NEAR Intents), every sample:
 
 ## base-script-2026-10-20
 
-Base, mainnet, 2026-10-20, signed by: test script. Record: `proofs/p4-speed/base/results/2026-10-20T00-51-59-782Z-live.json`.
+Base, mainnet, 2026-10-20, signed by: test script. Record: `perf/runs/base-script-2026-10-20.json`.
 
 Keys held by the test script, quote held before the tap. Filled is the first receipt with status 1. Fee is gas used x price + the L1 data fee.
 
@@ -200,7 +200,7 @@ Sell, every sample:
 
 ## base-hop-2026-10-26
 
-Base, mainnet, 2026-10-26, signed by: test script. Record: `proofs/g1-money-loop/runs`.
+Base, mainnet, 2026-10-26, signed by: test script. Record: `perf/runs/base-hop-2026-10-26.json`.
 
 SOL on Solana to ETH on a fresh Base wallet through Relay, request to arrival read on two RPCs per chain. Fee is Relay's quoted fee in USD.
 
@@ -215,7 +215,7 @@ Hop between chains (Relay), every sample:
 
 ## robinhood-script-2026-10-20
 
-Robinhood, mainnet, 2026-10-20, signed by: test script. Record: `proofs/p4-speed/hood/results/2026-10-20T17-13-35-480Z-live.json`.
+Robinhood, mainnet, 2026-10-20, signed by: test script. Record: `perf/runs/robinhood-script-2026-10-20.json`.
 
 Keys held by the test script, quote held before the tap. Filled is the first receipt with status 1. Fee is gas used x price.
 
@@ -272,7 +272,7 @@ Sell, every sample:
 
 ## near-intents-2026-10-19
 
-NEAR, mainnet, 2026-10-19, signed by: test script. Record: `proofs/p1-private-balance/runs/2026-10-19T22-53-44-913Z-live.json`.
+NEAR, mainnet, 2026-10-19, signed by: test script. Record: `perf/runs/near-intents-2026-10-19.json`.
 
 One leg of the P1 live run through NEAR Intents (1Click): request to the balance visible. Fee is 1Click's quoted fee in USD.
 
@@ -291,7 +291,7 @@ Money out to a fresh wallet (NEAR Intents), every sample:
 
 ## near-script-2026-10-20
 
-NEAR, mainnet, 2026-10-20, signed by: test script. Record: `proofs/p4-speed/near/results/2026-10-20T01-27-04-776Z-live.json`.
+NEAR, mainnet, 2026-10-20, signed by: test script. Record: `perf/runs/near-script-2026-10-20.json`.
 
 Keys held by the test script. Filled is the wallet's balance seen at optimistic, polled every 200 ms. Fee is the NEAR the trade's transactions burnt.
 
@@ -348,7 +348,7 @@ Sell, every sample:
 
 ## vault-gas-testnet-2026-10-26
 
-NEAR, testnet, 2026-10-26, signed by: test script. Record: `proofs/g1-vault-gas/testnet/results/runs/20261026T034502Z-testnet/txs.json`.
+NEAR, testnet, 2026-10-26, signed by: test script. Record: `perf/runs/vault-gas-testnet-2026-10-26.json`.
 
 The vault's test build: a real withdraw proof checked at tree depths 3, 16 and 32, and five deposits' tree work (no token call). Value is the vault receipt's gas; fee is the NEAR all receipts burnt.
 
@@ -373,7 +373,7 @@ Vault deposit, tree work only, every sample:
 
 ## proof-phone-2026-10-26
 
-NEAR, device, 2026-10-26, signed by: phone browser. Record: `proofs/g1-phone-prover/results/phone`.
+NEAR, device, 2026-10-26, signed by: phone browser. Record: `perf/runs/proof-phone-2026-10-26.json`.
 
 snarkjs 0.7.5 in one worker, single thread, in a phone browser; the first run of each page load is cold. Every proof re-verified on a second machine.
 
@@ -384,7 +384,7 @@ snarkjs 0.7.5 in one worker, single thread, in a phone browser; the first run of
 
 ## proof-threads-chromium-2026-11-02
 
-NEAR, device, 2026-11-02, signed by: test script. Record: `scripts/live-checks/signpage-prover-threads.answers.json`.
+NEAR, device, 2026-11-02, signed by: test script. Record: `perf/runs/proof-threads-chromium-2026-11-02.json`.
 
 Signing page prover on 4 threads, headless chromium 153.0.8010.12, test box (i5-14600K, 8-core cap), 6 proofs in one page, first cold; all verified. Same box and browser, one thread before this card: median 4819 ms (2.8x slower).
 
@@ -394,7 +394,7 @@ Signing page prover on 4 threads, headless chromium 153.0.8010.12, test box (i5-
 
 ## proof-threads-webkit-2026-11-02
 
-NEAR, device, 2026-11-02, signed by: test script. Record: `scripts/live-checks/signpage-prover-threads.answers.json`.
+NEAR, device, 2026-11-02, signed by: test script. Record: `perf/runs/proof-threads-webkit-2026-11-02.json`.
 
 Signing page prover on 4 threads, headless webkit 26.6, test box (i5-14600K, 8-core cap), 6 proofs in one page, first cold; all verified. Same box and browser, one thread before this card: median 4105 ms (3.2x slower).
 

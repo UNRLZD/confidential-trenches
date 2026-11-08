@@ -10,8 +10,8 @@
 // Card ci-mutants-sharded: the share of the mutant sweeps that one part of ci.yml's test-mutants matrix runs.
 //   node scripts/ci/test-shards.mjs mutants <index> <total>    (runs the part's sweeps; exit 1 when one failed)
 //
-// The sweeps are every workspace package's test:mutants but those MUTANTS_ELSEWHERE leaves to a job of their own,
-// each script split on && into its commands, each command run in its package's folder as `pnpm run` would. Each
+// The sweeps are every workspace package's test:mutants, the wallet's included (card held-move-forgotten-tx), each
+// script split on && into its commands, each command run in its package's folder as `pnpm run` would. Each
 // command goes to exactly one part: largest first, each to the part with the fewest planned seconds so far, by the
 // times MUTANT_SECONDS measured on CI. One that has no measured time counts as NEW_SWEEP_SECONDS, so a sweep added to
 // any package lands in a part before anyone times it. A part runs its commands one after another, all of them even
@@ -45,27 +45,37 @@ export function e2ePart(script, index, total) {
   return [build, ...runs.filter((_, i) => i % total === index)].join(" && ");
 }
 
-// the packages whose test:mutants a ci.yml job of their own runs, and that job; scripts/ci/test-shards.test.mjs fails
-// when the job does not run it
-export const MUTANTS_ELSEWHERE = { "@blindfill/wallet": "test-wallet" };
-
-// seconds each sweep took on CI, rounded up, read from each part's own log (main ad1136e1's pull request #436: run
-// 42430511830, its six test-mutants jobs), keyed `<package folder>: <command>`; scripts/ci/test-shards.test.mjs fails on
-// a key that names no sweep
+// seconds each sweep took on CI, rounded up, read from each part's own log, keyed `<package folder>: <command>`: the
+// higher of main ad1136e1's pull request #436 (run 42430511830, its six test-mutants jobs) and this card's pull request
+// #474 at e07b87ba (run 42494845995, its seven test-mutants jobs, the wallet's sweeps among them: card
+// held-move-forgotten-tx), but where a line says otherwise; scripts/ci/test-shards.test.mjs fails on a key that names no
+// sweep, and on a sweep with no key
 export const MUTANT_SECONDS = {
-  'packages/kit: node --test "test/mutants/*.test.mjs"': 430,
+  'packages/kit: node --test "test/mutants/*.test.mjs"': 468,
   "packages/kit: node test/evm-quote-mutants.mjs": 376,
-  "packages/signpage: node --test test/pool-deposit-mutants.test.mjs": 223,
-  "packages/signpage: node --test test/rules-pool-mutants.test.mjs": 71,
-  "packages/signpage: node --test test/rules-refund-mutants.test.mjs": 44,
-  "packages/signpage: node --test test/kit-version-mutants.test.mjs": 18,
+  "packages/signpage: node --test test/pool-deposit-mutants.test.mjs": 273,
+  "packages/signpage: node --test test/rules-pool-mutants.test.mjs": 133,
+  "packages/signpage: node --test test/rules-refund-mutants.test.mjs": 76,
+  "packages/signpage: node --test test/kit-version-mutants.test.mjs": 20,
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 15,
+  "packages/signpage: node scripts/held-mutants.mjs": 84,
+  // card sol-w-sweep: its pull request #469 at f1264afb, "ok in 411.7 s" (run 42501766705, job 128795848174)
+  "packages/signpage: node scripts/rent-back-mutants.mjs": 412,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 1/3": 226,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 2/3": 301,
-  "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 162,
-  // card helper-release-sweep-in-ci: not yet on CI; 30 s whole in one run off CI beside rules-refund-mutants (36 s
-  // there, 44 s above), so 30 x 44 / 36, rounded up
-  "apps/helper: node test/pool-evm/release-mutants.mjs": 37,
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 208,
+  "apps/helper: node test/pool-evm/release-mutants.mjs": 45,
+  // the wallet's, before #474 run one after another in test-wallet after its tests: the higher of #474's split and
+  // main 8ee3697b's test-wallet log at each sweep's last line (run 42488418921, job 128755272307)
+  "packages/wallet: FULL_RUNS=1 node --test test/note-restore.test.ts test/store.test.ts test/note-store-crash.test.ts test/pool-solana.test.ts": 150,
+  "packages/wallet: node scripts/note-restore-refund-mutants.mjs": 4,
+  "packages/wallet: node scripts/near-prepay-taken-mutants.mjs": 276,
+  "packages/wallet: node scripts/held-moveout-mutants.mjs": 271,
+  "packages/wallet: node scripts/refund-move-mutants.mjs": 45,
+  "packages/wallet: node scripts/exit-scan-mutants.mjs": 145,
+  // card wallet-restore-wallets (main daa758ea): its pull request's test-wallet log, 15:42:46.7Z to 15:43:56.3Z (run
+  // 42495419979, job 128776599060)
+  "packages/wallet: node scripts/restore-wallets-mutants.mjs": 70,
 };
 // a sweep with no measured time yet: about the middle ones measured (162 and 223 s)
 export const NEW_SWEEP_SECONDS = 200;
@@ -82,7 +92,7 @@ export function mutantCommands(root) {
   for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root })).toSorted()) {
     const { name, scripts } = JSON.parse(read(pkg));
     const script = scripts?.["test:mutants"];
-    if (script === undefined || Object.hasOwn(MUTANTS_ELSEWHERE, name)) continue;
+    if (script === undefined) continue;
     const dir = path.dirname(pkg).split(path.sep).join("/");
     if (typeof script !== "string" || !script.trim()) throw new Error(`${dir} has an empty test:mutants script`);
     for (const command of chain(script, `${dir}'s test:mutants`)) out.push({ dir, name, command });

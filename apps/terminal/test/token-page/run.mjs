@@ -299,7 +299,8 @@ try {
         const drawnRow = await f.evaluate(async (box) => {
           await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
           const root = document.querySelector(box);
-          const av = root?.querySelector(".tok-avw");
+          // the identity's avatar (the desktop header, the phone nav row), not the left rail's first row (card app-token-rail)
+          const av = root?.querySelector(":is(.tkp-head, .tkp-nav) .tok-avw");
           if (!av) return null;
           // cut: outside the nearest box that clips its content, or the viewport
           let c = null;

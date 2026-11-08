@@ -78,6 +78,11 @@ export type EvmPoolVenue = {
    *  its start, after every earlier transaction of its block. Absent: the evidence replays at the parent block. */
   readonly traceProviders?: readonly [string, string];
   readonly maxLag?: number;
+  /** How a quote's reads are sent to `providers` (card evm-buy-quote-in-window, review of 2c02f7df): at most `perCall`
+   *  reads in one aggregate3 call, and no JSON-RPC request body (a batch of calls) past `maxBytes`, the smallest request
+   *  size every one of the chain's quote providers was measured to take. A read whose own call is past `maxBytes` is
+   *  sent alone. */
+  readonly reads?: Readonly<{ perCall: number; maxBytes: number }>;
   /** The launchpads' hooked v4 pool shapes the device reads as reference pools (a route through any other hook has only
    *  the standard pools to be held to): the asset the pool pairs the token with, fee, tick spacing and hook. */
   readonly hookedPools?: readonly EvmHookedPool[];
@@ -169,6 +174,13 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Tenderly at 1,000, base.drpc.org refuses any range (code 35), nodies at 50, meowrpc 429s and has no eth_getLogs,
       // llamarpc 525, omniatech 521, lava 410, therpc 403.
       providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.api.pocket.network"]),
+      // 6 reads a call: aggregate3 shares one call's gas, and 64 of a 100 ETH buy's exact-out reads (8 of them 8.4-9.4M gas
+      // each) needed 77.3M, past base-rpc.publicnode.com's 50M eth_call cap (3/3 refused "out of gas: gas required exceeds:
+      // 50000000"; at 6 a call 30/30 answered; review of 2c02f7df, Base block 54,810,601). 24,000 bytes a request:
+      // base.api.pocket.network declines a request past some of its suppliers' size limit ("request 28000 bytes exceeds
+      // the endpoint request-size limit"): 0 of 10 at 24,576 and at 26,000 bytes, 6 of 10 at 28,000, 4 of 6 at 32,000
+      // (2026-11-08 15:5xZ); publicnode, blastapi and mainnet.base.org took 200,000
+      reads: bare({ perCall: 6, maxBytes: 24_000 }),
       // all five then listed kept state 600 s back (a state read at the block 600 s old answered on each, card evm-quote-warm-round
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
@@ -279,6 +291,12 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
       // nodeflare (no head)
       providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
+      // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
+      // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
+      // a cold quote's reads with no state refused (2026-11-08 13:4xZ). All five took a 200,000-byte request
+      // (2026-11-08 15:5xZ), the largest measured.
+      reads: bare({ perCall: 64, maxBytes: 200_000 }),
       // only these two of the five keep state 600 s back: Robinhood's own answers 630 s and refuses 660 s, dRPC 600 s
       // (card evm-buy-hookdata-fee, fold 3; 30 of 30 each at 600 s, 2026-11-04 20:12Z); publicnode, bloXroute and
       // Globalstake refused a state read at the block 600 s back, "historical state ... is not available" (card
@@ -417,6 +435,8 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // with 204: PublicNode allow-origin *, Pocket that origin (04:42Z). sepolia.base.org stays in the fee pair, whose
       // reads are views and blocks, never a log page.
       providers: Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"] as const),
+      // as Base mainnet's, unmeasured on these providers (the quote's reads there are few)
+      reads: bare({ perCall: 6, maxBytes: 24_000 }),
       feeProviders: Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"] as const),
       // 20 s of its blocks: the two heads were 5 blocks apart in one read at 2 s blocks (2026-11-04 09:53Z), so 10 then;
       // one every 200 ms now (10,000 blocks to block 54946277 took 2,000 s on sepolia.base.org and
@@ -469,6 +489,8 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // "-32701: exceed maximum block range: 50000" (05:01Z). PublicNode answers the signing page's CORS preflight 204,
       // allow-origin * (05:03Z).
       providers: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"] as const),
+      // as Base mainnet's, unmeasured on these providers (the quote's reads there are few)
+      reads: bare({ perCall: 6, maxBytes: 24_000 }),
       feeProviders: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"] as const),
       // the two heads were 18 blocks apart in one read (2026-11-04 09:53Z); mainnet's 100, about 16 s of its blocks (10,000
       // to block 149155719 took 1,634 s on both providers, read 2026-11-05 20:38Z)
