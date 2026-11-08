@@ -1,10 +1,11 @@
 // node --test scripts/live-checks/wallet-restore-id-reader.test.mjs: the live check's verdict on its recorded answers, with
-// no network. Each record is a real run of the check (the 8 Nov 2026 clock of the recording machine), both providers
-// asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited:
-// - good: this card's build (index.html, public/app.js and public/_headers at the card's branch, --local): PASS;
-// - bad_main_bundle: main's build before the card (1e1bc558's index.html, public/app.js and public/_headers, run with
-//   --local --root <that folder>): FAIL on the markers alone, none of the walk's reach in it;
-// - bad_live_before: the live SIGN_HOST before the card's release (release-105): FAIL on the markers alone;
+// no network. Each record is a real run of the check (the 8-9 Nov 2026 clock of the recording machine), both providers
+// asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded by card
+// wallet-restore-id-reader-wired, whose MARK gained the IdReader's rules:
+// - good: that card's build (index.html, public/app.js and public/_headers at its branch, --local): PASS;
+// - bad_main_bundle: main's build before it (610143c2's index.html, public/app.js and public/_headers, run with
+//   --local --root <that folder>): FAIL on the markers alone, the walk's reach in it and none of the IdReader's rules;
+// - bad_live_before: the live SIGN_HOST before its release: FAIL on the markers alone;
 // - bad_no_cors: this card's build with dRPC's answers stripped of every access-control header in transit (probe's
 //   transport argument, the live answers otherwise as read): FAIL on that provider's preflight and reads alone. No keyless
 //   NEAR provider answers a page's origin without CORS, so the missing header is made in transit, by this recorder:
@@ -30,7 +31,9 @@ const BAD = (rec) => {
   assert.equal(v.pass, bad.length === 0, `the verdict agrees with its lines: ${bad.join(", ")}`);
   return bad;
 };
-const MARKS = "/app.js carries the restore walk's reach";
+const MARKS = "/app.js carries the restore walk's reach and the IdReader's rules";
+// the IdReader's markers (card wallet-restore-id-reader-wired), after the walk's reach ones
+const ID_MARKERS = MARKERS.filter((k) => !k.startsWith("reach_"));
 const SAME = "/app.js is the script / names: its sha384 is the integrity";
 const CSP = "SIGN_HOST's connect-src reaches both providers";
 const IDS = "the ids read are the registered one and a fresh one";
@@ -70,10 +73,11 @@ test("the recorded good answer (the card's build and both providers' real reads)
   }
 });
 
-test("main's build before the card (no walk reach) fails, on the markers alone", () => {
-  assert.equal(answers.bad_main_bundle.url, "local build of main-1e1bc558");
+test("main's build before the IdReader was wired (the walk's reach, none of the IdReader's rules) fails, on the markers alone", () => {
+  assert.equal(answers.bad_main_bundle.url, "local build of main-610143c2");
   assert.deepEqual(BAD(answers.bad_main_bundle), [MARKS]);
-  for (const m of MARKERS) assert.equal(answers.bad_main_bundle.app.markers[m], 0, m);
+  assert.equal(ID_MARKERS.length, 9);
+  for (const m of MARKERS) assert.equal(answers.bad_main_bundle.app.markers[m], m.startsWith("reach_") ? 1 : 0, m);
 });
 
 test("the live SIGN_HOST before the card's release fails, on the markers alone", () => {
@@ -183,6 +187,20 @@ test("reach_misses and reach_floor match a miss counted only past the floor, nev
   assert.equal(n("r(l)?(s.push(a),u=0):u++", "reach_misses"), 0);
   assert.equal(n("let o=a??-1,s=[]", "reach_floor"), 1);
   assert.equal(n("let o=a??0,s=[]", "reach_floor"), 0);
+});
+
+// the page's wiring (src/pool-restore.ts readDepositIds): the error kept is the one thrown again, the result tested is the
+// one whose lanes are read
+test("ids_stop and ids_stall match the first unread id stopping every read after it and a lane unread ending the run, never another", () => {
+  const n = (text, k) => [...text.matchAll(MARK[k])].length;
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 1);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw p;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 0);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw e}", "ids_stop"), 0);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=x,e}", "ids_stop"), 0);
+  assert.equal(n("if(n.read?.(r.scope,t),!t.complete||t.lanes.some(e=>e.unread.length>0))return!1", "ids_stall"), 1);
+  assert.equal(n("if(n.read?.(r.scope,t),!t.complete||u.lanes.some(e=>e.unread.length>0))return!1", "ids_stall"), 0);
+  assert.equal(n("if(n.read?.(r.scope,t),!t.complete||t.lanes.some(e=>f.unread.length>0))return!1", "ids_stall"), 0);
+  assert.equal(n("if(n.read?.(r.scope,t),!t.complete)return!1", "ids_stall"), 0);
 });
 
 test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks it is the answer", async () => {

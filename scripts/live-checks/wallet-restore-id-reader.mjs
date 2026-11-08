@@ -8,17 +8,22 @@
 //     card's rules that the page carries (string literals and patterns that minifying keeps): the walk's reach, the
 //     index a walk-end error names, which a restore reads to before its gap counts (the walk's error says "restore again
 //     with reach[lane] = i"): the reach checked as an index of its lane, the floor it sets, and misses counted only past it;
+//     and, since card wallet-restore-id-reader-wired (the page's restore kind, src/pool-restore.ts, runs step 5 through
+//     the IdReader), the IdReader's rules: an id is a 64-hex implicit account, storage on the token is null or a
+//     balance, intents.near's list is a token list, the stronger of the two providers' answers taken (money over used
+//     over unused), the pass's finals meet or the restore does not start, a stale pass refused, step 5's lane stopped
+//     after DEPOSIT_ID_MARGIN failed reads, and the page's own wiring: the first id unread stops every read after it, and
+//     a lane unread or unfinished ends the run stalled;
 //   - each provider, asked with Origin SIGN_ORIGIN as the page asks (a POST with content-type application/json, so its
 //     preflight first), answers with CORS for the page's origin, and answers what the IdReader decides on:
 //       a registered id (REGISTERED, a NearBlocks USDC holder read 8 Nov 2026, registered on USDC) reads registered
 //       (storage_balance_of a balance, view_account an account), and a fresh implicit id, 32 random bytes made for the
 //       run, reads unused (storage_balance_of null, view_account UNKNOWN_ACCOUNT).
-// What this check cannot read, and why (verify, never assume): the IdReader's own code is not in the served bundle. At
-// f11b13ac nothing in packages/signpage/src imports restore/id-reader.ts, arms.ts or after.ts (the page's restore kind,
-// src/pool-restore.ts, imports only notes/restore.ts's writeRestored), and a build of the card carries none of the
-// IdReader's strings ("an id is a 64-hex implicit account id", "mt_tokens_for_owner" and the rest read 0 in public/app.js);
-// the card's change to the page's bundle is the walk's reach (notes/restore.ts, restore/walk.ts). The markers are those.
-// When the page imports the IdReader, its rules join MARK here.
+// Until card wallet-restore-id-reader-wired the IdReader's code was not in the served bundle (at f11b13ac nothing in
+// packages/signpage/src imported restore/id-reader.ts, and main 610143c2's public/app.js holds none of the id_ and ids_
+// markers below); its rules joined MARK once src/pool-restore.ts imported it. What this check cannot read: whether a
+// restore on SIGN_HOST reads any id today, as the mainnet build pins no pool yet (src/pool-restore.ts pagePools), so its
+// step 5 runs on the first pool pinned there.
 // After: sign
 //   node scripts/live-checks/wallet-restore-id-reader.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-restore-id-reader.mjs --local [--root <signpage dir>] [--record <file>]
@@ -53,6 +58,21 @@ export const MARK = Object.freeze({
   reach_floor: /let ([\w$]+)=([\w$]+)\?\?-1,/g,
   // a miss counts only past the floor: `r(l)?(s.push(a),u=0):a>o&&u++` (the index pushed is the one compared, the counter is the one reset)
   reach_misses: /\)\?\([\w$]+\.push\(([\w$]+)\),([\w$]+)=0\):\1>[\w$]+&&\2\+\+/g,
+  // the IdReader (packages/wallet/src/restore/id-reader.ts nearIdReader, openRestorePass) and step 5
+  // (restore/wallets.ts restoreDepositIds), as the page's restore kind imports them
+  id_hex: "an id is a 64-hex implicit account id",
+  id_storage: "storage_balance_of: neither null nor a balance",
+  id_intents: "mt_tokens_for_owner: not a token list",
+  // the stronger answer of the two providers: `{unused:0,used:1,money:2}`
+  id_rank: "{unused:0,used:1,money:2}",
+  id_pass_meet: "did not meet; the restore does not start",
+  id_pass_stale: "blocks past it; open a fresh pass",
+  ids_margin: "id reads failed with none showing history between them",
+  // the page's wiring (src/pool-restore.ts readDepositIds): the first unread id stops every read after it,
+  // `if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}`
+  ids_stop: /\.throwIfAborted\(\),([\w$]+)!==void 0\)throw \1;try\{return await [\w$]+\(([\w$]+)\)\}catch\(([\w$]+)\)\{throw \1\?\?=\3,\3\}/g,
+  // and a lane unread or unfinished ends the run stalled: `!t.complete||t.lanes.some(e=>e.unread.length>0))return!1`
+  ids_stall: /!([\w$]+)\.complete\|\|\1\.lanes\.some\(\(?([\w$]+)\)?=>\2\.unread\.length>0\)\)return!1/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);
@@ -71,7 +91,7 @@ export function judgeBundle(rec) {
     `/app.js is the script / names: its sha384 is the integrity (HTTP ${a.status ?? "?"}, ${a.bytes ?? "?"} bytes)`);
   const m = a.markers ?? {};
   const missing = MARKERS.filter((k) => !(Number.isSafeInteger(m[k]) && m[k] >= 1));
-  say(missing.length === 0, `/app.js carries the restore walk's reach (${missing.length ? `missing ${missing.join(", ")}` : `${MARKERS.length} marks found`})`);
+  say(missing.length === 0, `/app.js carries the restore walk's reach and the IdReader's rules (${missing.length ? `missing ${missing.join(", ")}` : `${MARKERS.length} marks found`})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
