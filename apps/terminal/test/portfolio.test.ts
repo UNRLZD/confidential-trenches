@@ -87,6 +87,18 @@ test("money and percent text", () => {
   assert.equal(units("0"), "0");
 });
 
+test("units: a sliver of a token never reads 0; the price's small form, cut and never rounded up", () => {
+  assert.equal(units("0"), "0");
+  assert.equal(units("0.004"), "0.004");
+  assert.equal(units("0.0000123"), "0.0₄123");
+  assert.equal(units("0.0099"), "0.0099");
+  assert.equal(units("0.00999999"), "0.00999");
+  assert.equal(units("0.01"), "0.01");
+  assert.equal(units("1.239"), "1.23");
+  assert.equal(units("12345"), "12.3K");
+  assert.equal(units("1e-7"), "0.0₆1");
+});
+
 test("S10.1 loading before the first state; S10.2 empty with none open; S10.5 offline keeps the last state", () => {
   assert.equal(portfolio(snap(null, "connecting"), data(), NOW).view, "S10.1");
   const down = portfolio(snap(null, "down"), data(), NOW);

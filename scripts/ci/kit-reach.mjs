@@ -315,10 +315,22 @@ export function reaches(file, text, names = [], kitName = null) {
   return out.sort((a, b) => a[0] - b[0]);
 }
 
-export function kitReach(root) {
-  const files = execFileSync("git", ["ls-files", "-z", "-c", "-o", "--exclude-standard"], { cwd: root, encoding: "utf8" })
-    .split("\0")
-    .filter(Boolean);
+// the file list git gives, whole or refused by name: a list cut at the buffer (node's default is 1 MiB, which a growing
+// repo reaches) would leave files unread, so it is never read as the list (card deep-import-maxbuffer)
+function listFiles(root, maxBuffer) {
+  try {
+    return execFileSync("git", ["ls-files", "-z", "-c", "-o", "--exclude-standard"], { cwd: root, encoding: "utf8", maxBuffer })
+      .split("\0")
+      .filter(Boolean);
+  } catch (e) {
+    if (e?.code === "ENOBUFS") throw new Error(`the file list was cut at ${maxBuffer} bytes`);
+    if (e?.signal) throw new Error(`git ended with signal ${e.signal}`);
+    throw e;
+  }
+}
+
+export function kitReach(root, maxBuffer = 1 << 28) {
+  const files = listFiles(root, maxBuffer);
   const unique = [...new Set(files)];
   const refusals = [];
   // the package names of packages/ and contracts/, and which one is the kit
