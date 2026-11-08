@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { inside, ROOT as DRIVER_ROOT, tapAmountOf } from "./testnet-withdraw-typed.ts";
+import { inside, NOTE, ROOT as DRIVER_ROOT, tapAmountOf } from "./testnet-withdraw-typed.ts";
 import { checkAmount, vaultScope } from "../../../packages/signpage/src/withdraw/checks.ts";
 import { formatUnits } from "../../../packages/signpage/src/withdraw/form.ts";
 import { NEAR_NETWORKS } from "../../../packages/wallet/src/deposit/account.ts";
@@ -16,7 +16,6 @@ import { withdrawRequest } from "../../../packages/wallet/src/withdraw/request.t
 
 const form = { checkAmount, formatUnits };
 const NET = NEAR_NETWORKS.testnet;
-const NOTE = 500_000n; // the driver's NOTE
 const FEE = 206_282n; // relayer-withdraw-send's recorded testnet quote
 const REACHED = "REACHED registerDepositOf: the pick passed";
 
@@ -85,4 +84,11 @@ test("a --out outside the repository is refused before anything is read or sent"
   assert.match(r.stderr, /ERROR: --out must be inside the repository/);
   assert.equal(r.stdout.includes("wwmo:"), false, "nothing ran before the refusal");
   assert.equal(existsSync(path.join(away, "state.json")), false, "no state made");
+});
+
+test("the driver's note is a deposit the vault takes: at least its MIN_DEPOSIT (the 01:45Z run's deposit panicked below it)", () => {
+  const rs = readFileSync(path.join(DRIVER_ROOT, "contracts/vault/src/constants.rs"), "utf8");
+  const min = /pub const MIN_DEPOSIT: u128 = ([0-9_]+);/.exec(rs);
+  assert.ok(min, "MIN_DEPOSIT is read from the vault's constants");
+  assert.ok(NOTE >= BigInt(min[1]!.replaceAll("_", "")), `NOTE ${NOTE} is below the vault's MIN_DEPOSIT ${min[1]}`);
 });
