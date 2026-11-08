@@ -215,10 +215,11 @@ test("the plan keeps a volume account while anything is owed through it", () => 
   assert.equal(vwhy(vol(VOL, 41, u64(9n))), "unclaimed incentive tokens 9");
   assert.equal(vwhy(vol(VOL, 57, u64(1n))), "volume 1 not settled");
   // PumpSwap cashback: earned @74 above claimed @82.
-  assert.equal(vwhy(vol(VOL_A, 74, u64(12_742_862n)), UVA_A), "cashback 12742862 unclaimed");
+  // (Its claim cannot run here: the volume account's WSOL account is not among the reads, so it stays, with why.)
+  assert.equal(vwhy(vol(VOL_A, 74, u64(12_742_862n)), UVA_A), "cashback 12742862 unclaimed (the volume account's So11111111111111111111111111111111111111112 account holds nothing read)");
   assert.equal(vwhy(vol(vol(VOL_A, 74, u64(5n)), 82, u64(5n)), UVA_A), "");
   // Pump's stable cashback: earned @90 above claimed @98. Pump's lamport cashback (@74) comes back with the close.
-  assert.equal(vwhy(vol(VOL, 90, u64(7n))), "stable cashback 7 unclaimed");
+  assert.equal(vwhy(vol(VOL, 90, u64(7n))), "stable cashback 7 unclaimed (the volume account's EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v account holds nothing read)");
   assert.equal(vwhy(vol(VOL, 74, u64(7n))), "");
 });
 

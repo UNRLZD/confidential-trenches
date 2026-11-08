@@ -56,7 +56,7 @@
 //   wallet of the user's at most; no request carries a key or the words. Nothing here logs.
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
+import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
@@ -390,7 +390,9 @@ export type OwedRentBack = { address: string; l: string; j: number; mints: { min
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void> };
 /** How a rent back ended: its sweep sent; nothing left on W; W under the smallest note (solanaSweepFloor), its lamports
  *  kept on W; an account the plan keeps (so W keeps the fee to close it later); W holding a token; or it gave up. */
-export type RentBackEnd = "sent" | "nothing" | "floor" | "kept" | "holds" | "gave_up";
+// "owed": W keeps an account whose cashback claim did not simulate on either RPC this pass, so the record stays and a
+// later pass claims it and sweeps (review M1 of 11c963f9)
+export type RentBackEnd = "sent" | "nothing" | "floor" | "owed" | "kept" | "holds" | "gave_up";
 export type RentBackTold = { address: string; step: "teardown" | "sweep" | "rent_back"; state: "fault" | "gave_up" | RentBackEnd; detail: string };
 
 /** The rent backs owed, in the wallet store's meta/owed/rentback-sol (meta/owed/ is never read or listed by the frame). */
@@ -720,7 +722,10 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    slot); every account the plan finds closable (a token account holding none, a volume account owing nothing) is
  *    closed to W by the kit's buildSolanaTeardown frames, checked by the rule (checkSolanaTeardownFrames: the kit's
  *    checkSolanaTeardown, both RPCs' simulations included), signed by W and sent on both; each frame read back until it
- *    is on both RPCs, failed on both, or past its blockhash on both.
+ *    is on both RPCs, failed on both, or past its blockhash on both. A cashback claim whose frame errs on both RPCs
+ *    while every other frame is clean on both is planned around, its program's claims off (the kit's
+ *    solanaTeardownChecked; one RPC's error is a fault, read again): its volume account stays open, with the reason,
+ *    every other close still goes, and the rent back ends "owed", so W stays owed and a later pass claims it.
  * 2. The sweep, only when the plan keeps nothing (review L4: an account kept, holding tokens or owing cashback or
  *    incentives, needs W's fee to be claimed or closed later) and every frame read back: W's lamports, the same on both
  *    RPCs, less its one fee and the rents the deposit takes as the program prices them (solanaDepositRents: its mark
@@ -819,14 +824,18 @@ async function rentBack(h: PoolSellHost, x: RentBack): Promise<RentBackEnd> {
       // (or its next) still uses; nothing is closed
       if (read.holds) return null;
       const { held, accounts, plan } = read;
-      if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0 };
+      if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0, unclaimed: undefined };
       const bh = await blockhashOf(rpcs);
-      const frames = buildSolanaTeardown(w.address, plan, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight });
-      // one frame at a time on each RPC: a public provider throttles a burst
-      const simulations: [SolanaTeardownSimulation, SolanaTeardownSimulation][] = [];
-      for (const f of frames) simulations.push(await both(rpcs, (r) => simulateSolanaTeardown(r, f.wire, w.address, addresses)));
-      checkSolanaTeardownFrames(frames.map((f) => f.wire), ctx, { accounts, wallet: [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], simulations });
-      return { keep: plan.keep, signed: await signAll(frames.map((f) => f.wire)), last: bh.lastHeight };
+      // one frame at a time on each RPC: a public provider throttles a burst; a claim that does not simulate is planned
+      // around once, claims off (the kit's solanaTeardownChecked), so the closes still go and the owed account stays
+      const simulate = async (fs: readonly { wire: Uint8Array }[]) => {
+        const simulations: [SolanaTeardownSimulation, SolanaTeardownSimulation][] = [];
+        for (const f of fs) simulations.push(await both(rpcs, (r) => simulateSolanaTeardown(r, f.wire, w.address, addresses)));
+        return simulations;
+      };
+      const t = await solanaTeardownChecked(w.address, plan, accounts, [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight }, simulate);
+      checkSolanaTeardownFrames(t.frames.map((f) => f.wire), ctx, t.reads);
+      return { keep: t.plan.keep, signed: await signAll(t.frames.map((f) => f.wire)), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
     });
     if (teardown === null) return end("gave_up", "the teardown");
     if (teardown.ok === null) return end("holds", "W holds a token it traded: its sell has not filled");
@@ -843,7 +852,7 @@ async function rentBack(h: PoolSellHost, x: RentBack): Promise<RentBackEnd> {
     }
     // a frame still unread: W's lamports are not yet what they stay, so no sweep is priced on them
     if (open.size > 0) return end("gave_up", "a teardown frame was not read back");
-    if (teardown.ok.keep.length > 0) return end("kept", teardown.ok.keep.map((k) => `${k.address}: ${k.why}`).join("; "));
+    if (teardown.ok.keep.length > 0) return end(teardown.ok.unclaimed === undefined ? "kept" : "owed", teardown.ok.keep.map((k) => `${k.address}: ${k.why}`).join("; "));
     // 2. the sweep
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     const sweep = await again("sweep", async () => {
@@ -917,7 +926,7 @@ const sellOwner = (ref: NoteRef, l: bigint, j: number): boolean => (ref.kind ===
 async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, sending?: () => Promise<boolean>): Promise<void> {
   try {
     if (e === "holds" && (await sending?.())) return;
-    if (e !== "sent" && e !== "gave_up") return await h.owed?.drop(o.address);
+    if (e !== "sent" && e !== "gave_up" && e !== "owed") return await h.owed?.drop(o.address);
     if (o.passes + 1 >= POOL_RENT_BACK_PASSES) {
       h.told?.({ address: o.address, step: "rent_back", state: "gave_up", detail: `owed no more after ${POOL_RENT_BACK_PASSES} passes: what is left stays on W` });
       return await h.owed?.drop(o.address);

@@ -41,11 +41,22 @@ import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
   SOLANA_CLOSE_VOLUME_ACCUMULATOR,
+  SOLANA_CLAIM_CASHBACK,
+  SOLANA_CLAIM_CASHBACK_V2,
+  SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_TEARDOWN_CU,
+  checkSolanaTeardown,
   solanaEventAuthority,
+  solanaTeardownPlan,
+  solanaTeardownUnclaimed,
   solanaRouteCuCap,
+  type SolanaClaim,
+  type SolanaHeld,
   type SolanaTeardownPlan,
+  type SolanaTeardownReads,
+  type SolanaTeardownUnclaimed,
   type SolanaTeardownSimulation,
+  type SolanaTeardownVerdict,
 } from "../../checks/solana/checks.ts";
 import type { SolanaFetch, SolanaRpc } from "./send.ts";
 import { deepFreeze } from "../../freeze.ts";
@@ -694,8 +705,11 @@ export function solanaWithBlockhash(a: SolanaAssembled, chain: { blockhash: stri
 // closes, HarvestWithheldTokensToMint (mint, account) right before it when the account has Token-2022's transfer-fee
 // extension, then CloseAccount (account, the wallet, the wallet). S-5: close_user_volume_accumulator under each pump
 // program whose volume account the plan closes. S-4 and S-5 are separate frames, so a pump change that breaks S-5 never
-// holds back the token closes; S-4 splits into more frames when one would pass 1,232 bytes. No tips: a teardown is
-// never raced. Each frame asks only the compute it uses (SOLANA_TEARDOWN_CU), at the caller's price.
+// holds back the token closes; S-4 splits into more frames when one would pass 1,232 bytes. Owed cashback (card
+// solana-teardown-cashback): each claim, with its volume account's close right after it, rides at the end of the last
+// frame (S-5, or the last S-4 frame when every volume account owes one), so no volume account closes with its cashback
+// still in it and the frame's own closes fund the claim account it opens. No tips: a teardown is never raced. Each
+// frame asks only the compute it uses (SOLANA_TEARDOWN_CU), at the caller's price.
 // ---------------------------------------------------------------------------------------------------------------
 
 /** The teardown frames for one wallet; empty when the plan closes nothing. */
@@ -719,8 +733,10 @@ export function buildSolanaTeardown(wallet: string, plan: SolanaTeardownPlan, ch
   // S-4, packed greedily: an account's harvest and close never split across frames.
   let body: SolanaApiInstruction[] = [];
   let cu = 0;
+  // The wallet's WSOL account a claim pays into closes right after that claim.
+  const unwrapped = new Set(plan.claim.filter((c) => c.unwrap).map((c) => c.to));
   for (const h of plan.close) {
-    if (h.kind !== "token") continue;
+    if (h.kind !== "token" || unwrapped.has(h.address)) continue;
     const group = [
       ...(h.harvest ? [ix(SOLANA_TOKEN_2022_PROGRAM, [acc(h.mint, false, true), acc(h.address, false, true)], [26, 4])] : []),
       ix(h.program, [acc(h.address, false, true), acc(wallet, false, true), acc(wallet, true, false)], [9]),
@@ -739,17 +755,91 @@ export function buildSolanaTeardown(wallet: string, plan: SolanaTeardownPlan, ch
     body.push(...group);
     cu += groupCu;
   }
-  if (body.length) out.push(frame(body, cu));
-  // S-5.
-  const volumes = plan.close.filter((h) => h.kind === "volume");
-  if (volumes.length) {
-    out.push(frame(volumes.map((h) => ix(h.program, [acc(wallet, true, true), acc(h.address, false, true), acc(solanaEventAuthority(h.program), false, false), acc(h.program, false, false)], [...SOLANA_CLOSE_VOLUME_ACCUMULATOR])), volumes.length * SOLANA_TEARDOWN_CU.volume));
+  // S-5: the volume closes that owe no claim.
+  const volClose = (h: SolanaHeld) => ix(h.program, [acc(wallet, true, true), acc(h.address, false, true), acc(solanaEventAuthority(h.program), false, false), acc(h.program, false, false)], [...SOLANA_CLOSE_VOLUME_ACCUMULATOR]);
+  const claimed = new Set(plan.claim.map((c) => c.uva));
+  const free = plan.close.filter((h) => h.kind === "volume" && !claimed.has(h.address));
+  // The claims, each with its volume account's close right after it: at the end of the last frame, after every close
+  // that owes none, so that frame's own closes fund a claim account it opens (a wallet emptied by a pool sell keeps only
+  // rent(0), under one token account's rent; every frame is simulated on the state before any of them lands).
+  const tail: SolanaApiInstruction[] = [];
+  let tailCu = 0;
+  for (const c of plan.claim) {
+    if (c.open) {
+      tail.push(ix(SOLANA_ATA_PROGRAM, [acc(wallet, true, true), acc(c.to, false, true), acc(wallet, false, false), acc(c.mint, false, false), acc(SOLANA_SYSTEM_PROGRAM, false, false), acc(SOLANA_TOKEN_PROGRAM, false, false)], [1]));
+      tailCu += SOLANA_TEARDOWN_CU.open;
+    }
+    tail.push(solanaClaimInstruction(wallet, c));
+    tailCu += SOLANA_TEARDOWN_CU.claim;
+    if (c.unwrap) {
+      tail.push(ix(SOLANA_TOKEN_PROGRAM, [acc(c.to, false, true), acc(wallet, false, true), acc(wallet, true, false)], [9]));
+      tailCu += SOLANA_TEARDOWN_CU.close;
+    }
+    const v = plan.close.find((h) => h.address === c.uva);
+    if (v) {
+      tail.push(volClose(v));
+      tailCu += SOLANA_TEARDOWN_CU.volume;
+    }
   }
+  if (free.length) {
+    if (body.length) out.push(frame(body, cu));
+    body = free.map(volClose);
+    cu = free.length * SOLANA_TEARDOWN_CU.volume;
+  }
+  if (tail.length && body.length) {
+    try {
+      out.push(frame([...body, ...tail], cu + tailCu));
+    } catch (e) {
+      if (!(e instanceof SolanaBuildError && e.code === "too_large")) throw e;
+      out.push(frame(body, cu), frame(tail, tailCu));
+    }
+  } else if (body.length || tail.length) out.push(frame([...body, ...tail], cu + tailCu));
   return out;
+}
+
+/** A claim's instruction, its accounts in the IDL's order (checks.ts SOLANA_CLAIM_CASHBACK, SOLANA_CLAIM_CASHBACK_V2). */
+function solanaClaimInstruction(wallet: string, c: SolanaClaim): SolanaApiInstruction {
+  const head = [acc(wallet, true, true), acc(c.uva, false, true), acc(c.mint, false, false), acc(SOLANA_TOKEN_PROGRAM, false, false)];
+  const tail = [acc(SOLANA_SYSTEM_PROGRAM, false, false), acc(solanaEventAuthority(c.program), false, false), acc(c.program, false, false)];
+  if (c.program === SOLANA_PUMP_AMM_PROGRAM) return ix(c.program, [...head, acc(c.from, false, true), acc(c.to, false, true), ...tail], [...SOLANA_CLAIM_CASHBACK]);
+  return ix(c.program, [...head, acc(SOLANA_ATA_PROGRAM, false, false), acc(c.from, false, true), acc(c.to, false, true), ...tail], [...SOLANA_CLAIM_CASHBACK_V2]);
 }
 
 /** The most accounts api.mainnet-beta.solana.com reads back in one simulation ("Too many accounts provided; max 4", 2026-11-02). */
 export const SOLANA_SIMULATE_ACCOUNTS_MAX = 4;
+
+/**
+ * The teardown for one wallet, built, simulated by `simulate` (each frame on both providers) and judged by
+ * checkSolanaTeardown on those reads. When only its simulation refuses a plan that claims cashback, and the frame that
+ * carries the claims errs on both providers while every other frame is clean on both (solanaTeardownUnclaimed, review
+ * M1 of 11c963f9), it is planned, built, simulated and judged again with the failing program's claim off, then, if the
+ * other program's claim fails too, with that one off as well (review L1: at most two more simulations), so a claim that
+ * does not land never holds back the closes or the claim that would. Any other refusal stands: the caller reads again.
+ * `reads` are what the verdict judged: the caller's signing rule judges the same. `plan` is solanaTeardownPlan over
+ * `accounts` (the caller's, so a plan that throws stays the caller's to handle).
+ */
+export async function solanaTeardownChecked(
+  wallet: string,
+  plan: SolanaTeardownPlan,
+  accounts: SolanaTeardownReads["accounts"],
+  lamports: readonly [bigint, bigint],
+  chain: { blockhash: string; lastValidBlockHeight: number },
+  simulate: (frames: readonly SolanaAssembled[]) => Promise<SolanaTeardownReads["simulations"]>,
+): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
+  const once = async (p: SolanaTeardownPlan, unclaimed?: SolanaTeardownUnclaimed) => {
+    const frames = buildSolanaTeardown(wallet, p, chain);
+    const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }) };
+    return { plan: p, frames, reads, verdict: checkSolanaTeardown(frames.map((f) => f.wire), wallet, reads) };
+  };
+  let t = await once(plan);
+  // each pass turns at least one more program's claim off, and there are two pump programs
+  for (let i = 0; i < 2; i++) {
+    const off = solanaTeardownUnclaimed(t.verdict, t.frames.map((f) => f.wire), t.reads.simulations, t.reads.unclaimed);
+    if (off === null || Object.keys(off).length === Object.keys(t.reads.unclaimed ?? {}).length) return t;
+    t = await once(solanaTeardownPlan(wallet, accounts, off), off);
+  }
+  return t;
+}
 
 /**
  * One provider's simulation of one teardown frame (sigVerify false, replaceRecentBlockhash true, at `confirmed`),
@@ -763,8 +853,19 @@ export async function simulateSolanaTeardown(rpc: SolanaRpc, wire: Uint8Array, w
     if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) return bad(`${what}.lamports is not a safe integer`);
     return BigInt(v);
   };
+  // A token account's amount after the frame (Token or Token-2022 data of at least 165 bytes), else null.
+  const amount = (a: unknown, what: string): bigint | null => {
+    if (a === null) return null;
+    const o = obj(a, what);
+    if (o.owner !== SOLANA_TOKEN_PROGRAM && o.owner !== SOLANA_TOKEN_2022_PROGRAM) return null;
+    const d = arr(o.data, `${what}.data`, 2);
+    if (typeof d[0] !== "string" || d[1] !== "base64" || d[0].length > 4 * 1024 * 1024) return bad(`${what}.data is not base64`);
+    const b = base64.decode(d[0]);
+    return b.length >= 165 ? new DataView(b.buffer, b.byteOffset, b.byteLength).getBigUint64(64, true) : null;
+  };
   const per = SOLANA_SIMULATE_ACCOUNTS_MAX - 1;
   const accounts: Record<string, bigint | null> = {};
+  const amounts: Record<string, bigint | null> = {};
   let walletAfter: bigint | null = null;
   for (let i = 0; i === 0 || i < addresses.length; i += per) {
     const group = [wallet, ...addresses.slice(i, i + per)];
@@ -778,7 +879,8 @@ export async function simulateSolanaTeardown(rpc: SolanaRpc, wire: Uint8Array, w
     walletAfter = w;
     group.slice(1).forEach((x, j) => {
       accounts[x] = lamports(list[j + 1], x);
+      amounts[x] = accounts[x] === null ? null : amount(list[j + 1], x);
     });
   }
-  return { err: null, wallet: walletAfter as bigint, accounts };
+  return { err: null, wallet: walletAfter as bigint, accounts, amounts };
 }
