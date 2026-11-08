@@ -29,7 +29,7 @@ const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "
 // app-chart-controls, on the owner's next picks page), the lower panel's and About's words R5 marks as draft copy (card
 // app-token-lower-panel, on the owner's next picks page), the deposit sheet's To label (card deposit-to-pool, on the
 // owner's next picks page)
-const STILL_DRAFT: Record<string, string[]> = { deposit: ["to"], discover: ["padMenuTitle", "updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine", "net5m", "sells5m", "vol5m"], verify: [], withdraw: [] };
+const STILL_DRAFT: Record<string, string[]> = { deposit: ["to"], discover: ["padMenuTitle", "updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine", "net5m", "sells5m", "vol5m"], verify: ["authority", "blockscout", "hoodscan", "owner", "pools", "proxy", "solanaExplorer"], withdraw: [] };
 
 test("the list: 103 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 103);

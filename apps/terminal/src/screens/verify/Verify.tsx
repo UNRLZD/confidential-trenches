@@ -7,7 +7,7 @@ import { Icon } from "../signin/Icon.tsx";
 import type { VerifyCheck, VerifyCheckId, VerifyRow, VerifyStatus, VerifyView } from "./model.ts";
 // the pools (card verify-pools): a row per chain under the vault's, opened the same way: its checks, the block and the
 // two RPCs it read, and two explorer links at the pool's address
-import type { PoolCheck, PoolCheckId, PoolChain, PoolRow as PoolRowView, PoolsView } from "./pools.ts";
+import { CHAIN_NAME, type PoolCheck, type PoolCheckId, type PoolChain, type PoolRow as PoolRowView, type PoolsView } from "./pools.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./verify.css";
@@ -21,8 +21,6 @@ const LABEL: Record<VerifyCheckId | PoolCheckId, WordId> = {
   keys: "keys", code: "codeHash", asset: "asset", registration: "registration", tokenCode: "tokenCode", balance: "balance",
   authority: "authority", owner: "owner", proxy: "proxy", poolCode: "codeHash",
 };
-/** A chain's name is data (deposit/model.ts CHAIN_NAME), not copy. */
-const CHAIN_NAME: Record<PoolChain, string> = { solana: "Solana", base: "Base", robinhood: "Robinhood" };
 /** An RPC's name is the URL it reads (the pair rule's); the screen shows its host, one to a line. */
 const host = (name: string) => name.replace(/^https?:\/\//, "");
 const Dot = ({ s }: { s: VerifyStatus | null }) => <span className={`vdot ${s ?? "load"}`} data-dot={s ?? "loading"} />;

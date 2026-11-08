@@ -13,6 +13,8 @@ import { short, type VerifyStatus, type VerifyValue } from "./model.ts";
 
 export type PoolChain = "solana" | "base" | "robinhood";
 export const POOL_CHAINS: readonly PoolChain[] = ["solana", "base", "robinhood"];
+/** Each pool row's name: its chain's, data as deposit/model.ts CHAIN_NAME draws it, not copy. */
+export const CHAIN_NAME: Readonly<Record<PoolChain, string>> = { solana: "Solana", base: "Base", robinhood: "Robinhood" };
 
 /** A Solana pool program as its deploy record names it: program_id, programdata, so_len, so_sha256 (hex). */
 export type SolanaPoolPin = { program: string; programdata: string; codeLen: number; codeSha256: string };
