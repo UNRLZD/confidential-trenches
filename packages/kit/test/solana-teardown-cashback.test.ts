@@ -600,21 +600,31 @@ test("the verdict judges the copies, never the frames: a frame whose bytes read 
   assert.equal(checkSolanaTeardown(t.frames.map((f) => f.wire), W, t.reads).ok, false, "the frames' own bytes are refused");
 });
 
-test("the re-plan around a claim that does not simulate reads the copies, never the frames: a claim frame that reads otherwise afterwards is still planned around (review 5 F4, mutant T4)", async () => {
-  const plan = solanaTeardownPlan(W, ACCOUNTS);
-  assert.equal(plan.claim.length, 1);
-  const off = solanaTeardownPlan(W, ACCOUNTS, { [SOLANA_PUMP_AMM_PROGRAM]: "any reason" });
+test("the re-plan around a claim that does not simulate reads the copies, never the frames: with two claims, the copies name the failing one alone while the frames, read otherwise afterwards, would turn both off (review 5 F4, mutant T4)", async () => {
+  const accounts = stableWorld();
+  const plan = solanaTeardownPlan(W, accounts);
+  assert.deepEqual(plan.claim.map((c) => c.program).sort(), [SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM].sort());
+  // the v2 claim's instruction in the frame's own bytes: both providers name it as failing
+  const failOnPump = (f: SolanaAssembled) => {
+    const m = solanaDecodeMessage(f.wire.subarray(65));
+    const i = m.instructions.findIndex((x) => m.staticKeys[x.programIndex] === SOLANA_PUMP_PROGRAM && x.data.length === 8 && x.data.every((b, j) => b === SOLANA_CLAIM_CASHBACK_V2[j]));
+    assert.ok(i >= 0);
+    const e = { err: { InstructionError: [i, { Custom: 6000 }] }, wallet: 0n, accounts: {} };
+    return [e, e] as const;
+  };
   let calls = 0;
-  const t = await solanaTeardownChecked(W, plan, ACCOUNTS, [W0, W0], R.chain, async (fs) => {
+  const t = await solanaTeardownChecked(W, plan, accounts, [W0, W0], R.chain, async (fs) => {
     calls++;
-    if (calls > 1) return fs.map((f) => [cleanSim(off, f), cleanSim(off, f)] as const);
-    // the claim fails on both; then every frame reads as a cut-short wire no check could decode
+    if (calls > 1) return fs.map((f) => [cleanSim(plan, f), cleanSim(plan, f)] as const);
+    const last = fs.length - 1;
+    const out = fs.map((f, i) => (i === last ? failOnPump(f) : [cleanSim(plan, f), cleanSim(plan, f)] as const));
+    // then every frame reads as a cut-short wire: no instruction in it names a program, so it would turn every claim off
     fs.forEach((f) => readsLater(f, f.wire.slice(0, 70)));
-    return fs.map(() => [{ err: SIM_ERR, wallet: 0n, accounts: {} }, { err: SIM_ERR, wallet: 0n, accounts: {} }] as const);
+    return out;
   });
-  assert.equal(calls, 2, "planned around: simulated with the claim, then claims off");
-  assert.deepEqual(failed(t.verdict), []);
-  assert.deepEqual(Object.keys(t.reads.unclaimed ?? {}), [SOLANA_PUMP_AMM_PROGRAM]);
+  assert.equal(calls, 2, "planned around once: the PumpSwap claim never failed");
+  assert.deepEqual(Object.keys(t.reads.unclaimed ?? {}), [SOLANA_PUMP_PROGRAM], "only the claim the copies name as failing goes off");
+  assert.deepEqual(t.plan.claim.map((c) => c.program), [SOLANA_PUMP_AMM_PROGRAM], "the PumpSwap claim stays");
 });
 
 test("the trade flow registers a teardown frame only after its verdict passes, and only with the copy checked (review 5 F4, mutants T6 and T7)", () => {
