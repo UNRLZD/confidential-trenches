@@ -67,6 +67,20 @@ function shuffled(seed) {
   return { order, late };
 }
 
+test("the replay asks the same calls in the same order however late its answers come: the good run's Base pool list, each answer held 0 to 10 ms on four seeds, passes with one walk (card spares-replay-order: main's runs 42449928067, 42450557518 and 42450652755 failed its publicnode case, the wallet's walk set by when each answer reached it)", async () => {
+  const base = (xs) => (xs === LISTS ? xs.filter((l) => l.label === "base pool") : xs);
+  let first;
+  for (const seed of [2, 3, 4, 6]) {
+    const { late } = shuffled(seed);
+    const replay = late(replayer(A.good));
+    const asked = [];
+    const r = await spares((...call) => (asked.push(JSON.stringify(call)), replay(...call)), { wait: false, order: base });
+    assert.equal(r.ok, true, `seed ${seed}:\n${r.lines.join("\n")}`);
+    if (first === undefined) first = asked;
+    else assert.deepEqual(asked, first, `seed ${seed}: another walk`);
+  }
+});
+
 test("the recorded runs give the same verdicts in another order: the lists and each list's cases shuffled, each answer held 0 to 10 ms so a pair's answers cross and its calls take another time (card spares-replay-order)", async () => {
   const SEED = 42330914;
   assert.notDeepEqual(shuffled(SEED).order(LISTS).map((l) => l.label), LISTS.map((l) => l.label));

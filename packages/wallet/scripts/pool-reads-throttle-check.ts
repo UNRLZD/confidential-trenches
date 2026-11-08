@@ -14,6 +14,7 @@
 // epoch (the check is the device's reads, not the helper's), so bind's only refusals are its reads'. Nothing is signed
 // or sent. The report: the epoch, the trees' size and roots, the binding's fee, deadline and context.
 import { createInterface } from "node:readline";
+import { bridgeAnswers } from "./bridge-answers.ts";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues } from "@blindfill/kit";
 import { evmAddress } from "../src/derive/index.ts";
@@ -25,14 +26,15 @@ const a = JSON.parse(process.argv[2] ?? "null") as Args;
 const out = (o: unknown) => process.stdout.write(`${JSON.stringify(o)}\n`);
 const waiting = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let next = 0;
-createInterface({ input: process.stdin }).on("line", (line) => {
-  const m = JSON.parse(line) as { id: number; result?: unknown; error?: string; name?: string; afterMs?: number | null };
+// a replay's answers are handed one at a time in the read's own order (./bridge-answers.ts, card spares-replay-order)
+const take = bridgeAnswers<{ id: number; result?: unknown; error?: string; name?: string; afterMs?: number | null }>(a.wait !== false, (m) => {
   const w = waiting.get(m.id);
   if (w === undefined) return;
   waiting.delete(m.id);
   if (m.error !== undefined) w.reject(Object.assign(new Error(m.error), m.name ? { name: m.name } : {}, m.afterMs !== undefined ? { afterMs: m.afterMs } : {}));
   else w.resolve(m.result);
-});
+}, () => waiting.size);
+createInterface({ input: process.stdin }).on("line", (line) => take(JSON.parse(line)));
 
 try {
   const venue = evmPoolVenues()[a.network];

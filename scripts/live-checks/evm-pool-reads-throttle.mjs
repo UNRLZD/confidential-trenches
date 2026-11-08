@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { poolFile } from "./pool-evm-deploy.mjs";
-import { recorder, replayer } from "./wallet-restore-transfer-rpcs.mjs";
+import { STILL_CLOCK, recorder, replayer } from "./wallet-restore-transfer-rpcs.mjs";
 
 const KEY = "evm-pool-reads-throttle";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -83,7 +83,7 @@ export function standIn(transport) {
 /** The wallet's pool reads, its RPCs bridged to `transport`. Resolves its report, or throws its refusal. */
 function runCheck(args, transport) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CHECK, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [...(args.wait ? [] : STILL_CLOCK), CHECK, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "", err = "", settled = false;
     child.stdin.on("error", () => {});
     const settle = (f, v) => (settled ? undefined : ((settled = true), f(v)));
