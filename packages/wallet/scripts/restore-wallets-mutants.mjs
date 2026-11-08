@@ -63,7 +63,7 @@ const M = [
   ["review N3: an unfinished restore called complete", WAL, [["complete: out.every((x) => x.reach === null)", "complete: true"]], RW, "N3"],
   ["review F7: an R, V or A secret key left in memory", ARMS, [["  k.secretKey.fill(0);\n  return k.id;", "  return k.id;"]], ["wallet", "test/pool-zeroing.test.ts"], "restoreArmAccounts zeroes"],
   ["the counter raised from lane 0's highest", WAL, [["const mine = lanes[store.lane]!;", "const mine = lanes[0]!;"]], RW, "step 7"],
-  ["R19: an unread id dropped from step 7's re-reads", WAL, [["const held = new Set([...x.notes, ...x.money]);", "const held = new Set([...x.notes, ...x.money, ...x.unread.map((u) => u.i)]);"]], RW, "step 7"],
+  ["R19: an unread id dropped from step 7's re-reads", WAL, [["const held = new Set(x.notes);", "const held = new Set([...x.notes, ...x.unread.map((u) => u.i)]);"]], RW, "step 7"],
   ["R13: the lanes' order not checked", WAL, [["|| !lanes.every((x, k) => x.lane === k)", ""]], RW, "step 7"],
   ["R01: the seed in the Worker's message", WALK, [[SENT, "precommitments: [...precommitments], seed64 } as WalkAsk;"]], NR, "Worker bridge"],
   ["R02: no Worker error listener", WALK, [['      w.addEventListener("error", () => end(() => reject(new Error(`lane ${lane}: the walk worker failed`))));\n', ""]], NR, "Worker bridge"],
