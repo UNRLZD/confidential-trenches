@@ -57,7 +57,7 @@ const JS = [
   "function Pf(e,t,n,r={}){if(e.ok||!e.plan||e.plan.claim.length===0||e.results.some(e=>!e.ok&&e.id!==`SIM`)||t.length===0||n.length!==t.length)return null;",
   "if(!n.slice(0,-1).every(([e,t])=>i(e)&&i(t)))return null;let[o,s]=n.at(-1);if(!a(o)||!a(s))return null;",
   "p=typeof d==`string`&&d===f&&u.includes(d)?d:null,m=`its claim did not simulate on either provider: A ${c(o)}, B ${c(s)}`,h={...r};for(let e of p===null?u:[p])h[e]=m;return h}",
-  "for(let t=0;t<2;t++){let t=Pf(s.verdict,s.frames.map(e=>e.wire),s.reads.simulations,s.reads.unclaimed);if(t===null||Object.keys(t).length===Object.keys(s.reads.unclaimed??{}).length)return s;s=await o(Mf(e,n,t,r),t)}return s}",
+  "for(let t=0;t<2;t++){let t=Pf(s.verdict,s.wires,s.reads.simulations,s.reads.unclaimed);if(t===null||Object.keys(t).length===Object.keys(s.reads.unclaimed??{}).length)return s;s=await o(Mf(e,n,t,r),t)}return s}",
   "if(v.ok.keep.length>0)return h(v.ok.unclaimed===void 0?`kept`:`owed`,v.ok.keep.map(e=>`${e.address}: ${e.why}`).join(`; `));",
   "async function ZR(e,t,n,r){try{if(n===`nothing`)return await e.owed?.drop(t.address);",
   "if(t!==e.fromAmount-e.amount&&y.push(`${o}: ${e.from} holds ${t??`nothing read`} after the claim (want ${e.fromAmount-e.amount})`),e.unwrap)continue;",

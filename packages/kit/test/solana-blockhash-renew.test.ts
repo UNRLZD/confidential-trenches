@@ -67,6 +67,31 @@ test("a fresh blockhash that is not an address, a height that is not one, or a w
   assert.throws(() => solanaWithBlockhash({ ...a, wire }, { blockhash: NEW, lastValidBlockHeight: 250 }), /the wire is not its own message/);
 });
 
+test("the message compiler and the blockhash renewal write only a 32-byte blockhash and 32-byte keys: 33 or 31 bytes are refused, never shifted into the message (review 4 M1)", () => {
+  const w = key(0);
+  const ixs = [{ program: SYSTEM, accounts: [{ key: key(1), signer: false, writable: true }], data: Uint8Array.of(2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0) }];
+  for (const n of [33, 31]) {
+    const odd = base58.encode(new Uint8Array(n).fill(7));
+    assert.throws(() => solanaCompileV0(w, ixs, odd, []), /is not 32 bytes/, `compile: a ${n}-byte blockhash`);
+    assert.throws(() => solanaCompileV0(w, [{ ...ixs[0]!, accounts: [{ key: odd, signer: false, writable: true }] }], OLD, []), /is not 32 bytes/, `compile: a ${n}-byte key`);
+    assert.throws(() => solanaWithBlockhash(assembled(3), { blockhash: odd, lastValidBlockHeight: 250 }), /the blockhash must be the device's own read/, `renew: a ${n}-byte blockhash`);
+  }
+  assert.equal(solanaDecodeMessage(solanaCompileV0(w, ixs, OLD, []).message).blockhash, OLD);
+});
+
+test("the message compiler writes only a 32-byte table address: a table of 31 or 33 bytes that loads a key is refused (review 5 F3)", () => {
+  const w = key(0);
+  const ixs = [{ program: SYSTEM, accounts: [{ key: key(1), signer: false, writable: true }], data: Uint8Array.of(2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0) }];
+  const table = { deactivationSlot: 2n ** 64n - 1n, addresses: [key(1)] };
+  const good = solanaCompileV0(w, ixs, OLD, [{ address: key(2), table }]);
+  assert.deepEqual(good.tablesUsed, [key(2)]);
+  assert.deepEqual(solanaDecodeMessage(good.message).lookups.map((l) => l.table), [key(2)]);
+  for (const n of [31, 33]) {
+    const odd = base58.encode(new Uint8Array(n).fill(7));
+    assert.throws(() => solanaCompileV0(w, ixs, OLD, [{ address: odd, table }]), /the table .* is not 32 bytes/, `compile: a ${n}-byte table address`);
+  }
+});
+
 const rec = (): SolanaLegRecord => ({ wallet: key(0), amount: 1n, expectedOut: 1n, minOut: 1n });
 
 test("planted: a leg whose bytes change between the check and the sign is refused, unsigned; an unchanged leg goes", () => {

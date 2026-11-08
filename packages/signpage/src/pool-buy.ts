@@ -99,9 +99,16 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 const ROUTE_OUT = new RegExp(SIGNPAGE_ROUTE_OUT.source, SIGNPAGE_ROUTE_OUT.flags);
 
 /** What a buy run needs from the page. */
+/** W's buy mint by W's address (card sol-w-sweep, delta review 7 of 08290868): each W is one buy's, and the buy writes
+ *  the mint it buys (and its token program) before its send, so the rent back after a later sell knows which of W's
+ *  tokens is W's own coin. A buy whose send fails leaves the record; it can only make the rent back hold. */
+export type BuyMints = { get(address: string): Promise<{ mint: string; program: string } | undefined>; put(address: string, m: { mint: string; program: string }): Promise<void> };
+
 export type PoolBuyHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
   pin: SolanaPoolPin;
+  /** Where the buy writes W's buy mint before its send (BuyMints); a write that fails sends nothing. */
+  bought?: BuyMints;
   /** The pin's lookup table (the address every tag 3 loads its accounts from); none pinned: refused not_allowed. */
   table: string | null;
   cluster: "mainnet" | "devnet";
@@ -504,6 +511,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       // the route as bound, told once the take holds the note (sendAndSettle): W, then the venue the check passed and its
       // pool (the curve's account or the AMM pool's)
       const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: venue.kind === "pump-curve" ? venue.curve : venue.pool }];
+      // W's buy mint, written before the send (delta review 7 of 08290868): the rent back holds while W holds any of it
+      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });
       return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound });
     }
   } catch (e) {

@@ -22,7 +22,7 @@ import { chainNamed } from "./model.ts";
 
 /** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot).
  *  `filling`: the helper says the row's Jupiter fields are still coming (true only when it sends `filling: true`). */
-export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead; filling?: boolean };
+export type TokenData = { status: "loading" } | { status: "error" } | { status: "empty" } | { status: "ready"; row: MarketRow; risk?: RiskRead; filling?: boolean; decimals?: number };
 
 /** HELPER_HOST's token read for one token (the CSP's connect-src names the host, public/_headers). */
 export const TOKEN_URL = (id: string, chain: MarketChain = "solana") => `https://ct-api.unrealized.trade/v1/market/token?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(id)}`;
@@ -35,7 +35,7 @@ class Unknown extends Error {}
 
 /** The row and `risk` of one token read. Throws Unknown on a 404, any other Error on a failed read, another status, or a
  *  row that is not this chain's and id's. */
-async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean }> {
+async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): Promise<{ row: MarketRow; risk?: RiskRead; filling: boolean; decimals?: number }> {
   const r = await fetchFn(TOKEN_URL(id, chain), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (r.status === 404) throw new Unknown("token: unknown");
   if (r.status !== 200) throw new Error(`token answered ${r.status}`);
@@ -43,7 +43,9 @@ async function readRow(chain: MarketChain, id: string, fetchFn: typeof fetch): P
   const row = isObject(body) ? body.row : null;
   const risk = isObject(body) ? body.risk : null;
   if (!isObject(row) || row.chain !== chain || row.token !== id || typeof row.symbol !== "string" || row.symbol === "") throw new Error("token: not this token's row");
-  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true };
+  // the mint's decimals (06b TokenPage `decimals`), which the Holders tab reads its base-unit amounts with
+  const decimals = isObject(body) && typeof body.decimals === "number" && Number.isInteger(body.decimals) && body.decimals >= 0 && body.decimals <= 30 ? body.decimals : undefined;
+  return { row: row as unknown as MarketRow, ...(isObject(risk) ? { risk: risk as RiskRead } : {}), filling: isObject(body) && body.filling === true, ...(decimals === undefined ? {} : { decimals }) };
 }
 
 /** The page's data for /token/<chain>/<id>: the token's row, the empty state (not found) for an id the helper does not

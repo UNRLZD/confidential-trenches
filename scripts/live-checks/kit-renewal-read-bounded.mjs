@@ -43,7 +43,8 @@ export const MARKERS = {
   // each leg: the rule read right before its signer is asked
   "the rule before each signer": new RegExp(`${ID}\\(\\)\\?\\?await ${ID}\\(${ID},${ID}\\.leg\\.wallet,${ID}\\.assembled,${ID}\\)`),
   // signedWire: the rule read when the signer answers, before its signature is checked or put in the wire
-  "the rule when the signer answers": new RegExp(`=await ${ID}\\.sign\\(${ID},${ID}\\.message,\\{lastValidBlockHeight:${ID}\\.lastValidBlockHeight\\}\\)\\}let ${ID}=${ID}\\(\\);if\\(${ID}\\)return ${ID};`),
+  // the signer handed the wire's message and height, or (card signers-own-bytes) the registry copy's message as a copy and its height
+  "the rule when the signer answers": new RegExp(`=await ${ID}\\.sign\\(${ID},${ID}(?:\\.message|\\.slice\\(\\)),\\{lastValidBlockHeight:${ID}(?:\\.lastValidBlockHeight)?\\}\\)\\}let ${ID}=${ID}\\(\\);if\\(${ID}\\)return ${ID};`),
   // the page (src/trade.ts legsRun): its signer passes its own three arguments straight through, with at most the
   // page's signing flag set first (card pool-read-down: no "down" from the first signature on), and its txs are the
   // kit's kept signatures alone, the list replaced by their hashes

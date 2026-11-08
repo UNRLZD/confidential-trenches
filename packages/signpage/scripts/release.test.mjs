@@ -235,21 +235,23 @@ test("planted: any change to what SIGN_HOST serves, with no new release, fails: 
   }
 });
 
-test("planted: the newest list is picked by N, not by text (release-100 after release-99)", () => {
+test("planted: the newest list is picked by N, not by text (release-1000 after release-999)", () => {
   const dir = releasesCopy();
   try {
     const newest = Object.keys(RELEASED).at(-1);
-    // release-99 an old list (release-1's, not this build), release-100 this build's: release-100 is the newest. Both
-    // past any real release, so a real list is never overwritten ("release-100" sorts before "release-99" as text)
-    writeFileSync(join(dir, "release-99.json"), readFileSync(join(dir, "release-1.json")));
-    writeFileSync(join(dir, "release-100.json"), readFileSync(join(dir, `${newest}.json`)));
-    const ledger = { ...RELEASED, "release-99": RELEASED["release-1"], "release-100": RELEASED[newest] };
+    // lo an old list (release-1's, not this build), hi this build's: hi is the newest. Both past any real release (one
+    // more digit than the ledger's newest), so a real list is never overwritten (hi sorts before lo as text)
+    const d = String(Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))))).length + 1;
+    const [lo, hi, next] = [`release-${10 ** d - 1}`, `release-${10 ** d}`, `release-${10 ** d + 1}`];
+    writeFileSync(join(dir, `${lo}.json`), readFileSync(join(dir, "release-1.json")));
+    writeFileSync(join(dir, `${hi}.json`), readFileSync(join(dir, `${newest}.json`)));
+    const ledger = { ...RELEASED, [lo]: RELEASED["release-1"], [hi]: RELEASED[newest] };
     assert.deepEqual(releaseProblems(dir, ledger), []);
-    // and the other way round, release-100 the stale one, fails on release-100
-    writeFileSync(join(dir, "release-99.json"), readFileSync(join(dir, `${newest}.json`)));
-    writeFileSync(join(dir, "release-100.json"), readFileSync(join(dir, "release-1.json")));
-    const p = releaseProblems(dir, { ...RELEASED, "release-99": RELEASED[newest], "release-100": RELEASED["release-1"] });
-    assert.ok(p.length && p.every((l) => l.startsWith(`release-100 ${STALE}`) && l.endsWith(": write release-101")), p.join("\n"));
+    // and the other way round, hi the stale one, fails on hi
+    writeFileSync(join(dir, `${lo}.json`), readFileSync(join(dir, `${newest}.json`)));
+    writeFileSync(join(dir, `${hi}.json`), readFileSync(join(dir, "release-1.json")));
+    const p = releaseProblems(dir, { ...RELEASED, [lo]: RELEASED[newest], [hi]: RELEASED["release-1"] });
+    assert.ok(p.length && p.every((l) => l.startsWith(`${hi} ${STALE}`) && l.endsWith(`: write ${next}`)), p.join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -258,12 +260,11 @@ test("planted: the newest list is picked by N, not by text (release-100 after re
 test("planted: a list not in the ledger, and a ledger entry whose list is gone, fail; a written release is never written again", () => {
   const dir = releasesCopy();
   try {
-    // two tags past the ledger's newest, so a cut never turns them into real ones
-    const top = Math.max(...Object.keys(RELEASED).map((k) => Number(k.slice("release-".length))));
-    const gone = `release-${top + 1}`;
-    const stray = `release-${top + 2}`;
-    writeFileSync(join(dir, `${stray}.json`), readFileSync(join(dir, "release-1.json")));
-    assert.ok(releaseProblems(dir).some((l) => l.startsWith(`${stray} is not in RELEASED`)));
+    // planted past the ledger's newest, so a cut release never takes a planted number
+    const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
+    const [unlisted, gone] = [`release-${n + 2}`, `release-${n + 1}`];
+    writeFileSync(join(dir, `${unlisted}.json`), readFileSync(join(dir, "release-1.json")));
+    assert.ok(releaseProblems(dir).some((l) => l.startsWith(`${unlisted} is not in RELEASED`)));
     assert.ok(releaseProblems(dir, { ...RELEASED, [gone]: "0".repeat(64) }).includes(`${gone} is in RELEASED but its list is gone`));
   } finally {
     rmSync(dir, { recursive: true, force: true });

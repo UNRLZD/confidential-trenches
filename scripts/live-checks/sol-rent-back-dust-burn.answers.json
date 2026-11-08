@@ -6,8 +6,8 @@
     "beforeFix": "b9fc0c5b's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before the review of bf467ae7's fold (a balance a full sell left held as W's own; the sell read at confirmed, after W's accounts): FAIL on the stranger's-balance rule alone"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ILfP00KPO8JVyUf86h+FvnrgRD60Wwm5fLhPx28eHgdA05pH6htixjsK2jOgN8G0\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-ILfP00KPO8JVyUf86h+FvnrgRD60Wwm5fLhPx28eHgdA05pH6htixjsK2jOgN8G0",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-W8HGMaVR/FQjaAmFVPdTRaDTYmr6TCWbWx39PseAgX84R0b34vgWtFLZr+Tk9zW8\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-W8HGMaVR/FQjaAmFVPdTRaDTYmr6TCWbWx39PseAgX84R0b34vgWtFLZr+Tk9zW8",
     "carries": {
       "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
       "a balance is a stranger's only when the sell itself, read ok and final on both RPCs before W's accounts, says plainly what W's account held after it; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": true,

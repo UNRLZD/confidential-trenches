@@ -72,7 +72,7 @@ import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../../wallet
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta } from "./pool-buy.ts";
+import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
@@ -83,6 +83,8 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 export type PoolSellHost = {
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
   pin: SolanaPoolPin;
+  /** W's buy mint, as the buy wrote it (pool-buy.ts BuyMints): read by the rent back. */
+  bought?: BuyMints;
   /** Two RPCs of different operators. */
   rpcs: readonly [SolanaRpc, SolanaRpc];
   /** The note store, opened top-level. */
@@ -436,6 +438,19 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
   };
 };
 
+/** W's buy mints, in the wallet store's meta/owed/buy-sol, by W's address (pool-buy.ts BuyMints). */
+export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">>): BuyMints => {
+  const KEY = "owed/buy-sol";
+  type All = Record<string, { mint: string; program: string }>;
+  return {
+    get: async (address) => {
+      const all = ((await (await store()).get("meta", KEY)) as All | undefined) ?? {};
+      return Object.hasOwn(all, address) ? all[address] : undefined;
+    },
+    put: async (address, m) => void (await (await store()).update("meta", KEY, (v) => ({ ...((v as All | undefined) ?? {}), [address]: { mint: m.mint, program: m.program } }))),
+  };
+};
+
 /** A sell, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
 async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<PoolSellAnswer> {
   for (let i = 0; ; i++) {
@@ -763,7 +778,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
   return wire;
 };
 
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: BuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>> };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: BuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -798,10 +813,12 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    claims it; its note INCOMING with the send before it leaves, then the sell
  *    lock is free (review L6): the settle at the next state read (settlePoolSells) gives its verdict. Under the smallest
  *    note the device spends (solanaSweepFloor, review M1), nothing is sent: W keeps its lamports.
- * A mint the device never traded on W (an airdrop, a stranger's token, what the page's holdings show of any mint not in
- * W's record) never holds the pass back: its account is not among the addresses the plan reads, so it is never burned or
- * closed, its tokens stay W's under the 12 words, and W's SOL is swept as usual (review 6 of 13898c19, F2; after a
- * restore that lost the trade record too, since nothing of such an account is touched).
+ * W's own coin is its one buy's mint, which the buy writes before its send (h.bought): it joins the record's mints, so W
+ * holding any unit of it holds the pass and keeps every lamport its sell needs (delta review 7 of 08290868). Any other
+ * mint (an airdrop, a stranger's token) never holds the pass back: its account is not among the addresses the plan
+ * reads, so it is never burned or closed, its tokens stay W's under the 12 words, and W's SOL is swept as usual (review 6
+ * of 13898c19, F2). A W with no buy record (a buy from before the record, or a restored device) holds while the page's
+ * holdings show any token the record does not name: its own coin is never stranded, at worst its rent waits.
  */
 async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ended> {
   const seeds: Uint8Array[] = [];
@@ -873,6 +890,11 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     return null;
   };
   try {
+    // no buy record of W's (a buy from before it was written, or a restored device): W holding any token the record does
+    // not name keeps everything (the page's holdings: a skip is the safe side), so W's own coin is never stranded; with
+    // the record, W's buy mint is among x.mints (rentBackOwed) and a stranger's mint never holds the pass back
+    const mints = new Set(x.mints.map((m) => m.mint));
+    if (x.buy === null && [...w.holdings.tokens].some(([mint, t]) => !mints.has(mint) && t.amount > 0n)) return end("holds", "W holds a token and no buy of W's is recorded");
     const addresses = solanaTeardownAddresses(w.address, x.mints);
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
@@ -953,8 +975,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
         return simulations;
       };
       const t = await solanaTeardownChecked(w.address, plan, accounts, [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight }, simulate, read.burn);
-      checkSolanaTeardownFrames(t.frames.map((f) => f.wire), ctx, t.reads);
-      return { keep: t.plan.keep, signed: await signAll(t.frames.map((f) => f.wire)), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
+      // the copies the kit checked, handed to no one, are the bytes checked again here and signed (card signers-own-bytes)
+      checkSolanaTeardownFrames(t.wires, ctx, t.reads);
+      return { keep: t.plan.keep, signed: await signAll(t.wires), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
     });
     if (teardown === null) return end("gave_up", "the teardown");
     if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: no full sell of it landed" : "W holds a token it traded: its sell not final yet", teardown.ok.holds);
@@ -1073,12 +1096,18 @@ async function heldSeen(x: RentBack): Promise<string | undefined> {
   const addresses = [x.w.address, ...solanaTeardownAddresses(x.w.address, x.mints)];
   const [a, b] = (await both(x.rpcs, (r) => accountsOf(r, addresses))).map((reads) => reads.map((t) => (t === null ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`)).join("|"));
   if (a !== b) return undefined;
-  return base64.encode(keccak_256(new TextEncoder().encode(`${a}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
+  // with no buy record, the page's holdings decide whether W holds (rentBack), so they are part of what W reads as
+  const tokens = x.buy === null ? `#${[...x.w.holdings.tokens].filter(([, t]) => t.amount > 0n).map(([mint]) => mint).sort().join(",")}` : "";
+  return base64.encode(keccak_256(new TextEncoder().encode(`${a}${tokens}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
 }
 
 /** A rent back, then its owed record: none when W reads as it did when its last pass ended on W's own state (review 3
  *  of c1fd2d20, 2b: a steady W costs one read a load, not a pass). */
-async function rentBackOwed(h: PoolSellHost, x: RentBack, o: OwedRentBack, hold?: Hold): Promise<void> {
+async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, hold?: Hold): Promise<void> {
+  // W's buy mint joins the mints the pass reads (delta review 7 of 08290868): W holding any of it holds the pass, its
+  // account closed with the rest once empty; a record that cannot be read is no record (the safe side)
+  const buy = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);
+  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };
   const seen = await heldSeen(x).catch(() => undefined);
   if (seen !== undefined && seen === o.seen) return;
   const r = await rentBack(h, x, hold);

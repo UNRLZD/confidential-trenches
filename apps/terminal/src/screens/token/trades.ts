@@ -84,10 +84,18 @@ const same = (a: readonly Trade[], b: readonly Trade[]): boolean =>
 
 const NONE: readonly Trade[] = [];
 
+/** The tape as the page draws it: `loading` until the first read ends, `none` when the last read failed (no marks, the
+ *  Trades tab's empty state), `ready` with the rows of the last good read (which may be none). */
+export interface Tape {
+  trades: readonly Trade[];
+  status: "loading" | "ready" | "none";
+}
+const LOADING: Tape = { trades: NONE, status: "loading" };
+
 /** The token's newest trades: read on mount and every 3 s while mounted (longer after failed reads, none while hidden); stopped on unmount and when the chain or the
- *  token change (then the list starts empty). A failed read leaves no marks. */
-export function useTrades(chain: MarketChain | null, token: string | null): readonly Trade[] {
-  const [state, setState] = useState<{ key: string; trades: readonly Trade[] }>({ key: "", trades: NONE });
+ *  token change (then the list starts from loading). A failed read leaves no marks. */
+export function useTrades(chain: MarketChain | null, token: string | null): Tape {
+  const [state, setState] = useState<{ key: string; tape: Tape }>({ key: "", tape: LOADING });
   const key = chain !== null && token !== null ? `${chain}\n${token}` : "";
   useEffect(() => {
     if (chain === null || token === null) return;
@@ -102,7 +110,9 @@ export function useTrades(chain: MarketChain | null, token: string | null): read
       }
       const t = await readTrades(chain, token, fetch, stop.signal);
       if (stop.signal.aborted) return;
-      setState((s) => (s.key === key && t !== null && same(s.trades, t) ? s : { key, trades: t ?? NONE }));
+      setState((s) =>
+        s.key === key && t !== null && s.tape.status === "ready" && same(s.tape.trades, t) ? s : { key, tape: t === null ? { trades: NONE, status: "none" } : { trades: t, status: "ready" } },
+      );
       // a failed read draws no marks and waits longer each time (nextWait), so a helper that cannot answer is not asked
       // every 3 s; a good read goes back to TRADES_POLL_MS
       fails = t === null ? fails + 1 : 0;
@@ -114,7 +124,7 @@ export function useTrades(chain: MarketChain | null, token: string | null): read
       clearTimeout(timer);
     };
   }, [chain, token, key]);
-  return state.key === key ? state.trades : NONE;
+  return state.key === key ? state.tape : LOADING;
 }
 
 /** A trader's address as the card draws it: the first 4, an ellipsis, the last 4; a short one whole. */

@@ -6,8 +6,8 @@
     "beforeFold": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: any SIM refusal turned every claim off and W's owed record was dropped: FAIL on the marks review M1 and L1 changed"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-j/9twhSANZA8bqb0CNtoKEIVhPk8bikj4q3W4zYxdjjm0WjAAvB4yl+lSn25wt/C\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-j/9twhSANZA8bqb0CNtoKEIVhPk8bikj4q3W4zYxdjjm0WjAAvB4yl+lSn25wt/C",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-W8HGMaVR/FQjaAmFVPdTRaDTYmr6TCWbWx39PseAgX84R0b34vgWtFLZr+Tk9zW8\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-W8HGMaVR/FQjaAmFVPdTRaDTYmr6TCWbWx39PseAgX84R0b34vgWtFLZr+Tk9zW8",
     "carries": {
       "PumpSwap's claim_cashback": true,
       "pump's claim_cashback_v2": true,
