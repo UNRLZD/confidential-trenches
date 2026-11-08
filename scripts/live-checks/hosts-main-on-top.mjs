@@ -36,9 +36,14 @@
 //     (certspotter's revoked, read from the CA's revocation lists), but sign.'s Google Trust Services certificates
 //     (CERTS_ALLOWED), whose keys Cloudflare holds, and Cloudflare serves SIGN_HOST itself. A child's certificate whose
 //     key someone kept would let a page on that child, on a network that steers its lookup, run SIGN_HOST's passkeys.
-//     certspotter alone gives revocation, so the line fails when it is unread.
+//     The line FAILs only on an unexpired child certificate certspotter has read as not revoked that is not one the
+//     cutover revoked (CUTOVER_REVOKED, each proven by the CA's own answers in scripts/deploy/hosts-cutover.sh). It is
+//     INCONCLUSIVE, never PASS or FAIL, when certspotter is unread, gives no revocation, or still lists one of those as
+//     not revoked (it reads the CA's lists on its own schedule): a deploy cannot make or keep a certificate, so this
+//     line never fails one. The check then ends INCONCLUSIVE (exit 2) if every other line holds.
 // The tree holds no child either: scripts/ci/host-children.mjs, in test:gates.
-//   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
+//   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, INCONCLUSIVE or error
+//   exit 2
 // --record writes every answer the run read to <file>, so the check's test can replay it.
 import "../net-window.mjs";
 import { createHash, randomBytes } from "node:crypto";
@@ -60,6 +65,9 @@ export const HELPER_ORIGIN = `https://${HELPER_HOST}`;
 export const WEBAUTHN = "/.well-known/webauthn";
 /** Origins the helper must not echo: the retired signing page's, and another site's. */
 export const REFUSED_ORIGINS = [`https://sign.${SIGN_HOST}`, "https://evil.example"];
+/** The certificates the cutover revoked at Let's Encrypt (certspotter ids): api.'s, the three ctwatch-test. ones and
+ *  SIGN_HOST's own of 2026-10-20. Until certspotter reads them revoked, the certificate line is INCONCLUSIVE. */
+export const CUTOVER_REVOKED = ["18102517185", "17921097554", "17921221760", "17921365530", "17883777060"];
 /** Child certificates that may stay good, each with its reason. */
 export const CERTS_ALLOWED = [
   { names: [`sign.${SIGN_HOST}`], issuer: "Google Trust Services", why: "Pages' certificate for the old sign.: Cloudflare holds its key, and Cloudflare serves SIGN_HOST itself" },
@@ -172,13 +180,17 @@ export function ctNames(rec, name) {
   return { names: [...all].filter((n) => n.endsWith(`.${SIGN_HOST}`)).sort() };
 }
 
-/** certspotter's unexpired certificates naming a child of SIGN_HOST that are neither revoked nor allowed:
- *  { bad: [line], count } or { error }. `now` is the run's time. */
+/** certspotter's unexpired certificates naming a child of SIGN_HOST, neither revoked nor allowed: { fail, wait, count }
+ *  (fail: read as not revoked and not one the cutover revoked; wait: one the cutover revoked that certspotter does not
+ *  yet list revoked, or any whose revocation certspotter gave no answer on), or { error } when certspotter is unread.
+ *  `now` is the run's time. */
 export function ctCerts(rec, now) {
   const src = CT_SOURCES.find((s) => s.name === "certspotter");
   const read = rec.ct?.find((c) => c.source === "certspotter");
-  if (!ctNames(rec, "certspotter").names) return { error: ctNames(rec, "certspotter").error };
-  const out = [];
+  const whole = ctNames(rec, "certspotter");
+  if (!whole.names) return { error: whole.error };
+  const fail = [];
+  const wait = [];
   let count = 0;
   for (const p of read.pages) {
     for (const c of ctPage(src, p).json) {
@@ -189,10 +201,14 @@ export function ctCerts(rec, now) {
       const issuer = String(c.issuer?.friendly_name ?? c.issuer?.name ?? "");
       if (c.revoked === true) continue;
       if (CERTS_ALLOWED.some((a) => kids.every((n) => a.names.includes(n)) && names.every((n) => n === SIGN_HOST || a.names.includes(n)) && issuer.includes(a.issuer))) continue;
-      out.push(`${c.id} for ${kids.join(", ")} (${issuer || "issuer unread"}, to ${c.not_after}) ${c.revoked === false ? "is not revoked" : "has no revocation read"}`);
+      const what = `${c.id} for ${kids.join(", ")} (${issuer || "issuer unread"}, to ${c.not_after})`;
+      // certspotter answers revoked false by default; it has read the CA's lists only when its revocation has a checked_at
+      if (c.revoked !== false || !c.revocation?.checked_at) wait.push(`${what} has no revocation read`);
+      else if (CUTOVER_REVOKED.includes(String(c.id))) wait.push(`${what}, revoked by the cutover, is not yet read revoked`);
+      else fail.push(`${what} is not revoked`);
     }
   }
-  return { bad: out, count };
+  return { fail, wait, count };
 }
 
 const sha = (alg, text, enc) => createHash(alg).update(text).digest(enc);
@@ -315,13 +331,24 @@ export function judge(rec) {
     add(g.every((x) => !x.error && x.status === NXDOMAIN), `${name}, in the CT logs: NXDOMAIN on both: ${g.map(say).join("; ")}`);
   }
   const certs = ctCerts(rec, Date.parse(rec.at ?? "") || Date.now());
-  add(!certs.error && !certs.bad.length, certs.error ? `child certificates: certspotter unread (${certs.error}), so their revocation is not judged` : `child certificates: ${certs.count} unexpired, ${certs.bad.length ? `still good: ${certs.bad.join("; ")}` : `each revoked or allowed (${CERTS_ALLOWED.map((a) => `${a.names.join(", ")} by ${a.issuer}: ${a.why}`).join("; ")})`}`);
+  let unsure = false;
+  if (certs.error) {
+    unsure = true;
+    lines.push(`INCONCLUSIVE child certificates: certspotter unread (${certs.error}), so their revocation is not judged`);
+  } else if (certs.fail.length) {
+    add(false, `child certificates: ${certs.count} unexpired, still good: ${[...certs.fail, ...certs.wait].join("; ")}`);
+  } else if (certs.wait.length) {
+    unsure = true;
+    lines.push(`INCONCLUSIVE child certificates: ${certs.count} unexpired, not yet read revoked: ${certs.wait.join("; ")}`);
+  } else {
+    add(true, `child certificates: ${certs.count} unexpired, each revoked or allowed (${CERTS_ALLOWED.map((a) => `${a.names.join(", ")} by ${a.issuer}: ${a.why}`).join("; ")})`);
+  }
   const app = of(APP_HOST);
   add(app.every((g) => !g.error && g.status === NOERROR && g.cnames[0] === APP_TARGET && g.as.length > 0), `${APP_HOST} is the terminal's project ${APP_TARGET}: ${app.map(say).join("; ")}`);
   const helper = of(HELPER_HOST);
   add(helper.every((g) => !g.error && g.status === NOERROR && g.cnames.length === 0 && g.as.length === 1 && g.as[0] === HELPER_IP), `${HELPER_HOST} is ct-helper's primary IP: ${helper.map(say).join("; ")}`);
   judgeHttp(rec.http, add);
-  return { ok, lines };
+  return { ok: ok && !unsure, inconclusive: ok && unsure, lines };
 }
 
 /** The HTTPS lines: the signing page's origin, the rp.id, both CSPs, the webauthn path, the helper's CORS, the
@@ -368,10 +395,10 @@ if (import.meta.main) {
     const rec = await read();
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     if (rec.answers.every((x) => x.error)) throw new Error(`no resolver answered: ${rec.answers[0]?.error}`);
-    const { ok, lines } = judge(rec);
+    const { ok, inconclusive, lines } = judge(rec);
     for (const l of lines) console.log(l);
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
-    process.exit(ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${ok ? "PASS" : inconclusive ? "INCONCLUSIVE" : "FAIL"}`);
+    process.exit(ok ? 0 : inconclusive ? 2 : 1);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);

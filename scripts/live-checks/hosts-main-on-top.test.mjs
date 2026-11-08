@@ -5,10 +5,12 @@
 //         exactly those lines; its CT reads as they came (crt.sh's list without its canary, certspotter's api.,
 //         ctwatch-test. and sign.);
 //   good: DNS and CT from the 2026-11-06 run's own answers, each moved to the name it answers once the clicks are done;
-//         HTTPS from release-92's own list and build; certspotter's list as read on 2026-11-08 01:33Z with the four
-//         Let's Encrypt child certificates revoked as the cutover revokes them (the answers' about says each part): PASS;
-//   bad_cert: the good answer with that certspotter list as read, api.'s and ctwatch-test.'s certificates unrevoked:
-//         FAIL on the certificate line alone;
+//         HTTPS from release-92's own list and build; certspotter's list as read on 2026-11-08 01:33Z with the five
+//         certificates the cutover revokes marked revoked (the answers' about says each part): PASS;
+//   stale_cert: the good answer with that certspotter list as read, the four child certificates the cutover revokes
+//         still read not revoked: INCONCLUSIVE on the certificate line alone;
+//   unread_cert: certspotter refusing (HTTP 429) while crt.sh's list is whole: INCONCLUSIVE on that line alone;
+//   bad_cert: a sixth child certificate, unknown to the cutover, read not revoked: FAIL on that line alone;
 //   bad_cors: the good answer with a helper that echoes any origin: FAIL on the two refusal lines alone.
 // Planted on the good answer: a wildcard, a child with a record of another type, a resolver that disagrees or does not
 // answer, SIGN_HOST on the terminal's project, the helper on another address, a child in the CT logs that answers or
@@ -20,7 +22,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctCerts, ctNames, REFUSED_ORIGINS, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
+import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctCerts, ctNames, CUTOVER_REVOKED, REFUSED_ORIGINS, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "hosts-main-on-top.answers.json"), "utf8"));
@@ -66,7 +68,6 @@ test("recorded bad answer, today's DNS: SIGN_HOST is the terminal's, api. and si
       `BAD ${SIGN_HOST} is the signing page's project ${SIGN_TARGET}`,
       `BAD api.${SIGN_HOST}, api.`,
       `BAD sign.${SIGN_HOST}, sign.`,
-      "BAD child certificates",
       "BAD https",
       "BAD rp.id",
       `BAD ${SIGN_HOST}'s CSP`,
@@ -86,14 +87,32 @@ test("recorded bad answer, today's DNS: SIGN_HOST is the terminal's, api. and si
   assert.match(lines, /BAD https:\/\/api\.confidential\.unrealized\.trade\/ gives no answer: HTTP 404/);
 });
 
-test("recorded bad answer (review F1), certspotter's list on 2026-11-08: api.'s and ctwatch-test.'s certificates unexpired and not revoked: FAIL on that line alone", () => {
+const unsure = (r) => r.lines.filter((l) => l.startsWith("INCONCLUSIVE"));
+
+test("recorded stale answer, certspotter's list on 2026-11-08 01:33Z: the cutover's revocations not yet read: INCONCLUSIVE on the certificate line alone", () => {
+  const r = judge(ANSWERS.stale_cert);
+  assert.equal(r.ok, false);
+  assert.equal(r.inconclusive, true);
+  assert.deepEqual(bad(r), []);
+  assert.equal(unsure(r).length, 1);
+  for (const id of ["18102517185", "17921097554", "17921221760", "17921365530"]) assert.ok(unsure(r)[0].includes(`${id} for `) && CUTOVER_REVOKED.includes(id), id);
+  // sign.'s Google Trust Services certificates are allowed by name
+  for (const id of ["18096830193", "18096839733"]) assert.ok(!unsure(r)[0].includes(id), id);
+});
+
+test("recorded unread answer, certspotter refusing: INCONCLUSIVE on the certificate line alone", () => {
+  const r = judge(ANSWERS.unread_cert);
+  assert.equal(r.inconclusive, true, r.lines.join("\n"));
+  assert.deepEqual(bad(r), []);
+  assert.deepEqual(unsure(r), ["INCONCLUSIVE child certificates: certspotter unread (HTTP 429), so their revocation is not judged"]);
+});
+
+test("recorded bad answer, a sixth child certificate unknown to the cutover read not revoked: FAIL on that line alone", () => {
   const r = judge(ANSWERS.bad_cert);
   assert.equal(r.ok, false);
+  assert.equal(r.inconclusive, false);
   assert.deepEqual(bad(r).map((l) => l.split(":")[0]), ["BAD child certificates"]);
-  const line = bad(r)[0];
-  for (const id of ["18102517185", "17921097554", "17921221760", "17921365530"]) assert.ok(line.includes(`${id} for `) && line.includes("is not revoked"), id);
-  // sign.'s Google Trust Services certificates are allowed by name
-  for (const id of ["18096830193", "18096839733"]) assert.ok(!line.includes(id), id);
+  assert.match(bad(r)[0], /18200000001 for api\.confidential\.unrealized\.trade \(Let's Encrypt, to 2027-02-06T04:00:00Z\) is not revoked/);
 });
 
 test("recorded bad answer (review F6), a helper that echoes any origin: FAIL on the two refusal lines alone", () => {
@@ -102,30 +121,38 @@ test("recorded bad answer (review F6), a helper that echoes any origin: FAIL on 
   assert.deepEqual(bad(r).map((l) => l.split(" Origin ")[1]?.split(":")[0] + ":" + l.split(" Origin ")[1]?.split(":")[1]), REFUSED_ORIGINS);
 });
 
-test("planted certificate cases: an unexpired child certificate passes only revoked, or allowed by name and issuer", () => {
+test("planted certificate cases: an unexpired child certificate FAILs only read not revoked and unknown to the cutover; else INCONCLUSIVE or fine", () => {
   const at = Date.parse(ANSWERS.good.at);
-  const cert = (names, over = {}) => ({ id: "9", dns_names: names, not_after: "2027-01-30T03:40:46Z", issuer: { friendly_name: "Let's Encrypt" }, revoked: false, ...over });
+  const read = { time: null, reason: null, checked_at: "2026-11-08T05:00:00Z" };
+  const cert = (names, over = {}) => ({ id: "9", dns_names: names, not_after: "2027-01-30T03:40:46Z", issuer: { friendly_name: "Let's Encrypt" }, revoked: false, revocation: read, ...over });
   const spot = (...cs) => withCt(ANSWERS.good, "certspotter", [page([issuance(1, [SIGN_HOST]), ...cs]), page([])]);
   const api = ["api", SIGN_HOST].join(".");
   const sign = ["sign", SIGN_HOST].join(".");
-  assert.deepEqual(ctCerts(spot(cert([api])), at).bad.length, 1, "api., revoked false");
-  assert.deepEqual(ctCerts(spot(cert([api], { revoked: true })), at).bad, [], "api., revoked true");
-  assert.deepEqual(ctCerts(spot(cert([api], { revoked: undefined })), at).bad.length, 1, "api., revocation not read");
-  assert.deepEqual(ctCerts(spot(cert([api], { not_after: "2026-11-01T00:00:00Z" })), at).bad, [], "api., expired");
-  assert.deepEqual(ctCerts(spot(cert([sign], { issuer: { friendly_name: "Google Trust Services" } })), at).bad, [], "sign. by Google");
-  assert.equal(ctCerts(spot(cert([sign])), at).bad.length, 1, "sign. by another CA");
-  assert.equal(ctCerts(spot(cert([sign, api], { issuer: { friendly_name: "Google Trust Services" } })), at).bad.length, 1, "sign. and api. by Google");
-  assert.equal(ctCerts(spot(cert([SIGN_HOST])), at).bad.length, 0, "SIGN_HOST alone is no child");
-  // the record's own line
-  const r = judge(spot(cert([api])));
-  assert.deepEqual(bad(r).map((l) => l.split(":")[0]), ["BAD child certificates"]);
-  // certspotter unread: the certificates are not judged, and the line fails
-  const un = judge(withCt(ANSWERS.good, "certspotter", [page({ message: "rate limited" }, 429)]));
-  assert.ok(bad(un).some((l) => l.startsWith("BAD child certificates: certspotter unread (HTTP 429)")), bad(un).join("\n"));
+  const of = (...cs) => ctCerts(spot(...cs), at);
+  assert.equal(of(cert([api])).fail.length, 1, "api., unknown, read not revoked");
+  assert.deepEqual(of(cert([api], { revoked: true })), { fail: [], wait: [], count: 1 }, "api., revoked");
+  assert.deepEqual([of(cert([api], { id: "18102517185" })).fail.length, of(cert([api], { id: "18102517185" })).wait.length], [0, 1], "the cutover's, not yet read revoked");
+  assert.deepEqual([of(cert([api], { revocation: undefined })).fail.length, of(cert([api], { revocation: undefined })).wait.length], [0, 1], "revocation never checked");
+  assert.deepEqual([of(cert([api], { revoked: undefined })).fail.length, of(cert([api], { revoked: undefined })).wait.length], [0, 1], "no revoked field");
+  assert.deepEqual(of(cert([api], { not_after: "2026-11-01T00:00:00Z" })).count, 0, "expired");
+  assert.equal(of(cert([sign], { issuer: { friendly_name: "Google Trust Services" } })).fail.length, 0, "sign. by Google");
+  assert.equal(of(cert([sign])).fail.length, 1, "sign. by another CA");
+  assert.equal(of(cert([sign, api], { issuer: { friendly_name: "Google Trust Services" } })).fail.length, 1, "sign. and api. by Google");
+  assert.equal(of(cert([SIGN_HOST])).count, 0, "SIGN_HOST alone is no child");
+  // the verdicts: FAIL on a read unknown one even beside a stale one; INCONCLUSIVE on a stale one alone
+  let r = judge(spot(cert([api]), cert([api], { id: "17921097554" })));
+  assert.deepEqual([r.ok, r.inconclusive, bad(r).map((l) => l.split(":")[0])], [false, false, ["BAD child certificates"]]);
+  r = judge(spot(cert([api], { id: "17921097554" })));
+  assert.deepEqual([r.ok, r.inconclusive, bad(r).length], [false, true, 0]);
+  // INCONCLUSIVE never hides another line's FAIL
+  const both = spot(cert([api], { id: "17921097554" }));
+  both.http.helper_app.acao = null;
+  r = judge(both);
+  assert.deepEqual([r.ok, r.inconclusive], [false, false]);
 });
 
 test("no line prints the helper's address", () => {
-  for (const k of ["good", "bad", "bad_cert", "bad_cors"]) for (const l of judge(ANSWERS[k]).lines) assert.ok(!l.includes(HELPER_IP), `${k}: ${l}`);
+  for (const k of ["good", "bad", "stale_cert", "unread_cert", "bad_cert", "bad_cors"]) for (const l of judge(ANSWERS[k]).lines) assert.ok(!l.includes(HELPER_IP), `${k}: ${l}`);
 });
 
 /** The good answer with its HTTPS part changed by `edit`. */
@@ -236,7 +263,8 @@ test("planted CT log cases: a child the logs name must be NXDOMAIN on both, and 
   // no source whole: certspotter limited and crt.sh's list without its canary
   r = judge(withCt(ANSWERS.good, "certspotter", [page({ message: "rate limited" }, 429)]));
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r).map((l) => l.split(":")[0]), ["BAD the CT logs are read", "BAD child certificates"]);
+  assert.deepEqual(bad(r).map((l) => l.split(":")[0]), ["BAD the CT logs are read"]);
+  assert.equal(r.inconclusive, false, "a FAIL elsewhere is a FAIL");
   assert.ok(r.lines.includes("--  certspotter: unread (HTTP 429), so its names are not judged"), r.lines.join("\n"));
   // certspotter's list without SIGN_HOST's own certificate is not whole
   assert.match(ctNames(withCt(ANSWERS.good, "certspotter", [page([issuance(2, [WWW])]), page([])]), "certspotter").error, /does not name confidential\.unrealized\.trade/);
@@ -246,8 +274,9 @@ test("planted CT log cases: a child the logs name must be NXDOMAIN on both, and 
   // crt.sh whole and certspotter unread: one whole source is enough
   const crt = withCt(withCt(ANSWERS.good, "certspotter", [{ url: "https://ct.example/", error: "ETIMEDOUT" }]), "crt.sh", [page([{ common_name: ["sign", SIGN_HOST].join("."), name_value: `${["sign", SIGN_HOST].join(".")}\n${["api", SIGN_HOST].join(".")}` }])]);
   r = judge(crt);
-  // the names are judged on crt.sh alone; the certificates' revocation is certspotter's only, so that line fails
-  assert.deepEqual(bad(r).map((l) => l.split(":")[0]), ["BAD child certificates"], r.lines.join("\n"));
+  // the names are judged on crt.sh alone; the certificates' revocation is certspotter's only, so that line is unsure
+  assert.deepEqual(bad(r), [], r.lines.join("\n"));
+  assert.equal(r.inconclusive, true);
   assert.ok(r.lines.includes("ok  the CT logs are read: crt.sh"), r.lines.join("\n"));
   assert.ok(r.lines.includes("--  certspotter: unread (ETIMEDOUT), so its names are not judged"), r.lines.join("\n"));
   // a record with no CT reads fails
