@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/solana-teardown-cashback.test.mjs: the live check replays its recorded answers
 // (solana-teardown-cashback.answers.json). good: this card's SIGN_HOST build, its teardown claiming owed cashback before
-// a volume close: PASS. bad: main 3a57948a's build: FAIL. liveBefore: SIGN_HOST before this card's deploy: FAIL. Planted
+// a volume close, and planning around a claim that does not simulate: PASS. bad: main 3a57948a's build: FAIL. liveBefore: SIGN_HOST before this card's deploy: FAIL. Planted
 // on the good one: another /app.js, no pin, each mark taken away: each FAIL; and planted bundles with a mark's line
 // changed: each FAIL.
 import assert from "node:assert/strict";
@@ -39,6 +39,8 @@ const JS = [
   "if(a.owner!==`Tk`||e.length!==Df||z.encode(e.subarray(0,32))!==t.mint||z.encode(e.subarray(32,64))!==t.uva)throw Error(`${i} is not the volume account's ${t.mint} account`);",
   "if(d&&!w.includes(d)){l.push(`${c}: close of ${e} before its claim in this frame`);continue}",
   "if(v.length!==3||v[1]?.key!==t||v[2]?.key!==t||!v[0]?.writable||!v[1]?.writable||!g(b[e-1],T)){l.push(`${c}: close of ${T.to} not right after its claim`);continue}",
+  "function Nf(e){return e.ok||!e.plan||e.plan.claim.length===0||e.results.some(e=>!e.ok&&e.id!==`SIM`)?null:`its claim did not simulate: ${(e.results.find(e=>e.id===`SIM`)?.detail??``).slice(0,160)}`}",
+  "s=await o(t),c=Nf(s.verdict);return c===null?s:o(jf(e,n,c),c)}",
   "if(t!==e.fromAmount-e.amount&&y.push(`${o}: ${e.from} holds ${t??`nothing read`} after the claim (want ${e.fromAmount-e.amount})`),e.unwrap)continue;",
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
@@ -50,7 +52,11 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("if(d&&!w.includes(d))", "if(false)"), 3],
     [JS.replace("||!g(b[e-1],T)", ""), 4],
     [JS.replace("v[1]?.key!==t||", ""), 4],
-    [JS.replace("if(t!==e.fromAmount-e.amount&&", "if(false&&"), 5],
+    [JS.replace("||e.results.some(e=>!e.ok&&e.id!==`SIM`)", ""), 5],
+    [JS.replace("e.plan.claim.length===0||", ""), 5],
+    [JS.replace("return c===null?s:o(jf(e,n,c),c)", "return s"), 6],
+    [JS.replace("o(jf(e,n,c),c)", "o(jf(e,n,c))"), 6],
+    [JS.replace("if(t!==e.fromAmount-e.amount&&", "if(false&&"), 7],
   ];
   for (const [js, i] of planted) {
     const c = facts("", js).carries;

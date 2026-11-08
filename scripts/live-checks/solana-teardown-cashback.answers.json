@@ -1,18 +1,20 @@
 {
  "_note": {
-  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+  "good": "this card's SIGN_HOST build (mainnet) after review L2's fold: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
   "bad": "main 3a57948a's build (mainnet): no claims, no claim rules: FAIL",
   "liveBefore": "SIGN_HOST read 2026-11-08T05:02:00.964Z, before this card's deploy: FAIL"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lqtt9X5Makvg0C8Qk24HCFSpVRyUXarF3Q26LF0UvYyEBcX1KtiNRss5EzCdhVJP\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-lqtt9X5Makvg0C8Qk24HCFSpVRyUXarF3Q26LF0UvYyEBcX1KtiNRss5EzCdhVJP",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-86wFenLNE4aCUNh9jx97JWtzBmillAlcKiJKqqYx4Kd/XXqX4+TW4gJ3LqUefaq4\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-86wFenLNE4aCUNh9jx97JWtzBmillAlcKiJKqqYx4Kd/XXqX4+TW4gJ3LqUefaq4",
   "carries": {
    "PumpSwap's claim_cashback": true,
    "pump's claim_cashback_v2": true,
    "the volume account's own claim account read, any other refused": true,
    "a volume close before its claim in the frame refused": true,
    "the claim's WSOL closed only right after its claim, to the wallet": true,
+   "a refusal planned around only when SIM alone refuses a claim": true,
+   "a teardown refused at SIM planned again once, claims off": true,
    "the claim paid in full in the simulation": true
   }
  },

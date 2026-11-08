@@ -1168,7 +1168,10 @@ const EXT_CONFIDENTIAL_FEE_AMOUNT = 17;
 export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000, open: 25_000, claim: 40_000 } as const;
 deepFreeze(SOLANA_TEARDOWN_CU);
 const TOKEN_ACCOUNT_LEN = 165;
-/** A 165-byte account's rent: 2,039,280 lamports at today's rate ((128 + 165) x 3,480 x 2); a claim's open pays no more. */
+/** The most lamports an account a claim opens may hold after its frame: 2,039,280, a 165-byte account's rent at the older
+ *  rate ((128 + 165) x 3,480 x 2). A cap, not the rate: mainnet's rent for 165 bytes reads 1,488,440 ((128 + 165) x
+ *  5,080, packages/wallet/src/pool/balances.ts, 5 Nov), and whatever an open takes over real rent stays in the wallet's
+ *  own account, which only the wallet can close. */
 const SOLANA_TOKEN_ACCOUNT_RENT_MAX = 2_039_280n;
 
 /** One account as a provider answered it (getMultipleAccounts, base64). */
@@ -1209,8 +1212,10 @@ export function solanaTeardownAddresses(wallet: string, mints: readonly { mint: 
 /**
  * What the teardown closes and what stays, from the device's own reads of the wallet's accounts on two providers.
  * Throws when the providers disagree on any account (the caller re-reads) or an address is not the wallet's.
+ * `unclaimed`: claims off (solanaTeardownUnclaimed: a frame carrying a claim failed its simulation); each owed volume
+ * account stays open with this reason, and every other account is planned as if nothing were owed.
  */
-export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>): SolanaTeardownPlan {
+export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: string): SolanaTeardownPlan {
   const plan: SolanaTeardownPlan = { close: [], claim: [], keep: [] };
   const volumes = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [solanaVolumeAccumulator(wallet, p), p]));
   const cash = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [p, solanaCashbackAccounts(wallet, p)]));
@@ -1294,7 +1299,8 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
       const toClose = plan.close.find((h) => h.address === c.to);
       const toKept = plan.keep.find((k) => k.address === c.to);
       let stop: string | null = null;
-      if (has === undefined || has < o.amount) stop = `the volume account's ${c.mint} account holds ${has ?? "nothing read"}`;
+      if (unclaimed !== undefined) stop = unclaimed;
+      else if (has === undefined || has < o.amount) stop = `the volume account's ${c.mint} account holds ${has ?? "nothing read"}`;
       else if (toRead === undefined) stop = `${c.to} not read`;
       else if (toRead !== null && (toRead.owner !== SOLANA_TOKEN_PROGRAM || (o.program === SOLANA_PUMP_AMM_PROGRAM ? !toClose : toRead.data[108] !== 1))) stop = `${c.to} cannot take it${toKept ? ` (${toKept.why})` : ""}`;
       if (stop) why.push(`${o.why} (${stop})`);
@@ -1331,6 +1337,8 @@ export type SolanaTeardownReads = {
   wallet: readonly [bigint, bigint];
   /** Per frame, in order: its simulation on provider A and B. */
   simulations: readonly (readonly [SolanaTeardownSimulation | null, SolanaTeardownSimulation | null])[];
+  /** Claims off, with the reason each owed volume account stays open (solanaTeardownPlan's `unclaimed`). */
+  unclaimed?: string;
 };
 export type SolanaTeardownCheckId = "READ" | "DECODE" | "FRAME" | "COVER" | "SIM";
 export type SolanaTeardownVerdict = { ok: boolean; plan: SolanaTeardownPlan | null; results: { id: SolanaTeardownCheckId; ok: boolean; detail: string }[] };
@@ -1346,7 +1354,7 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
   const r = (id: SolanaTeardownCheckId, ok: boolean, detail: string) => ({ id, ok, detail });
   let plan: SolanaTeardownPlan;
   try {
-    plan = solanaTeardownPlan(wallet, reads.accounts);
+    plan = solanaTeardownPlan(wallet, reads.accounts, reads.unclaimed);
     if (reads.wallet[0] !== reads.wallet[1]) throw new Error(`the providers disagree on the wallet's lamports: ${reads.wallet[0]}/${reads.wallet[1]}`);
   } catch (err) {
     return { ok: false, plan: null, results: [r("READ", false, (err as Error).message)] };
@@ -1511,4 +1519,17 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
     r("SIM", sim.length === 0, sim.join("; ") || "every frame clean on both providers, every closed account gone, every claim paid in full to the wallet, every lamport back less the fee"),
   ];
   return { ok: results.every((x) => x.ok), plan, results };
+}
+
+/**
+ * Whether a refused teardown goes again with claims off, and the reason the owed volume accounts then stay open: only
+ * when every check passed but SIM and the plan claims something (the claims ride in the last frame, and the verdict
+ * covers every frame, so a claim that does not simulate, a layout the program no longer takes or cashback switched off,
+ * would otherwise hold every close back). With claims off nothing owed is closed away, so the fallback can cost the
+ * wallet nothing but the claim's wait. Null otherwise: a frame, cover or read refusal is never planned around.
+ */
+export function solanaTeardownUnclaimed(v: SolanaTeardownVerdict): string | null {
+  if (v.ok || !v.plan || v.plan.claim.length === 0 || v.results.some((x) => !x.ok && x.id !== "SIM")) return null;
+  const sim = v.results.find((x) => x.id === "SIM");
+  return `its claim did not simulate: ${(sim?.detail ?? "").slice(0, 160)}`;
 }

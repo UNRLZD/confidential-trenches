@@ -10,7 +10,9 @@
 //   - the refusal of a volume close before its claim in the same frame;
 //   - the refusal of a close of the claim's WSOL account anywhere but right after its claim, to the wallet;
 //   - the simulation's claim paid in full: the volume account's claim account left with exactly what it held less the
-//     claim.
+//     claim;
+//   - a claim that does not simulate planned around once, claims off (review L2 of 5592a871): only when SIM alone
+//     refuses a plan that claims, so the other closes still go and the owed volume account stays open.
 // It does not prove those lines run or refuse: that is the kit's tests at the released commit
 // (test/solana-teardown-cashback.test.ts, a mainnet wallet owed 12,742,862 recorded on two RPCs, and planted frames
 // that claim to another account), and that the served files are that commit's build is signpage-release's.
@@ -33,6 +35,8 @@ export const MARKS = Object.freeze({
   "the volume account's own claim account read, any other refused": new RegExp(`!==(${I})\\.mint\\|\\|${I}\\.encode\\(${I}\\.subarray\\(32,64\\)\\)!==\\1\\.uva\\)throw Error\\(\`\\$\\{${I}\\} is not the volume account's \\$\\{\\1\\.mint\\} account\`\\)`),
   "a volume close before its claim in the frame refused": new RegExp(`if\\((${I})&&!${I}\\.includes\\(\\1\\)\\)\\{${I}\\.push\\(\`\\$\\{${I}\\}: close of \\$\\{${I}\\} before its claim in this frame\`\\)`),
   "the claim's WSOL closed only right after its claim, to the wallet": new RegExp(`${I}\\[1\\]\\?\\.key!==(${I})\\|\\|${I}\\[2\\]\\?\\.key!==\\1\\|\\|!${I}\\[0\\]\\?\\.writable\\|\\|!${I}\\[1\\]\\?\\.writable\\|\\|!${I}\\(${I}\\[${I}-1\\],(${I})\\)\\)\\{${I}\\.push\\(\`\\$\\{${I}\\}: close of \\$\\{\\2\\.to\\} not right after its claim\`\\)`),
+  "a refusal planned around only when SIM alone refuses a claim": new RegExp(`return (${I})\\.ok\\|\\|!\\1\\.plan\\|\\|\\1\\.plan\\.claim\\.length===0\\|\\|\\1\\.results\\.some\\((${I})=>!\\2\\.ok&&\\2\\.id!==\`SIM\`\\)\\?null:\`its claim did not simulate: `),
+  "a teardown refused at SIM planned again once, claims off": new RegExp(`(${I})=await (${I})\\(${I}\\),(${I})=${I}\\(\\1\\.verdict\\);return \\3===null\\?\\1:\\2\\(${I}\\(${I},${I},\\3\\),\\3\\)`),
   "the claim paid in full in the simulation": new RegExp(`if\\((${I})!==(${I})\\.fromAmount-\\2\\.amount&&${I}\\.push\\(\`\\$\\{${I}\\}: \\$\\{\\2\\.from\\} holds \\$\\{\\1\\?\\?\`nothing read\`\\} after the claim \\(want \\$\\{\\2\\.fromAmount-\\2\\.amount\\}\\)\`\\)`),
 });
 

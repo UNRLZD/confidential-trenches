@@ -27,6 +27,7 @@ import {
   solanaEventAuthority,
   solanaTeardownAddresses,
   solanaTeardownPlan,
+  solanaTeardownUnclaimed,
   solanaVolumeAccumulator,
   type SolanaHeldRead,
   type SolanaTeardownPlan,
@@ -34,7 +35,7 @@ import {
   type SolanaTeardownSimulation,
 } from "../src/checks/solana/checks.ts";
 import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage } from "../src/checks/solana/message.ts";
-import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0, type SolanaApiInstruction } from "../src/trade/solana/build.ts";
+import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked, type SolanaApiInstruction, type SolanaAssembled } from "../src/trade/solana/build.ts";
 import type { SolanaRpc } from "../src/trade/solana/send.ts";
 
 type RawAcc = { owner: string; lamports: number; data: [string, string] } | null;
@@ -374,4 +375,70 @@ test("funding: a wallet a pool sell left at rent(0) opens its WSOL account with 
     lamports += step;
     assert.ok(lamports >= 0n);
   }
+});
+
+// Review L2 of 5592a871: the verdict covers every frame and the claims ride in the last one, so a claim that does not
+// simulate (claim_cashback_v2 never run on a real owed account, cashback switched off, more compute than its budget,
+// more paid than owed) refused the whole teardown, every close with it; before the card only the owed account stayed.
+// solanaTeardownChecked plans again once with claims off: the owed account stays open with its reason, the rest closes.
+const SIM_ERR = { InstructionError: [2, { Custom: 6000 }] };
+// A clean simulation of a frame on the pre-state: the closes it names gone, the wallet up by their lamports less the fee.
+const cleanSim = (plan: SolanaTeardownPlan, f: SolanaAssembled): SolanaTeardownSimulation => {
+  const keys = new Set(solanaDecodeMessage(f.wire.subarray(65)).staticKeys);
+  const here = plan.close.filter((h) => keys.has(h.address));
+  return { err: null, wallet: W0 + here.reduce((x, h) => x + h.lamports, 0n) - 5_000n, accounts: Object.fromEntries(here.map((h) => [h.address, null])), amounts: {} };
+};
+
+test("L2: a claim whose frame does not simulate is planned around once, claims off: the owed volume account stays open with the reason, every other close is framed, simulated and passes", async () => {
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  assert.equal(plan.claim.length, 1);
+  // what claims off closes, whatever the reason: the lamports a clean simulation gives back
+  const off = solanaTeardownPlan(W, ACCOUNTS, "any reason");
+  const calls: SolanaAssembled[][] = [];
+  const t = await solanaTeardownChecked(W, plan, ACCOUNTS, [W0, W0], R.chain, async (fs) => {
+    calls.push([...fs]);
+    // first: the claim's frame fails on both providers; then the claims-off frames are clean
+    return calls.length === 1 ? fs.map(() => [{ err: SIM_ERR, wallet: 0n, accounts: {} }, { err: SIM_ERR, wallet: 0n, accounts: {} }] as const) : fs.map((f) => [cleanSim(off, f), cleanSim(off, f)] as const);
+  });
+  assert.equal(calls.length, 2, "simulated twice: with the claim, then claims off");
+  assert.deepEqual(failed(t.verdict), []);
+  assert.deepEqual(t.plan.claim, []);
+  assert.deepEqual(t.plan.close.map((h) => h.address), [UVA_P], "the pump volume account still closes");
+  assert.equal(t.plan.keep.length, 1);
+  assert.equal(t.plan.keep[0]!.address, UVA_A);
+  assert.match(t.plan.keep[0]!.why, /^cashback 12742862 unclaimed \(its claim did not simulate: .*Custom.*6000/);
+  assert.equal(t.reads.unclaimed, t.plan.keep[0]!.why.slice("cashback 12742862 unclaimed (".length, -1));
+  // the frames close nothing owed and claim nothing
+  for (const f of t.frames) {
+    const m = solanaDecodeMessage(f.wire.subarray(65));
+    assert.ok(!m.staticKeys.includes(UVA_A) && !m.staticKeys.includes(WSOL_W), "the owed account and its claim are out of the frames");
+  }
+  // the check is bound to the mode: the same frames judged with claims on are refused (the plan's claim is not there)
+  const { unclaimed: _off, ...claimsOn } = t.reads;
+  const on = checkSolanaTeardown(t.frames.map((f) => f.wire), W, claimsOn);
+  assert.equal(on.ok, false);
+});
+
+test("L2: nothing planned around when the plan claims nothing, or when a check other than SIM refuses: one simulation, the first verdict stands", async () => {
+  // no claim (the PumpSwap volume account's WSOL account not read): SIM fails, simulated once, refused as before
+  const noClaim = { ...ACCOUNTS };
+  delete (noClaim as Record<string, unknown>)[solanaCashbackAccounts(W, SOLANA_PUMP_AMM_PROGRAM).from];
+  const plan = solanaTeardownPlan(W, noClaim);
+  assert.equal(plan.claim.length, 0);
+  let n = 0;
+  const t = await solanaTeardownChecked(W, plan, noClaim, [W0, W0], R.chain, async (fs) => (n++, fs.map(() => [{ err: SIM_ERR, wallet: 0n, accounts: {} }, { err: SIM_ERR, wallet: 0n, accounts: {} }] as const)));
+  assert.equal(n, 1);
+  assert.equal(t.verdict.ok, false);
+  assert.deepEqual(failed(t.verdict).map((x) => x.split(" ")[0]), ["SIM"]);
+  assert.equal(t.reads.unclaimed, undefined);
+  // a refusal at FRAME, COVER, READ or DECODE is never planned around, nor a passing verdict
+  const v = checkSolanaTeardown(R.frames.map((x) => base64.decode(x)), W, await readsOf());
+  assert.equal(v.ok, true);
+  assert.equal(solanaTeardownUnclaimed(v), null);
+  for (const id of ["READ", "DECODE", "FRAME", "COVER"] as const) {
+    const bad = { ...v, ok: false, results: v.results.map((x) => (x.id === id || x.id === "SIM" ? { ...x, ok: false } : x)) };
+    assert.equal(solanaTeardownUnclaimed(bad), null, id);
+  }
+  const simOnly = { ...v, ok: false, results: v.results.map((x) => (x.id === "SIM" ? { ...x, ok: false, detail: "y".repeat(500) } : x)) };
+  assert.equal(solanaTeardownUnclaimed(simOnly), `its claim did not simulate: ${"y".repeat(160)}`, "bounded");
 });

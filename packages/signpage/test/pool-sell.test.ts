@@ -156,6 +156,9 @@ type Plant = {
   /** W's volume accounts the buy made, under each pump program named, at rent(137): owing nothing, or `owed` (its
    *  needs_claim byte set: incentive tokens to claim, so pump keeps it open) */
   volumes?: { program: string; owed?: boolean; unsettled?: boolean; cashback?: bigint }[];
+  /** PumpSwap's claim_cashback fails as the program refuses it (review L2 of 5592a871: cashback switched off, a layout
+   *  the program no longer takes) */
+  claimFails?: boolean;
   /** Provider B throttled once the sell has landed (the devnet run at 0068524a: onfinality's HTTP 429s, each call failing
    *  after page-rpc's own retries): from the first read of W's token account ("read") or the first teardown simulation
    *  ("simulate"), B's next `n` calls fail as the page's RPC fails them */
@@ -317,6 +320,7 @@ function chain(plant: Plant = {}) {
         const t = on.get(to2);
         if (uva !== solanaVolumeAccumulator(user, SOLANA_PUMP_AMM_PROGRAM) || from !== solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM) || to2 !== solanaAta(user, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)) throw new Error("ConstraintSeeds");
         if (!t || !f) throw new Error("AccountNotInitialized");
+        if (plant.claimFails) throw new Error("CashbackDisabled");
         const ud = Uint8Array.from(u.data);
         new DataView(ud.buffer).setBigUint64(82, new DataView(ud.buffer).getBigUint64(74, true), true);
         on.set(uva, { ...u, data: ud });
@@ -1457,6 +1461,37 @@ test("a full sell whose PumpSwap volume account is owed cashback: the teardown c
   const f = solanaDecodeMessage(w.c.txs.get(back[0]!)!.tx.subarray(65));
   assert.deepEqual(f.instructions.map((x) => f.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, VF.pumpswap.mintRead.owner, SOLANA_ATA_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]);
   assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
+});
+
+// Review L2 of 5592a871: the claim rides in the teardown's last frame and the verdict covers every frame, so a claim
+// that does not simulate refused the whole teardown, W's token account's close with it. Planned again with claims off,
+// W's token account still closes to W, and the owed volume account stays open, its cashback in its own WSOL account and
+// the reason told; nothing is swept, so W keeps the fee to claim it later (review L4 of 0068524a).
+test("a full sell whose PumpSwap cashback claim does not simulate: planned again with claims off, W's token account still closes to W, the owed volume account stays open with its cashback and the reason, nothing swept", async () => {
+  const CASHBACK = 12_742_862n;
+  const back: string[] = [];
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }], claimFails: true });
+  w.host.back = (s) => void back.push(s);
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const source = solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const before = w.c.accounts.get(vol)!.lamports;
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sell = w.c.deposits[0]!;
+  // W's token account closed to W; the volume account and its cashback untouched; W's own WSOL account never opened
+  assert.equal(w.c.accounts.get(solanaAta(W.address, VF.pumpswap.mint, VF.pumpswap.mintRead.owner)), undefined, "W's token account closed");
+  assert.equal(w.c.accounts.get(vol)?.lamports, before);
+  assert.equal(new DataView(w.c.accounts.get(source)!.data.buffer).getBigUint64(64, true), CASHBACK);
+  assert.equal(w.c.accounts.get(solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)), undefined);
+  // one frame, the compute limit and the token close alone; W keeps what it held plus that rent less the frame's fee
+  assert.equal(back.length, 1);
+  const f = solanaDecodeMessage(w.c.txs.get(back[0]!)!.tx.subarray(65));
+  assert.deepEqual(f.instructions.map((x) => f.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, VF.pumpswap.mintRead.owner]);
+  const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
+  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), afterSell + BigInt(TOKEN_RENT) - BigInt(FEE));
+  assert.equal(w.c.deposits.length, 1, "nothing swept");
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:kept"]);
+  assert.match(w.told[0]!.detail, new RegExp(`^${vol}: cashback ${CASHBACK} unclaimed \\(its claim did not simulate: .*CashbackDisabled`));
 });
 
 // The devnet run at 0068524a: the sell filled, then provider B answered HTTP 429 to the rent back's reads, and the

@@ -56,7 +56,7 @@
 //   wallet of the user's at most; no request carries a key or the words. Nothing here logs.
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
+import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
@@ -720,7 +720,9 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    slot); every account the plan finds closable (a token account holding none, a volume account owing nothing) is
  *    closed to W by the kit's buildSolanaTeardown frames, checked by the rule (checkSolanaTeardownFrames: the kit's
  *    checkSolanaTeardown, both RPCs' simulations included), signed by W and sent on both; each frame read back until it
- *    is on both RPCs, failed on both, or past its blockhash on both.
+ *    is on both RPCs, failed on both, or past its blockhash on both. A cashback claim that does not simulate is planned
+ *    around once with claims off (the kit's solanaTeardownChecked): its volume account stays open and owed, with the
+ *    reason, and every other close still goes.
  * 2. The sweep, only when the plan keeps nothing (review L4: an account kept, holding tokens or owing cashback or
  *    incentives, needs W's fee to be claimed or closed later) and every frame read back: W's lamports, the same on both
  *    RPCs, less its one fee and the rents the deposit takes as the program prices them (solanaDepositRents: its mark
@@ -821,12 +823,16 @@ async function rentBack(h: PoolSellHost, x: RentBack): Promise<RentBackEnd> {
       const { held, accounts, plan } = read;
       if (plan.close.length === 0) return { keep: plan.keep, signed: [], last: 0 };
       const bh = await blockhashOf(rpcs);
-      const frames = buildSolanaTeardown(w.address, plan, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight });
-      // one frame at a time on each RPC: a public provider throttles a burst
-      const simulations: [SolanaTeardownSimulation, SolanaTeardownSimulation][] = [];
-      for (const f of frames) simulations.push(await both(rpcs, (r) => simulateSolanaTeardown(r, f.wire, w.address, addresses)));
-      checkSolanaTeardownFrames(frames.map((f) => f.wire), ctx, { accounts, wallet: [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], simulations });
-      return { keep: plan.keep, signed: await signAll(frames.map((f) => f.wire)), last: bh.lastHeight };
+      // one frame at a time on each RPC: a public provider throttles a burst; a claim that does not simulate is planned
+      // around once, claims off (the kit's solanaTeardownChecked), so the closes still go and the owed account stays
+      const simulate = async (fs: readonly { wire: Uint8Array }[]) => {
+        const simulations: [SolanaTeardownSimulation, SolanaTeardownSimulation][] = [];
+        for (const f of fs) simulations.push(await both(rpcs, (r) => simulateSolanaTeardown(r, f.wire, w.address, addresses)));
+        return simulations;
+      };
+      const t = await solanaTeardownChecked(w.address, plan, accounts, [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight }, simulate);
+      checkSolanaTeardownFrames(t.frames.map((f) => f.wire), ctx, t.reads);
+      return { keep: t.plan.keep, signed: await signAll(t.frames.map((f) => f.wire)), last: bh.lastHeight };
     });
     if (teardown === null) return end("gave_up", "the teardown");
     if (teardown.ok === null) return end("holds", "W holds a token it traded: its sell has not filled");
