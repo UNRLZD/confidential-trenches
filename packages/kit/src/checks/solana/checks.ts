@@ -1233,12 +1233,17 @@ export function solanaVolumeClaimable(owner: string, v: Uint8Array): bigint {
  * `unclaimed`: claims off by pump program (solanaTeardownUnclaimed: the frame carrying the claims failed its simulation on
  * both providers); each volume account owed under a program named stays open with that program's reason, and every
  * other account, the other program's claim included, is planned as before.
+ * A System-owned account with no data at one of the wallet's addresses (lamports anyone may send to an address not yet
+ * made) is no account here: the wallet can neither close nor spend it, and the program that makes the account there
+ * takes it as it is (review 5 of 38e59182, M1: such lamports at an unused volume address refused every plan).
  * `burn`: the token accounts whose whole balance the caller burns before their close (card sol-rent-back-dust-burn: a
  * balance a landed full sell did not leave, a stranger's). Each one burns exactly the amount both providers read, of its
  * own mint, and only when it would close but for that balance: open, not native, no other close authority, and no
  * Token-2022 extension but ImmutableOwner. Any other stays kept, holding its balance.
  */
-export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: SolanaTeardownUnclaimed, burn: readonly string[] = []): SolanaTeardownPlan {
+export function solanaTeardownPlan(wallet: string, given: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: SolanaTeardownUnclaimed, burn: readonly string[] = []): SolanaTeardownPlan {
+  const none = (x: SolanaHeldRead | null): SolanaHeldRead | null => (x !== null && x.owner === SOLANA_SYSTEM_PROGRAM && x.data.length === 0 ? null : x);
+  const accounts = Object.fromEntries(Object.entries(given).map(([k, [a, b]]) => [k, [none(a), none(b)] as const]));
   const plan: SolanaTeardownPlan = { close: [], claim: [], keep: [] };
   const volumes = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [solanaVolumeAccumulator(wallet, p), p]));
   const cash = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [p, solanaCashbackAccounts(wallet, p)]));

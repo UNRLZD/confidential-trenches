@@ -198,7 +198,7 @@ test("the plan harvests only withheld fees there are", () => {
 test("the plan refuses reads it cannot trust", () => {
   assert.throws(() => planOf(token({}), { ...token({}), lamports: 1n }), /disagree/);
   assert.throws(() => planOf(token({}), { ...token({}), owner: SOLANA_TOKEN_PROGRAM }), /disagree/);
-  assert.throws(() => planOf({ owner: SOLANA_SYSTEM_PROGRAM, lamports: 1n, data: new Uint8Array(0) }), /not a token program/);
+  assert.throws(() => planOf({ owner: SOLANA_SYSTEM_PROGRAM, lamports: 1n, data: new Uint8Array(1) }), /not a token program/);
   assert.throws(() => planOf(token({ program: SOLANA_TOKEN_PROGRAM, len: 166 })), /not a token account/);
   assert.throws(() => planOf(token({ owner: STRANGER })), /not the wallet's/);
   const v = checkSolanaTeardown([], W, { accounts: ACCOUNTS, wallet: [W0, W0 + 1n], simulations: [] });
@@ -338,4 +338,20 @@ test("FRAME refuses a burn the plan has not asked for: none named, or a Token-20
     assert.match(failing(v, "FRAME"), new RegExp(`burn of 1 from ${DUST}`), `extension ${ext[0]}`);
     assert.match(failing(v, "FRAME"), new RegExp(`close of ${DUST}`), `extension ${ext[0]}`);
   }
+});
+
+// Review 5 of 38e59182, M1: lamports anyone sends to one of the wallet's addresses not yet made (a System account, no
+// data) refused every plan, so a griefed wallet's rent back gave up on every load. Such an account is no account.
+test("the plan takes a System account with no data at any of the wallet's addresses as none, and plans the rest", () => {
+  const sys = { owner: SOLANA_SYSTEM_PROGRAM, lamports: 890_880n, data: new Uint8Array(0) };
+  for (const at of [UVA_A, UVA_P, TOK.address]) {
+    const plan = solanaTeardownPlan(W, { ...ACCOUNTS, [at]: [sys, sys] });
+    assert.deepEqual(plan.close.map((h) => h.address).sort(), PLAN.close.map((h) => h.address).filter((x) => x !== at).sort(), at);
+    assert.deepEqual(plan.keep, [], at);
+  }
+  // one provider showing it, the other none yet: alike, none
+  assert.deepEqual(solanaTeardownPlan(W, { ...ACCOUNTS, [UVA_A]: [sys, null] }).close.length, PLAN.close.length - 1);
+  // with data it is still refused
+  const sysData = { ...sys, data: new Uint8Array(8) };
+  assert.throws(() => solanaTeardownPlan(W, { ...ACCOUNTS, [UVA_A]: [sysData, sysData] }), /is owned by 1111/);
 });

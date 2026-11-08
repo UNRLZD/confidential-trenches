@@ -1,11 +1,11 @@
 {
   "_note": {
-    "good": "this card's build (mainnet) on card/sol-w-sweep with review 3 of 446d830f folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "this card's build (mainnet) on card/sol-w-sweep with review 5 of 38e59182 folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bdI7qAnf/vTrk/S0pBB0DzC31RXm7KeOyPQWmkF5jKTBjCej6CfFW2fkx3t44M4U\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-bdI7qAnf/vTrk/S0pBB0DzC31RXm7KeOyPQWmkF5jKTBjCej6CfFW2fkx3t44M4U",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-avjX4uwFe9yfqvAGdKhoi/o2XsTnf3aAZNS3VXBPGleC7l+MQ3/YWLzIjBJA0ejg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-avjX4uwFe9yfqvAGdKhoi/o2XsTnf3aAZNS3VXBPGleC7l+MQ3/YWLzIjBJA0ejg",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
@@ -18,9 +18,13 @@
       "the sweep's rule leaves exactly that, for at most two": true,
       "the sweep goes on when only owed-cashback accounts are kept": true,
       "W owed, not dropped, when the rest is under the floor": true,
-      "a load that reads W as it read at its last end runs no pass": true,
-      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end with what W read as": true,
-      "a load whose own reads fail keeps every record, and the sell lock is taken per owed W, never around the list": true,
+      "a load that reads W as it read at its last end runs no pass: what W read as is both RPCs' alike bytes of W and its accounts, the helper's tokens, the rent and the rules' version": true,
+      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end from the record as it is then, with what W read as only on W's own state": true,
+      "the only empty end: the plan closes nothing, both RPCs read W's lamports alike, and they are 0, owed while a claim is owed": true,
+      "a load whose own reads fail keeps every record, each W least recently tried first, its record read again inside the locks, the list stopping where a sell holds the sell lock": true,
+      "a rent back holds W's own lock for its pass and the sell lock only between its sleeps, each sleep letting it go and taking it again only if free": true,
+      "a plan refusal ends the pass only on reads both RPCs answered alike": true,
+      "a record written goes to the end of the list, so a load tries the least recently tried W first": true,
       "the plan marks a volume account owed only cashback": true
     }
   },
@@ -39,9 +43,13 @@
       "the sweep's rule leaves exactly that, for at most two": false,
       "the sweep goes on when only owed-cashback accounts are kept": false,
       "W owed, not dropped, when the rest is under the floor": false,
-      "a load that reads W as it read at its last end runs no pass": false,
-      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end with what W read as": false,
-      "a load whose own reads fail keeps every record, and the sell lock is taken per owed W, never around the list": false,
+      "a load that reads W as it read at its last end runs no pass: what W read as is both RPCs' alike bytes of W and its accounts, the helper's tokens, the rent and the rules' version": false,
+      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end from the record as it is then, with what W read as only on W's own state": false,
+      "the only empty end: the plan closes nothing, both RPCs read W's lamports alike, and they are 0, owed while a claim is owed": false,
+      "a load whose own reads fail keeps every record, each W least recently tried first, its record read again inside the locks, the list stopping where a sell holds the sell lock": false,
+      "a rent back holds W's own lock for its pass and the sell lock only between its sleeps, each sleep letting it go and taking it again only if free": false,
+      "a plan refusal ends the pass only on reads both RPCs answered alike": false,
+      "a record written goes to the end of the list, so a load tries the least recently tried W first": false,
       "the plan marks a volume account owed only cashback": false
     }
   }
