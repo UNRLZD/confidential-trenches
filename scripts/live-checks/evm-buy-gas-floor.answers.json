@@ -1,0 +1,258 @@
+{
+ "good": {
+  "at": "2026-11-08T07:47:48.004Z",
+  "pools": [
+   {
+    "chain": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "reads": [
+     {
+      "provider": "base-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "base-mainnet.public.blastapi.io",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "reads": [
+     {
+      "provider": "robinhood-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "robinhood.drpc.org",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   },
+   {
+    "chain": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "reads": [
+     {
+      "provider": "base-sepolia-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "base-testnet.api.pocket.network",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   },
+   {
+    "chain": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "reads": [
+     {
+      "provider": "rpc.testnet.chain.robinhood.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "robinhood-sepolia-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   }
+  ],
+  "swaps": [
+   {
+    "chain": "base",
+    "reads": [
+     {
+      "provider": "base-rpc.publicnode.com",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000001559c69",
+      "low": {
+       "error": {
+        "code": -32003,
+        "message": "out of gas: gas required exceeds: 43448"
+       }
+      }
+     },
+     {
+      "provider": "base-mainnet.public.blastapi.io",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000001559476",
+      "low": {
+       "error": {
+        "code": -32003,
+        "message": "out of gas: gas required exceeds: 43448"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "reads": [
+     {
+      "provider": "robinhood-rpc.publicnode.com",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000000222648",
+      "low": {
+       "error": {
+        "code": -32000,
+        "message": "out of gas"
+       }
+      }
+     },
+     {
+      "provider": "robinhood.drpc.org",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000000222648",
+      "low": {
+       "error": {
+        "code": -32000,
+        "message": "out of gas"
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "from": "this card's read at 87f280e2, from the pool"
+ },
+ "bad": {
+  "at": "2026-11-08T07:48:06.913Z",
+  "pools": [
+   {
+    "chain": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "reads": [
+     {
+      "provider": "base-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "base-mainnet.public.blastapi.io",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "reads": [
+     {
+      "provider": "robinhood-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "robinhood.drpc.org",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   },
+   {
+    "chain": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "reads": [
+     {
+      "provider": "base-sepolia-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "base-testnet.api.pocket.network",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   },
+   {
+    "chain": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "reads": [
+     {
+      "provider": "rpc.testnet.chain.robinhood.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     },
+     {
+      "provider": "robinhood-sepolia-rpc.publicnode.com",
+      "result": "0x000000000000000000000000000000000000000000000000000000000007a120"
+     }
+    ]
+   }
+  ],
+  "swaps": [
+   {
+    "chain": "base",
+    "reads": [
+     {
+      "provider": "base-rpc.publicnode.com",
+      "cap": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted: K`'5",
+        "data": "0x4b602735"
+       }
+      },
+      "low": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted: K`'5",
+        "data": "0x4b602735"
+       }
+      }
+     },
+     {
+      "provider": "base-mainnet.public.blastapi.io",
+      "cap": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted: K`'5",
+        "data": "0x4b602735"
+       }
+      },
+      "low": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted: K`'5",
+        "data": "0x4b602735"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "reads": [
+     {
+      "provider": "robinhood-rpc.publicnode.com",
+      "cap": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted",
+        "data": "0x4b602735"
+       }
+      },
+      "low": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted",
+        "data": "0x4b602735"
+       }
+      }
+     },
+     {
+      "provider": "robinhood.drpc.org",
+      "cap": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted",
+        "data": "0x4b602735"
+       }
+      },
+      "low": {
+       "error": {
+        "code": 3,
+        "message": "execution reverted",
+        "data": "0x4b602735"
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "from": "the same read sent from 0x...dEaD, not the pool (a kit that sent the read as any account)"
+ }
+}
