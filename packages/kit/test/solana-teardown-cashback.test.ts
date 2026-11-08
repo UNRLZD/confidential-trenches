@@ -538,19 +538,90 @@ test("L2: nothing planned around when the plan claims nothing, or when a check o
 });
 
 // Card signers-own-bytes: the bytes solanaTeardownChecked checks are copies taken before it simulates and handed to no
-// one; a frame changed while it simulates leaves them as built, so the caller signs only what was checked.
-test("solanaTeardownChecked checks, and returns as `wires`, copies taken before the simulation: a frame changed while it simulates is not what is checked or signed", async () => {
-  const accounts = stableWorld();
-  const plan = solanaTeardownPlan(W, accounts);
+// one. A frame changed while it simulates is refused (review 5 F6), so the bytes simulated are the bytes checked; and a
+// frame whose bytes read differently afterwards (an accessor here: any holder of the frame that changes it later) is never
+// what is judged, planned around or signed (review 5 F4: the reviewer's mutants T1 and T4 die here, T6 and T7 below).
+/** The frame's first byte of its fee payer (after the signatures, the v0 prefix, the header and the key count): every check refuses its change. */
+const payerByte = (wire: Uint8Array): number => 1 + 64 * wire[0]! + 1 + 3 + 1;
+/** Makes `f.wire` read as itself once (the refusal's read), then as `later` on every read after. */
+/** The recorded wallet's lamports on each provider, as readsOf reads them. */
+const WALLET: [bigint, bigint] = [W0, BigInt(R.reads[1]!.value[0]!.lamports)];
+const readsLater = (f: SolanaAssembled, later: Uint8Array): void => {
+  const first = f.wire;
+  let n = 0;
+  Object.defineProperty(f, "wire", { configurable: true, enumerable: true, get: () => (n++ === 0 ? first : later) });
+};
+
+test("solanaTeardownChecked refuses a frame changed while it simulates, in place or replaced: the bytes simulated are the bytes checked and signed (review 5 F6)", async () => {
+  // the recorded wallet: its one frame rebuilds byte for byte and its recorded simulations pass
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  const recorded = (await readsOf()).simulations;
+  const sims = (_fs: readonly SolanaAssembled[]) => recorded;
+  const changes: [string, (f: SolanaAssembled) => void][] = [
+    ["a signature byte flipped in place", (f) => { f.wire[1] = (f.wire[1]! ^ 1) & 0xff; }],
+    ["the fee payer's byte flipped in place", (f) => { const k = payerByte(f.wire); f.wire[k] = (f.wire[k]! ^ 1) & 0xff; }],
+    ["the wire replaced by other bytes", (f) => { (f as { wire: Uint8Array }).wire = Uint8Array.from(f.wire, (b, j) => (j === f.wire.length - 1 ? b ^ 1 : b)); }],
+    ["the wire cut short", (f) => { (f as { wire: Uint8Array }).wire = f.wire.slice(0, -1); }],
+  ];
+  for (const [name, change] of changes) {
+    await assert.rejects(
+      solanaTeardownChecked(W, plan, ACCOUNTS, WALLET, R.chain, async (fs) => {
+        const out = sims(fs);
+        change(fs[0]!);
+        return out;
+      }),
+      /teardown frame 0 changed while it simulated/,
+      name,
+    );
+  }
+  // the same bytes in a new array are the same frame
+  const t = await solanaTeardownChecked(W, plan, ACCOUNTS, WALLET, R.chain, async (fs) => {
+    const out = sims(fs);
+    (fs[0] as { wire: Uint8Array }).wire = Uint8Array.from(fs[0]!.wire);
+    return out;
+  });
+  assert.equal(t.verdict.ok, true);
+});
+
+test("the verdict judges the copies, never the frames: a frame whose bytes read otherwise after it simulated leaves the copies' verdict passing while the frames' fails (review 5 F4, mutant T1)", async () => {
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  const recorded = (await readsOf()).simulations;
   const built = buildSolanaTeardown(W, plan, R.chain).map((f) => Uint8Array.from(f.wire));
-  const t = await solanaTeardownChecked(W, plan, accounts, [W0, W0], R.chain, async (fs) => {
-    for (const f of fs) f.wire[1] = (f.wire[1]! ^ 1) & 0xff; // a byte of the wire changed in place
-    return fs.map((f) => [cleanSim(plan, f), cleanSim(plan, f)] as const);
+  const evil = built.map((w) => { const e = Uint8Array.from(w); const k = payerByte(e); e[k] = e[k]! ^ 1; return e; });
+  const t = await solanaTeardownChecked(W, plan, ACCOUNTS, WALLET, R.chain, async (fs) => {
+    const out = recorded;
+    fs.forEach((f, i) => readsLater(f, evil[i]!));
+    return out;
   });
   assert.equal(t.wires.length, built.length);
-  t.wires.forEach((w, i) => {
-    assert.deepEqual(w, built[i], `frame ${i}: the checked copy is the frame as built`);
-    assert.notDeepEqual(t.frames[i]!.wire, w, `frame ${i}: the frame itself was changed while it simulated`);
+  t.wires.forEach((w, i) => assert.deepEqual(w, built[i], `frame ${i}: the checked copy is the frame as built`));
+  assert.deepEqual(failed(t.verdict), [], "the verdict is the copies', and they pass");
+  assert.deepEqual(t.frames.map((f) => f.wire), evil, "the frames now read otherwise");
+  assert.equal(checkSolanaTeardown(t.frames.map((f) => f.wire), W, t.reads).ok, false, "the frames' own bytes are refused");
+});
+
+test("the re-plan around a claim that does not simulate reads the copies, never the frames: a claim frame that reads otherwise afterwards is still planned around (review 5 F4, mutant T4)", async () => {
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  assert.equal(plan.claim.length, 1);
+  const off = solanaTeardownPlan(W, ACCOUNTS, { [SOLANA_PUMP_AMM_PROGRAM]: "any reason" });
+  let calls = 0;
+  const t = await solanaTeardownChecked(W, plan, ACCOUNTS, [W0, W0], R.chain, async (fs) => {
+    calls++;
+    if (calls > 1) return fs.map((f) => [cleanSim(off, f), cleanSim(off, f)] as const);
+    // the claim fails on both; then every frame reads as a cut-short wire no check could decode
+    fs.forEach((f) => readsLater(f, f.wire.slice(0, 70)));
+    return fs.map(() => [{ err: SIM_ERR, wallet: 0n, accounts: {} }, { err: SIM_ERR, wallet: 0n, accounts: {} }] as const);
   });
-  assert.deepEqual(failed(checkSolanaTeardown(t.wires, W, t.reads)), failed(t.verdict), "the verdict is the copies' verdict");
+  assert.equal(calls, 2, "planned around: simulated with the claim, then claims off");
+  assert.deepEqual(failed(t.verdict), []);
+  assert.deepEqual(Object.keys(t.reads.unclaimed ?? {}), [SOLANA_PUMP_AMM_PROGRAM]);
+});
+
+test("the trade flow registers a teardown frame only after its verdict passes, and only with the copy checked (review 5 F4, mutants T6 and T7)", () => {
+  // the frames never leave the flow (its simulation sends providers base64 of the bytes), so after the F6 refusal a
+  // swap of either line changes nothing a run can see today; this holds the shape that keeps it so
+  const src = readFileSync(new URL("../src/trade/solana/flow.ts", import.meta.url), "utf8");
+  assert.match(src, /\n {2}const \{ frames, wires: checkedWires, verdict \} = await solanaTeardownChecked\([^\n]*\n {2}if \(!verdict\.ok \|\| frames\.length === 0\) return \{ verdict, frames: frames\.length, [^\n]*\n {2}frames\.forEach\(\(f, i\) => ownSolanaWire\(f, checkedWires\[i\]!\)\);\n/);
+  assert.equal(src.match(/ownSolanaWire\(/g)?.length, 2, "the legs' one and the teardown's one");
+  assert.doesNotMatch(src, /ownSolanaWire\([^,()]+, [^()]*\.wire\)/, "never registered with its own wire");
 });

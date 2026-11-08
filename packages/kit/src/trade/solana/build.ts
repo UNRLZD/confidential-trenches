@@ -842,6 +842,12 @@ export async function solanaTeardownChecked(
     // caller signs only these (own-wires.ts), so a change to a frame while it simulates is never signed
     const wires = frames.map((f) => Uint8Array.from(f.wire));
     const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }) };
+    // the bytes simulated are the bytes checked and signed: a frame changed while it simulated is refused (review 5 F6)
+    frames.forEach((f, i) => {
+      const w = f.wire;
+      const c = wires[i]!;
+      if (!(w instanceof Uint8Array) || w.length !== c.length || !w.every((b, j) => b === c[j])) bad(`teardown frame ${i} changed while it simulated`);
+    });
     return { plan: p, frames, wires, reads, verdict: checkSolanaTeardown(wires, wallet, reads) };
   };
   let t = await once(plan);
