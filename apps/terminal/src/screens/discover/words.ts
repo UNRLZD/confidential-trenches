@@ -40,6 +40,26 @@ export const WORDS = {
   loading: ok("Loading", "owner 1 Nov 16:45Z, keep; drafted from S5.1 skeleton rows: the list's accessible name only (never drawn)"),
   // {age} is data (listAge: 1m, 12m, 2h, 3d); the owner's pick changes only the words around it
   updated: draft("Updated {age} ago", "board/words-pending.json, card app-list-age: Discover's list header, right side, muted, only when the helper's list is older than 60 s"),
+  // the toolbar (card app-discover-toolbar): R5 discover-1440.html and discover-390.html's own labels (live UNRLZD's
+  // Toolbar.tsx words, M160 N8), and round 4's signed CN-93, CN-94 and CN-95 (owner-decisions.md:189 words-r4)
+  all: ok("All", "R5 discover-1440.html presets and discover-390.html chips"),
+  fewerFlags: ok("Fewer flags", "R5 discover-1440.html presets and discover-390.html chips"),
+  mc10k: ok("MC ≥ $10K", "R5 discover-1440.html chip-minMc"),
+  launchpad: ok("Launchpad", "R5 discover-1440.html chip-launchpad and discover-390.html m-filter-launchpad"),
+  launchpads: ok("Launchpads", "R5 discover-1440.html launchpad-menu aria-label (never drawn)"),
+  padMenuTitle: draft("Launchpads by tokens now", "R5 discover-1440.html launchpad-menu title, P.dc DV-13: CN-137 (09-design-brief §11.1), not signed"),
+  clear: ok("Clear", "CN-93 reset (words-r4, signed); R5 discover-1440.html launchpad-clear"),
+  quickBuy: ok("Quick buy", "R5 discover-1440.html discover-qb and discover-390.html m-dock"),
+  usd: ok("USD", "R5 discover-1440.html discover-qb unit"),
+  qbAmount: ok("Quick buy amount in USD", "R5 discover-1440.html discover-qb-amount aria-label (never drawn)"),
+  search: ok("Search", "CN-94 (words-r4, signed); R5 col-search aria-label `Search <column>`"),
+  clearSearch: ok("Clear search", "R5 discover-1440.html S5.14 column search aria-label (never drawn)"),
+  noResults: ok("No results", "CN-95 (words-r4, signed); R5 S5.13"),
+  pause: ok("Pause", "R5 discover-390.html m-pause"),
+  resume: ok("Resume", "R5 discover-390.html m-pause (S5.8)"),
+  paused: ok("Paused", "R5 discover-ui.js colHead pause pill"),
+  // {n} is data (the count of new tokens held back)
+  pausedNew: ok("Paused · {n} new", "R5 discover-390.html S5.8 `Paused · 3 new`; 09-design-brief S5 Pause"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
