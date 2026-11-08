@@ -16,6 +16,7 @@
 //   - neither pin is the throwaway relayer.
 // A pin the release leaves null FAILs its part. It sends nothing and moves no money. scripts/ci/bundle-checks.mjs runs
 // the bundle part on a pull request's own build (readBundle and judgeBundle, which read only the build).
+// After: sign
 //   node scripts/live-checks/wallet-mainnet-relayer-pins.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -25,9 +26,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KEY = "wallet-mainnet-relayer-pins";
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const HELPER = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 /** Mainnet's release pair (the kit's NEAR_NETWORKS.mainnet: one FastNEAR URL and dRPC). */
 export const PAIR = Object.freeze(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]);
 export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
@@ -123,7 +123,7 @@ const query = async (fetchFn, url, params) => {
 };
 const helperGet = async (fetchFn, p) => {
   try {
-    const r = await fetchFn(`${HELPER}${p}`, { redirect: "error", headers: { origin: APP }, signal: AbortSignal.timeout(15_000) });
+    const r = await fetchFn(`${HELPER}${p}`, { redirect: "error", headers: { origin: SIGN }, signal: AbortSignal.timeout(15_000) });
     const text = (await r.text()).slice(0, 4096);
     let body;
     try {
