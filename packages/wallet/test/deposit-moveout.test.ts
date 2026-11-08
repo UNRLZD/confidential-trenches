@@ -10,7 +10,7 @@ import { VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -355,22 +355,57 @@ test("review 2 of exit-ids-out: a typed account or token that is not a string is
     const signed = base64.decode(m.signed);
     const txBytes = signed.slice(0, signed.length - 65);
     assert.ok(ed25519.verify(signed.slice(signed.length - 64), sha256(txBytes), k.publicKey), `${name}: signed by the key it checked`);
-    // M2: the builder's own copy of the key is zeroed, on a build and on a refusal
-    const fill = Uint8Array.prototype.fill;
-    let zeroed = 0;
-    Uint8Array.prototype.fill = function (this: Uint8Array, v: number, ...rest: [number?, number?]) {
-      if (v === 0 && this.length === 32 && this.every((x, i) => x === k.secretKey[i])) zeroed++;
-      return fill.call(this, v, ...rest);
-    } as typeof fill;
-    try {
-      const own = keyOf();
-      b(TO, TOKEN, {}, own);
+    // M2 (review 3 M1): the builder's own copy of the key is zeroed whole, on a build and on a refusal. Every 32-byte
+    // array that holds the secret when its length is read during the call is recorded by identity (the builder reads
+    // its copy's length), and after the call each one but the caller's own must read all zero.
+    for (const refuse of [false, "read", "key"] as const) {
+      const lengthOf = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), "length")!;
+      const seen = new Set<Uint8Array>();
+      Object.defineProperty(Object.getPrototypeOf(Uint8Array.prototype), "length", {
+        ...lengthOf,
+        get(this: Uint8Array) {
+          const n = lengthOf.get!.call(this) as number;
+          if (n === 32 && this instanceof Uint8Array && k.secretKey.every((x, i) => this[i] === x)) seen.add(this);
+          return n;
+        },
+      });
+      const own = refuse === "key" ? { ...keyOf(), id: k2.id } : keyOf();
+      try {
+        if (refuse === "read") assert.throws(() => b(TO, TOKEN, { u: k2.id }, own), MoveOutRefused);
+        else if (refuse === "key") assert.throws(() => b(TO, TOKEN, { u: k2.id }, own), MoveOutRefused);
+        else b(TO, TOKEN, {}, own);
+      } finally {
+        Object.defineProperty(Object.getPrototypeOf(Uint8Array.prototype), "length", lengthOf);
+      }
       assert.ok(own.secretKey.some((x) => x !== 0), "the caller's key is the caller's to zero");
-      assert.throws(() => b(TO, TOKEN, { u: k2.id }, keyOf()), MoveOutRefused);
-    } finally {
-      Uint8Array.prototype.fill = fill;
+      seen.delete(own.secretKey);
+      assert.ok(seen.size >= 1, `${name}: the builder's copy was seen`);
+      for (const c of seen) assert.ok(c.every((x) => x === 0), `${name}${refuse ? ` (refused: ${refuse})` : ""}: a copy of the secret is left live`);
     }
-    assert.equal(zeroed, 2, `${name}: its copy zeroed after the build and after the refusal`);
+    // review 3 L1: a nonce whose + 1 is past a u64, a storage minimum past a u128, are refused, never wrapped
+    assert.throws(() => b(TO, TOKEN, { nonce: (1n << 64n) - 1n }), MoveOutRefused, `${name}: nonce 2^64 - 1`);
+    b(TO, TOKEN, { nonce: (1n << 64n) - 2n });
+  }
+});
+
+test("review 3 of exit-ids-out: a storage minimum at or past 2^128 is refused by the move and the registration; checkWithdrawCalls and checkRegisterCalls refuse a String vault or intents.near", () => {
+  const k = depositId(SEED, 1n, 0);
+  const BH = "11111111111111111111111111111111";
+  const key = () => ({ ...k, secretKey: k.secretKey.slice() });
+  const read = { height: 1000, blockHash: BH, nonce: 7n, free: NEAR, usdc: 2_500_000n, registered: false, gasPrice: 100_000_000n, u: U, to: TO, token: TOKEN };
+  for (const min of [1n << 128n, (1n << 128n) + 1n]) {
+    assert.throws(() => buildMoveOut({ read, key: key(), kind: "id", to: TO, token: TOKEN, storageMin: min }), MoveOutRefused);
+    assert.throws(() => buildRegisterOut({ read, key: key(), to: TO, token: TOKEN, storageMin: min }), MoveOutRefused);
+  }
+  buildRegisterOut({ read, key: key(), to: TO, token: TOKEN, storageMin: (1n << 128n) - 1n });
+  for (const name of [NET.vault, "intents.near"]) {
+    for (const to of [new String(name), { toJSON: () => name }] as unknown as string[]) {
+      assert.throws(() => checkWithdrawCalls(U, to, TOKEN, withdrawCalls(to, 1n, TOKEN), 2n), MoveOutRefused, `withdraw ${name}`);
+      assert.throws(() => checkRegisterCalls(U, to, TOKEN, [{ method: "storage_deposit", args: { account_id: to, registration_only: true }, gas: MOVE_GAS.storage_deposit, deposit: STORAGE_MIN }], STORAGE_MIN), MoveOutRefused, `register ${name}`);
+    }
+    const tok = new String(TOKEN) as unknown as string;
+    assert.throws(() => checkWithdrawCalls(U, TO, tok, withdrawCalls(TO, 1n, tok), 2n), MoveOutRefused);
+    assert.throws(() => checkRegisterCalls(U, TO, tok, [{ method: "storage_deposit", args: { account_id: TO, registration_only: true }, gas: MOVE_GAS.storage_deposit, deposit: STORAGE_MIN }], STORAGE_MIN), MoveOutRefused);
   }
 });
 

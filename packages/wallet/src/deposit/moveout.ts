@@ -323,6 +323,9 @@ function ownKeyCopy(k: OwnKey): OwnKey {
   }
   return key;
 }
+/** The encoder's widths: a nonce is a u64 and a deposit a u128 (it would wrap a larger one silently, review 3 L1). */
+const U64_MAX = (1n << 64n) - 1n;
+const U128_LIMIT = 1n << 128n;
 /**
  * The typed account and the token are strings: an object (a String, or one whose toJSON names the vault) would pass
  * the === refusals by identity while JSON.stringify signs another name (review 2, M1).
@@ -332,7 +335,7 @@ function namesOk(to: unknown, token: unknown): void {
 }
 /**
  * The read, copied once, for this account, typed account and token, or a refusal; its nonce a bigint at or above 0,
- * its block hash 32 bytes in base58 and its registration true or false.
+ * below 2^64 - 1 (so nonce + 1 is a u64), its block hash 32 bytes in base58 and its registration true or false.
  */
 function readFor<R extends { u: string; to: string; token: string; nonce: bigint; blockHash: string; registered: boolean }>(read: R, u: string, to: string, token: string): R {
   const r = { ...read };
@@ -343,7 +346,8 @@ function readFor<R extends { u: string; to: string; token: string; nonce: bigint
   } catch {
     hash = null;
   }
-  if (typeof r.nonce !== "bigint" || r.nonce < 0n || hash === null || hash.length !== 32 || (r.registered !== true && r.registered !== false)) throw new MoveOutRefused("the read's nonce, block hash or registration is not one");
+  // nonce + 1 is signed as a u64: the encoder would wrap a larger one silently (review 3, L1)
+  if (typeof r.nonce !== "bigint" || r.nonce < 0n || r.nonce >= U64_MAX || hash === null || hash.length !== 32 || (r.registered !== true && r.registered !== false)) throw new MoveOutRefused("the read's nonce, block hash or registration is not one");
   return r;
 }
 /** How much of what the account holds stays: an id keeps one base unit (restore finds it by its balance, W:929); A moves all, so its DeleteAccount can follow. */
@@ -373,7 +377,7 @@ export function buildMoveOut(a: { read: MoveOutReadFor; key: OwnKey; kind: "id" 
   try {
     const read = readFor(a.read, key.id, to, token);
     if (typeof read.usdc !== "bigint" || read.usdc <= keep) throw new MoveOutRefused("nothing to move on the token");
-    if (!read.registered && (typeof min !== "bigint" || min <= 0n)) throw new MoveOutRefused("the token's storage minimum is not read");
+    if (!read.registered && (typeof min !== "bigint" || min <= 0n || min >= U128_LIMIT)) throw new MoveOutRefused("the token's storage minimum is not read");
     const storageMin = read.registered ? 0n : min;
     const calls = moveCalls(to, read.usdc - keep, !read.registered, storageMin);
     // the signing page's own rule, unchanged: it bounds the amount by its usdc argument less one base unit, so an id
@@ -407,7 +411,7 @@ export function buildRegisterOut(a: { read: RegisterOutReadFor; key: OwnKey; to:
   try {
     const read = readFor(a.read, key.id, to, token);
     if (read.registered !== false) throw new MoveOutRefused("the typed account is registered on the token already");
-    if (typeof storageMin !== "bigint" || storageMin <= 0n) throw new MoveOutRefused("the token's storage minimum is not read");
+    if (typeof storageMin !== "bigint" || storageMin <= 0n || storageMin >= U128_LIMIT) throw new MoveOutRefused("the token's storage minimum is not read");
     const calls = moveCalls(to, 1n, true, storageMin).slice(0, 1);
     checkRegisterCalls(key.id, to, token, calls, storageMin);
     const nonce = read.nonce + 1n;
