@@ -167,12 +167,14 @@ test("M362 (1): a tag 3 inner step invoking Token-2022 (a transfer that runs the
   assert.deepEqual(calls, []);
 });
 
-test("M362 (5): a tag 2 W signed with a 9th account is refused before any read (not_pool)", async () => {
-  const nine = wire({ accounts: (a) => [...a, { key: TO, signer: false, writable: false }] });
-  assert.equal(verdict(nine), "not_pool");
+test("M362 (5): a tag 2 W signed with a 10th account is refused before any read (not_pool); a 9th, the next state page since d3edab1, is the program's to judge", async () => {
+  const nine = wire({ accounts: (a) => [...a, { key: TO, signer: false, writable: true }] });
+  const ten = wire({ accounts: (a) => [...a, { key: TO, signer: false, writable: true }, { key: ATTACKER, signer: false, writable: false }] });
+  assert.equal(verdict(nine), "ok");
+  assert.equal(verdict(ten), "not_pool");
   assert.equal(verdict(wire()), "ok");
   const calls: Calls = [];
-  assert.equal(code(await sender({ a: calls }).carry(body(nine))), "not_pool");
+  assert.equal(code(await sender({ a: calls }).carry(body(ten))), "not_pool");
   assert.deepEqual(calls, []);
 });
 
