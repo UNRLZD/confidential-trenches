@@ -13,8 +13,8 @@
 // testnet relayer, VT-T02's R, whose key lived only in VT-T02's run state, which is gone; this run's relayer is
 // relayer-withdraw-send's, whose key is in its state. The relayer's side is the helper's own GET /v1/withdraw/fee quote
 // and POST /v1/withdraw carry (apps/helper/src/withdraw/fee.ts, send.ts carryWithdraw, outcomeRound every 10 s), run in
-// this process with R's key and reached through the page's fetchFn at the release's URLs: the deployed helper answers
-// every testnet withdrawal token_halted (no testnet token watch).
+// this process with R's key and reached through the page's fetchFn at the release's URLs: the deployed helper carries
+// with the release's R only, so this run's R is carried here.
 //
 // Stand-ins, each named in the run record: check 10's token watch answers a caught-up, open token; the prover is
 // snarkjs in node on the pinned setup files (the page's worker runs the same files in a browser).
@@ -80,10 +80,38 @@ function parseArgs(argv: string[]) {
   for (const k of ["--parent", "--key-file", "--t04-state", "--rws-state", "--state"]) if (!v[k]) throw new Error(`${k} is required`);
   return { parent: v["--parent"]!, keyFile: v["--key-file"]!, t04State: v["--t04-state"]!, rwsState: v["--rws-state"]!, state: v["--state"]!, out: v["--out"] ?? DEFAULT_OUT };
 }
-const inside = (file: string, roots: string[]) => {
-  const real = path.resolve(file);
+/**
+ * Whether `file` is inside one of `roots` (realpaths, deploy.mjs repoRoots), compared on its real path: the file's own,
+ * or for a file not made yet its nearest existing parent's, so a symlink or another spelling of the repository on a
+ * case-insensitive disk is refused too (as deploy.mjs loadKey does).
+ */
+export function inside(file: string, roots: string[]): boolean {
+  let at = path.resolve(file);
+  const rest: string[] = [];
+  while (!existsSync(at) && path.dirname(at) !== at) {
+    rest.unshift(path.basename(at));
+    at = path.dirname(at);
+  }
+  const real = path.join(realpathSync.native(at), ...rest);
   return roots.some((r) => real === r || real.startsWith(r + path.sep));
-};
+}
+
+/**
+ * What the tap sends W for the whole note, through the form's own amount check (packages/signpage/src/withdraw/checks.ts
+ * checkAmount, on the amount as the form's field writes it, form.ts formatUnits): withdrawRequest's amount is what the
+ * recipient gets, and amount + fee must fit in the note (request.ts), so it is the note less the quoted fee. The vault
+ * pays the recipient withdrawn - fee = that amount (payout.rs). Refused as the form refuses it.
+ */
+export function tapAmountOf(
+  available: bigint, fee: bigint,
+  form: { checkAmount: (typed: unknown, a: { available: bigint | null; fee: bigint | null }) => { ok: boolean; amount?: bigint; code?: string }; formatUnits: (u: bigint) => string },
+): bigint {
+  const amount = available - fee;
+  if (amount <= 0n) throw new Error(`the note ${available} does not cover the fee ${fee}`);
+  const c = form.checkAmount(form.formatUnits(amount), { available, fee });
+  if (!c.ok || c.amount !== amount) throw new Error(`the form refuses ${amount}: ${c.code ?? "another amount"}`);
+  return amount;
+}
 /** Another run's seed (T04's, relayer-withdraw-send's), read only: never created, never printed. */
 function seedOf(file: string, roots: string[], flag: string): Buffer {
   if (inside(file, roots) || !existsSync(file)) throw new Error(`${flag}: no state file outside the repository`);
@@ -126,6 +154,8 @@ async function main() {
   const { typedRegisterDepositOf } = await wallet("arming/accounts.ts");
   const { NEAR_NETWORKS } = await wallet("deposit/account.ts");
   const { lowerFinalTime, treesOf, withdrawSettle } = await page_("withdraw/handoff.ts");
+  const { checkAmount, checkRecipient } = await page_("withdraw/checks.ts");
+  const { formatUnits } = await page_("withdraw/form.ts");
   const { vaultSync, vaultSyncStart } = await import(pathToFileURL(path.join(ROOT, "packages/kit/src/index.ts")).href);
   const { vaultScope } = await page_("withdraw/checks.ts");
 
@@ -268,13 +298,21 @@ async function main() {
   const over = { network: "testnet", fetchFn };
   steps.before ??= await balances();
   save();
-  const amount: bigint = note.leaf!.value;
   const signal = AbortSignal.timeout(600_000);
-  log(`tap: ${amount} to ${W} (the whole note ${note.id})`);
   const tap0 = Date.now();
-  // the hand-off's own steps (handoff.ts withdrawHandoff), with this run's relayer in place of the release's pair
-  const quote = await askWithdrawFee({ token: TOKEN, relayer: { relayer_account: R, fee_recipient: R }, amount, fetchFn });
-  const drawnFee: bigint = quote.relayFee;
+  // the form's own checks first, as a tap passes them: the typed account, then the amount for the whole note
+  const rc = await checkRecipient(W, "testnet", tRpcs);
+  if (!rc.ok || rc.recipient !== W) throw new Error(`the form refuses W: ${json(rc)}`);
+  const pairR = { relayer_account: R, fee_recipient: R };
+  const available: bigint = note.leaf!.value;
+  const drawn = await askWithdrawFee({ token: TOKEN, relayer: pairR, amount: available, fetchFn });
+  const drawnFee: bigint = drawn.relayFee;
+  const amount = tapAmountOf(available, drawnFee, { checkAmount, formatUnits });
+  // the hand-off's own steps (handoff.ts withdrawHandoff), with this run's relayer in place of the release's pair:
+  // the quote again for the amount, never above the fee the amount was drawn with
+  const quote = await askWithdrawFee({ token: TOKEN, relayer: pairR, amount, fetchFn });
+  if (quote.relayFee > drawnFee) throw new Error(`the fee rose from ${drawnFee} to ${quote.relayFee} between the draw and the tap: run again`);
+  log(`tap: ${amount} to ${W} (the note ${available} less the fee ${drawnFee})`);
   const [trees, blockNs] = await Promise.all([vaultSync({ vault: VAULT, rpcs: tRpcs, cursor: vaultSyncStart(VAULT), lists: ["leaves", "labels"] }).then(treesOf), lowerFinalTime(tRpcs)]);
   const seedCopy = Uint8Array.from(seed64);
   const req = await withdrawRequest({
@@ -318,8 +356,9 @@ async function main() {
     if (pr.length) throw new Error(`readback: ${t.hash}`);
   }
   const after = await balances();
-  const want = amount - BigInt(sentBody.withdrawal.relay_fee);
-  if (BigInt(after.W_usdc ?? -1) !== want) throw new Error(`W holds ${after.W_usdc} USDC, want ${want} (the note less the relay fee)`);
+  // the vault pays the recipient withdrawn - fee, which is the amount the tap asked (payout.rs)
+  if (BigInt(sentBody.withdrawal.relay_fee) + amount !== BigInt(sentBody.public_signals[2])) throw new Error("the request's withdrawn is not the amount and its fee");
+  if (BigInt(after.W_usdc ?? -1) !== amount) throw new Error(`W holds ${after.W_usdc} USDC, want ${amount} (the amount the tap asked)`);
   steps.run = {
     amount: String(amount), drawn_fee: String(drawnFee), relay_fee: String(sentBody.withdrawal.relay_fee), register_deposit: String(sentBody.withdrawal.register_deposit),
     recipient: sentBody.withdrawal.recipient, fund_recipient: sentBody.fund_recipient, end: end.kind, tap_ms: tapMs, prove_ms: proveMs, body_bytes: JSON.stringify(sentBody).length,
@@ -333,10 +372,10 @@ async function main() {
   const b = steps.before;
   const r = steps.run;
   const prose = [
-    `The run: contracts/vault/scripts/testnet-withdraw-typed.ts on NEAR testnet, the keyless vault ${VAULT} on the team's test USDC ${TOKEN}. The device's side is the signing page's and the wallet's own withdraw code run in node as the testnet build: this run's 12 words and one note planned in the note store (fake-indexeddb) and deposited by D; the hand-off's own steps (askWithdrawFee, the trees by vaultSync, lowerFinalTime, withdrawRequest with the typed account, relayWithdraw, withdrawArrival); then the settle pass a reload runs (withdrawSettle). withdrawHandoff itself pins the release's testnet relayer, whose key is not held, so its steps run with this run's relayer. The relayer's side is the helper's own GET /v1/withdraw/fee quote and POST /v1/withdraw carryWithdraw with outcomeRound every 10 s, in process with R's key, reached through the page's fetchFn at the release's URLs, because the deployed helper answers every testnet withdrawal token_halted.`,
+    `The run: contracts/vault/scripts/testnet-withdraw-typed.ts on NEAR testnet, the keyless vault ${VAULT} on the team's test USDC ${TOKEN}. The device's side is the signing page's and the wallet's own withdraw code run in node as the testnet build: this run's 12 words and one note planned in the note store (fake-indexeddb) and deposited by D; the hand-off's own steps (askWithdrawFee, the trees by vaultSync, lowerFinalTime, withdrawRequest with the typed account, relayWithdraw, withdrawArrival); then the settle pass a reload runs (withdrawSettle). withdrawHandoff itself pins the release's testnet relayer, whose key is not held, so its steps run with this run's relayer. The relayer's side is the helper's own GET /v1/withdraw/fee quote and POST /v1/withdraw carryWithdraw with outcomeRound every 10 s, in process with R's key, reached through the page's fetchFn at the release's URLs, because the deployed helper carries with the release's R only.`,
     `Stand-ins: check 10's token watch answered a caught-up, open token; the prover was snarkjs in node on the pinned setup files (single thread), not the page's worker.`,
     `Accounts: P ${P.id} (makes W), D ${D.id} (T04's depositor, deposits the note), R ${R} (relayer-withdraw-send's relayer, also the fee recipient), W ${W} (the typed account: named, no key, not registered on the token before the withdrawal).`,
-    `The request as sent: recipient ${r.recipient}, fund_recipient ${r.fund_recipient}, register_deposit ${r.register_deposit} (the token's storage minimum, read naming no account), relay_fee ${r.relay_fee} to R, the whole note ${r.amount} (leaf ${r.note.leaf}); request body ${r.body_bytes} bytes; proof ${r.prove_ms} ms.`,
+    `The request as sent: recipient ${r.recipient}, fund_recipient ${r.fund_recipient}, register_deposit ${r.register_deposit} (the token's storage minimum, read naming no account), relay_fee ${r.relay_fee} to R, amount ${r.amount} to W (the note ${r.note.value} at leaf ${r.note.leaf} less the fee: the form's checkAmount and checkRecipient passed first); request body ${r.body_bytes} bytes; proof ${r.prove_ms} ms.`,
     `The withdrawal ended ${r.end} (withdrawArrival) in ${r.tap_ms} ms from the tap; POST /v1/withdraw answers ${r.posts.join(", ")}; the reload's settle pass after it: ${json(r.settle_pass)}, with no POST.`,
     `Every Tx above read back FINAL on https://test.rpc.fastnear.com and https://near-testnet.drpc.org, every receipt a success.`,
     `Before (${b.at}): W USDC ${b.W_usdc}, W registration ${json(b.W_registration)}, R USDC ${b.R_usdc}, vault USDC ${b.vault_usdc}, R NEAR ${b.R_near}, totals ${json(b.totals)}.`,

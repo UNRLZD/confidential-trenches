@@ -31,6 +31,8 @@ export type ArrivalArgs = {
   signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
+  /** Tests only: the kit's vaultSync otherwise. */
+  sync?: typeof vaultSync;
 };
 
 export const ARRIVAL_POLL_MS = 1_000;
@@ -52,13 +54,18 @@ export async function withdrawArrival(a: ArrivalArgs): Promise<ArrivalOutcome> {
   if (nearPairNetwork(rpcs) !== network) throw new Error(nearPairRule(network));
   if (typeof nullifierHash !== "bigint" || typeof recipient !== "string" || recipient.length === 0) throw new Error("nullifierHash or recipient: not given");
   const sleep = a.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  const sync = a.sync ?? vaultSync;
+  // the cursor is kept across rounds, so a round reads only the spends from the first one not settled on (vaultSync's
+  // spends cursor stops there): the spend followed is read again each round until its payout has run, never skipped
+  let cursor = vaultSyncStart(vault);
   for (;;) {
     signal?.throwIfAborted();
     try {
-      const s = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["spends"], ...(signal ? { signal } : {}) });
+      const s = await sync({ vault, rpcs, cursor, lists: ["spends"], ...(signal ? { signal } : {}) });
       const row = s.spends.find((r) => r.nullifierHash === nullifierHash);
       const out = row === undefined ? null : arrivalOf(row, recipient);
       if (out !== null) return out;
+      cursor = s.cursor;
     } catch {
       signal?.throwIfAborted(); // one RPC down, behind or disagreeing: nothing concluded this round
     }

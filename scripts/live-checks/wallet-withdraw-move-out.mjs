@@ -7,7 +7,8 @@
 //   - / names exactly one module script, /app.js, with its integrity, and /app.js's sha384 is that integrity;
 //   - /app.js holds this card's strings, which minifying keeps (string literals): withdrawRequest's refusals of a typed
 //     recipient that is not a NEAR account id, and of the vault, intents.near or the token as the typed recipient, the arrival read's input refusal (wallet/src/withdraw/arrival.ts), and the form's unmatched
-//     notice (its mark and its draft words).
+//     notice (its mark and its draft words); and the hand-off's own wiring of the typed account into withdrawRequest
+//     (a pattern, HANDOFF_RE: a build that drops `to: w.recipient` from the hand-off fails).
 // The mainnet build offers no hand-off until the release names mainnet's relayer (handoff.ts withdrawHandoff: null);
 // the code that pays the typed account is in the bundle either way, which is what this reads.
 //   node scripts/live-checks/wallet-withdraw-move-out.mjs [--url <origin>] [--record <file>]
@@ -30,7 +31,13 @@ export const MARKERS = [
   "nullifierHash or recipient: not given",
   "dataset.notice=`unmatched`",
   "Withdrawal unmatched",
+  // the hand-off's own wiring (handoff.ts withdrawHandoff: amount: w.amount, to: w.recipient), as the minifier writes
+  // it, read by HANDOFF_RE: a build whose hand-off no longer passes the typed account to withdrawRequest pays A again
+  "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:",
 ];
+/** The hand-off marker's pattern (object keys survive minifying; the variable is any minified name). */
+export const HANDOFF_RE = /amount:[\w$]+\.amount,to:[\w$]+\.recipient,deadlineMs:/g;
+const countOf = (text, k) => (k === MARKERS[MARKERS.length - 1] ? (text.match(HANDOFF_RE) ?? []).length : text.split(k).length - 1);
 
 /** The verdict on a record: { pass, lines }. */
 export function judge(rec) {
@@ -74,7 +81,7 @@ export async function probe(origin, fetchFn = fetch) {
     status: res.status,
     bytes: body.length,
     sha384: `sha384-${createHash("sha384").update(body).digest("base64")}`,
-    markers: Object.fromEntries(MARKERS.map((k) => [k, text.split(k).length - 1])),
+    markers: Object.fromEntries(MARKERS.map((k) => [k, countOf(text, k)])),
   };
   return rec;
 }

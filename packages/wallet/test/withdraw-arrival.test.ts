@@ -42,3 +42,23 @@ test("withdrawArrival reads the release pair only, and stops on the caller's sig
   await assert.rejects(going);
   assert.equal(rounds, 3, "a read that fails concludes nothing: it reads again until stopped");
 });
+
+// review of c19ad399, L4: a round reads from the last round's cursor, never from the vault's first spend again
+test("withdrawArrival keeps its cursor across rounds: each round starts where the last one's read ended", async () => {
+  const T = NEAR_NETWORKS.testnet;
+  const rpc = (name: string) => ({ name, query: async () => ({}) });
+  const asked: number[] = [];
+  let round = 0;
+  const out = await withdrawArrival({
+    network: "testnet", rpcs: [rpc(T.fastnear[0]), rpc(T.drpc)], nullifierHash: 41n, recipient: "bob.testnet", sleep: async () => {},
+    sync: (async (a: { cursor: { spends: number } }) => {
+      asked.push(a.cursor.spends);
+      round++;
+      // round 1: rows 0-6 settled and row 7 in flight, so the cursor stops at 7; round 2: row 7 paid
+      const spends = round === 1 ? [row({ index: 7, status: "in_flight" })] : [row({ index: 7 })];
+      return { spends, cursor: { ...a.cursor, spends: 7 } };
+    }) as never,
+  });
+  assert.equal(out.kind, "arrived");
+  assert.deepEqual(asked, [0, 7], "round 2 reads from round 1's cursor");
+});

@@ -684,3 +684,32 @@ test("resume: the page dies after the send, before landed: the rerun sends the s
   const again = await withdrawSettle(page(v), { network: "testnet", rpcs: c.rpcs(), priceRpcs: pair("mainnet"), fetchFn: counting(posts), relay: async () => Promise.reject(new Error("no relay")) });
   assert.deepEqual(again.outcomes, {});
 });
+
+// review of c19ad399, L3: a landing by another attempt of these words (another device, own false) ends on its spend row
+test("a landing that is not own, paid to another account, ends elsewhere (never a bare landed)", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("eve.testnet");
+  const h = await handoffOf(v, page(v), {
+    relay: async (_seed, r) => ({ kind: "landed", own: false, change: (await v.ns.get(r.noteId))!, spend: { nullifierHash: BigInt(r.body.public_signals[1]), recipient: "eve.testnet", status: "paid", refundValue: 0n } as never }),
+    arrivalRpcs: c.rpcs(),
+    arrival: async () => Promise.reject(new Error("a landing that is not own reads no arrival")),
+  });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "elsewhere" });
+});
+
+// review of c19ad399, L4: one deadline per tap, so a tap never waits HANDOFF_WAIT_MAX_MS twice
+test("the relay and the arrival read after it share one deadline: the same signal", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("alice.testnet");
+  let relaySignal: AbortSignal | undefined;
+  let arrivalSignal: AbortSignal | undefined;
+  const landed = realRelayLanded(c)!;
+  const h = await handoffOf(v, page(v), {
+    relay: async (seed, r, deps) => ((relaySignal = deps.signal), landed(seed, r, deps)),
+    arrivalRpcs: c.rpcs(),
+    arrival: async (a) => ((arrivalSignal = a.signal), withdrawArrival(a)),
+  });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "arrived" });
+  assert.ok(relaySignal instanceof AbortSignal);
+  assert.equal(arrivalSignal, relaySignal, "the arrival waits under the relay's own deadline, not a fresh one");
+});

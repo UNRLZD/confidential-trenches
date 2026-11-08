@@ -2,24 +2,25 @@
  "good": {
   "key": "wallet-withdraw-move-out",
   "url": "local build",
-  "at": "2026-11-07T23:38:56.156Z",
+  "at": "2026-11-08T00:13:38.566Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-1T2jdLMzD2uEGZWNkob4rFvfpFVKBgXSMMkPx2l9/Xk44irmnMAymloLH0K0Frch",
+   "integrity": "sha384-EqThJA+j7IrCzplICSz/jQmdxnvqGQmHnhKdZeHHHxECOtkM5Cxf14tKzKNZX8KP",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 735214,
-   "sha384": "sha384-1T2jdLMzD2uEGZWNkob4rFvfpFVKBgXSMMkPx2l9/Xk44irmnMAymloLH0K0Frch",
+   "bytes": 735319,
+   "sha384": "sha384-EqThJA+j7IrCzplICSz/jQmdxnvqGQmHnhKdZeHHHxECOtkM5Cxf14tKzKNZX8KP",
    "markers": {
     "to: not a NEAR account id": 1,
     "to: the vault, intents.near or the token": 1,
     "nullifierHash or recipient: not given": 1,
     "dataset.notice=`unmatched`": 1,
-    "Withdrawal unmatched": 1
+    "Withdrawal unmatched": 1,
+    "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:": 1
    }
   }
  },
@@ -44,6 +45,31 @@
     "nullifierHash or recipient: not given": 0,
     "dataset.notice=`unmatched`": 0,
     "Withdrawal unmatched": 0
+   }
+  }
+ },
+ "bad_handoff_drop": {
+  "key": "wallet-withdraw-move-out",
+  "url": "local build with to: w.recipient dropped from handoff.ts",
+  "at": "2026-11-08T00:13:46.274Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-HMzZiFnv6B6y4Stpl4aVd0b6a5MvezMAFS4YUdKV3UAhfo0h3opsK9VcmmQEZ5Cw",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 735304,
+   "sha384": "sha384-HMzZiFnv6B6y4Stpl4aVd0b6a5MvezMAFS4YUdKV3UAhfo0h3opsK9VcmmQEZ5Cw",
+   "markers": {
+    "to: not a NEAR account id": 1,
+    "to: the vault, intents.near or the token": 1,
+    "nullifierHash or recipient: not given": 1,
+    "dataset.notice=`unmatched`": 1,
+    "Withdrawal unmatched": 1,
+    "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:": 0
    }
   }
  }

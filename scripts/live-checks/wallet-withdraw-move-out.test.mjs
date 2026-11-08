@@ -3,13 +3,15 @@
 // - good: this card's build (index.html and public/app.js at the card's branch, --local) served at / and /app.js: PASS;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose script still routes nothing to the typed
 //   account and shows no unmatched withdrawal: FAIL on the markers alone;
+// - bad_handoff_drop: this card's build with `to: w.recipient` dropped from the hand-off (handoff.ts), which pays
+//   the note's A again: FAIL on the hand-off marker alone (review of c19ad399, L1);
 // - and the good record with its integrity naming another script, and with one marker gone: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, localFetch, MARKERS, probe, SIGN_ORIGIN } from "./wallet-withdraw-move-out.mjs";
+import { HANDOFF_RE, judge, localFetch, MARKERS, probe, SIGN_ORIGIN } from "./wallet-withdraw-move-out.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-withdraw-move-out.answers.json"), "utf8"));
@@ -43,4 +45,22 @@ test("the good script under a page whose integrity names another script fails; o
 test("the committed build in this tree passes as the recorded good answer did", async () => {
   const rec = await probe(SIGN_ORIGIN, localFetch);
   assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
+});
+
+test("a build whose hand-off no longer passes the typed account fails, on the hand-off marker alone", () => {
+  const m = answers.bad_handoff_drop;
+  assert.equal(judge(m).pass, false);
+  assert.deepEqual(BAD(m), [MARKS]);
+  const hand = MARKERS[MARKERS.length - 1];
+  assert.equal(m.app.markers[hand], 0);
+  for (const k of MARKERS.slice(0, -1)) assert.ok(m.app.markers[k] >= 1, k);
+  assert.equal(answers.good.app.markers[hand], 1, "the card's build holds the hand-off wiring once");
+});
+
+test("the hand-off pattern reads any minified name, and only the hand-off's own wiring", () => {
+  const count = (t) => (t.match(HANDOFF_RE) ?? []).length;
+  assert.equal(count("withdrawRequest({amount:c.amount,to:c.recipient,deadlineMs:Rt(n)})"), 1);
+  assert.equal(count("{amount:$a.amount,to:_b.recipient,deadlineMs:1}"), 1);
+  assert.equal(count("{amount:c.amount,deadlineMs:Rt(n)}"), 0);
+  assert.equal(count("{amount:c.amount,to:c.account,deadlineMs:1}"), 0);
 });
