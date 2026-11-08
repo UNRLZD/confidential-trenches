@@ -1,4 +1,4 @@
-// node packages/signpage/scripts/rent-back-mutants.mjs (card sol-w-sweep, delta reviews 5 and 6 of 38e59182): plants
+// node packages/signpage/scripts/rent-back-mutants.mjs (card sol-w-sweep, delta reviews 5 and 6 of 38e59182 and 6 of 13898c19): plants
 // one mutant at a time in the signing page's rent back (src/pool-sell.ts) and the kit's teardown plan
 // (packages/kit/src/checks/solana/checks.ts), runs the test that holds it, expects it to fail, puts the source back.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -26,9 +26,27 @@ const M = [
   ["L3 a floor end always W's own state", SELL, T, "steady: cheapest < floor,", "steady: true,"],
   ["info the sell's record replaces the mints a prior one kept", SELL, T, "      owedRec.mints = mintsOf(prior?.mints, owedRec.mints);\n", ""],
   ["info a pass's end replaces the record's mints", SELL, T, "mints: mintsOf(now.mints, o.mints), ", ""],
+  // delta review 6 of 13898c19's named ones (its runner's plants, byte for byte)
+  ["review 6 N6b-sameRead-no-lamports", SELL, T, "a.owner === b.owner && a.lamports === b.lamports && a.data.length", "a.owner === b.owner && a.data.length"],
+  // N8 (the again loop's `if (e === BUSY) throw e` taken out) is left out as equivalent: a try's body never sleeps, the
+  // sleep before it is outside its try, so BUSY never reaches that catch
+  ["review 6 N10-no-back-lock", SELL, T, "  const own = await take(locks, backLock(address), ifAvailable);\n  if (!own) return true;", "  const own = () => {};"],
+  ["review 6 N10b-back-lock-busy-stops-list", SELL, T, "  if (!own) return true;", "  if (!own) return false;"],
+  ["review 6 N12-seen-no-rules-version", SELL, T, "#${POOL_RENT_BACK_RULES}`", "`"],
+  ["review 6 N16-owedAfter-no-reread", SELL, T, "    const now = (await h.owed?.list())?.find((r) => r.address === o.address) ?? o;", "    const now = o;"],
+  ["review 6 N17-owedAfter-mints-not-merged", SELL, T, "mints: mintsOf(now.mints, o.mints), passes", "mints: now.mints, passes"],
+  ["review 6 N18-zero-with-claim-dropped", SELL, T, "if (lamports === 0n) return { end: owed > 0 ? (\"owed\" as const) : (\"nothing\" as const)", "if (lamports === 0n) return { end: \"nothing\" as const"],
+  ["review 6 N19-setup-fault-no-stop", SELL, T, "        await owedAfter(h, o, \"gave_up\");\n      });\n      if (!go) return;", "        await owedAfter(h, o, \"gave_up\");\n      });\n      void go;"],
+  ["review 6 N20-setup-fault-unlocked", SELL, T, "      const go = await withHolds(locks, address, true, wait, async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;", "      const go = await (async (f: () => Promise<void>) => (await f(), true))(async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;"],
+  ["review 6 N21-sweep-refused-gives-up", SELL, T, "      if (now.k === \"refused\") return { end: \"refused\" as const, detail: now.why };", "      if (now.k === \"refused\") return { end: \"gave_up\" as const, detail: now.why };"],
+  ["review 6 N22-busy-detail-plain", SELL, T, "e === BUSY ? \"a sell took the sell lock between tries: W waits for the next load\" : faultOf(e)", "faultOf(e)"],
+  ["review 6 N24-sell-back-ifAvailable", SELL, T, "later.back = (locks) => withHolds(locks, w.address, false, wait,", "later.back = (locks) => withHolds(locks, w.address, true, wait,"],
 ];
+// ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
+const only = process.env.ONLY;
+const run = only ? M.filter(([name]) => name.includes(only)) : M;
 let killed = 0;
-for (const [name, file, test, from, to] of M) {
+for (const [name, file, test, from, to] of run) {
   const src = readFileSync(file, "utf8");
   const pairs = Array.isArray(from) ? from : [[from, to]];
   const once = pairs.find(([f]) => src.split(f).length !== 2);
@@ -56,5 +74,5 @@ for (const [name, file, test, from, to] of M) {
     process.exitCode = 1;
   }
 }
-console.log(`${killed}/${M.length} killed`);
-if (killed !== M.length) process.exitCode = 1;
+console.log(`${killed}/${run.length} killed`);
+if (killed !== run.length || run.length === 0) process.exitCode = 1;
