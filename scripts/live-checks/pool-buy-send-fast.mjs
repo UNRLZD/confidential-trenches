@@ -6,8 +6,8 @@
 // its 429s, tap to sent 19.88 s, past the kit client's 10 s), and the helper's route refused five reads the pool path
 // makes. With Origin SIGN_HOST it passes only when:
 //   - devnet: getAccountInfo of the devnet pool's account answers 200 owned by the devnet pool program (the route reads
-//     devnet, not mainnet); both are the deploy record's (pool-sol-deploy.devnet.json, read by devnetPin; a replay
-//     passes the record its recording carries, its `deployment`);
+//     devnet, not mainnet); both are today's deploy record's (pool-sol-deploy.devnet.json, read by devnetPin), for a
+//     replay too, so a recording of another program or pool FAILs;
 //   - on both routes, each read the pool path makes beyond the original list (getSlot, getBlockTime,
 //     getSignaturesForAddress, getFeeForMessage) is forwarded: 200 with a JSON-RPC answer for its own id, never 400
 //     method_not_allowed (a provider's JSON-RPC error for the planted arguments still counts);
@@ -64,9 +64,10 @@ const json = (t) => {
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)];
 
 /** The check on one recorded run: { deployment, reads: [{ route, kind: "pool" | "owner" | "pace" | "restore", method, id, ms, status, headers, body }] },
- *  against the pin of its deploy record `deployment`. */
-export function judge({ deployment, reads }) {
-  const pin = devnetPin(deployment ?? null); // a run carries its record: none is refused, never read as today's
+ *  against today's devnet pin (devnetPin()), the one a live run reads: a recorded run is judged on it too, so reads of
+ *  another program or pool FAIL; its own `deployment` is what it was read for, never its judge. */
+export function judge({ reads }) {
+  const pin = devnetPin();
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const headersOk = (r, tag) => {
@@ -111,8 +112,9 @@ export function judge({ deployment, reads }) {
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
-/** The run's reads on HELPER_HOST `base` for the pin `pin` (today's deploy record's, unless a replay passes its own). */
-export async function read(base = BASE, fetchFn = fetch, pin = devnetPin()) {
+/** The run's reads on HELPER_HOST `base` for today's devnet pin (devnetPin()), as judge reads them. */
+export async function read(base = BASE, fetchFn = fetch) {
+  const pin = devnetPin();
   const reads = [];
   let id = 1;
   const one = async (route, kind, method, params) => {

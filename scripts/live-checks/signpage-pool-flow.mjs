@@ -2,8 +2,8 @@
 // Live check of card signpage-pool-flow: the devnet pool the signing page's testnet build pins (SOL_POOLS.devnet,
 // packages/wallet/src/pool/solana.ts) is the deployed one. The pins are not read from the wallet:
 //   - the program and pool are those of contracts/pool-solana's devnet deployment record
-//     (scripts/live-checks/pool-sol-deploy.devnet.json, read by devnetPin); a replay passes the record its recording
-//     carries (its `deployment`);
+//     (scripts/live-checks/pool-sol-deploy.devnet.json, read by devnetPin); a replay is judged on today's record too, so
+//     a recording on another program or pool FAILs;
 //   - on two devnet RPCs of two operators, pool-sol-deploy's own check passes for that program:
 //     - an executable upgradeable-loader program with its upgrade authority none, and the build's code;
 //     - the pool account the program's, with the record's deposit in its trees;
@@ -183,10 +183,13 @@ function b58(bytes) {
 }
 
 /** The verdict for `program` read through `fetchFn` (live, or a recorded answer replayed), and SIGN_HOST's read `sign`,
- *  against the pin of the deploy record `deployment` and the table pin `pinTable` (today's; a replay passes its
- *  recording's, its `deployment` and `pin_table`). */
-export async function check({ deployment = devnetPin().record, pinTable = PIN.table, program, table = pinTable, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper } = {}) {
-  const pin = devnetPin(deployment);
+ *  against today's devnet pin (devnetPin(), the deploy record pool-sol-deploy.devnet.json) and today's table pin
+ *  PIN.table, the ones a live run reads: a replay is judged on them too, so a recording on another program, pool or
+ *  table FAILs (it takes no deploy record or table pin of its own). */
+export async function check({ program, table = PIN.table, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper, ...rest } = {}) {
+  if ("deployment" in rest || "pinTable" in rest) throw new Error("check reads today's devnet pin and table only: no deploy record or table pin is passed in");
+  const pinTable = PIN.table;
+  const pin = devnetPin();
   const record = pin.record;
   program ??= pin.program;
   const lines = [];
@@ -213,7 +216,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const deployment = devnetPin().record;
     const program = opt("--program") ?? PIN.program;
     const table = opt("--table") ?? PIN.table;
-    const r = await check({ deployment, program, table, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, helper });
+    const r = await check({ program, table, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, helper });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, pin_table: PIN.table, program, table, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);

@@ -23,7 +23,7 @@ test("recorded bad answer: a devnet pool buy in the withdraw's place: FAIL, its 
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
   assert.ok(v.lines.some((l) => l.endsWith("loads a lookup table")), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => l.endsWith(`not a tag 2 release of the pinned program ${devnetPin(ANSWERS.bad.deployment).program}`)), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith(`not a tag 2 release of the pinned program ${devnetPin().program}`)), v.lines.join("\n"));
   assert.ok(v.lines.some((l) => l.endsWith("(onward): not on both RPCs at finalized")), v.lines.join("\n"));
   assert.ok(!v.lines.some((l) => l.includes("SIGN_HOST")), "SIGN_HOST serves its pinned /app.js");
 });
@@ -128,14 +128,17 @@ test("card live-check-devnet-pair: the second provider answering 503 moves read(
   assert.ok(one.lines.some((l) => l.endsWith("(release): not on both RPCs at finalized")), one.lines.join("\n"));
 });
 
-test("the pin is the deploy record's: the good recording PASSES against its own record and FAILS against today's", () => {
-  const old = devnetPin(ANSWERS.good.deployment);
-  assert.equal(old.program, "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ");
-  assert.notEqual(NOW.program, old.program);
-  assert.equal(judge(ANSWERS.good).ok, true);
-  const v = judge({ ...ANSWERS.good, deployment: NOW.record });
-  assert.equal(v.ok, false);
-  assert.ok(v.lines.some((l) => l.startsWith("BAD") && l.endsWith(`(release): not a tag 2 release of the pinned program ${NOW.program}`)), v.lines.join("\n"));
-  // an answer with no deploy record is refused, never read as today's
-  assert.throws(() => judge({ sign: ANSWERS.good.sign, run: ANSWERS.good.run }), /not a devnet deploy record/);
+test("the pin is today's: the good recording is on today's pool; a release on the pool before the re-pin (2S5wpE7U) FAILs, whatever deploy record the answer carries", () => {
+  assert.equal(ANSWERS.good.deployment.program_id, NOW.program);
+  assert.equal(ANSWERS.good.deployment.pool, NOW.pool);
+  assert.equal(judge(GOOD).ok, true, judge(GOOD).lines.join("\n"));
+  const BEFORE = { program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" };
+  const old = { program: BEFORE.program, accounts: [BEFORE.pool, W, PIN.feePayer], data: [2, 0, 0] };
+  const before = { signature: "R".repeat(88), reads: both(read(wire([PIN.feePayer, W], [cu, old]), [], [])) };
+  // the answer naming the deploy record of that pool, as a recording on it would: still judged on today's pin
+  const oldRecord = { ...NOW.record, program_id: BEFORE.program, pool: BEFORE.pool };
+  for (const deployment of [NOW.record, oldRecord, undefined]) failsWith({ ...GOOD, deployment, run: [{ ...GOOD.run[0], release: before }] }, `(release): not a tag 2 release of the pinned program ${NOW.program}`);
+  // today's program on the pool before the re-pin: refused on the pool
+  const otherPool = { ...release, accounts: [BEFORE.pool, W, PIN.feePayer] };
+  failsWith({ ...GOOD, run: [{ ...GOOD.run[0], release: { signature: "R".repeat(88), reads: both(read(wire([PIN.feePayer, W], [cu, otherPool]), [], [])) } }] }, `(release): the release is not on the pinned pool ${NOW.pool}`);
 });

@@ -25,7 +25,7 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign) => check({ run: R, deployment: rec.deployment, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign });
+const run = (rec, plant, sign = rec.sign) => check({ run: R, precommitment: rec.precommitment, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep: async () => {}, sign });
 const bad = (r, start) => {
   assert.equal(r.ok, false);
   assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${start}`)), r.lines.join("\n"));
@@ -73,7 +73,7 @@ test("planted: a record naming another deposit's leaf (the deploy run's, state l
   const page = A.good.answers.find((a) => a.method === "getAccountInfo" && a.json?.result?.value?.owner === R.program && Buffer.from(a.json.result.value.data[0], "base64").subarray(0, 9).equals(Buffer.concat([Buffer.from("bfpage01"), Buffer.of(0)])));
   const other = Buffer.from(page.json.result.value.data[0], "base64").subarray(16, 48).toString("hex");
   assert.notEqual(other, R.commitment);
-  const r = await check({ run: { ...R, leafIndex: "0", commitment: other }, deployment: A.good.deployment, precommitment: R.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign });
+  const r = await check({ run: { ...R, leafIndex: "0", commitment: other }, precommitment: R.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign });
   bad(r, "the run's recorded commitment");
   bad(r, "state page 0 entry 0");
 });
@@ -82,15 +82,15 @@ test("planted: a record naming another deposit's leaf (the deploy run's, state l
 // 42201131294) moves the reads to the next operator on the list, here the helper's route serving the same answers: PASS;
 // with no other operator answering, two stay required: FAIL.
 test("card live-check-devnet-pair: the second provider answering 503 moves the read to the next operator: PASS; one operator answering: FAIL", async () => {
-  const [solana, second] = A.good.rpcs;
-  const helper = "https://api.confidential.unrealized.trade/v1/rpc/solana-devnet";
+  // the list's third operator (DEVNET_PROVIDERS) serves the second's answers once the second is out
+  const [solana, second, helper] = A.good.rpcs;
   const answers = [...A.good.answers.filter((a) => a.url === solana), ...A.good.answers.filter((a) => a.url === second).map((a) => ({ ...a, url: helper }))];
   const down = (inner = replay(answers)) => async (url, init) => (url === second ? { ok: false, status: 503, json: async () => null } : inner(url, init));
-  const r = await check({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second, helper], sleep: async () => {}, sign: A.good.sign });
+  const r = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second, helper], sleep: async () => {}, sign: A.good.sign });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`info ${second} is out`)), r.lines.join("\n"));
   for (const s of ["deposit ", "mark ", "label page ", "state page ", "U "]) assert.equal(r.lines.filter((l) => l.startsWith(`ok   ${s}`)).length, 2, s);
-  const one = await check({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second], sleep: async () => {}, sign: A.good.sign });
+  const one = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second], sleep: async () => {}, sign: A.good.sign });
   bad(one, "two operators answered: 1");
 });
 
@@ -127,12 +127,16 @@ test("card signpage-pool-flow-answers, planted on the good answer: the deposit, 
   namesNull(r, "state page ", slots);
 });
 
-test("the pin is the deploy record's: the good recording PASSES against its own record and FAILS against today's", async () => {
+test("the pin is today's: the good recording names today's pool; a run on the old pool 2S5wpE7U, or a deploy record handed in, FAILs", async () => {
   const { devnetPin } = await import("./pool-sol-deploy.mjs");
   const now = devnetPin();
-  assert.equal(devnetPin(A.good.deployment).program, "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ");
-  assert.equal((await run(A.good)).ok, true);
-  const r = await run({ ...A.good, deployment: now.record });
-  assert.equal(r.ok, false);
-  assert.ok(r.lines.some((l) => l.startsWith(`BAD  the run is on the pinned devnet pool ${now.pool}`)), r.lines.join("\n"));
+  assert.equal(A.good.deployment.program_id, now.program);
+  assert.equal(A.good.deployment.pool, now.pool);
+  assert.equal(R.program, now.program);
+  assert.equal(R.pool, now.pool);
+  // the same reads for a run on the pool before the re-pin: refused on the run line, whatever the answers say
+  const old = await check({ run: { ...R, program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign, ...(A.good.evm ? { evm: A.good.evm } : {}) }).catch((e) => ({ ok: false, lines: [`BAD  ${e.message}`] }));
+  bad(old, "the run is on the pinned devnet pool 92YuYhb4");
+  // a replay may not hand the check its recording's deploy record: the check reads today's alone
+  await assert.rejects(check({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign }), /today's devnet pin only/);
 });

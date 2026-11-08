@@ -15,8 +15,10 @@ import { PIN, RUN, check, getRead } from "./signpage-pool-flow.mjs";
 import { REREADS, account, answerOf, behindOf, devnetPin, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./signpage-pool-flow.answers.json", import.meta.url), "utf8"));
-/** The pin the recordings were checked against: the deploy record each carries (pool-sol-deploy.devnet.json at 1dfba94d). */
-const OLD = devnetPin(A.good.deployment);
+/** The pin every recording is judged on: today's (pool-sol-deploy.devnet.json), as a live run reads it. */
+const OLD = devnetPin();
+/** The devnet pool before the re-pin (f2d9c7bf), on which no recording may pass. */
+const BEFORE = Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" });
 
 /** Answers served in recorded order by (url, method, params); `plant` may change one recorded result. */
 function replay(answers, plant = (a) => a.json) {
@@ -31,7 +33,7 @@ function replay(answers, plant = (a) => a.json) {
     return { ok: a.status === 200, status: a.status, headers: new Headers(a.retry_after ? { "retry-after": a.retry_after } : {}), json: async () => json };
   };
 }
-const run = (rec, plant, sign = rec.sign, helper = rec.helper, sleep = async () => {}) => check({ deployment: rec.deployment, pinTable: rec.pin_table, program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep, sign, helper });
+const run = (rec, plant, sign = rec.sign, helper = rec.helper, sleep = async () => {}) => check({ program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep, sign, helper });
 /** A run the answers file keeps as changes on another (`from`): `set` gives the answer at index i a Retry-After or
  * another body, `copy` serves those answers again after the rest. */
 function derived(name) {
@@ -185,27 +187,21 @@ test("card signpage-pool-flow-answers: Retry-After in seconds or as an HTTP date
   assert.deepEqual(w.ms, [3000]);
 });
 
-test("the pin is the deploy record's: the good recording PASSES against its own record and FAILS against today's", async () => {
-  assert.equal(OLD.program, "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ");
-  assert.equal((await run(A.good)).ok, true);
+test("the pin is today's: the good recording names today's program, pool and table; the run's transactions on the pool before the re-pin FAIL; no record or table pin is handed in", async () => {
   const now = devnetPin();
-  assert.notEqual(now.program, OLD.program);
-  // today's record in the recording's place, the same chain answers: another program, pool and code
-  const r = await run({ ...A.good, deployment: now.record });
-  assert.equal(r.ok, false);
-  assert.ok(r.lines.includes(`BAD  the program read is the pin's: ${OLD.program}`), r.lines.join("\n"));
-  // the run's transactions are not on today's pool, and the helper's answer names the recording's program
-  for (const name of Object.keys(RUN)) assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${name} ${RUN[name]}`)), name);
-  assert.ok(r.lines.some((l) => l.startsWith("BAD  the helper's fee answer names the pin's program")), r.lines.join("\n"));
-  // a live run's default is today's record
+  assert.equal(A.good.deployment.program_id, now.program);
+  assert.equal(A.good.deployment.pool, now.pool);
+  assert.equal(A.good.pin_table, PIN.table);
   assert.equal(PIN.program, now.program);
   assert.equal(PIN.pool, now.pool);
-});
-
-test("the table pin is the recording's: the good recording FAILS against today's table pin", async () => {
-  assert.notEqual(A.good.pin_table, PIN.table);
-  const r = await run({ ...A.good, pin_table: PIN.table });
+  // the same answers with every transaction on the pool before the re-pin (2S5wpE7U, its program 5V9iJECf)
+  const before = (a) => (a.method === "getTransaction" && a.json?.result ? JSON.parse(JSON.stringify(a.json).replaceAll(now.pool, BEFORE.pool).replaceAll(now.program, BEFORE.program)) : a.json);
+  const r = await run(A.good, before);
   assert.equal(r.ok, false);
-  assert.ok(r.lines.includes(`BAD  the table read is the pin's: ${A.good.table}`), r.lines.join("\n"));
-  assert.ok(r.lines.some((l) => l.startsWith(`BAD  buy ${RUN.buy}`)), r.lines.join("\n"));
+  for (const name of Object.keys(RUN)) assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${name} ${RUN[name]}`)), `${name}\n${r.lines.join("\n")}`);
+  // the helper's fee answer for the pool before the re-pin: refused
+  const helper = { ...A.good.helper, json: { ...A.good.helper.json, program: BEFORE.program, pool: BEFORE.pool } };
+  assert.ok((await run(A.good, undefined, A.good.sign, helper)).lines.some((l) => l.startsWith("BAD  the helper's fee answer names the pin's program")));
+  // a replay may not hand the check its recording's deploy record or table pin
+  for (const extra of [{ deployment: A.good.deployment }, { pinTable: A.good.pin_table }]) await assert.rejects(check({ ...extra, program: A.good.program, table: A.good.table, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign, helper: A.good.helper }), /today's devnet pin and table only/);
 });

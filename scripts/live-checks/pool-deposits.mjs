@@ -81,7 +81,7 @@ export function judgeEvm(e, routed = routedReleases()) {
 }
 
 /** The verdict for this card's run (with `precommitment` in its place when given), read through `fetchFn`, SIGN_HOST's
- *  read `sign`, and SIGN_HOST's EVM facts `evm`. */
+ *  read `sign`, and SIGN_HOST's EVM facts `evm`, on today's devnet pin (signpage-pool-notes's check, which takes no deploy record). */
 export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), evm, ...rest } = {}) {
   const r = await checkRun({ run, ...rest });
   const lines = [...r.lines, ...judgeEvm(evm)];

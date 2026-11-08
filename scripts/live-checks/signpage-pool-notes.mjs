@@ -39,9 +39,11 @@ export async function readSignFlow(fetchFn = fetch) {
 }
 
 /** The verdict for the run `run` (with `precommitment` in its place when given), read through `fetchFn`, and SIGN_HOST's read `sign`,
- *  against the pin of the deploy record `deployment` (today's, pool-sol-deploy.devnet.json; a replay passes its recording's). */
-export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), deployment = devnetPin().record, precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign } = {}) {
-  const pin = devnetPin(deployment);
+ *  against today's devnet pin (pool-sol-deploy.devnet.json, devnetPin()), the one a live run reads: a replay is judged on
+ *  it too, so a recording on another program or pool FAILs (it takes no deploy record of its own). */
+export async function check({ run = JSON.parse(readFileSync(RUN, "utf8")), precommitment = run.precommitment, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, ...rest } = {}) {
+  if ("deployment" in rest) throw new Error("check reads today's devnet pin only: no deploy record is passed in");
+  const pin = devnetPin();
   const lines = [];
   const say = (pass, text) => lines.push(`${pass ? "ok  " : "BAD "} ${text}`);
   say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0,
@@ -104,7 +106,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const sign = await readSignFlow();
     const precommitment = opt("--precommitment") ?? run.precommitment;
     const deployment = devnetPin().record;
-    const r = await check({ run, deployment, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign });
+    const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);

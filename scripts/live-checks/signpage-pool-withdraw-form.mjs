@@ -8,7 +8,7 @@
 //     - the release: two signers, the helper's devnet fee payer (the pin) then W; after the compute budget exactly one
 //       instruction, a tag 2 release of the pinned program on the pinned pool (its 1st account) with W its 2nd (the
 //       recipient); no lookup table. The program and pool are the deploy record's (pool-sol-deploy.devnet.json, read by
-//       devnetPin); a replay passes the record its recording carries (its `deployment`);
+//       devnetPin); a replay is judged on today's record too, so a release on another program or pool FAILs;
 //     - the onward send: one signer, that same W, its fee payer; exactly one instruction, a System transfer from W to
 //       To of the part; no lookup table; To's balance up by exactly the part, and W left with nothing.
 // The fee payer, To and the run's parts are written out here, not read from the repo.
@@ -87,9 +87,10 @@ export function decode(b) {
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The verdict on an answer { deployment, sign: { index, sha384 }, run: [{ part, release: { signature, reads }, onward }] },
- *  against the pin of its deploy record `deployment`. */
+ *  against today's devnet pin (devnetPin()), the one a live run reads: a recorded answer is judged on it too, so a
+ *  release on another program or pool FAILs; the answer's own `deployment` is what it was read for, never its judge. */
 export function judge(a) {
-  const pool = devnetPin(a.deployment ?? null); // an answer carries its record: none is refused, never read as today's
+  const pool = devnetPin();
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a.sign?.index ?? "")?.[1];
