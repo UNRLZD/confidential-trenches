@@ -1,11 +1,11 @@
 {
  "good": {
   "source": "a local build read from dist",
-  "at": "2026-11-08T17:36:43.158Z",
+  "at": "2026-11-08T18:12:13.283Z",
   "pageStatus": 200,
   "js": [
    {
-    "url": "/assets/index-DF2LmhUC.js",
+    "url": "/assets/index-q3xf0PZD.js",
     "status": 200,
     "found": [
      "ct-signin-hint",
@@ -16,7 +16,7 @@
   ],
   "css": [
    {
-    "url": "/assets/style-CTst5b2e.css",
+    "url": "/assets/style-B78r8p-_.css",
     "status": 200,
     "found": [
      ".tb-acct[data-shape=in]{min-width:264px}",

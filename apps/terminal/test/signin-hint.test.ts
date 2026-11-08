@@ -1,6 +1,6 @@
 // The sign-in hint (card app-header-first-paint-auth, src/screens/signin/hint.ts): APP_HOST's own record of the last
 // sign-in state the signing page's snapshot said, "in" or "out" and nothing else, read before the first paint so the
-// header draws its loading state at the shape it will land in (none: the reserved "in" box); written only when a
+// header draws its loading state at the shape it will land in (none: "out", a new visitor); written only when a
 // snapshot holds a state, so a wrong hint is corrected for the next load.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -37,10 +37,13 @@ test("readHint: in or out as stored; anything else, nothing, or storage that thr
   assert.equal(readHint(null), null);
 });
 
-test("firstShape: the stored hint; with none, in (the reserved box, so a signed-in load moves nothing)", () => {
+test("firstShape: the stored hint; with none (a new visitor, a bad value, blocked storage), out: R5's room before Sign in", () => {
   assert.equal(firstShape("in"), "in");
   assert.equal(firstShape("out"), "out");
-  assert.equal(firstShape(null), "in");
+  assert.equal(firstShape(null), "out");
+  assert.equal(firstShape(readHint(store().s)), "out");
+  assert.equal(firstShape(readHint(store({ [HINT_KEY]: "IN" }).s)), "out");
+  assert.equal(firstShape(readHint(store({}, true).s)), "out");
 });
 
 test("hintOf: the snapshot's own state, in or out; nothing while it holds no state (connecting, or down with nothing known)", () => {

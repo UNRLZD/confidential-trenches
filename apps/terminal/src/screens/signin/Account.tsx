@@ -29,7 +29,7 @@ function Balance({ m }: { m: HeaderModel }) {
 
 /** The desktop top bar's right cluster. */
 /** The account side's shape (hint.ts, card app-header-first-paint-auth): the stored hint read in the first render,
- *  before the first paint (none: the reserved "in" box), kept while the state loads; then hint.ts shapeOf. The hint is
+ *  before the first paint (none: "out", a new visitor), kept while the state loads; then hint.ts shapeOf. The hint is
  *  written whenever a snapshot holds a state. */
 export function useAccountShape(): Hint {
   const src = useSigninSource();

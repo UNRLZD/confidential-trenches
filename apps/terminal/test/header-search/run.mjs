@@ -17,7 +17,9 @@
 //     each view lands in, the hint read back as that state, and signed out R5's room before Sign in (12 layout px after
 //     the chip, 20 after the narrow bar's button, 4 after the phone's); two views with a wrong hint (out but signed in,
 //     in but signed out) land in the right state with the hint corrected (signed out inside the kept box, CLS 0), and
-//     their next load has R5's room and CLS 0.
+//     their next load has R5's room and CLS 0; two views signed in with no hint (app storage cleared while the signing
+//     page kept its own), desktop and phone, land signed in (the box grows once) with the hint written, and their next
+//     load has CLS 0.
 //   node apps/terminal/test/header-search/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +39,7 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const desk = (width) => ({ name: String(width), viewport: { width, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false });
 const phone = { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, mode: "phone" };
 // each width signed in and signed out, the sign-in hint (card app-header-first-paint-auth, src/screens/signin/hint.ts)
-// stored as the state it lands in; then two views whose stored hint is wrong
+// stored as the state it lands in; then two views whose stored hint is wrong, and two signed in with none stored
 const BASE_VIEWS = [{ ...desk(1920), mode: "field" }, { ...desk(1440), mode: "field" }, { ...desk(1024), mode: "field" }, { ...desk(900), mode: "button" }, phone];
 const VIEWS = [
   ...BASE_VIEWS.flatMap((v) => [
@@ -46,6 +48,8 @@ const VIEWS = [
   ]),
   { ...desk(1440), mode: "field", kind: "signed", hint: "out", stale: true },
   { ...phone, kind: "tap", hint: "in", stale: true },
+  { ...desk(1440), mode: "field", kind: "signed", hint: null, stale: true },
+  { ...phone, kind: "signed", hint: null, stale: true },
 ];
 const HINT_KEY = "ct-signin-hint";
 // R5's room before the account side, layout px (proto.css): the chip sits in .tbr at its 12 px gap; the narrow bar's
@@ -107,7 +111,8 @@ async function open(browser, route, v, reads) {
     ({ key, hint, app }) => {
       if (location.origin === app && !sessionStorage.getItem("__hinted")) {
         sessionStorage.setItem("__hinted", "1");
-        localStorage.setItem(key, hint);
+        if (hint === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, hint);
       }
     },
     { key: HINT_KEY, hint: v.hint, app: APP_HOST },
@@ -191,8 +196,8 @@ let n = 0;
 try {
   for (const v of VIEWS) {
     n++;
-    const tag = `@${v.name} ${v.kind === "signed" ? "in" : "out"}${v.stale ? ` (stale hint ${v.hint})` : ""}`;
-    const shot = (name) => (SHOTS ? v.page.screenshot({ path: path.join(SHOTS, `search-${v.name}-${v.kind === "signed" ? "in" : "out"}${v.stale ? "-stale" : ""}-${name}.png`) }) : null);
+    const tag = `@${v.name} ${v.kind === "signed" ? "in" : "out"}${v.stale ? (v.hint ? ` (stale hint ${v.hint})` : " (no hint)") : ""}`;
+    const shot = (name) => (SHOTS ? v.page.screenshot({ path: path.join(SHOTS, `search-${v.name}-${v.kind === "signed" ? "in" : "out"}${v.stale ? (v.hint ? "-stale" : "-nohint") : ""}-${name}.png`) }) : null);
     const reads = { lists: 0, token: [] };
     const route = await harnessRoute(dir, v.kind);
     const { ctx, page, f, errors } = await open(browser, route, v, reads);
@@ -212,8 +217,9 @@ try {
     // a stale "in" hint that lands signed out keeps its reserved box for that load (Sign in inside it, nothing moves)
     if (want === "out" && !(v.stale && v.hint === "in")) check(p0.gap !== null && Math.abs(p0.gap - GAP[v.mode]) < 0.75, `${tag}: ${p0.gap === null ? "no" : p0.gap.toFixed(1)} layout px before Sign in, want R5's ${GAP[v.mode]}`);
     if (v.stale) {
-      // a wrong hint ends in the right state with the hint corrected (above); a stale "out" that lands signed in grows
-      // the box once (counted, not checked); the next load reads the corrected hint: R5's room and CLS 0
+      // a wrong hint ends in the right state with the hint corrected (above); a stale "out", or no hint (read as out),
+      // that lands signed in grows the box once (counted, not checked); the next load reads the corrected hint: R5's
+      // room and CLS 0
       if (v.hint === "in") check(p0.cls === 0, `${tag}: layout shift ${p0.cls}, want 0 (Sign in lands inside the kept box): ${JSON.stringify(p0.shifts)}`);
       await shot("closed");
       await page.reload({ waitUntil: "load" });
@@ -346,4 +352,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} views`);
   process.exit(1);
 }
-console.log(`PASS ${n} views (1920, 1440, 1024: the field; 900: the button; 390: the phone button; each signed in and out with its stored hint, then two views with a wrong hint) from the built app inside the stand-in shell: typed ${TARGET.symbol} found and opened, a listed and an unlisted address, an unknown mint, chains All, Solana and Base, R5's room before Sign in, the hint corrected${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} views (1920, 1440, 1024: the field; 900: the button; 390: the phone button; each signed in and out with its stored hint, then two views with a wrong hint and two signed in with none) from the built app inside the stand-in shell: typed ${TARGET.symbol} found and opened, a listed and an unlisted address, an unknown mint, chains All, Solana and Base, R5's room before Sign in, the hint corrected${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
