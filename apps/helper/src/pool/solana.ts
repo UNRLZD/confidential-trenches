@@ -11,7 +11,10 @@
 //                       writable), slot 0 not zero, or over SOLANA_MAX_TX_BYTES (400);
 //   bad_signature       W's signature does not verify over the message bytes: any byte changed after W signed;
 //   not_pool            the instruction after the compute budget is not the configured pool program's tag 2 or tag 3,
-//                       or its first account is not the pool;
+//                       or its first account is not the pool; a tag 2 of other than 8 or 9 accounts (the ninth the
+//                       next state page, release.rs:155); a tag 3 with flag bit 1 and no account after the tip account
+//                       (or at 8, no tip) for the next state page, or an inner instruction naming that page (buy.rs:155-159;
+//                       the program refuses it by key, InnerNamesPoolAccount);
 //   extra_instruction   any instruction other than at most one compute unit limit and one compute unit price, before
 //                       exactly one pool instruction;
 //   fee_payer_named     the fee payer named anywhere but the payer (key 0) and the pool instruction's account 2: as a
@@ -140,17 +143,17 @@ export type PoolSendCode =
 export type PoolSendAnswer = { status: number; body: { signature: string } | { error: { code: PoolSendCode; detail?: string } }; retryAfterS?: number };
 
 /** What a pool instruction carries that the checks read: its tag, its relay fee and the accounts tag 3's inner instructions name. */
-export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[] };
+export type SolanaPoolIx = { tag: 2 | 3; relayFee: bigint; deadlineMs: bigint; nullifier: string; tip: bigint; innerAccounts: number[]; innerPrograms: number[]; nextPage: boolean };
 
 /** Tag 2's or tag 3's data, read; throws on any layout TAG3.md and release.rs do not allow. */
 export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
   if (d[0] === SOLANA_POOL_TAG_RELEASE) {
     const r = solanaDecodePoolRelease(d); // exactly 387 bytes
-    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), tip: 0n, innerAccounts: [], innerPrograms: [] };
+    return { tag: 2, relayFee: r.relayFee, deadlineMs: r.deadlineMs, nullifier: Buffer.from(r.existingNullifierHash).toString("hex"), tip: 0n, innerAccounts: [], innerPrograms: [], nextPage: false };
   }
   if (d[0] !== SOLANA_POOL_TAG_RELEASE_AND_BUY || d.length < 2) throw new Error("not tag 2 or tag 3");
   const flags = d[1]!;
-  if ((flags & ~1) !== 0) throw new Error("tag 3 flags other than bit 0");
+  if ((flags & ~3) !== 0) throw new Error("tag 3 flags other than bits 0 and 1");
   const proof = flags & 1 ? PROOF_COMPRESSED : PROOF_RAW;
   const fieldsAt = 2 + proof;
   const tipAt = fieldsAt + FIELDS;
@@ -175,7 +178,7 @@ export function solanaReadPoolIx(d: Uint8Array): SolanaPoolIx {
     if (at > d.length) throw new Error("tag 3 inner data truncated");
   }
   if (at !== d.length) throw new Error("tag 3 bytes after the last inner instruction");
-  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms };
+  return { tag: 3, relayFee, deadlineMs: v.getBigUint64(fieldsAt + DEADLINE_AT, true), nullifier: Buffer.from(d.subarray(fieldsAt + 32, fieldsAt + 64)).toString("hex"), tip: v.getBigUint64(tipAt, true), innerAccounts, innerPrograms, nextPage: (flags & 2) !== 0 };
 }
 
 /** The relay fee a pool instruction carries, or null when the bytes are not one (checkSolanaPoolTx then names why). */
@@ -256,7 +259,11 @@ export function checkSolanaPoolTx(wire: Uint8Array, cfg: { program: string; pool
   } catch (e) {
     return no("not_pool", (e as Error).message);
   }
-  if (pix.accounts.length < 8 || (p.tag === 2 && pix.accounts.length !== 8)) return no("not_pool", "not the release's accounts");
+  if (pix.accounts.length < 8 || (p.tag === 2 && pix.accounts.length !== 8 && pix.accounts.length !== 9)) return no("not_pool", "not the release's accounts");
+  // tag 3's next state page (flag bit 1): after the tip account, or at 8 with no tip; no inner instruction may name it
+  const nextAt = p.nextPage ? 8 + (p.tip > 0n ? 1 : 0) : -1;
+  if (p.nextPage && nextAt >= pix.accounts.length) return no("not_pool", "flag bit 1 with no next state page");
+  if (p.nextPage && [...p.innerAccounts, ...p.innerPrograms].includes(nextAt)) return no("not_pool", "an inner instruction names the next state page");
   // the pool at account 0: a static key here, a loaded one once its table is read (checkSolanaPoolKeys)
   if (pix.accounts[0]! < m.staticKeys.length && keyOf(pix.accounts[0]!) !== cfg.pool) return no("not_pool", "another pool");
   if (pix.accounts[1] !== 1) return no("bad_shape", "account 1 is not W", 400);
@@ -647,25 +654,43 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   }
 }
 
-/** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). */
+/** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). Devnet's program
+ *  may be a list, comma apart (solanaPoolPrograms). */
 export const POOL_SOLANA_ENV = {
   mainnet: ["POOL_SOLANA_PROGRAM_MAINNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET", "POOL_SOLANA_FEE_MAINNET", "POOL_SOLANA_RPCS_MAINNET"],
   devnet: ["POOL_SOLANA_PROGRAM_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_DEVNET", "POOL_SOLANA_FEE_DEVNET", "POOL_SOLANA_RPCS_DEVNET"],
 } as const;
 
-/** The Solana pool senders the host's environment sets, by pool address; a cluster with none of its names set is off. */
+/** The pool programs a cluster's POOL_SOLANA_PROGRAM_* names: mainnet exactly one; devnet one or more, comma apart,
+ *  so a re-pinned devnet pool and the one before it are served side by side while the signing pages move from one to
+ *  the other (card pool-senders-next-page-helper, the expand). Each a program id, none twice, no empty entry. */
+export function solanaPoolPrograms(cluster: string, value: string, name: string): string[] {
+  const list = cluster === "devnet" ? value.split(",") : [value];
+  if (list.some((p) => !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p))) throw new Error(`${name} must be a program id${cluster === "devnet" ? ", or several comma apart" : ""}`);
+  if (new Set(list).size !== list.length) throw new Error(`${name} names a program twice`);
+  return list;
+}
+
+/** The Solana pool senders the host's environment sets, by pool address: one for each program a cluster lists, on that
+ *  cluster's one fee payer, fee and RPCs; a cluster with none of its names set is off. A program that two clusters
+ *  name throws. */
 export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>, fetchFn?: typeof fetch): Map<string, SolanaPoolSender> {
   const out = new Map<string, SolanaPoolSender>();
   for (const [cluster, names] of Object.entries(POOL_SOLANA_ENV)) {
     const [program, key, fee, rpcs] = names.map((n) => env[n] ?? "");
     if (program === "" && key === "" && fee === "" && rpcs === "") continue;
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(program!)) throw new Error(`${names[0]} must be a program id`);
+    const programs = solanaPoolPrograms(cluster, program!, names[0]);
     const urls = rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[3]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u, fetchFn ? { fetch: fetchFn } : {})) as unknown as readonly [SolanaRpc, SolanaRpc];
     if (!/^[1-9][0-9]{0,18}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of lamports`);
-    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: fee! }, { providers });
-    out.set(s.pool, s);
+    for (const p of programs) {
+      const s = solanaPoolSender({ cluster, program: p, feePayerSecret: key!, fee: fee! }, { providers });
+      // one pool, one sender: a program another cluster already serves (both key on the same pool address) would
+      // silently take that cluster's sends to its own fee payer and RPCs, so it stops the start instead
+      if (out.has(s.pool)) throw new Error(`${names[0]} names a program another cluster already serves`);
+      out.set(s.pool, s);
+    }
   }
   return out;
 }
