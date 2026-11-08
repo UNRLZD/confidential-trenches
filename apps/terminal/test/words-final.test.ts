@@ -26,9 +26,10 @@ const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "
 // the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name, Discover's list age
 // line (card app-list-age, on the owner's next picks page), Portfolio's export label and wallets heading (card
 // app-export-every-wallet, on the owner's next picks page), the chart menus' rows R5 does not draw (card
-// app-chart-controls, on the owner's next picks page), the deposit sheet's To label (card deposit-to-pool, on the
+// app-chart-controls, on the owner's next picks page), the lower panel's and About's words R5 marks as draft copy (card
+// app-token-lower-panel, on the owner's next picks page), the deposit sheet's To label (card deposit-to-pool, on the
 // owner's next picks page)
-const STILL_DRAFT: Record<string, string[]> = { deposit: ["to"], discover: ["updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: ["gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine"], verify: [], withdraw: [] };
+const STILL_DRAFT: Record<string, string[]> = { deposit: ["to"], discover: ["updated"], portfolio: ["exportKey", "more", "wallets"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine", "net5m", "sells5m", "vol5m"], verify: [], withdraw: [] };
 
 test("the list: 103 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 103);
