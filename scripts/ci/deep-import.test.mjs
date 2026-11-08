@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { kitReach } from "./kit-reach.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const DEPCRUISE = join(ROOT, "node_modules/.bin/depcruise");
@@ -36,10 +37,15 @@ const STEPS = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
   .scripts["check:imports"].split("&&")
   .map((step) => step.trim().match(/"[^"]*"|\S+/g).map((a) => a.replace(/^"(.*)"$/, "$1")));
 
-function run(bin, args, dir) {
+// A child's output is whole or the run is refused by name: past maxBuffer (node cuts the output and gives status null) or
+// ended by a signal, it throws, so a cut report is never parsed, never read as a pass (rc 0) and never as a refusal
+// (a rc that is not 0). The rc of an ordinary failure stays the child's own.
+function run(bin, args, dir, maxBuffer = 1 << 28) {
   try {
-    return { rc: 0, out: execFileSync(bin, args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 28 }) };
+    return { rc: 0, out: execFileSync(bin, args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer }) };
   } catch (e) {
+    if (e.code === "ENOBUFS") throw new Error(`the dependency report was cut at ${maxBuffer} bytes (${bin} ${args.join(" ")})`);
+    if (typeof e.status !== "number") throw new Error(`${bin} ended with signal ${e.signal ?? "none"} and no exit status (${e.code ?? e.message})`);
     return { rc: e.status, out: `${e.stdout}${e.stderr}` };
   }
 }
@@ -692,4 +698,28 @@ test("a kit file other than core.ts that reaches core or the wallet, by package 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Card deep-import-maxbuffer: a child's output that is cut (past the buffer), or a child that ends with a signal, is
+// never read as a pass and never parsed: the harness refuses it by name. On main, run() returned rc null for a cut
+// report, which assert.notEqual(rc, 0) reads as a refusal and `rc ||= r.rc` loses, and a cut JSON.parse'd.
+test("a dependency report cut at the buffer is refused by name, never parsed or counted as a pass", () => {
+  const dir = tree(KIT);
+  assert.throws(() => run(DEPCRUISE, ["--config", CONFIG, "--output-type", "json", "."], dir, 1024), /the dependency report was cut at 1024 bytes/);
+  // the same report at the normal buffer is whole and parses
+  assert.ok(JSON.parse(run(DEPCRUISE, ["--config", CONFIG, "--output-type", "json", "."], dir).out).modules.length > 0);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a child that ends with a signal is refused by name, not counted as a pass or a refusal", () => {
+  const dir = tree(KIT);
+  assert.throws(() => run(process.execPath, ["-e", 'process.kill(process.pid, "SIGKILL")'], dir), /ended with signal SIGKILL/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("kit-reach refuses by name a file list cut at the buffer, and reads it whole at the normal one", () => {
+  const dir = tree(KIT);
+  assert.throws(() => kitReach(dir, 16), /the file list was cut at 16 bytes/);
+  assert.deepEqual(kitReach(dir).refusals, []);
+  rmSync(dir, { recursive: true, force: true });
 });

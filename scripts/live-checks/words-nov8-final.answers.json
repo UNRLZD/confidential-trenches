@@ -1,0 +1,120 @@
+{
+ "good": {
+  "at": "2026-11-08T19:58:34.836Z",
+  "hosts": {
+   "sign": {
+    "source": "this checkout, packages/signpage",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/app.js",
+      "status": 200,
+      "found": [
+       "text held.moveOut",
+       "text held.links",
+       "text held.moved",
+       "text held.sending",
+       "text held.nothing",
+       "text held.notMoved",
+       "text held.gas",
+       "text pw.withdraw",
+       "text pw.invalidAddress",
+       "text pw.invalidAmount",
+       "text pw.insufficient",
+       "text pw.busy",
+       "text pw.maxFee",
+       "text pw.min",
+       "text pw.tryTwo",
+       "text pw.tryTwo-or",
+       "text pw.feeRose",
+       "text pw.feeRoseSend",
+       "no draft mark for a fixed word",
+       "the vault form's draft keys",
+       "the pool form's draft keys"
+      ]
+     }
+    ]
+   },
+   "app": {
+    "source": "this checkout, apps/terminal/dist",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/assets/index-BraXbNAK.js",
+      "status": 200,
+      "found": [
+       "final token.gridLines",
+       "final token.lastLine",
+       "final token.indMA",
+       "final token.indEMA",
+       "final token.indBOLL",
+       "final token.indRSI",
+       "final token.indMACD",
+       "final trade.proofReady",
+       "final trade.proofMaking",
+       "final trade.poolBare",
+       "final trade.poolSuffix",
+       "final positions.toPool",
+       "final discover.updated",
+       "final deposit.to",
+       "final portfolio.exportKey",
+       "final portfolio.wallets",
+       "final discover.padMenuTitle",
+       "final search.placeholder"
+      ]
+     }
+    ]
+   }
+  },
+  "note": "this card: packages/signpage rebuilt (build-app.mjs) and apps/terminal built fresh (vite build, 8 Nov 2026), both read from disk (--local): every kept word a final entry in the terminal script, the signing page script writing data-draft-copy only through its key helper"
+ },
+ "bad": {
+  "at": "2026-11-08T19:58:42.656Z",
+  "hosts": {
+   "sign": {
+    "source": "https://confidential.unrealized.trade/",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/app.js",
+      "status": 200,
+      "found": [
+       "text held.moveOut",
+       "text held.links",
+       "text held.moved",
+       "text held.sending",
+       "text held.nothing",
+       "text held.notMoved",
+       "text held.gas",
+       "text pw.withdraw",
+       "text pw.invalidAddress",
+       "text pw.invalidAmount",
+       "text pw.insufficient",
+       "text pw.busy",
+       "text pw.maxFee",
+       "text pw.min",
+       "text pw.tryTwo",
+       "text pw.tryTwo-or",
+       "text pw.feeRose",
+       "text pw.feeRoseSend"
+      ]
+     }
+    ]
+   },
+   "app": {
+    "source": "https://ct-app.unrealized.trade/",
+    "pageStatus": 200,
+    "js": [
+     {
+      "url": "/assets/index-pB_D_o6v.js",
+      "status": 200,
+      "found": [
+       "final positions.toPool"
+      ]
+     }
+    ]
+   }
+  },
+  "note": "SIGN_HOST and APP_HOST as deployed before this card, read over https on 8 Nov 2026: the terminal script holds the kept words as drafts (their sources name no pick) and the signing page writes data-draft-copy for fixed words; positions.toPool is in no script (the sell box is mounted nowhere), so it passes vacuously"
+ }
+}

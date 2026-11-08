@@ -124,6 +124,7 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
   const refusal = f.form.find((e) => e.dataset.for === "amount")!;
   assert.equal(refusal.dataset.refusal, "insufficient");
   assert.equal(refusal.textContent, POOL_WITHDRAW_WORDS.insufficient);
+  assert.equal(refusal.dataset.draftCopy, undefined, "Insufficient was kept (owner 8 Nov 07:55Z): no draft mark");
   assert.equal(f.go.disabled, true);
   await f.tap();
   assert.deepEqual(f.handed, [], "a refused screen hands nothing over");
@@ -133,7 +134,8 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
   assert.equal(f.lines.hidden, false);
   const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
   assert.deepEqual(shown, { to: TO, "max-fee": "0.001305 SOL" });
-  assert.deepEqual(f.lines.children.filter((e) => e.tag === "dt").map((e) => e.dataset.draftCopy), ["to", "max-fee"]);
+  assert.deepEqual(f.lines.children.filter((e) => e.tag === "dt").map((e) => e.dataset.draftCopy), ["to", undefined], "To is still a draft; Max fee was kept (owner 8 Nov 07:55Z)");
+  assert.equal(f.go.dataset.draftCopy, undefined, "Withdraw was kept (owner 8 Nov 07:55Z): no draft mark");
   assert.equal(f.go.disabled, false);
   await f.tap();
   assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE + W_FEE }]);
@@ -153,14 +155,14 @@ test("Amount: one no plan sends without dust is refused with the nearest amounts
   assert.equal(poolRefusalWords("solana", "unplannable", undefined, { above: cap }), `Try ${formatUnits(cap, 9)} SOL`);
 });
 
-test("the drawn screen: an unplannable amount draws the nearest amounts, under the try words' draft key", async () => {
+test("the drawn screen: an unplannable amount draws the nearest amounts, with no draft mark on the Try words (kept, owner 8 Nov 07:55Z)", async () => {
   const f = drawn(async () => ({ ...FUNDS, notes: [{ id: "a", value: 10_000_000n }] }));
   f.type("to", TO);
   f.type("amount", formatUnits(10_000_000n - FEE - W_FEE - 1n, 9));
   await settle();
   const refusal = f.form.find((e) => e.dataset.for === "amount")!;
   assert.equal(refusal.dataset.refusal, "unplannable");
-  assert.equal(refusal.dataset.draftCopy, "try");
+  assert.equal(refusal.dataset.draftCopy, undefined);
   assert.match(refusal.textContent, /^Try \S+ or \S+ SOL$/);
 });
 
@@ -196,11 +198,12 @@ test("a send owed whose fee rose: its line and button drawn with the fee it need
   await settle();
   const rose = f.form.find((e) => e.dataset.lines === "fee-rose")!;
   assert.equal(rose.hidden, false);
-  const line = rose.find((e) => e.dataset.draftCopy === "fee-rose")!;
+  const line = rose.find((e) => e.tag === "p")!;
   assert.equal(line.textContent, "Network fee rose. New max fee: 0.000015 SOL.");
+  assert.equal(line.dataset.draftCopy, undefined, "kept (owner 8 Nov 07:55Z): no draft mark");
   const again = rose.find((e) => e.dataset.action === "fee-redraw")!;
   assert.equal(again.textContent, "Send at new fee");
-  assert.equal(again.dataset.draftCopy, "fee-redraw");
+  assert.equal(again.dataset.draftCopy, undefined, "kept (owner 8 Nov 07:55Z): no draft mark");
   again.fire("click");
   again.fire("click");
   await settle();
@@ -218,7 +221,7 @@ test("a fee that changed since the line was drawn: the press hands nothing over 
   rose.find((e) => e.dataset.action === "fee-redraw")!.fire("click");
   await settle();
   assert.equal(calls.length, 0, "the fee shown is no longer the one owed: nothing handed over");
-  assert.equal(rose.find((e) => e.dataset.draftCopy === "fee-rose")!.textContent, "Network fee rose. New max fee: 0.00002 SOL.");
+  assert.equal(rose.find((e) => e.tag === "p")!.textContent, "Network fee rose. New max fee: 0.00002 SOL.");
   rose.find((e) => e.dataset.action === "fee-redraw")!.fire("click");
   await settle();
   assert.deepEqual(calls, [["op1", 20_000n]]);

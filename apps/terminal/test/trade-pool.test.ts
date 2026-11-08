@@ -44,7 +44,7 @@ test("a total that is not a plain decimal reads none, never a label the data doe
   }
 });
 
-test("the two labels are terse drafts for the owner's picks page", () => {
-  assert.deepEqual([WORDS.proofReady.text, WORDS.proofReady.draft], ["Proof ready", true]);
-  assert.deepEqual([WORDS.proofMaking.text, WORDS.proofMaking.draft], ["Making proof", true]);
+test("the two labels are terse and kept (owner 8 Nov 07:55Z), no draft mark", () => {
+  assert.deepEqual([WORDS.proofReady.text, WORDS.proofReady.draft], ["Proof ready", false]);
+  assert.deepEqual([WORDS.proofMaking.text, WORDS.proofMaking.draft], ["Making proof", false]);
 });

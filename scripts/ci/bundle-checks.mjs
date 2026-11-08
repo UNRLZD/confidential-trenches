@@ -77,6 +77,8 @@ export const CHILD_RUNS = [
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
+  { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
@@ -88,6 +90,7 @@ export const OUT = {
   "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
+  "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",
   "wallet-deposit-follow": "the helper's deposit status answer",
   "pool-ready-no-flicker": "the devnet run record",
@@ -128,12 +131,14 @@ export const OUT = {
   "app-console-429": "the helper under load",
   "trade-box-bal-cash": "a browser",
   "app-list-age": "a browser and the helper",
+  "app-discover-toolbar": "a browser and the helper",
   "app-pool-withdraw": "a browser",
   "app-hop-sync-lock": "a browser",
   "balances-per-chain": "a browser and chain RPCs",
   "app-export-every-wallet": "a browser",
   "evm-quote-warm-round": "EVM RPC quotes",
   "evm-quote-lag-held": "EVM RPC quotes",
+  "evm-quote-read-gas-starve": "EVM RPC quotes",
   "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",

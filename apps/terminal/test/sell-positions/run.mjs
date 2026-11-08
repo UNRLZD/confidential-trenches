@@ -202,6 +202,7 @@ try {
         check((await page.locator('[data-testid="sell-box"] .trb-input').inputValue()) === "25", `${tag}: the box does not show the running 25%`);
         check((await page.$$eval("[data-pct][data-on]", (bs) => bs.map((b) => b.getAttribute("data-pct")).join(" "))) === "2500", `${tag}: the box's lit preset is not 25%`);
       }
+      if (f === "dust") check(norm(await page.locator('[data-testid="sell-held"]').innerText()) === "0.0₅3 TORCH held", `${tag}: held line is the real amount, never 0`);
       if (f === "up" && !tapIt) {
         check(norm(await page.locator('[data-testid="sell-held"]').innerText()) === "1.23M TORCH held", `${tag}: held line`);
         const share = await settle(async () => norm(await page.locator('[data-testid="sell-share"]').innerText()), "≈ $109.49");
