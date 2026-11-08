@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { feeProblems, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { bindProblem, feeProblems, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteCommitment, noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { restorePages, writeRestored } from "../../../packages/wallet/src/notes/restore.ts";
@@ -228,7 +228,7 @@ test("H2: a sweep sends U's whole USDC to the named account, refused when the ac
   assert.match(SRC, /"sweep-u": \(\) => sweepU\(rest\)/);
   assert.match(SRC, /act\.call\("ft_transfer", \{ receiver_id: to, amount: String\(balance\) \}, 30n \* TGAS, 1n\)/);
   // every way USDC stays at U names the way out: a bind that did not deposit, and USDC left after the deposit
-  assert.match(SRC, /deposit: \$\{json\(outcome\)\}[^`]*sweep-u/);
+  assert.match(SRC, /deposit: \$\{why\} \(\$\{json\(outcome\)\}\)[^`]*sweep-u/);
   assert.match(SRC, /still holds \$\{left\} USDC[^`]*sweep-u/);
   assert.match(SRC, /\.\.\.withdraws, \.\.\.sweeps,/, "the record holds every sweep");
   const paste = readFileSync(path.join(HERE, "mainnet-money", "4-sweep-u.sh"), "utf8");
@@ -312,6 +312,20 @@ test("MA: after a refunded and settled payout, the refund note the wallet restor
     ns.close();
     w.close();
   }
+});
+
+test("LA: a second transfer that reached U after its deposit landed is no front-run: the run goes on with the deposit's note", () => {
+  const U = "a".repeat(64);
+  assert.equal(bindProblem("deposited", undefined, U, 5_000_000n), null);
+  // the earlier call landed 5 USDC; U now holds the 2 USDC of a later transfer, which this bind read
+  assert.equal(bindProblem("front_run", { depositor: U, value: 5_000_000n }, U, 2_000_000n), null);
+  // P deposited by another account: a real front-run, named for what it is, and U's USDC is still at U
+  assert.match(String(bindProblem("front_run", { depositor: "x.near", value: 1_000_000n }, U, 5_000_000n)), /^front-run: P was deposited by x\.near, not U, with 1000000; U's 5000000 USDC stays at U/);
+  assert.match(String(bindProblem("front_run", undefined, U, 5_000_000n)), /no row of P/);
+  assert.equal(bindProblem("struck", undefined, U, 5_000_000n), "struck");
+  // the driver reads P's row on both RPCs for a front_run and records the deposit's own value, not the read at U
+  assert.match(SRC, /outcome\.kind === "front_run"[\s\S]{0,400}r\.precommitment === BigInt\(run\.precommitment\)[\s\S]{0,200}const why = bindProblem\(outcome\.kind, row, U, amount\);/);
+  assert.match(SRC, /st\.write\("deposit", \{ amount: String\(leaf\.value\)/);
 });
 
 test("L3: the fee is held to the withdrawal's own bound before any deposit: 2 * fee < the note (withdrawRequest's fee < amount, the vault's fee <= withdrawn / 2)", () => {

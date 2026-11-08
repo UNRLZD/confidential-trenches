@@ -209,6 +209,19 @@ export function noteToWithdraw<N extends { id: string; ref: { kind: string; i?: 
   return notes.find((n) => line.has(n.id) && n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.value > 0n) ?? null;
 }
 
+/**
+ * Null when the run goes on with the note bindDeposit landed: deposited, or a front_run whose row of P is U's own deposit
+ * (its value is not what U held when this bind read it: a second transfer reached U after that deposit had landed).
+ * Else why the run stops: a deposit of P by another account (a real front-run) or the bind's other outcome.
+ */
+export function bindProblem(kind: string, row: { depositor: string; value: bigint } | undefined, U: string, amount: bigint): string | null {
+  if (kind === "deposited") return null;
+  if (kind !== "front_run") return kind;
+  if (row === undefined) return "front_run, and the deposits page holds no row of P on this read";
+  if (row.depositor === U) return null;
+  return `front-run: P was deposited by ${row.depositor}, not U, with ${row.value}; U's ${amount} USDC stays at U`;
+}
+
 /** `fn` asked up to `tries` times (a provider a block behind the other, a dropped answer); null when every try failed. */
 export async function retried<T>(fn: () => Promise<T>, tries: number, wait: () => Promise<void> = () => sleep(3000)): Promise<T | null> {
   for (let t = 0; t < tries; t++) {
@@ -613,13 +626,20 @@ async function go(argv: string[], create: boolean) {
     if (network === "testnet") deps.relayerAccount = relayers.bind;
     const outcome = await bindDeposit(seed64, { network, s: scope, i, noteId: note.id, amount }, deps);
     log(`bindDeposit: ${outcome.kind} in ${Date.now() - tBind} ms`);
-    if (outcome.kind !== "deposited") throw new Error(`deposit: ${json(outcome)}; the USDC is at U or in the vault: resume goes on from here, and sweep-u sends what is at U to ${to}`);
+    let row: { depositor: string; value: bigint } | undefined;
+    if (outcome.kind === "front_run") {
+      const rows = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["deposits"] }).then((x: any) => x.deposits, () => []);
+      row = rows.find((r: any) => r.precommitment === BigInt(run.precommitment));
+    }
+    const why = bindProblem(outcome.kind, row, U, amount);
+    if (why !== null) throw new Error(`deposit: ${why} (${json(outcome)}); the USDC is at U or in the vault: resume goes on from here, and sweep-u sends what is at U to ${to}`);
+    if (outcome.kind === "front_run") log(`U's own deposit of P landed first with ${row!.value} (U then held ${amount}: a later transfer): the run goes on with that note`);
     note = outcome.note;
     const calls = (await ns.get(note.id))?.calls ?? [];
     const txs = [...new Set([...calls.flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []), ...heard.bind])];
     const leaf = note.leaf;
-    st.write("deposit", { amount: String(amount), bind_ms: Date.now() - tBind, txs, relayer: relayers.bind, before, after: await balances({ U }), leaf: { value: String(leaf.value), label: String(leaf.label), commitment: String(leaf.commitment), leaf_index: String(leaf.leafIndex) } });
-    log(`deposited ${amount}: leaf ${leaf.leafIndex}; relayer txs ${txs.join(", ") || "none heard"}`);
+    st.write("deposit", { amount: String(leaf.value), bind_ms: Date.now() - tBind, txs, relayer: relayers.bind, before, after: await balances({ U }), leaf: { value: String(leaf.value), label: String(leaf.label), commitment: String(leaf.commitment), leaf_index: String(leaf.leafIndex) } });
+    log(`deposited ${leaf.value}: leaf ${leaf.leafIndex}; relayer txs ${txs.join(", ") || "none heard"}`);
     const left = BigInt(await view2(rpcs, token, "ft_balance_of", { account_id: U }).catch(() => "0"));
     if (left > 0n) log(`U still holds ${left} USDC that was not deposited: sweep-u sends it to ${to} (the run goes on)`);
     }
