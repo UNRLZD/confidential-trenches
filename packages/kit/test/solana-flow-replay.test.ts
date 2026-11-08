@@ -28,6 +28,7 @@ import {
   type SolanaTradeRequest,
 } from "../src/index.ts";
 import { SOLANA_BUILD_TIMEOUT_MS } from "../src/trade/solana/build.ts";
+import { solanaTeardownAddresses } from "../src/checks/solana/checks.ts";
 
 type Fixture = {
   requests: { side: "buy" | "sell"; mint: string; slippageBps: number; wallets: string[]; legs: { wallet: string; amount: string; arm: { own: boolean } }[] }[];
@@ -184,6 +185,72 @@ test("the recorded buy and sell replay through every check, with S12's two refer
     }
     if (req.side === "sell") for (const l of r.legs) assert.equal(l.teardown?.verdict.ok, true, l.teardown?.refused);
   }
+});
+
+// Review L2 of 11c963f9: no replay took the teardown's fallback, so a mutant that refused whenever claims went off
+// passed. A sell wallet's PumpSwap volume account owed cashback (its WSOL in the account's own WSOL account), whose
+// claim's frame errs on both providers: the teardown plans around it, claims off, passes, and keeps the owed volume
+// account with the reason (the volume close no longer framed).
+test("a sell leg whose PumpSwap volume account is owed cashback the claim cannot take (its frame erring on both providers): the teardown plans around it and passes, the owed account kept with its reason", async () => {
+  const CASHBACK = 12_742_862n;
+  const w = request(SELL).legs[0]!.wallet;
+  const uva = solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM);
+  const src = solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const d = deps(SELL);
+  // the teardown's read: W and its addresses (under either token program), ten to a call (flow.ts readAccounts)
+  const lists = [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM].map((program) => [w, ...solanaTeardownAddresses(w, [{ mint: request(SELL).token, program }])]);
+  const teardownRead = (keys: readonly string[]) => lists.some((l) => l.some((_x, i) => i % 10 === 0 && JSON.stringify(l.slice(i, i + 10)) === JSON.stringify(keys)));
+  let erred = 0;
+  const plant = (r: (typeof d.providers)[number]) => Object.assign(async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    if (method === "simulateTransaction") {
+      const m = solanaDecodeMessage(base64.decode(params[0] as string).subarray(65));
+      const i = m.instructions.findIndex((x) => m.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM && x.data.length === 8 && x.data.every((b, j) => b === [37, 58, 35, 126, 190, 53, 228, 197][j]));
+      if (i >= 0) {
+        erred++;
+        return { context: { slot: 1 }, value: { err: { InstructionError: [i, { Custom: 6000 }] }, accounts: null } };
+      }
+    }
+    const a = (await r(method, params)) as { context: unknown; value: ({ data: [string, string]; lamports: number; owner: string } | null)[] };
+    // the teardown's read (the only one naming the claim's source): the volume account owed CASHBACK, its WSOL there
+    if (method === "getMultipleAccounts" && teardownRead(params[0] as string[])) {
+      const keys = params[0] as string[];
+      a.value = a.value.map((x, k) => {
+        if (keys[k] === uva && x) {
+          const v = base64.decode(x.data[0]);
+          // cashback_earned @74 over total_cashback_claimed @82 (this wallet's recorded volume account has claimed before)
+          const dv = new DataView(v.buffer, v.byteOffset);
+          dv.setBigUint64(74, dv.getBigUint64(82, true) + CASHBACK, true);
+          return { ...x, data: [base64.encode(v), "base64"] };
+        }
+        if (keys[k] === src) {
+          const t = new Uint8Array(165);
+          t.set(base58.decode(SOLANA_SOL_MINT), 0);
+          t.set(base58.decode(uva), 32);
+          new DataView(t.buffer).setBigUint64(64, CASHBACK, true);
+          t[108] = 1;
+          new DataView(t.buffer).setUint32(109, 1, true);
+          return { data: [base64.encode(t), "base64"], executable: false, lamports: 2_039_280 + Number(CASHBACK), owner: SOLANA_TOKEN_PROGRAM, rentEpoch: 0, space: 165 };
+        }
+        return x;
+      });
+    }
+    return a;
+  }, { asks: r.asks, times: r.times });
+  const r = await runSolanaTrade(request(SELL), { ...d, providers: [plant(d.providers[0]), plant(d.providers[1])] });
+  const leg = r.legs.find((l) => l.wallet === w)!;
+  assert.equal(leg.refused, undefined, leg.refused);
+  const t = leg.teardown!;
+  assert.equal(erred, 2, "the claim's frame simulated once on each provider, then planned around");
+  assert.equal(t.verdict.ok, true, t.refused);
+  assert.deepEqual(t.verdict.plan!.claim, []);
+  const kept = t.verdict.plan!.keep.find((k) => k.address === uva);
+  assert.match(kept?.why ?? "", /^cashback 12742862 unclaimed \(its claim did not simulate on either provider: A .*6000.*, B .*6000/);
+  // the dry run reads W before its sell, still holding the token: with the owed account kept, nothing is left to close
+  assert.equal(t.frames, 0);
+  assert.equal(t.refused, undefined);
+  assert.ok(!t.verdict.plan!.close.some((h) => h.address === uva), "the owed account is not closed");
+  // the other sell legs tear down as before
+  for (const l of r.legs.filter((x) => x.wallet !== w)) assert.equal(l.teardown?.verdict.ok, true, l.teardown?.refused);
 });
 
 test("the buy is the wallet's first on PumpSwap: its simulation creates the PumpSwap volume account, and S11 passes", async () => {

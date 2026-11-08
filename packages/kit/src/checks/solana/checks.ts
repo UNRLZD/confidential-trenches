@@ -1214,10 +1214,11 @@ export function solanaTeardownAddresses(wallet: string, mints: readonly { mint: 
 /**
  * What the teardown closes and what stays, from the device's own reads of the wallet's accounts on two providers.
  * Throws when the providers disagree on any account (the caller re-reads) or an address is not the wallet's.
- * `unclaimed`: claims off (solanaTeardownUnclaimed: a frame carrying a claim failed its simulation); each owed volume
- * account stays open with this reason, and every other account is planned as if nothing were owed.
+ * `unclaimed`: claims off by pump program (solanaTeardownUnclaimed: the frame carrying the claims failed its simulation on
+ * both providers); each volume account owed under a program named stays open with that program's reason, and every
+ * other account, the other program's claim included, is planned as before.
  */
-export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: string): SolanaTeardownPlan {
+export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: SolanaTeardownUnclaimed): SolanaTeardownPlan {
   const plan: SolanaTeardownPlan = { close: [], claim: [], keep: [] };
   const volumes = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [solanaVolumeAccumulator(wallet, p), p]));
   const cash = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [p, solanaCashbackAccounts(wallet, p)]));
@@ -1301,7 +1302,8 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
       const toClose = plan.close.find((h) => h.address === c.to);
       const toKept = plan.keep.find((k) => k.address === c.to);
       let stop: string | null = null;
-      if (unclaimed !== undefined) stop = unclaimed;
+      const off = unclaimed !== undefined && Object.hasOwn(unclaimed, o.program) ? unclaimed[o.program] : undefined;
+      if (off !== undefined) stop = off;
       else if (has === undefined || has < o.amount) stop = `the volume account's ${c.mint} account holds ${has ?? "nothing read"}`;
       else if (toRead === undefined) stop = `${c.to} not read`;
       else if (toRead !== null && (toRead.owner !== SOLANA_TOKEN_PROGRAM || (o.program === SOLANA_PUMP_AMM_PROGRAM ? !toClose : toRead.data[108] !== 1))) stop = `${c.to} cannot take it${toKept ? ` (${toKept.why})` : ""}`;
@@ -1339,9 +1341,11 @@ export type SolanaTeardownReads = {
   wallet: readonly [bigint, bigint];
   /** Per frame, in order: its simulation on provider A and B. */
   simulations: readonly (readonly [SolanaTeardownSimulation | null, SolanaTeardownSimulation | null])[];
-  /** Claims off, with the reason each owed volume account stays open (solanaTeardownPlan's `unclaimed`). */
-  unclaimed?: string;
+  /** Claims off by program, with the reason each owed volume account stays open (solanaTeardownPlan's `unclaimed`). */
+  unclaimed?: SolanaTeardownUnclaimed;
 };
+/** Claims off, by pump program: the reason each owed volume account under it stays open. */
+export type SolanaTeardownUnclaimed = Readonly<Record<string, string>>;
 export type SolanaTeardownCheckId = "READ" | "DECODE" | "FRAME" | "COVER" | "SIM";
 export type SolanaTeardownVerdict = { ok: boolean; plan: SolanaTeardownPlan | null; results: { id: SolanaTeardownCheckId; ok: boolean; detail: string }[] };
 
@@ -1524,14 +1528,49 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
 }
 
 /**
- * Whether a refused teardown goes again with claims off, and the reason the owed volume accounts then stay open: only
- * when every check passed but SIM and the plan claims something (the claims ride in the last frame, and the verdict
- * covers every frame, so a claim that does not simulate, a layout the program no longer takes or cashback switched off,
- * would otherwise hold every close back). With claims off nothing owed is closed away, so the fallback can cost the
- * wallet nothing but the claim's wait. Null otherwise: a frame, cover or read refusal is never planned around.
+ * Whether a refused teardown goes again with claims off, and for which pump programs, with the reason each owed volume
+ * account then stays open (review M1 of 11c963f9). Only when every check passed but SIM, the plan claims something, every
+ * frame before the last simulates clean on both providers and the last, which carries the claims, errs on both: a
+ * program's refusal (a layout it no longer takes, cashback switched off, more compute than its budget) shows on both,
+ * a provider's lag or a hostile provider on one, and that stays a refusal the caller reads again. The program off is
+ * the one whose instruction both providers name as failing, when that is a claim's (review L1: a failing claim keeps
+ * only its own account open); otherwise every claim's. `already`: the programs a previous try turned off, kept. With
+ * claims off nothing owed is closed away; the caller keeps the wallet owed, so a later pass claims it. Null otherwise.
  */
-export function solanaTeardownUnclaimed(v: SolanaTeardownVerdict): string | null {
+export function solanaTeardownUnclaimed(v: SolanaTeardownVerdict, wires: readonly Uint8Array[], simulations: SolanaTeardownReads["simulations"], already: SolanaTeardownUnclaimed = {}): SolanaTeardownUnclaimed | null {
   if (v.ok || !v.plan || v.plan.claim.length === 0 || v.results.some((x) => !x.ok && x.id !== "SIM")) return null;
-  const sim = v.results.find((x) => x.id === "SIM");
-  return `its claim did not simulate: ${(sim?.detail ?? "").slice(0, 160)}`;
+  if (wires.length === 0 || simulations.length !== wires.length) return null;
+  const clean = (s: SolanaTeardownSimulation | null): boolean => s !== null && s.err === null;
+  const errs = (s: SolanaTeardownSimulation | null): boolean => s !== null && s.err !== null && s.err !== undefined;
+  if (!simulations.slice(0, -1).every(([a, b]) => clean(a) && clean(b))) return null;
+  const [a, b] = simulations.at(-1)!;
+  if (!errs(a) || !errs(b)) return null;
+  const err = (s: SolanaTeardownSimulation): string => {
+    try {
+      return JSON.stringify(s.err).slice(0, 120);
+    } catch {
+      return "an error";
+    }
+  };
+  // the instruction each provider names as failing, by its program
+  let failing: readonly [string | null, string | null];
+  try {
+    const m = solanaDecodeTransaction(wires.at(-1)!).message;
+    const at = (s: SolanaTeardownSimulation): string | null => {
+      const e = (s.err as { InstructionError?: unknown } | null)?.InstructionError;
+      const i = Array.isArray(e) ? e[0] : undefined;
+      const x = typeof i === "number" && Number.isSafeInteger(i) ? m.instructions[i] : undefined;
+      return x ? (m.staticKeys[x.programIndex] ?? null) : null;
+    };
+    failing = [at(a!), at(b!)];
+  } catch {
+    failing = [null, null];
+  }
+  const claimed = [...new Set(v.plan.claim.map((c) => c.program))];
+  const [fa, fb] = failing;
+  const one = typeof fa === "string" && fa === fb && claimed.includes(fa) ? fa : null;
+  const why = `its claim did not simulate on either provider: A ${err(a!)}, B ${err(b!)}`;
+  const off: Record<string, string> = { ...already };
+  for (const p of one === null ? claimed : [one]) off[p] = why;
+  return off;
 }

@@ -62,7 +62,7 @@ import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMa
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, type SolanaHeldRead, type SolanaTeardownSimulation } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { ErrorCode, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -390,8 +390,9 @@ export type OwedRentBack = { address: string; l: string; j: number; mints: { min
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void> };
 /** How a rent back ended: its sweep sent; nothing left on W; W under the smallest note (solanaSweepFloor), its lamports
  *  kept on W; an account the plan keeps (so W keeps the fee to close it later); W holding a token; or it gave up. */
-// "owed": W keeps only what a claim of its owed cashback needs (solanaSweepKeep) and the rest is under the floor, so
-// nothing is swept this pass and the record stays for the claim (card sol-w-sweep)
+// "owed": W keeps what a later claim of its owed cashback needs: an account whose claim did not simulate on either RPC
+// this pass (review M1 of 11c963f9), with the rest under the floor once that claim's cost is kept (solanaSweepKeep,
+// card sol-w-sweep); nothing is swept this pass and the record stays, so a later pass claims it and sweeps
 export type RentBackEnd = "sent" | "nothing" | "floor" | "owed" | "kept" | "holds" | "gave_up";
 export type RentBackTold = { address: string; step: "teardown" | "sweep" | "rent_back"; state: "fault" | "gave_up" | RentBackEnd; detail: string };
 
@@ -747,9 +748,10 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    slot); every account the plan finds closable (a token account holding none, a volume account owing nothing) is
  *    closed to W by the kit's buildSolanaTeardown frames, checked by the rule (checkSolanaTeardownFrames: the kit's
  *    checkSolanaTeardown, both RPCs' simulations included), signed by W and sent on both; each frame read back until it
- *    is on both RPCs, failed on both, or past its blockhash on both. A cashback claim that does not simulate is planned
- *    around once with claims off (the kit's solanaTeardownChecked): its volume account stays open and owed, with the
- *    reason, and every other close still goes.
+ *    is on both RPCs, failed on both, or past its blockhash on both. A cashback claim whose frame errs on both RPCs
+ *    while every other frame is clean on both is planned around, its program's claims off (the kit's
+ *    solanaTeardownChecked; one RPC's error is a fault, read again): its volume account stays open, with the reason,
+ *    every other close still goes, and the rent back ends "owed", so W stays owed and a later pass claims it.
  * 2. The sweep, only when the plan keeps nothing but volume accounts owed cashback a claim could not take this time
  *    (review L4: an account kept holding tokens, or owing incentives or volume, needs W's fee to be claimed or closed
  *    later, so W keeps all) and every frame read back: W's lamports, the same on both RPCs, less its one fee, the rents
@@ -833,7 +835,7 @@ async function rentBack(h: PoolSellHost, x: RentBack): Promise<RentBackEnd> {
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
     // claims off and `unclaimed` the reason when the teardown's claim did not simulate (the kit's solanaTeardownChecked)
-    const readW = async (unclaimed?: string) => {
+    const readW = async (unclaimed?: SolanaTeardownUnclaimed) => {
       const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));
       const accounts = Object.fromEntries(addresses.map((a, i) => [a, [held[0][i + 1]!, held[1][i + 1]!] as const]));
       const holding = x.mints.map((m) => {
@@ -881,15 +883,16 @@ async function rentBack(h: PoolSellHost, x: RentBack): Promise<RentBackEnd> {
     }
     // a frame still unread: W's lamports are not yet what they stay, so no sweep is priced on them
     if (open.size > 0) return end("gave_up", "a teardown frame was not read back");
-    if (owedOf(teardown.ok.keep) === null) return end("kept", teardown.ok.keep.map((k) => `${k.address}: ${k.why}`).join("; "));
+    if (owedOf(teardown.ok.keep) === null) return end(teardown.ok.unclaimed === undefined ? "kept" : "owed", teardown.ok.keep.map((k) => `${k.address}: ${k.why}`).join("; "));
     // 2. the sweep
+    const unclaimed = teardown.ok.unclaimed;
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     const sweep = await again("sweep", async () => {
       // W and its accounts read again, after the frames (review M-A: a frame that failed on chain, a token sent to W's
       // account meanwhile, leaves an account open): the sweep only when the plan now closes nothing and keeps nothing,
       // so W keeps the fee for what is still open; a claim the teardown planned around stays planned around (card
       // sol-w-sweep: it is the next pass's to try again, from the claim's cost the sweep leaves on W)
-      const now = await readW(teardown.ok.unclaimed);
+      const now = await readW(unclaimed);
       if (now.holds) return { end: "kept" as const, detail: "W holds a token it traded" };
       const owed = owedOf(now.plan.keep);
       if (owed === null) return { end: "kept" as const, detail: now.plan.keep.map((k) => `${k.address}: ${k.why}`).join("; ") };

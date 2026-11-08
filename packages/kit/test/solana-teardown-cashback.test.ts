@@ -389,11 +389,11 @@ const cleanSim = (plan: SolanaTeardownPlan, f: SolanaAssembled): SolanaTeardownS
   return { err: null, wallet: W0 + here.reduce((x, h) => x + h.lamports, 0n) - 5_000n, accounts: Object.fromEntries(here.map((h) => [h.address, null])), amounts: {} };
 };
 
-test("L2: a claim whose frame does not simulate is planned around once, claims off: the owed volume account stays open with the reason, every other close is framed, simulated and passes", async () => {
+test("L2: a claim whose frame does not simulate on either provider is planned around, its program's claims off: the owed volume account stays open with the reason, every other close is framed, simulated and passes", async () => {
   const plan = solanaTeardownPlan(W, ACCOUNTS);
   assert.equal(plan.claim.length, 1);
   // what claims off closes, whatever the reason: the lamports a clean simulation gives back
-  const off = solanaTeardownPlan(W, ACCOUNTS, "any reason");
+  const off = solanaTeardownPlan(W, ACCOUNTS, { [SOLANA_PUMP_AMM_PROGRAM]: "any reason" });
   const calls: SolanaAssembled[][] = [];
   const t = await solanaTeardownChecked(W, plan, ACCOUNTS, [W0, W0], R.chain, async (fs) => {
     calls.push([...fs]);
@@ -406,8 +406,10 @@ test("L2: a claim whose frame does not simulate is planned around once, claims o
   assert.deepEqual(t.plan.close.map((h) => h.address), [UVA_P], "the pump volume account still closes");
   assert.equal(t.plan.keep.length, 1);
   assert.equal(t.plan.keep[0]!.address, UVA_A);
-  assert.match(t.plan.keep[0]!.why, /^cashback 12742862 unclaimed \(its claim did not simulate: .*Custom.*6000/);
-  assert.equal(t.reads.unclaimed, t.plan.keep[0]!.why.slice("cashback 12742862 unclaimed (".length, -1));
+  // the reason names what failed: the claim's frame, on both providers, each provider's error
+  assert.match(t.plan.keep[0]!.why, /^cashback 12742862 unclaimed \(its claim did not simulate on either provider: A .*Custom.*6000.*, B .*Custom.*6000/);
+  assert.deepEqual(Object.keys(t.reads.unclaimed ?? {}), [SOLANA_PUMP_AMM_PROGRAM]);
+  assert.equal(t.reads.unclaimed![SOLANA_PUMP_AMM_PROGRAM], t.plan.keep[0]!.why.slice("cashback 12742862 unclaimed (".length, -1));
   // the frames close nothing owed and claim nothing
   for (const f of t.frames) {
     const m = solanaDecodeMessage(f.wire.subarray(65));
@@ -417,6 +419,94 @@ test("L2: a claim whose frame does not simulate is planned around once, claims o
   const { unclaimed: _off, ...claimsOn } = t.reads;
   const on = checkSolanaTeardown(t.frames.map((f) => f.wire), W, claimsOn);
   assert.equal(on.ok, false);
+});
+
+// Review M1 of 11c963f9: any SIM refusal turned claims off, so one provider erring once (a lagging backend, a stale
+// balancer, one hostile provider) dropped the claim for good. Only a claim frame that errs on both providers, with
+// every other frame clean on both, is planned around; anything else is a refusal the caller reads again.
+test("M1: one provider erring on the claim's frame, or a frame before it dirty, is no fallback: one simulation, the first verdict stands", async () => {
+  const plan = solanaTeardownPlan(W, ACCOUNTS);
+  const ok = (await readsOf()).simulations[0]!;
+  for (const which of [0, 1] as const) {
+    let n = 0;
+    const t = await solanaTeardownChecked(W, plan, ACCOUNTS, [W0, W0], R.chain, async (fs) => (n++, fs.map(() => (which === 0 ? [{ err: SIM_ERR, wallet: 0n, accounts: {} }, ok[1]] : [ok[0], { err: SIM_ERR, wallet: 0n, accounts: {} }]) as never)));
+    assert.equal(n, 1, `provider ${which} alone`);
+    assert.equal(t.verdict.ok, false);
+    assert.deepEqual(t.plan.claim.length, 1, "the claim stays planned");
+    assert.equal(t.reads.unclaimed, undefined);
+    // a provider that answered nothing is no error on both either
+    assert.equal(solanaTeardownUnclaimed(t.verdict, t.frames.map((f) => f.wire), [[{ err: SIM_ERR, wallet: 0n, accounts: {} }, null]]), null);
+  }
+  // two frames: the claim's (the last) errs on both, but the one before is dirty on one provider: no fallback
+  const v = checkSolanaTeardown(R.frames.map((x) => base64.decode(x)), W, { ...(await readsOf()), simulations: [[{ err: SIM_ERR, wallet: 0n, accounts: {} }, { err: SIM_ERR, wallet: 0n, accounts: {} }]] });
+  const wire = base64.decode(R.frames[0]!);
+  const bad = { err: SIM_ERR, wallet: 0n, accounts: {} };
+  assert.notEqual(solanaTeardownUnclaimed(v, [wire], [[bad, bad]]), null, "the claim frame on both: planned around");
+  assert.equal(solanaTeardownUnclaimed(v, [wire, wire], [[ok[0]!, bad], [bad, bad]]), null);
+  assert.equal(solanaTeardownUnclaimed(v, [wire, wire], [[null, ok[1]!], [bad, bad]]), null);
+  assert.equal(solanaTeardownUnclaimed(v, [wire, wire], [[ok[0]!, ok[1]!], [bad, bad]])?.[SOLANA_PUMP_AMM_PROGRAM]?.startsWith("its claim did not simulate on either provider"), true);
+  // the claim frame clean on both (the refusal is elsewhere, a lamport count): no fallback
+  assert.equal(solanaTeardownUnclaimed(v, [wire], [[ok[0]!, ok[1]!]]), null);
+  // wires and simulations that do not pair: none
+  assert.equal(solanaTeardownUnclaimed(v, [], []), null);
+  assert.equal(solanaTeardownUnclaimed(v, [wire], [[bad, bad], [bad, bad]]), null);
+});
+
+// Review L1 of 11c963f9: one failing claim dropped every claim. The program whose instruction both providers name as
+// failing has its claims off; the other program's claim stays, and goes off only when it fails too (two more
+// simulations at most). An error that names no claim's instruction turns every claim off at once.
+test("L1: the failing program's claim alone goes off; the other's goes off only when it fails too; an unmapped error turns all off", async () => {
+  const accounts = stableWorld();
+  const plan = solanaTeardownPlan(W, accounts);
+  assert.deepEqual(plan.claim.map((c) => c.program).sort(), [SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM].sort());
+  const at = (f: SolanaAssembled, program: string): number => {
+    const m = solanaDecodeMessage(f.wire.subarray(65));
+    const want = program === SOLANA_PUMP_PROGRAM ? SOLANA_CLAIM_CASHBACK_V2 : SOLANA_CLAIM_CASHBACK;
+    return m.instructions.findIndex((x) => m.staticKeys[x.programIndex] === program && x.data.length === 8 && x.data.every((b, i) => b === want[i]));
+  };
+  const failOn = (f: SolanaAssembled, program: string) => {
+    const e = { err: { InstructionError: [at(f, program), { Custom: 6000 }] }, wallet: 0n, accounts: {} };
+    return [e, e] as const;
+  };
+  // v2 refuses, the PumpSwap claim would land: the second simulation keeps the PumpSwap claim, and stops there
+  const calls: SolanaTeardownPlan[] = [];
+  const one = await solanaTeardownChecked(W, plan, accounts, [W0, W0], R.chain, async (fs) => {
+    calls.push(calls.length === 0 ? plan : solanaTeardownPlan(W, accounts, { [SOLANA_PUMP_PROGRAM]: "x" }));
+    return calls.length === 1 ? fs.map((f, i) => (i === fs.length - 1 ? failOn(f, SOLANA_PUMP_PROGRAM) : [cleanSim(plan, f), cleanSim(plan, f)] as const)) : fs.map((f) => [cleanSim(plan, f), cleanSim(plan, f)] as const);
+  });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(one.plan.claim.map((c) => c.program), [SOLANA_PUMP_AMM_PROGRAM], "the PumpSwap claim stays");
+  assert.deepEqual(Object.keys(one.reads.unclaimed ?? {}), [SOLANA_PUMP_PROGRAM]);
+  assert.match(one.plan.keep.find((k) => k.address === UVA_P)!.why, /^stable cashback 500000 unclaimed \(its claim did not simulate on either provider/);
+  // both refuse: v2 off first, then the PumpSwap claim off too; three simulations in all
+  let n = 0;
+  const both = await solanaTeardownChecked(W, plan, accounts, [W0, W0], R.chain, async (fs) => {
+    n++;
+    const last = fs.length - 1;
+    if (n === 1) return fs.map((f, i) => (i === last ? failOn(f, SOLANA_PUMP_PROGRAM) : [cleanSim(plan, f), cleanSim(plan, f)] as const));
+    if (n === 2) return fs.map((f, i) => (i === last ? failOn(f, SOLANA_PUMP_AMM_PROGRAM) : [cleanSim(plan, f), cleanSim(plan, f)] as const));
+    return fs.map((f) => [cleanSim(plan, f), cleanSim(plan, f)] as const);
+  });
+  assert.equal(n, 3, "at most two more simulations");
+  assert.deepEqual(both.plan.claim, []);
+  assert.deepEqual(Object.keys(both.reads.unclaimed ?? {}).sort(), [SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM].sort());
+  // an error naming no claim's instruction (a string, an index out of range, the two providers naming different ones):
+  // every claim off at once
+  for (const errs of [["x", "x"], [{ InstructionError: [99, {}] }, { InstructionError: [99, {}] }], "split"] as const) {
+    let k = 0;
+    const all = await solanaTeardownChecked(W, plan, accounts, [W0, W0], R.chain, async (fs) => {
+      k++;
+      const last = fs.length - 1;
+      if (k > 1) return fs.map((f) => [cleanSim(plan, f), cleanSim(plan, f)] as const);
+      return fs.map((f, i) => {
+        if (i !== last) return [cleanSim(plan, f), cleanSim(plan, f)] as const;
+        if (errs === "split") return [failOn(f, SOLANA_PUMP_PROGRAM)[0], failOn(f, SOLANA_PUMP_AMM_PROGRAM)[0]] as const;
+        return [{ err: errs[0], wallet: 0n, accounts: {} }, { err: errs[1], wallet: 0n, accounts: {} }] as const;
+      });
+    });
+    assert.equal(k, 2, JSON.stringify(errs));
+    assert.deepEqual(all.plan.claim, [], JSON.stringify(errs));
+  }
 });
 
 test("L2: nothing planned around when the plan claims nothing, or when a check other than SIM refuses: one simulation, the first verdict stands", async () => {
@@ -432,13 +522,17 @@ test("L2: nothing planned around when the plan claims nothing, or when a check o
   assert.deepEqual(failed(t.verdict).map((x) => x.split(" ")[0]), ["SIM"]);
   assert.equal(t.reads.unclaimed, undefined);
   // a refusal at FRAME, COVER, READ or DECODE is never planned around, nor a passing verdict
-  const v = checkSolanaTeardown(R.frames.map((x) => base64.decode(x)), W, await readsOf());
+  const wires = R.frames.map((x) => base64.decode(x));
+  const bad = { err: SIM_ERR, wallet: 0n, accounts: {} };
+  const v = checkSolanaTeardown(wires, W, await readsOf());
   assert.equal(v.ok, true);
-  assert.equal(solanaTeardownUnclaimed(v), null);
+  assert.equal(solanaTeardownUnclaimed(v, wires, [[bad, bad]]), null);
   for (const id of ["READ", "DECODE", "FRAME", "COVER"] as const) {
-    const bad = { ...v, ok: false, results: v.results.map((x) => (x.id === id || x.id === "SIM" ? { ...x, ok: false } : x)) };
-    assert.equal(solanaTeardownUnclaimed(bad), null, id);
+    const refused = { ...v, ok: false, results: v.results.map((x) => (x.id === id || x.id === "SIM" ? { ...x, ok: false } : x)) };
+    assert.equal(solanaTeardownUnclaimed(refused, wires, [[bad, bad]]), null, id);
   }
-  const simOnly = { ...v, ok: false, results: v.results.map((x) => (x.id === "SIM" ? { ...x, ok: false, detail: "y".repeat(500) } : x)) };
-  assert.equal(solanaTeardownUnclaimed(simOnly), `its claim did not simulate: ${"y".repeat(160)}`, "bounded");
+  // the reason is bounded: each provider's error at most 120 characters
+  const simOnly = { ...v, ok: false, results: v.results.map((x) => (x.id === "SIM" ? { ...x, ok: false } : x)) };
+  const long = { err: "y".repeat(500), wallet: 0n, accounts: {} };
+  assert.equal(solanaTeardownUnclaimed(simOnly, wires, [[long, long]])?.[SOLANA_PUMP_AMM_PROGRAM], `its claim did not simulate on either provider: A "${"y".repeat(119)}, B "${"y".repeat(119)}`);
 });
