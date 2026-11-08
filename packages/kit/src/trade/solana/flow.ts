@@ -72,6 +72,7 @@ import {
   type SolanaCapStep,
   type SolanaJupiterBuild,
 } from "./build.ts";
+import { isOwnSolanaWire, ownSolanaWire } from "./own-wires.ts";
 import { dryRunSolanaSet, sendSolanaSet, solanaPacedRpc, solanaProviderLimits, solanaSameProvider, type SolanaProviderRps, type SolanaDryTx, type SolanaFetch, type SolanaRpc, type SolanaSendPath, type SolanaTxOutcome } from "./send.ts";
 
 export type SolanaTradeLeg = {
@@ -607,6 +608,7 @@ async function prepareLeg(
     rec.size = a.size;
     rec.verdict = verdict;
     if (!verdict.ok) { rec.refused = `checks: ${verdict.results.filter((r) => !r.ok).map((r) => `${r.id} ${r.detail}`).join("; ").slice(0, 400)}`; return null; }
+    ownSolanaWire(a, checked);
     return { leg, rec, assembled: a, checked, renew };
   };
   // A trade whose blockhash grew old while its legs were built (runSolanaTrade): the pre-state and the simulation read
@@ -641,7 +643,8 @@ function referenceLate(at: number, now: number): string | null {
   return age >= 0 && age <= SOLANA_BLOCKHASH_REFRESH_MS ? null : `checks: the reference is ${Number.isFinite(age) ? Math.round(age) : 0} ms old at the signature, past the ${SOLANA_BLOCKHASH_REFRESH_MS} ms limit`;
 }
 
-/** The signature into the wire's one slot, checked against the wallet's key before anything is sent. */
+/** The signature into the wire's one slot, checked against the wallet's key before anything is sent. Only a wire this
+ *  flow built and checked is signed (own-wires.ts): any other is refused before the signer is asked. */
 export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }): Promise<Uint8Array> {
   return (await signedWire(deps, wallet, a, () => null)) as Uint8Array;
 }
@@ -649,7 +652,9 @@ export async function solanaSignedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign
 /** solanaSignedWire with the age rule: `late` is read when the signer answers, before its signature is checked or put
  * in the wire; a reason from it is answered instead of the wire, and the signature is dropped. */
 async function signedWire(deps: Pick<SolanaTradeDeps, "dry" | "sign">, wallet: string, a: { wire: Uint8Array; message: Uint8Array; lastValidBlockHeight: number }, late: () => string | null): Promise<Uint8Array | string> {
-  // The bytes signed are the bytes checked: one signature slot, and the message is the wire's own message.
+  // The bytes signed are the bytes checked: a wire this flow built and checked, unchanged since; one signature slot, and
+  // the message is the wire's own message.
+  if (!isOwnSolanaWire(a)) throw new Error("the wire is not one this flow built and checked");
   if (a.wire[0] !== 1 || a.wire.length !== 65 + a.message.length || a.wire.subarray(65).some((b, i) => b !== a.message[i])) throw new Error("the message is not the checked wire's message");
   let sig: Uint8Array;
   if (deps.dry) {
@@ -703,8 +708,11 @@ async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps:
   const bh = await readSolanaBlockhashBoth(deps.providers);
   const frames = buildSolanaTeardown(w, plan, bh);
   const simulations = await Promise.all(frames.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers)));
-  const verdict = checkSolanaTeardown(frames.map((f) => f.wire), w, { accounts, wallet: [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], simulations });
+  // the copies checked are the only bytes signed (own-wires.ts)
+  const checkedWires = frames.map((f) => Uint8Array.from(f.wire));
+  const verdict = checkSolanaTeardown(checkedWires, w, { accounts, wallet: [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], simulations });
   if (!verdict.ok || frames.length === 0) return { verdict, frames: frames.length, ...(verdict.ok ? {} : { refused: "teardown checks" }) };
+  frames.forEach((f, i) => ownSolanaWire(f, checkedWires[i]!));
   const set = await signSet(deps, frames.map((f) => ({ wallet: w, tx: f })));
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };
   if (deps.dry) return { verdict, frames: frames.length, dry: (await dryRunSolanaSet(set, sendOpts)).txs };
