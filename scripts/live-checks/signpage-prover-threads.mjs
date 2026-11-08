@@ -20,7 +20,7 @@
 //     --base: a build's own address (a Pages preview) read as SIGN_HOST is, its own origin in place of SIGN_HOST's
 //   node scripts/live-checks/signpage-prover-threads.mjs --harness [--site <dir>] [...]
 //     the harness: SIGN_HOST answered from a build folder under its own _headers, every matching rule joined as Pages
-//     joins them (default: a fresh `deploy.mjs --dry-run` build, which passed the deploy gate); every other host refused.
+//     joins them (default: a fresh `deploy.mjs --build` build, which passed the deploy gate); every other host refused.
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it; each
 //   proof's time in the worker is in it (page.proofs[].proveMs), the record perf/runs takes.
 // packages/signpage/scripts/deploy.mjs refuses a _headers whose thread rule is not THREAD_CSP, exactly.

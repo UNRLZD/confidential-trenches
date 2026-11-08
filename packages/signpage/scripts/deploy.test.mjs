@@ -4,8 +4,9 @@
 // /assets/zk/<sha256>.<ext>; a changed, missing or extra setup file, a stale worker or a worker rule with another
 // policy is refused.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -31,14 +32,19 @@ function pkgWith(headers, extra = {}) {
   return d;
 }
 
-// a spawnSync stand-in that records every call: git answers HEAD `head` and the tree's status `status`; `uploads` are
-// the calls that would send bytes (git reads the tree, which any run may do)
-function recorder({ head = "abc", status = "", install = 0 } = {}) {
+// a spawnSync stand-in that records every call: git answers HEAD `head`, the tree's status `status`, a fetch of origin main
+// with exit `fetch` and origin/main's head `main` (HEAD's by default), gh the heads of main's passed ci.yml push runs `ci`
+// (HEAD's by default); `uploads` are the calls that would send bytes (the reads any run may make)
+function recorder({ head = "abc", status = "", install = 0, fetch = 0, main = head, ci = `${head}\n` } = {}) {
   const calls = [];
   const run = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     if (cmd === "pnpm" && args[0] === "install") return { status: install, stdout: "", stderr: install ? "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" : "" };
-    return { status: 0, stdout: cmd !== "git" ? "" : args.includes("rev-parse") ? (head ? `${head}\n` : "") : status };
+    if (cmd === "gh") return { status: 0, stdout: ci };
+    if (cmd !== "git") return { status: 0, stdout: "" };
+    if (args.includes("fetch")) return { status: fetch, stdout: "" };
+    if (args.includes("rev-parse")) return { status: 0, stdout: args.includes("origin/main") ? (main ? `${main}\n` : "") : head ? `${head}\n` : "" };
+    return { status: 0, stdout: status };
   };
   return { calls, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
 }
@@ -177,10 +183,16 @@ test("a build carrying any Pages config file but _headers, or .well-known/webaut
   assert.equal(uploads().length, 0);
 });
 
-test("--dry-run stops after the gate and keeps the build, whose _headers is the package's", async () => {
+test("--build and --dry-run stop after the gate and keep the build, whose _headers is the package's; --build reads nothing of main", async () => {
+  const b = recorder({ main: "other", ci: "" });
+  const built = await deploy(["--build"], {}, b.run);
+  assert.equal(built.code, 0, (built.err ?? []).join("\n"));
+  rmSync(/gate ok on (\S+);/.exec(built.out[0])[1], { recursive: true, force: true });
+  assert.deepEqual(b.calls.map((c) => c.cmd), ["pnpm"], "--build makes no git or gh read");
   const { uploads, run } = recorder();
-  const r = await deploy(["--dry-run"], {}, run);
+  const r = await deploy(["--dry-run"], {}, run, undefined, {}, RELEASED_TREE());
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
+  assert.match(r.out[0], /a deploy would go ahead$/);
   const dir = /gate ok on (\S+);/.exec(r.out[0])[1];
   try {
     assert.deepEqual(checkDir(dir), []);
@@ -225,19 +237,20 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   assert.equal(r2.code, 1);
   assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
   assert.equal(headless.uploads().length, 0);
-  // --dry-run still builds and gates a work in progress, and says a deploy would refuse it
+  // --dry-run still builds and gates a work in progress, and exits 1 with what a deploy would refuse
   const dry = recorder({ status: " M packages/signpage/index.html" });
-  const d = await deploy(["--dry-run"], {}, dry.run);
-  assert.equal(d.code, 0, (d.err ?? []).join("\n"));
+  const d = await deploy(["--dry-run"], {}, dry.run, undefined, {}, RELEASED_TREE());
+  assert.equal(d.code, 1, (d.out ?? []).join("\n"));
   rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
-  assert.match(d.out[0], /uncommitted changes: a deploy would refuse/);
+  assert.match(d.out[0], /a deploy would refuse it:$/);
+  assert.match(d.err.join("\n"), /^REFUSED the tree has uncommitted changes/m);
 });
 
 test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", async () => {
   const { calls, run, installs } = recorder();
-  // the build of a missing package throws: the install was already asked for, after the two tree reads
+  // the build of a missing package throws: the install was already asked for, after the tree and main reads
   await assert.rejects(deploy([], ENV, run, NO_PKG), /ENOENT/);
-  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? 2 : 0)].join(" ")), ["git rev-parse", "git status", "pnpm install"]);
+  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? 2 : 0)].join(" ")), ["git rev-parse", "git status", "git fetch", "git rev-parse", "gh run", "pnpm install"]);
   assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile"]);
   assert.equal(installs()[0].opts.cwd, dirname(dirname(PKG)));
   const dry = recorder();
@@ -379,7 +392,7 @@ test("a SIGN_HOST that cannot be read, or answers other than 200, is never taken
 
 // Card signpage-release-at-deploy: the "newest release is this build" rule moved here from every card branch's
 // release.test, so a release is cut once per sign deploy, not once per card.
-test("planted: a deploy of a build no committed release names is refused before the token, nothing uploaded; --dry-run says a deploy would refuse it", async () => {
+test("planted: a deploy of a build no committed release names is refused before its env check, nothing uploaded; --dry-run exits 1", async () => {
   const pkg = pkgCopy();
   const named = releasedAs(pkg);
   try {
@@ -394,7 +407,7 @@ test("planted: a deploy of a build no committed release names is refused before 
       const rec = recorder();
       const r = await deploy([], ENV, rec.run, pkg, signHost(rec).net, released);
       assert.equal(r.code, 1, (r.out ?? []).join("\n"));
-      assert.ok(r.err.some((l) => /^REFUSED release-\d+, the newest release, is not this SIGN_HOST build \(SIGN_HOST \/extra\.txt: built, not in the list\): cut release-\d+ on main/.test(l)), r.err.join("\n"));
+      assert.ok(r.err.some((l) => /^REFUSED release-\d+, the newest release, is not this SIGN_HOST build \(SIGN_HOST \/extra\.txt: built, not in the list\): cut release-\d+ on a branch from origin\/main's head/.test(l)), r.err.join("\n"));
       assert.equal(r.err.at(-1), "nothing was uploaded");
       assert.equal(rec.uploads().length, 0);
     }
@@ -408,15 +421,72 @@ test("planted: a deploy of a build no committed release names is refused before 
     const e = await deploy([], ENV, edited.run, undefined, signHost(edited).net, { ...RELEASED_TREE(), ledger: { "release-1": "0".repeat(64) } });
     assert.ok(e.code === 1 && e.err.some((l) => l.startsWith("REFUSED release-1 was edited after it was written")), (e.err ?? []).join("\n"));
     assert.deepEqual([changed.uploads().length, edited.uploads().length], [0, 0]);
-    // --dry-run builds it and says a deploy would refuse it
+    // with no token in the environment it is refused all the same (code 1, not the env check's 2): the release check sits above it
+    const bare = recorder();
+    const n = await deploy([], {}, bare.run, pkg, signHost(bare).net, named);
+    assert.equal(n.code, 1, (n.err ?? []).join("\n"));
+    assert.ok(n.err.some((l) => l.startsWith("REFUSED release-1, the newest release, is not this SIGN_HOST build")), n.err.join("\n"));
+    assert.ok(!n.err.some((l) => /CLOUDFLARE/.test(l)), n.err.join("\n"));
+    // --dry-run builds it and exits 1 with what a deploy would refuse
     const dry = recorder();
     const d = await deploy(["--dry-run"], {}, dry.run, pkg, {}, named);
-    assert.equal(d.code, 0, (d.err ?? []).join("\n"));
+    assert.equal(d.code, 1, (d.out ?? []).join("\n"));
     rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
-    assert.match(d.out[0], /; no committed release names this build \(release-1, the newest release, is not this SIGN_HOST build \(SIGN_HOST \/: [^)]*\)[^;]*: a deploy would refuse it$/);
+    assert.match(d.out[0], /a deploy would refuse it:$/);
+    assert.ok(d.err.some((l) => l.startsWith("REFUSED release-1, the newest release, is not this SIGN_HOST build (SIGN_HOST /: ")), d.err.join("\n"));
   } finally {
     rmSync(pkg, { recursive: true, force: true });
     rmSync(named.dir, { recursive: true, force: true });
+  }
+});
+
+// Card signpage-release-at-deploy, review P1: the deploy knows main, not only this checkout's lists. A checkout behind
+// origin/main could cut its own release-<N> under a name main already holds with other bytes, and deploy it.
+test("planted: a deploy is refused unless HEAD is origin/main's head, fetched now, with a passed ci.yml push run on main", async () => {
+  const cases = {
+    "a checkout behind origin/main": [{ main: "def" }, /^REFUSED HEAD abc is not origin\/main's head def: a sign deploy is main's head/],
+    "main's head with no passed push run": [{ ci: "def\n" }, /^REFUSED HEAD abc has no passed push run of ci\.yml on main$/],
+    "a fetch that fails": [{ fetch: 128 }, /^REFUSED git fetch origin main failed \(exit 128\)/],
+  };
+  for (const [name, [opts, want]] of Object.entries(cases)) {
+    const rec = recorder(opts);
+    const r = await deploy([], ENV, rec.run, undefined, signHost(rec).net, RELEASED_TREE());
+    assert.equal(r.code, 1, `${name}: ${(r.out ?? []).join("\n")}`);
+    assert.ok(r.err.some((l) => want.test(l)), `${name}: ${r.err.join("\n")}`);
+    assert.deepEqual([rec.installs().length, rec.uploads().length], [0, 0], `${name}: refused before the install, the build and the upload`);
+    const dry = recorder(opts);
+    const d = await deploy(["--dry-run"], {}, dry.run, undefined, {}, RELEASED_TREE());
+    assert.equal(d.code, 1, `${name} --dry-run`);
+    rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
+    assert.ok(d.err.some((l) => want.test(l)), `${name} --dry-run: ${d.err.join("\n")}`);
+  }
+  // the reads it makes: a fetch of origin main, origin/main's head, and the passed push runs of ci.yml on main
+  const rec = recorder();
+  assert.equal((await deploy([], ENV, rec.run, undefined, signHost(rec).net, RELEASED_TREE())).code, 0);
+  assert.ok(rec.calls.some((c) => c.cmd === "git" && c.args.slice(2).join(" ") === "fetch -q origin main"));
+  const gh = rec.calls.find((c) => c.cmd === "gh");
+  assert.deepEqual(gh.args, ["run", "list", "-R", "UNRLZD/confidential-trenches", "--branch", "main", "--workflow", "ci.yml", "--event", "push", "--status", "success", "-L", "200", "--json", "headSha", "-q", ".[].headSha"]);
+});
+
+// review P2-2: a release build is the commit's tree, so a file git ignores in public/ is never served or listed
+test("planted: an ignored file in public/ (.env.local) is not in the build; build() copies the tracked sources only", () => {
+  // a git checkout of the package's sources, with the repository's ignore rule for .env.* and one ignored file planted
+  const pkg = pkgCopy();
+  const git = (...a) => execFileSync("git", ["-C", pkg, ...a], { encoding: "utf8" });
+  let dir;
+  try {
+    git("init", "-q");
+    writeFileSync(join(pkg, ".gitignore"), ".env.*\n");
+    git("add", "--", ".gitignore", "index.html", "public");
+    writeFileSync(join(pkg, "public", ".env.local"), "SECRET_FOR_A_TEST_ONLY=1\n");
+    assert.equal(git("check-ignore", "public/.env.local").trim(), "public/.env.local");
+    dir = build(pkg);
+    assert.ok(!existsSync(join(dir, ".env.local")), "public/.env.local was built");
+    assert.deepEqual(checkDir(dir), []);
+    assert.ok(readFileSync(join(dir, "app.js")).equals(readFileSync(join(PKG, "public", "app.js"))));
+  } finally {
+    rmSync(pkg, { recursive: true, force: true });
+    if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
 

@@ -19,17 +19,22 @@
 // verify gate (scripts/ci/verify-gate.mjs) holds every new list's tree to a commit of the pull request.
 // RELEASED is the ledger of every written list's sha256: ledgerProblems() fails an old list edited after it was
 // written, a list missing from the ledger and a ledger entry whose list is gone, on every branch (release.test.mjs);
-// the verify gate refuses a change to a list or a ledger entry on main. A card branch cuts no release (card
-// signpage-release-at-deploy): a release is cut once per sign deploy, on main, and the sign deploy (deploy.mjs) refuses
-// a build that the newest committed list does not name (unreleasedProblems(): every SIGN_HOST file, every header, the
-// _headers file), so every build SIGN_HOST serves is a release. The flow, right before a sign deploy, on main at the
-// commit to deploy, with no uncommitted change:
-//   1. node packages/signpage/scripts/release-list.mjs release-<N>     N one past the newest list in releases/
-//   2. add the row it prints (add to RELEASED: "release-<N>": "<sha256 of the list>",) at the end of RELEASED below
-//   3. node --test packages/signpage/scripts/release.test.mjs          the ledger holds every list as written
-//   4. git commit -m "Card <key>: signing page release-<N>" -- packages/signpage/releases/release-<N>.json packages/signpage/scripts/release-list.mjs
-//   5. the sign deploy at that commit (scripts/deploy/pages.sh node packages/signpage/scripts/deploy.mjs), then its
-//      live run; signpage-release-at-deploy reads SIGN_HOST against the newest committed list
+// the verify gate refuses a change to a list or a ledger entry on main. A card cuts no release (card
+// signpage-release-at-deploy): a release is cut once per sign deploy, and the sign deploy (deploy.mjs) serves only
+// origin/main's head with a passed ci.yml push run, and only a build the newest committed list names (unreleasedProblems:
+// every SIGN_HOST file, every header, the _headers file), so every build SIGN_HOST serves is a release on main. The flow:
+//   1. cut release-<N> on a branch from origin/main's head (git worktree add -b card/<key> ... origin/main, a clean
+//      tree, pnpm install --frozen-lockfile): node packages/signpage/scripts/release-list.mjs release-<N>, N exactly one
+//      past the newest list (it refuses any other N), then add the row it prints (add to RELEASED: "release-<N>":
+//      "<sha256 of the list>",) at the end of RELEASED below, run node --test packages/signpage/scripts/release.test.mjs,
+//      and commit both: git commit -m "Card <key>: signing page release-<N>" -- packages/signpage/releases/release-<N>.json packages/signpage/scripts/release-list.mjs
+//   2. push it with push-card (the team's push script, card/<key>);
+//   3. merge it (the verify gate holds the new list's tree to the base's or the pull request's, with the head's
+//      SIGN_HOST build inputs, and refuses a name main already holds with other bytes);
+//   4. deploy main at that merge, once its ci.yml push run passed: scripts/deploy/pages.sh node
+//      packages/signpage/scripts/deploy.mjs, then its live run; signpage-release-at-deploy reads SIGN_HOST against the
+//      newest committed list. A change that lands on main after the cut and touches SIGN_HOST's build inputs makes the
+//      deploy refuse: cut release-<N+1> the same way.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -304,7 +309,7 @@ export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED) {
   const next = `release-${Number(newest.slice(8)) + 1}`;
   const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
   for (const l of diffLists(makeList(newest, { SIGN_HOST: built }, null), listed))
-    p.push(`${newest}, the newest release, is not this SIGN_HOST build (${l}): cut ${next} on main (node packages/signpage/scripts/release-list.mjs ${next}, its sha256 in RELEASED, commit both), then deploy`);
+    p.push(`${newest}, the newest release, is not this SIGN_HOST build (${l}): cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}, its row in RELEASED), push and merge it, then deploy main at that merge`);
   return p;
 }
 
@@ -351,6 +356,9 @@ export function main(a, releases = RELEASES) {
   }
   if (a.length !== 1 || !TAG.test(a[0])) return usage;
   if (existsSync(listPath(a[0], releases))) return { code: 1, err: [`${a[0]} is already written: a release is never written again`] };
+  const newest = newestRelease(releases);
+  const want = `release-${newest ? Number(newest.slice(8)) + 1 : 1}`;
+  if (a[0] !== want) return { code: 1, err: [`${a[0]} is not the next release: the newest list is ${newest ?? "none"}, so the next is ${want}`] };
   const dirty = uncommitted();
   if (dirty) return { code: 1, err: [`uncommitted changes, so the list could not name its tree:\n${dirty}`] };
   const list = headList();

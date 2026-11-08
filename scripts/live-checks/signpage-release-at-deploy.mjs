@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // Live check of card signpage-release-at-deploy: after a sign deploy, SIGN_HOST (https://confidential.unrealized.trade)
-// serves exactly the newest committed release list's SIGN_HOST part (packages/signpage/releases, newest by N, in the
-// deployed commit's tree), so every build it serves is a release a user or a judge can read. A release is cut once per
-// sign deploy, on main, right before it (packages/signpage/scripts/release-list.mjs's header), and the deploy refuses a
-// build that list does not name (packages/signpage/scripts/deploy.mjs); this check reads what the host serves after it.
+// serves the newest committed release list's SIGN_HOST part (packages/signpage/releases, newest by N, in the deployed
+// commit's tree): every file it names, in both request modes, with its bytes and headers, the probes answered by its
+// fallback page, and every script a page loads named by it. A served file no page loads and no probe asks for is not
+// seen; the deploy's gate holds the build itself to the list. A release is cut once per sign deploy, on a branch from
+// origin/main and merged before it (packages/signpage/scripts/release-list.mjs's header), and the deploy serves only
+// main's head and refuses a build that list does not name (packages/signpage/scripts/deploy.mjs); this check reads what
+// the host serves after it.
 // It runs check-signpage (packages/signpage/scripts/check-signpage.mjs, over HTTPS) through signpage-release's run(),
 // which holds the list's origin to SIGN_HOST's real name.
 // After: sign

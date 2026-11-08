@@ -34,7 +34,7 @@ test("the newest list is picked by N, not by text (release-1000 after release-99
   assert.equal(newestTag(), newest());
 });
 
-test("recorded good answer: SIGN_HOST serves exactly release-102's SIGN_HOST part, every file in both modes: PASS", () => {
+test("recorded good answer: SIGN_HOST serves every file of release-102's SIGN_HOST part, in both modes: PASS", () => {
   const r = replay(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines.at(-1), "MATCH release-102");

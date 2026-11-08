@@ -235,7 +235,7 @@ test("planted: a deploy's build that the newest list does not name fails: /, /ap
   };
   const one = (p, what) => {
     assert.equal(p.length, 1, p.join("\n"));
-    assert.ok(p[0].startsWith(`${tag}, ${STALE} (SIGN_HOST ${what}`) && p[0].includes(`: cut ${next} on main`), p[0]);
+    assert.ok(p[0].startsWith(`${tag}, ${STALE} (SIGN_HOST ${what}`) && p[0].includes(`: cut ${next} on a branch from origin/main's head`), p[0]);
   };
   try {
     assert.deepEqual(withBuild(PKG, (b) => unreleasedProblems(b, dir, ledger)), []);
@@ -270,7 +270,7 @@ test("planted: the newest list is picked by N, not by text (release-1000 after r
     writeFileSync(join(dir, `${lo}.json`), mine);
     writeFileSync(join(dir, `${hi}.json`), old);
     const p = withBuild(PKG, (b) => unreleasedProblems(b, dir, { [lo]: sha256(mine), [hi]: sha256(old) }));
-    assert.ok(p.length && p.every((l) => l.startsWith(`${hi}, ${STALE}`) && l.includes(`: cut ${next} on main`)), p.join("\n"));
+    assert.ok(p.length && p.every((l) => l.startsWith(`${hi}, ${STALE}`) && l.includes(`: cut ${next} on a branch from origin/main's head`)), p.join("\n"));
     assert.equal(newestRelease(mkdtempSync(join(tmp, "none-"))), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -296,6 +296,11 @@ test("planted: a list not in the ledger, and a ledger entry whose list is gone, 
   try {
     const tag = Object.keys(RELEASED).at(-1);
     assert.deepEqual(listMain([tag], copy), { code: 1, err: [`${tag} is already written: a release is never written again`] });
+    // N is exactly the newest plus one: a jump (release-1060 after release-106) is refused before any build or write
+    const n = Number(tag.slice("release-".length));
+    for (const skip of [`release-${n + 2}`, `release-${n * 10}`])
+      assert.deepEqual(listMain([skip], copy), { code: 1, err: [`${skip} is not the next release: the newest list is ${tag}, so the next is release-${n + 1}`] });
+    assert.ok(!existsSync(join(copy, `release-${n + 2}.json`)));
     // and in the default folder, releases/ itself: refused before any build or write, the list as written
     assert.deepEqual(listMain([tag]), { code: 1, err: [`${tag} is already written: a release is never written again`] });
     assert.equal(sha256(readFileSync(join(PKG, "releases", `${tag}.json`))), RELEASED[tag]);
@@ -373,13 +378,20 @@ test("the command line prints every line, its verdict last, to a pipe: a long NO
   // (macOS writes a pipe asynchronously; process.exit() dropped what was queued, the verdict with it, 8 Nov)
   const answers = JSON.parse(readFileSync(join(dirname(dirname(PKG)), "scripts", "live-checks", "signpage-release-at-deploy.answers.json"), "utf8"));
   const list = onlyHost(readList(answers.bad.release), "sign");
+  const answer = structuredClone(answers.bad);
+  // and 70 more files, read as /app.js was, each listed with an 8 KB policy it was not served: 140 lines of about 10 KB
+  // more, so the run prints well over 1 MB and the old exit cuts it every time
+  for (let i = 0; i < 70; i++) {
+    const path = `/planted-${i}.js`;
+    list.hosts.SIGN_HOST.files.push({ path, bytes: 1, sha256: "0".repeat(64), headers: { "content-security-policy": "x".repeat(8000) } });
+    answer.hosts.SIGN_HOST.files[path] = structuredClone(answer.hosts.SIGN_HOST.files["/app.js"]);
+  }
   const [listFile, answerFile] = [join(tmp, "late-list.json"), join(tmp, "late-answer.json")];
   writeFileSync(listFile, JSON.stringify(list));
-  writeFileSync(answerFile, JSON.stringify(answers.bad));
+  writeFileSync(answerFile, JSON.stringify(answer));
   const child = spawn(process.execPath, [join(PKG, "scripts", "check-signpage.mjs"), "--list", listFile, "--answer", answerFile], { stdio: ["ignore", "pipe", "pipe"] });
   const chunks = [];
-  // a reader that falls behind once, as a loaded machine does: after the first chunk it waits 300 ms. At 1e1bc558 this
-  // fails about three runs in five on a Mac (the tail queued in the child when it exits), never after the fix
+  // a reader that falls behind once, as a loaded machine does: after the first chunk it waits 300 ms
   child.stdout.on("data", (c) => {
     if (!chunks.length) {
       child.stdout.pause();
@@ -390,7 +402,8 @@ test("the command line prints every line, its verdict last, to a pipe: a long NO
   const code = await new Promise((r) => child.on("close", r));
   const lines = Buffer.concat(chunks).toString("utf8").trimEnd().split("\n");
   assert.equal(code, 1);
-  assert.match(lines.at(-1), /^NO MATCH release-105: 32 line\(s\) differ$/, `the last of ${lines.length} lines: ${lines.at(-1).slice(0, 120)}`);
+  assert.ok(Buffer.concat(chunks).length > 1 << 20, `${Buffer.concat(chunks).length} bytes`);
+  assert.match(lines.at(-1), /^NO MATCH release-105: 172 line\(s\) differ$/, `the last of ${lines.length} lines: ${lines.at(-1).slice(0, 120)}`);
 });
 
 // ---------- one host against its own build ----------
