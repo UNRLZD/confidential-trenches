@@ -50,7 +50,8 @@
 //        account: the way out for USDC at U that was not deposited (a second transfer, a refused or struck bind, a
 //        front-run's refund, USDC sent after the deposit); kept in <dir>/sweep.json for the record
 //   node contracts/vault/scripts/mainnet-money.ts record --state <dir> --fund-tx <hash> <signer> [--fund-tx ...]
-//        [--settle-tx <hash> <signer>] [--deposit-tx <hash> <signer>] [--withdraw-tx <hash> <signer>]   writes scripts/live-checks/vault-mainnet-money.run.json and .md
+//        [--settle-tx <hash> <signer>] [--deposit-tx <hash> <signer>] [--withdraw-tx <hash> <signer>]   writes vault-mainnet-money.run.json
+//        and .md into the --state folder (recordFiles), outside the checkout
 import "../../../scripts/net-window.mjs";
 import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
@@ -67,8 +68,6 @@ export const CARD = "vault-mainnet-money";
 export const RECORD = path.join(HERE, "..", "deployments", "mainnet-v1.json");
 export const PIN = path.join(HERE, "..", "deployments", "mainnet-v1.pin.json");
 export const TESTNET_RECORD = path.join(HERE, "..", "deployments", "testnet-v1.json");
-export const RUN_RECORD = `scripts/live-checks/${CARD}.run.json`;
-export const MONEY_RECORD = `scripts/live-checks/${CARD}.md`;
 const NEAR = 10n ** 24n;
 const TGAS = 10n ** 12n;
 /** What opens U: an implicit account exists once it holds NEAR; 0.01 N covers its 182 B and its one key. */
@@ -1000,10 +999,19 @@ async function record(argv: string[]) {
   const os = await import("node:os");
   const lp = localProblems(text + JSON.stringify(runRec), [os.hostname(), os.hostname().split(".")[0]!, os.userInfo().username]);
   if (lp.length) throw new Error(`record: ${lp.join("; ")}`);
-  const suffix = o.network === "mainnet" ? "" : ".testnet";
-  writeFileSync(path.join(ROOT, RUN_RECORD.replace(/\.run\.json$/, `${suffix}.run.json`)), JSON.stringify(runRec, null, 2) + "\n");
-  writeFileSync(path.join(ROOT, MONEY_RECORD.replace(/\.md$/, `${suffix}.md`)), text);
+  // beside the step state, never in the checkout: a later paste's clean-tree gate never meets them, and the CO commits
+  // them from there as scripts/live-checks/<name>
+  const files = recordFiles(st.dir, o.network);
+  writeFileSync(files.run, JSON.stringify(runRec, null, 2) + "\n");
+  writeFileSync(files.md, text);
   console.log(text);
+  log(`the record: ${files.md} and ${files.run} (outside the checkout; commit them as scripts/live-checks/${path.basename(files.md)} and ${path.basename(files.run)})`);
+}
+
+/** Where record writes: the run's folder, named as the money gate's records are (scripts/live-checks/<card>[.testnet].{run.json,md}). */
+export function recordFiles(dir: string, network: Network) {
+  const suffix = network === "mainnet" ? "" : ".testnet";
+  return { run: path.join(dir, `${CARD}${suffix}.run.json`), md: path.join(dir, `${CARD}${suffix}.md`) };
 }
 
 function flags(argv: string[], required: string[], optional: string[] = []): Record<string, string> {
