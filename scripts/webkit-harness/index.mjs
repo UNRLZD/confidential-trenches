@@ -14,8 +14,8 @@ import https from 'node:https';
 import http from 'node:http';
 import net from 'node:net';
 
-export const SIGN_HOST = 'sign.confidential.unrealized.trade';
-export const APP_HOST = 'confidential.unrealized.trade';
+export const SIGN_HOST = 'confidential.unrealized.trade';
+export const APP_HOST = 'ct-app.unrealized.trade';
 const HOSTS = new Set([SIGN_HOST, APP_HOST]);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY = 8 * 1024 * 1024;

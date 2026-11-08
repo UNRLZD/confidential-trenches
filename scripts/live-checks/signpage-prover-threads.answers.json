@@ -10,7 +10,7 @@
     "sha256": "d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46",
     "headers": {
      "content-type": "text/javascript; charset=utf-8",
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -173,15 +173,15 @@
    "loadMs": 296,
    "console": [
     "error Refused to load data:text/javascript,postMessage('ran') because it does not appear in the worker-src directive of the Content Security Policy.",
-    "error Refused to load blob:https://sign.confidential.unrealized.trade/78443cb9-4f46-4212-9b36-56a93151ed85 because it does not appear in the worker-src directive of the Content Security Policy.",
-    "worker https://sign.confidential.unrealized.trade/prover-worker.js"
+    "error Refused to load blob:https://confidential.unrealized.trade/78443cb9-4f46-4212-9b36-56a93151ed85 because it does not appear in the worker-src directive of the Content Security Policy.",
+    "worker https://confidential.unrealized.trade/prover-worker.js"
    ],
    "workerScripts": [
-    "https://sign.confidential.unrealized.trade/prover-worker.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js"
+    "https://confidential.unrealized.trade/prover-worker.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js"
    ]
   }
  },
@@ -196,7 +196,7 @@
     "sha256": "d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46",
     "headers": {
      "content-type": "text/javascript; charset=utf-8",
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -360,19 +360,19 @@
    "console": [
     "warning Error with Permissions-Policy header: Unrecognized feature: 'bluetooth'.",
     "error Creating a worker from 'data:text/javascript,postMessage('ran')' violates the following Content Security Policy directive: \"worker-src 'self'\". The action has been blocked.",
-    "error Creating a worker from 'blob:https://sign.confidential.unrealized.trade/4d54f1d7-4114-4bc0-8d46-35bc592f9d43' violates the following Content Security Policy directive: \"worker-src 'self'\". The action has been blocked.",
-    "worker https://sign.confidential.unrealized.trade/prover-worker.js",
-    "worker https://sign.confidential.unrealized.trade/prover-thread.js",
-    "worker https://sign.confidential.unrealized.trade/prover-thread.js",
-    "worker https://sign.confidential.unrealized.trade/prover-thread.js",
-    "worker https://sign.confidential.unrealized.trade/prover-thread.js"
+    "error Creating a worker from 'blob:https://confidential.unrealized.trade/4d54f1d7-4114-4bc0-8d46-35bc592f9d43' violates the following Content Security Policy directive: \"worker-src 'self'\". The action has been blocked.",
+    "worker https://confidential.unrealized.trade/prover-worker.js",
+    "worker https://confidential.unrealized.trade/prover-thread.js",
+    "worker https://confidential.unrealized.trade/prover-thread.js",
+    "worker https://confidential.unrealized.trade/prover-thread.js",
+    "worker https://confidential.unrealized.trade/prover-thread.js"
    ],
    "workerScripts": [
-    "https://sign.confidential.unrealized.trade/prover-worker.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js"
+    "https://confidential.unrealized.trade/prover-worker.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js"
    ]
   }
  },
@@ -386,7 +386,7 @@
     "bytes": 0,
     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "headers": {
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -668,7 +668,7 @@
    ],
    "loadMs": 272,
    "workerScripts": [
-    "https://sign.confidential.unrealized.trade/prover-worker.js"
+    "https://confidential.unrealized.trade/prover-worker.js"
    ]
   }
  },
@@ -682,7 +682,7 @@
     "bytes": 0,
     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "headers": {
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -964,7 +964,7 @@
    ],
    "loadMs": 331,
    "workerScripts": [
-    "https://sign.confidential.unrealized.trade/prover-worker.js"
+    "https://confidential.unrealized.trade/prover-worker.js"
    ]
   }
  },
@@ -979,7 +979,7 @@
     "sha256": "d2d61af55de7f1c92e8d3edc2c5fd68fd37c4294b4a4d4da54b5b963aceb4e46",
     "headers": {
      "content-type": "text/javascript; charset=utf-8",
-     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' data: blob:; connect-src 'self' https://api.confidential.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
+     "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' data: blob:; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker, default-src 'none'; script-src 'wasm-unsafe-eval'",
      "x-content-type-options": "nosniff",
      "cross-origin-resource-policy": "same-origin"
     }
@@ -1045,13 +1045,13 @@
    ],
    "loadMs": 334,
    "workerScripts": [
-    "blob:https://sign.confidential.unrealized.trade/2de6dd34-ae23-4967-a81f-53cf0054448d",
-    "https://sign.confidential.unrealized.trade/prover-worker.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js",
-    "https://sign.confidential.unrealized.trade/prover-thread.js"
+    "blob:https://confidential.unrealized.trade/2de6dd34-ae23-4967-a81f-53cf0054448d",
+    "https://confidential.unrealized.trade/prover-worker.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js",
+    "https://confidential.unrealized.trade/prover-thread.js"
    ]
   }
  }

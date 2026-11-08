@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const KEY = "wallet-per-buy";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const HELPER = "https://api.confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 export const CHILD = path.join(REPO, "packages/wallet/scripts/buy-wallets-live.ts");
 const A8 = JSON.parse(readFileSync(path.join(REPO, "packages/wallet/test/vectors/a8.json"), "utf8"));
 /** The A.8 vector's W for chain c ("sol" or "evm") at j (the vector holds j 0 and 1): what every route must have read. */

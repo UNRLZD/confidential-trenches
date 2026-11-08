@@ -27,9 +27,9 @@ import { fileURLToPath } from "node:url";
 import { IMAGE_INPUTS } from "../../apps/helper/deploy/image-inputs.mjs";
 
 const KEY = "helper-host-health";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const OTHER = "https://example.com";
 export const PARTS = ["proxy", "relay", "intents", "delegate", "orders", "log"];
 /** POST /v1/bind's probe: not one SignedDelegateAction, so the route answers check 1's bad_shape and reads nothing. */

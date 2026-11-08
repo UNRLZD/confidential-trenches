@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card signpage-error-after-timeout on SIGN_HOST (https://sign.confidential.unrealized.trade). What it
+// Live check of card signpage-error-after-timeout on SIGN_HOST (https://confidential.unrealized.trade). What it
 // holds, and only that: the served /app.js is the one index.html pins (its sha384), and its api (src/api.ts startApi),
 // as minified, posts a trade kind's end as a progress stage after the kind's answer:
 //   - a kind answered by running hands `give` whether its kind is in the trade set (`let e=kc.has(l.type)`; from card
@@ -21,7 +21,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-error-after-timeout";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 export const TRADE_KINDS = ["buy", "pool.buy", "pool.sell", "pool.deposit"];

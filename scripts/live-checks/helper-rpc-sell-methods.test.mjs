@@ -15,7 +15,7 @@ import { PARAMS, SIGN, judge, read } from "./helper-rpc-sell-methods.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-rpc-sell-methods.answers.json"), "utf8"));
-const BASE = "https://api.confidential.unrealized.trade";
+const BASE = "https://ct-api.unrealized.trade";
 
 // a fetch that answers each call with the recorded read for its method, after checking the check asked the right thing
 const replay = (rec, sent = []) => async (url, init) => {

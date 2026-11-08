@@ -57,13 +57,13 @@ test("read() asks the three tokens with Origin APP_HOST (replayed helper; device
     const u = new URL(url);
     if (u.pathname === "/v1/withdraw/fee") {
       asked.push(u.searchParams.get("token"));
-      assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+      assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
       const r = A.good.reads.find((x) => x.asked === u.searchParams.get("token"));
       return new Response(r.body, { status: r.status, headers: r.headers });
     }
     throw new Error("no RPC in this test");
   };
-  const run = await read("https://api.confidential.unrealized.trade", fetchFn);
+  const run = await read("https://ct-api.unrealized.trade", fetchFn);
   assert.deepEqual(asked, [TOKENS.mainnet, TOKENS.testnet, OTHER]);
   assert.ok(run.device.mainnet.error && run.device.testnet.error);
   assert.equal(judge(run, A.good.relayer).ok, false, "no device reads, no pass");

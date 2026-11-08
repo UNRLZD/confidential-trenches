@@ -19,7 +19,7 @@ const replay = (run) => async (url, init) => {
   const chain = url.match(/\/v1\/rpc\/([a-z]+)$/)?.[1];
   const body = JSON.parse(init.body);
   assert.equal(init.method, "POST");
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   assert.equal(init.headers["content-type"], "application/json");
   const c = CASES.find((x) => x.chain === chain);
   const kind = body.method === c.listed.method ? "listed" : "unlisted";
@@ -28,7 +28,7 @@ const replay = (run) => async (url, init) => {
   assert.equal(body.id, r.id);
   return new Response(r.body, { status: r.status, headers: r.headers });
 };
-const run = async (rec) => judge(await read("https://api.confidential.unrealized.trade", replay(rec)));
+const run = async (rec) => judge(await read("https://ct-api.unrealized.trade", replay(rec)));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 
 test("recorded good run: each chain's listed read answered, each unlisted method refused 400: PASS", async () => {

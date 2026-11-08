@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { SolanaBuildError, fetchSolanaJupiterBuild, fetchSolanaJupiterBuildThatFits, type SolanaBuildRequest } from "../src/trade/solana/build.ts";
 
 const G = JSON.parse(readFileSync(new URL("./fixtures/solana-builds.json", import.meta.url), "utf8")).good as { mint: string; wallet: string; shapes: { body: string }[] };
-const ORIGIN = "https://api.confidential.unrealized.trade";
+const ORIGIN = "https://ct-api.unrealized.trade";
 const R: SolanaBuildRequest = { side: "buy", wallet: G.wallet, token: G.mint, amount: 10_000_000n, slippageBps: 1000 };
 const capOf = (url: string) => Number(new URL(url).searchParams.get("maxAccounts"));
 const BUILT = () => new Response(G.shapes[0]!.body, { status: 200 });

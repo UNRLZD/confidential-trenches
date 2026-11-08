@@ -12,7 +12,7 @@ import "./signpage-frame.css";
 // <html data-signpage="connecting|ready|down|update"> names the state for the browser tests and the live check.
 
 /** SIGN_HOST's release URL: the shell's origin, the only one the client posts to and hears. */
-export const SIGN_HOST_URL = "https://sign.confidential.unrealized.trade/";
+export const SIGN_HOST_URL = "https://confidential.unrealized.trade/";
 
 // Draft words (the live UNRLZD terminal's signerDown and retry lines, auth/copy.ts:190-191).
 const DOWN = "Couldn't load. Your funds are safe.";

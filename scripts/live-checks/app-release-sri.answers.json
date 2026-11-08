@@ -1,6 +1,6 @@
 {
  "liveBefore": {
-  "url": "https://confidential.unrealized.trade/",
+  "url": "https://ct-app.unrealized.trade/",
   "status": 200,
   "headers": {
    "access-control-allow-origin": "*",
@@ -9,7 +9,7 @@
    "cf-ray": "a53b6fdedafe86b1-HKG",
    "connection": "keep-alive",
    "content-encoding": "br",
-   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "content-type": "text/html; charset=utf-8",
    "cross-origin-opener-policy": "same-origin",
    "cross-origin-resource-policy": "same-origin",
@@ -28,12 +28,12 @@
   },
   "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-BZbRfUUY.js\" integrity=\"sha384-wWYzzK+UkdIsuiOfDtcGB1y2eoWYS4kHIYLvSJW0Msm+qZ0+/CaihAHjZiCtwmwt\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-CFy105Rc.css\" integrity=\"sha384-6rxymKz4bt09PRr7cCNyTl3GLz1UHqfnIhJIY6rZN244IOLMpLTcwMW1y90+XfPT\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
   "files": {
-   "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js": {
+   "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js": {
     "status": 200,
     "bytes": 325858,
     "sha384": "sha384-wWYzzK+UkdIsuiOfDtcGB1y2eoWYS4kHIYLvSJW0Msm+qZ0+/CaihAHjZiCtwmwt"
    },
-   "https://confidential.unrealized.trade/assets/style-CFy105Rc.css": {
+   "https://ct-app.unrealized.trade/assets/style-CFy105Rc.css": {
     "status": 200,
     "bytes": 12420,
     "sha384": "sha384-6rxymKz4bt09PRr7cCNyTl3GLz1UHqfnIhJIY6rZN244IOLMpLTcwMW1y90+XfPT"
@@ -41,11 +41,11 @@
   }
  },
  "good": {
-  "url": "https://confidential.unrealized.trade/",
+  "url": "https://ct-app.unrealized.trade/",
   "status": 200,
   "headers": {
    "connection": "keep-alive",
-   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "content-type": "text/html; charset=utf-8",
    "cross-origin-opener-policy": "same-origin",
    "cross-origin-resource-policy": "same-origin",
@@ -60,12 +60,12 @@
   },
   "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-BqIKAnCc.js\" integrity=\"sha384-58HymAdPU3gK9SpeP6jLRE8pGZreCwjup6DPKUsMpPs31zn9QFCWIV13GkRTK3ad\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-Cg5JEa0e.css\" integrity=\"sha384-T4JS5ZGdyqZ3fgraPytTlSUplld9goGzYSe+hD6evSD4kfwvHUgoyFZgytQ7dMwL\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
   "files": {
-   "https://confidential.unrealized.trade/assets/index-BqIKAnCc.js": {
+   "https://ct-app.unrealized.trade/assets/index-BqIKAnCc.js": {
     "status": 200,
     "bytes": 323595,
     "sha384": "sha384-58HymAdPU3gK9SpeP6jLRE8pGZreCwjup6DPKUsMpPs31zn9QFCWIV13GkRTK3ad"
    },
-   "https://confidential.unrealized.trade/assets/style-Cg5JEa0e.css": {
+   "https://ct-app.unrealized.trade/assets/style-Cg5JEa0e.css": {
     "status": 200,
     "bytes": 12360,
     "sha384": "sha384-T4JS5ZGdyqZ3fgraPytTlSUplld9goGzYSe+hD6evSD4kfwvHUgoyFZgytQ7dMwL"
@@ -74,11 +74,11 @@
   "source": "harness, apps/terminal/dist"
  },
  "bad": {
-  "url": "https://confidential.unrealized.trade/",
+  "url": "https://ct-app.unrealized.trade/",
   "status": 200,
   "headers": {
    "connection": "keep-alive",
-   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "content-type": "text/html; charset=utf-8",
    "cross-origin-opener-policy": "same-origin",
    "cross-origin-resource-policy": "same-origin",
@@ -93,12 +93,12 @@
   },
   "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <link rel=\"preload\" href=\"/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <link rel=\"preload\" href=\"/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n    <script type=\"module\" crossorigin src=\"/assets/index-BqIKAnCc.js\" integrity=\"sha384-58HymAdPU3gK9SpeP6jLRE8pGZreCwjup6DPKUsMpPs31zn9QFCWIV13GkRTK3ad\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/style-Cg5JEa0e.css\" integrity=\"sha384-T4JS5ZGdyqZ3fgraPytTlSUplld9goGzYSe+hD6evSD4kfwvHUgoyFZgytQ7dMwL\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
   "files": {
-   "https://confidential.unrealized.trade/assets/index-BqIKAnCc.js": {
+   "https://ct-app.unrealized.trade/assets/index-BqIKAnCc.js": {
     "status": 200,
     "bytes": 323596,
     "sha384": "sha384-v8GD07z5rjobpscmwfhDRKLvkHF4YMCLGolt8P7QAkr7GbO5W88FRtlCmGFGTsf4"
    },
-   "https://confidential.unrealized.trade/assets/style-Cg5JEa0e.css": {
+   "https://ct-app.unrealized.trade/assets/style-Cg5JEa0e.css": {
     "status": 200,
     "bytes": 12360,
     "sha384": "sha384-T4JS5ZGdyqZ3fgraPytTlSUplld9goGzYSe+hD6evSD4kfwvHUgoyFZgytQ7dMwL"

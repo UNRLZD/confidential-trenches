@@ -23,8 +23,8 @@ import { fileURLToPath } from "node:url";
 import { HELPER_RPC_METHODS } from "../../packages/kit/src/index.ts";
 
 const KEY = "helper-rpc-sell-methods";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const SHA = /^[0-9a-f]{40}$/;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const MAINNET_POOL_RECORD = "scripts/live-checks/pool-sol-deploy.mainnet.json";

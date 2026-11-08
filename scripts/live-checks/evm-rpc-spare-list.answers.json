@@ -18,21 +18,21 @@
   "preflight": {
    "https://base.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://rpc.sentio.xyz/base": {
     "status": 200,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://robinhood.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    }
   },
   "cases": {
@@ -302,7 +302,7 @@
  },
  "bad": {
   "recorded": "2026-11-05T20:09:22.175Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "scans": {
    "base": [
     "https://base-rpc.publicnode.com",
@@ -503,7 +503,7 @@
  },
  "badHistory": {
   "recorded": "2026-11-06T12:56:12.617Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "scans": {
    "base": [
     "https://base-rpc.publicnode.com",
@@ -520,21 +520,21 @@
   "preflight": {
    "https://base.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://rpc.sentio.xyz/base": {
     "status": 200,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://robinhood.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    }
   },
   "cases": {
@@ -765,7 +765,7 @@
  },
  "badSpare": {
   "recorded": "2026-11-06T22:47:37.423Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "scans": {
    "base": [
     "https://base-rpc.publicnode.com",
@@ -782,21 +782,21 @@
   "preflight": {
    "https://base.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://rpc.sentio.xyz/base": {
     "status": 200,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://robinhood.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    }
   },
   "cases": {
@@ -1079,21 +1079,21 @@
   "preflight": {
    "https://base.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://rpc.sentio.xyz/base": {
     "status": 200,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://robinhood.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    }
   },
   "cases": {
@@ -1363,7 +1363,7 @@
  },
  "badRangeCap": {
   "recorded": "2026-11-06T16:06:11.312Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "scans": {
    "base": [
     "https://base-rpc.publicnode.com",
@@ -1380,21 +1380,21 @@
   "preflight": {
    "https://base.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://rpc.sentio.xyz/base": {
     "status": 200,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    },
    "https://robinhood.api.pocket.network": {
     "status": 204,
-    "allow": "https://confidential.unrealized.trade",
+    "allow": "https://ct-app.unrealized.trade",
     "headers": "content-type",
-    "post": "https://confidential.unrealized.trade"
+    "post": "https://ct-app.unrealized.trade"
    }
   },
   "cases": {

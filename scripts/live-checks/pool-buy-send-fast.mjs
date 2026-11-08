@@ -27,8 +27,8 @@ import { writeFileSync } from "node:fs";
 import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const KEY = "pool-buy-send-fast";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const PACE_READS = 6;
 /** [design: 1 s: a public endpoint at 1 request a second answers every other read of a run like this 429, and a
  *  keyed provider answers a getSlot in tens of ms; the median keeps one slow read from deciding.] */

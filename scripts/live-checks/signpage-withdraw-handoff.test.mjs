@@ -45,5 +45,5 @@ test("the check judges by the wallet's own release values (the child's --consts,
   assert.deepEqual(c.relayer, RELAYER);
   assert.deepEqual(c.testnetHosts, TESTNET_HOSTS);
   assert.deepEqual(c.mainnetPair, MAINNET_PAIR);
-  assert.equal(c.feeUrl, "https://api.confidential.unrealized.trade/v1/withdraw/fee");
+  assert.equal(c.feeUrl, "https://ct-api.unrealized.trade/v1/withdraw/fee");
 });

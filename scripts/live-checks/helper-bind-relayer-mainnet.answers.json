@@ -10,12 +10,12 @@
   "status": 200,
   "headers": {
    "x-helper-commit": "c04a490b4d701dea2f9a47e9ce616fce41f23ff0",
-   "access-control-allow-origin": "https://confidential.unrealized.trade"
+   "access-control-allow-origin": "https://ct-app.unrealized.trade"
   },
   "body": "{\"ok\":true,\"commit\":\"c04a490b4d701dea2f9a47e9ce616fce41f23ff0\",\"release\":7,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\",\"trades\":\"public\",\"stream\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[]},\"bind\":{\"mainnet\":\"6cf3b2339b24ec11cf5575beb5d3de0f5a443ab708ad9212f89b9b1483152048\"}}"
  },
  "bad_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "record": {
    "account_id": "vault-test.confidential.unrlzd.near"
   },
@@ -25,7 +25,7 @@
   "status": 200,
   "headers": {
    "x-helper-commit": "af75100a34cbd641835ccd30fe4de36509436d5a",
-   "access-control-allow-origin": "https://confidential.unrealized.trade"
+   "access-control-allow-origin": "https://ct-app.unrealized.trade"
   },
   "body": "{\"ok\":true,\"commit\":\"af75100a34cbd641835ccd30fe4de36509436d5a\",\"release\":93,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"down\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\"],\"base\":[],\"robinhood\":[],\"near\":[]}}"
  }

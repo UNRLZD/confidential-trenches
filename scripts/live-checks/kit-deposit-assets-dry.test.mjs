@@ -23,7 +23,7 @@ import { ASSETS, BASE_USDC, NEAR_USDC, PLACEHOLDER, SOL_USDC, dec, judge } from 
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "kit-deposit-assets-dry.answers.json"), "utf8"));
-const H = "https://api.confidential.unrealized.trade/v1/proxy/oneclick";
+const H = "https://ct-api.unrealized.trade/v1/proxy/oneclick";
 
 /** A fresh copy of the synthetic good answer, changed by `f`. */
 const plant = (f) => {

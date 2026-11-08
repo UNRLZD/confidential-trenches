@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card pool-deposits: the signing page's same-chain Solana deposit, built, priced and its mark read by the
 // kit (packages/kit/src/trade/solana/pool-deposit.ts) since slice 2, landed a note on the devnet pool its testnet build
-// pins, and SIGN_HOST (https://sign.confidential.unrealized.trade) still serves the mainnet build, which carries no testnet pin. The run is pool-deposits.run.json,
+// pins, and SIGN_HOST (https://confidential.unrealized.trade) still serves the mainnet build, which carries no testnet pin. The run is pool-deposits.run.json,
 // written from packages/signpage/scripts/pool-deposit-devnet.mjs (runPoolDeposit, src/pool-deposit.ts, at this card's
 // code, a seed made in that run). The reads are signpage-pool-notes's, on each of two devnet RPCs of two operators at
 // finalized: the deposit tx with no error, paid and signed by the run's U, calling the pinned program; the mark at the
@@ -30,7 +30,7 @@ import { check as checkRun, readSignFlow } from "./signpage-pool-notes.mjs";
 const KEY = "pool-deposits";
 export const RUN = new URL("./pool-deposits.run.json", import.meta.url);
 
-const SIGN_HOST = "https://sign.confidential.unrealized.trade";
+const SIGN_HOST = "https://confidential.unrealized.trade";
 /** The EVM deposit's marks in SIGN_HOST's bundle, each a string the minifier keeps. */
 export const EVM_MARKS = Object.freeze({
   // derive/keys.ts depositIdEvm: U^evm's HKDF label

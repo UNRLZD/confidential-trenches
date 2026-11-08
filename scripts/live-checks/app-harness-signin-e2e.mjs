@@ -21,8 +21,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-harness-signin-e2e";
-export const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
+export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 /** The boot frame in APP_HOST's page and its rules in the page's stylesheet, as the build writes them. */
 export const APP_MARKERS = { page: ['<div id="boot" aria-hidden="true" hidden>', 'class="boot-panel"'], css: ["#root:not(:empty)~#boot{display:none}", ".boot-panel{"] };
 /** The backdrop in SIGN_HOST's script, as the minifier writes it. */

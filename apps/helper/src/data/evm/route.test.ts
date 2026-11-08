@@ -14,7 +14,7 @@ import { geckoBudget } from "../gecko.ts";
 import { createEvmLists, GT_BASE, GT_READS, MAKER_RPCS, makerFilters } from "./lists.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
 const GT: Record<string, string> = {
   [`${GT_BASE}/networks/base/${GT_READS.new}`]: fx("gt-base-new.json"),

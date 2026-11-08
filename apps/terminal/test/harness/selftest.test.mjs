@@ -34,7 +34,7 @@ test("recorded good answer: every host serves, an authenticator registers, both 
     const h = ANSWERS.good.hosts.find((x) => x.role === role);
     assert.deepEqual(Object.keys(h.served).sort(), ["content-security-policy", "integrity-policy", "permissions-policy"], role);
   }
-  assert.match(ANSWERS.good.hosts.find((x) => x.role === "sign").served["content-security-policy"], /frame-ancestors https:\/\/confidential\.unrealized\.trade/);
+  assert.match(ANSWERS.good.hosts.find((x) => x.role === "sign").served["content-security-policy"], /frame-ancestors https:\/\/ct-app\.unrealized\.trade/);
 });
 
 test("recorded bad answer: no virtual authenticator, so no passkey registers: FAIL", () => {

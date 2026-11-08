@@ -17,11 +17,11 @@ const replay = (run) => async (url, init) => {
   const token = new URL(url).searchParams.get("token");
   assert.equal(new URL(url).pathname, "/v1/token-status");
   assert.equal(init.method, "GET");
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   const r = run.reads.find((x) => x.asked === token);
   return new Response(r.body, { status: r.status, headers: r.headers });
 };
-const run = async (rec) => judge(await read("https://api.confidential.unrealized.trade", replay(rec)));
+const run = async (rec) => judge(await read("https://ct-api.unrealized.trade", replay(rec)));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const withUsdc = (f) => ({ ...A.good, reads: A.good.reads.map((x) => (x.asked === USDC ? { ...x, body: JSON.stringify(f(JSON.parse(x.body))) } : x)) });
 

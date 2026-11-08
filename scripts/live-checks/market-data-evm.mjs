@@ -24,8 +24,8 @@ import { ROW_FIELDS, ROW_REQUIRED } from "../../apps/terminal/src/screens/discov
 import { FACTORIES, readMakers } from "../../apps/helper/src/data/evm/lists.ts";
 
 const KEY = "market-data-evm";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 /** The chains whose lists the helper serves (fold 1: Base). */
 export const CHAINS = ["base", "robinhood"];
 export const FIELDS = [...ROW_FIELDS];

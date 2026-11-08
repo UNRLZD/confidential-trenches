@@ -14,9 +14,9 @@ import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const TRADE_HOSTS = [
-  "https://api.confidential.unrealized.trade",
+  "https://ct-api.unrealized.trade",
   "https://solana-rpc.publicnode.com",
   "https://sender.helius-rpc.com",
   "https://mainnet.block-engine.jito.wtf",

@@ -21,9 +21,9 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "wallet-deposit-follow";
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const HELPER = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const STATUS_PATH = "/v1/proxy/oneclick/v0/status";
 export const LOCK = "ct-wallet/deposit-follow/";
 /** The G1 arm-swap live run's deposit address (research proofs/g1-arm-swap, packages/kit/test/fixtures/oneclick-quotes.json live). */

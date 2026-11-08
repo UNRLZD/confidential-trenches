@@ -42,8 +42,8 @@ export { haltOf, viewOutcome };
 const KEY = "helper-usdc-event-watch";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const PIN_SHA256 = "b98ccd530f7e643cfef32f4529ade060ef87ff73b0101536399470777b86cfe6"; // the pin is base58 of it
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 /** The networks the helper carries, so its watch must answer caught up there. Mainnet is carried because the host names
  *  its vault (WITHDRAW_VAULT_MAINNET, BIND_VAULT_MAINNET: token-status/status.ts vaultOf), not because the release forces
  *  it: withdraw/send.ts starts a helper that names no mainnet vault and refuses only one other than MAINNET_VAULT. The

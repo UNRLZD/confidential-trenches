@@ -1121,12 +1121,12 @@ async function record(argv: string[]) {
   log(`the record: ${files.md} and ${files.run} (outside the checkout; commit them as scripts/live-checks/${path.basename(files.md)} and ${path.basename(files.run)})`);
 }
 
-/** Where record writes: the run's folder, named as the money gate's records are (scripts/live-checks/<card>[.testnet].{run.json,md}). */
 /** The record's key: the card's on mainnet, its own on testnet (the rehearsal), so the money gate reads each under its own name. */
 export function recordKey(network: Network): string {
   return network === "mainnet" ? CARD : `${CARD}-testnet`;
 }
 
+/** Where record writes: the run's folder, named as the money gate's records are (scripts/live-checks/<key>.{run.json,md}, the key <card> or <card>-testnet). */
 export function recordFiles(dir: string, network: Network) {
   const key = recordKey(network);
   return { run: path.join(dir, `${key}.run.json`), md: path.join(dir, `${key}.md`) };

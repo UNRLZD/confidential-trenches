@@ -47,16 +47,16 @@
      "img-src": [
       "'self'",
       "data:",
-      "https://api.confidential.unrealized.trade"
+      "https://ct-api.unrealized.trade"
      ],
      "font-src": [
       "'self'"
      ],
      "connect-src": [
       "'self'",
-      "https://api.confidential.unrealized.trade",
-      "wss://api.confidential.unrealized.trade",
-      "https://sign.confidential.unrealized.trade",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -68,7 +68,7 @@
       "'none'"
      ],
      "frame-src": [
-      "https://sign.confidential.unrealized.trade"
+      "https://confidential.unrealized.trade"
      ],
      "frame-ancestors": [
       "'none'"
@@ -142,20 +142,20 @@
       "type": "image"
      },
      {
-      "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
       "type": "fetch"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "rows": 355,
      "badRows": []
@@ -205,16 +205,16 @@
      "img-src": [
       "'self'",
       "data:",
-      "https://api.confidential.unrealized.trade"
+      "https://ct-api.unrealized.trade"
      ],
      "font-src": [
       "'self'"
      ],
      "connect-src": [
       "'self'",
-      "https://api.confidential.unrealized.trade",
-      "wss://api.confidential.unrealized.trade",
-      "https://sign.confidential.unrealized.trade",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -226,7 +226,7 @@
       "'none'"
      ],
      "frame-src": [
-      "https://sign.confidential.unrealized.trade"
+      "https://confidential.unrealized.trade"
      ],
      "frame-ancestors": [
       "'none'"
@@ -300,20 +300,20 @@
       "type": "image"
      },
      {
-      "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
       "type": "fetch"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "rows": 355,
      "badRows": []
@@ -370,16 +370,16 @@
      "img-src": [
       "'self'",
       "data:",
-      "https://api.confidential.unrealized.trade"
+      "https://ct-api.unrealized.trade"
      ],
      "font-src": [
       "'self'"
      ],
      "connect-src": [
       "'self'",
-      "https://api.confidential.unrealized.trade",
-      "wss://api.confidential.unrealized.trade",
-      "https://sign.confidential.unrealized.trade",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -391,7 +391,7 @@
       "'none'"
      ],
      "frame-src": [
-      "https://sign.confidential.unrealized.trade"
+      "https://confidential.unrealized.trade"
      ],
      "frame-ancestors": [
       "'none'"
@@ -465,20 +465,20 @@
       "type": "image"
      },
      {
-      "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
       "type": "fetch"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "rows": 355,
      "badRows": [
@@ -2304,16 +2304,16 @@
      "img-src": [
       "'self'",
       "data:",
-      "https://api.confidential.unrealized.trade"
+      "https://ct-api.unrealized.trade"
      ],
      "font-src": [
       "'self'"
      ],
      "connect-src": [
       "'self'",
-      "https://api.confidential.unrealized.trade",
-      "wss://api.confidential.unrealized.trade",
-      "https://sign.confidential.unrealized.trade",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -2325,7 +2325,7 @@
       "'none'"
      ],
      "frame-src": [
-      "https://sign.confidential.unrealized.trade"
+      "https://confidential.unrealized.trade"
      ],
      "frame-ancestors": [
       "'none'"
@@ -2399,20 +2399,20 @@
       "type": "image"
      },
      {
-      "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
       "type": "fetch"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      }
     ],
     "lists": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
      "status": 200,
      "rows": 354,
      "badRows": [
@@ -4219,16 +4219,16 @@
      "img-src": [
       "'self'",
       "data:",
-      "https://api.confidential.unrealized.trade"
+      "https://ct-api.unrealized.trade"
      ],
      "font-src": [
       "'self'"
      ],
      "connect-src": [
       "'self'",
-      "https://api.confidential.unrealized.trade",
-      "wss://api.confidential.unrealized.trade",
-      "https://sign.confidential.unrealized.trade",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -4240,7 +4240,7 @@
       "'none'"
      ],
      "frame-src": [
-      "https://sign.confidential.unrealized.trade"
+      "https://confidential.unrealized.trade"
      ],
      "frame-ancestors": [
       "'none'"
@@ -4314,23 +4314,23 @@
       "type": "image"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      }
     ],
@@ -4359,16 +4359,16 @@
      "img-src": [
       "'self'",
       "data:",
-      "https://api.confidential.unrealized.trade"
+      "https://ct-api.unrealized.trade"
      ],
      "font-src": [
       "'self'"
      ],
      "connect-src": [
       "'self'",
-      "https://api.confidential.unrealized.trade",
-      "wss://api.confidential.unrealized.trade",
-      "https://sign.confidential.unrealized.trade",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -4380,7 +4380,7 @@
       "'none'"
      ],
      "frame-src": [
-      "https://sign.confidential.unrealized.trade"
+      "https://confidential.unrealized.trade"
      ],
      "frame-ancestors": [
       "'none'"
@@ -4454,23 +4454,23 @@
       "type": "image"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      },
      {
-      "url": "https://sign.confidential.unrealized.trade/",
+      "url": "https://confidential.unrealized.trade/",
       "type": "document"
      }
     ],

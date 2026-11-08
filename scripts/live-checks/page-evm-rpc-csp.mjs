@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 
 const KEY = "page-evm-rpc-csp";
-export const PAGES = Object.freeze({ app: "https://confidential.unrealized.trade/", sign: "https://sign.confidential.unrealized.trade/" });
+export const PAGES = Object.freeze({ app: "https://ct-app.unrealized.trade/", sign: "https://confidential.unrealized.trade/" });
 
 /** Every https URL anywhere in a value (own fields only, any depth). */
 function urlsIn(v, out = []) {

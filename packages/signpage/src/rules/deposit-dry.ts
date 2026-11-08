@@ -29,7 +29,7 @@ import {
 const USDC_DECIMALS = 6;
 /** The helper's 1Click proxy for the token list (apps/helper/src/proxy/vendors.ts: oneclick, GET /v0/tokens upstream). The
  *  helper takes every proxy call as a POST (apps/helper/src/server.ts) and asks 1Click with the entry's own method. */
-export const DEPOSIT_TOKENS_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/tokens";
+export const DEPOSIT_TOKENS_URL = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens";
 /** The largest token list read: 1Click lists about 216 tokens, some 60 KB (read 6 Nov 13:41Z). */
 export const DEPOSIT_TOKENS_MAX = 1_048_576;
 /** The amount of the dry quote deposit.assets reads each asset's withdraw fee from: 10 USDC, well inside the limits. */

@@ -1,10 +1,10 @@
 {
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "readAt": "2026-11-06T06:39:35.289Z",
   "answers": [
    {
-    "url": "https://api.confidential.unrealized.trade/v1/withdraw/fee",
+    "url": "https://ct-api.unrealized.trade/v1/withdraw/fee",
     "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
     "method": "GET",
     "request": null,
@@ -12,7 +12,7 @@
     "text": "{\"error\":{\"code\":\"not_found\"}}"
    },
    {
-    "url": "https://api.confidential.unrealized.trade/v1/withdraw/fee",
+    "url": "https://ct-api.unrealized.trade/v1/withdraw/fee",
     "asked": "bf-usdc-20261101t022248.testnet",
     "method": "GET",
     "request": null,
