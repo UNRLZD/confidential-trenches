@@ -349,3 +349,19 @@ test("F1: from the commit's fresh clone the driver signs; a file planted in the 
   assert.match(r.out, /written by commit f{40}, not this paste's [0-9a-f]{40}/);
   assert.deepEqual(r.sends, []);
 });
+
+test("F1: in the run, the gate stands right before U's deposit signature, the prover's load and the withdrawal's signature, and before each sendTx", () => {
+  const SRC = readFileSync(DRIVER, "utf8");
+  assert.match(SRC, /sourceGate\("U signs its deposit"\);\n\s+const outcome = await bindDeposit\(/);
+  assert.match(SRC, /sourceGate\("the prover loads and sees the note's secrets"\);\n\s+const prover = await nodeProver\(\);/);
+  assert.match(SRC, /sourceGate\("the withdrawal is signed"\);\n\s+const out = await relayWithdraw\(/);
+  assert.match(SRC, /async function sendTx\([^\n]*\n  sourceGate\(`\$\{signer\} signs`\);\n/);
+  // a row of P met while the run waits is a stop unless ownDeposit proves it U's own
+  assert.match(SRC, /const own = await ownDeposit\(\{ rows, want: wantOf\(\)[^\n]*\n\s+if \(own\.why !== null\) throw new Error\(`deposit: /);
+  // each command starts with its source held, before anything is read
+  for (const fn of ["go(argv: string[], create: boolean)", "openU(argv: string[])", "sweepU(argv: string[])"]) {
+    const body = SRC.slice(SRC.indexOf(`async function ${fn}`));
+    assert.match(body.slice(0, 400), /^[^\n]*\n[^\n]*flags\([^\n]*\n  const o = await opened\(started\(v\), /, fn);
+  }
+  assert.match(SRC.slice(SRC.indexOf("async function record(")), /const o = await opened\(started\(v\), /);
+});
