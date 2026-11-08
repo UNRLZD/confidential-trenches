@@ -40,6 +40,7 @@ test("the good run with one thing changed fails", () => {
     bad(changed((r) => (r.chains[chain].index.readers[1] = r.chains[chain].index.readers[0].replace("://", "://other."))), new RegExp(`${chain}: two index readers on two operators`));
     bad(changed((r) => (r.chains[chain].index.readers[1] = "https://ct-api.unrealized.trade")), new RegExp(`${chain}: no reader is ours`));
     bad(changed((r) => (r.chains[chain].index.margin = 0)), new RegExp(`${chain}: span .*margin 0`));
+    bad(changed((r) => (r.chains[chain].heads[1] = r.chains[chain].heads[0] + 50_000)), new RegExp(`${chain}: the two heads 50000 blocks apart`));
   }
 });
 

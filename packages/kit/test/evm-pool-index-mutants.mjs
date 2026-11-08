@@ -35,6 +35,9 @@ const FORK = "a span's last block on another fork on one reader is asked again";
 const UNREAD = "a pool whose state is not answered leaves its span unproven";
 const LOGS = "a log of another block range, another address, removed or of another event is no pool";
 const BUDGET = "the halves' budget spent ends the sync rpc_error";
+const Q1 = "Q1: a 429 whose Retry-After is 0 or a past date waits at least the backoff";
+const Q2 = "Q2: one lying reader in a partial sync never stores a pool at its block";
+const Q3 = "Q3: a pool one reader logs inside the depth whose transaction's receipt on the other is another block refuses";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -87,7 +90,23 @@ export const MUTANTS = [
   // 429s: one spends a try; no bound on a batch's wait; the wait not clipped to the bound (F5)
   ["if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {", "if (false) {", HALVES],
   ["if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {", "if (/429|rate limit/i.test(String((e as Error)?.message))) {", WAIT],
-  ["const ms = Math.min(typeof after === \"number\" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++, INDEX_LIMITED_WAIT_MS - waited);", "const ms = typeof after === \"number\" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++;", WAIT],
+  ["const ms = Math.min(Math.max(typeof after === \"number\" && after >= 0 ? after : 0, BACKOFF_MS * 2 ** waits++), INDEX_LIMITED_WAIT_MS - waited);", "const ms = Math.max(typeof after === \"number\" && after >= 0 ? after : 0, BACKOFF_MS * 2 ** waits++);", WAIT],
+  // review 2 of 1fb6b198, P1: a 429 of Retry-After 0 (or a past date) waits nothing
+  ["Math.max(typeof after === \"number\" && after >= 0 ? after : 0, BACKOFF_MS * 2 ** waits++)", "(typeof after === \"number\" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++)", Q1],
+  // review 2 of 1fb6b198, P1: a one-reader pool's block taken on that reader's word: no receipt asked; asked of the
+  // reader that logged it; each of the receipt's checks; an unanswered receipt taken as agreeing; a log with no hashes
+  ["const check = ones.filter((p) => held.has(p.id));", "const check = ones.filter(() => false);", Q3],
+  ["const of = check.filter((p) => logged.get(p.id)!.by !== r);", "const of = check.filter((p) => logged.get(p.id)!.by === r);", Q3],
+  ["isQty(rc.blockNumber) && Number(rc.blockNumber) === p.block && ", "", Q3],
+  ["typeof rc.blockHash === \"string\" && rc.blockHash.toLowerCase() === f.at && ", "", Q3],
+  ["Array.isArray(rc.logs) && rc.logs.some((l) => {", "(Array.isArray(rc.logs) || true) && [true].some((l) => { return true;", Q3],
+  ["return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;", "return g !== null && g.tx === f.tx && g.at === f.at;", Q3],
+  ["return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;", "return g !== null && g.p.id === p.id && g.at === f.at;", Q3],
+  ["return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;", "return g !== null && g.p.id === p.id && g.tx === f.tx;", Q3],
+  ["if (a === null || a === undefined || !(\"result\" in a)) return void unread.add(p.id);", "if (a === null || a === undefined || !(\"result\" in a)) return;", Q3],
+  ["if (!isHash(o.transactionHash) || !isHash(o.blockHash)) return null;", "", LOGS],
+  // review 2 of 1fb6b198, P2 (Q2): the liar's one-reader pool kept, at its block
+  ["if (!same) refuse(", "if (false) refuse(", Q2],
   // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
   ["else j.alone[r] = true;", "else j.ans[r] = NO_ANSWER;", ALONE],
   ["for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;", "for (const j of g) if (j.alone[r]) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],

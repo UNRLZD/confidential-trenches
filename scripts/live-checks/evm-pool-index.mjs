@@ -63,6 +63,8 @@ export function judge(run) {
     const heads = c.heads ?? [];
     say(heads.length === 2 && heads.every((h) => Number.isInteger(h)), `${chain}: both readers answered a head: ${heads.join(", ")}`);
     const n = Math.min(...heads);
+    // the kit refuses two heads more than the reorg margin apart (pool-index.ts): a reader that far behind is no reader
+    say(Math.max(...heads) - Math.min(...heads) <= want.margin, `${chain}: the two heads ${Math.max(...heads) - Math.min(...heads)} blocks apart, the margin ${want.margin} at most`);
     const spans = c.spans ?? [];
     say(spans.length === SPANS && spans[0]?.b === n, `${chain}: ${spans.length} spans read, the newest ending at N ${n}`);
     let pools = 0;

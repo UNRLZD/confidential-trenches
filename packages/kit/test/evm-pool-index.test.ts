@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evmPoolIdOf, evmPoolIndexSync, type EvmPoolIndexConfig, type EvmPoolIndexData } from "../src/checks/evm/pool-index.ts";
-import { EvmQuoteError, type EvmPoolKey, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { EvmQuoteError, evmJsonRpc, type EvmPoolKey, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import * as poolIndex from "../src/checks/evm/pool-index.ts";
 // read off the module, so this file still loads (and each test fails on its own) on a build without it
 const INDEX_LIMITED_WAIT_MS = (poolIndex as { INDEX_LIMITED_WAIT_MS?: number }).INDEX_LIMITED_WAIT_MS;
@@ -24,9 +24,13 @@ const key = (i: number, hooks = "0x0000000000000000000000000000000000000000"): E
   hooks,
 });
 type Pool = { key: EvmPoolKey; block: number; id?: string };
+/** A pool's Initialize transaction: one hash per pool, wherever a reader logs it. */
+const txOf = (p: Pool) => "0x" + bytesToHex(keccak_256(new TextEncoder().encode(`tx ${evmPoolIdOf(p.key)}`)));
 const logOf = (p: Pool) => ({
   address: PM,
   blockNumber: hx(p.block),
+  blockHash: blockHash(p.block),
+  transactionHash: txOf(p),
   topics: [INIT, p.id ?? evmPoolIdOf(p.key), "0x" + w(BigInt(p.key.currency0)), "0x" + w(BigInt(p.key.currency1))],
   data: "0x" + w(BigInt(p.key.fee)) + w(BigInt(p.key.tickSpacing)) + w(BigInt(p.key.hooks)) + w(79228162514264337593543950336n) + w(0n),
 });
@@ -61,6 +65,10 @@ type Reader = {
   stateError?: boolean;
   /** more logs this reader answers to every getLogs */
   extraLogs?: unknown[];
+  /** the receipts answered with an error */
+  receiptError?: boolean;
+  /** pools this reader's receipts read, where they are not its logs' (default: `pools`) */
+  receipts?: Pool[];
   calls: EvmRpcCall[][];
 };
 function reader(r: Reader): EvmRpc {
@@ -99,6 +107,11 @@ function reader(r: Reader): EvmRpc {
           return { error: { code: -32005, message: "25/second request limit reached" } };
         }
         return { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
+      }
+      if (c.method === "eth_getTransactionReceipt") {
+        if (r.receiptError) return { error: { code: -32000, message: "header not found" } };
+        const p = (r.receipts ?? r.pools).find((q) => txOf(q) === c.params[0]);
+        return { result: p === undefined ? null : { blockNumber: hx(p.block), blockHash: blockHash(p.block), status: "0x1", logs: [logOf(p)] } };
       }
       if (c.method === "eth_call") {
         if (r.stateError) return { error: { code: -32000, message: "missing trie node" } };
@@ -224,7 +237,8 @@ test("F5: a pool only one reader reported is kept only if the PoolManager holds 
   // a log both report whose id word is not its key's is no pool
   const wrongId = { key: key(4), block: head - 8_000, id: "0x" + "ab".repeat(32) };
   const a: Reader = { head, pools: [real, fake, both, wrongId], state, calls: [] };
-  const b: Reader = { head, pools: [both, wrongId], state, calls: [] };
+  // b's logs miss `real` (a log gap), but its chain holds real's transaction
+  const b: Reader = { head, pools: [both, wrongId], receipts: [real, both], state, calls: [] };
   const r = await evmPoolIndexSync(null, cfgOf(a, b));
   assert.equal(r.coversThrough, head);
   assert.deepEqual(ids(r.pools), new Set([evmPoolIdOf(real.key), evmPoolIdOf(both.key)]));
@@ -250,7 +264,7 @@ test("F6: past the hard pool cap the index refuses by name and never serves a pa
   assert.equal(atCap.pools!.length, 6);
   // pools one reader alone reported, held, that take it past the cap: the readers disagree on what counts
   const state = new Set(ps.map((p) => evmPoolIdOf(p.key)));
-  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, state, calls: [] }, { head, pools: ps.slice(0, 4), state, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /past the cap 5/.test(e.message));
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, state, calls: [] }, { head, pools: ps.slice(0, 4), receipts: ps, state, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /past the cap 5/.test(e.message));
 });
 
 test("a span answered with an error is asked as its halves on both, and a 429 waits without spending a try", async () => {
@@ -398,8 +412,13 @@ test("a log of another block range, another address, removed or of another event
     ["another address", { ...lg, address: "0x" + "12".repeat(20) }],
     ["removed", { ...lg, removed: true }],
     ["another event", { ...lg, topics: ["0x" + "34".repeat(32), ...lg.topics.slice(1)] }],
+    // a log naming no transaction or no block hash: its receipt cannot be asked (review 2 of 1fb6b198)
+    ["no transaction hash", { ...lg, transactionHash: undefined }],
+    ["no block hash", { ...lg, blockHash: null }],
   ] as const) {
-    const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], state: both2, calls: [], extraLogs: [bad] }, { head, pools: [real], state: both2, calls: [], extraLogs: [bad] }));
+    // x's state is set on both, so a log taken as x's pool would keep it
+    const st = new Set([...both2, evmPoolIdOf(x.key)]);
+    const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], state: st, calls: [], extraLogs: [bad] }, { head, pools: [real], state: st, calls: [], extraLogs: [bad] }));
     assert.equal(r.coversThrough, head, what);
     assert.ok(!ids(r.pools).has(evmPoolIdOf(x.key)), what);
   }
@@ -412,4 +431,82 @@ test("the halves' budget spent ends the sync rpc_error, partial", async () => {
   assert.equal(r.coversThrough, null);
   assert.equal(r.error?.code, "rpc_error");
   assert.match(r.error!.message, /more spans with an error than any chain explains/);
+});
+
+// The delta review of 1fb6b198 (Q1-Q3 its probes): a 429 with no wait, and a one-reader pool's block, which the state
+// read never proves.
+test("Q1: a 429 whose Retry-After is 0 or a past date waits at least the backoff, so the batch's wait bound ends it", async () => {
+  const head = 1_000_000;
+  const ps = pools(3, head);
+  for (const retry of ["0", new Date(Date.now() - 60_000).toUTCString()]) {
+    let asked = 0;
+    const res429 = (async () => (asked++, new Response("", { status: 429, headers: { "retry-after": retry } }))) as unknown as typeof fetch;
+    const cfg = cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] });
+    let slept = 0;
+    const out = await evmPoolIndexSync(null, { ...cfg, readers: [evmJsonRpc("https://reader-a.example", res429), cfg.readers[1]], nap: async (ms) => void (slept += ms) }).catch((e: unknown) => e);
+    // the head read alone: the 429s wait up to INDEX_LIMITED_WAIT_MS, then spend INDEX_TRIES tries, and the sync refuses
+    assert.ok(out instanceof EvmQuoteError && out.code === "rpc_error", `${retry}: ${String(out)}`);
+    assert.ok(asked < 20, `${retry}: ${asked} requests`);
+    assert.ok(slept >= INDEX_LIMITED_WAIT_MS!, `${retry}: slept ${slept} ms`);
+  }
+});
+
+test("Q3: a pool one reader logs inside the depth whose transaction's receipt on the other is another block refuses", async () => {
+  const head = 1_000_000;
+  const q = { key: key(9), block: 800_000 }; // real, below from = 900,001
+  const moved = { key: q.key, block: 950_000 };
+  const state = new Set([real, q].map((p) => evmPoolIdOf(p.key)));
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [real, q], state, calls: [] }, { head, pools: [real, moved], state, calls: [] })), code("rpc_disagree", /receipt of pool/));
+  // a transaction the other reader has no receipt of: refused too
+  const made = { key: key(10), block: 950_000 };
+  const st2 = new Set([real, made].map((p) => evmPoolIdOf(p.key)));
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [real], receipts: [real], state: st2, calls: [] }, { head, pools: [real, made], state: st2, calls: [] })), code("rpc_disagree", /receipt of pool/));
+  // an honest log gap (the other reader's receipt agrees) is kept, at its block
+  const gap = { key: key(11), block: 950_000 };
+  const st3 = new Set([real, gap].map((p) => evmPoolIdOf(p.key)));
+  const a: Reader = { head, pools: [real], receipts: [real, gap], state: st3, calls: [] };
+  const r = await evmPoolIndexSync(null, cfgOf(a, { head, pools: [real, gap], state: st3, calls: [] }));
+  assert.equal(r.coversThrough, head);
+  assert.equal(r.pools!.find((p) => p.id === evmPoolIdOf(gap.key))?.block, 950_000);
+  assert.deepEqual(a.calls.flat().filter((c) => c.method === "eth_getTransactionReceipt").map((c) => c.params), [[txOf(gap)]]);
+  // the receipt's block hash, its log's transaction and its log's block each checked
+  for (const lie of [
+    (rc: Record<string, unknown>) => (rc.blockHash = blockHash(950_000, "fork")),
+    (rc: Record<string, unknown>) => ((rc.logs as Record<string, unknown>[])[0]!.transactionHash = "0x" + "77".repeat(32)),
+    (rc: Record<string, unknown>) => ((rc.logs as Record<string, unknown>[])[0]!.blockNumber = hx(950_001)),
+    (rc: Record<string, unknown>) => ((rc.logs as Record<string, unknown>[])[0]!.blockHash = blockHash(950_000, "fork")),
+    (rc: Record<string, unknown>) => (rc.blockNumber = hx(950_001)),
+    (rc: Record<string, unknown>) => (rc.logs = [{ ...logOf({ key: key(12), block: 950_000 }), transactionHash: txOf(gap) }]),
+    (rc: Record<string, unknown>) => (rc.logs = null),
+  ]) {
+    const inner = reader({ head, pools: [real], receipts: [real, gap], state: st3, calls: [] });
+    const lying: EvmRpc = async (calls) => (await inner(calls)).map((x, i) => (calls[i]!.method === "eth_getTransactionReceipt" && (x as { result: unknown }).result ? (lie((x as { result: Record<string, unknown> }).result), x) : x));
+    const cfg = cfgOf({ head, pools: [], calls: [] }, { head, pools: [real, gap], state: st3, calls: [] });
+    await assert.rejects(evmPoolIndexSync(null, { ...cfg, readers: [lying, cfg.readers[1]] }), code("rpc_disagree", /receipt of pool/));
+  }
+  // a receipt not answered: the span is unproven, the sync partial
+  const un = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], receipts: [real, gap], receiptError: true, state: st3, calls: [] }, { head, pools: [real, gap], state: st3, calls: [] }));
+  assert.equal(un.coversThrough, null);
+  assert.equal(un.error?.code, "rpc_error");
+  assert.ok(!un.index!.pools.some((p) => p.id === evmPoolIdOf(gap.key)));
+});
+
+test("Q2: one lying reader in a partial sync never stores a pool at its block, so later honest syncs go on", async () => {
+  const head = 1_000_000;
+  const p = { key: key(1), block: head - 55_000 }; // real, span [940001, 950000]
+  const y = head - 25_000; // the liar's block
+  const state = new Set([evmPoolIdOf(p.key)]);
+  const a: Reader = { head, pools: [p], state, calls: [] };
+  // b logs p at y, and never answers the real span's last block, so that span ends rpc_error
+  const b: Reader = { head, pools: [{ key: p.key, block: y }], receipts: [p], state, calls: [], noBlock: { b: head - 50_000, times: Infinity } };
+  const r = await evmPoolIndexSync(null, cfgOf(a, b)).catch((e: unknown) => e);
+  assert.ok(r instanceof EvmQuoteError && r.code === "rpc_disagree" && /receipt of pool/.test(r.message), String(r));
+  // the caller keeps what it had (none): both honest from here, every sync goes on and has p at its own block
+  let index: EvmPoolIndexData | null = null;
+  for (let i = 1; i <= 2; i++) {
+    const s = await evmPoolIndexSync(index, cfgOf({ head: head + 10 * i, pools: [p], state, calls: [] }, { head: head + 10 * i, pools: [p], state, calls: [] }));
+    assert.equal(s.coversThrough, head + 10 * i);
+    assert.equal(s.pools!.find((x) => x.id === evmPoolIdOf(p.key))?.block, p.block);
+    index = s.index;
+  }
 });

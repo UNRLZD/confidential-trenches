@@ -134,10 +134,13 @@ const gapsOf = (spans: readonly (readonly [number, number])[], lo: number, hi: n
   return out;
 };
 
-/** A log's pool, or null where the log is not the PoolManager's Initialize in [a, b] or its id word is not its key's. */
-function poolOfLog(l: unknown, pm: string, a: number, b: number): EvmIndexedPool | null {
-  const o = l as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown; removed?: unknown } | null;
+/** A log's pool and where the log says it is (its transaction's and its block's hash, which F5 asks the other reader
+ *  for), or null where the log is not the PoolManager's Initialize in [a, b] or its id word is not its key's. */
+type Found = { readonly p: EvmIndexedPool; readonly tx: string; readonly at: string };
+function poolOfLog(l: unknown, pm: string, a: number, b: number): Found | null {
+  const o = l as { address?: unknown; topics?: unknown; data?: unknown; blockNumber?: unknown; removed?: unknown; transactionHash?: unknown; blockHash?: unknown } | null;
   if (typeof o !== "object" || o === null || o.removed === true) return null;
+  if (!isHash(o.transactionHash) || !isHash(o.blockHash)) return null;
   const t = o.topics;
   if (typeof o.address !== "string" || o.address.toLowerCase() !== pm || !Array.isArray(t) || t.length !== 4 || !t.every(isHash)) return null;
   if (t[0]!.toLowerCase() !== INITIALIZE || !isQty(o.blockNumber) || typeof o.data !== "string" || !/^0x([0-9a-fA-F]{64}){5}$/.test(o.data)) return null;
@@ -153,16 +156,16 @@ function poolOfLog(l: unknown, pm: string, a: number, b: number): EvmIndexedPool
   if (BigInt(key.currency0) >= BigInt(key.currency1)) return null;
   const id = evmPoolIdOf(key);
   if (id !== t[1]!.toLowerCase()) return null;
-  return Object.freeze({ id, key, block: n });
+  return { p: Object.freeze({ id, key, block: n }), tx: o.transactionHash.toLowerCase(), at: o.blockHash.toLowerCase() };
 }
 
 /** A reader's answer to a span: its last block's hash and its pools; `cut` where its logs were an error or no answer
  *  ("error") or at the cap ("full"), which is asked again as halves. */
-type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; cut: "error" | "full" | null };
+type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; logs: Map<string, Found>; cut: "error" | "full" | null };
 /** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request. */
 type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; alone: [boolean, boolean]; disagree: number };
 const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], alone: [false, false], disagree: 0 });
-const NO_ANSWER: Answer = Object.freeze({ hash: "", pools: new Map(), cut: "error" as const });
+const NO_ANSWER: Answer = Object.freeze({ hash: "", pools: new Map(), logs: new Map(), cut: "error" as const });
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
  *  can be proven (the heads, the pin), where the readers disagree, and past the cap; a reader that does not answer
@@ -190,7 +193,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         const after = (e as { afterMs?: unknown } | null)?.afterMs;
         if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {
           stats.limited[r]++;
-          const ms = Math.min(typeof after === "number" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++, INDEX_LIMITED_WAIT_MS - waited);
+          // never less than the backoff (review 2 of 1fb6b198: `Retry-After: 0` or a past date is afterMs 0, which waited
+          // nothing, spent no try and asked again at once, 1,729 times in 2 s)
+          const ms = Math.min(Math.max(typeof after === "number" && after >= 0 ? after : 0, BACKOFF_MS * 2 ** waits++), INDEX_LIMITED_WAIT_MS - waited);
           waited += ms;
           stats.limitedMaxMs[r] = Math.max(stats.limitedMaxMs[r], waited);
           await nap(ms);
@@ -223,6 +228,8 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const jobs: Job[] = [];
   for (const [a, b] of gapsOf(old?.spans ?? [], from, n).reverse()) for (let hi = b; hi >= a; hi -= c.span) jobs.push(jobOf(Math.max(a, hi - c.span + 1), hi));
   let proved: { a: number; b: number; pools: EvmIndexedPool[]; one: EvmIndexedPool[] }[] = [];
+  // each pool only one reader logged: which reader, and its log
+  const logged = new Map<string, { by: 0 | 1; f: Found }>();
   let pin: string | null = null;
   // F6: the pools both readers report (one reader's alone count once F5 holds them, so one operator's made-up logs
   // never refuse the index as too many)
@@ -246,14 +253,17 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     const blk = (out[2 * i + 1] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
     if (!Array.isArray(logs) || !blk || !isHash(blk.hash) || !isQty(blk.number) || Number(blk.number) !== j.b) return null;
     const pools = new Map<string, EvmIndexedPool>();
+    const found = new Map<string, Found>();
     for (const x of logs) {
-      const p = poolOfLog(x, pm, j.a, j.b);
-      if (p === null) continue;
+      const f = poolOfLog(x, pm, j.a, j.b);
+      if (f === null) continue;
+      const p = f.p;
       // F2: one pool at two blocks in one answer is no answer an honest reader gives
       if (pools.has(p.id) && pools.get(p.id)!.block !== p.block) return refuse("rpc_disagree", `index reader answered pool ${p.id} at two blocks`);
       pools.set(p.id, p);
+      found.set(p.id, f);
     }
-    return { hash: blk.hash.toLowerCase(), pools, cut: logs.length >= INDEX_SPAN_LOGS ? "full" : null };
+    return { hash: blk.hash.toLowerCase(), pools, logs: found, cut: logs.length >= INDEX_SPAN_LOGS ? "full" : null };
   };
 
   // a job both readers answered: asked again as its halves where either was cut; the same last block and every pool
@@ -279,6 +289,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     const one: EvmIndexedPool[] = [];
     for (const [id, p] of x.pools) (y.pools.has(id) ? both : one).push(p);
     for (const [id, p] of y.pools) if (!x.pools.has(id)) one.push(p);
+    for (const p of one) logged.set(p.id, x.pools.has(p.id) ? { by: 0, f: x.logs.get(p.id)! } : { by: 1, f: y.logs.get(p.id)! });
     count += both.length;
     if (count > c.cap) return refuse("too_many_pools", `chain ${c.chainId} has more than ${c.cap} pools, the index's cap`);
     proved.push({ a: j.a, b: j.b, pools: both, one });
@@ -374,6 +385,30 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       // slot0's low 160 bits are the price, never 0 once the pool is initialized
       else if (BigInt.asUintN(160, BigInt(u)) !== 0n) held.add(p.id);
     });
+    // the state proves the pool, never its block: the reader that did not log a held pool is asked for the logged
+    // transaction's receipt, which must hold the same Initialize log at the same block and block hash (review 2 of
+    // 1fb6b198: a real pool initialized before `from`, logged by one reader inside the depth, was served there); a
+    // receipt not answered is unread
+    const check = ones.filter((p) => held.has(p.id));
+    for (const r of [0, 1] as const) {
+      const of = check.filter((p) => logged.get(p.id)!.by !== r);
+      for (let i = 0; i < of.length; i += INDEX_STATE_BATCH) {
+        const part = of.slice(i, i + INDEX_STATE_BATCH);
+        const out = await ask(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
+        part.forEach((p, k) => {
+          const a = out?.[k] as { result?: unknown } | null | undefined;
+          if (a === null || a === undefined || !("result" in a)) return void unread.add(p.id);
+          const f = logged.get(p.id)!.f;
+          const rc = a.result as { blockNumber?: unknown; blockHash?: unknown; logs?: unknown } | null;
+          const same = rc !== null && typeof rc === "object" && isQty(rc.blockNumber) && Number(rc.blockNumber) === p.block && typeof rc.blockHash === "string" && rc.blockHash.toLowerCase() === f.at && Array.isArray(rc.logs) && rc.logs.some((l) => {
+            const g = poolOfLog(l, pm, p.block, p.block);
+            return g !== null && g.p.id === p.id && g.tx === f.tx && g.at === f.at;
+          });
+          if (!same) refuse("rpc_disagree", `index reader ${r + 1}'s receipt of pool ${p.id}'s transaction is not its Initialize at block ${p.block}`);
+        });
+      }
+    }
+    for (const id of unread) held.delete(id);
     if (unread.size > 0) {
       error ??= new EvmQuoteError("rpc_error", `the index readers did not answer the PoolManager's state of ${unread.size} pool(s)`);
       proved = proved.filter((p) => !p.one.some((o) => unread.has(o.id)));
