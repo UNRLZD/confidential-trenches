@@ -15,5 +15,6 @@
 .tm-cn { font-family: var(--font-num, ui-monospace, monospace); font-variant-numeric: tabular-nums; text-align: right; }
 .tm-cw { grid-column: 1 / -1; text-align: left; }
 /* At a mark's 12 or 16 px the logo is its colour disc: the initials Avatar draws would be 4 to 6 px, under the text
-   floor (11 px), so they are kept at the floor and not painted (the disc clips them; Avatar is aria-hidden) */
-.tm .tok-av { font-size: 11px !important; color: transparent; }
+   floor (11 px), so they are kept at the floor and not painted (the disc clips them; Avatar is aria-hidden); both over Avatar's own
+   inline size and colour */
+.tm .tok-av { font-size: 11px !important; color: transparent !important; }
