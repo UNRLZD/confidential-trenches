@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Makes the mainnet deposit carry's gas account key on the helper's server (card helper-bind-relayer-mainnet), as
 # withdraw-relayer-key.sh makes the withdrawal relayer's. Run on the server, from the checkout redeploy.sh keeps, once it
-# is at a commit that has this file and contracts/vault/deployments/mainnet-v1.json (git fetch and checkout, as
-# redeploy.sh's step 1 does):
+# is at a commit that has this file and contracts/vault/deployments/mainnet-v1.json (main fetched and the commit found
+# on it, as redeploy.sh's step 0 does, then checked out, its step 1; vault-lines.sh's step 1 has the command):
 #   apps/helper/deploy/bind-relayer-key.sh
 # The first deploy of mainnet-v1.json: the order is in vault-lines.sh's header, its one place (this step is its step 3:
 # the key is checked against the running image's MAINNET_VAULT, exit 5 below, and the record commit R moves that pin,
