@@ -58,7 +58,7 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, WALLET_SEED_LOCK, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
@@ -66,6 +66,12 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { depositFollows } from "./deposit-follow.ts";
+import { depositToEnd, poolFollows, poolRefundMover, solanaPoolFollowDeps, type PoolFollowHost } from "./pool-deposit-follow.ts";
+import { POOL_ADDRESS_ASSET, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
+import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
+import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
+import { POOL_ASSET_DECIMALS } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -82,7 +88,7 @@ import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
-import { testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { poolRestore } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
 
@@ -146,6 +152,13 @@ const restore = !framed
 // a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):
 // top-level only, as the seed signs U's call; the store and the seed are opened when a follow runs
 const follows = !framed ? depositFollows({ network: () => PAGE_NETWORK, store: () => open(), seed64: () => openSeed64() }) : null;
+// a pool quote's money carried from U_X into X's pool with no tap, and a refund of it carried back to U_X
+// (src/pool-deposit-follow.ts, card pool-deposit-follow): top-level only; its chain reads are set below, where the pool
+// kinds' pairs are made, and until then (or on a chain the page pins no pool on) an op waits for the next landing
+let poolFollowDeps: PoolFollowHost["deps"] = () => null;
+const poolFollow = !framed
+  ? poolFollows({ store: () => open(), decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], deps: (f, op) => poolFollowDeps(f, op) })
+  : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 if (framed) document.body.append(root);
@@ -179,6 +192,45 @@ else {
     },
   );
   const hasSolana = PAGE_POOLS.some((p) => p.chain === "solana");
+  const poolKindMap = poolKinds(poolDeps);
+  // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
+  // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
+  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => {
+    if (!ONECLICK_USDC_ASSETS.includes(origin)) return null;
+    const p = prices.get(chain);
+    if (p === null) return null;
+    const d = -p.expo, digits = p.price.padStart(d + 1, "0");
+    const usd = d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
+    return { decimalsIn: 6, pricing: { in: ["1", "1"], out: [usd, usd] } };
+  };
+  const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
+  // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor); none on a
+  // chain whose reads are not built here yet (Base and Robinhood: no mainnet pool is pinned)
+  const floorFor = async (chain: PoolChain, wallet: string): Promise<bigint | null> => {
+    const pair = solPair();
+    return chain === "solana" && pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
+  };
+  const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
+  poolFollowDeps = (f, op) => {
+    const pair = solPair();
+    if (f.chain !== "solana" || pair === null || PAGE_SOL_PIN === undefined) return null;
+    const program = PAGE_SOL_PIN.program;
+    return solanaPoolFollowDeps({
+      rpcs: pair,
+      program,
+      deposit: (_f, amount, signal) => depositToEnd(poolKindMap["pool.deposit"] as Parameters<typeof depositToEnd>[0], "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
+      refund: poolRefundMover({
+        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair()),
+        floor: async (g) => readSolanaPoolFloor(pair, program, g.u),
+        priced: (g) => pricedFor(g.chain, g.origin),
+        decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
+        seed64: () => openSeed64(),
+        seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),
+        move: op.move,
+        record: op.record,
+      }),
+    });
+  };
   // a buy or a sell from the trade box (src/trade.ts): legs from this device's own arm records only, signed here
   const trades = tradeKind({ store: () => open(), seed64: () => openSeed64(), deps: releaseTradeDeps() });
   shell = mountShell(document, {
@@ -225,14 +277,15 @@ else {
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts(),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
-      // page; a quote from another chain waits for the follow that carries it into the pool (no `checked`: refused)
-      "pool.address": poolAddressHost({ pools: pagePoolScopes, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named() }),
+      // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
+      // took it (src/pool-deposit-follow.ts), on mainnet only
+      "pool.address": poolAddressHost({ pools: pagePoolScopes, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
       // no pin, mainnet until its pools deploy, refuses every one not_allowed and makes no read); a sell's decimals read
       // on two providers
-      ...poolKinds(poolDeps),
+      ...poolKindMap,
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     }),
@@ -514,7 +567,7 @@ const open = async (): Promise<WalletStore> => {
       moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
       // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
-      if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed();
+      if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed(), poolFollow?.stop();
       if (e.kind !== "signout") return;
       store = null;
       followsClosed = false;
@@ -522,10 +575,11 @@ const open = async (): Promise<WalletStore> => {
       void testnet?.signedOut();
       restore?.signedOut();
       follows?.signedOut();
+      poolFollow?.stop();
       show("signed-out");
     },
   }));
-  if (had === null && followsClosed) (followsClosed = false), void follows?.settle();
+  if (had === null && followsClosed) (followsClosed = false), void follows?.settle(), void poolFollow?.settle().catch(() => {});
   return s;
 };
 
@@ -637,6 +691,8 @@ async function landed(l: Landing): Promise<void> {
   void testnet?.settle();
   // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
   void follows?.settle().catch(() => {});
+  // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts)
+  void poolFollow?.settle().catch(() => {});
   // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
   void settleWithdraws().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
@@ -732,6 +788,7 @@ async function signOut(): Promise<void> {
   restore?.signedOut();
   // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
   follows?.signedOut();
+  poolFollow?.stop();
   withdrawsSignedOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
