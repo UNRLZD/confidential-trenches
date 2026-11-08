@@ -3,8 +3,9 @@
 // (fixtures.tsx) built with vite and served on 127.0.0.1, every state at 390 x 844 (dpr 2, touch) and 1440 x 900
 // (dpr 1). Per state: its rows' colours and no other, the opened row's checks with the planted one's colour, app-shell's
 // BAR-10 rules (MEASURE: no text under 11 px, no phone tap box under 44 px, no horizontal scroll), no external
-// request, and no claim word on screen. Then a tap on a row opens its checks and a second tap closes them.
-//   node apps/terminal/test/verify/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
+// request, and no claim word on screen. Then a tap on a row opens its checks and a second tap closes them. The pool
+// rows (card verify-pools): each state's pool rows' colours, an opened one's checks and its two explorer links.
+//   node apps/terminal/test/verify/run.mjs [--shots <dir>] [--scheme dark|light]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -18,12 +19,17 @@ const args = process.argv.slice(2);
 const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+const schemeAt = args.indexOf("--scheme");
+const SCHEME = schemeAt >= 0 ? args[schemeAt + 1] : "dark";
+if (SCHEME !== "light" && SCHEME !== "dark") throw new Error("--scheme light|dark");
 
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
-// fixture, S18 state, panel state, code row, funds row, { check: status } of the opened row
+// fixture, S18 state, panel state, code row, funds row, { check: status } of the opened row, the pool rows (all ok
+// unless named)
+const OK3 = { solana: "ok", base: "ok", robinhood: "ok" };
 const STATES = [
   ["loading", "S18.1", "loading", "loading", "loading", {}],
   ["read", "S18.2", "read", "ok", "ok", {}],
@@ -35,7 +41,20 @@ const STATES = [
   ["release", "S18.9", "read", "danger", "ok", { keys: "ok", code: "danger" }],
   ["key", "CH-091", "read", "danger", "ok", { keys: "danger", code: "ok" }],
   ["unregistered", "CH-120", "read", "ok", "danger", { asset: "ok", registration: "danger", tokenCode: "ok", balance: "ok" }],
+  ["pools-loading", "VP-1", "read", "ok", "ok", {}, { solana: "loading", base: "loading", robinhood: "loading" }],
+  ["pools-open", "VP-2", "read", "ok", "ok", { authority: "ok", poolCode: "ok", owner: "ok", proxy: "ok" }],
+  ["pool-authority", "VP-3", "read", "ok", "ok", { authority: "danger", poolCode: "ok" }, { ...OK3, solana: "danger" }],
+  ["pool-owner", "VP-4", "read", "ok", "ok", { owner: "danger", proxy: "ok", poolCode: "ok" }, { ...OK3, base: "danger" }],
+  ["pool-proxy", "VP-5", "read", "ok", "ok", { owner: "ok", proxy: "danger", poolCode: "ok" }, { ...OK3, robinhood: "danger" }],
+  ["pool-code", "VP-6", "read", "ok", "ok", { owner: "ok", proxy: "ok", poolCode: "danger" }, { ...OK3, base: "danger" }],
+  ["pool-disagree", "VP-7", "read", "ok", "ok", { owner: "warn", proxy: "ok", poolCode: "ok" }, { ...OK3, robinhood: "warn" }],
 ];
+// each pool's two explorer links, at the address its row reads (release.ts mainnet pools)
+const LINKS = {
+  solana: ["https://solscan.io/account/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", "https://explorer.solana.com/address/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"],
+  base: ["https://basescan.org/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf", "https://base.blockscout.com/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf"],
+  robinhood: ["https://robinhoodchain.blockscout.com/address/0x9306359433127c4f3be426f6faeb00a3c41f66db", "https://hoodscan.co/address/0x9306359433127c4f3be426f6faeb00a3c41f66db"],
+};
 const CLAIM = /\b(verified|safe|secure|backed|guarantee|trustless|all there|matches|proven|solvent)\b/i;
 
 async function build() {
@@ -68,7 +87,7 @@ const check = (ok, what) => ok || fails.push(what);
 
 let BASE = "";
 async function open(browser, w, f) {
-  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
+  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce", colorScheme: SCHEME });
   await ctx.addInitScript(INIT);
   const page = await ctx.newPage();
   const external = [];
@@ -85,13 +104,19 @@ BASE = `http://127.0.0.1:${server.address().port}`;
 const browser = await launchBrowser("chromium");
 try {
   for (const w of WIDTHS) {
-    for (const [f, sid, state, code, funds, checks] of STATES) {
+    for (const [f, sid, state, code, funds, checks, pools = OK3] of STATES) {
       const tag = `${f} (${sid}) @${w.name}`;
       const { ctx, page, external } = await open(browser, w, f);
       const got = await page.locator(".vfy").evaluate((e) => [e.dataset.state, e.dataset.code, e.dataset.funds]);
       check(JSON.stringify(got) === JSON.stringify([state, code, funds]), `${tag}: panel ${got}, want ${[state, code, funds]}`);
       const shown = Object.fromEntries(await page.$$eval("[data-check]", (els) => els.map((e) => [e.dataset.check, e.dataset.status])));
       check(JSON.stringify(shown) === JSON.stringify(checks), `${tag}: checks ${JSON.stringify(shown)}, want ${JSON.stringify(checks)}`);
+      const poolRows = Object.fromEntries(await page.$$eval("[data-pool]", (els) => els.map((e) => [e.dataset.pool, e.dataset.status])));
+      check(JSON.stringify(poolRows) === JSON.stringify(pools), `${tag}: pool rows ${JSON.stringify(poolRows)}, want ${JSON.stringify(pools)}`);
+      for (const c of await page.$$eval(".vrow-box.open[data-pool]", (els) => els.map((e) => e.dataset.pool))) {
+        const hrefs = await page.$$eval(`[data-pool="${c}"] a[data-explorer]`, (els) => els.map((e) => [e.getAttribute("href"), e.getAttribute("target"), e.getAttribute("rel")]));
+        check(JSON.stringify(hrefs) === JSON.stringify(LINKS[c].map((h) => [h, "_blank", "noopener noreferrer"])), `${tag}: ${c} explorer links ${JSON.stringify(hrefs)}`);
+      }
       const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       check(!m.hscroll, `${tag}: horizontal scroll`);
       check(m.smallText.length === 0, `${tag}: text under 11 px: ${m.smallText.join(", ")}`);
@@ -105,7 +130,13 @@ try {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(sid);
       }
-      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${sid}-${f}-${w.name}.png`) });
+      const shot = (end) => page.screenshot({ path: path.join(SHOTS, `${sid}-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}${end}.png`) });
+      if (SHOTS) await shot("");
+      // an opened pool row sits below the vault's: a second shot with the panel scrolled to its end
+      if (SHOTS && sid.startsWith("VP-")) {
+        await page.$eval(".vbody", (e) => (e.scrollTop = e.scrollHeight));
+        await shot("-end");
+      }
       await ctx.close();
     }
 
