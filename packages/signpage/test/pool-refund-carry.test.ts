@@ -24,7 +24,7 @@ k0.secretKey.fill(0);
 const PRICING = { in: ["1", "1"], out: ["150", "150.1"] } as const;
 const F = { chain: "solana" as const, s: "777", i: 0, u: SOL_U, refund_id: ID, address: "DEPOSIT", deadline_ms: NOW, origin: BASE_USDC, min_out: "20000000" };
 const T = BigInt(NOW - 2_000) * 1_000_000n;
-const readOf = (held: bigint, used: boolean | null = null, timeMs = NOW - 2_000): MoveRead => ({ height: 100, timeMs, reads: [{ blockTimeNs: BigInt(timeMs) * 1_000_000n, held }, { blockTimeNs: BigInt(timeMs) * 1_000_000n + 5_000_000n, held }], held, used, salt: "252812b3" });
+const readOf = (held: bigint, used: boolean | null = null, timeMs = NOW - 2_000): MoveRead => ({ height: 100, timeMs, reads: [{ blockTimeNs: BigInt(timeMs) * 1_000_000n, held, registered: true }, { blockTimeNs: BigInt(timeMs) * 1_000_000n + 5_000_000n, held, registered: true }], held, used, salt: "252812b3" });
 
 function answerTo(req: Record<string, unknown>): Answer {
   const amountIn = BigInt(req.amount as string);

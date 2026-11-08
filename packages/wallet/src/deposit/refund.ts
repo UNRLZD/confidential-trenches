@@ -95,10 +95,12 @@ export function transferPayload(p: { u: string; deadlineMs: number; nonce: strin
   });
 }
 
-/** One RPC's reads at the one block the follow read: its time (ns) and what U holds of the asset (mt_balance_of). */
+/** One RPC's reads at the one block the follow read: its time (ns), what U holds of the asset (mt_balance_of) and
+ *  whether U is registered on the network's USDC (storage_balance_of not null; card intents-u-registered-first). */
 export interface RefundRead {
   blockTimeNs: bigint;
   held: bigint;
+  registered: boolean;
 }
 /** The move as the op records it before it is sent: its nonce, deadline (unix ms), asset, amount and the block its reads
  *  were made at. */
@@ -203,6 +205,9 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
   const now = deps.now ?? Date.now;
   const [a, b] = ask.reads;
   if (a.held !== b.held || a.held <= 0n) return { kind: "refused", why: "held" };
+  // U not yet registered on USDC on both RPCs (the relayer registers it once a status shows it money): no quote and no
+  // signature yet (the rule refuses one anyway); a later round reads again
+  if (a.registered !== true || b.registered !== true) return { kind: "refused", why: "unregistered" };
   const held = a.held;
   // 0. after a refusal, the route first: an empty body answered by one of its own refusals (bad_shape), else no quote
   if (ask.probe === true) {

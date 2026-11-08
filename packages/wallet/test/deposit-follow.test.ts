@@ -75,6 +75,8 @@ class Chain {
   heldAt: ((k: "a" | "b", at: bigint) => bigint) | null = null;
   /** intents.near's current salt (current_salt). */
   salt = "252812b3";
+  /** storage_balance_of(U) on USDC per side: U registered on the token (card intents-u-registered-first). */
+  registered: Record<"a" | "b", boolean> = { a: true, b: true };
   /** A block's time by its height, when the test sets it (else the side's `timeMs` for every block). */
   timeAt: ((at: bigint) => number) | null = null;
   constructor(u: string, height = 275753808n, nonce = 275753000000001n) {
@@ -124,6 +126,12 @@ class Chain {
           assert.equal(Buffer.from(a.nonce, "base64").length, 32);
           const used = this.used.has(a.nonce) || (this.usedFrom.has(a.nonce) && at >= this.usedFrom.get(a.nonce)!);
           return stamp({ jsonrpc: "2.0", id: "x", result: { result: [...Buffer.from(JSON.stringify(used))], logs: [] } });
+        }
+        if (params.method_name === "storage_balance_of") {
+          assert.equal(params.account_id, NET.usdc);
+          const a = JSON.parse(Buffer.from(params.args_base64 as string, "base64").toString());
+          const reg = a.account_id === this.u && this.registered[k];
+          return stamp({ jsonrpc: "2.0", id: "x", result: { result: [...Buffer.from(JSON.stringify(reg ? { total: "1250000000000000000000", available: "0" } : null))], logs: [] } });
         }
         if (params.method_name === "current_salt") {
           assert.equal(params.account_id, INTENTS);
@@ -1369,14 +1377,19 @@ test("readMoveAt: both RPCs at one block (the lower final height): its time, the
   t.chain.a.held = t.chain.b.held = CREDIT;
   const n1 = versionedNonce("252812b3", NOW);
   t.chain.used.add(n1);
-  const r = await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs);
+  const r = await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs, NET.usdc);
   assert.deepEqual(r && { height: r.height, held: r.held, used: r.used, salt: r.salt }, { height: Number(t.chain.a.height), held: CREDIT, used: true, salt: "252812b3" });
+  // card intents-u-registered-first: U's registration on USDC, per RPC as each answered (the rule needs both)
+  assert.deepEqual(r?.reads.map((x) => x.registered), [true, true]);
+  t.chain.registered.b = false;
+  assert.deepEqual((await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs, NET.usdc))?.reads.map((x) => x.registered), [true, false], "null on one RPC: kept as it answered");
+  t.chain.registered.b = true;
   t.chain.b.held = CREDIT - 1n;
-  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs), null, "balances that disagree");
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs, NET.usdc), null, "balances that disagree");
   t.chain.b.held = CREDIT;
   t.chain.a.finalLag = 0n;
   t.chain.b.height += 100n;
-  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs), null, "finals too far apart");
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, rpcs, NET.usdc), null, "finals too far apart");
 });
 
 test("D1: a stranger's dust under U after the move lands never holds the move open; the op is done on its money back", async () => {
@@ -1681,16 +1694,16 @@ test("readMoveAt: is_nonce_used or the salt read apart, a block or a view answer
   t.chain.a.held = t.chain.b.held = CREDIT;
   const n1 = versionedNonce("252812b3", NOW);
   const [a, b] = t.chain.rpcs();
-  assert.notEqual(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, b]), null, "the two RPCs as they answer");
+  assert.notEqual(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, b], NET.usdc), null, "the two RPCs as they answer");
   const value = (j: any): unknown => JSON.parse(Buffer.from(j.result.result).toString());
   const usedApart: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.method_name === "is_nonce_used") j.result.result = [...Buffer.from(JSON.stringify(!value(j)))]; return j; } };
-  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, usedApart]), null, "is_nonce_used apart");
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, usedApart], NET.usdc), null, "is_nonce_used apart");
   const saltApart: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.method_name === "current_salt" && j.result) j.result.result = [...Buffer.from(JSON.stringify("00000000"))]; return j; } };
-  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, saltApart]), null, "current_salt apart");
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, saltApart], NET.usdc), null, "current_salt apart");
   const blockOff: FollowRpc = { ...b, block: async (p: any) => { const j: any = await b.block(p); if ("block_id" in p && j.result) j.result.header.height += 1; return j; } };
-  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, blockOff]), null, "a block at another height");
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, blockOff], NET.usdc), null, "a block at another height");
   const viewOff: FollowRpc = { ...b, query: async (p: any) => { const j: any = await b.query(p); if (p.block_id !== undefined && j.result) j.result.block_height += 1; return j; } };
-  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, viewOff]), null, "a view at another block");
+  assert.equal(await readMoveAt(INTENTS, t.u, n1, ORIGIN, [a, viewOff], NET.usdc), null, "a view at another block");
 });
 
 test("the refund move's key: U's own key from the seed, open for the signature only, key and seed zeroed after; a seed whose U is not the op's signs nothing", async () => {

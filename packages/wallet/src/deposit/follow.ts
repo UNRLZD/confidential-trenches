@@ -323,9 +323,10 @@ export interface MoveRead {
  * The refund move's reads at one block on both RPCs (finding 5 of the deposit-follow review: never each at its own
  * RPC's latest final): each RPC's final block, their heights within HEIGHT_SPREAD_MAX, then at the lower height on both
  * the block's time, what `account` holds of `tokenId`, intents.near's current salt and, given a nonce, is_nonce_used;
- * every pair equal, else null.
+ * every pair equal, else null. Also `account`'s registration on `usdc` (storage_balance_of: null or a balance, anything
+ * else no read), kept per RPC as each answered: the rule needs both registered (card intents-u-registered-first).
  */
-export async function readMoveAt(intents: string, account: string, nonce: string | null, tokenId: string, rpcs: readonly [FollowRpc, FollowRpc]): Promise<MoveRead | null> {
+export async function readMoveAt(intents: string, account: string, nonce: string | null, tokenId: string, rpcs: readonly [FollowRpc, FollowRpc], usdc: string): Promise<MoveRead | null> {
   const finals = await Promise.all(rpcs.map((r) => blockAt(r, { finality: "final" })));
   if (finals.some((f) => f === null)) return null;
   const heights = finals.map((f) => f!.height);
@@ -333,20 +334,24 @@ export async function readMoveAt(intents: string, account: string, nonce: string
   const at = Math.min(...heights);
   const sides = await Promise.all(
     rpcs.map(async (r) => {
-      const [b, held, salt, used] = await Promise.all([
+      const [b, held, salt, used, storage] = await Promise.all([
         blockAt(r, { block_id: at }),
         viewJsonAt(r, intents, "mt_balance_of", { account_id: account, token_id: tokenId }, at),
         viewJsonAt(r, intents, "current_salt", {}, at),
         nonce === null ? Promise.resolve(null) : viewJsonAt(r, intents, "is_nonce_used", { account_id: account, nonce }, at),
+        viewJsonAt(r, usdc, "storage_balance_of", { account_id: account }, at),
       ]);
       if (b === null || typeof held !== "string" || !DIGITS.test(held) || typeof salt !== "string" || !/^[0-9a-f]{8}$/.test(salt)) return null;
       if (nonce !== null && typeof used !== "boolean") return null;
-      return { timeNs: b.timeNs, held: BigInt(held), salt, used: used as boolean | null };
+      // NEP-145: null when not registered, else {total, available}; anything else is no read
+      const st = storage as { total?: unknown } | null | undefined;
+      if (st !== null && (typeof st !== "object" || Array.isArray(st) || typeof st.total !== "string" || !DIGITS.test(st.total))) return null;
+      return { timeNs: b.timeNs, held: BigInt(held), salt, used: used as boolean | null, registered: st !== null };
     }),
   );
   const [a, b] = sides;
   if (a == null || b == null || a.timeNs !== b.timeNs || a.held !== b.held || a.salt !== b.salt || a.used !== b.used) return null;
-  return { height: at, timeMs: Number(a.timeNs / 1_000_000n), reads: [{ blockTimeNs: a.timeNs, held: a.held }, { blockTimeNs: b.timeNs, held: b.held }], held: a.held, used: a.used, salt: a.salt };
+  return { height: at, timeMs: Number(a.timeNs / 1_000_000n), reads: [{ blockTimeNs: a.timeNs, held: a.held, registered: a.registered }, { blockTimeNs: b.timeNs, held: b.held, registered: b.registered }], held: a.held, used: a.used, salt: a.salt };
 }
 
 /** Where 1Click's refunds land (refundType INTENTS, deposit/quote.ts): the intents contract of each network; none on testnet. */
@@ -915,7 +920,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
       // a read below a move's own block, the block that found the last move through or over, or this session's highest: no read
       const floor = Math.max(readFloor, ...all.map(([, op]) => Math.max(op.follow.move?.height ?? 0, op.follow.prior_height ?? 0)));
       readAt = async (nonce: string | null, asset: string): Promise<MoveRead | null> => {
-        const r = await readMoveAt(intents, U, nonce, asset, rpcs);
+        const r = await readMoveAt(intents, U, nonce, asset, rpcs, token);
         if (r === null || r.height < floor) return null;
         readFloor = Math.max(readFloor, r.height);
         return r;
