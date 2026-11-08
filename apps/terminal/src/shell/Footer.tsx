@@ -57,7 +57,7 @@ export function Footer({ read = liveRead }: { read?: () => Promise<BlockRead | n
         {ticks.map((t) => (
           <span key={t.sym} className="tick" data-tick={t.sym}>
             <img src={LOGO[t.sym]} alt="" />
-            {t.sym} {fmtUsd(t.usd)}
+            <span>{t.sym} <span className="v">{fmtUsd(t.usd)}</span></span>
           </span>
         ))}
       </span>

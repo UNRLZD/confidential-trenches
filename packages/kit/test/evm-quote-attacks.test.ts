@@ -7114,3 +7114,241 @@ test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap 
     assert.match(c.override[c.tx.to]!.balance, /^0x[0-9a-f]+$/);
   }
 });
+
+// Card evm-buy-quote-ends-on-node: a round is agreed a batch at a time. Agreed whole (main at 3a73b181), one late
+// answer sent the whole round to the next spare: a cold Robinhood WETH-USDG quote asked each of its 4,130 exact-out reads
+// 5.3 times on average over five providers (2026-11-08 11:0xZ). Here the second provider answers one batch of the
+// exact-out round late: that batch alone goes to a spare, and every other exact-out read is asked of two providers.
+// a fresh token with rh-cold-quote's shape: its hookless native 0.3% pool and 99 seeded currencies, 89 of them unable to
+// give Q (each case its own token and currencies: a scan and a plan are kept per token for the module's life)
+const qeCase = (token: string, at: number) => {
+  const eth: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => 3000n * a, state: pricedAt(3000n) };
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+  const seeded = Array.from({ length: 99 }, (_, i) => rcSeeded(at + i, i < 89 ? 1000n * AMOUNT : undefined, token));
+  return { pools: [eth, ...seeded], logs: rcLogs(seeded), req: { chain: "robinhood" as const, token, amountIn: AMOUNT, slippageBps: 100, route } };
+};
+test("QE1 one late batch of a round asks a spare for that batch alone: each exact-out read is asked of two providers, plus one batch", async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x300);
+  const asks = [0, 0, 0, 0];
+  // quoteExactOutputSingle's selector (quote.ts SEL_V4_OUT_SINGLE) once in each exact-out read's calldata
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  let slowed = false;
+  const counted = (rpc: EvmRpc, k: number, slowOne = false): EvmRpc => async (calls) => {
+    asks[k]! += per(calls);
+    if (slowOne && !slowed && per(calls) > 0) {
+      slowed = true;
+      await new Promise((r) => setTimeout(r, 1_500));
+    }
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1, true), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(slowed, "a batch of exact-out reads was answered late");
+  const distinct = asks[0]!;
+  assert.ok(distinct > 18 * 3, `${distinct} exact-out reads: more than three batches`);
+  assert.equal(asks[1], distinct, "the second provider is asked every read once");
+  // the spares: the late batch's reads alone (a batch is 3 calls of 6 reads), and that batch was asked of one: a late
+  // batch already sent asks a spare (its gate said it was sent), never waits out its own answer
+  assert.ok(asks[2]! + asks[3]! <= 18, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${distinct}`);
+  assert.ok(asks[2]! + asks[3]! > 0, "the late batch asked a spare");
+});
+
+// Card evm-buy-quote-ends-on-node: the quote's deadline. Once the block is agreed, no request is sent past that
+// block's time plus EVM_QUOTE_MAX_AGE_MS, and the quote refuses stale_quote; at 3a73b181 it read on past it.
+const ticking = (pools: ModelPool[], who: 0 | 1, headNo: number, clock: { ms: number; ts: number; past: number; sent: number }, stepMs: number): EvmRpc => {
+  const rpc = chain(pools, who, headNo);
+  return async (calls) => {
+    if (calls.some((c) => c.method === "eth_call")) {
+      clock.sent++;
+      if (clock.ts > 0 && NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) clock.past++;
+      clock.ms += stepMs;
+    }
+    const out = await rpc(calls);
+    for (const a of out) {
+      const t = (a as { result?: { timestamp?: unknown } } | null)?.result?.timestamp;
+      if (typeof t === "string") clock.ts = Math.max(clock.ts, Number(t));
+    }
+    return out;
+  };
+};
+test("QE2 (buy) a quote whose reads tick past its block's time plus EVM_QUOTE_MAX_AGE_MS sends no request past it and refuses stale_quote", async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x400);
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
+  const rpcs = [ticking(pools, 0, RC_HEAD, clock, 3_000), ticking(pools, 1, RC_HEAD, clock, 3_000)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000), undefined, () => clock.ms));
+  assert.ok(clock.ts > 0 && clock.ms >= quoteMod.EVM_QUOTE_MAX_AGE_MS, `the reads ran ${clock.ms} ms`);
+  assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} read requests sent past the deadline`);
+  assert.equal(v.accepted, false);
+  assert.equal((v as { code?: string }).code, "stale_quote");
+});
+test("QE2 (sell) a sell quote whose reads tick past its block's time plus EVM_QUOTE_MAX_AGE_MS sends no request past it and refuses stale_quote", async () => {
+  const token = freshToken();
+  const { pools } = liarCase(token);
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
+  const rpcs = [ticking(pools, 0, 5_000_000, clock, 5_000), ticking(pools, 1, 5_000_000, clock, 5_000)];
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, boughtBlock: 1n, sent: [], bought: seededRoute(token) } as EvmPoolSellQuoteRequest;
+  const v = await sellVerdict(evmPoolSellQuoteWith(req, rpcs, NOW, scanner(5_000_000, []), KEEP_MIN, () => clock.ms));
+  assert.ok(clock.ts > 0 && clock.ms >= quoteMod.EVM_QUOTE_MAX_AGE_MS, `the reads ran ${clock.ms} ms`);
+  assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} read requests sent past the deadline`);
+  assert.equal(v.accepted, false);
+  assert.equal((v as { code?: string }).code, "stale_quote");
+});
+
+// Card evm-buy-quote-ends-on-node: a second provider that takes the exact-out round's requests and never answers them
+// holds its gate; the round's batches queued behind them still end, on a spare, as a whole round did (V1).
+test("QE3 a second provider that never answers the exact-out reads: the round's batches queued behind it end on a spare", { timeout: 20_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x600);
+  const asks = [0, 0, 0, 0];
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  const counted = (rpc: EvmRpc, k: number): EvmRpc => (calls) => ((asks[k]! += per(calls)), k === 1 && per(calls) > 0 ? new Promise(() => {}) : rpc(calls));
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const t = performance.now();
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(performance.now() - t < 10_000, `${Math.round(performance.now() - t)} ms`);
+  // the hung provider holds 2 batches (its gate): those two ask a spare, every batch queued behind them moves to the
+  // next provider once, and no batch is asked of a fourth
+  const distinct = asks[0]!;
+  assert.ok(asks[1]! <= 2 * 18, `the hung provider was sent ${asks[1]} exact-out reads, its gate's 2 batches at most`);
+  assert.ok(asks[2]! + asks[3]! <= distinct, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${distinct}`);
+});
+
+// Card evm-buy-quote-ends-on-node: the second provider answers every exact-out batch late but answers. Each late batch
+// sent may ask a spare only within the round's budget (2, plus 1 per 5 batches): the spares are asked no more.
+test("QE4 a second provider late on every exact-out batch: the spares are asked only the round's budget of batches", async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x700);
+  const asks = [0, 0, 0, 0];
+  let batches = 0;
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  const counted = (rpc: EvmRpc, k: number, slow = false): EvmRpc => async (calls) => {
+    asks[k]! += per(calls);
+    if (k === 0 && per(calls) > 0) batches++;
+    if (slow && per(calls) > 0) await new Promise((r) => setTimeout(r, 900));
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1, true), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  const budget = 2 + Math.ceil(batches / 5);
+  assert.ok(batches > budget, `${batches} exact-out batches, more than the budget of ${budget}`);
+  // a batch is 3 calls of 6 reads
+  assert.ok(asks[2]! + asks[3]! <= budget * 18, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads, ${budget} batches at most`);
+});
+
+// Card evm-buy-quote-ends-on-node: a provider that stalls, then answers. The batches queued behind its stalled requests
+// moved to the third provider; when its gate frees, each moved request is dropped unsent, never counted a failure
+// that asks a fourth: the fourth is asked only the round's spares left in its budget.
+test("QE5 a stalled provider that recovers: its moved requests are dropped unsent and ask no fourth provider", { timeout: 20_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x800);
+  const asks = [0, 0, 0, 0];
+  let stalls = 0;
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const counted = (rpc: EvmRpc, k: number): EvmRpc => async (calls) => {
+    const n = per(calls);
+    asks[k]! += n;
+    if (n > 0 && k === 1 && stalls++ < 2) await pause(2_500);
+    if (n > 0 && k === 2) await pause(1_200);
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal(asks[1], 2 * 18, "the stalled provider was sent its gate's 2 batches, the rest moved unsent");
+  assert.ok(asks[3]! <= 2 * 18, `the fourth provider is asked ${asks[3]} exact-out reads, 2 batches of spares at most`);
+});
+
+// Card evm-buy-quote-ends-on-node (review of 2d9a7bd9, finding 4): a request is late by the time since it was sent, never
+// since it was queued. Timed from the queue, healthy providers answering in 250 ms (under EVM_HEDGE_MS) asked a spare for
+// 63 of 99 batches queued behind their gates (the review's RX1), which spent the late budget.
+test("QE6 healthy providers whose exact-out batches wait in their gates: no batch asks a spare", { timeout: 20_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x900);
+  const asks = [0, 0, 0, 0];
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  // the first provider answers each exact-out batch in 40 ms, the second in 250 ms (the review's RX1): both under
+  // EVM_HEDGE_MS once sent, the second's batches queued in its gate behind each other
+  const ms = [40, 250, 40, 40];
+  const counted = (rpc: EvmRpc, k: number): EvmRpc => async (calls) => {
+    asks[k]! += per(calls);
+    if (per(calls) > 0) await new Promise((r) => setTimeout(r, ms[k]));
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(asks[0]! > 2 * 18, `${asks[0]} exact-out reads: more batches than Robinhood's gate sends at once`);
+  assert.equal(asks[2]! + asks[3]!, 0, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${asks[0]}`);
+});
+
+// Card evm-buy-quote-ends-on-node (review of 2d9a7bd9): the deadline holds the scan provider too. Once the block is
+// agreed, each scan request ticks the device's clock 4 s (the review's RX2): no scan request is sent past the block's
+// time plus EVM_QUOTE_MAX_AGE_MS, and the quote refuses stale_quote.
+test("QE7 scan requests that tick past the block's time plus EVM_QUOTE_MAX_AGE_MS: none is sent past it, and the quote refuses stale_quote", async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0xa00);
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
+  const rpcs = [ticking(pools, 0, RC_HEAD, clock, 0), ticking(pools, 1, RC_HEAD, clock, 0)];
+  const scan = scanner(RC_HEAD, logs, [], 100_000);
+  const slow: EvmRpc = async (calls) => {
+    if (clock.ts > 0 && calls.some((c) => c.method === "eth_getLogs")) {
+      clock.sent++;
+      if (NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) clock.past++;
+      clock.ms += 4_000;
+    }
+    return scan(calls);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, slow, undefined, () => clock.ms));
+  assert.ok(clock.sent > 0 && clock.ms >= quoteMod.EVM_QUOTE_MAX_AGE_MS, `${clock.sent} scan requests after the block ran ${clock.ms} ms`);
+  assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} scan requests sent past the deadline`);
+  assert.equal((v as { code?: string }).code, "stale_quote");
+});
+
+// Card evm-buy-quote-ends-on-node (review of 2d9a7bd9): W's releases read on the pool's own providers keeps the quote's
+// deadline. The finalized heads' answers tick the device's clock 40 s: no request after them is sent, and the sell
+// refuses stale_quote.
+test("QE8 (sell) W's releases on the pool's own providers: no request past the block's time plus EVM_QUOTE_MAX_AGE_MS", async () => {
+  const token = freshToken();
+  const pools = [seeded(token)];
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
+  const rpcs = [ticking(pools, 0, 5_000_000, clock, 0), ticking(pools, 1, 5_000_000, clock, 0)];
+  const late = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    clock.sent++;
+    if (clock.ts > 0 && NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) clock.past++;
+    const out = await rpc(calls);
+    if (calls.some((c) => c.params[0] === "finalized")) clock.ms += 40_000;
+    return out;
+  };
+  const pool = [late(chain(pools, 0, 5_000_000)), late(chain(pools, 1, 5_000_000))];
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, boughtBlock: 1n, sent: [], bought: seededRoute(token) } as EvmPoolSellQuoteRequest;
+  const v = await sellVerdict(evmPoolSellQuoteWith(req, rpcs, NOW, scanner(5_000_000, []), KEEP_MIN, () => clock.ms, pool));
+  assert.ok(clock.sent > 0, "the pool's providers were asked");
+  assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} pool requests sent past the deadline`);
+  assert.equal((v as { code?: string }).code, "stale_quote");
+});
+
+test("QE11 the scan's catch-up past the agreed block keeps the deadline: a rate-limited catch-up is not asked again past it (review of 2f9a3ccc, finding 7)", { timeout: 30_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0xb00);
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
+  const rpcs = [ticking(pools, 0, RC_HEAD, clock, 0), ticking(pools, 1, RC_HEAD, clock, 0)];
+  const base = scanner(RC_HEAD, logs, [], 100_000);
+  const LAG = 500;
+  let catchUps = 0;
+  let catchUpsPast = 0;
+  const scan: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) return calls.map((_, id) => ({ jsonrpc: "2.0", id, result: "0x" + (RC_HEAD - LAG).toString(16) }));
+    const up = calls.some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { fromBlock: string }).fromBlock) > RC_HEAD - LAG);
+    if (up) {
+      catchUps++;
+      if (clock.ts > 0 && NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) catchUpsPast++;
+      clock.ms += 31_000;
+      // the first catch-up answers a rate limit: asked again whole
+      if (catchUps === 1) return calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32005, message: "rate limit exceeded" } }));
+    }
+    return base(calls);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scan, undefined, () => clock.ms));
+  console.log("QE11", JSON.stringify({ code: (v as { code?: string }).code, catchUps, catchUpsPast, ms: clock.ms }));
+  assert.ok(catchUps >= 1, "a catch-up ran");
+  assert.equal(catchUpsPast, 0, `${catchUpsPast} catch-up requests sent past the deadline`);
+  assert.equal((v as { code?: string }).code, "stale_quote");
+});

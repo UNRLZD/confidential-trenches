@@ -1,0 +1,98 @@
+{
+ "good": {
+  "source": "harness: the build apps/terminal/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-08T14:01:31.060Z",
+  "browser": "156.0.8078.79",
+  "loads": [
+   {
+    "width": "phone",
+    "legend": true,
+    "toggled": false,
+    "heldMs": 30370,
+    "moves": 75,
+    "texts": 24,
+    "shifts": [],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "legend": true,
+    "toggled": true,
+    "heldMs": 30104,
+    "moves": 67,
+    "texts": 25,
+    "shifts": [
+     {
+      "at": 17184,
+      "value": 0.000473828727816358,
+      "input": true,
+      "sources": [
+       "canvas 1047,140 50x597 -> 1041,140 56x597",
+       "canvas 1047,738 50x83 -> 1041,738 56x83",
+       "span.tkp-lgkv 344,145 92x10 -> 365,145 103x10",
+       "span.tkp-lgkv 288,145 50x10 -> 304,145 54x10",
+       "span.tkp-lgkv 231,145 50x10 -> 242,145 54x10"
+      ]
+     }
+    ],
+    "errors": []
+   }
+  ]
+ },
+ "bad": {
+  "source": "live",
+  "at": "2026-11-08T14:02:37.218Z",
+  "browser": "156.0.8078.79",
+  "loads": [
+   {
+    "width": "phone",
+    "legend": true,
+    "toggled": false,
+    "heldMs": 30369,
+    "moves": 75,
+    "texts": 26,
+    "shifts": [],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "legend": true,
+    "toggled": true,
+    "heldMs": 30177,
+    "moves": 67,
+    "texts": 26,
+    "shifts": [
+     {
+      "at": 17464,
+      "value": 0.00047462277091906725,
+      "input": true,
+      "sources": [
+       "canvas 1047,140 50x597 -> 1041,140 56x597",
+       "canvas 1047,738 50x83 -> 1041,738 56x83",
+       "span.tkp-lgkv 344,145 86x10 -> 365,145 97x10",
+       "span.tkp-lgkv 288,145 50x10 -> 304,145 54x10",
+       "span.tkp-lgkv 231,145 50x10 -> 242,145 54x10"
+      ]
+     },
+     {
+      "at": 21207,
+      "value": 2.9751499003343623e-06,
+      "input": false,
+      "sources": [
+       "span.tkp-lgkv 365,145 97x10 -> 360,145 97x10"
+      ]
+     },
+     {
+      "at": 22389,
+      "value": 3.119574652777778e-06,
+      "input": false,
+      "sources": [
+       "span.tkp-lgkv 360,145 97x10 -> 365,145 103x10"
+      ]
+     }
+    ],
+    "errors": []
+   }
+  ]
+ }
+}

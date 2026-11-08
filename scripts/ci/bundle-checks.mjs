@@ -52,6 +52,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
+  viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
@@ -112,6 +113,7 @@ export const OUT = {
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",
   "app-chart-live": "a browser and the helper",
+  "app-legend-holds-still": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
   "app-no-blank-pages": "a browser",
   "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
