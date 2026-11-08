@@ -23,7 +23,9 @@
 //   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
 //   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsReader on the first),
 //   since devnet has no helper route, and a read naming W reaches that public RPC (mainnet reads them on the helper's
-//   keyed route, buy-wallets.ts). They only pick W: the run reads W's token account and lamports again on both RPCs.
+//   keyed route, buy-wallets.ts). They pick W and nothing more: the sell reads W's token account and lamports again on
+//   both RPCs, and the rent back after it runs only on W's buy record (pool-buy.ts BuyMints, written by the buy before
+//   its send), never on these holdings; with no record it holds (delta review 8 of 5697d7a1).
 //   Its ops record goes in the page's wallet store, and each state read settles a sell a closed page left INCOMING
 //   (pool-sell.ts settlePoolSells), writing its record's stage.
 // - On the page's own network (card signpage-pool-mainnet): main.ts builds this on every build. Nothing differs between
@@ -229,6 +231,9 @@ export type TestnetOver = {
   /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
    *  (its sign-out signal and its pass, fold review 3). */
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
+  /** The trade kinds (poolBuyKind, poolSellKind otherwise): a test reads the hosts this page wires into them (W's buy
+   *  record, written by the buy host and read by the sell host; delta review 8 of 5697d7a1). */
+  tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind };
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -542,7 +547,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       end: () => notes?.close(),
     };
   };
-  const buy = poolBuyKind(() => buyHost());
+  const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
   const settle = (): Promise<void> => Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {});
   const settleSolana = (): Promise<void> => {
@@ -597,7 +602,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
-  const sell = poolSellKind(() => sellHost());
+  const sell = (over.tradeKinds?.sell ?? poolSellKind)(() => sellHost());
   // the sells a closed or reloaded page left INCOMING: each settled by the run's own verdict rules, its ops record's
   // stage written; under the seed's shared lock, as every pass that writes the store (a sign out waits for it)
   const settleSells = async (): Promise<void> => {

@@ -11,6 +11,8 @@ const BUY = `${W}/src/pool-buy.ts`;
 const T = "test/pool-sell.test.ts";
 const KC = "../kit/test/solana-teardown-cashback.test.ts";
 const TB = "test/pool-buy.test.ts";
+const TESTNET = `${W}/src/pool-testnet.ts`;
+const TT = "test/pool-testnet.test.ts";
 // [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
 const M = [
@@ -49,11 +51,16 @@ const M = [
   ["review 7 P9 the open's lamports bound without the prefund", KIT, KC, "lam - c.prefund > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim", "lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim"],
   // delta review 7 of 08290868, item 1: W's buy mint (the buy's record) holds the pass while W holds any of it
   ["review 7 A1 the buy record not read into the pass", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };", "const x: RentBack = { ...given, buy: buy ? buy : null };"],
-  ["review 7 A2 no buy record: the page's holdings decide nothing", SELL, T, '    if (x.buy === null && [...w.holdings.tokens].some(([mint, t]) => !mints.has(mint) && t.amount > 0n)) return end("holds", "W holds a token and no buy of W\'s is recorded");\n', ""],
-  ["review 7 A3 a buy record read as none", SELL, T, "    if (x.buy === null && [...w.holdings.tokens]", "    if ([...w.holdings.tokens]"],
-  ["review 7 A4 no buy record: the holdings left out of what W read as", SELL, T, "const tokens = x.buy === null ?", "const tokens = false ?"],
+  ["review 7 A2 no buy record: the pass runs", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded");\n', ""],
+  ["review 7 A3 a buy record read as none", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };", "const x: RentBack = { ...given, buy: null };"],
   ["review 7 A5 the buy writes no record", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n", ""],
   ["review 7 A6 the buy's record written after its send", BUY, TB, [["      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound });", "      try { return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound }); } finally { await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram }); }"]]],
+  // delta review 8 of 5697d7a1: with no buy record the pass holds; the record through the page's store
+  ["review 8 F1 no buy record: the page's holdings decide the pass", SELL, T, '    if (!x.buy) return end("holds", "no buy of W\'s is recorded");', '    if (!x.buy && [...w.holdings.tokens].some(([mint, t]) => !x.mints.some((m) => m.mint === mint) && t.amount > 0n)) return end("holds", "no buy of W\'s is recorded");'],
+  ["review 8 C3 a buy record that cannot be read faults the pass", SELL, T, "const buy = await Promise.resolve(h.bought?.get(given.w.address)).catch(() => undefined);", "const buy = await h.bought?.get(given.w.address);"],
+  ["review 8 C5 the buy host loses bought", TESTNET, TT, "      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it\n      bought: buyMints(page.store),\n", ""],
+  ["review 8 C6 the sell host loses bought", TESTNET, TT, "      owed: owedRentBacks(page.store),\n      bought: buyMints(page.store),\n", "      owed: owedRentBacks(page.store),\n"],
+  ["review 8 C7 buyMints' get returns undefined", SELL, T, "return Object.hasOwn(all, address) ? all[address] : undefined;", "return undefined;"],
 ];
 // ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
 const only = process.env.ONLY;

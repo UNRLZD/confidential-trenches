@@ -884,11 +884,11 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     return null;
   };
   try {
-    // no buy record of W's (a buy from before it was written, or a restored device): W holding any token the record does
-    // not name keeps everything (the page's holdings: a skip is the safe side), so W's own coin is never stranded; with
+    // no buy record of W's (a buy from before it was written, or a restored device): the pass holds, W's SOL kept on W
+    // under the 12 words (delta review 8 of 5697d7a1, F1). Only the record names W's own coin: on mainnet the page's
+    // holdings are the helper's word (pool-testnet.ts, solanaHelperHoldings), and a sweep is never signed on it. With
     // the record, W's buy mint is among x.mints (rentBackOwed) and a stranger's mint never holds the pass back
-    const mints = new Set(x.mints.map((m) => m.mint));
-    if (x.buy === null && [...w.holdings.tokens].some(([mint, t]) => !mints.has(mint) && t.amount > 0n)) return end("holds", "W holds a token and no buy of W's is recorded");
+    if (!x.buy) return end("holds", "no buy of W's is recorded");
     const addresses = solanaTeardownAddresses(w.address, x.mints);
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
@@ -1035,9 +1035,7 @@ async function heldSeen(x: RentBack): Promise<string | undefined> {
   const addresses = [x.w.address, ...solanaTeardownAddresses(x.w.address, x.mints)];
   const [a, b] = (await both(x.rpcs, (r) => accountsOf(r, addresses))).map((reads) => reads.map((t) => (t === null ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`)).join("|"));
   if (a !== b) return undefined;
-  // with no buy record, the page's holdings decide whether W holds (rentBack), so they are part of what W reads as
-  const tokens = x.buy === null ? `#${[...x.w.holdings.tokens].filter(([, t]) => t.amount > 0n).map(([mint]) => mint).sort().join(",")}` : "";
-  return base64.encode(keccak_256(new TextEncoder().encode(`${a}${tokens}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
+  return base64.encode(keccak_256(new TextEncoder().encode(`${a}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
 }
 
 /** A rent back, then its owed record: none when W reads as it did when its last pass ended on W's own state (review 3

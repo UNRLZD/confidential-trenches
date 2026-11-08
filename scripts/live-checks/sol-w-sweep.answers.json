@@ -1,12 +1,13 @@
 {
   "_note": {
-    "good": "this card's build (mainnet) on card/sol-w-sweep with reviews 5 of 38e59182 and 6 of 13898c19 folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "this card's build (mainnet) on card/sol-w-sweep with reviews 5 of 38e59182, 6 of 13898c19, 7 of 08290868 and 8 of 5697d7a1 folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL",
-    "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone"
+    "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone",
+    "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7UcKMDvoa1ap2FIH6IfZ3H5zfhBwK5IRsfef8pfA2R3mjjZt2yAofiPnkNdSlpGy\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-7UcKMDvoa1ap2FIH6IfZ3H5zfhBwK5IRsfef8pfA2R3mjjZt2yAofiPnkNdSlpGy",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-2jBt7JEIVRMNQP69CqIKddFz2ZgjJp5zjb+aIwaybBFWNvFVJA2ZTihg5PwYrm8H\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-2jBt7JEIVRMNQP69CqIKddFz2ZgjJp5zjb+aIwaybBFWNvFVJA2ZTihg5PwYrm8H",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
@@ -34,7 +35,7 @@
       "a full sell's record keeps the mints W's record already names": true,
       "the sweep's plan refusal ends the pass refused, not given up": true,
       "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
-      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record the page's holdings hold it": true
+      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true
     }
   },
   "bad": {
@@ -67,7 +68,7 @@
       "a full sell's record keeps the mints W's record already names": false,
       "the sweep's plan refusal ends the pass refused, not given up": false,
       "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": false,
-      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record the page's holdings hold it": false
+      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": false
     }
   },
   "beforeFold": {
@@ -100,7 +101,40 @@
       "a full sell's record keeps the mints W's record already names": true,
       "the sweep's plan refusal ends the pass refused, not given up": true,
       "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
-      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record the page's holdings hold it": false
+      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": false
+    }
+  },
+  "beforeFold8": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7UcKMDvoa1ap2FIH6IfZ3H5zfhBwK5IRsfef8pfA2R3mjjZt2yAofiPnkNdSlpGy\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-7UcKMDvoa1ap2FIH6IfZ3H5zfhBwK5IRsfef8pfA2R3mjjZt2yAofiPnkNdSlpGy",
+    "carries": {
+      "a full sell deposits W's surplus": true,
+      "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
+      "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read": true,
+      "rent(0) only when a full sell's keep is refused or leaves its note under the floor": true,
+      "the sell prices a full sell with that fallback, at the sweep's floor": true,
+      "the reserve cap leaves out what the sweep carries on": true,
+      "the sell's rule prices a full sell exactly from the signed min out, rent(0) only where the device falls back, every note at least the pool's least deposit, at a rent and a cap of their own constants": true,
+      "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
+      "the sweep's rule leaves exactly that, for at most two": true,
+      "the sweep goes on when only owed-cashback accounts are kept": true,
+      "W owed, not dropped, when the rest is under the floor": true,
+      "a load that reads W as it read at its last end runs no pass: what W read as is both RPCs' alike bytes of W and its accounts, the rent and the rules' version": false,
+      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end from the record as it is then, with what W read as only on W's own state": true,
+      "the only empty end: the plan closes nothing, both RPCs read W's lamports alike, and they are 0, owed while a claim is owed": true,
+      "a load whose own reads fail keeps every record, each W least recently tried first, its record read again inside the locks, the list stopping where a sell holds the sell lock": true,
+      "a rent back holds W's own lock for its pass and the sell lock only between its sleeps, each sleep letting it go and taking it again only if free": true,
+      "a plan refusal ends the pass only on reads both RPCs answered alike": true,
+      "a record written goes to the end of the list, so a load tries the least recently tried W first": true,
+      "the plan marks a volume account owed only cashback": true,
+      "the kit's plan reads a System account with no data at one of W's addresses as no account, on both RPCs' reads": true,
+      "a claim that opens W's account carries the lamports both RPCs read there, and the check's gain and rent take them": true,
+      "a pass's refused end is steady, as its holds and kept ends are": true,
+      "a floor end is steady only under the floor at the cheapest deposit, and only as the sweep found it": true,
+      "a full sell's record keeps the mints W's record already names": true,
+      "the sweep's plan refusal ends the pass refused, not given up": true,
+      "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
+      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": false
     }
   }
 }
