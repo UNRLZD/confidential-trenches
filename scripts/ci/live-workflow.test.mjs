@@ -119,10 +119,11 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's forty-four checks (signpage-shell runs four ways, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's forty-five checks (signpage-shell runs four ways, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 44);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 45);
   assert.ok(sign.include.some((e) => e.key === "wallet-near-prepay-taken" && !e.chrome && e.args === ""), "wallet-near-prepay-taken runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "evm-sell-no-release-in-flight" && !e.chrome && e.args === ""), "evm-sell-no-release-in-flight runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-release-reads-paced" && !e.chrome && e.args === ""), "solana-release-reads-paced runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposit-sent-end" && !e.chrome && e.args === ""), "pool-deposit-sent-end runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "solana-written-accounts-whole" && !e.chrome && e.args === ""), "solana-written-accounts-whole runs after every sign deploy");
@@ -148,7 +149,7 @@ test("the signing page's forty-four checks (signpage-shell runs four ways, walle
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 34, "the app's thirty-four checks, app-deposit-mount, page-evm-rpc-csp and evm-sell-hook-intrablock the newest");
+  assert.equal(app.include.length, 35, "the app's thirty-five checks, app-deposit-mount, page-evm-rpc-csp, evm-sell-hook-intrablock and app-quick-buy-one-tap the newest");
   assert.ok(app.include.some((e) => e.key === "app-deposit-mount" && e.chrome && e.args === ""), "app-deposit-mount runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host app"), "page-evm-rpc-csp reads APP_HOST alone after every app deploy");
   assert.ok(app.include.some((e) => e.key === "rh-cold-quote" && e.args === ""), "rh-cold-quote runs after every app deploy");

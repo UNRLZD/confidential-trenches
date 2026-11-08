@@ -689,6 +689,62 @@ contract SellTest is SellBase {
   }
 
   /*///////////////////////////////////////////////////////////////
+      AUDIT E-01: FOREIGN ETH DURING A SELL MEETS MINOUT (the delegate's behaviour, held)
+  //////////////////////////////////////////////////////////////*/
+
+  // Pillow Auditors v1.0 (7 Nov), E-01, their PoC as they wrote it. A hostile target takes the tokens and pays nothing;
+  // a release that lands on W mid-sell (modelled by PendingRelease) meets minOut. The release's ETH becomes the sell's
+  // note and the proceeds are gone. The deployed delegate is final, so this stays its documented behaviour, and the
+  // guard is the kit's: no sell is built for a W while a release to W is not final on two RPCs (card
+  // evm-sell-no-release-in-flight; packages/kit src/trade/evm/sell-releases.ts).
+  function test_pillow_E01_foreignEthDuringTheSellMeetsMinOut() public {
+    PendingRelease _release = new PendingRelease{value: 0.5 ether}();
+    SkimRouter _skim = new SkimRouter();
+    SellDelegate.Sell memory _s = _good();
+    _s.target = address(_skim);
+    _s.data = abi.encodeCall(SkimRouter.swap, (token, AMOUNT, _release, W));
+    uint256 _before = W.balance;
+    uint256 _poolBefore = address(pool).balance;
+    _send(_s, FEE, _signed(_s));
+    assertEq(token.balanceOf(address(_skim)), AMOUNT, 'the target kept the tokens');
+    assertEq(W.balance, _before, 'W has no ETH from the release');
+    assertEq(address(pool).balance - _poolBefore, 0.5 ether - FEE, 'the release, less the fee, is the note');
+  }
+
+  // Review 181fd050 of the card, R2-3: a Bought in W's tail can land again as ETH. A replayed buy is the same proof and
+  // the same signature, and whether it lands as Bought or as Withdrawn is decided when it runs: a route that moves the
+  // buy's pool first makes buySwap fail MinOutNotMet, and the pool's fallback pays the chunk to W in ETH and logs
+  // Withdrawn (Buy.t.sol test_minOutNotMetPaysOut, through _paysOut). ETH that lands on W mid-sell meets minOut, the
+  // target keeps the tokens and the ETH becomes the sell's note (test_pillow_E01_foreignEthDuringTheSellMeetsMinOut
+  // above). The two together are E-01 through a replayed buy, so the kit holds the sell for every Bought to W in the tail
+  // but the sale's own funding buy (packages/kit src/trade/evm/sell-releases.ts).
+
+  // Review a5956de3 of the card, item 1: a Bought that lands again as Bought pays W the bought token and no ETH, so it
+  // meets no minOut. Where the bought token is the one W sells, W's balance of it no longer falls by exactly the amount,
+  // and the whole sell reverts at the exact-debit check: DebitNotExact where the buy pays less than the amount, an
+  // underflow (Panic 0x11) where it pays as much or more. Its fallback is the note above.
+  function test_aBoughtReplayedMidSellRevertsAtTheExactDebit() public {
+    uint256[2] memory _paid = [AMOUNT / 2, AMOUNT * 2];
+    for (uint256 _k; _k < 2; ++_k) {
+      PendingBuy _buy = new PendingBuy();
+      token.mint(address(_buy), _paid[_k]);
+      BuyReplayRouter _r = new BuyReplayRouter();
+      vm.deal(address(_r), OUT);
+      SellDelegate.Sell memory _s = _good();
+      _s.target = address(_r);
+      _s.data = abi.encodeCall(BuyReplayRouter.swap, (token, AMOUNT, _buy, W, OUT));
+      bytes memory _sig = _signed(_s);
+      uint256 _tokens = token.balanceOf(W);
+      vm.prank(SENDER);
+      if (_k == 0) vm.expectRevert(SellDelegate.DebitNotExact.selector);
+      else vm.expectRevert(abi.encodeWithSignature('Panic(uint256)', 0x11));
+      _w().sell(_s, FEE, _sig);
+      assertEq(token.balanceOf(W), _tokens, 'W keeps its tokens');
+      assertEq(_w().nonce(), 0, 'the nonce is not used');
+    }
+  }
+
+  /*///////////////////////////////////////////////////////////////
       REVIEW ROUND 3, L-2: A COPIED PRECOMMITMENT (today's behaviour, held)
   //////////////////////////////////////////////////////////////*/
 
@@ -817,5 +873,38 @@ contract SellDelegateKeylessTest is SellBase {
       }
       assertTrue(_found, 'a listed selector is missing');
     }
+  }
+}
+
+contract PendingRelease {
+  constructor() payable {}
+
+  function land(address _to) external {
+    (bool _ok,) = _to.call{value: address(this).balance}('');
+    require(_ok, 'release: send failed');
+  }
+}
+
+contract SkimRouter {
+  function swap(MockToken _token, uint256 _pull, PendingRelease _release, address _w) external {
+    _token.transferFrom(msg.sender, address(this), _pull);
+    _release.land(_w);
+  }
+}
+
+/// A buy of W's own token, landed when a route calls it (a Bought a reorg put back in the mempool)
+contract PendingBuy {
+  function land(MockToken _token, address _to) external {
+    _token.transfer(_to, _token.balanceOf(address(this)));
+  }
+}
+
+/// A router that takes the amount and pays W `_pay` of ETH, and lands a pending buy on W in between
+contract BuyReplayRouter {
+  function swap(MockToken _token, uint256 _pull, PendingBuy _buy, address _w, uint256 _pay) external {
+    _token.transferFrom(msg.sender, address(this), _pull);
+    _buy.land(_token, _w);
+    (bool _ok,) = _w.call{value: _pay}('');
+    require(_ok, 'router: pay failed');
   }
 }
