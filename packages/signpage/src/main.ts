@@ -61,7 +61,7 @@ import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/walle
 import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, WALLET_SEED_LOCK, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
-import { startApi } from "./api.ts";
+import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
@@ -218,7 +218,9 @@ else {
     return solanaPoolFollowDeps({
       rpcs: pair,
       program,
-      deposit: (_f, amount, signal) => depositToEnd(poolKindMap["pool.deposit"] as Parameters<typeof depositToEnd>[0], "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
+      // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
+      deposit: (g, amount, signal) =>
+        depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
       refund: poolRefundMover({
         read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair()),
         floor: async (g) => readSolanaPoolFloor(pair, program, g.u),

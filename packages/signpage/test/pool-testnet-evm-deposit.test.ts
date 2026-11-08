@@ -214,3 +214,30 @@ test("pool-deposit-sent-end low 3: the page's deposit hosts read the notes read 
   assert.equal(locks.request, request, "the spy is gone");
   assert.deepEqual(asked.filter((x) => x === NOTES_LOCK), [], "no note store opened: the notes lock never asked");
 });
+
+test("pool-deposit-follow review H1: depositFrom runs the Solana deposit kind with its fixed U_{s,i}, the request checked by the pool rule; any other chain or a bad amount is refused before the kind", async () => {
+  type SolHost = import("../src/pool-deposit.ts").PoolDepositHost;
+  type From = import("../src/pool-deposit.ts").PoolDepositFrom;
+  const sol: { ask: unknown; from: From | undefined }[] = [];
+  const evm: unknown[] = [];
+  const refuse = { error: "not_allowed" } as const;
+  const r = rpcs();
+  const t = testnetPool(page(), {
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: () => r.pair,
+    evmRound: () => async () => ({ events: [], finalBlock: 100n }),
+    depositKinds: {
+      solana: (_host: () => SolHost) => (ask, _ctx, from) => (sol.push({ ask, from }), refuse),
+      evm: () => (ask) => (evm.push(ask), refuse),
+    },
+  });
+  t.depositFrom({ chain: "solana", amount: "0.05" }, { s: 7n, i: 3 }, ctx);
+  assert.deepEqual(sol, [{ ask: { kind: "pool.deposit", chain: "solana", token: null, amount: 50_000_000n, slippageBps: 0, decimals: 9 }, from: { s: 7n, i: 3 } }]);
+  assert.deepEqual(t.depositFrom({ chain: "base", amount: "0.05" }, { s: 7n, i: 3 }, ctx), refuse);
+  assert.deepEqual(t.depositFrom({ chain: "solana", amount: "-1" }, { s: 7n, i: 3 }, ctx), refuse);
+  // a kind passed in is the rule's own: still a deposit
+  t.depositFrom({ chain: "solana", amount: "0.05", kind: "pool.buy" }, { s: 7n, i: 3 }, ctx);
+  assert.equal(sol.length, 2);
+  assert.equal((sol[1]!.ask as { kind: string }).kind, "pool.deposit");
+  assert.equal(evm.length, 0, "no EVM kind runs from depositFrom");
+});

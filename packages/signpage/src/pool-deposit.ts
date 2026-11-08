@@ -470,7 +470,10 @@ function uOf(ref: NoteRef): { s: bigint; i: number } | null {
 }
 
 /** The run of one pool.deposit (`ask` already passed checkPoolRequest), or, with no ask, the INCOMING notes finished. */
-export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): Promise<PoolDepositAnswer> {
+/** A deposit's fixed source (card pool-deposit-follow, review H1): U_{s,i} alone, from its planned deposit note or its
+ *  next second arrival; never the newest-used-or-planned pick, so money a quote sent to an older U_X goes in from U_X. */
+export type PoolDepositFrom = { s: bigint; i: number };
+export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
   if (ask !== null && (ask.kind !== "pool.deposit" || ask.chain !== "solana")) return { error: "not_allowed" };
   const { pool, scope } = solanaPoolOf(h.pin.program);
   const store = await h.notes();
@@ -720,6 +723,16 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
     const newest = free.length ? Math.max(...free) : null;
     let source: { s: bigint; i: number } | null = newest === null ? null : { s: scope, i: newest };
     let ref: NoteRef | null = source === null ? null : onU(source.i);
+    if (fixed !== undefined) {
+      // the fixed source: U_{s,i}'s planned deposit note, else (its deposit used) its next second arrival; a U with a
+      // note still landing is read again next time; a U the store never planned is refused
+      if (fixed.s !== scope) return { error: "not_allowed" };
+      if (busy.has(fixed.i)) return { stage: "not_landed", txs: [] };
+      const dep = all.find((n) => n.ref.kind === "deposit" && n.ref.s === fixed.s && n.ref.i === fixed.i) as (NoteRecord & { ref: Extract<NoteRef, { kind: "deposit" }> }) | undefined;
+      if (dep === undefined) return { error: "not_allowed" };
+      source = { s: fixed.s, i: fixed.i };
+      ref = dep.state === "PLANNED" ? dep.ref : onU(fixed.i);
+    }
 
     for (let k = 0; k < rungs.length; ) {
       if (source === null || ref === null) {
@@ -751,7 +764,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null): P
           continue;
         }
         // the used U no longer covers a rung: the move starts on the planned index's U (its PLANNED note waits for it)
-        if (k === 0 && source.i === newest && planned.ref.kind === "second") {
+        if (fixed === undefined && k === 0 && source.i === newest && planned.ref.kind === "second") {
           source = null;
           ref = null;
           continue;
@@ -836,7 +849,7 @@ type Locks = Pick<LockManager, "request">;
  *  that ends with no verdict past a send of its ask has its open notes read on (followPoolDeposit), and their end goes
  *  as one more `progress` event (card pool-deposit-sent-end). */
 export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
-  return (ask: PoolAsk | null, ctx: KindContext | null): HostRefusal | Running<"pool.deposit"> => {
+  return (ask: PoolAsk | null, ctx: KindContext | null, from?: PoolDepositFrom): HostRefusal | Running<"pool.deposit"> => {
     if ((ask !== null && (ask.kind !== "pool.deposit" || ask.chain !== "solana")) || !locks) return { error: "not_allowed" };
     let answer: HostAnswer<"pool.deposit"> | HostRefusal | null = null;
     let give!: () => void;
@@ -864,7 +877,7 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
           // null: the run threw (review 5: its `left` is still read, so a throw past a send never leaves the app at sent)
           let a: PoolDepositAnswer | null = null;
           try {
-            a = await runPoolDeposit(run, ask);
+            a = await runPoolDeposit(run, ask, from);
           } finally {
             try {
               const l = left as PoolDepositLeft | null;

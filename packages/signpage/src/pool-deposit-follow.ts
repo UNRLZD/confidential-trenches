@@ -72,8 +72,9 @@ export const POOL_STATUS_STAGE: Readonly<Record<OneClickStatus, PoolFollowStage>
   FAILED: "failed",
 });
 // expired ranks with waiting: a stale PENDING_DEPOSIT never shows a quote past its deadline as live again, and a send
-// seen after it (waiting, in transit) still shows
-const RANK: Partial<Record<PoolFollowStage, number>> = { quote_checked: 0, expired: 1, waiting: 1, in_transit: 2, failed: 2, short: 2 };
+// seen after it (waiting, in transit) still shows. refunded and then refund_move rank above every status before them
+// (review L1): a stale PENDING_DEPOSIT or KNOWN_DEPOSIT_TX after a refund never steps the stage back
+const RANK: Partial<Record<PoolFollowStage, number>> = { quote_checked: 0, expired: 1, waiting: 1, in_transit: 2, failed: 2, short: 2, refunded: 3, refund_move: 4 };
 
 /** A deposit run's end as the page's pool.deposit kind tells it (pool-deposit.ts poolDepositKind: the answer, then its
  *  end as progress), or its refusal code. */
@@ -137,8 +138,9 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       // the chain first: U_X's money, the lower of two RPCs at finalized, carried into the pool while it covers a deposit
       const [a, b] = await deps.balances(f);
       const low = a < b ? a : b;
-      const c = await deps.costs(f);
-      if (low >= c.floor) {
+      // the costs' reads only once U_X holds at least the least rung (review L2): none while it holds nothing
+      const c = low >= deps.ladder.min ? await deps.costs(f) : null;
+      if (c !== null && low >= c.floor) {
         const amount = askOf(deps.ladder, low, c.perRung, c.keep);
         if (amount > 0n) {
           const end = await deps.deposit(f, amount, deps.signal);

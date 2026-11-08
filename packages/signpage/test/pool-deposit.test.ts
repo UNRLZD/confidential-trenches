@@ -2354,3 +2354,40 @@ test("pool-deposit-sent-end review 2 (info): a note a pass the follower did not 
   assert.equal((await ours(ns))[0]!.sends!.length, 2, "the state read's pass sent the note anew");
   assert.deepEqual(waits.slice(killed, killed + 3), [2_000, 2_000, 2_000], "the new send is read every 2 s");
 });
+
+test("from a fixed U_X (card pool-deposit-follow, review H1): a late send to an older U_X goes in from U_X, never from the newest used U", async () => {
+  const c = chain();
+  const ns = await notes();
+  const ux = await plannedU(ns); // U_X: the planned index a quote named
+  c.fund(ux.address, Number(RUNG) + COST);
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG))) as { stage: string }).stage, "filled");
+  const nv = await plannedU(ns);
+  assert.notEqual(nv.i, ux.i);
+  c.fund(nv.address, Number(RUNG) + COST);
+  { const r2 = await runPoolDeposit(host(c, ns), ask(RUNG)); assert.equal((r2 as { stage: string }).stage, "filled", JSON.stringify(r2) + " ux " + c.lamports(ux.address)); }
+  // the newest used U covers a rung again, and a late send (an older quote to U_X, or its refund carried back) credits U_X
+  c.fund(nv.address, Number(RUNG) + COST);
+  c.fund(ux.address, 50_000_000);
+  const vBefore = c.lamports(nv.address);
+  // with no fixed source pool.deposit picks the newest used U: the follow must not take that path
+  const r = await runPoolDeposit(host(c, ns), ask(RUNG), { s: SCOPE, i: ux.i });
+  assert.equal((r as { stage: string }).stage, "filled", JSON.stringify(r));
+  assert.equal(c.lamports(nv.address), vBefore, "the newest used U is not touched");
+  assert.ok(c.lamports(ux.address) <= 50_000_000 - Number(RUNG), "the rung went in from U_X");
+  const mine = (await ours(ns)).filter((n) => n.ref.kind === "second" && n.ref.id.id === "U" && n.ref.id.i === ux.i && n.state !== "PLANNED");
+  assert.equal(mine.length, 1, "U_X's next second arrival is the note");
+});
+
+test("from a fixed U_X: a U the store never planned, or another pool's scope, is refused and nothing is sent", async () => {
+  const c = chain();
+  const ns = await notes();
+  const ux = await plannedU(ns);
+  c.fund(ux.address, Number(RUNG) + COST);
+  c.fund(U(ux.i + 7), Number(RUNG) + COST);
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG), { s: SCOPE, i: ux.i + 7 }), { error: "not_allowed" });
+  assert.deepEqual(await runPoolDeposit(host(c, ns), ask(RUNG), { s: SCOPE + 1n, i: ux.i }), { error: "not_allowed" });
+  assert.equal(c.lamports(ux.address), Number(RUNG) + COST);
+  // its own planned deposit note: filled from U_X
+  assert.equal(((await runPoolDeposit(host(c, ns), ask(RUNG), { s: SCOPE, i: ux.i })) as { stage: string }).stage, "filled");
+  assert.equal(c.lamports(ux.address), 0);
+});

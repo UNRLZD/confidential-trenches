@@ -259,3 +259,39 @@ test("Solana's reads: U_X's finalized balance per RPC, the costs at today's rent
   const bad = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.u) });
   assert.equal(await bad.status(F, new AbortController().signal), null, "a status whose refund is not U_{s,i} is no read");
 });
+
+test("review L1: after REFUNDED a stale PENDING_DEPOSIT past the deadline never steps the stage back to quote_checked or expired", async () => {
+  const w = world([
+    { bal: [0n, 0n], status: "REFUNDED" },
+    { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
+    { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
+  ]);
+  await followPoolQuote(F, w.deps);
+  assert.deepEqual(w.stages, ["refunded"]);
+});
+
+test("review L1: after the refund's move a stale KNOWN_DEPOSIT_TX never steps refund_move back to waiting", async () => {
+  const w = world([{ bal: [0n, 0n], status: "REFUNDED" }, { bal: [0n, 0n], status: "KNOWN_DEPOSIT_TX" }, { bal: [0n, 0n], status: "REFUNDED" }], { refund: async () => "moved" });
+  await followPoolQuote(F, w.deps);
+  assert.deepEqual(w.stages, ["refunded", "refund_move"]);
+});
+
+test("review L2: the costs are read only once U_X holds at least the least rung", async () => {
+  const w = world([
+    { bal: [0n, 0n], status: "PENDING_DEPOSIT" },
+    { bal: [SOL_LADDER.min - 1n, SOL_LADDER.min], status: "PROCESSING" },
+    { bal: [FLOOR, FLOOR], status: "SUCCESS", past: true },
+  ]);
+  // each costs read with the lower balance of its round
+  const seen: bigint[] = [];
+  let low = 0n;
+  const bal = w.deps.balances, read = w.deps.costs;
+  w.deps.balances = async (f) => {
+    const r = await bal(f);
+    low = r[0] < r[1] ? r[0] : r[1];
+    return r;
+  };
+  w.deps.costs = (f) => (seen.push(low), read(f));
+  assert.equal(await followPoolQuote(F, w.deps), "in_pool");
+  assert.ok(seen.length > 0 && seen.every((l) => l >= SOL_LADDER.min), seen.join(","));
+});
