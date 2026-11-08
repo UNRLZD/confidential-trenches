@@ -365,3 +365,78 @@ test("planted on the good answer: a recorded 429 names its resource's origin and
     assert.ok(!r.lines.some((l) => l.includes("id=abc")), "no query in a line");
   }
 });
+
+// Card live-press-window-retry: a press meant to land inside the guard's 500 ms that lands at or past it never tested
+// the guard, held or not. The probe presses it again on a fresh draw (TRIES at most); one that never lands inside ends
+// the check INCONCLUSIVE, naming each try's ms, never PASS and never a BAD line. A press inside that acts stays BAD.
+test("live547 (the sign live run 42499353181's early Backup press at 547 ms, the page held) reads INCONCLUSIVE, never PASS or BAD", () => {
+  const r = judge(answers.live547);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.pass, false);
+  assert.deepEqual(bad(answers.live547), []);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("INCONCLUSIVE")), [
+    "INCONCLUSIVE no-prf: a press on Backup within 500 ms of it drawn draws no words: no press landed inside the 500 ms window in 1 try (547 ms), so the guard was not tested (signed-in, 0 words)",
+  ]);
+});
+
+test("the good answer's verdict is PASS, and every recorded bad answer's is FAIL", () => {
+  assert.equal(judge(answers.good).verdict, "PASS");
+  for (const k of Object.keys(answers).filter((x) => x !== "note" && x !== "good" && x !== "live547")) assert.equal(judge(answers[k]).verdict, "FAIL", k);
+});
+
+// each in-window press, by where its record is and what its window reads: [name, step, timing at the edge, an act]
+const WINDOWED = [
+  ["prf: a mouse press within 500 ms of Sign out shown does nothing", (r) => r.prf.protect.mouse, { withinMs: 500 }, { state: "signed-out", account: null }],
+  ["prf: Tab then Enter within 500 ms of Sign out shown does nothing", (r) => r.prf.protect.enter, { withinMs: 612 }, { state: "signed-out", account: null }],
+  ["prf: a press within 500 ms after visibilitychange does nothing", (r) => r.prf.triggers.visibilitychange, { withinMs: 520 }, { state: "signed-out", account: null }],
+  ["prf: a press within 500 ms after pageshow does nothing", (r) => r.prf.triggers.pageshow, { withinMs: 501 }, { state: "signed-out", account: null }],
+  ["prf: a press within 500 ms after focus does nothing", (r) => r.prf.triggers.focus, { withinMs: 700 }, { state: "signed-out", account: null }],
+  ["prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing", (r) => r.prf.burst, { firstMs: 510 }, { state: "signed-out", account: null }],
+  ["prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing", (r) => r.prf.burst, { gapMs: 505 }, { state: "signed-out", account: null }],
+  ["phone: a tap within 500 ms of Sign out shown does nothing", (r) => r.phone.tap, { withinMs: 540 }, { state: "signed-out", account: null }],
+  ["no-prf: a press on Copy within 500 ms of it drawn copies nothing", (r) => r.noPrf.copyEarly, { withinMs: 530 }, { copies: 1 }],
+  ["no-prf: a press on Saved within 500 ms of it drawn does nothing", (r) => r.noPrf.savedEarly, { withinMs: 520 }, { state: "signed-in", codeSaved: "true" }],
+  ["no-prf: a press on Backup within 500 ms of it drawn draws no words", (r) => r.noPrf.backupEarly, { withinMs: 547 }, { state: "backup", words: 12 }],
+];
+
+test("each in-window press that lands at or past 500 ms, held or acted on, reads INCONCLUSIVE with its tries' ms; inside, an act is BAD", () => {
+  for (const [line, step, edge, act] of WINDOWED) {
+    for (const acted of [false, true]) {
+      const r = clone(answers.good);
+      const t = step(r);
+      // the try before it, as the probe keeps it: its timings, 40 ms later still at the edge
+      const miss = Object.fromEntries(["withinMs", "sinceDrawMs", "firstMs", "secondMs", "gapMs"].filter((k) => typeof t[k] === "number").map((k) => [k, t[k]]));
+      for (const [k, v] of Object.entries(edge)) miss[k] = v + 40;
+      Object.assign(t, edge, { missed: [miss] });
+      if (acted) t.after = { ...t.after, ...act };
+      const j = judge(r);
+      assert.equal(j.verdict, "INCONCLUSIVE", `${line} ${JSON.stringify(edge)} acted ${acted}\n${j.lines.join("\n")}`);
+      assert.deepEqual(bad(r), [], line);
+      const inc = j.lines.filter((l) => l.startsWith("INCONCLUSIVE"));
+      assert.equal(inc.length, 1, inc.join("\n"));
+      assert.ok(inc[0].startsWith(`INCONCLUSIVE ${line}: no press landed inside the 500 ms window in 2 tries (`), inc[0]);
+      for (const v of Object.values(edge)) assert.ok(inc[0].includes(`${v} ms`) && inc[0].includes(`${v + 40} ms`), inc[0]);
+    }
+    // inside the window, the same act is BAD, as before the card
+    const r = clone(answers.good);
+    step(r).after = { ...step(r).after, ...act };
+    assert.equal(judge(r).verdict, "FAIL", line);
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${line} (`)), `${line}\n${bad(r).join("\n")}`);
+  }
+});
+
+test("a missed window never hides a BAD line elsewhere: the verdict is FAIL", () => {
+  const r = clone(answers.live547);
+  r.prf.steps.signout.db = true;
+  assert.equal(judge(r).verdict, "FAIL");
+});
+
+test("a press that missed its control, or was never made, stays BAD wherever it landed", () => {
+  for (const [line, step] of WINDOWED) {
+    for (const edit of [(t) => Object.assign(t, { pressOn: "BODY", withinMs: 600, firstMs: 600 }), (t) => Object.assign(t, { pressed: false })]) {
+      const r = clone(answers.good);
+      edit(step(r));
+      assert.equal(judge(r).verdict, "FAIL", line);
+    }
+  }
+});

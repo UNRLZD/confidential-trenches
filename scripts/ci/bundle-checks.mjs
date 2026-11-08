@@ -57,6 +57,8 @@ export const IN_PROCESS = [
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
+  viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
+  viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
@@ -74,6 +76,7 @@ export const CHILD_RUNS = [
   { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
@@ -81,6 +84,7 @@ export const OUT = {
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",
+  "kit-sol-pool-deposit-floor": "the release ledger: it holds the served /app.js to a written release list, so a planted bundle fails it whatever it plants (its replay holds the marks and the pin)",
   "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
@@ -109,11 +113,13 @@ export const OUT = {
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
+  "app-header-search-chain": "the helper's lists and token answers (its behaviour run is in test:e2e)",
   "app-token-route": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",
   "app-chart-live": "a browser and the helper",
   "app-legend-holds-still": "a browser and the helper",
+  "app-discover-rows-hold": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
   "app-no-blank-pages": "a browser",
   "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",

@@ -1,7 +1,8 @@
 // node packages/wallet/scripts/restore-wallets-mutants.mjs (card wallet-restore-wallets): plants one broken rule of the
 // wallet and deposit-id restore (src/restore/wallets.ts, wallet.md §2.3 steps 4, 5 and 7) or of the lane walk's Worker
 // bridge (src/restore/walk.ts) at a time, runs the test that holds that rule, expects it to fail, and puts the source
-// back. "strings sent and taken" is the wallet-restore-notes round-3 review's case: a bridge that sends the
+// back. Also the same-chain deposit's rent hand-off to the kit's builder (card kit-sol-pool-deposit-floor, src/pool/
+// same-chain.ts). "strings sent and taken" is the wallet-restore-notes round-3 review's case: a bridge that sends the
 // precommitments as strings to a Worker that takes them restores no note with every check on the walk passing.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -11,11 +12,17 @@ const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
 const NR = ["wallet", "test/note-restore.test.ts"];
 const RW = ["wallet", "test/restore-wallets.test.ts"];
+// card kit-sol-pool-deposit-floor (S-01 review): the same-chain deposit hands the kit's builder the rent the device read
+const SC = "wallet/src/pool/same-chain.ts";
+const PSC = ["wallet", "test/pool-same-chain.test.ts"];
+const RENT_IN = "a.sizes, a.blockhash, a.rent) };";
 const SENT = "precommitments: [...precommitments] };";
 const STRINGS = "precommitments: [...precommitments].map(String) as unknown as bigint[] };";
 const CHECK = '!a.precommitments.every((p) => typeof p === "bigint")';
 // [name, file, [[the source as written, the plant]...], [package, test file], test name pattern]
 const M = [
+  ["S-01 review: the same-chain deposit builds at a rent of 0, not the rent read", SC, [[RENT_IN, "a.sizes, a.blockhash, { lamportsPerByte: 0n, factor: 1n }) };"]], PSC, "S-01 review"],
+  ["S-01 review: the same-chain deposit builds at mainnet's rent, not the rent read", SC, [[RENT_IN, "a.sizes, a.blockhash, { lamportsPerByte: 5_080n, factor: 1n }) };"]], PSC, "S-01 review"],
   ["the bridge sends the precommitments as strings", WALK, [[SENT, STRINGS]], NR, "Worker bridge"],
   ["the Worker takes precommitments that are not bigints", WALK, [[CHECK, "false"]], NR, "Worker bridge"],
   ["strings sent and taken (round-3 review)", WALK, [[SENT, STRINGS], [CHECK, "false"]], NR, "Worker bridge"],

@@ -129,6 +129,9 @@ export const MUTANTS = [
   [EVM, [["  const wait = h.wait ?? ((ms: number) => followWait(ms, h.signal));", "  const wait = h.wait ?? ((ms: number) => followWait(ms));"]], "pool-deposit-sent-end low 4 (EVM): the end's own wait"],
   // low 5: a hand-off whose store read fails hands no note over (part_filled told unproved, or nothing after "sent")
   [EVM, [["        notes = [...askNotes.values()];\n", "        notes = [];\n"]], "pool-deposit-sent-end low 5 (EVM)"],
+  // card kit-sol-pool-deposit-floor (S-01 review): the deposit hands the kit's builder the rent both RPCs read
+  [SOL, [["{ value, precommitment }, st.sizes, blockhash, st.rent);", "{ value, precommitment }, st.sizes, blockhash, { lamportsPerByte: 0n, factor: 1n });"]], "H1 (probe B):"],
+  [SOL, [["{ value, precommitment }, st.sizes, blockhash, st.rent);", "{ value, precommitment }, st.sizes, blockhash, { lamportsPerByte: 5_080n, factor: 1n });"]], "S-01 review:"],
 ];
 
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };

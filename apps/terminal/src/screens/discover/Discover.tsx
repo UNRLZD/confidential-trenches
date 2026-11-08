@@ -196,9 +196,11 @@ function Body({ data, k, win, phone, nowMs, onRetry }: { data: DiscoverData; k: 
         <W id="noTokens" />
       </div>
     );
+  // the rows are fixed slots, keyed by their place: a refresh that adds, drops or reorders tokens redraws each slot in
+  // place with its new token, so no drawn row slides (a row keyed by its token moved a slot each time one ranked above it)
   return (
     <div className="dsc-rows" role="list" data-state="S5.2">
-      {rows.map((r) => (phone ? <PhoneRow key={r.token} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={r.token} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
+      {rows.map((r, i) => (phone ? <PhoneRow key={i} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={i} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
     </div>
   );
 }
