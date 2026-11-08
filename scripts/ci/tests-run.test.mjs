@@ -109,6 +109,21 @@ test("every tracked test file in this tree is run by CI", () => {
   assert.deepEqual(unrun(ROOT), [], "a test file no CI command runs: name it by a glob in ci.yml or in its package's test script");
 });
 
+// card helper-sell-sweep-in-ci: the helper's EVM sell sweep (apps/helper/test/pool-evm/sell-mutants.mjs) is no test file,
+// so the check above cannot see it; it runs in CI only while a ci.yml line runs the mutant split and the helper's
+// test:mutants gives the split every one of its parts (scripts/ci/test-shards.test.mjs holds that the split's parts
+// together run each command)
+test("the helper's EVM sell sweep is a command of the mutant split that ci.yml's test-mutants runs", () => {
+  const lines = runLines(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8"));
+  assert.ok(lines.some((l) => /^node scripts\/ci\/test-shards\.mjs mutants "\$INDEX" "\$TOTAL"$/.test(l.trim())), "no ci.yml line runs the mutant split");
+  // its parts, one command each (node test/pool-evm/sell-mutants.mjs <k>/<n>): every k from 1 to n, each once
+  const parts = mutantCommands(ROOT).filter((c) => c.dir === "apps/helper" && /^node test\/pool-evm\/sell-mutants\.mjs\b/.test(c.command))
+    .map((c) => /^node test\/pool-evm\/sell-mutants\.mjs ([1-9]\d*)\/([1-9]\d*)$/.exec(c.command)?.slice(1).join("/") ?? c.command);
+  assert.ok(parts.length > 0, "the mutant split has no apps/helper command running test/pool-evm/sell-mutants.mjs");
+  const n = Number(parts[0].split("/")[1]);
+  assert.deepEqual(parts.toSorted(), Array.from({ length: n }, (_, k) => `${k + 1}/${n}`).toSorted(), `the sweep's parts: ${parts.join(", ")}`);
+});
+
 // a small tree: ci.yml runs a root script, a live-check glob and every package's test script; one package names its
 // test files one by one, as packages/wallet did on main bb4eafd
 test("a planted test file that no command names fails; the same tree without it passes", () => {
