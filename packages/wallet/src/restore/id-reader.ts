@@ -31,7 +31,10 @@
 // - A pass is used only while fresh and only on the providers it was opened on (review P1, P2): building a reader reads
 //   both finals once and refuses a pass more than VAULT_SYNC_LAG_MAX below the higher of them; a scan that exists to see
 //   money after a height opens its own pass above it (openRereadPass, arms.ts openSecondScanPass); and the pass keeps
-//   its two provider objects, matched by identity, never by name.
+//   its two provider objects (a frozen copy), matched by identity, never by name. A reader carries its pass
+//   (`reader.pass`, read-only): it reads that one block for as long as it lives, so every step that exists to see money
+//   after a height takes the reader and refuses one whose pass is not above it (./wallets.ts rereadsDue, ./arms.ts
+//   secondScanDepositIds and secondScanArmAccounts; review R1).
 // - An indexer (NearBlocks, the intents explorer) is a server's word: it may turn an id both providers see as unused
 //   into "used" (`indexer` answers true), never anything into "unused"; a failed or false answer changes nothing.
 //
@@ -195,12 +198,24 @@ export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, N
     if (x.hash !== y.hash) throw new Error(`the RPCs' blocks at ${floor} differ (${x.hash}, ${y.hash}); the restore does not start`);
     if (opts.after !== undefined && floor <= opts.after) throw new Error(`the pass at block ${floor} is not past block ${opts.after}; read again once the chain is past it`);
     const pass: RestorePass = Object.freeze({ network, rpcs: Object.freeze([rpcs[0].name, rpcs[1].name]) as readonly [string, string], h: floor, hash: x.hash });
-    PASSES.set(pass, rpcs);
+    PASSES.set(pass, Object.freeze([rpcs[0], rpcs[1]] as const));
     return pass;
   })();
 }
 
 /** A pass for the open's step 7 re-reads (./wallets.ts afterRestore): they exist to see money after the restore's pass. */
+/** A reader and the one pass it reads (review R1). */
+export type PassIdReader = IdReader & { readonly pass: RestorePass };
+export type PassBalanceReader = ((what: NearBalanceRead, account: string) => Promise<bigint>) & { readonly pass: RestorePass };
+const carrying = <F extends object>(f: F, pass: RestorePass): F & { readonly pass: RestorePass } =>
+  Object.freeze(Object.defineProperty(f, "pass", { value: pass, enumerable: true, writable: false, configurable: false })) as F & { readonly pass: RestorePass };
+/** Refuses a reader whose pass is not above `height`: a step that exists to see money after it (review R1). */
+export function readerPast<R extends { readonly pass: Pick<RestorePass, "h"> }>(reader: R, height: number, step: string): R {
+  if (!Number.isSafeInteger(reader?.pass?.h)) throw new Error(`${step}: the reader carries no pass`);
+  if (reader.pass.h <= height) throw new Error(`${step}: the reader's pass at block ${reader.pass.h} is not past block ${height}; open a fresh pass`);
+  return reader;
+}
+
 export function openRereadPass(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], restored: RestorePass, opts: Omit<PassOpts, "after"> = {}): Promise<RestorePass> {
   if (!PASSES.has(restored)) throw new Error("the pass is not one openRestorePass opened");
   return openRestorePass(network, rpcs, { ...opts, after: restored.h });
@@ -228,7 +243,7 @@ async function fresh(pass: RestorePass, rpcs: readonly [NearRpc, NearRpc], block
  * The IdReader of step 5 on the network's token and intents.near, through one FastNEAR RPC and the dRPC RPC of that
  * network (nearPairNetwork), in either order, every view at the pass's block (openRestorePass).
  */
-export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: IdReaderOpts = {}): Promise<IdReader> {
+export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: IdReaderOpts = {}): Promise<PassIdReader> {
   const { token, retried, first, blockOf } = setup(network, rpcs, opts);
   const at = pinOf(pass, network, rpcs);
 
@@ -244,7 +259,7 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
   };
   const RANK: Record<IdState, number> = { unused: 0, used: 1, money: 2 };
 
-  return fresh(pass, rpcs, blockOf).then((): IdReader => async (u: string): Promise<IdState> => {
+  return fresh(pass, rpcs, blockOf).then(() => carrying(async (u: string): Promise<IdState> => {
     if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
     const a = first() === 0 ? 0 : 1;
     const got: (IdState | Error)[] = [];
@@ -269,7 +284,7 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
       }
     }
     return state;
-  });
+  }, pass));
 }
 
 /** What intents.near holds for an account at the pass's block: the sum of its listed tokens (0 when none is listed). */
@@ -293,7 +308,7 @@ export type NearBalanceRead = "usdc" | "near" | "intents";
  * fails; a balance above 0 on either provider is enough, and 0 only when both answer 0, so a provider that hides money
  * never makes the restore pass over it. A halt ("FiatToken: paused") fails the read.
  */
-export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: Omit<IdReaderOpts, "indexer"> = {}): Promise<(what: NearBalanceRead, account: string) => Promise<bigint>> {
+export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: Omit<IdReaderOpts, "indexer"> = {}): Promise<PassBalanceReader> {
   const { token, retried, first, blockOf } = setup(network, rpcs, opts);
   const at = pinOf(pass, network, rpcs);
   const readOn = async (rpc: NearRpc, what: NearBalanceRead, a: string): Promise<bigint> => {
@@ -304,7 +319,7 @@ export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc,
     }
     return intentsSum(retried, rpc, a, at);
   };
-  return fresh(pass, rpcs, blockOf).then(() => async (what: NearBalanceRead, a: string): Promise<bigint> => {
+  return fresh(pass, rpcs, blockOf).then(() => carrying(async (what: NearBalanceRead, a: string): Promise<bigint> => {
     if (what !== "usdc" && what !== "near" && what !== "intents") throw new Error(`unknown read ${String(what)}`);
     if (typeof a !== "string" || !HEX64.test(a)) throw new Error("an account is a 64-hex implicit account id");
     const x = first() === 0 ? 0 : 1;
@@ -320,5 +335,5 @@ export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc,
     // 0 only when both answered 0
     if (failed !== undefined) throw failed;
     return 0n;
-  });
+  }, pass));
 }

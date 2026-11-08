@@ -33,6 +33,7 @@ import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
 import { RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
 import { refKey } from "../notes/store.ts";
+import { readerPast, type RestorePass } from "./id-reader.ts";
 
 /** The tags of an arm's own wallets, and of its hop targets (wallet.md l.91-100). */
 export const ARM_TAGS = ["sol", "evm", "near"] as const satisfies readonly Chain[];
@@ -253,7 +254,7 @@ export async function restoreDepositIds(
 }
 
 /** Step 7's plan: the index the new lane's counter was raised to, and the ids every open re-reads until `until`. */
-export type AfterRestore = { scope: bigint; lane: number; next: number; until: number; rereads: { lane: number; i: number; id: string }[] };
+export type AfterRestore = { scope: bigint; lane: number; next: number; until: number; after: number; rereads: { lane: number; i: number; id: string }[] };
 
 /** The last index step 7 covers in a lane: its highest with a note or any history plus two of the lane (empty: its second). */
 const coverTo = (x: LaneIds): number => (x.highest === null ? x.lane + RESTORE_LANES : x.highest + 2 * RESTORE_LANES);
@@ -268,8 +269,11 @@ export async function afterRestore(
   scope: bigint,
   lanes: readonly LaneIds[],
   atMs: number,
+  restored: Pick<RestorePass, "h">,
 ): Promise<AfterRestore> {
   if (!Number.isSafeInteger(atMs) || atMs <= 0) throw new Error("atMs is the restore's NEAR block time in ms");
+  // the restore's pass: the re-reads exist to see money after its block (review R1)
+  if (!Number.isSafeInteger(restored?.h) || restored.h <= 0) throw new Error("restored: the restore's pass");
   if (lanes.length !== RESTORE_LANES || !lanes.every((x, k) => x.lane === k)) throw new Error("lanes: one per lane, in order");
   // an unfinished restore (review N3): a lane stopped past its note walk's end was never read past its reach, so no
   // counter is raised and nothing is re-read on its word; the user restores again with the reaches named
@@ -285,10 +289,15 @@ export async function afterRestore(
     const held = new Set(x.notes);
     for (let i = x.lane; i <= coverTo(x) && i <= U32; i += RESTORE_LANES) if (!held.has(i)) rereads.push({ lane: x.lane, i, id: depositAccount(seed64, scope, i).account });
   }
-  return { scope, lane: store.lane, next, until: atMs + REREAD_MS, rereads };
+  return { scope, lane: store.lane, next, until: atMs + REREAD_MS, after: restored.h, rereads };
 }
 
-/** The ids an open re-reads: step 7's list while the NEAR final block time `nowMs` is before its end, then none. */
-export function rereadsDue(plan: Pick<AfterRestore, "until" | "rereads">, nowMs: number): AfterRestore["rereads"] {
+/**
+ * The ids an open re-reads: step 7's list while the NEAR final block time `nowMs` is before its end, then none. The
+ * reader they are read with is taken here and must read a block past the restore's (review R1: never the restore's
+ * own reader, which reads its one pinned block for as long as it lives).
+ */
+export function rereadsDue(plan: Pick<AfterRestore, "until" | "after" | "rereads">, reader: { readonly pass: Pick<RestorePass, "h"> }, nowMs: number): AfterRestore["rereads"] {
+  readerPast(reader, plan.after, "the re-reads");
   return nowMs < plan.until ? plan.rereads : [];
 }

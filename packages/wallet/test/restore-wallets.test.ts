@@ -146,6 +146,9 @@ const LANES: Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked"> = {
 };
 const ONE = [0, null, null, null, null, null, null, null];
 const at = (lane: number, k: number) => lane + 8 * k;
+// the restore's pass (step 7's re-reads read past its block) and a reader of a pass past it
+const RESTORED = { h: 1000 };
+const AFTER = { pass: { h: 1001 } };
 
 test("step 5: every lane's deposit ids are read to 21 past its highest with a note or money (an empty lane: its first 21)", async () => {
   const { holds, log } = idReader([at(5, 10), at(5, 30), at(2, 21), at(6, 0), at(6, 2)]);
@@ -268,7 +271,7 @@ test("step 7: the new lane's counter goes past the lost store's possible index, 
   const T = 1_762_600_000_000;
   for (const [lane, min] of [[0, at(0, 4)], [1, at(1, 1)], [6, at(6, 4)]] as const) {
     const asked: [bigint, number][] = [];
-    const plan = await afterRestore(SEED, { lane, raiseDepositIndex: async (s, m) => (asked.push([s, m]), m) }, SCOPE, lanes, T);
+    const plan = await afterRestore(SEED, { lane, raiseDepositIndex: async (s, m) => (asked.push([s, m]), m) }, SCOPE, lanes, T, RESTORED);
     assert.deepEqual(asked, [[SCOPE, min]], `lane ${lane}`);
     assert.equal(plan.next, min);
     assert.equal(plan.until, T + 72 * 3_600_000, "72 h of NEAR block time (a deposit address's life, D44)");
@@ -280,12 +283,14 @@ test("step 7: the new lane's counter goes past the lost store's possible index, 
     assert.deepEqual(of(3), [11, 19]);
     assert.deepEqual(of(6), [14, 22, 30, 38]);
     assert.ok(plan.rereads.every((x) => x.id === id(x.i)));
-    assert.deepEqual(rereadsDue(plan, T + REREAD_MS - 1), plan.rereads);
-    assert.deepEqual(rereadsDue(plan, T + REREAD_MS), []);
+    assert.deepEqual(rereadsDue(plan, AFTER, T + REREAD_MS - 1), plan.rereads);
+    assert.deepEqual(rereadsDue(plan, AFTER, T + REREAD_MS), []);
+    // review R1: a reader of the restore's own pass (or one before it) is refused
+    assert.throws(() => rereadsDue(plan, { pass: RESTORED }, T), /the re-reads: the reader's pass at block 1000 is not past block 1000/);
   }
-  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async () => 0 }, SCOPE, lanes.slice(1), T), /one per lane/);
+  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async () => 0 }, SCOPE, lanes.slice(1), T, RESTORED), /one per lane/);
   // the lanes in another order: refused, never read as another lane's (R13)
-  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async () => 0 }, SCOPE, [...lanes].reverse(), T), /one per lane, in order/);
+  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async () => 0 }, SCOPE, [...lanes].reverse(), T, RESTORED), /one per lane, in order/);
 });
 
 test("step 7: an id whose read failed and a used id now empty are re-read on each open; the counter goes past them", async () => {
@@ -293,7 +298,7 @@ test("step 7: an id whose read failed and a used id now empty are re-read on eac
   const lanes = await restoreDepositIds(SEED, SCOPE, LANES, idReader([], [at(1, 3), at(2, 0)], [at(1, 4)]).holds);
   const T = 1_762_600_000_000;
   const asked: number[] = [];
-  const plan = await afterRestore(SEED, { lane: 1, raiseDepositIndex: async (_s, m) => (asked.push(m), m) }, SCOPE, lanes, T);
+  const plan = await afterRestore(SEED, { lane: 1, raiseDepositIndex: async (_s, m) => (asked.push(m), m) }, SCOPE, lanes, T, RESTORED);
   assert.deepEqual(asked, [at(1, 6)]);
   const of = (l: number) => plan.rereads.filter((x) => x.lane === l).map((x) => x.i);
   assert.deepEqual(of(1), [0, 1, 2, 3, 4, 5, 6].map((k) => at(1, k)));
@@ -336,10 +341,10 @@ test("step 5 and 7 (N3): a lane stopped at its reach leaves the restore unfinish
   assert.ok(!log.includes(id(75)), "the money at 75 is never read");
   const raised: number[] = [];
   await assert.rejects(
-    afterRestore(SEED, { lane: 3, raiseDepositIndex: async (_s, m) => (raised.push(m), m) }, SCOPE, got.lanes, 1_762_600_000_000),
+    afterRestore(SEED, { lane: 3, raiseDepositIndex: async (_s, m) => (raised.push(m), m) }, SCOPE, got.lanes, 1_762_600_000_000, RESTORED),
     /^Error: the restore is unfinished: lane 3 stopped at 19, past the note walk's end; restore again with reach\[3\] = 19$/,
   );
-  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => (raised.push(m), m) }, SCOPE, got.lanes, 1_762_600_000_000), /the restore is unfinished/);
+  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => (raised.push(m), m) }, SCOPE, got.lanes, 1_762_600_000_000, RESTORED), /the restore is unfinished/);
   assert.deepEqual(raised, [], "no counter raised: lane 3's stays at 19 or below");
   // the restore again with that reach reads on to the money, complete
   const again = await depositIds(SEED, SCOPE, { ...r, laneWalked: walkedTo(high, RESTORE_GAP, got.lanes.map((x) => x.reach)) }, holds);
@@ -353,7 +358,7 @@ test("step 5 and 7 (N3): a lane stopped at its reach leaves the restore unfinish
 // second read outvotes money
 test("step 7 (N2): an id read as money is still re-read on each open until its move lands", async () => {
   const lanes = await restoreDepositIds(SEED, SCOPE, LANES, idReader([at(1, 0)]).holds);
-  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, 1_762_600_000_000);
+  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, 1_762_600_000_000, RESTORED);
   assert.ok(plan.rereads.some((x) => x.i === at(1, 0) && x.id === id(at(1, 0))));
   // an id with a note is the vault's, never re-read
   assert.ok(!plan.rereads.some((x) => x.i === 0));
