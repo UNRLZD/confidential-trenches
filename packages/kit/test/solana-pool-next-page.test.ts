@@ -17,7 +17,7 @@ const next = (tree: 0 | 1, size: number) => solanaPoolPage(PROGRAM, tree, (Math.
 test("tag 1 names each tree's next page as accounts 6 and 7, writable, the page after the one its size reads", () => {
   // the trees on different pages too (releases grow the state tree alone): each tree's next page from its own size
   for (const [s, l] of [[0, 0], [6, 5], [1023, 1022], [1024, 2047], [5000, 4999], [1030, 1000], [1000, 1030]] as const) {
-    const ix = solanaPoolDepositIx(PROGRAM, DEPOSITOR, note, { stateSize: s, labelSize: l });
+    const ix = solanaPoolDepositIx(PROGRAM, DEPOSITOR, note, { stateSize: s, labelSize: l }, rent);
     assert.equal(ix.accounts.length, 8, `sizes ${s}/${l}`);
     assert.deepEqual(ix.accounts[6], { key: next(0, s), signer: false, writable: true });
     assert.deepEqual(ix.accounts[7], { key: next(1, l), signer: false, writable: true });

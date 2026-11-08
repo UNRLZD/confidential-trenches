@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { SOLANA_SYSTEM_PROGRAM, solanaPoolPage, solanaPoolPreMark, solanaPoolTreeSizes, solanaRentMin, solanaRentOf, type SolanaRent, vaultLabelOf } from "@blindfill/kit";
+import { SOLANA_SYSTEM_PROGRAM, solanaPoolDepositCost, solanaPoolPage, solanaPoolPreMark, solanaPoolTreeSizes, solanaRentMin, solanaRentOf, type SolanaRent, vaultLabelOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { refKey, type NoteState } from "../src/notes/store.ts";
@@ -28,7 +28,10 @@ const ACC = DEVNET.answers[0]!.accounts;
 const SIZES = solanaPoolTreeSizes({ owner: LATER.now[0]!.pool.owner, data: base64.decode(LATER.now[0]!.pool.data) }, PROGRAM);
 assert.deepEqual(SIZES, { stateSize: 44, labelSize: 32 });
 const RENT = solanaRentOf({ owner: ACC.rent!.owner, data: base64.decode(ACC.rent!.data[0]) });
-const FREE: SolanaRent = { lamportsPerByte: 0n, factor: 1n };
+// the least rent a Rent sysvar holds, 1 lamport a byte (the kit refuses a rate of 0, as solanaRentOf does): one
+// deposit on the recorded sizes, far from a page's end, costs U the mark's rent(17) and one 72-byte entry on each page
+const ONE: SolanaRent = { lamportsPerByte: 1n, factor: 1n };
+const ONE_COST = solanaRentMin(ONE, 17) + 2n * 72n;
 const FEE = 5_000n;
 const BLOCKHASH = "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM";
 const RUNG = SOL_LADDER.min; // 0.01 SOL
@@ -117,8 +120,8 @@ function runSolana(balance: bigint, rent: SolanaRent, plant?: (w: ReturnType<typ
 test("only the ladder sum goes in: U's notes are exactly the ladder plan's, refs and rungs, and the remainder stays in U", () => {
   const B = 87_654_321n; // 0.087654321 SOL
   const plan = poolDepositPlan(SEED, SCOPE, SOL_LADDER, U0, B);
-  // no rent and no fee here (FREE, and the run's FEE paid on top): the notes alone
-  const run = runSolana(B + FEE * BigInt(plan.notes.length), FREE);
+  // the least rent and the run's FEE paid on top: the notes alone
+  const run = runSolana(B + (FEE + ONE_COST) * BigInt(plan.notes.length), ONE);
   assert.deepEqual(run.out.map((x) => [refKey(x.ref), x.value]), plan.notes.map((n) => [refKey(n.ref), n.value]));
   assert.equal(run.left, plan.left);
   assert.ok(run.left < SOL_LADDER.min);
@@ -192,34 +195,34 @@ test("a reload mid-way settles the open note and never deposits again at a new i
   const B = 80_000_000n; // 0.05 + 0.02 + 0.01
   const plan = poolDepositPlan(SEED, SCOPE, SOL_LADDER, U0, B);
   assert.deepEqual(plan.notes.map((n) => n.value), [50_000_000n, 20_000_000n, 10_000_000n]);
-  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, fee: 0n, rent: FREE, pages: world(FREE).pageReads(), sizes: SIZES, blockhash: BLOCKHASH };
-  const marked = (...refs: NoteRef[]) => (p: bigint): AccountRead => markAt(p, refs.some((r) => P(r) === p) ? markAccount(RUNG, 2n, FREE) : null);
+  const base = { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, fee: 0n, rent: ONE, pages: world(ONE).pageReads(), sizes: SIZES, blockhash: BLOCKHASH };
+  const marked = (...refs: NoteRef[]) => (p: bigint): AccountRead => markAt(p, refs.some((r) => P(r) === p) ? markAccount(RUNG, 2n, ONE) : null);
   // U's deposit note landed; second arrival 0 was signed and written INCOMING, then the page reloaded before it landed
   const held = (s: NoteState): HeldNote[] => [{ ref: U0, state: "UNSPENT" }, { ref: U0n(0), state: s }];
   const pending = solanaSameChainDeposit({ ...base, held: held("INCOMING"), markAt: marked(U0), balance: 30_000_000n });
   assert.deepEqual([pending.kind, "ref" in pending ? refKey(pending.ref) : null], ["settle", refKey(U0n(0))]);
   assert.equal(pending.tx, undefined);
   // it landed while the page was closed: still settled first (its value is the send's), nothing new signed
-  assert.equal(solanaSameChainDeposit({ ...base, held: held("INCOMING"), markAt: marked(U0, U0n(0)), balance: 10_000_000n }).kind, "settle");
+  assert.equal(solanaSameChainDeposit({ ...base, held: held("INCOMING"), markAt: marked(U0, U0n(0)), balance: RUNG + ONE_COST }).kind, "settle");
   // once settled, the next deposit is second arrival 1, the plan's last note, never another index
-  const next = solanaSameChainDeposit({ ...base, held: held("UNSPENT"), markAt: marked(U0, U0n(0)), balance: 10_000_000n });
+  const next = solanaSameChainDeposit({ ...base, held: held("UNSPENT"), markAt: marked(U0, U0n(0)), balance: RUNG + ONE_COST });
   assert.equal(next.kind, "deposit");
   if (next.kind !== "deposit") return;
   assert.deepEqual([refKey(next.ref), next.value, next.precommitment], [refKey(plan.notes[2]!.ref), plan.notes[2]!.value, plan.notes[2]!.precommitment]);
   // the page closed between a note's mark and its store write (PLANNED, no send): its mark is claimed first
-  const claim = solanaSameChainDeposit({ ...base, held: held("PLANNED"), markAt: marked(U0, U0n(0)), balance: 10_000_000n });
+  const claim = solanaSameChainDeposit({ ...base, held: held("PLANNED"), markAt: marked(U0, U0n(0)), balance: RUNG + ONE_COST });
   assert.deepEqual([claim.kind, "refs" in claim ? claim.refs.map(refKey) : null], ["claim", [refKey(U0n(0))]]);
   // a store that lost note 0 entirely: the chain names it, so it is claimed, never deposited past
-  const lost = solanaSameChainDeposit({ ...base, held: [{ ref: U0, state: "UNSPENT" }], markAt: marked(U0, U0n(0)), balance: 10_000_000n });
+  const lost = solanaSameChainDeposit({ ...base, held: [{ ref: U0, state: "UNSPENT" }], markAt: marked(U0, U0n(0)), balance: RUNG + ONE_COST });
   assert.deepEqual([lost.kind, "refs" in lost ? lost.refs.map(refKey) : null], ["claim", [refKey(U0n(0))]]);
   // a store that holds nothing while U's deposit note is on chain: note 0 of the claim is U's deposit note itself
-  const none = solanaSameChainDeposit({ ...base, held: [], markAt: marked(U0), balance: 10_000_000n });
+  const none = solanaSameChainDeposit({ ...base, held: [], markAt: marked(U0), balance: RUNG + ONE_COST });
   assert.deepEqual([none.kind, "refs" in none ? none.refs.map(refKey) : null], ["claim", [refKey(U0)]]);
   // a TAKEN note (history this store did not record) counts as landed: the deposit goes on the next note
-  const taken = solanaSameChainDeposit({ ...base, held: [{ ref: U0, state: "TAKEN" }], markAt: marked(U0), balance: 10_000_000n });
+  const taken = solanaSameChainDeposit({ ...base, held: [{ ref: U0, state: "TAKEN" }], markAt: marked(U0), balance: RUNG + ONE_COST });
   assert.deepEqual([taken.kind, "ref" in taken ? refKey(taken.ref) : null], ["deposit", refKey(U0n(0))]);
   // a chain read behind the store (one that misses a landed note) is refused, never planned at that note again
-  assert.throws(() => solanaSameChainDeposit({ ...base, held: held("UNSPENT"), markAt: marked(U0), balance: 10_000_000n }), /at or past the chain's next note/);
+  assert.throws(() => solanaSameChainDeposit({ ...base, held: held("UNSPENT"), markAt: marked(U0), balance: RUNG + ONE_COST }), /at or past the chain's next note/);
 });
 
 test("the next note's precommitment is recomputed from the words, and a note of another chain is refused", () => {
@@ -231,7 +234,7 @@ test("the next note's precommitment is recomputed from the words, and a note of 
   assert.throws(() => sameChainNext({ ...args, first: { kind: "deposit", s: SCOPE + 1n, i: 0 }, next: { ref: U0, precommitment: P(U0) } }), /scope is its s/);
   assert.deepEqual(solanaChainNext(SEED, SCOPE, U0, PROGRAM, (p) => markAt(p, null)), { ref: U0, precommitment: P(U0), held: 0n });
   // a scope that is not the program's pool's is refused before any key is derived
-  assert.throws(() => solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE + 1n, ladder: SOL_LADDER, first: { kind: "deposit", s: SCOPE + 1n, i: 0 }, held: [], markAt: (p) => markAt(p, null), balance: RUNG, fee: 0n, rent: FREE, pages: world(FREE).pageReads(), sizes: SIZES, blockhash: BLOCKHASH }), /not the program's pool's/);
+  assert.throws(() => solanaSameChainDeposit({ program: PROGRAM, seed64: SEED, scope: SCOPE + 1n, ladder: SOL_LADDER, first: { kind: "deposit", s: SCOPE + 1n, i: 0 }, held: [], markAt: (p) => markAt(p, null), balance: RUNG, fee: 0n, rent: ONE, pages: world(ONE).pageReads(), sizes: SIZES, blockhash: BLOCKHASH }), /not the program's pool's/);
   // below the smallest rung with its cost: U keeps it all
   assert.deepEqual(sameChainNext({ ...args, balance: RUNG - 1n, next: { ref: U0, precommitment: P(U0) } }), { kind: "keep", left: RUNG - 1n });
 });
@@ -297,4 +300,22 @@ test("EVM: the call has the shape of the deposit pool-evm-testnet-run landed on 
   assert.equal(got.call?.data.slice(0, 10), a!.input.slice(0, 10));
   // a scope that is not the pinned pool's is refused before any pick
   assert.throws(() => evmSameChainDeposit({ pin: PIN, seed64: SEED, scope: SCOPE, ladder: EVM_LADDER, first: { kind: "deposit", s: SCOPE, i: 0 }, held: [], events: [], finalBlock: 1n, balance: ERUNG, cost: 0n }), /not the pinned pool's/);
+});
+
+test("S-01 review: the rent the device read is the rent the kit's builder holds the note to: at a rent where a rung is under the release floor, the deposit is refused naming it", () => {
+  // 25,000 a byte: the kit's fee 5,600,000 (213 x 25,000 + 10,000 rounded up, plus 200,000), the floor 11,200,000, over
+  // the 10,000,000 rung; at the recorded rent the same note builds. U's deposit note landed; its first second arrival is
+  // next, U holding the rung, its cost and an empty account's rent, so the rung is the one note planned.
+  const HIGH: SolanaRent = { lamportsPerByte: 25_000n, factor: 1n };
+  const args = (rent: SolanaRent) => {
+    const w = world(rent);
+    const mark = (p: bigint): AccountRead => markAt(p, p === P(U0) ? markAccount(RUNG, 1n, rent) : null);
+    const pageHeld = (tree: 0 | 1) => w.pages.get(page(tree, tree === 0 ? w.sizes.stateSize : w.sizes.labelSize)) ?? 0n;
+    const cost = solanaPoolDepositCost(FEE, rent, w.sizes, { mark: 0n, statePage: pageHeld(0), labelPage: pageHeld(1) });
+    return { program: PROGRAM, seed64: SEED, scope: SCOPE, ladder: SOL_LADDER, first: U0, held: [{ ref: U0, state: "UNSPENT" as const }], markAt: mark, balance: RUNG + cost + solanaRentMin(rent, 0), fee: FEE, rent, pages: w.pageReads(), sizes: { ...w.sizes }, blockhash: BLOCKHASH };
+  };
+  assert.throws(() => solanaSameChainDeposit(args(HIGH)), /the value 10000000 is under the release floor of 11200000 lamports at this rent/);
+  const ok = solanaSameChainDeposit(args(RENT));
+  assert.deepEqual([ok.kind, "value" in ok ? ok.value : null], ["deposit", RUNG]);
+  assert.ok(ok.tx !== undefined);
 });
