@@ -6,6 +6,8 @@ import * as kit from "../src/index.ts";
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import type { EvmRpc, EvmRpcCall } from "../src/checks/evm/quote.ts";
 import type { EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
+const { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE } = quoteMod;
+const MULTICALL3_ADDR = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
 export const W = (v: bigint) => v.toString(16).padStart(64, "0");
 export const NATIVE = "0x0000000000000000000000000000000000000000";
@@ -56,19 +58,23 @@ export function decodeAggregate(data: string): string[] {
     return h.slice(2 * (e + 128), 2 * (e + 128 + dl));
   });
 }
-export function encodeAggregate(outs: (bigint | null)[]): string {
-  const body = outs.map((x) => (x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
+/** aggregate3's answer as EVM_READ_GAS_CODE gives it, its marker after the last result (card evm-quote-read-gas-starve) */
+export function encodeAggregate(outs: (bigint | null | "gas")[]): string {
+  // "gas": the code's success word 2, a read that ran out of its gas
+  const body = outs.map((x) => (x === "gas" ? W(2n) + W(0x40n) + W(0n) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
   let at = 32 * outs.length;
   const offs = body.map((b) => {
     const o = W(BigInt(at));
     at += b.length / 2;
     return o;
   });
-  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("");
+  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("") + "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
 }
 
 export type Model = {
   price: (p: Pool) => bigint | null;
+  /** the reads that run out of gas at any gas (card evm-quote-read-gas-starve: ticks spammed past the 1x price) */
+  ranOut?: (p: Pool) => boolean;
   /** what the probe answers for (token, to, amount); null: it reverts */
   probe?: (token: string, to: string, amount: bigint) => bigint | null;
   headSec?: number;
@@ -148,8 +154,11 @@ export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmR
       const override = c.params[2] as Record<string, { code: string }> | undefined;
       let out: bigint | null;
       if (to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11") {
-        assert.equal(override, undefined);
-        return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map(one)) };
+        // every aggregate3 call runs the per-read gas code with the call's gas (card evm-quote-read-gas-starve), and no other
+        // override: the sell's reads have no hook replaced
+        assert.deepEqual(override, { [MULTICALL3_ADDR]: { code: EVM_READ_GAS_CODE } });
+        assert.equal((c.params[0] as { gas?: string }).gas, "0x" + EVM_READ_CALL_GAS.toString(16));
+        return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map((d) => (["cdca1753", "ca253dc9"].includes(d.slice(0, 8)) && m.ranOut?.(poolOf(d)) === true ? ("gas" as const) : one(d)))) };
       }
       if (override !== undefined) {
         const d = data.slice(2);

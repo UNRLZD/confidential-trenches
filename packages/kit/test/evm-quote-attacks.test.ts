@@ -71,17 +71,21 @@ function decodeAggregate(data: string): string[] {
 // a revert with V4Quoter's NotEnoughLiquidity(bytes32) as its data (card rh-cold-quote: an exact-output quote past what
 // the pool can give)
 const RAN_OUT = Symbol("NotEnoughLiquidity");
+// EVM_READ_GAS_CODE's success word 2: a read that failed having used half its gas or more (card evm-quote-read-gas-starve)
+const STARVED = Symbol("starved");
 // v4-core's SafeCastOverflow(), wrapped in V4Quoter's UnexpectedRevertBytes(bytes): the output needs more than 2^127 in
 const OVERFLOW = Symbol("SafeCastOverflow");
-function encodeAggregate(outs: (bigint | null | typeof RAN_OUT | typeof OVERFLOW)[]): string {
-  const body = outs.map((x) => (x === RAN_OUT ? W(0n) + W(0x40n) + W(36n) + "7a5ed734" + W(0n) + "0".repeat(56) : x === OVERFLOW ? W(0n) + W(0x40n) + W(100n) + "6190b2b0" + W(0x20n) + W(4n) + "93dafdf1" + "0".repeat(56) + "0".repeat(56) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
+// `mark`: EVM_READ_GAS_CODE's marker after the last result (card evm-quote-read-gas-starve); Multicall3's own has none
+const READ_MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
+function encodeAggregate(outs: (bigint | null | typeof RAN_OUT | typeof OVERFLOW | typeof STARVED)[], mark = true): string {
+  const body = outs.map((x) => (x === STARVED ? W(2n) + W(0x40n) + W(0n) : x === RAN_OUT ? W(0n) + W(0x40n) + W(36n) + "7a5ed734" + W(0n) + "0".repeat(56) : x === OVERFLOW ? W(0n) + W(0x40n) + W(100n) + "6190b2b0" + W(0x20n) + W(4n) + "93dafdf1" + "0".repeat(56) + "0".repeat(56) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
   let at = 32 * outs.length;
   const offs = body.map((b) => {
     const o = W(BigInt(at));
     at += b.length / 2;
     return o;
   });
-  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("");
+  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("") + (mark ? READ_MARKER : "");
 }
 type Head = { number: string; hash: string; timestamp: string; baseFeePerGas?: string };
 /** A provider: `head` is its latest block, `byNumber` the other blocks it holds, `price` answers each quote at the
@@ -311,7 +315,9 @@ type Sees = { seq: boolean; hist: boolean; beacon: boolean; baseFee: boolean; ra
 // `deltaFee`: where its `exec` fails the trade, it does so by a fee taken through a delta (the miss shows at minOut), not
 // by its hook reverting, so the trade's trace shows no errored frame into the hook
 // `gas`: what a swap through the pool spends in the pool's own buySwap (default SWAP_HOP_GAS; card evm-buy-gas-floor)
-type ModelPool = { gas?: bigint; deltaFee?: true; key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; lieAt?: (a: bigint, ctx: SimCtx) => bigint | null; exec?: (a: bigint, ctx: SimCtx) => bigint | null; neutral?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; mostOf?: Record<string, bigint>; over?: 0 | 1 | "both"; plainOn?: 0 | 1 | "both" };
+// `readGas`: the gas a quote through the pool (its hook as it is) uses, Infinity for a pool built to burn all it is given
+// (card evm-quote-read-gas-starve); 100,000 by default
+type ModelPool = { readGas?: number; gas?: bigint; deltaFee?: true; key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; lieAt?: (a: bigint, ctx: SimCtx) => bigint | null; exec?: (a: bigint, ctx: SimCtx) => bigint | null; neutral?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; mostOf?: Record<string, bigint>; over?: 0 | 1 | "both"; plainOn?: 0 | 1 | "both" };
 const pidOf = (k: EvmPoolKey) => kk(W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks)));
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {
   const [currency0, currency1] = BigInt(other) < BigInt(token) ? [other, token] : [token, other];
@@ -322,9 +328,26 @@ const keyOf = (token: string, other: string, fee: number, tickSpacing: number, h
 // `balances` is each account's ETH at the block (the pinned sell sender holds one ETH), which a state override replaces;
 // `nitro`: the chain is Robinhood's (Arbitrum Nitro), whose system state a replay sees as sysWord and sysSees hold it
 type Overridden = { replaces: string[]; hooks: string[][] };
+const MC3 = "0xca11bde05977b3631167028862be2a173976ca11";
+// each provider's eth_call gas cap, used where a call names no gas (geth and reth cut a call's gas to it): 50M as
+// base-rpc.publicnode.com and the Pocket gateways, blastapi's 550M
+const GAS_CAPS: [number, number] = [50_000_000, 50_000_000];
 function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: Overridden[], balances: Record<string, bigint> = { [SENDER]: 10n ** 18n }, nitro = false): EvmRpc {
   const live = pools.filter((p) => p.only === undefined || p.only === who);
   const byPid = new Map(live.map((p) => [pidOf(p.key), p]));
+  // the gas a read uses: the most of its v4 hops' pools' readGas where its hook runs as it is, or 100,000
+  const readGasOf = (d: string, overridden: Set<string>): number => {
+    if (!d.startsWith("ca253dc9")) return 100_000;
+    const q = poolOf(d);
+    let [from, most] = [q.from, 100_000];
+    for (let i = 0; i < q.hops; i++) {
+      const k = keyOf(q.to[i]!, from, q.fees[i]!, q.spacings[i]!, q.hooks[i]!);
+      const p = byPid.get(pidOf({ ...k, currency0: k.currency0.toLowerCase(), currency1: k.currency1.toLowerCase(), hooks: k.hooks.toLowerCase() }));
+      if (p?.readGas !== undefined && !(p.key.hooks !== NATIVE && overridden.has(p.key.hooks.toLowerCase())) && p.readGas > most) most = p.readGas;
+      from = q.to[i]!;
+    }
+    return most;
+  };
   const slots = new Map<string, bigint>();
   for (const p of live) {
     const s = BigInt("0x" + kk(pidOf(p.key) + W(6n)));
@@ -431,7 +454,10 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
       // Nitro refuses any override of ArbOS's state account (every pinned Robinhood provider, 2026-11-07 16:22Z)
       if (nitro && c.method === "eth_call" && Object.keys((c.params[2] ?? {}) as object).some((k) => k.toLowerCase() === ARBOS)) return { jsonrpc: "2.0", id, error: { code: -32000, message: "overriding address 0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf  not allowed" } };
       const { to, data } = c.params[0] as { to: string; data: string };
-      const overridden = new Set(Object.keys((c.params[2] as Record<string, unknown> | undefined) ?? {}).map((x) => x.toLowerCase()));
+      // EVM_READ_GAS_CODE at Multicall3 (card evm-quote-read-gas-starve) is the call's own code, no hook's override
+      const over = (c.params[2] as Record<string, { code?: string }> | undefined) ?? {};
+      const bounded = Object.entries(over).some(([a, o]) => a.toLowerCase() === MC3 && o.code === quoteMod.EVM_READ_GAS_CODE);
+      const overridden = new Set(Object.keys(over).map((x) => x.toLowerCase()).filter((x) => !(bounded && x === MC3)));
       // the swap-gas read's one override is the pool's balance (card evm-buy-gas-floor; GF5 holds it): `overrides` keeps
       // the hooks' replacements
       if (overridden.size > 0 && overrides !== undefined && !data.startsWith("0x" + SEL_BUY_SWAP)) {
@@ -444,7 +470,24 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
           const w = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
           return Array.from({ length: w(32) }, (_, i) => "0x" + h.slice(2 * (64 + w(64 + 32 * i)) + 24, 2 * (64 + w(64 + 32 * i)) + 64));
         })();
-        return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map((d, i) => one(tos[i]!, d, overridden))) };
+        // each read's gas (card evm-quote-read-gas-starve): the call's gas as sent, or with none the provider's cap
+        // (GAS_CAPS); EVM_READ_GAS_CODE gives each of the n reads L, and a read that needs more answers 2; Multicall3
+        // itself gives each read 63/64 of what the call has left, and a read that needs more fails as a revert (empty)
+        const ds = decodeAggregate(data);
+        const sent = (c.params[0] as { gas?: string }).gas;
+        let left = sent !== undefined ? Number(BigInt(sent)) : GAS_CAPS[who];
+        const L = Math.floor((Math.floor((left - 100_000) / ds.length) - 30_000) * 63 / 64);
+        return { jsonrpc: "2.0", id, result: encodeAggregate(ds.map((d, i) => {
+          const need = readGasOf(d, overridden);
+          if (bounded) return need > L ? (STARVED as typeof STARVED) : one(tos[i]!, d, overridden);
+          const given = Math.floor((left * 63) / 64);
+          if (need > given) {
+            left -= given;
+            return null;
+          }
+          left -= need;
+          return one(tos[i]!, d, overridden);
+        }), bounded) };
       }
       // PoolManager.extsload(bytes32[]): each slot's word
       if ((to.toLowerCase() === PM || to.toLowerCase() === RH_PM || to.toLowerCase() === BS_PM) && data.startsWith("0xdbd035ff")) {
@@ -2753,13 +2796,14 @@ test("PE10 a funded sim that pays W's sale under the market's quotes counts the 
   }
 });
 
-// the getEthBalance read of the sell sender answered as a revert of that one read (aggregate3 with allowFailure)
+// the getEthBalance read of the sell sender answered as a revert of that one read (aggregate3 with allowFailure), as the
+// per-read gas code answers it (its marker last)
 const balanceReverts = (rpc: EvmRpc): EvmRpc => async (calls) =>
   (await rpc(calls)).map((r, i) => {
     const p = calls[i]!.params[0] as { to?: string; data?: string };
     if (calls[i]!.method !== "eth_call" || p.to?.toLowerCase() !== "0xca11bde05977b3631167028862be2a173976ca11" || !p.data?.includes(SEL_ETH_BALANCE)) return r;
     const w = (x: bigint) => x.toString(16).padStart(64, "0");
-    return { ...(r as object), result: "0x" + w(0x20n) + w(1n) + w(0x20n) + w(0n) + w(0x40n) + w(0n) };
+    return { ...(r as object), result: "0x" + w(0x20n) + w(1n) + w(0x20n) + w(0n) + w(0x40n) + w(0n) + READ_MARKER };
   });
 const SEL_ETH_BALANCE = "4d2301cc"; // Multicall3.getEthBalance(address)
 
@@ -7486,4 +7530,230 @@ test("QE14 each venue's reads per call and request bytes are pinned, and no Base
   } finally {
     quoteMod.evmReadsPerCall();
   }
+});
+
+// Card evm-quote-read-gas-starve: each read's gas is its own. Inside Multicall3's aggregate3 a read that runs out of the
+// call's shared gas answers as a revert, and a revert prices its route at nothing (Card 0's money review, finding 5), so
+// a pool built to burn gas, seeded beside the token's real pool, starved the real pool's reads and the seeded route was
+// bought at a tenth of the price. The model's providers cap a call at 50M gas, as base-rpc.publicnode.com and Pocket do.
+// a hookless pool whose quote needs more gas than any call has: one seeded with initialized ticks past every price a
+// quote reaches (anyone can add a position), or with a hook that loops
+const burner = (token: string): ModelPool => ({ key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 100n, readGas: Infinity });
+const heavyReal = (token: string, readGas: number): ModelPool => ({ ...real(token), readGas });
+const gasQuote = (pools: ModelPool[], token: string, route: EvmRoute, rpcs?: [EvmRpc, EvmRpc]) =>
+  verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route, pools: [burner(token).key] } as EvmPoolBuyQuoteRequest, rpcs ?? [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }])));
+/** Each aggregate3 call's read count, as `rpc` is asked. */
+const readsPerAsk = (rpc: EvmRpc, into: number[]): EvmRpc => async (calls) => {
+  for (const c of calls) {
+    const p = c.params[0] as { to?: string; data?: string };
+    if (c.method === "eth_call" && p.to?.toLowerCase() === MC3) into.push(Number(BigInt("0x" + p.data!.slice(74, 138))));
+  }
+  return rpc(calls);
+};
+
+// the token's better hookless pool at the standard key (3000, 60), its quote taking `readGas`, and a hookless pool
+// built to burn gas at (500, 10), quoted just before it in one aggregate3 call of 6: one seeded with initialized ticks
+// past every price a quote reaches (anyone can add a position), or behind a hook that loops
+const betterAt = (token: string, readGas: number): ModelPool => ({ key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a, readGas });
+const spamAt = (token: string): ModelPool => ({ key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a / 100n, readGas: Infinity });
+const stdQuote = (pools: ModelPool[], token: string, rpcs?: [EvmRpc, EvmRpc]) =>
+  verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, rpcs ?? [chain(pools, 0), chain(pools, 1)], NOW));
+
+test("GS1 a standard pool built to burn gas, quoted before the token's better standard pool in one call, starves none of its reads: the seeded route is held to the better one", async () => {
+  const token = "0x00000000000000000000000000000000000a5a51";
+  // the better pool's quote takes 1M gas (a v4 quote crossing ticks): more than the 1/64 of a 50M call the burner
+  // leaves the reads after it in Multicall3's aggregate3, far inside a read's own share of a call of 6
+  assert.deepEqual(await stdQuote([seeded(token), betterAt(token, 1_000_000)], token), below, "control: no burner");
+  const pools = [seeded(token), betterAt(token, 1_000_000), spamAt(token)];
+  const n: number[] = [];
+  assert.deepEqual(await stdQuote(pools, token, [readsPerAsk(chain(pools, 0), n), chain(pools, 1)]), below);
+  // the burner's reads are read again alone, the better pool's never needed to be
+  assert.ok(n.filter((x) => x === 1).length >= 1, `calls of ${n.join(",")} reads`);
+});
+
+test("GS2 two providers with the same 50M cap that agree on a starved read: the read is read again alone and the better pool still holds the seeded route", async () => {
+  const token = "0x00000000000000000000000000000000000a5a52";
+  // the better pool's quote takes 10M gas: more than a read's share of a call of 6 (about 6.5M), inside a read's alone
+  const pools = [seeded(token), betterAt(token, 10_000_000), spamAt(token)];
+  const n: number[] = [];
+  assert.deepEqual(await stdQuote(pools, token, [readsPerAsk(chain(pools, 0), n), chain(pools, 1)]), below);
+  assert.ok(n.filter((x) => x === 1).length >= 4, `calls of ${n.join(",")} reads: the burner's two and the better pool's two alone`);
+});
+
+test("GS3 a read that runs out of its gas alone prices nothing, and the buy's own route that does is refused by name", async () => {
+  const token = "0x00000000000000000000000000000000000a5a53";
+  // the real pool burns all it is given, read alone too: its route counts for nothing, and the seeded route is best
+  assert.equal((await gasQuote([seeded(token), heavyReal(token, Infinity)], token, seededRoute(token))).accepted, true);
+  // the buy's own route burns all it is given
+  await assert.rejects(
+    evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain([{ ...seeded(token), readGas: Infinity }], 0), chain([{ ...seeded(token), readGas: Infinity }], 1)], NOW),
+    (e: unknown) => e instanceof EvmQuoteError && e.code === "no_quote" && /runs out of its gas read alone/.test(e.message),
+  );
+});
+
+test("GS4 providers of 50M and 550M caps answer the same: every call is sent with its gas", async () => {
+  const token = "0x00000000000000000000000000000000000a5a54";
+  GAS_CAPS[1] = 550_000_000;
+  try {
+    assert.deepEqual(await stdQuote([seeded(token), betterAt(token, 10_000_000), spamAt(token)], token), below);
+  } finally {
+    GAS_CAPS[1] = 50_000_000;
+  }
+});
+
+test("GS5 a provider that answers a read that ran out of gas as a revert is not agreed with", async () => {
+  const token = "0x00000000000000000000000000000000000a5a55";
+  const pools = [seeded(token), heavyReal(token, Infinity)];
+  // provider 2 hides the real pool: each success word 2 it answers as 0, a revert
+  const inner = chain(pools, 1);
+  const hides: EvmRpc = async (calls) => {
+    const out = (await inner(calls)) as { result?: string }[];
+    return out.map((a) => {
+      if (typeof a.result !== "string" || a.result.length < 2 + 128) return a;
+      const h = a.result.slice(2);
+      const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+      if (at(0) !== 0x20 || at(32) < 1) return a;
+      let r = h;
+      for (let i = 0; i < at(32); i++) {
+        const e = 64 + at(64 + 32 * i);
+        if (e + 32 <= h.length / 2 && at(e) === 2) r = r.slice(0, 2 * e) + W(0n) + r.slice(2 * e + 64);
+      }
+      return { ...a, result: "0x" + r };
+    });
+  };
+  assert.deepEqual(await gasQuote(pools, token, seededRoute(token), [chain(pools, 0), hides]), { accepted: false, code: "rpc_disagree" });
+});
+
+// Review of fe9f5ec3, finding 1: about 2,000 initialized ticks just past the 1x end price in the token's best v3 pool
+// make that route's read at twice the amount run out of gas, alone too. Multicall3 answered it as a revert, which a v3
+// route reads as a partial fill, so the best route was dropped and a worse one won; EVM_READ_GAS_CODE answers it 2.
+// `spam`: the reads that run out of gas, at any gas; every other read answers `price` (provider's model)
+function spammed(price: (p: Pool) => bigint | null, spam: (p: Pool) => boolean): EvmRpc {
+  const inner = provider(head("0x100"), price);
+  return async (calls) => {
+    const out = (await inner(calls)) as { result?: string }[];
+    return out.map((a, i) => {
+      const c = calls[i]!;
+      const p0 = c.params[0] as { to?: string; data?: string };
+      if (c.method !== "eth_call" || p0.to?.toLowerCase() !== MC3) return a;
+      const over = (c.params[2] as Record<string, { code?: string }> | undefined) ?? {};
+      const bounded = Object.entries(over).some(([k, o]) => k.toLowerCase() === MC3 && o.code === quoteMod.EVM_READ_GAS_CODE);
+      return { ...a, result: encodeAggregate(decodeAggregate(p0.data!).map((d) => (spam(poolOf(d)) ? (bounded ? STARVED : null) : price(poolOf(d)))), bounded) };
+    });
+  };
+}
+// the direct v3 pools at 1% and 0.3%: the 1% gives 2 a wei, the 0.3% 1; no two-hop pool
+const direct = (p: Pool) => (p.venue === "v3" && p.hops === 1 && p.fees[0] === 10000 ? 2n * p.amount : p.venue === "v3" && p.hops === 1 && p.fees[0] === 3000 ? p.amount : null);
+const spamTwice = (p: Pool) => p.venue === "v3" && p.hops === 1 && p.fees[0] === 10000 && p.amount === 2n * AMOUNT;
+const v3at = (fee: number): EvmRoute => ({ venue: "uniswap-v3", tokens: [WETH, TOKEN], fees: [fee] });
+
+test("GS6 a single-hop v3 route whose read at twice runs out of gas alone fills at its 1x: the best route is still the best, bought or held against", async () => {
+  // the spammed route itself is bought at its 1x (before: partial_fill)
+  const own = await buy(v3at(10000), spammed(direct, spamTwice), spammed(direct, spamTwice));
+  assert.equal(own.accepted, true, String((own as { code?: string }).code));
+  assert.equal((own as { amountOut: bigint }).amountOut, 2n * AMOUNT);
+  // the worse route is held to it (before: bought, the best route dropped)
+  assert.deepEqual(await buy(v3at(3000), spammed(direct, spamTwice), spammed(direct, spamTwice)), below);
+});
+
+test("GS7 a v3 route of two hops whose read at twice runs out of gas alone: it is refused by name as the buy's route, and where its 1x beats every route that fills", async () => {
+  // a two-hop through the listed middle gives 3 a wei, the direct 1% pool 2; the two-hop's twice runs out
+  const price = (p: Pool) => (p.venue === "v3" && p.hops === 2 ? 3n * p.amount : direct(p));
+  const twoHop = (p: Pool) => p.venue === "v3" && p.hops === 2 && p.amount === 2n * AMOUNT;
+  const q = (route: EvmRoute) => buy(route, spammed(price, twoHop), spammed(price, twoHop));
+  assert.deepEqual(await q(v3at(10000)), { accepted: false, code: "out_of_gas" });
+  // the two-hop bought itself: its 1x may be a partial fill hidden by a hop's spam (before: partial_fill, as a revert)
+  assert.deepEqual(await q({ venue: "uniswap-v3", tokens: [WETH, USDC, TOKEN], fees: [3000, 3000] }), { accepted: false, code: "out_of_gas" });
+  // a two-hop that quotes less than the direct route is dropped, and the direct route bought
+  const less = (p: Pool) => (p.venue === "v3" && p.hops === 2 ? p.amount : direct(p));
+  assert.equal((await buy(v3at(10000), spammed(less, twoHop), spammed(less, twoHop))).accepted, true);
+});
+
+test("GS8 a provider that drops the per-read gas code's override is refused by name, never read as Multicall3's shared gas", async () => {
+  // review of fe9f5ec3, finding 3: Multicall3's own answer has the same shape, so only the code's marker tells them apart
+  const pools = [seeded(TOKEN)];
+  const drops = (k: 0 | 1): EvmRpc => async (calls) =>
+    chain(pools, k)(calls.map((c) => (c.method === "eth_call" && c.params[2] !== undefined ? { ...c, params: [c.params[0], c.params[1], Object.fromEntries(Object.entries(c.params[2] as Record<string, unknown>).filter(([a]) => a.toLowerCase() !== MC3))] } : c)));
+  assert.equal((await stdQuote(pools, TOKEN)).accepted, true, "control: the code runs");
+  await assert.rejects(
+    evmPoolBuyQuoteWith({ chain: "base", token: TOKEN, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(TOKEN) }, [drops(0), drops(1)], NOW),
+    (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error" && /without the per-read gas code's marker/.test(e.message),
+  );
+});
+
+test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 6 first, none alone where 6 a call fits them", async () => {
+  // review of fe9f5ec3, finding 2: at Robinhood's 64 a call (L about 583,000) every heavy read was read again alone on
+  // each provider. The better pool's quote takes 5.5M gas: more than a read's share of the round's calls of 8 to 16 (cut by
+  // bytes), inside its share of 6
+  const token = "0x00000000000000000000000000000000000a5a5b";
+  const pools = [seeded(token), betterAt(token, 5_500_000)];
+  quoteMod.evmReadsPerCall(64);
+  try {
+    const n: number[] = [];
+    assert.deepEqual(await stdQuote(pools, token, [readsPerAsk(chain(pools, 0), n), chain(pools, 1)]), below);
+    assert.ok(n.some((x) => x > 6), `calls of ${n.join(",")} reads: a call of more than 6`);
+    assert.ok(n.some((x) => x > 1 && x <= 6) && !n.includes(1), `calls of ${n.join(",")} reads: read again 6 a call, none alone`);
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+});
+
+test("GS12 a read that needed fewer a call is sent that many a call in the next quote: a warm quote reads no 2 again", async () => {
+  // review of fe9f5ec3, finding 2: rh-cold-quote's warm median went from 1.34 s to 2.17 s on the re-read's round trips
+  const token = "0x00000000000000000000000000000000000a5a5c";
+  const pools = [seeded(token), betterAt(token, 5_500_000)];
+  // each aggregate3 answer's reads answered 2, as `rpc` answers them
+  const twos = (rpc: EvmRpc, into: number[]): EvmRpc => async (calls) => {
+    const out = (await rpc(calls)) as { result?: string }[];
+    calls.forEach((c, i) => {
+      const r = out[i]?.result;
+      if (c.method !== "eth_call" || (c.params[0] as { to?: string }).to?.toLowerCase() !== MC3 || typeof r !== "string") return;
+      const h = r.slice(2);
+      const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+      into.push(Array.from({ length: at(32) }, (_, k) => at(64 + at(64 + 32 * k))).filter((w) => w === 2).length);
+    });
+    return out;
+  };
+  quoteMod.evmReadsPerCall(64);
+  try {
+    const cold: number[] = [];
+    assert.deepEqual(await stdQuote(pools, token, [twos(chain(pools, 0), cold), chain(pools, 1)]), below);
+    assert.ok(cold.some((x) => x > 0), `cold: ${cold.join(",")} reads answered 2 a call`);
+    const warm: number[] = [];
+    assert.deepEqual(await stdQuote(pools, token, [twos(chain(pools, 0), warm), chain(pools, 1)]), below);
+    assert.ok(warm.length > 0 && warm.every((x) => x === 0), `warm: ${warm.join(",")} reads answered 2 a call`);
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+});
+
+test("GS13 a route above the hidden two-hop whose swap does not fit hides it from no verdict: the buy is refused by name", async () => {
+  // delta review of 7904e159 (RV1): the two-hop through USDC gives 3 a wei and its read at twice runs out of gas alone;
+  // a direct 1% pool gives 4 but its swap does not run (a free seeded pool behind a hook that lets only the quoter
+  // through); the bought 0.3% route gives 1. Measured against the raw best (the 1%), the two-hop hid, and the 0.3% was
+  // bought at 1e18; the best route that fits is the two-hop, which may be a partial fill
+  const price = (p: Pool) => (p.venue === "v3" && p.hops === 2 ? 3n * p.amount : p.venue === "v3" && p.hops === 1 && p.fees[0] === 10000 ? 4n * p.amount : p.venue === "v3" && p.hops === 1 && p.fees[0] === 3000 ? p.amount : null);
+  const twoHop = (p: Pool) => p.venue === "v3" && p.hops === 2 && p.amount === 2n * AMOUNT;
+  // the 1% pool's swap reverts: its buySwap read is the one with fee 10000 (0x002710) in its path
+  const noFit = (rpc: EvmRpc): EvmRpc => async (calls) =>
+    ((await rpc(calls)) as unknown[]).map((a, i) => {
+      const d = String((calls[i]!.params[0] as { data?: string }).data);
+      return d.startsWith("0x" + SEL_BUY_SWAP) && d.includes("002710") ? { jsonrpc: "2.0", id: i, error: { code: 3, message: "execution reverted" } } : a;
+    });
+  assert.deepEqual(await buy(v3at(3000), noFit(spammed(price, twoHop)), noFit(spammed(price, twoHop))), { accepted: false, code: "out_of_gas" });
+  // control: the two-hop's twice answered, it fills and is the best that fits, so the 0.3% is held below it
+  assert.deepEqual(await buy(v3at(3000), noFit(spammed(price, () => false)), noFit(spammed(price, () => false))), below);
+});
+
+test("GS14 a hidden listed two-hop within the slippage of a route through an unlisted hook refuses it by name", async () => {
+  // delta review of 7904e159: the listed-within-slippage check sees the routes dropped as out of gas. The bought route
+  // goes through a hook the venue does not list at 3 a wei; the listed two-hop through USDC gives a hair under it and its
+  // read at twice runs out of gas alone, so it may be a partial fill: whether a listed route is within the slippage is
+  // not known, and the buy is refused out_of_gas (before: below_reference, as if the two-hop filled)
+  const hooked: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: UNPINNED, hookData: "0x" }] };
+  const price = (p: Pool) => (p.venue === "v4" && p.hops === 1 && p.hooks[0]?.toLowerCase() === UNPINNED.toLowerCase() ? 3n * p.amount : p.venue === "v3" && p.hops === 2 ? 3n * p.amount - p.amount / 1000n : null);
+  const twoHop = (p: Pool) => p.venue === "v3" && p.hops === 2 && p.amount === 2n * AMOUNT;
+  assert.deepEqual(await buy(hooked, spammed(price, twoHop), spammed(price, twoHop)), { accepted: false, code: "out_of_gas" });
+  // control: the two-hop's twice answered, it fills, and the listed route within the slippage holds the hooked one
+  assert.deepEqual(await buy(hooked, spammed(price, () => false), spammed(price, () => false)), below);
 });
