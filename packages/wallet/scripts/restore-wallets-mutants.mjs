@@ -39,6 +39,7 @@ const M = [
   ["the re-reads take ids that hold a note or money", WAL, [["if (!held.has(i)) rereads.push", "rereads.push"]], RW, "step 7"],
   ["the re-reads due at the window's end", WAL, [["return nowMs < plan.until ?", "return nowMs <= plan.until ?"]], RW, "step 7"],
   ["a 48 h window", WAL, [["export const REREAD_MS = 72 * 3_600_000;", "export const REREAD_MS = 48 * 3_600_000;"]], RW, "step 7"],
+  ["W's secret key left in memory", WAL, [["    w.secretKey.fill(0);\n", ""]], ["wallet", "test/pool-zeroing.test.ts"], "restoreWallets zeroes"],
   ["the counter raised from lane 0's highest", WAL, [["const mine = lanes[store.lane]!;", "const mine = lanes[0]!;"]], RW, "step 7"],
 ];
 let ok = 0;
