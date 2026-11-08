@@ -375,6 +375,23 @@ test("after a filled sell, the teardown runs only on a token account both provid
   assert.equal(r[2]?.teardown, undefined);
 });
 
+// Review of bf467ae7, F6: the armed path (a W that may buy many times) passes no burn list: a unit landing on W's token
+// account between the empty read after the fill and the teardown's own read is kept, never burned (only the signing
+// page's rent back, on a W of one buy, burns a stranger's balance)
+test("the armed path's teardown passes no burn list: a balance read at its own read is kept, never burned", async () => {
+  const r = [rec(W1)];
+  const ata = solanaAta(W1, TOKEN, T);
+  const seen = [0, 0];
+  const acc = (p: 0 | 1) => (k: string) => (k === ata ? tokenAcc(seen[p]!++ === 0 ? 0n : 1n) : null);
+  const a = after(() => ok, acc(0));
+  const b = after(() => ok, acc(1));
+  assert.equal(await finishSolanaSet(sellReq, r, [tx(1, "filled")], fdeps(a, b), T), "filled");
+  // no frame built (nothing to close: the account kept holding its unit), so nothing burned, and every check passes
+  const td = r[0]?.teardown;
+  assert.deepEqual({ frames: td?.frames, ok: td?.verdict.ok, refused: td?.refused }, { frames: 0, ok: true, refused: undefined }, JSON.stringify(td?.verdict.results));
+  assert.ok(td?.verdict.plan?.keep.some((k) => k.address === ata && /holds 1 of/.test(k.why)), JSON.stringify(td?.verdict.plan));
+});
+
 test("a filled sell keeps its record when the read after it fails: the failure is on rec.teardown, nothing throws", async () => {
   const r = [rec(W1)];
   const a = after(() => ok, () => new Error("HTTP 429"));
