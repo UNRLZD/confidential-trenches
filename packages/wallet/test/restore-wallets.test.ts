@@ -12,7 +12,7 @@ import { depositAccount } from "../src/deposit/account.ts";
 import type { NoteRestore, RestoredNote, RestoredSpend } from "../src/notes/restore.ts";
 import { refKey } from "../src/notes/store.ts";
 import type { NoteRef } from "../src/notes/secrets.ts";
-import { afterRestore, ARM_TAGS, DEPOSIT_ID_MARGIN, HOP_TAGS, REREAD_MS, rereadsDue, restoreDepositIds, restoreWallets, type HistoryChain, type LaneIds } from "../src/restore/wallets.ts";
+import { afterRestore, ARM_TAGS, DEPOSIT_ID_MARGIN, HOP_TAGS, REREAD_MS, rereadsDue, restoreDepositIds, restoreWallets, type HistoryChain, type IdState, type LaneIds } from "../src/restore/wallets.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const SCOPE = vaultScopeOf(keccak_256, "vault.bf-restore.testnet", "usdc.fakes.testnet");
@@ -123,11 +123,13 @@ test("step 4: the reads go in the order `pick` draws, never the notes' order", a
 
 // ---------- the deposit lanes ----------
 const id = (i: number) => depositAccount(SEED, SCOPE, i).account;
-function idReader(money: Iterable<number>, fail: Iterable<number> = []) {
+// an id reader: "money" for the indices in `money`, "used" for those in `used`, a failure for those in `fail`
+function idReader(money: Iterable<number>, fail: Iterable<number> = [], used: Iterable<number> = []) {
   const m = new Set([...money].map(id));
   const f = new Set([...fail].map(id));
+  const u = new Set([...used].map(id));
   const log: string[] = [];
-  return { log, holds: async (u: string) => (log.push(u), f.has(u) ? Promise.reject(new Error("rpc down")) : m.has(u)) };
+  return { log, holds: async (x: string): Promise<IdState> => (log.push(x), f.has(x) ? Promise.reject(new Error("rpc down")) : m.has(x) ? "money" : u.has(x) ? "used" : "unused") };
 }
 // notes in lane 0 (0, 8, 16) and lane 3 (3); lane 5 empty with money at its 11th and 31st index; lane 2 with money past
 // its first 21; lane 6 with money under an index that holds a note (6) and the next one skipped (14 empty, 22 money)
@@ -163,6 +165,45 @@ test("step 5: an id read that fails counts as money (listed, the lane goes on pa
   assert.equal(got[1]!.readTo, at(1, 20 + DEPOSIT_ID_MARGIN));
   await assert.rejects(restoreDepositIds(SEED, SCOPE, { ...LANES, laneHighest: [8, null, null, 3, null, null, 6, null] }, holds), /lane 0: its highest 8 is not its highest note/);
   await assert.rejects(restoreDepositIds(SEED, SCOPE, { ...LANES, laneHighest: [16, null, null, 3, null, null, 6] }, holds), /one per lane/);
+  // an answer that is not money, used or unused is a failed read, never "unused" (R12)
+  for (const bad of [undefined, null, 0, "yes", true, false]) {
+    const got2 = await restoreDepositIds(SEED, SCOPE, LANES, async (u) => (u === id(at(7, 3)) ? (bad as unknown as IdState) : "unused"));
+    assert.deepEqual(got2[7]!.unread, [{ i: at(7, 3), id: id(at(7, 3)), error: "the read answered neither money, used nor unused" }], String(bad));
+    assert.equal(got2[7]!.highest, at(7, 3), String(bad));
+  }
+});
+
+// the review's case: 21 or more ids of a lane used (refunded to U, then withdrawn out) and now empty, then one still
+// holding a refund. A gap limit counts ids never used, not ids at zero (BIP-44), so the money past them is read.
+test("step 5: ids that were used and are now empty reset the margin as money does; only ids never used count toward it", async () => {
+  const used = Array.from({ length: 21 }, (_, k) => at(0, k + 1)); // 8 .. 168
+  const { holds } = idReader([at(0, 22)], [], used); // money at 176
+  const got = await restoreDepositIds(SEED, SCOPE, { notes: [note(dep(0))], laneHighest: [0, null, null, null, null, null, null, null] }, holds);
+  assert.deepEqual([got[0]!.notes, got[0]!.money, got[0]!.used, got[0]!.highest, got[0]!.readTo], [[0], [at(0, 22)], used, at(0, 22), at(0, 22 + DEPOSIT_ID_MARGIN)]);
+  // in an empty lane too: a used id at its 21st index carries the read to the money at its 30th
+  const e = await restoreDepositIds(SEED, SCOPE, LANES, idReader([at(4, 30)], [], [at(4, 20)]).holds);
+  assert.deepEqual([e[4]!.money, e[4]!.used, e[4]!.highest], [[at(4, 30)], [at(4, 20)], at(4, 30)]);
+  // ids with history past the note walk's end may hold notes it never matched: the restore stops
+  await assert.rejects(
+    restoreDepositIds(SEED, SCOPE, LANES, idReader([], [], [at(4, 0), at(4, 1), at(4, 2)]).holds, { walkGap: 2 }),
+    /lane 4: ids with history reach index 20, past the note walk's end at 12; walk the lane on from there/,
+  );
+});
+
+// the review's case: an RPC that keeps failing (or answering 429) moved the margin with every failure, so a lane read
+// on toward 2^32. Each read fails a macrotask later, so the test's own timeout ends a run that never stops.
+test("step 5: margin id reads failed with no read showing history between them end the restore with an error", { timeout: 5_000 }, async () => {
+  const later = (f: () => IdState | Error) => new Promise<IdState>((res, rej) => setImmediate(() => { const x = f(); x instanceof Error ? rej(x) : res(x); }));
+  let reads = 0;
+  await assert.rejects(
+    restoreDepositIds(SEED, SCOPE, LANES, () => (reads++, later(() => new Error("HTTP 429")))),
+    new RegExp(`lane 0: ${DEPOSIT_ID_MARGIN} id reads failed with none showing history between them \\(the last at index ${at(0, DEPOSIT_ID_MARGIN - 1)}: HTTP 429\\); the restore stops, to be retried`),
+  );
+  assert.equal(reads, DEPOSIT_ID_MARGIN, "lane 0 stops at its margin-th failed read, its ids read from index 0");
+  // a read that shows history between failures starts the count again: margin 3, failures, money, failures
+  const fails = new Set([at(1, 0), at(1, 1), at(1, 3), at(1, 4)].map(id));
+  const got = await restoreDepositIds(SEED, SCOPE, LANES, (u) => later(() => (fails.has(u) ? new Error("rpc down") : u === id(at(1, 2)) ? "money" : "unused")), { margin: 3 });
+  assert.deepEqual([got[1]!.unread.map((x) => x.i), got[1]!.money, got[1]!.highest, got[1]!.readTo], [[at(1, 0), at(1, 1), at(1, 3), at(1, 4)], [at(1, 2)], at(1, 4), at(1, 7)]);
 });
 
 test("step 7: the new lane's counter goes past the lost store's possible index, and every open re-reads each lane to its highest plus two for 72 h", async () => {
@@ -186,4 +227,18 @@ test("step 7: the new lane's counter goes past the lost store's possible index, 
     assert.deepEqual(rereadsDue(plan, T + REREAD_MS), []);
   }
   await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async () => 0 }, SCOPE, lanes.slice(1), T), /one per lane/);
+  // the lanes in another order: refused, never read as another lane's (R13)
+  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async () => 0 }, SCOPE, [...lanes].reverse(), T), /one per lane, in order/);
+});
+
+test("step 7: an id whose read failed and a used id now empty are re-read on each open; the counter goes past them", async () => {
+  // lane 1 (empty): index 25 (its 4th) failed, index 33 (its 5th) used and empty; lane 2: index 2 (its 1st) failed
+  const lanes = await restoreDepositIds(SEED, SCOPE, LANES, idReader([], [at(1, 3), at(2, 0)], [at(1, 4)]).holds);
+  const T = 1_762_600_000_000;
+  const asked: number[] = [];
+  const plan = await afterRestore(SEED, { lane: 1, raiseDepositIndex: async (_s, m) => (asked.push(m), m) }, SCOPE, lanes, T);
+  assert.deepEqual(asked, [at(1, 6)]);
+  const of = (l: number) => plan.rereads.filter((x) => x.lane === l).map((x) => x.i);
+  assert.deepEqual(of(1), [0, 1, 2, 3, 4, 5, 6].map((k) => at(1, k)));
+  assert.deepEqual(of(2), [at(2, 0), at(2, 1), at(2, 2)]);
 });

@@ -32,7 +32,12 @@ const M = [
   ["one arm per label", WAL, [["    const k = `${s.l}:${s.j}`;", "    const k = `${s.l}`;"]], RW, "step 4"],
   ["the deposit ids read one short of the margin", WAL, [["+ RESTORE_LANES * margin;", "+ RESTORE_LANES * (margin - 1);"]], RW, "step 5"],
   ["a failed id read is not money", WAL, [["        unread.push({ i, id, error: why(e) });\n        highest = Math.max(highest ?? i, i);", "        unread.push({ i, id, error: why(e) });"]], RW, "step 5"],
-  ["money does not move the lane's highest", WAL, [["        money.push(i);\n        highest = Math.max(highest ?? i, i);", "        money.push(i);"]], RW, "step 5"],
+  ["history does not move the lane's highest", WAL, [['      (state === "money" ? money : used).push(i);\n      highest = Math.max(highest ?? i, i);', '      (state === "money" ? money : used).push(i);']], RW, "step 5"],
+  ["a used id does not reset the margin (review: money past 21 used ids)", WAL, [['      if (state === "unused") continue;', '      if (state !== "money") continue;']], RW, "step 5"],
+  ["failed id reads never end a lane (review: a reader that always rejects)", WAL, [["if (++failed >= margin) throw", "if (++failed >= Infinity) throw"]], RW, "step 5"],
+  ["a read showing history does not restart the failure count", WAL, [["      failed = 0;\n", ""]], RW, "step 5"],
+  ["the note walk's end not checked against the ids with history", WAL, [["if (highest !== null && highest > walked) throw", "if (false) throw"]], RW, "step 5"],
+  ["R12: an id answer that is not money, used or unused taken", WAL, [['        if (state !== "money" && state !== "used" && state !== "unused") throw new Error("the read answered neither money, used nor unused");\n', ""]], RW, "step 5"],
   ["the walk's highest not checked against the notes", WAL, [["if (h !== (notes.length === 0 ? null : notes[notes.length - 1])) throw", "if (false) throw"]], RW, "step 5"],
   ["step 7 covers the highest plus one", WAL, [["x.highest + 2 * RESTORE_LANES", "x.highest + RESTORE_LANES"]], RW, "step 7"],
   ["step 7 covers an empty lane's first index only", WAL, [["x.highest === null ? x.lane + RESTORE_LANES :", "x.highest === null ? x.lane :"]], RW, "step 7"],
@@ -41,9 +46,17 @@ const M = [
   ["a 48 h window", WAL, [["export const REREAD_MS = 72 * 3_600_000;", "export const REREAD_MS = 48 * 3_600_000;"]], RW, "step 7"],
   ["W's secret key left in memory", WAL, [["    w.secretKey.fill(0);\n", ""]], ["wallet", "test/pool-zeroing.test.ts"], "restoreWallets zeroes"],
   ["the counter raised from lane 0's highest", WAL, [["const mine = lanes[store.lane]!;", "const mine = lanes[0]!;"]], RW, "step 7"],
+  ["R19: an unread id dropped from step 7's re-reads", WAL, [["const held = new Set([...x.notes, ...x.money]);", "const held = new Set([...x.notes, ...x.money, ...x.unread.map((u) => u.i)]);"]], RW, "step 7"],
+  ["R13: the lanes' order not checked", WAL, [["|| !lanes.every((x, k) => x.lane === k)", ""]], RW, "step 7"],
+  ["R01: the seed in the Worker's message", WALK, [[SENT, "precommitments: [...precommitments], seed64 } as WalkAsk;"]], NR, "Worker bridge"],
+  ["R02: no Worker error listener", WALK, [['      w.addEventListener("error", () => end(() => reject(new Error(`lane ${lane}: the walk worker failed`))));\n', ""]], NR, "Worker bridge"],
 ];
+// one plant alone: node packages/wallet/scripts/restore-wallets-mutants.mjs "<part of its name>"
+const only = process.argv[2];
+const RUN = only === undefined ? M : M.filter(([name]) => name.includes(only));
+if (RUN.length === 0) throw new Error(`no plant named ${only}`);
 let ok = 0;
-for (const [name, file, edits, [pkg, test], pat] of M) {
+for (const [name, file, edits, [pkg, test], pat] of RUN) {
   const path = `${P}/${file}`;
   const src = readFileSync(path, "utf8");
   let planted = src;
@@ -68,5 +81,5 @@ for (const [name, file, edits, [pkg, test], pat] of M) {
   if (killed) ok++;
   console.log(`${killed ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}`);
 }
-console.log(`${ok}/${M.length} killed`);
-if (ok !== M.length) process.exitCode = 1;
+console.log(`${ok}/${RUN.length} killed`);
+if (ok !== RUN.length) process.exitCode = 1;

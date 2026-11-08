@@ -2,9 +2,10 @@
 // whole walk of a scope never used: 8 lanes x RESTORE_GAP indices), in the installed Google Chrome, as the signing page
 // runs it: src/restore/walk.ts's walkInWorkers starting one module Worker per lane (src/restore/walk-worker.ts, bundled
 // by Vite as the signing page's build bundles its code), then restorePages checking every walk on the page's thread.
-// It runs at Chrome's CPU throttling rates 1 (this machine) and 4 (Lighthouse's mobile preset, a mid-tier phone), each
-// read through the DevTools protocol (Emulation.setCPUThrottlingRate), and also one lane on the page's own thread at
-// each rate, which shows whether the throttle reached the Workers.
+// It runs at Chrome's CPU throttling rates 1 (this machine) and 4 (Lighthouse's mobile preset), each read through the
+// DevTools protocol (Emulation.setCPUThrottlingRate), and also one lane on the page's own thread at each rate, which
+// shows whether the throttle reached the Workers. Every number it prints is measured on a desktop, not on a phone: rate
+// 4 is this desktop slowed down, never a phone's figure (a phone's own run is still to be made).
 //   node packages/wallet/scripts/restore-walk-timing.mjs      (starts Chrome through scripts/browsers.mjs; about a minute)
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

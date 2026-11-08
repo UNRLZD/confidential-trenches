@@ -985,3 +985,30 @@ test("a deposit at index 2 is restored, with its value, through the real Worker 
   });
   await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk: viaWorker }), /lane \d: the walk worker refused: precommitments: not bigints/);
 });
+
+test("the Worker bridge posts each Worker exactly its lane, scope, gap, the two masters and the precommitments, never the seed", async () => {
+  const v = new Vault();
+  v.deposit(sec({ kind: "deposit", s: SCOPE, i: 2 }).precommitment, 7_000_000n, hex64("u2"));
+  const posted: unknown[] = [];
+  const walk = walkInWorkers(SEED, () => {
+    const p = spawnWalker();
+    return { ...p, postMessage: (m) => (posted.push(m), p.postMessage(m)) };
+  });
+  await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk });
+  assert.equal(posted.length, RESTORE_LANES);
+  for (const m of posted) assert.deepEqual(Object.keys(m as object).sort(), ["gap", "lane", "nullifier", "precommitments", "scope", "secret"]);
+});
+
+test("the Worker bridge: a Worker that throws on load ends the restore with its lane named", { timeout: 10_000 }, async () => {
+  const v = new Vault();
+  const broken = (): WalkPort => {
+    const w = new Worker('throw new Error("the walk worker would not load")', { eval: true });
+    spawned.push(w);
+    return {
+      postMessage: (m) => w.postMessage(m),
+      addEventListener: (type, f) => void w.on(type, type === "message" ? (data: unknown) => f({ data }) : () => f({})),
+      terminate: () => void w.terminate(),
+    };
+  };
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk: walkInWorkers(SEED, broken) }), /lane \d: the walk worker failed/);
+});

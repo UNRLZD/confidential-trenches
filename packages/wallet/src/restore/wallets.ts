@@ -12,17 +12,23 @@
 //   leave money where the user cannot see it. The reads go in a random order, never the notes' order; each names one
 //   address and nothing else. Every secret key derived here is zeroed at once: only addresses leave this file.
 // - Step 5, the deposit ids of each lane: U_{s,i} is read for every index of the lane up to its highest with a note or
-//   money, and on until DEPOSIT_ID_MARGIN indices of the lane in a row past that hold nothing (in an empty lane, its
-//   first DEPOSIT_ID_MARGIN). A read that fails counts as money (listed in `unread`, and the lane's highest moves up to
-//   it), so a failure never ends a lane early nor lets step 7 name an index that may hold a lost store's send.
+//   any history, and on until DEPOSIT_ID_MARGIN indices of the lane in a row past that were never used (in an empty
+//   lane, its first DEPOSIT_ID_MARGIN). As BIP-44's gap limit counts addresses with no history, not addresses at zero,
+//   an id that was ever used (funded, refunded, withdrawn out) resets the count as money does: a run of used ids
+//   now empty never hides money past it. A read that fails counts as money (listed in `unread`, and the lane's highest
+//   moves up to it), so a failure never ends a lane early nor lets step 7 name an index that may hold a lost store's
+//   send; once DEPOSIT_ID_MARGIN reads of a lane fail with no read showing history between them (so DEPOSIT_ID_MARGIN
+//   in a row among them), step 5 stops with an error naming the lane, so a provider that keeps failing ends the
+//   restore, to be retried, instead of reading on toward 2^32.
 // - Step 7, after the restore: the new store draws its own lane when it opens (../store/index.ts). Its deposit counter
-//   for the scope is raised past the lost store's possible index, to its lane's highest with a note or money plus two
-//   of the lane (in an empty lane, its second index). For 72 h of NEAR block time after the restore, every open re-reads,
-//   in every lane, each deposit id up to that lane's highest plus two (in an empty lane, its first two) that holds no
-//   note and no money, so a late send to a quote the lost store named is found.
+//   for the scope is raised past the lost store's possible index, to its lane's highest with a note or any history plus
+//   two of the lane (in an empty lane, its second index). For 72 h of NEAR block time after the restore, every open
+//   re-reads, in every lane, each deposit id up to that lane's highest plus two (in an empty lane, its first two) that
+//   holds no note and no money (a used id now empty and an id whose read failed included), so a late send to a quote
+//   the lost store named is found.
 import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
-import { RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
+import { RESTORE_GAP, RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
 import { refKey } from "../notes/store.ts";
 
 /** The tags of an arm's own wallets, and of its hop targets (wallet.md l.91-100). */
@@ -38,7 +44,7 @@ const READS: Record<Chain, readonly HistoryChain[]> = {
   evm: ["base", "robinhood"],
   "hop-evm": ["base", "robinhood"],
 };
-/** Deposit ids of a lane in a row past its highest that hold nothing before the id reads stop (wallet.md l.302-308). */
+/** Deposit ids of a lane in a row past its highest that were never used before the id reads stop (wallet.md l.302-308). */
 export const DEPOSIT_ID_MARGIN = 21;
 /** How long after a restore every open re-reads the deposit ids (a deposit address's life, D44; wallet.md l.327). */
 export const REREAD_MS = 72 * 3_600_000;
@@ -49,8 +55,13 @@ const U32 = 0xffffffff;
  * one signature, on NEAR the account itself). Throws when it cannot tell.
  */
 export type HistoryReader = (chain: HistoryChain, address: string) => Promise<boolean>;
-/** Whether a deposit id (U, a NEAR implicit account) holds money on intents.near or the vault's token. Throws when it cannot tell. */
-export type IdReader = (id: string) => Promise<boolean>;
+/**
+ * What a deposit id (U, a NEAR implicit account) shows: "money" when it holds money on intents.near or the vault's
+ * token; "used" when it holds none but has any history (its NEAR account, a nonce or a transaction on NEAR or inside
+ * intents.near: it was funded, refunded or withdrawn out); "unused" when it was never used. Throws when it cannot tell.
+ */
+export type IdState = "money" | "used" | "unused";
+export type IdReader = (id: string) => Promise<IdState>;
 
 /** A fresh wallet the restore found: its arm (l, j), the note whose withdrawal made it, its path and address. */
 export type RestoredWallet = { c: Chain; l: bigint; j: number; note: string; path: string; address: string; history: HistoryChain[]; returnNote: string | null };
@@ -135,19 +146,25 @@ export async function restoreWallets(
   return { wallets, unread };
 }
 
-/** One lane's deposit ids: the indices with a note, with money, the ids that could not be read, and the lane's highest. */
-export type LaneIds = { lane: number; notes: number[]; money: number[]; unread: { i: number; id: string; error: string }[]; highest: number | null; readTo: number };
+/**
+ * One lane's deposit ids: the indices with a note, with money, used and now empty, the ids that could not be read, and
+ * the lane's highest of all of them.
+ */
+export type LaneIds = { lane: number; notes: number[]; money: number[]; used: number[]; unread: { i: number; id: string; error: string }[]; highest: number | null; readTo: number };
 
-/** Step 5, the deposit ids: every lane of the scope read to DEPOSIT_ID_MARGIN past its highest with a note or money. */
+/** Step 5, the deposit ids: every lane of the scope read to DEPOSIT_ID_MARGIN never-used ids past its highest with a note or history. */
 export async function restoreDepositIds(
   seed64: Uint8Array,
   scope: bigint,
   r: Pick<NoteRestore, "notes" | "laneHighest">,
   holds: IdReader,
-  opts: { margin?: number } = {},
+  opts: { margin?: number; walkGap?: number } = {},
 ): Promise<LaneIds[]> {
   const margin = opts.margin ?? DEPOSIT_ID_MARGIN;
   if (!Number.isSafeInteger(margin) || margin < 1) throw new Error("margin is a count above 0");
+  // the note walk's gap (step 3): ids with history past where it stopped may hold notes it never matched
+  const walkGap = opts.walkGap ?? RESTORE_GAP;
+  if (!Number.isSafeInteger(walkGap) || walkGap < 1) throw new Error("walkGap is a count above 0");
   if (!Array.isArray(r.laneHighest) || r.laneHighest.length !== RESTORE_LANES) throw new Error("laneHighest: one per lane");
   const noted = new Set<number>();
   for (const n of r.notes) if (n.ref.kind === "deposit" && n.ref.s === scope) noted.add(n.ref.i);
@@ -159,25 +176,33 @@ export async function restoreDepositIds(
     if (h !== (notes.length === 0 ? null : notes[notes.length - 1])) throw new Error(`lane ${lane}: its highest ${String(h)} is not its highest note`);
     let highest: number | null = h ?? null;
     const money: number[] = [];
+    const used: number[] = [];
     const unread: LaneIds["unread"] = [];
+    // failed reads since the lane's last read that showed history: margin of them ends the restore with an error
+    let failed = 0;
     let i = lane;
     for (; i <= U32 && i <= (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin; i += RESTORE_LANES) {
       const id = depositAccount(seed64, scope, i).account;
-      let yes: unknown;
+      let state: unknown;
       try {
-        yes = await holds(id);
-        if (typeof yes !== "boolean") throw new Error("the read answered neither yes nor no");
+        state = await holds(id);
+        if (state !== "money" && state !== "used" && state !== "unused") throw new Error("the read answered neither money, used nor unused");
       } catch (e) {
         unread.push({ i, id, error: why(e) });
         highest = Math.max(highest ?? i, i);
+        if (++failed >= margin) throw new Error(`lane ${lane}: ${failed} id reads failed with none showing history between them (the last at index ${i}: ${why(e)}); the restore stops, to be retried`);
         continue;
       }
-      if (yes) {
-        money.push(i);
-        highest = Math.max(highest ?? i, i);
-      }
+      if (state === "unused") continue;
+      (state === "money" ? money : used).push(i);
+      highest = Math.max(highest ?? i, i);
+      failed = 0;
     }
-    out.push({ lane, notes, money, unread, highest, readTo: i - RESTORE_LANES });
+    // the note walk counts a used id with no note as a miss: when ids with history run on past its end, a note there
+    // was never matched, so the restore stops instead of returning fewer notes
+    const walked = (notes.length === 0 ? lane - RESTORE_LANES : notes[notes.length - 1]!) + RESTORE_LANES * walkGap;
+    if (highest !== null && highest > walked) throw new Error(`lane ${lane}: ids with history reach index ${highest}, past the note walk's end at ${walked}; walk the lane on from there`);
+    out.push({ lane, notes, money, used, unread, highest, readTo: i - RESTORE_LANES });
   }
   return out;
 }
@@ -185,7 +210,7 @@ export async function restoreDepositIds(
 /** Step 7's plan: the index the new lane's counter was raised to, and the ids every open re-reads until `until`. */
 export type AfterRestore = { scope: bigint; lane: number; next: number; until: number; rereads: { lane: number; i: number; id: string }[] };
 
-/** The last index step 7 covers in a lane: its highest with a note or money plus two of the lane (empty: its second). */
+/** The last index step 7 covers in a lane: its highest with a note or any history plus two of the lane (empty: its second). */
 const coverTo = (x: LaneIds): number => (x.highest === null ? x.lane + RESTORE_LANES : x.highest + 2 * RESTORE_LANES);
 
 /**
