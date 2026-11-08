@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card evm-sell-no-release-in-flight on SIGN_HOST (https://sign.confidential.unrealized.trade), audit
+// Live check of card evm-sell-no-release-in-flight on SIGN_HOST (https://confidential.unrealized.trade), audit
 // E-01: no EVM sale is built for a one-time wallet W while a release that pays W ETH is not final on two RPCs, so a
 // hostile route can never pass minOut with a release's ETH. W's key lives only on the signing page, so its bundle is the
 // one place a Sell can be built and signed; the kit's sell builder (packages/kit/src/trade/evm/quoted.ts evmQuotedSell)
@@ -15,6 +15,7 @@
 // and its mutants in test/evm-quote-mutants.mjs); that the served files are that commit's build is signpage-release's.
 // The recorded answers: SIGN_HOST as served (good, no builder), the kit's sell builder bundled at this card's commit
 // (good, the builder and the guard) and at the commit before it (bad, the builder alone), and planted bundles.
+// After: sign
 //   node scripts/live-checks/evm-sell-no-release-in-flight.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -23,7 +24,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "evm-sell-no-release-in-flight";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The kit's EVM sell builder and signer, by their refusals: a bundle with any of them can build or sign a Sell. */

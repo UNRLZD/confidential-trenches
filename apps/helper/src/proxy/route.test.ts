@@ -9,7 +9,7 @@ import { start } from "../server.ts";
 import { createProxy } from "./proxy.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const APP = "https://confidential.unrealized.trade";
+const APP = "https://ct-app.unrealized.trade";
 const KEY = "fake-jupiter-key-" + "j".repeat(16);
 const seen: { url: string; headers: Record<string, string>; body: unknown }[] = [];
 const proxy = createProxy(

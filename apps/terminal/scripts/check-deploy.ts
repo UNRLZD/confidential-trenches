@@ -19,8 +19,8 @@ import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmOrigins } from "../../../scripts/live-checks/page-evm-rpc-csp.mjs";
 
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
-export const HELPER_HOST = "api.confidential.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
+export const HELPER_HOST = "ct-api.unrealized.trade";
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org", "https://near.drpc.org"];
 // the origin of every provider in the kit's EVM venue lists, read from the kit (card page-evm-rpc-csp)
 export const EVM_RPCS: string[] = evmOrigins();

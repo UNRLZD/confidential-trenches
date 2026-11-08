@@ -12,6 +12,7 @@
 // with no follow left running, U's refund waits in U (packages/wallet/test/deposit-prepay-taken.test.ts, red at 361a04f2).
 // The recorded answers: facts() over this card's committed SIGN_HOST build (packages/signpage/index.html and
 // public/app.js), and SIGN_HOST as served before the card's deploy (read 7 Nov).
+// After: sign
 //   node scripts/live-checks/wallet-near-prepay-taken.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -20,7 +21,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "wallet-near-prepay-taken";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 /** bind.ts callAmount's refusal: in the bundle only where the device reads a call's signed amount. */
 export const MARK = "the note's call names no amount";
 /** The deposit follow's lock (packages/signpage/src/deposit-follow.ts FOLLOW_LOCK). */

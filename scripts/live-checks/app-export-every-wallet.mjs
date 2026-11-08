@@ -14,6 +14,7 @@
 // that wallet is one ACCOUNT holds money on, and every such wallet (WALLETS: the kit's moneyWallets of ACCOUNT, pinned
 // here; the check's test holds the two equal) was asked for at least once. A screenshot of each width, of its Wallets
 // rows in view, of the desktop export menu and of a phone sheet are kept.
+// After: app
 //   node scripts/live-checks/app-export-every-wallet.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-export-every-wallet.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -30,9 +31,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-export-every-wallet";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 
 const SO_A = "Fixture1Wa11etSo1ana1111111111111111111111";
 const SO_B = "Fixture2Wa11etSo1ana2222222222222222222222";

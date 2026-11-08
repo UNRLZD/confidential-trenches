@@ -41,6 +41,7 @@
 // It reads eth_getCode of anvil's account 0 at latest on the venue's two feeProviders (the kit's evmPoolVenues()); it
 // passes only when both are code (else it names why), the fee answers are right for both callers (the same fee within
 // one epoch), every plant answers 422 with its own code, and the headers are as for a Solana pool.
+// After: helper
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -55,8 +56,8 @@ const req = createRequire(new URL("../../apps/helper/package.json", import.meta.
 const { secp256k1 } = req("@noble/curves/secp256k1.js");
 const { keccak_256 } = req("@noble/hashes/sha3.js");
 
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 const FIELDS = ["chain", "cluster", "program", "pool", "fee_payer", "epoch_ms", "epoch_start_ms", "fee", "step"];
 /** Two keyless RPCs per cluster the Rent sysvar is read on (both answered 2026-11-03 02:22Z). */
 export const RENT_RPCS = {

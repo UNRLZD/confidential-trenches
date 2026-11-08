@@ -12,6 +12,7 @@
 // The behaviour itself (each control used once and read back, the marks inside the plot, the hover card) is the
 // terminal's own browser run, apps/terminal/test/token-page/run.mjs (state chart-controls at 390, 1440 and 1280), and
 // the marks' read and layout apps/terminal/test/token-marks.test.ts.
+// After: app
 //   node scripts/live-checks/app-chart-controls.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-chart-controls.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk
@@ -23,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-chart-controls";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 export const JS_MARKERS = ["chart-toolbar", "chart-tf-", "chart-indicators", "chart-display", "chart-mode", "chart-denom", "chart-bottom", "chart-range-", "chart-clock", "chart-scale-pct", "chart-scale-log", "chart-scale-auto", "trade-mark", "trade-mark-card", "/v1/market/trades"];
 export const CSS_MARKERS = [".tkp-bottombar", ".tkp-menu", ".tm-layer", ".tm-dot"];
 

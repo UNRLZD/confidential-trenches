@@ -98,7 +98,7 @@ test("planted: a ready drawn as a dash where the pool sent one: FAIL", () => {
 });
 
 // a page as the check hooks it: Playwright's console and pageerror events, emitted by hand
-const SHELL = "https://sign.confidential.unrealized.trade";
+const SHELL = "https://confidential.unrealized.trade";
 const msg = (t, location, type = "error") => ({ type: () => type, text: () => t, location: () => location });
 const thrown = (Name, message, at) => {
   const e = new Name(message);

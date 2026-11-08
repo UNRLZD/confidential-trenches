@@ -6,6 +6,7 @@
 // a withdraw W signed for value + 1 and a buy carrying W's Withdraw signature (bad_signature), a withdraw past its
 // deadline (deadline_near) and one to a recipient with code (recipient_code), each with its own code.
 // Its recorded runs are helper-evm-sender-2.answers.json, replayed by helper-evm-sender-2.test.mjs.
+// After: helper
 //   node scripts/live-checks/helper-evm-sender-2.mjs [--base <helper url>] [--pool <EVM pool>]
 // PASS exit 0, FAIL exit 1, error exit 2. No key that holds money, no transaction: every plant is refused before a send.
 import { spawnSync } from "node:child_process";

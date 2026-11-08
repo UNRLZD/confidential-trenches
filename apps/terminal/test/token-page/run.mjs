@@ -23,7 +23,7 @@ import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
-const HELPER = "https://api.confidential.unrealized.trade";
+const HELPER = "https://ct-api.unrealized.trade";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
@@ -412,7 +412,7 @@ try {
           check(errors.length === 0, `${tag}: page errors after the live reads: ${errors.join(" | ")}`);
           // the page itself logs nothing; Chrome writes its own line for every response that is not a 2xx, which no page
           // code can stop (the card's hand-back names the helper change that would): held to one per failed live read
-          const net = consoles.filter((c) => /^Failed to load resource: the server responded with a status of 503 .*\(https:\/\/api\.confidential\.unrealized\.trade\/v1\/market\/candles\)$/.test(c));
+          const net = consoles.filter((c) => /^Failed to load resource: the server responded with a status of 503 .*\(https:\/\/ct-api\.unrealized\.trade\/v1\/market\/candles\)$/.test(c));
           const own = consoles.filter((c) => !net.includes(c));
           check(own.length === 0, `${tag}: console errors: ${own.join(" | ")}`);
           check(net.length === (s.candles === "live503" ? calls.live : 0), `${tag}: ${net.length} browser network lines for ${calls.live} live reads`);

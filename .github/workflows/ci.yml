@@ -3,9 +3,11 @@
 #   actions/checkout v7.0.1, actions/setup-node v7.1.0, pnpm/action-setup v6.1.0;
 #   actions/cache v6.1.0 read from its repo on 2026-11-02 at 12:40Z, its restore/ and save/ actions (the same commit)
 #   on 2026-11-05 at 15:05Z;
-#   foundry-rs/foundry-toolchain v1.9.1 read from its repo on 2026-11-02 at 20:12Z;
 #   Swatinem/rust-cache v2.9.3 (d1527c8, released 2026-10-20) and actions/download-artifact v8.0.2 (9000827, released
 #   2026-10-07) read from their repos on 2026-11-04 at 07:20Z.
+# Foundry v1.7.1 is no action but its release file, foundry_v1.7.1_linux_amd64.tar.gz (asset 415095756 of
+# foundry-rs/foundry, 98,596,412 bytes), sha256 cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b:
+# the asset's digest field on GitHub's API read on 2026-11-08 at 09:34Z, and a local sha256 of its bytes agrees.
 # The five job ids are the required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test.
 # The sixth, vault-sandbox, and the seventh, pool-solana, join them when the owner adds them to the ruleset. The
 # eighth, slither, is advisory and stays out of it.
@@ -351,28 +353,37 @@ jobs:
       - name: the Solana pool's deploy script's own tests, and its mutation list still names its source and tests
         run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs contracts/pool-solana/scripts/pin.test.mjs contracts/pool-solana/scripts/mainnet-deploy.test.mjs
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
-      # version its tests were first run with, released 2026-05-08) through foundry-toolchain v1.9.1 (908c540, read
-      # 2026-11-02 20:12Z), solc 0.8.28 as its foundry.toml pins. The forge tests run the kit's real proofs through the
-      # verifiers the pool deploys; layout.test.mjs reads the pool's storage and ABI from the compiler. The buy's fork
-      # tests (Base and Robinhood at pinned blocks) read only test/fork-rpc.mjs, which answers from the recorded
-      # test/fixtures/fork-rpc.json, so the job reads no public RPC.
+      # version its tests were first run with, released 2026-05-08; its sha256 as the header reads it), solc 0.8.28 as
+      # its foundry.toml pins. The forge tests run the kit's real proofs through the verifiers the pool deploys;
+      # layout.test.mjs reads the pool's storage and ABI from the compiler. The buy's fork tests (Base and Robinhood at
+      # pinned blocks) read only test/fork-rpc.mjs, which answers from the recorded test/fixtures/fork-rpc.json, so the
+      # job reads no public RPC.
       - name: the EVM pool's forge-std
         run: bash scripts/ci/retry.sh git submodule update --init contracts/pool-evm/lib/forge-std
-      # The action has no retry input (src/index.ts at 908c540), and a 504 outlasted foundryup's own five tries over 31 s
-      # (job 127152961657), so a failed install runs once more after 30 s; scripts/ci/download-retry.mjs holds the pair.
-      - id: foundry
-        continue-on-error: true
-        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+      # Foundry from the cache when it holds it (card ci-foundry-cached): foundry-toolchain's foundryup read
+      # github.com/foundry-rs's release pages on every run, and they answered 504 from 8 Nov 08:45Z (PRs #454 and #455,
+      # three runs each). On a miss scripts/ci/fetch.sh fetches the release asset through GitHub's API with the job's
+      # read-only token, and the bytes must be the sha256 the header names, or the step fails and nothing is saved.
+      - id: foundry-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: v1.7.1
-      - name: a pause after a failed Foundry install
-        if: steps.foundry.outcome == 'failure'
-        run: sleep 30
-      - name: Foundry once more
-        if: steps.foundry.outcome == 'failure'
-        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+          path: ~/.cache/ci-downloads/foundry-1.7.1.tar.gz
+          key: download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b
+      - name: Foundry v1.7.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/foundry-1.7.1.tar.gz cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b \
+            https://api.github.com/repos/foundry-rs/foundry/releases/assets/415095756
+          mkdir -p "$RUNNER_TEMP/foundry"
+          tar -xzf ~/.cache/ci-downloads/foundry-1.7.1.tar.gz -C "$RUNNER_TEMP/foundry" forge cast anvil chisel
+          echo "$RUNNER_TEMP/foundry" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/foundry/forge" --version
+      - if: steps.foundry-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: v1.7.1
+          path: ~/.cache/ci-downloads/foundry-1.7.1.tar.gz
+          key: download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b
       - name: the EVM pool's tests
         run: |
           node contracts/pool-evm/test/fork-rpc.mjs -- forge test --root contracts/pool-evm --no-storage-caching
@@ -786,19 +797,27 @@ jobs:
           persist-credentials: false
       - name: the EVM pool's forge-std
         run: bash scripts/ci/retry.sh git submodule update --init contracts/pool-evm/lib/forge-std
-      - id: foundry
-        continue-on-error: true
-        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+      # Foundry as test-scripts has it: from the cache, or on a miss through GitHub's API (card ci-foundry-cached)
+      - id: foundry-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: v1.7.1
-      - name: a pause after a failed Foundry install
-        if: steps.foundry.outcome == 'failure'
-        run: sleep 30
-      - name: Foundry once more
-        if: steps.foundry.outcome == 'failure'
-        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+          path: ~/.cache/ci-downloads/foundry-1.7.1.tar.gz
+          key: download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b
+      - name: Foundry v1.7.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/foundry-1.7.1.tar.gz cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b \
+            https://api.github.com/repos/foundry-rs/foundry/releases/assets/415095756
+          mkdir -p "$RUNNER_TEMP/foundry"
+          tar -xzf ~/.cache/ci-downloads/foundry-1.7.1.tar.gz -C "$RUNNER_TEMP/foundry" forge cast anvil chisel
+          echo "$RUNNER_TEMP/foundry" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/foundry/forge" --version
+      - if: steps.foundry-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: v1.7.1
+          path: ~/.cache/ci-downloads/foundry-1.7.1.tar.gz
+          key: download-foundry-1.7.1-cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24

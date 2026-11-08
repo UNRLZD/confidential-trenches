@@ -42,7 +42,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 test("the facts read from a bundle", () => {
   // the minified shapes as the good bundle spells them (the build with the pool-usd fold)
   const js =
-    "var hO=`https://api.confidential.unrealized.trade`;" +
+    "var hO=`https://ct-api.unrealized.trade`;" +
     "function Cm(e,t=rm){let n=sm.get(e)??e,r=mm(n,t),i=(n,i)=>{if(cm===r)return e(n,i);let a=hm(e,t,n);return a.wait?a.wait.then(()=>a.run(i)):a.run(i)},a=n.url===void 0?i:Object.assign(i,{url:n.url});return sm.set(a,n),a}" +
     "function wm(e,t,n){let r=Sm(e,(r,i)=>{let a,o;try{o=typeof t==`function`?t():t,a=Promise.resolve(e(r,i))}catch(e){return Promise.reject(e)}return Em(a,o,n)}),i=sm.get(e)??e,a=(i.url===void 0?om.get(i):am.get(fm(i.url)))?.limits.values().next().value;return a?Cm(r,a):r}" +
     "Ly=e=>e instanceof Fy||e instanceof jm&&e.fault===`timeout`;async function zy(e,t,n,r,i){for(let a=1;;a++){if(i.stopped)return X(`${r}: not asked again, the read has ended`);" +
@@ -50,7 +50,7 @@ test("the facts read from a bundle", () => {
     "t Promise.all(e.map(async e=>{try{let r=wm(e,n),i=(e,t)=>Promise.resolve().then(()=>r(e,t)),a=Xm(await i(`getLatestBlockhash`,[{commitment:`finalized`}]));" +
     "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>p_(e,t.length),()=>null)));" +
     "let t=(await Promise.resolve().then(()=>wm(e,Wv)(`getAccountInfo`,[dv,{encoding:`base64`,commitment:`confirmed`}])))?.value;" +
-    "var GM=`https://api.confidential.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`;function qM(){return{helper:GM,providers:[Cm(hk(KM)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
+    "var GM=`https://ct-api.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`;function qM(){return{helper:GM,providers:[Cm(hk(KM)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
     "var pI=yE.mainnet,mI=`mainnet`,hI=()=>{let[e,t]=[hk(KM),gk(GM)];return[Cm(e),Cm(t)]}";
   const f = facts("", js);
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, release: true, pair: true, timed: true, price: true });

@@ -11,6 +11,7 @@
 // The keys to look for are read into this process only, from its JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY and
 // ONECLICK_JWT (the host's real keys after a deploy, the planted ones in a local proof). With no key to look for, the
 // check is an error, never a pass.
+// After: helper
 //   node scripts/live-checks/helper-proxy.mjs [--base <url>] [--record <file> --planted]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; it writes the keys only with --planted
 //   (keys made for a local proof, never a real one), so the check's test can replay it.
@@ -18,8 +19,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-proxy";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const PATH = "/v1/proxy/oneclick/v0/tokens";
 export const ENV_KEYS = ["JUPITER_API_KEY", "RELAY_API_KEY", "LIFI_API_KEY", "ONECLICK_JWT"];
 const SHA = /^[0-9a-f]{40}$/;

@@ -13,6 +13,7 @@
 // topic is its account. A trade is judged when its bundle's receipt holds a swap log in some operation's run; its trader
 // must then be the account of one such operation, never the bundler, never none. It passes only when at least one trade
 // is judged and none is wrong; with none judged it FAILS with that reason, never passes on nothing.
+// After: helper
 //   node scripts/live-checks/helper-tape-4337-trader.mjs [--base <url>] [--chain robinhood|base] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -20,8 +21,8 @@ import { writeFileSync } from "node:fs";
 import { SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "helper-tape-4337-trader";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 30;
 export const JUDGE_ENOUGH = 5;
 // the EntryPoints and their events, as the eth-infinitism/account-abstraction releases name them (read on chain in

@@ -25,7 +25,7 @@ import { readCapped } from "./capped.ts";
 import { askDepositQuote, checkPoolDepositWallet, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, POOL_DEPOSIT_DESTINATION, type DepositQuoteReply, type PoolDepositChain } from "./quote.ts";
 
 /** The release's relayer for an id's intents: POST /v1/intents on HELPER_HOST (kit helper/v1.ts HelperIntentsRequest). */
-export const RELEASE_INTENTS_URL = "https://api.confidential.unrealized.trade/v1/intents";
+export const RELEASE_INTENTS_URL = "https://ct-api.unrealized.trade/v1/intents";
 export const RELEASE_INTENTS_TIMEOUT_MS = 10_000;
 /** An id's intent deadline: the lower of two RPCs' final-block times + 120 s (wallet.md §2.8 refund move row; the rule's
  *  ID_INTENT_WINDOW_MS, which a test holds equal). */

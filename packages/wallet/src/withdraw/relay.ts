@@ -74,7 +74,7 @@ import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, type WithdrawRequest } from "./
 import { POOL_TESTNET } from "../pool/network.ts";
 
 /** The release's helper (the signing page's CSP lets it reach no other, packages/signpage/public/_headers). */
-export const RELEASE_HELPER = "https://api.confidential.unrealized.trade";
+export const RELEASE_HELPER = "https://ct-api.unrealized.trade";
 /**
  * The release's withdrawal relayer on each network (HelperReleaseRelayer: what askWithdrawFee checks the fee answer
  * against and what the withdrawal pays its fee to), written here and never read from a helper; null where the release

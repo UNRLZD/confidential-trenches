@@ -14,6 +14,7 @@
 // return_key "withdraw" (the kit's RETURN_KEYS): no address, no amount, no other field. After the answer every pool row
 // is still inside its panel (the desktop panel clips: a line that pushed a row out would hide it). A screenshot of each
 // run is kept.
+// After: app
 //   node scripts/live-checks/app-pool-withdraw.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-pool-withdraw.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -30,9 +31,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-pool-withdraw";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signed-in account the stand-in shell sends: four pool rows, as a real account can hold (the NEAR USDC row has no
  *  Withdraw: NEAR is no pool chain), a balance on Solana and Base, an empty Robinhood pool. */
 export const POOLS = {

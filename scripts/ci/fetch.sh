@@ -9,6 +9,11 @@
 # fetched again. A fetch is curl with its own retry (--retry 6 --retry-all-errors, a doubling wait of 63 s in all), and
 # the fetched bytes must match the sha256 too, or the step fails and nothing is left at <file> for the save.
 # scripts/ci/download-retry.mjs refuses a workflow's curl to a file and a fetch.sh with no cache in front of it.
+# Card ci-foundry-cached: <url> may be a release asset through GitHub's API (https://api.github.com/repos/<owner>/<repo>/
+# releases/assets/<id>), which answered while github.com/foundry-rs's release pages gave 504 (8 Nov from 08:45Z, PRs
+# #454 and #455). The API gives the bytes only to Accept: application/octet-stream, and the job's read-only token
+# (GITHUB_TOKEN, when the step sets it) lifts the anonymous rate limit. Only that url gets either header, and curl drops
+# an Authorization header on the redirect to the asset's storage host (another host, curl 7.58 and later).
 set -euo pipefail
 [ "$#" = 3 ] || { echo "usage: fetch.sh <file> <sha256> <url>" >&2; exit 2; }
 file=$1 sum=$2 url=$3
@@ -23,7 +28,12 @@ if [ -e "$file" ]; then
 fi
 mkdir -p "$(dirname "$file")"
 rm -f "$file.part"
-curl -sSfL --retry 6 --retry-all-errors -o "$file.part" "$url"
+hdr=()
+if [[ $url =~ ^https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/assets/[0-9]+$ ]]; then
+  hdr=(-H "Accept: application/octet-stream")
+  if [ -n "${GITHUB_TOKEN:-}" ]; then hdr+=(-H "Authorization: Bearer $GITHUB_TOKEN"); fi
+fi
+curl -sSfL --retry 6 --retry-all-errors -o "$file.part" ${hdr[@]+"${hdr[@]}"} "$url"
 if ! echo "$sum  $file.part" | sha256sum -c --status -; then
   rm -f "$file.part"
   echo "fetch.sh: $url is not sha256 $sum" >&2

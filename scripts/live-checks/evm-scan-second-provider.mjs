@@ -23,7 +23,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const BOUND_MS = 60_000;
 export const MODES = ["refused", "no logs"];
 export const HELD = 2; // quotes per mode

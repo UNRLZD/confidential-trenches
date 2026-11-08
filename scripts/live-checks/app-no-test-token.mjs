@@ -10,6 +10,7 @@
 //     itself read at HELPER_HOST (GET /v1/market/lists?chain=solana, 200);
 //   - the token read: the page read GET /v1/market/token for that same mint, 200, and its row is that mint.
 // A screenshot of every load is kept.
+// After: app
 //   node scripts/live-checks/app-no-test-token.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
@@ -23,8 +24,8 @@ import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-no-test-token";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
 export const TOKEN_URL = (mint) => `${HELPER_HOST}/v1/market/token?chain=solana&token=${encodeURIComponent(mint)}`;
 export const FIXTURE = /fixture/i;

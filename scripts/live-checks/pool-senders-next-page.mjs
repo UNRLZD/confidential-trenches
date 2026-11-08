@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-senders-next-page on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds,
+// Live check of card pool-senders-next-page on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // and only that: the served /app.js is the one index.html pins (its sha384), it is a released build from release-92 on
 // (a packages/signpage/releases/release-<N>.json, N >= 92, names its sha384 for SIGN_HOST), and in it, as minified, the
 // Solana sell (src/pool-sell.ts):
@@ -14,6 +14,7 @@
 // neither shape, and the release ledger tells a release-92-or-later build from any other. This file reaches no package
 // code (the import check holds it). The PR's own build runs judge(read, { ledger: false }) in scripts/ci/bundle-checks.mjs,
 // since it is cut as a release only after its merge.
+// After: sign
 //   node scripts/live-checks/pool-senders-next-page.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -23,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-senders-next-page";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 /** The first release whose sell holds the window rule and the six fallback. */
 export const FOLDED_FROM = 92;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;

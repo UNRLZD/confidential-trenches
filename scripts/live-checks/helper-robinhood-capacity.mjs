@@ -10,14 +10,15 @@
 // then Trending 5m, then New, each once), and reads GET /v1/market/trades?chain=robinhood&token=<t>&limit=50 for all of
 // them at once. It passes only when the lists answer 200 with at least TOKENS_MIN tokens and every tape answers 200 JSON
 // { trades: [...], src: "chain", as_of_ms }. A failing tape is named by its status, Retry-After and time.
+// After: helper
 //   node scripts/live-checks/helper-robinhood-capacity.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-robinhood-capacity";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 12;
 /** Fewer listed tokens than this is no test of the queues: a FAIL, not a pass on little. */
 export const TOKENS_MIN = 6;

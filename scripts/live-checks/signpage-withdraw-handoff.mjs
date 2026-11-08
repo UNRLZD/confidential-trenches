@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card signpage-withdraw-handoff on SIGN_HOST (https://sign.confidential.unrealized.trade) and the release
+// Live check of card signpage-withdraw-handoff on SIGN_HOST (https://confidential.unrealized.trade) and the release
 // helper it reads. What it holds, on what is deployed:
 //   - SIGN_HOST's build is one network's: its CSP connect-src names the mainnet NEAR pair and no testnet NEAR RPC, so
 //     the mainnet build cannot read a testnet RPC;
@@ -12,6 +12,7 @@
 //     its relay_fee is a u128 at or below the device's own fee_max at the token's storage minimum. A helper that quotes
 //     above the device's cap, or names another relayer, fails it: the form would show the fee unread and hand off nothing.
 // The testnet withdrawal itself (the hand-off from the testnet build's form to settled) is a money run, not this check.
+// After: sign
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs [--record <file>]
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs --local [--record <file>]
 //     the same with this tree's committed build (index.html, public/app.js, public/_headers) in place of SIGN_HOST's;
@@ -27,7 +28,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-withdraw-handoff";
-export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
+export const SIGN_URL = "https://confidential.unrealized.trade/";
 /** The release values the check judges by: the wallet's own (packages/wallet/scripts/withdraw-fee-check.ts --consts
  *  prints them, and the test holds these equal to them). */
 export const RELAYER = { relayer_account: "r-2b700409.bf-vt-20261102t071444.testnet", fee_recipient: "f-2b700409.bf-vt-20261102t071444.testnet" }; // gitleaks:allow (public account ids)

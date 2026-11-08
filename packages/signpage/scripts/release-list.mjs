@@ -33,7 +33,7 @@ import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
-export const HOSTS = Object.freeze({ SIGN_HOST: "https://sign.confidential.unrealized.trade", APP_HOST: "https://confidential.unrealized.trade" });
+export const HOSTS = Object.freeze({ SIGN_HOST: "https://confidential.unrealized.trade", APP_HOST: "https://ct-app.unrealized.trade" });
 // Pages reads these from the build as configuration and serves none of them (Cloudflare Pages docs: headers, redirects,
 // routing, Functions); each host's gate refuses _worker.js, and a build with any other one is refused below
 const CONFIG = ["_headers", "_redirects", "_routes.json", "_worker.js"];
@@ -250,8 +250,8 @@ export const RELEASED = Object.freeze({
   "release-92": "07aa9172c19f95e48f9d8a52e52dbdb54e378f19466f4caa0cdf783bc49516db",
   "release-93": "17e691070cb88c3f330fcfaefb39c7c6770d6dd0ad4e13e56855927280b25534",
   "release-94": "96170a4d69d3181387ada026e3f47d35ca97875455360ca2e6cea18277518790",
-  "release-95": "dd842a35181ec8d6c532e19ea0172fa25f2d0a3762cd013f06a2ea0c3ead63bb",
-  "release-96": "d43aea7267da9ec2b4bbdad3e2f7391ce75ca5cd580a9a70a24ace57960978b3",
+  "release-95": "2a391205a1f0fa7aefdd659f3adfad1068e2889f19ae0aba9e3666acecdb8c99",
+  "release-96": "e8e83c7e5c54999759874b4952a9535a2455fbb65a9d9261d03c98084018ee7c",
 });
 
 /**

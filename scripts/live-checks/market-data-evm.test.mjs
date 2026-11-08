@@ -54,9 +54,9 @@ const replay = (a, chain = "base") => {
     });
     return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
   }
-  if (url.startsWith("https://api.confidential.unrealized.trade")) {
-    assert.equal(url, `https://api.confidential.unrealized.trade/v1/market/lists?chain=${chain}`);
-    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  if (url.startsWith("https://ct-api.unrealized.trade")) {
+    assert.equal(url, `https://ct-api.unrealized.trade/v1/market/lists?chain=${chain}`);
+    assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
     return new Response(a.answer.body, { status: a.answer.status, headers: a.answer.headers });
   }
   const sha = createHash("sha256").update(init.body).digest("hex");

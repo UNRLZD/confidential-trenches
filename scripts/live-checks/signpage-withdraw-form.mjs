@@ -9,6 +9,7 @@
 //   - /app.js holds the form's own strings, which minifying keeps (string literals): the refusal codes not-account and
 //     no-account, the RPC answer it reads (UNKNOWN_ACCOUNT), the Withdraw button's pending mark (withdraw-relay), the
 //     form's mark (withdraw = "form") and its draft refusal words (Invalid address, Busy · Retry).
+// After: sign
 //   node scripts/live-checks/signpage-withdraw-form.mjs [--url <origin>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each
 //   marker's count, never the bytes.
@@ -19,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-withdraw-form";
-export const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
+export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 /** The form's strings in the bundle, each as the minifier writes it (string literals and a dataset property). */
 export const MARKERS = ["not-account", "no-account", "UNKNOWN_ACCOUNT", "withdraw-relay", "dataset.withdraw=`form`", "Invalid address", "Busy · Retry"];
 

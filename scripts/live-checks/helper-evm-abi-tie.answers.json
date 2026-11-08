@@ -1,5 +1,5 @@
 {
- "about": "good: the chain reads are real (both RPCs per testnet, 2026-11-07T06:47:22.617Z) on the pools the kit pins, card pool-evm-buy-pays-revert’s set (Base Sepolia 0xeb967dfc..., Robinhood testnet 0xed9fac86...), each landed withdraw the first of the run record paired with its current pool record (landedOf); the helper answers are constructed, evmPoolSender() of apps/helper/src/pool/evm.ts at 7fb8a8a0 run in-process (--in-process), since the helper is not yet deployed with these pools; replace it with the host’s real run once it is. bad: the same in-process run, the same day (2026-11-07T06:46:51.439Z), made by this file as it was at 7fb8a8a0, whose landedOf read the first withdraw of pool-evm-testnet-run.<network>.json: a withdraw that landed on the first set’s pools (0xb239a38a..., 0xe5e94841...), not the pinned one, so its landed lines and the landed_withdraw answers (not_pool) fail. first_set: the recordings of card helper-evm-abi-tie (6 Nov) on the first pool set, judged on the pins they were made on: good: the chain reads are real (both RPCs per testnet, 2026-11-06T15:28:33.179Z); the helper answers are constructed, from evmPoolSender() of this branch at 593805c7 run in-process (--in-process: fee() on the kit feeProviders, carry() of the three bodies), with the deployed host fee_recipient (feeRecipientFrom), since the fix is not deployed; replace it with the host real run once deployed. bad: a real run against the deployed helper https://api.confidential.unrealized.trade (2026-11-06T15:28:21.289Z), X-Helper-Commit f1d5298f8201ed9c5adb4d13526dc1e95f579dcb, which still carries the three-argument withdraw: it refuses the landed withdraw as bad_shape and takes the three-argument form to epoch_off.",
+ "about": "good: the chain reads are real (both RPCs per testnet, 2026-11-07T06:47:22.617Z) on the pools the kit pins, card pool-evm-buy-pays-revert’s set (Base Sepolia 0xeb967dfc..., Robinhood testnet 0xed9fac86...), each landed withdraw the first of the run record paired with its current pool record (landedOf); the helper answers are constructed, evmPoolSender() of apps/helper/src/pool/evm.ts at 7fb8a8a0 run in-process (--in-process), since the helper is not yet deployed with these pools; replace it with the host’s real run once it is. bad: the same in-process run, the same day (2026-11-07T06:46:51.439Z), made by this file as it was at 7fb8a8a0, whose landedOf read the first withdraw of pool-evm-testnet-run.<network>.json: a withdraw that landed on the first set’s pools (0xb239a38a..., 0xe5e94841...), not the pinned one, so its landed lines and the landed_withdraw answers (not_pool) fail. first_set: the recordings of card helper-evm-abi-tie (6 Nov) on the first pool set, judged on the pins they were made on: good: the chain reads are real (both RPCs per testnet, 2026-11-06T15:28:33.179Z); the helper answers are constructed, from evmPoolSender() of this branch at 593805c7 run in-process (--in-process: fee() on the kit feeProviders, carry() of the three bodies), with the deployed host fee_recipient (feeRecipientFrom), since the fix is not deployed; replace it with the host real run once deployed. bad: a real run against the deployed helper https://ct-api.unrealized.trade (2026-11-06T15:28:21.289Z), X-Helper-Commit f1d5298f8201ed9c5adb4d13526dc1e95f579dcb, which still carries the three-argument withdraw: it refuses the landed withdraw as bad_shape and takes the three-argument form to epoch_off.",
  "good": {
   "base": "in-process apps/helper/src/pool/evm.ts at 7fb8a8a0ca15f58bb319e529934f5fbbd71f9327 (constructed: not the deployed host)",
   "constructed": true,
@@ -72,7 +72,7 @@
      ]
     },
     "feeRecipientFrom": {
-     "base": "https://api.confidential.unrealized.trade",
+     "base": "https://ct-api.unrealized.trade",
      "status": 404,
      "headers": {
       "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39"
@@ -147,7 +147,7 @@
      ]
     },
     "feeRecipientFrom": {
-     "base": "https://api.confidential.unrealized.trade",
+     "base": "https://ct-api.unrealized.trade",
      "status": 404,
      "headers": {
       "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39"
@@ -229,7 +229,7 @@
      ]
     },
     "feeRecipientFrom": {
-     "base": "https://api.confidential.unrealized.trade",
+     "base": "https://ct-api.unrealized.trade",
      "status": 404,
      "headers": {
       "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39"
@@ -304,7 +304,7 @@
      ]
     },
     "feeRecipientFrom": {
-     "base": "https://api.confidential.unrealized.trade",
+     "base": "https://ct-api.unrealized.trade",
      "status": 404,
      "headers": {
       "x-helper-commit": "358d8f4f89d94dbbfa2c159dfeeb37cb2d77ff39"
@@ -387,7 +387,7 @@
       ]
      },
      "feeRecipientFrom": {
-      "base": "https://api.confidential.unrealized.trade",
+      "base": "https://ct-api.unrealized.trade",
       "status": 200,
       "headers": {
        "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
@@ -462,7 +462,7 @@
       ]
      },
      "feeRecipientFrom": {
-      "base": "https://api.confidential.unrealized.trade",
+      "base": "https://ct-api.unrealized.trade",
       "status": 200,
       "headers": {
        "x-helper-commit": "f1d5298f8201ed9c5adb4d13526dc1e95f579dcb"
@@ -473,7 +473,7 @@
    ]
   },
   "bad": {
-   "base": "https://api.confidential.unrealized.trade",
+   "base": "https://ct-api.unrealized.trade",
    "at": "2026-11-06T15:28:21.289Z",
    "pools": [
     {

@@ -25,8 +25,10 @@ test("the recorded good answer (the card's build) passes", () => {
   for (const m of MARKERS) assert.ok(answers.good.app.markers[m] >= 1, m);
 });
 
+// the live read was made before card hosts-main-on-top moved SIGN_HOST to the main address: the record names its old
+// child, sign. under it, as read then
 test("the recorded live SIGN_HOST before the release fails, on the markers alone", () => {
-  assert.equal(answers.bad_live_before.url, SIGN_ORIGIN);
+  assert.equal(answers.bad_live_before.url, `https://sign.${new URL(SIGN_ORIGIN).host}`);
   assert.equal(judge(answers.bad_live_before).pass, false);
   assert.deepEqual(BAD(answers.bad_live_before), [MARKS]);
 });

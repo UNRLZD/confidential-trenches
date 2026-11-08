@@ -23,6 +23,7 @@
 // The run records the sha256 of the /app.js SIGN_HOST served, and the deposit run passes only when it is the newest
 // release list's pin for SIGN_HOST's /app.js (packages/signpage/releases): so a host still serving an older release,
 // whose deposit.quote is refused just the same, fails here.
+// After: sign
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
@@ -41,14 +42,14 @@ import { named } from "./record-names.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_URL = "https://confidential.unrealized.trade/";
 export const STRANGERS = ["https://example.com", "https://evil.ct.test", "https://app.other.test"];
 export const READY_MS = 5_000;
 const SETTLE_MS = 1_500;
 /** The deposit quote's longest wait: the device's own helper timeout (10 s) and room. */
 export const QUOTE_MS = 15_000;
-export const HELPER_QUOTE = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote";
+export const HELPER_QUOTE = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote";
 const SOL_USDC = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";
 /** deposit.quote's answer codes (packages/signpage/src/rules/deposit-quote.ts). */
 export const QUOTE_CODES = ["not_allowed", "above_max", "busy", "down", "quote_check_failed", "not_available"];

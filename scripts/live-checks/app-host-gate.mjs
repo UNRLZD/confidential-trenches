@@ -8,6 +8,7 @@
 //   - Integrity-Policy, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and Permissions-Policy equal the
 //     policy's, and no Cross-Origin-Embedder-Policy and no X-Frame-Options is sent (any X-Frame-Options value would
 //     refuse the shell's frame).
+// After: app
 //   node scripts/live-checks/app-host-gate.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 import "../net-window.mjs";
@@ -16,9 +17,9 @@ import { fileURLToPath } from "node:url";
 import { evmOrigins } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "app-host-gate";
-export const URL_ = "https://confidential.unrealized.trade/";
-const SIGN = "https://sign.confidential.unrealized.trade";
-const HELPER = "api.confidential.unrealized.trade";
+export const URL_ = "https://ct-app.unrealized.trade/";
+const SIGN = "https://confidential.unrealized.trade";
+const HELPER = "ct-api.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
 // the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists, before the NEAR RPCs, which
 // a testnet build swaps as the connect-src's last sources (apps/terminal/build/network.mjs)

@@ -41,6 +41,7 @@
 // (d19853937cfed8e9, which /build answers for many multi-hop routes). S7's minOut is the floor of the build's own
 // outAmount at the slippage this check asked for, so the floor decoded from the signed bytes must be at least what was
 // asked. S11 and S12 need a funded simulation and the reference pool, the buy flow's.
+// After: helper
 //   node scripts/live-checks/solana-jupiter-build.mjs [--base <helper origin>] [--token <mint>] [--no-route-token <mint>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (no candidate has no route at 40 and a fitting one).
 //   --record writes every answer the run read, so the test can replay it.
@@ -65,7 +66,7 @@ import {
 } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-jupiter-build";
-export const BASE = "https://api.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
 /** A 503's cause entry in the helper's Server-Timing (apps/helper/src/proxy/proxy.ts Cause). */
 export const CAUSE = /(^|,\s*)cause;desc="(429|held|budget|5xx|timeout|send|key|answer)"/;
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];

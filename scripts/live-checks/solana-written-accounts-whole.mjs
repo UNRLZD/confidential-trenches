@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card solana-written-accounts-whole on SIGN_HOST (https://sign.confidential.unrealized.trade). The
+// Live check of card solana-written-accounts-whole on SIGN_HOST (https://confidential.unrealized.trade). The
 // signing page bundles the kit's Solana checks, so the device that signs a Jupiter build runs the ones SIGN_HOST serves.
 // What it proves, and only that: the served /app.js is the one index.html pins (its sha384), and its text carries these
 // lines of S11's rule on every token account of the wallet's the tx writes, each found by a mark of the bundle's shape
@@ -16,6 +16,7 @@
 // served files are that commit's build is signpage-release's (the release list against a fresh build). A check that ran
 // the served S11 itself would need to execute the page's bundle outside its page; no sha of one release is pinned here,
 // since every later release changes app.js. The recorded planted bundles with a mark's line changed or gone each FAIL.
+// After: sign
 //   node scripts/live-checks/solana-written-accounts-whole.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -24,7 +25,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "solana-written-accounts-whole";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name

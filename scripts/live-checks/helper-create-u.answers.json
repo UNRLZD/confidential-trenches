@@ -11,7 +11,7 @@
   "relayer": null
  },
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "recipient": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
   "relayer": null,
   "before": {
@@ -76,7 +76,7 @@
   }
  },
  "bad": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "recipient": "386aeb3286b4a6548d1ed2a84557073858cf1b696310359c5100cb06ed233ef8",
   "relayer": "bind.example.near",
   "before": {

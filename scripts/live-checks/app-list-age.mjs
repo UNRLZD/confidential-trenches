@@ -9,6 +9,7 @@
 // The page re-reads every 12 s, so a drawn age is taken as right when it is listAge of the last lists answer the page
 // read at the time of the reading, or 12 s before it.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
+// After: app
 //   node scripts/live-checks/app-list-age.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-list-age.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -26,9 +27,9 @@ import { listAge } from "../../apps/terminal/src/screens/discover/model.ts";
 import { ageLine } from "../../apps/terminal/src/screens/discover/words.ts";
 
 const KEY = "app-list-age";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 const LISTS_PATH = "/v1/market/lists";
 export const KINDS = ["served", "dated"];
 export const WIDTHS = [

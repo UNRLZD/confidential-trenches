@@ -35,6 +35,10 @@
 // kit's messages to its parent as app-in-shell's parent mode does, and reports what it gets to the check. A build with
 // no shell (main's: SIGN_HOST framed by APP_HOST) is read the old way, so its recorded run shows what that frame reads:
 // after the same sign-in, an APP_HOST page framing SIGN_HOST asks its state.
+// After: sign --engine chromium --live --width phone
+// After: sign --engine chromium --live --width desktop
+// After: sign --engine firefox --live --width phone
+// After: sign --engine firefox --live --width desktop
 //   node scripts/live-checks/signpage-shell.mjs --engine webkit|chromium|firefox [--width phone|desktop] [--site <dir>] [--record <file>]
 //     at 390 x 844 (phone, the iPhone case) or 1440 x 900 (desktop, the default); the record names the width and the
 //     top window's own width as read
@@ -56,8 +60,8 @@ import { named } from "./record-names.mjs";
 
 const KEY = "signpage-shell";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_HOST = "sign.confidential.unrealized.trade";
-export const APP_HOST = "confidential.unrealized.trade";
+export const SIGN_HOST = "confidential.unrealized.trade";
+export const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const APP = `https://${APP_HOST}`;
 const STRANGER = "https://example.com/";

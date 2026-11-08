@@ -23,6 +23,7 @@
 //     the sell lock taken per owed W, so a sell tapped meanwhile waits for one W at most.
 // It does not prove those lines run: that is the signing page's tests at the released commit (test/pool-sell.test.ts,
 // rules-pool.test.ts), and that the served files are that commit's build is signpage-release's.
+// After: sign
 //   node scripts/live-checks/sol-w-sweep.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

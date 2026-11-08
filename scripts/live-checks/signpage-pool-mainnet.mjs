@@ -19,6 +19,7 @@
 // Not read here, and why: a real mainnet note's deposit, proof, buy, sell and withdraw on the deployed page wait for
 // SOL_POOLS.mainnet (card pool-sol-deploy-mainnet) and the funded run of card pool-sol-mainnet-run; until then the
 // pinned mainnet build is proven by packages/signpage/test/main-mainnet-pools.test.ts (a planted pin, test only).
+// After: sign
 //   node scripts/live-checks/signpage-pool-mainnet.mjs [--record <file>]
 //   node scripts/live-checks/signpage-pool-mainnet.mjs --local [<dir>] [--record <file>]
 //     --local: no network; Playwright answers SIGN_HOST from a build dir under its own _headers (default: this
@@ -38,9 +39,9 @@ import { named } from "./record-names.mjs";
 
 const KEY = "signpage-pool-mainnet";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_URL = "https://sign.confidential.unrealized.trade/";
-export const APP_HOST = "https://confidential.unrealized.trade";
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const SIGN_URL = "https://confidential.unrealized.trade/";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The page's mainnet Solana pair (packages/signpage/src/trade.ts SOLANA_PROVIDER_A and TRADE_HELPER's route). */
 export const PAGE_PAIR = ["https://solana-rpc.publicnode.com", `${HELPER_HOST}/v1/rpc/solana`];
 /** What only the pool flow and its queue carry, written out here: src/pool-deposit.ts POOL_DEPOSIT_LOCK, src/pool-sell.ts

@@ -182,7 +182,7 @@ test("made from the good run: a record whose first call was asked without maxAcc
   assert.equal(r.ok, false);
   assert.equal(bad(r).length, 1);
   // the replay refuses the kit's call, which the kit reports as a helper that did not answer
-  assert.match(bad(r)[0], /^BAD S-1 buy, a listed token: upstream: the helper did not answer: the kit asked https:\/\/api\.confidential\.unrealized\.trade\/v1\/proxy\/jupiter\/swap\/v2\/build\?/);
+  assert.match(bad(r)[0], /^BAD S-1 buy, a listed token: upstream: the helper did not answer: the kit asked https:\/\/ct-api\.unrealized\.trade\/v1\/proxy\/jupiter\/swap\/v2\/build\?/);
 });
 
 test("recorded shared-route run (before send times were kept): the listed token's buy and sell are shared_accounts_route_v2 and pass S1, S6, S7 and S10 with the frame; its pace line alone FAILs", async () => {

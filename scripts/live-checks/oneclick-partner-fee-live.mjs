@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card oneclick-partner-fee-live on HELPER_HOST (https://api.confidential.unrealized.trade): a quote the
+// Live check of card oneclick-partner-fee-live on HELPER_HOST (https://ct-api.unrealized.trade): a quote the
 // helper fetches from 1Click with its key carries the fee entry the device's check accepts on the partner path, the
 // path deposit.quote checks on (packages/signpage/src/rules/deposit-quote.ts). 1Click's fee follows the route
 // (docs.near-intents.org resources/fees.md, read 2026-11-06T15:18Z: 1 bp between stablecoins, 20 bps otherwise), so the
@@ -18,6 +18,7 @@
 //     to $1 (a floor of about $0.10 on what 1Click prices near $19, so the price floor does not refuse it: this check
 //     holds the fee entry, not the price, which the device reads on its own).
 // A kit that pins another fee for a route than 1Click charges a keyed partner fails here ("app-fees").
+// After: helper
 //   node scripts/live-checks/oneclick-partner-fee-live.mjs [--base <url>] [--record <file>]
 //   node scripts/live-checks/oneclick-partner-fee-live.mjs --answer <file>     judge a recorded answer, no network
 // --record writes what the run read (the requests, each answer's status and body, the time), so the test can replay it,
@@ -30,7 +31,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { DEPOSIT_DRY_PLACEHOLDER, checkOneClickQuote } from "../../packages/kit/src/index.ts";
 
 const KEY = "oneclick-partner-fee-live";
-export const BASE = "https://api.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
 export const PATH = "/v1/proxy/oneclick/v0/quote";
 export const NEAR_USDC = "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 export const SOL_USDC = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";

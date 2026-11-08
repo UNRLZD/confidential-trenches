@@ -13,9 +13,11 @@
 // packages/kit/test/signpage-client.test.mjs (onRoute; an earlier kit's client drops route events and keeps every stage),
 // apps/terminal/test/buy-route.test.ts and test/buy-route/run.mjs (the live seam's values on the strip). SIGN_HOST's
 // mainnet build answers pool.buy only once pinned pools land there, so no live buy runs here.
+// After: app --host app
+// After: sign --host sign
 //   node scripts/live-checks/signpage-buy-route-events.mjs [--host sign|app] [--record <file>]
-//     the deployed hosts (both unless --host names one): SIGN_HOST https://sign.confidential.unrealized.trade/ and
-//     APP_HOST https://confidential.unrealized.trade/
+//     the deployed hosts (both unless --host names one): SIGN_HOST https://confidential.unrealized.trade/ and
+//     APP_HOST https://ct-app.unrealized.trade/
 //   node scripts/live-checks/signpage-buy-route-events.mjs --local [--host sign|app] [--record <file>]
 //     the same read on this checkout: packages/signpage (index.html, public/app.js) and apps/terminal/dist (built first)
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -28,8 +30,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "signpage-buy-route-events";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const HOSTS = {
-  sign: { url: "https://sign.confidential.unrealized.trade/", local: path.join(ROOT, "packages/signpage"), localJs: (ref) => path.join("public", new URL(ref, "http://x/").pathname) },
-  app: { url: "https://confidential.unrealized.trade/", local: path.join(ROOT, "apps/terminal/dist"), localJs: (ref) => new URL(ref, "http://x/").pathname },
+  sign: { url: "https://confidential.unrealized.trade/", local: path.join(ROOT, "packages/signpage"), localJs: (ref) => path.join("public", new URL(ref, "http://x/").pathname) },
+  app: { url: "https://ct-app.unrealized.trade/", local: path.join(ROOT, "apps/terminal/dist"), localJs: (ref) => new URL(ref, "http://x/").pathname },
 };
 const Q = "[\"'`]";
 const ID = "[\\w$]+";

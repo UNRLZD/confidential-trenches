@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card wallet-restore-transfer-rpcs: a restore from the 12 words reads every W's tokens on every EVM
 // network, never "unread" because a provider caps the range, or because one is out: on Base and Robinhood on the live
-// helper's route (POST https://api.confidential.unrealized.trade/v1/rpc/{chain}, one reader, decision M359, card
+// helper's route (POST https://ct-api.unrealized.trade/v1/rpc/{chain}, one reader, decision M359, card
 // evm-transfer-rpc-spares), on a testnet on its Transfer list (the wallet's EVM_TRANSFER_RPCS, which testnet-run takes
 // too: three operators read as a pair with a spare; on 5 Nov 17:1xZ thirdweb's keyless daily quota failed Base and
 // Robinhood testnet, HTTP 429 with Retry-After about 7.4 h). On 4 Nov 23:18Z the evm-buy-hookdata-fee run's restore left two of its three Base Sepolia Ws
@@ -27,6 +27,7 @@
 // (the URL's host, never a key; the method, the block range, its try, and the Retry-After the provider named and the
 // time waited since its last answer). Run 42146750370's job was cancelled at 20 min with no line: four reads one after
 // another, printed only at the end, the Base one at 78-block pages (EVM_LOG_CEILING_PAGES in the wallet's evm.ts).
+// After: helper
 //   node scripts/live-checks/wallet-restore-transfer-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of wallet-restore-transfer-rpcs.answers.json, and its bad run: the
@@ -45,7 +46,7 @@ export const CHECK = path.join(REPO, "packages", "wallet", "scripts", "transfer-
 /** scripts/live-checks/evm-buy-hookdata-fee.base-sepolia.json: the v3 buy's W, its block and the token it bought. */
 export const W = "0x809286a1bf1585b1eeeefcc7a7f3508158fd078e";
 export const USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
-export const HELPER = "https://api.confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 /** Each network's read ends within this: the slowest, Base's 50,000 blocks on the helper's route at its 1,000-block cap,
  * is 80 pages of 625 blocks at the holdings pace (2 eth_getLogs in 3 s), 130 s from the Mac (6 Nov 02:53Z, 88 calls)
  * and 3.2 min on GitHub's runner (run 42152968842); this is 2.8 times the Mac's read, and with the networks read at once

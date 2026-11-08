@@ -53,7 +53,7 @@ test("create asks for a passkey on SIGN_HOST with the frozen PRF input and the s
   await p.createPasskey(s.env);
   assert.equal(s.calls.length, 1);
   const o = s.calls[0]!.options.publicKey;
-  assert.equal(o.rp.id, "sign.confidential.unrealized.trade");
+  assert.equal(o.rp.id, "confidential.unrealized.trade");
   assert.equal(o.rp.id, d.SIGN_HOST);
   assert.equal(o.rp.name, "UNRLZD");
   assert.equal(o.user.name, "Trading account");
@@ -168,9 +168,9 @@ test("the sheet's answer is hostile until checked", async () => {
 });
 
 test("the ceremony runs on SIGN_HOST only", async () => {
-  for (const hostname of ["confidential.unrealized.trade", "unrealized.trade", "evil.sign.confidential.unrealized.trade", undefined]) {
+  for (const hostname of ["ct-app.unrealized.trade", "unrealized.trade", "evil.confidential.unrealized.trade", undefined]) {
     const s = sheet({ create: { ext: withPrf() }, get: [{ ext: withPrf() }] });
-    await assert.rejects(p.createPasskey({ ...s.env, hostname }), /runs on sign\.confidential\.unrealized\.trade only/);
+    await assert.rejects(p.createPasskey({ ...s.env, hostname }), /runs on confidential\.unrealized\.trade only/);
     await assert.rejects(p.getPasskey({ ...s.env, hostname }), /only/);
     assert.equal(s.calls.length, 0);
   }

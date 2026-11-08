@@ -13,6 +13,7 @@
 //   - the fresh trade's signature is on the tape in a read that answered within 2 s of the check holding the trade, with
 //     its side, its time (the event's clock) and its trader (the event's user);
 //   - the 1s candles hold a bar at the trade's second with a volume above 0.
+// After: helper
 //   node scripts/live-checks/index-sol-trades.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -20,8 +21,8 @@ import { writeFileSync } from "node:fs";
 import { fromLogs, poolMints, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
 
 const KEY = "index-sol-trades";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const WS = "wss://api.mainnet-beta.solana.com";
 const RPC = "https://api.mainnet-beta.solana.com";
 export const FRESH_MS = 2_000;

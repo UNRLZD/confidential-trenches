@@ -5,6 +5,7 @@
 //   - that /app.js holds the pool rule: its refusal ("pool request not allowed: ", the rule's PoolRuleRefused) and the
 //     device's own read of a token's decimals (ERC-20 decimals(), selector 0x313ce567), which no other kind has.
 // The markers are written out here, not read from the repo.
+// After: sign
 //   node scripts/live-checks/signpage-pool-kinds.mjs [--site <dir>] [--record <file>] [--answer <file>]
 // --site reads a build folder (its index.html and public/app.js) in place of SIGN_HOST: the answer this tree's build
 // gives, which the deployed page must match. PASS exit 0, FAIL exit 1, error exit 2. --record writes the answer read;
@@ -14,7 +15,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const MARKERS = ["pool request not allowed: ", "PoolRuleRefused", "0x313ce567"];
 
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;

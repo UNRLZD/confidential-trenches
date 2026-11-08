@@ -13,6 +13,7 @@
 //   - the head's time is within 60 s of this check's own clock (a stale provider is no read).
 // Every answer is hostile: the numbers must be canonical hex quantities and safe integers in bounds, the back block must be
 // exactly BACK below the head, and a provider that errors, times out (10 s) or answers a JSON-RPC error is a BAD line naming it.
+// After: helper
 //   node scripts/live-checks/base-200ms-blocks.mjs [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

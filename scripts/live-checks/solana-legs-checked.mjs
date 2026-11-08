@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card solana-legs-checked on SIGN_HOST (https://sign.confidential.unrealized.trade). The signing page
+// Live check of card solana-legs-checked on SIGN_HOST (https://confidential.unrealized.trade). The signing page
 // bundles the kit's Solana checks, so the device that signs a Jupiter build runs the ones SIGN_HOST serves. What it
 // proves, and only that: the served /app.js is the one index.html pins (its sha384), and its text carries these lines,
 // each found by a mark of the bundle's shape (the minifier renames, never restructures them;
@@ -15,6 +15,7 @@
 // are that commit's build is signpage-release's (the release list against a fresh build); no sha of one release is
 // pinned here, since every later release changes app.js. The recorded planted bundles A (the walk starts past every
 // account), B (its wallet-account refusal behind `0&&`) and C (the walk removed) each FAIL.
+// After: sign
 //   node scripts/live-checks/solana-legs-checked.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -23,7 +24,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "solana-legs-checked";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name

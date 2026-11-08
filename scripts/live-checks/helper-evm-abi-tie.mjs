@@ -17,6 +17,7 @@
 // It passes only when every read above holds and every helper answer carries one full-sha X-Helper-Commit, the same on
 // every read of the run (one helper answered all of it, never two builds behind one host). The selectors
 // are this file's strings, which contracts/pool-evm/test/abi-tie.test.mjs holds to contracts/pool-evm/abi.json.
+// After: helper
 //   node scripts/live-checks/helper-evm-abi-tie.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 // --in-process answers the fee read and the three POSTs from this checkout's apps/helper/src/pool/evm.ts
@@ -36,7 +37,7 @@ import { RPCS } from "./pool-evm-testnet-run.mjs";
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
 const { keccak_256 } = req("@noble/hashes/sha3.js");
 
-export const BASE = "https://api.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const NETWORKS = ["base-sepolia", "robinhood-testnet"];
 const selector = (sig) => Buffer.from(keccak_256(new TextEncoder().encode(sig))).subarray(0, 4).toString("hex");

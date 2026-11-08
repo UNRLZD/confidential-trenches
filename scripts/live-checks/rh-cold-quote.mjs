@@ -12,6 +12,7 @@
 //     the scan's depth, read after the quotes on the chain's first scan provider (a token whose seeded pools are gone
 //     proves nothing about a cold scan).
 // The cold quote's requests per host are printed (traced, as evm-quote-warm-round has them).
+// After: app
 //   node scripts/live-checks/rh-cold-quote.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run to <file>, for the test's replay
 // (rh-cold-quote.answers.json). Reads only: no key, no transaction, no money moves.

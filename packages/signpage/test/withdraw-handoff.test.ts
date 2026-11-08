@@ -228,7 +228,7 @@ test("fee is the release relayer's quote, bounded by the device's own fee_max at
   const asked: string[] = [];
   const d = testnet(v, { rpcs: pair("testnet", asked), fetchFn: helper(feeAnswer(), seen) });
   assert.equal(await d.fee(), RELAY_FEE);
-  assert.deepEqual(seen, [`https://api.confidential.unrealized.trade/v1/withdraw/fee?token=${T.usdc}`]);
+  assert.deepEqual(seen, [`https://ct-api.unrealized.trade/v1/withdraw/fee?token=${T.usdc}`]);
   assert.deepEqual(asked, [], "the form names no A before a note is picked");
   // below the amount and above fee_max: refused for fee_max
   await assert.rejects(testnet(v, { fetchFn: helper(feeAnswer({ relay_fee: "100000000" })) }).fee(), /relay_fee: above the device's fee_max/);

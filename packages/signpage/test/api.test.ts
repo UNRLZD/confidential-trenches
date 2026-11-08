@@ -64,7 +64,7 @@ test("state from APP_HOST's parent: answered with the state, to APP_HOST only", 
 test("a wrong origin is dropped: no answer, no change", async () => {
   const p = page();
   const id = uuid();
-  for (const origin of ["https://evil.ct.test", "https://app.other.test", "https://example.com", "https://confidential.unrealized.trade.evil.com", "http://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade", "null", ""]) {
+  for (const origin of ["https://evil.ct.test", "https://app.other.test", "https://example.com", "https://ct-app.unrealized.trade.evil.com", "http://ct-app.unrealized.trade", "https://confidential.unrealized.trade", "null", ""]) {
     p.send({ v: 1, id, type: "buy" }, { origin });
   }
   await p.idle();

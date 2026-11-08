@@ -10,14 +10,15 @@
 // none in WAIT_MS is named and proves nothing.
 // PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] }; FAIL
 // when one answers otherwise (a 404 is the bug) or a lists read fails; INCONCLUSIVE (exit 3) when no chain dropped one.
+// After: helper
 //   node scripts/live-checks/robinhood-listed-tape-opens.mjs [--base <url>] [--wait-ms <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "robinhood-listed-tape-opens";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const CHAINS = ["robinhood", "base", "solana"];
 /** The helper reads a list again once it is 60 s old (lists.ts LIST_MS), Solana's one a 4 s step: five minutes sees
  *  several refreshes on every chain (Robinhood dropped 5 of 44 tokens in 3 min on 2026-11-07 06:56-06:59Z). */

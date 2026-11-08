@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { accountOfEntropy, entropyOfPrf, judge, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
+import { accountOfEntropy, APP_HOST, entropyOfPrf, judge, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-passkey-prf.answers.json"), "utf8"));
@@ -225,7 +225,8 @@ test("each broken step fails the check", () => {
   const g = answers.good;
   const A = g.prf.steps.create.account;
   const cases = [
-    ["a passkey on the parent domain", (r) => (r.prf.credentials = [{ rpId: "confidential.unrealized.trade" }])],
+    ["a passkey on the parent domain", (r) => (r.prf.credentials = [{ rpId: "unrealized.trade" }])],
+    ["a passkey on the app's host", (r) => (r.prf.credentials = [{ rpId: APP_HOST }])],
     ["two passkeys", (r) => r.prf.credentials.push({ rpId: SIGN_HOST })],
     ["another account after sign-in", (r) => (r.prf.steps.signin.account = "00".repeat(32))],
     ["a reload that asks again or loses the account", (r) => (r.prf.steps.reload = { state: "signed-out", account: null })],
@@ -346,13 +347,13 @@ test("planted on the good answer: a recorded 429 names its resource's origin and
   const kept = [];
   watch({ on: (ev, f) => (hooks[ev] = f) }, kept);
   const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
-  hooks.console(msg(text, { url: "https://api.confidential.unrealized.trade/v1/relay/status?id=abc" }));
+  hooks.console(msg(text, { url: "https://ct-api.unrealized.trade/v1/relay/status?id=abc" }));
   hooks.console({ type: () => "warning", text: () => "a warning", location: () => ({ url: "https://x.example/" }) });
   hooks.console(msg("Uncaught boom", undefined));
   hooks.pageerror(new Error("boom"));
-  assert.deepEqual(kept, [`console: ${text} (https://api.confidential.unrealized.trade/v1/relay/status)`, "console: Uncaught boom", "pageerror: boom"]);
+  assert.deepEqual(kept, [`console: ${text} (https://ct-api.unrealized.trade/v1/relay/status)`, "console: Uncaught boom", "pageerror: boom"]);
   for (const [line, want] of [
-    [kept[0], `console: ${text} (https://api.confidential.unrealized.trade/v1/relay/status)`],
+    [kept[0], `console: ${text} (https://ct-api.unrealized.trade/v1/relay/status)`],
     [kept[1], "console: Uncaught boom"],
     [kept[2], "pageerror: boom"],
   ]) {

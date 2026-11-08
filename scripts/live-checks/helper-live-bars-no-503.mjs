@@ -12,14 +12,15 @@
 // It passes only when at least HELD_MIN tokens are held and every live read answers 200 JSON { tf: "15m", candles: [1 or
 // 2 bars], src, as_of_ms }. A failing read is named by its token, status and time; the answers' age (read time less
 // as_of_ms) is printed, so a stale serve stays on record.
+// After: helper
 //   node scripts/live-checks/helper-live-bars-no-503.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-live-bars-no-503";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 8;
 /** Fewer held tokens than this is no test of the live reads: a FAIL, not a pass on little. */
 export const HELD_MIN = 4;

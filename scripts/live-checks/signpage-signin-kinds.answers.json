@@ -2,7 +2,7 @@
  "note": "Every record is a real run on the browser harness (SIGN_HOST's and APP_HOST's real names mapped to it, SIGN_HOST's build under its own _headers, the APP_HOST stand-in under apps/terminal/public/_headers), but the three marked edited. good: this card's page at 8fe32cc. bad: the card's page at efacb58, before the recheck's Lows. badDcad6c9: the card's page at dcad6c9, before the review fixes. badMain: main 89cd22c's page. badSeedBeforeChoice: 8fe32cc planted so the wallet way makes a seed before the choice. badFramable: 8fe32cc served without frame-ancestors 'none'. badM1a, badM3b: the review's mutants on 8fe32cc. badFrameSrc, badLoadedReported and badPressNeverLanded: edited, see their own notes.",
  "good": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-03T15:51:19.955Z",
   "prf": {
@@ -515,7 +515,7 @@
  },
  "bad": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:36:12.467Z",
   "prf": {
@@ -1011,7 +1011,7 @@
  },
  "badDcad6c9": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:46:16.262Z",
   "prf": {
@@ -1507,7 +1507,7 @@
  },
  "badMain": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:47:07.549Z",
   "prf": {
@@ -2009,7 +2009,7 @@
  },
  "badSeedBeforeChoice": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:44:58.914Z",
   "prf": {
@@ -2505,7 +2505,7 @@
  },
  "badFramable": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:45:37.707Z",
   "prf": {
@@ -3001,7 +3001,7 @@
  },
  "badM1a": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:41:53.086Z",
   "prf": {
@@ -3497,7 +3497,7 @@
  },
  "badM3b": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:44:04.748Z",
   "prf": {
@@ -3994,7 +3994,7 @@
  },
  "badFrameSrc": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:41:13.959Z",
   "prf": {
@@ -4491,7 +4491,7 @@
  },
  "badLoadedReported": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:45:37.707Z",
   "prf": {
@@ -4988,7 +4988,7 @@
  },
  "badPressNeverLanded": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "harness",
   "at": "2026-11-02T04:41:13.959Z",
   "prf": {
@@ -5485,7 +5485,7 @@
  },
  "liveGood": {
   "key": "signpage-signin-kinds",
-  "url": "https://sign.confidential.unrealized.trade/",
+  "url": "https://confidential.unrealized.trade/",
   "mode": "live",
   "at": "2026-11-03T15:52:08.763Z",
   "prf": {

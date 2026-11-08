@@ -76,7 +76,7 @@ test("read() asks the lists with the app's Origin, then every token's tape at on
   };
   const run = await read("https://helper.test", fetchFn);
   assert.equal(asked.length, 9);
-  assert.ok(asked.every(([, o]) => o === "https://confidential.unrealized.trade"));
+  assert.ok(asked.every(([, o]) => o === "https://ct-app.unrealized.trade"));
   assert.ok(run.answers.every((x) => !("body" in x) && x.shape === "tape"));
   assert.equal(judge(run).ok, true);
 });

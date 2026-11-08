@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card signpage-sent-read-back on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds,
+// Live check of card signpage-sent-read-back on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // and only that: the served /app.js is the one index.html pins (its sha384); and the bundle sends no pool transaction
 // (it never names the helper's /v1/pool/solana/send), or, in src/pool-buy.ts sendAndSettle as minified:
 //   - the hook it calls right after it takes the helper's signature is `named` (a name to read back, never told);
@@ -19,6 +19,7 @@
 // test/pool-withdraw.test.ts (the helper answering a signature that is not this transaction's, red on main a95cce2).
 // The recorded testnet answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg, { network:
 // "testnet" }) of each tree (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/signpage-sent-read-back.mjs [--base <url>] [--record <file>] [--answer <file>]
 //   (--base: a build's own address, a Pages preview say; SIGN_HOST when absent)
 // PASS exit 0, FAIL exit 1, error exit 2.
@@ -28,7 +29,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "signpage-sent-read-back";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The hooks the bundle calls right after it checks the helper's signature is one (64 bytes of base58), in order. */
