@@ -3,7 +3,8 @@
 // gas answers as a revert, and the kit's EVM quote prices a reverted route at nothing, so one heavy read starved the
 // reads after it. The kit (packages/kit/src/checks/evm/quote.ts) now sends every aggregate3 call with its gas set to
 // EVM_READ_CALL_GAS and EVM_READ_GAS_CODE at Multicall3's address (eth_call's state override): each read gets its own
-// share of the call's gas, and a read that may have run out of it answers 2, which the kit reads again alone. What it
+// share of the call's gas, and a read that may have run out of it answers 2, which the kit reads again (6 a call, then
+// alone); after the answer the code writes a marker word, which every answer here must end in. What it
 // proves, and only that: on every provider the kit pins for a mainnet quote (evmPoolVenues: Base and Robinhood, at
 // least two each), at its latest block, the kit's own code and gas (its exports, not copied here) answer six planted
 // reads (eth_call code overrides at addresses no one holds, read only) as
@@ -12,12 +13,14 @@
 // so the loop starves none of the reads after it, a real revert stays a revert, and a read that caught a frame running
 // out of gas (as a quoter does) is told apart from it; and 64 reads with the loop first answer 2 then 63 of 1. That
 // the kit reads a 2 again alone, agrees on it and prices nothing on one answered alone is its test
-// (test/evm-quote-attacks.test.ts GS1-GS5 and their mutants in test/evm-quote-mutants.mjs).
+// (test/evm-quote-attacks.test.ts GS1-GS11, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
+// test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-quote-read-gas-starve.mjs [--record <file> --as good|bad] [--answer <file> --as good|bad]
 // The bad answer is the same run through Multicall3's own code (no override): the loop and the 0xee read answer 0.
 // PASS exit 0, FAIL exit 1, error exit 2.
-// Runs: once, it reads what a host deploy cannot change: the providers' answers to the kit's per-read gas code (the
-// kit's buy quote ships in no host's bundle yet)
+// After every app deploy (as the kit's other EVM quote checks): a pinned provider can stop applying code overrides or
+// change its gas cap at any time, and the deploy's run reads it again
+// After: app
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE, evmPoolVenues } from "../../packages/kit/src/index.ts";
@@ -53,10 +56,14 @@ function aggregate(tos) {
   });
   return "0x82ad56cb" + w(0x20) + w(el.length) + offs.join("") + el.join("");
 }
-/** Each read's success word and its return data's last significant hex digits, or null for an answer that is not one */
+// keccak256("blindfill.read.gas.v1"): the word the kit's code writes after its answer, and the kit takes no answer without
+// (unaggregate, review of fe9f5ec3 finding 3); judge reads it inside EVM_READ_GAS_CODE as its PUSH32
+const MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
+/** Each read's success word and its return data's last significant hex digits, or null for an answer that is not one
+ *  or does not end in MARKER */
 export function results(r) {
-  if (typeof r !== "string" || !/^0x([0-9a-f]{64})+$/i.test(r)) return null;
-  const h = r.slice(2);
+  if (typeof r !== "string" || !/^0x([0-9a-f]{64})+$/i.test(r) || r.slice(-64).toLowerCase() !== MARKER) return null;
+  const h = r.slice(2, -64);
   const at = (o) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
   try {
     return Array.from({ length: at(32) }, (_, i) => {
@@ -98,6 +105,11 @@ export async function collect(own = false) {
   return { at: new Date().toISOString(), code: own ? "multicall3" : EVM_READ_GAS_CODE, chains: out };
 }
 
+// an answer that is not the code's, cut to its start and end (no marker shows as the last word)
+const cut = (x) => {
+  const s = JSON.stringify(x) ?? String(x);
+  return s.length > 140 ? `not the code's: ${s.slice(0, 66)}...${s.slice(-66)}` : `not the code's: ${s}`;
+};
 /** PASS where each mainnet chain has two providers or more, and each answers both planted calls as the kit's code must */
 export function judge(a) {
   const lines = [];
@@ -107,15 +119,16 @@ export function judge(a) {
     if (!good) ok = false;
   };
   line(a?.code === EVM_READ_GAS_CODE, `the run's code is the kit's EVM_READ_GAS_CODE`);
+  line(EVM_READ_GAS_CODE.includes("7f" + MARKER), "the kit's code writes its marker after the answer");
   const chains = a?.chains ?? [];
   line(["base", "robinhood"].every((c) => chains.some((x) => x.chain === c)), "Base and Robinhood were read");
   for (const { chain, reads } of chains) {
     line(reads.length >= 2, `${chain}: ${reads.length} providers`);
     for (const r of reads) {
       const six = results(r.six);
-      line(six !== null && JSON.stringify(six) === JSON.stringify(SIX_WANT), `${chain} ${r.provider}: six planted reads answer ${JSON.stringify(six ?? r.six)}`);
+      line(six !== null && JSON.stringify(six) === JSON.stringify(SIX_WANT), `${chain} ${r.provider}: six planted reads answer ${six === null ? cut(r.six) : JSON.stringify(six)}`);
       const many = results(r.sixtyFour);
-      line(many !== null && many.map((x) => x[0]).join("") === SIXTY_FOUR_WANT, `${chain} ${r.provider}: 64 reads, the loop first, answer ${many === null ? JSON.stringify(r.sixtyFour) : many.map((x) => x[0]).join("")}`);
+      line(many !== null && many.map((x) => x[0]).join("") === SIXTY_FOUR_WANT, `${chain} ${r.provider}: 64 reads, the loop first, answer ${many === null ? cut(r.sixtyFour) : many.map((x) => x[0]).join("")}`);
     }
   }
   return { ok, lines };

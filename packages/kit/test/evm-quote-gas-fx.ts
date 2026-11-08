@@ -7,6 +7,21 @@
 import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 
 const MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11";
+/** EVM_READ_GAS_CODE's marker word, written after its answer (review of fe9f5ec3, finding 3) */
+export const READ_MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
+const ours = (c: EvmRpcCall) => {
+  const [tx, , over] = c.params as [Record<string, unknown>, unknown, Record<string, { code?: unknown }> | undefined];
+  return c.method === "eth_call" && String(tx?.to).toLowerCase() === MULTICALL3 && Object.entries(over ?? {}).some(([a, o]) => a.toLowerCase() === MULTICALL3 && o.code === EVM_READ_GAS_CODE);
+};
+/** `answers` to `sent` as EVM_READ_GAS_CODE answers them: each recorded aggregate3 result (Multicall3's own, which
+ *  predates the code) with the code's marker after it, so the device reads it as the code's answer; every read the
+ *  recording holds ran with the call's whole gas, and every recorded case's outcome is the one recorded. */
+export function withMarker<T>(sent: readonly EvmRpcCall[], answers: T): T {
+  (answers as { result?: unknown }[]).forEach((a, i) => {
+    if (sent[i] !== undefined && ours(sent[i]!) && typeof a?.result === "string") a.result = a.result + READ_MARKER;
+  });
+  return answers;
+}
 /** `calls` as the recording sent them (card evm-quote-read-gas-starve): the recording predates the per-read gas, so an
  *  aggregate3 call is matched without its gas (EVM_READ_CALL_GAS) and without EVM_READ_GAS_CODE's override at
  *  Multicall3, the hook's override kept where it has one; any other call as it is. Each recorded read ran with the call's

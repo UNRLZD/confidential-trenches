@@ -58,19 +58,23 @@ export function decodeAggregate(data: string): string[] {
     return h.slice(2 * (e + 128), 2 * (e + 128 + dl));
   });
 }
-export function encodeAggregate(outs: (bigint | null)[]): string {
-  const body = outs.map((x) => (x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
+/** aggregate3's answer as EVM_READ_GAS_CODE gives it, its marker after the last result (card evm-quote-read-gas-starve) */
+export function encodeAggregate(outs: (bigint | null | "gas")[]): string {
+  // "gas": the code's success word 2, a read that ran out of its gas
+  const body = outs.map((x) => (x === "gas" ? W(2n) + W(0x40n) + W(0n) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
   let at = 32 * outs.length;
   const offs = body.map((b) => {
     const o = W(BigInt(at));
     at += b.length / 2;
     return o;
   });
-  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("");
+  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("") + "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
 }
 
 export type Model = {
   price: (p: Pool) => bigint | null;
+  /** the reads that run out of gas at any gas (card evm-quote-read-gas-starve: ticks spammed past the 1x price) */
+  ranOut?: (p: Pool) => boolean;
   /** what the probe answers for (token, to, amount); null: it reverts */
   probe?: (token: string, to: string, amount: bigint) => bigint | null;
   headSec?: number;
@@ -154,7 +158,7 @@ export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmR
         // override: the sell's reads have no hook replaced
         assert.deepEqual(override, { [MULTICALL3_ADDR]: { code: EVM_READ_GAS_CODE } });
         assert.equal((c.params[0] as { gas?: string }).gas, "0x" + EVM_READ_CALL_GAS.toString(16));
-        return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map(one)) };
+        return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map((d) => (["cdca1753", "ca253dc9"].includes(d.slice(0, 8)) && m.ranOut?.(poolOf(d)) === true ? ("gas" as const) : one(d)))) };
       }
       if (override !== undefined) {
         const d = data.slice(2);
