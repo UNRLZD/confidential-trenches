@@ -8,8 +8,10 @@ import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SELL = `${W}/src/pool-sell.ts`;
 const KIT = `${W}/../kit/src/checks/solana/checks.ts`;
+const FLOW = `${W}/../kit/src/trade/solana/flow.ts`;
 const T = "test/pool-sell.test.ts";
 const K = "../kit/test/solana-teardown-rules.test.ts";
+const KF = "../kit/test/solana-flow.test.ts";
 // [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
 const M = [
@@ -32,17 +34,32 @@ const M = [
   // equivalent: the mixed read's throw (an "ok" beside a "none", "failed" or "other" read leaves a meta that is not one
   // or reads a different balance, so the alike-meta throw below it refuses it the same), and the burn count's "at
   // least once" (FRAME takes a burn only right before its account's close, which runs once, so no account burns twice)
-  ["D1 a balance the sell left taken as a stranger's", SELL, T, '        if (a !== 0n) return "no";\n', ""],
+  // D1 inverted by the review of bf467ae7, F1: a full sell never leaves W's own units, so a balance it left is a
+  // stranger's; holding it as W's own stranded W for good (a hostile RPC front-running 1 unit)
+  ["D1 a balance a full sell left held as W's own", SELL, T, 'what W\'s account held after it");\n      return "yes";', 'what W\'s account held after it");\n      if (a !== 0n) return "no";\n      return "yes";'],
   ["D2 the RPCs' metas may differ", SELL, T, "if (a === null || b === null || a !== b) throw", "if (a === null || b === null) throw"],
   ["D3 a meta that does not say it taken", SELL, T, "if (a === null || b === null || a !== b) throw", "if (a !== b) throw"],
-  ["D4 a sell not read yet taken as sold", SELL, T, "          unsure = true;\n          continue;", "          continue;"],
+  ["D4 a sell not read yet taken as sold", SELL, T, '? "no" : "unsure";', '? "no" : "yes";'],
   ["D5 an unsure read stored as W's own state", SELL, T, 'steady: sold === "no" }', "steady: true }"],
   ["D6 a failed sell taken as sold", SELL, T, 'if (got.every((g) => g.got === "failed")) return "no";', 'if (got.every((g) => g.got === "failed")) return "yes";'],
-  ["D7 a sell past its blockhash taken as sold", SELL, T, 'if (await pastOnBoth(rpcs, by.last)) return "no";', 'if (await pastOnBoth(rpcs, by.last)) return "yes";'],
-  ["D8 no record of the sell taken as sold", SELL, T, 'if (by === undefined) return "no";', "if (by === undefined) continue;"],
+  ["D7 a sell past its blockhash taken as sold", SELL, T, '(await pastOnBoth(rpcs, by.last)) ? "no" : "unsure"', '(await pastOnBoth(rpcs, by.last)) ? "yes" : "unsure"'],
+  // D8 (soldOne's own `by === undefined` taken as sold) is left out as equivalent since the review of bf467ae7's F5:
+  // readW asks soldOne only of a mint with a recorded sell; D8b holds a held mint with none
+  ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
   ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bh.lastHeight } };\n", ""],
   ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait }"],
+  // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
+  // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
+  ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
+  ["review Y2 leftAfter counts another owner's account", SELL, T, "if (b.mint !== mint || b.owner !== owner) continue;", "if (b.mint !== mint) continue;"],
+  ["review Y3 leftAfter counts another mint's account", SELL, T, "if (b.mint !== mint || b.owner !== owner) continue;", "if (b.owner !== owner) continue;"],
+  ["review Y4 a list with no W entry read as 0", SELL, T, "    total = (total ?? 0n) + BigInt(amount);\n  }\n  return total;", "    total = (total ?? 0n) + BigInt(amount);\n  }\n  return total ?? 0n;"],
+  ["review Y7 another mint's sell used", SELL, T, "const by = x.sell?.[m];", "const by = Object.values(x.sell ?? {})[0];"],
+  ["review F5a the sell read at confirmed", SELL, T, 'signed, "finalized"));', "signed));"],
+  ["review F5b the sell read after W's accounts", SELL, T, [["      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));\n      const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));\n", "      const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));\n      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));\n"]]],
+  ["review F5c a sell read's fault for a mint W no longer holds", SELL, T, "await soldOne(m.mint).catch((e: unknown) => ({ fault: e }))", "await soldOne(m.mint)"],
+  ["review F6 the armed path passes a burn list", FLOW, KF, "    plan = solanaTeardownPlan(w, accounts);", "    plan = solanaTeardownPlan(w, accounts, undefined, addresses);"],
   ["K1 a Token-2022 extension burned", KIT, K, "burn.includes(address) && other === undefined &&", "burn.includes(address) &&"],
   ["K2 the burn's amount unchecked", KIT, K, "|| u64(d, 1) !== h.burn ", ""],
   ["K3 the burn's mint unchecked", KIT, K, "|| a[1]?.key !== h.mint ", ""],

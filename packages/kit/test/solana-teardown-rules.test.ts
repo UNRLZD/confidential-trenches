@@ -330,6 +330,21 @@ for (const [name, frames, id, detail] of BURN_CASES) {
   });
 }
 
+// Review of bf467ae7, F3 (its mutant X2): "right before its close" is the burned account's own close. Burn A, close B,
+// then close A later is refused: the burn and its close could land in different frames, the account left open
+test("FRAME refuses a burn whose next instruction closes another account, its own close later in the frame", () => {
+  const EMPTY_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const B = solanaAta(W, EMPTY_MINT, T22);
+  const empty = token({ mint: EMPTY_MINT, amount: 0n, exts: [[7, []]] });
+  const reads = { ...DUST_READS, [B]: [empty, empty] as const };
+  const s: SolanaTeardownSimulation = { err: null, wallet: W0 + 2n * 2_039_280n - 5_000n, accounts: { [DUST]: null, [B]: null } };
+  const run = (f: I[]) => checkSolanaTeardown([wire(f)], W, { accounts: reads, wallet: [W0, W0], simulations: [[s, s]], burn: [DUST] });
+  // the control: the burn right before its own close, then B's close, passes every check
+  assert.deepEqual(run([limit(20_600), burnIx(DUST, DUST_MINT, 1n), t22close(DUST), t22close(B)]).results.filter((r) => !r.ok), []);
+  const v = run([limit(20_600), burnIx(DUST, DUST_MINT, 1n), t22close(B), t22close(DUST)]);
+  assert.match(failing(v, "FRAME"), new RegExp(`burn of 1 from ${DUST}`), JSON.stringify(v.results));
+});
+
 test("FRAME refuses a burn the plan has not asked for: none named, or a Token-2022 account with a hook or a fee extension", () => {
   assert.match(failing(burnRun([BURN_OK()], { burn: [] }), "FRAME"), new RegExp(`burn of 1 from ${DUST}`));
   for (const ext of [[15, [0]], [2, u64(0n)]] as [number, number[]][]) {

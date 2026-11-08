@@ -32,8 +32,10 @@ In the order of the lines above:
    that lifts the sweep to the floor, so the sell kept rent(0), and W's lamports waited on W, its owed record kept.
 11. S's leftovers go back to D: S's token account (balance 0) closed and every lamport S held, 2310000, sent to D; S at 0.
 12. D tops W up with 500000 lamports so a note of W's lamports clears the floor: W 3627456 to 4127456.
-13. The next load (W's owed record as its sell wrote it, the page's state read) runs the rent back once: the sweep, a
-    tag 1 deposit of everything W holds into the pool: W 4127456 to 0.
+13. The next load runs the rent back once: the sweep, a tag 1 deposit of everything W holds into the pool: W 4127456 to
+    0. That load (pool-flow-devnet.mjs, FLOW_SWEEP_W) writes W a fresh owed record, its mint alone, with no `sell` and
+    `passes: 0`, then the page's state read; W's token account had closed at line 9, so the record's missing sell
+    changes nothing here.
 
 Before this card, run 7 (signpage-pool-flow.md) and every W holding a stranger's unit ended "holds" with the token account open; here the unit is burned and the account closed, and W ends at 0. After the last load, W, its token account and both volume accounts read null at finalized on api.devnet.solana.com. U ended at 0 at its deposit and S at 0 at line 11.
 

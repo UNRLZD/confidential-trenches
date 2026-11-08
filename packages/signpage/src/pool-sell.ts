@@ -877,34 +877,34 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
     // claims off and `unclaimed` the reason when the teardown's claim did not simulate (the kit's solanaTeardownChecked)
-    // each held mint's full sell (the owed record's `sell`), on both RPCs: "yes" when this very transaction landed ok
-    // leaving W's account of that mint at 0, so what it holds came after, a stranger's; "no" when both say plainly the
-    // balance is W's own (no record of the sell, as one written before this card; the sell left some; it failed; it
-    // never landed, past its blockhash on both); "unsure" while neither has it yet and its blockhash still runs (it may
-    // land: W holds, not as its own state, so the next load reads it again); anything else (another transaction, the
-    // RPCs differ, a meta that does not say it, an RPC down) throws, a fault read again
-    const soldOut = async (mints: readonly string[]): Promise<"yes" | "no" | "unsure"> => {
-      let unsure = false;
-      for (const m of mints) {
-        const by = x.sell?.[m];
-        if (by === undefined) return "no";
-        const signed = base64.decode(by.tx);
-        if (signed.length < 65 || signed[0] !== 1) throw new Error("the owed record's sell is not one signed transaction");
-        const got = await both(rpcs, (r) => readBackMeta(r, base58.encode(signed.subarray(1, 65)), signed));
-        if (got.every((g) => g.got === "failed")) return "no";
-        if (got.every((g) => g.got === "none")) {
-          if (await pastOnBoth(rpcs, by.last)) return "no";
-          unsure = true;
-          continue;
-        }
-        if (!got.every((g) => g.got === "ok")) throw new Error(`the sell reads ${got.map((g) => g.got).join("/")}`);
-        const [a, b] = got.map((g) => leftAfter(g.meta, w.address, m));
-        if (a === null || b === null || a !== b) throw new Error("the sell's meta does not say plainly what W's account held after it");
-        if (a !== 0n) return "no";
-      }
-      return unsure ? "unsure" : "yes";
+    // one mint's full sell (the owed record's `sell`), on both RPCs at finalized: "yes" when this very transaction is
+    // final and ok, its meta saying plainly what W's account of that mint held after it, so what W holds of it now came
+    // after, a stranger's (a full sell sells exactly the balance both RPCs read, and W gets its own units only from its
+    // one buy: whatever it left, a front-run unit included, is a stranger's; review of bf467ae7, F1); "no" when both say
+    // plainly the balance is W's own (no record of the sell, as one written before this card; it failed; it never
+    // landed, past its blockhash on both); "unsure" while neither has it final yet and its blockhash still runs (it may
+    // land or be landing: W holds, not as its own state, so the next load reads it again, at chain finality); anything
+    // else (another transaction, the RPCs differ, a meta that does not say it, an RPC down) throws, a fault read again
+    const soldOne = async (m: string): Promise<"yes" | "no" | "unsure"> => {
+      const by = x.sell?.[m];
+      if (by === undefined) return "no";
+      const signed = base64.decode(by.tx);
+      if (signed.length < 65 || signed[0] !== 1) throw new Error("the owed record's sell is not one signed transaction");
+      const got = await both(rpcs, (r) => readBackMeta(r, base58.encode(signed.subarray(1, 65)), signed, "finalized"));
+      if (got.every((g) => g.got === "failed")) return "no";
+      if (got.every((g) => g.got === "none")) return (await pastOnBoth(rpcs, by.last)) ? "no" : "unsure";
+      if (!got.every((g) => g.got === "ok")) throw new Error(`the sell reads ${got.map((g) => g.got).join("/")}`);
+      const [a, b] = got.map((g) => leftAfter(g.meta, w.address, m));
+      if (a === null || b === null || a !== b) throw new Error("the sell's meta does not say plainly what W's account held after it");
+      return "yes";
     };
     const readW = async (unclaimed?: SolanaTeardownUnclaimed) => {
+      // each recorded sell read before W's accounts (review of bf467ae7, F5): a sell final before them left W's account
+      // as the sell's meta says, so a balance read after it is a stranger's; a sell landing between the two reads is not
+      // final at the first, reads unsure, and W holds to the next load. What a sell read throws counts only for a mint
+      // W still holds.
+      const sells = new Map<string, "yes" | "no" | "unsure" | { fault: unknown }>();
+      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));
       const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));
       const accounts = Object.fromEntries(addresses.map((a, i) => [a, [held[0][i + 1]!, held[1][i + 1]!] as const]));
       const holding = x.mints.flatMap((m) => {
@@ -917,7 +917,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // a W that holds is never planned (nothing of it is closed, whatever its other accounts read), unless what it holds
       // is a balance its full sell did not leave (card sol-rent-back-dust-burn: soldOut), which the kit's teardown burns,
       // exactly the balance both RPCs read, before the close
-      const sold = holding.length > 0 ? await soldOut(holding.map((t) => t.mint)) : "yes";
+      let sold: "yes" | "no" | "unsure" = "yes";
+      for (const t of holding) {
+        const s = sells.get(t.mint) ?? "no";
+        if (typeof s === "object") throw s.fault;
+        if (s === "no") sold = "no";
+        else if (s === "unsure" && sold === "yes") sold = "unsure";
+      }
       if (sold !== "yes") return { k: "holds" as const, steady: sold === "no" };
       const burn = holding.map((t) => t.ata);
       try {
@@ -951,7 +957,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       return { keep: t.plan.keep, signed: await signAll(t.frames.map((f) => f.wire)), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
     });
     if (teardown === null) return end("gave_up", "the teardown");
-    if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: its sell has not filled" : "W holds a token it traded: its sell not read back yet", teardown.ok.holds);
+    if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: no full sell of it landed" : "W holds a token it traded: its sell not final yet", teardown.ok.holds);
     if (teardown.ok.refused !== undefined) return end("refused", teardown.ok.refused);
     for (const f of teardown.ok.signed) await send(f.signed, f.signature);
     // each frame on both RPCs, failed on both, or past its blockhash on both, within the rent back's one bound
