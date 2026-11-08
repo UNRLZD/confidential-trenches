@@ -41,6 +41,7 @@ export const CHANGED = [
   "scripts/live-checks/delete-refund-readback.mjs",
   "scripts/live-checks/delete-refund-readback.sweep.mjs",
   "scripts/live-checks/evm-buy-gas-depth.mjs",
+  "scripts/live-checks/evm-buy-gas-floor.mjs",
   "scripts/live-checks/evm-buy-hookdata-fee.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
