@@ -1,5 +1,5 @@
 import { Link, NavLink } from "react-router";
-import { AccountCluster, PhoneAccount } from "../screens/signin/Account.tsx";
+import { AccountCluster, PhoneAccount, useAccountShape } from "../screens/signin/Account.tsx";
 import { Logo } from "./Logo.tsx";
 import { ChainChip, SearchButton, SearchField } from "./Search.tsx";
 
@@ -15,6 +15,7 @@ const PAGES = [
 const on = ({ isActive }: { isActive: boolean }) => (isActive ? "on" : undefined);
 
 export function Header() {
+  const shape = useAccountShape();
   return (
     <header className="tb">
       <Link to="/" className="logo-link">
@@ -30,7 +31,7 @@ export function Header() {
       <SearchField />
       <SearchButton />
       <ChainChip />
-      <div className="tb-acct">
+      <div className="tb-acct" data-shape={shape}>
         <AccountCluster />
       </div>
     </header>
@@ -40,13 +41,14 @@ export function Header() {
 // The phone header (R5 P.phHeader, app.js:393-399): the compact logo, the search button that opens the same search
 // (Search.tsx) and the account side (Sign in or the balance pill); its other controls join with their screens.
 export function PhoneHeader() {
+  const shape = useAccountShape();
   return (
     <header className="phh">
       <Link to="/" className="hit44 logo-link">
         <Logo phone />
       </Link>
       <SearchButton phone />
-      <div className="phh-acct">
+      <div className="phh-acct" data-shape={shape}>
         <PhoneAccount />
       </div>
     </header>

@@ -12,7 +12,12 @@
 //     source.ts loadToken) and its row opens its page; a pasted unknown mint finds No results;
 //   - the chain filter offers All and the chains with data (Solana, Base); Base keeps only the Base row of a symbol both
 //     chains hold, Solana only the Solana one, All both;
-//   - no horizontal scroll, no layout shift from the first paint (CLS 0), no page error, signed in and out.
+//   - no horizontal scroll, no layout shift from the first paint (CLS 0), no page error, signed in and out;
+//   - the account side (card app-header-first-paint-auth): the stored sign-in hint (signin/hint.ts) seeded as the state
+//     each view lands in, the hint read back as that state, and signed out R5's room before Sign in (12 layout px after
+//     the chip, 20 after the narrow bar's button, 4 after the phone's); two views with a wrong hint (out but signed in,
+//     in but signed out) land in the right state with the hint corrected (signed out inside the kept box, CLS 0), and
+//     their next load has R5's room and CLS 0.
 //   node apps/terminal/test/header-search/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,14 +35,22 @@ const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
 const desk = (width) => ({ name: String(width), viewport: { width, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false });
+const phone = { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, mode: "phone" };
+// each width signed in and signed out, the sign-in hint (card app-header-first-paint-auth, src/screens/signin/hint.ts)
+// stored as the state it lands in; then two views whose stored hint is wrong
+const BASE_VIEWS = [{ ...desk(1920), mode: "field" }, { ...desk(1440), mode: "field" }, { ...desk(1024), mode: "field" }, { ...desk(900), mode: "button" }, phone];
 const VIEWS = [
-  { ...desk(1920), mode: "field", kind: "signed" },
-  { ...desk(1440), mode: "field", kind: "tap" },
-  { ...desk(1024), mode: "field", kind: "signed" },
-  { ...desk(900), mode: "button", kind: "signed" },
-  { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, mode: "phone", kind: "signed" },
-  { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, mode: "phone", kind: "tap" },
+  ...BASE_VIEWS.flatMap((v) => [
+    { ...v, kind: "signed", hint: "in" },
+    { ...v, kind: "tap", hint: "out" },
+  ]),
+  { ...desk(1440), mode: "field", kind: "signed", hint: "out", stale: true },
+  { ...phone, kind: "tap", hint: "in", stale: true },
 ];
+const HINT_KEY = "ct-signin-hint";
+// R5's room before the account side, layout px (proto.css): the chip sits in .tbr at its 12 px gap; the narrow bar's
+// button is the bar's own child (gap 20); the phone's 44 px button has a -6 px right margin in the header's 10 px gap
+const GAP = { field: 12, button: 20, phone: 4 };
 
 const recorded = JSON.parse(readFileSync(path.join(APP, "test/discover-data/helper-lists-2026-11-01.json"), "utf8"));
 const tokenRest = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-token-2026-11-03.json"), "utf8")).rest;
@@ -89,6 +102,16 @@ async function open(browser, route, v, reads) {
     }
     return route(r);
   });
+  // the stored sign-in hint, in the terminal's own frame (APP_HOST's storage), before any of its script runs
+  await ctx.addInitScript(
+    ({ key, hint, app }) => {
+      if (location.origin === app && !sessionStorage.getItem("__hinted")) {
+        sessionStorage.setItem("__hinted", "1");
+        localStorage.setItem(key, hint);
+      }
+    },
+    { key: HINT_KEY, hint: v.hint, app: APP_HOST },
+  );
   await ctx.addInitScript(() => {
     window.__cls = 0;
     window.__long = 0;
@@ -138,6 +161,21 @@ const read = (f) =>
       rows: res ? [...res.querySelectorAll(".srr[data-token]")].map((e) => ({ token: e.getAttribute("data-token"), chain: e.getAttribute("data-chain"), href: e.getAttribute("href"), on: e.getAttribute("aria-selected") })) : [],
       chips: [...document.querySelectorAll('[data-testid="chain-chips"] .srch-cchip')].map((b) => `${b.getAttribute("data-chain")}:${b.getAttribute("aria-pressed")}`),
       menu: [...document.querySelectorAll('[data-testid="chain-menu"] .srch-mrow')].map((b) => `${b.getAttribute("data-chain")}:${b.textContent}`),
+      header: [...document.querySelectorAll(".tb [data-header], .phh [data-header]")].filter(vis).map((e) => e.getAttribute("data-header"))[0] ?? null,
+      hint: (() => {
+        try {
+          return localStorage.getItem("ct-signin-hint");
+        } catch {
+          return "unreadable";
+        }
+      })(),
+      // the room between the last search control and Sign in, in layout px (signed out)
+      gap: (() => {
+        const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--fit-zoom")) || 1;
+        const before = [document.querySelector('.tb [data-testid="chain-chip"]'), document.querySelector('.tb [data-testid="search-button"]'), document.querySelector('[data-testid="search-button-phone"]')].find(vis);
+        const signin = [document.querySelector('.tb .btn-signin'), document.querySelector('.phh [data-header="S1.1"]')].find(vis);
+        return before && signin ? (signin.getBoundingClientRect().left - before.getBoundingClientRect().right) / z : null;
+      })(),
       scroll: document.documentElement.scrollWidth - window.innerWidth,
       cls: window.__cls ?? null,
       shifts: window.__shifts ?? [],
@@ -153,19 +191,52 @@ let n = 0;
 try {
   for (const v of VIEWS) {
     n++;
-    const tag = `@${v.name} ${v.kind === "signed" ? "in" : "out"}`;
-    const shot = (name) => (SHOTS ? v.page.screenshot({ path: path.join(SHOTS, `search-${v.name}-${v.kind === "signed" ? "in" : "out"}-${name}.png`) }) : null);
+    const tag = `@${v.name} ${v.kind === "signed" ? "in" : "out"}${v.stale ? ` (stale hint ${v.hint})` : ""}`;
+    const shot = (name) => (SHOTS ? v.page.screenshot({ path: path.join(SHOTS, `search-${v.name}-${v.kind === "signed" ? "in" : "out"}${v.stale ? "-stale" : ""}-${name}.png`) }) : null);
     const reads = { lists: 0, token: [] };
     const route = await harnessRoute(dir, v.kind);
     const { ctx, page, f, errors } = await open(browser, route, v, reads);
     v.page = page;
     check(await ready(f, TRENDING[0].token), `${tag}: / did not draw the top Trending token`);
+    await f.waitForSelector('.tb [data-header="S1.1"], .tb [data-header="S1.3"], .tb [data-header="S1.4"], .phh [data-header="S1.1"], .phh [data-header="S1.3"], .phh [data-header="S1.4"]', { state: "attached", timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(300);
     const p0 = await read(f);
     check(p0.field === (v.mode === "field") && p0.button === (v.mode === "button") && p0.phoneButton === (v.mode === "phone"), `${tag}: field ${p0.field}, button ${p0.button}, phone button ${p0.phoneButton}; want the ${v.mode}`);
     check((p0.chip !== null) === (v.mode === "field"), `${tag}: the chain chip drawn ${p0.chip !== null}`);
     if (v.mode === "field") check(p0.chip === "all", `${tag}: the chain chip starts at ${p0.chip}, want all`);
     check(p0.scroll <= 0, `${tag}: horizontal scroll ${p0.scroll}px`);
+    // the account side: its landed state, the hint corrected to it, and signed out R5's room before Sign in
+    const want = v.kind === "signed" ? "in" : "out";
+    check(want === "out" ? p0.header === "S1.1" : p0.header === "S1.3" || p0.header === "S1.4", `${tag}: the account side landed as ${p0.header}, want signed ${want}`);
+    check(p0.hint === want, `${tag}: the stored hint reads ${p0.hint} after the state landed, want ${want}`);
+    // a stale "in" hint that lands signed out keeps its reserved box for that load (Sign in inside it, nothing moves)
+    if (want === "out" && !(v.stale && v.hint === "in")) check(p0.gap !== null && Math.abs(p0.gap - GAP[v.mode]) < 0.75, `${tag}: ${p0.gap === null ? "no" : p0.gap.toFixed(1)} layout px before Sign in, want R5's ${GAP[v.mode]}`);
+    if (v.stale) {
+      // a wrong hint ends in the right state with the hint corrected (above); a stale "out" that lands signed in grows
+      // the box once (counted, not checked); the next load reads the corrected hint: R5's room and CLS 0
+      if (v.hint === "in") check(p0.cls === 0, `${tag}: layout shift ${p0.cls}, want 0 (Sign in lands inside the kept box): ${JSON.stringify(p0.shifts)}`);
+      await shot("closed");
+      await page.reload({ waitUntil: "load" });
+      let g = null;
+      for (const until = Date.now() + 8_000; !g && Date.now() < until; ) {
+        g = page.frames().find((x) => x !== page.mainFrame() && x.url().startsWith(`${APP_HOST}/`)) ?? null;
+        if (!g) await page.waitForTimeout(100);
+      }
+      check(g && (await ready(g, null)), `${tag}: the next load drew no token page`);
+      if (g) {
+        await g.waitForSelector('.tb [data-header="S1.1"], .tb [data-header="S1.3"], .tb [data-header="S1.4"], .phh [data-header="S1.1"], .phh [data-header="S1.3"], .phh [data-header="S1.4"]', { state: "attached", timeout: 10_000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        const q = await read(g);
+        check(want === "out" ? q.header === "S1.1" : q.header === "S1.3" || q.header === "S1.4", `${tag}: the next load landed as ${q.header}`);
+        check(q.hint === want, `${tag}: the next load's hint reads ${q.hint}, want ${want}`);
+        if (want === "out") check(q.gap !== null && Math.abs(q.gap - GAP[v.mode]) < 0.75, `${tag}: the next load has ${q.gap === null ? "no" : q.gap.toFixed(1)} layout px before Sign in, want R5's ${GAP[v.mode]}`);
+        check(q.cls === 0, `${tag}: the next load's layout shift ${q.cls}, want 0: ${JSON.stringify(q.shifts)}`);
+        await shot("next-load");
+      }
+      check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
+      await ctx.close();
+      continue;
+    }
     await shot("closed");
 
     // open the search
@@ -275,4 +346,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} views`);
   process.exit(1);
 }
-console.log(`PASS ${n} views (1920, 1440, 1024: the field; 900: the button; 390: the phone button; signed in and out) from the built app inside the stand-in shell: typed ${TARGET.symbol} found and opened, a listed and an unlisted address, an unknown mint, chains All, Solana and Base${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} views (1920, 1440, 1024: the field; 900: the button; 390: the phone button; each signed in and out with its stored hint, then two views with a wrong hint) from the built app inside the stand-in shell: typed ${TARGET.symbol} found and opened, a listed and an unlisted address, an unknown mint, chains All, Solana and Base, R5's room before Sign in, the hint corrected${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
