@@ -44,11 +44,13 @@ const COPY = (own) =>
       `[^]{0,200}?!${I}\\.verify\\((${I}),\\4,${I}\\.decode\\(\\6\\)\\)\\)\\)throw Error\\(\`the signature for \\$\\{\\6\\} does not verify\`\\);return \\2\\.set\\(\\7,1\\),\\{wire:\\2,lastValidBlockHeight:\\3\\}\\}`,
   );
 const LEG = (reg) => new RegExp(`,(${I})\\.ok\\?\\(${esc(reg)}\\((${I}),(${I})\\),\\{leg:${I},rec:${I},assembled:\\2,checked:\\3,`);
-// the teardown: the kit's checked teardown copies each frame's wire before it simulates, checks those copies and returns
-// them as wires; the flow registers those copies, after the checks pass, before it signs
+// the teardown: the kit's checked teardown copies each frame's wire before it simulates, refuses a frame whose wire the
+// simulation changed (review 5 F6), checks those copies and returns them as wires; the flow registers those copies,
+// after the checks pass, before it signs
 const TEARDOWN_CHECKED = new RegExp(
   `async function (${I})\\(${I},${I},(${I}),(${I}),${I},(${I})\\)\\{let ${I}=async\\((${I}),(${I})\\)=>\\{let (${I})=${I}\\(${I},\\5,${I}\\),(${I})=\\7\\.map\\((${I})=>Uint8Array\\.from\\(\\9\\.wire\\)\\),(${I})=\\{accounts:\\2,wallet:\\3,simulations:await \\4\\(\\7\\)` +
-    `[^;]{0,80}?\\};return\\{plan:\\5,frames:\\7,wires:\\8,reads:\\10,verdict:${I}\\(\\8,${I},\\10\\)\\}\\}`,
+    `[^;]{0,80}?\\};return \\7\\.forEach\\(\\((${I}),(${I})\\)=>\\{let (${I})=\\11\\.wire,(${I})=\\8\\[\\12\\];\\13 instanceof Uint8Array&&\\13\\.length===\\14\\.length&&\\13\\.every\\(\\((${I}),(${I})\\)=>\\15===\\14\\[\\16\\]\\)\\|\\|${I}\\(\`teardown frame \\$\\{\\12\\} changed while it simulated\`\\)\\}\\),` +
+    `\\{plan:\\5,frames:\\7,wires:\\8,reads:\\10,verdict:${I}\\(\\8,${I},\\10\\)\\}\\}`,
 );
 const TEARDOWN_SIGNED = (checked, reg) =>
   new RegExp(
@@ -59,19 +61,28 @@ const teardown = (js, reg) => {
   const c = TEARDOWN_CHECKED.exec(js);
   return c !== null && TEARDOWN_SIGNED(c[1], reg).test(js);
 };
+// the signing page's rent back (pool-sell.ts): it checks again, and signs, the copies the kit's checked teardown
+// returned (t.wires), never the frames' own arrays (main 53921971's t.frames.map((f) => f.wire), review 5 F5)
+const RENT_BACK = (checked) =>
+  new RegExp(`(${I})=await ${esc(checked)}\\([^]{0,500}?\\);return ${I}\\(\\1\\.wires,${I},\\1\\.reads\\),\\{keep:\\1\\.plan\\.keep,signed:await ${I}\\(\\1\\.wires\\),`);
+const rentBack = (js) => {
+  const c = TEARDOWN_CHECKED.exec(js);
+  return c !== null && RENT_BACK(c[1]).test(js);
+};
 
 export const MARKS = Object.freeze([
   "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy",
   "the signer refuses a wire not in the registry before anything else",
   "the signer signs, verifies and returns only the registry's copy, with its height",
   "a trade leg is registered only once its verdict is ok, with its checked copy",
-  "a teardown's frames are copied before their simulations and registered only after their checks pass, before they are signed",
+  "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed",
+  "the rent back checks again and signs the teardown's checked copies, never its frames' wires",
 ]);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which lines the bundle carries. */
 export function facts(index, js) {
   const r = REGISTRY.exec(js);
-  const has = r ? [true, GATE(r[5]).test(js), COPY(r[5]).test(js), LEG(r[2]).test(js), teardown(js, r[2])] : MARKS.map(() => false);
+  const has = r ? [true, GATE(r[5]).test(js), COPY(r[5]).test(js), LEG(r[2]).test(js), teardown(js, r[2]), rentBack(js)] : MARKS.map(() => false);
   return { index, sha384: sha384(js), carries: Object.fromEntries(MARKS.map((k, i) => [k, has[i]])) };
 }
 
