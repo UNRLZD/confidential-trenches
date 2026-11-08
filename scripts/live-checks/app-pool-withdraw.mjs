@@ -14,6 +14,7 @@
 // return_key "withdraw" (the kit's RETURN_KEYS): no address, no amount, no other field. After the answer every pool row
 // is still inside its panel (the desktop panel clips: a line that pushed a row out would hide it). A screenshot of each
 // run is kept.
+// After: app
 //   node scripts/live-checks/app-pool-withdraw.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-pool-withdraw.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

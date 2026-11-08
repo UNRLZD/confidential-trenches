@@ -29,6 +29,7 @@
 // watch's own pausedAt rule (block h's header, ft_balance_of at its parent and at h by hash, the pin at both) reads
 // open then halted at the Pause's block and halted then open at the Unpause's. Every view is read through the helper's
 // own functions (apps/helper/src/token-status/status.ts viewOutcome, haltOf and pausedFrom), never a copy.
+// After: helper
 //   node scripts/live-checks/helper-usdc-event-watch.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

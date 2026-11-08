@@ -14,6 +14,7 @@
 // neither shape, and the release ledger tells a release-92-or-later build from any other. This file reaches no package
 // code (the import check holds it). The PR's own build runs judge(read, { ledger: false }) in scripts/ci/bundle-checks.mjs,
 // since it is cut as a release only after its merge.
+// After: sign
 //   node scripts/live-checks/pool-senders-next-page.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

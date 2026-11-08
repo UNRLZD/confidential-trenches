@@ -13,6 +13,7 @@
 //     signer's ft_withdraw to the vault: 403 receiver_is_vault. Without --seen the line says so and nothing is judged
 //     for it: no signer is seen until a real 1Click delivery or refund went through the deployed helper.
 // Every answer carries a full-sha X-Helper-Commit, SIGN_HOST echoed, a JSON body under 1 KB and no tx_hash.
+// After: helper
 //   node scripts/live-checks/helper-id-intents.mjs [--base <url>] [--seen <signer>] [--record <file>]   PASS 0, FAIL 1, error 2
 import "../net-window.mjs";
 import { randomBytes } from "node:crypto";

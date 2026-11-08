@@ -23,6 +23,7 @@
 // The run records the sha256 of the /app.js SIGN_HOST served, and the deposit run passes only when it is the newest
 // release list's pin for SIGN_HOST's /app.js (packages/signpage/releases): so a host still serving an older release,
 // whose deposit.quote is refused just the same, fails here.
+// After: sign
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers

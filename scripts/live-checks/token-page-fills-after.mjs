@@ -18,6 +18,7 @@
 // The helper side, read live (Origin APP_HOST): the top of the helper's Trending column (its row Jupiter's) read as a
 // token page answers 200 with filling false (a read named on chain, its search late, is read again 6 s later, up to
 // HELPER_TRIES times). Run after the helper's deploy: the helper deploys first, then the app.
+// After: app
 //   node scripts/live-checks/token-page-fills-after.mjs [--helper <url>] [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST, framed by the stand-in shell; the helper at HELPER_HOST (or --helper)
 //   node scripts/live-checks/token-page-fills-after.mjs --harness [--build <dir>] [--helper <url>] [--shots <dir>] [--record <file>]

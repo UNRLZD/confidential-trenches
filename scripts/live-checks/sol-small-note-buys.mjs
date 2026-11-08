@@ -13,6 +13,7 @@
 // that packages/wallet/src/pool/balances.ts solanaTapSpendOf gives (solanaPoolBuyMaxSpend at the worst venue).
 // Scripts reach Blindfill only through the kit's entry (check:imports), so the rung and the tip cap are written here;
 // packages/wallet/test/pool-balances.test.ts holds them equal to SOL_LADDER.min and SOL_TIP_CAP.
+// After: helper
 //   node scripts/live-checks/sol-small-note-buys.mjs [--pin <program>:<feePayer>] [--rent <lamportsPerByte>x<factor>] [--record <file>]
 //     --rent: a harness run, that rent standing for the pair's read (the helper is still read live)
 //     PASS exit 0, FAIL exit 1, error exit 2

@@ -21,6 +21,7 @@
 //   - on desktop, after the panel is closed, the footer's Verify pill opens it again, once: it starts from loading,
 //     reads both RPCs afresh (none with no vault named) and draws the same end state, and its close returns home.
 // A screenshot of each width is kept.
+// After: app --network {network}
 //   node scripts/live-checks/app-verify-mount.mjs [--network mainnet|testnet] [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST/verify as it is served; --network is the network its build names (the deploy passes
 //     it, read from the build's _headers; mainnet when not given)

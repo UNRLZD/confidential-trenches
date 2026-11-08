@@ -13,6 +13,7 @@
 // topic is its account. A trade is judged when its bundle's receipt holds a swap log in some operation's run; its trader
 // must then be the account of one such operation, never the bundler, never none. It passes only when at least one trade
 // is judged and none is wrong; with none judged it FAILS with that reason, never passes on nothing.
+// After: helper
 //   node scripts/live-checks/helper-tape-4337-trader.mjs [--base <url>] [--chain robinhood|base] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

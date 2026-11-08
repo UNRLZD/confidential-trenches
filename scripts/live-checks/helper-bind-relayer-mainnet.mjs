@@ -11,6 +11,7 @@
 // nothing and moves no money.
 // Before mainnet-v1.json exists there is no mainnet vault to carry for: scripts/ci/helper-live-checks.mjs lists the check
 // not-applicable then, and run by hand it stops with exit 2.
+// After: helper
 //   node scripts/live-checks/helper-bind-relayer-mainnet.mjs --commit <sha> [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";

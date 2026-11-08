@@ -15,6 +15,7 @@
 //     the route check (a helper before the card answers 422 bad_route).
 // It passes only when there is at least one pool, the fee answers 200 with a fee collector, each plant answers its own
 // status and code with no hash, and every answer carries a full-sha X-Helper-Commit.
+// After: helper
 //   node scripts/live-checks/evm-sell-hook-converge.mjs [--base <url>] [--record <file>]
 //   node scripts/live-checks/evm-sell-hook-converge.mjs --local [--record <file>]   (the same plants through this tree's
 //     helper sender in process, throwaway keys, no provider: what a deploy of this tree answers)

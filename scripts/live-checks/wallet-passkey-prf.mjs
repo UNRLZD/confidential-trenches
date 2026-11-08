@@ -46,6 +46,7 @@
 //     on Backup within 500 ms of it drawn draws no words, and one after the window opens the backup with 12 words. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
 //     "invalid-code" and stores nothing; the 12 words of A.8's seed (16 zero bytes, built from the pinned BIP-39 list)
 //     sign in as A.8's T_0, the check's own derivation, with code_saved true.
+// After: sign
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-passkey-prf.mjs --harness [--site <dir>] ...   the same steps on the app's browser
 //     harness (apps/terminal/test/harness) with SIGN_HOST's real name mapped to it, serving SIGN_HOST's build

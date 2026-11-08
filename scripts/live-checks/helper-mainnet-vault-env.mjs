@@ -18,6 +18,7 @@
 // implicit account: the key its id names) and at least RELAYER_FLOOR_YOCTO, one withdrawal's floor (send.ts
 // withdrawFloor, else every send answers relayer_low). Every answer carries a full-sha X-Helper-Commit and APP_HOST
 // echoed, a JSON body under 1 KB, and no tx_hash.
+// After: helper
 //   node scripts/live-checks/helper-mainnet-vault-env.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { createRequire } from "node:module";

@@ -41,6 +41,7 @@
 // It reads eth_getCode of anvil's account 0 at latest on the venue's two feeProviders (the kit's evmPoolVenues()); it
 // passes only when both are code (else it names why), the fee answers are right for both callers (the same fee within
 // one epoch), every plant answers 422 with its own code, and the headers are as for a Solana pool.
+// After: helper
 //   node scripts/live-checks/helper-pool-senders.mjs --pool <address> [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

@@ -23,6 +23,7 @@
 //     reads on two RPCs;
 //   - Done closes the sheet, and Portfolio's total reads $73.18.
 // A screenshot of the To row, a pool picked, the address and the deposited state is kept per width and scheme.
+// After: app
 //   node scripts/live-checks/deposit-to-pool.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served), framed by the stand-in shell
 //   node scripts/live-checks/deposit-to-pool.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

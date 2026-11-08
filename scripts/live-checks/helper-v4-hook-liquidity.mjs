@@ -14,6 +14,7 @@
 // trade is judged when its receipt names one such trader whose net move of the token has the trade's side, and no v2,
 // v3 or curve swap moves the token in the same transaction. Each judged trade's amt must be exactly that move. It passes only when
 // at least one trade is judged and none is wrong; with none judged it FAILS with that reason, never passes on nothing.
+// After: helper
 //   node scripts/live-checks/helper-v4-hook-liquidity.mjs [--base <url>] [--chain base|robinhood] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

@@ -19,6 +19,7 @@
 // Not read here, and why: a real mainnet note's deposit, proof, buy, sell and withdraw on the deployed page wait for
 // SOL_POOLS.mainnet (card pool-sol-deploy-mainnet) and the funded run of card pool-sol-mainnet-run; until then the
 // pinned mainnet build is proven by packages/signpage/test/main-mainnet-pools.test.ts (a planted pin, test only).
+// After: sign
 //   node scripts/live-checks/signpage-pool-mainnet.mjs [--record <file>]
 //   node scripts/live-checks/signpage-pool-mainnet.mjs --local [<dir>] [--record <file>]
 //     --local: no network; Playwright answers SIGN_HOST from a build dir under its own _headers (default: this
