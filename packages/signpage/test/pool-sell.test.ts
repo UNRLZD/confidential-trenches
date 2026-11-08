@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { after, test } from "node:test";
+import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -2965,4 +2966,13 @@ test("N21: a plan refusal at the sweep's read ends the pass refused, not given u
   assert.equal(w.told.at(-1)?.state, "refused", JSON.stringify(w.told.slice(-3)));
   assert.match(w.told.at(-1)!.detail, /is owned by 11111111111111111111111111111111/);
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+});
+
+// Card signers-own-bytes, review 5 F4 (mutant T8, main 53921971's shape): the rent back checks and signs the copies the
+// kit checked (t.wires), never the frames' own arrays. The frames never leave the kit's teardown call, which refuses one
+// changed while it simulates, so a run cannot tell the two apart today; this holds the shape that keeps it so.
+test("the rent back checks and signs the kit's checked copies, never the frames' wires", () => {
+  const src = readFileSync(new URL("../src/pool-sell.ts", import.meta.url), "utf8");
+  assert.match(src, /\n {6}checkSolanaTeardownFrames\(t\.wires, ctx, t\.reads\);\n {6}return \{ keep: t\.plan\.keep, signed: await signAll\(t\.wires\), /);
+  assert.doesNotMatch(src, /\bt\.frames\b/, "the frames are never read");
 });

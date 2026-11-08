@@ -40,6 +40,12 @@ class Chain {
   foreignKey: string | null = null;
   sent: string[] = [];
   txs = new Map<string, "ok" | "failed">();
+  /** the access key nonce answered as a JSON string (nearcore answers a number; a hostile RPC may not) */
+  nonceString = false;
+  /** the access key nonce answered as this exact JSON string, on both RPCs */
+  nonceText: string | undefined = undefined;
+  /** the head hash both RPCs answer (default: a 32-byte hash per height) */
+  headHash: string | null = null;
   /** U's key nonce at a height (default: the current one at every height) */
   nonceAt: (h: number) => bigint = () => this.nonce;
   /** what the second RPC answers differently, at the same height */
@@ -62,13 +68,13 @@ class Chain {
       name,
       block: async (p) => {
         const h = "block_id" in p ? p.block_id : this[k].height;
-        return { result: { header: { height: h, hash: sk.hash ?? base58.encode(sha256(new TextEncoder().encode(`b${h}`))), timestamp_nanosec: "1" } } };
+        return { result: { header: { height: h, hash: sk.hash ?? this.headHash ?? base58.encode(sha256(new TextEncoder().encode(`b${h}`))), timestamp_nanosec: "1" } } };
       },
       query: async (p) => {
         const h = at(p);
         if (p.request_type === "view_access_key_list") {
           const own = `ed25519:${base58.encode(Uint8Array.from(U.match(/../g)!, (x) => parseInt(x, 16)))}`;
-          const keys = [{ public_key: this.foreignKey ?? own, access_key: { nonce: Number(sk.nonce ?? this.nonceAt(h)), permission: "FullAccess" } }];
+          const keys = [{ public_key: this.foreignKey ?? own, access_key: { nonce: this.nonceText ?? (this.nonceString ? String(sk.nonce ?? this.nonceAt(h)) : Number(sk.nonce ?? this.nonceAt(h))), permission: "FullAccess" } }];
           if (this.keys > 1) keys.push({ public_key: "ed25519:11111111111111111111111111111111", access_key: { nonce: 0, permission: "FullAccess" } });
           return { result: { block_height: h, keys } };
         }
@@ -277,6 +283,18 @@ test("the payload rule refuses a memo, another receiver, an amount at U's whole 
   for (const f of bad) assert.throws(f, MoveOutRefused);
 });
 
+test("the payload rule reads an amount only as plain digits and the registration with its two args alone: \"+5\", \"-5\" or an extra arg is refused (review 5 F3)", () => {
+  const ok = moveCalls(TO, 5n, true, STORAGE_MIN);
+  checkMoveCalls(U, TO, TOKEN, ok, 2_500_000n, STORAGE_MIN);
+  for (const amount of ["+5", "-5", " 5", "05", "5.0", "0x5", "5n"]) {
+    assert.throws(() => checkMoveCalls(U, TO, TOKEN, [ok[0]!, { ...ok[1]!, args: { receiver_id: TO, amount } }], 2_500_000n, STORAGE_MIN), /the amount is above/, `amount ${JSON.stringify(amount)}`);
+  }
+  assert.throws(
+    () => checkMoveCalls(U, TO, TOKEN, [{ ...ok[0]!, args: { account_id: TO, registration_only: true, extra: 1 } }, ok[1]!], 2_500_000n, STORAGE_MIN),
+    /the registration is storage_deposit/,
+  );
+});
+
 test("bytes both RPCs refuse for U's NEAR answer gas and are kept: once U holds the cost the same bytes land, none signed anew", async () => {
   const chain = new Chain();
   chain.registered.add(TO);
@@ -325,6 +343,77 @@ test("M2 the token's code is not the kit's pin on both RPCs: nothing signed (W:9
   chain.code = "11111111111111111111111111111111";
   assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" });
   assert.equal(chain.sent.length, 0);
+});
+
+test("L a nonce of 2^64-1 or more, answered as a string by both RPCs, is unread: nonce + 1 would not fit the u64 signed (exit-ids-out delta review 4, finding 3)", async () => {
+  for (const nonce of [2n ** 64n - 1n, 2n ** 64n, 2n ** 70n]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonceString = true;
+    chain.nonce = nonce;
+    seedOpens = 0;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" }, String(nonce));
+    assert.equal(seedOpens, 0);
+    assert.equal(chain.sent.length, 0);
+  }
+  // the largest nonce whose next one fits a u64 is read, and signed at 2^64-1
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.nonceString = true;
+  chain.nonce = 2n ** 64n - 2n;
+  assert.equal((await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain))).kind, "moved");
+  assert.equal(decode(chain.sent[0]!).nonce, 2n ** 64n - 1n);
+});
+
+test("a nonce answered as \"+5\", \"-5\" or any string but plain digits, the same on both RPCs, is unread: nothing opened or signed (review 5 F3)", async () => {
+  for (const text of ["+5", "-5", "05", " 5", "5.0", "0x5"]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonceText = text;
+    seedOpens = 0;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" }, text);
+    assert.equal(seedOpens, 0);
+    assert.equal(chain.sent.length, 0);
+  }
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.nonceText = "5";
+  assert.equal((await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain))).kind, "moved");
+  assert.equal(decode(chain.sent[0]!).nonce, 6n);
+});
+
+test("M1 a head hash of 33 or 31 bytes, the same on both RPCs, is unread: nothing opened or signed (review 4 M1)", async () => {
+  for (const n of [33, 31, 0]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.headHash = base58.encode(new Uint8Array(n).fill(7));
+    seedOpens = 0;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" }, String(n));
+    assert.equal(seedOpens, 0);
+    assert.equal(chain.sent.length, 0);
+  }
+});
+
+test("L1 the amount is a digit string: a JSON number or a bigint is refused (review 4 L1)", () => {
+  for (const amount of [5, 5n, "05", "5.0", " 5"]) {
+    const calls = moveCalls(TO, 5n, false, 0n);
+    (calls.at(-1)!.args as Record<string, unknown>).amount = amount;
+    assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls, 10n, 0n), MoveOutRefused, String(amount));
+  }
+  assert.equal(checkMoveCalls(U, TO, TOKEN, moveCalls(TO, 5n, false, 0n), 10n, 0n).calls.at(-1)!.args.amount, "5");
+});
+
+test("L2 a call with a field of any other name is refused as a move-out refusal, never a TypeError (review 4 L2)", () => {
+  for (const extra of [new Uint8Array(1), "unsigned", { x: 1 }, undefined]) {
+    for (const k of [0, 1]) {
+      const calls = moveCalls(TO, 5n, true, STORAGE_MIN) as unknown as Record<string, unknown>[];
+      calls[k]!.x = extra;
+      assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls as never, 10n, STORAGE_MIN), (e: unknown) => e instanceof MoveOutRefused && /method, args, gas and deposit/.test((e as Error).message), `call ${k}: ${String(extra)}`);
+    }
+  }
+  const calls = moveCalls(TO, 5n, false, 0n) as unknown as Record<string, unknown>[];
+  delete calls[0]!.gas;
+  assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls as never, 10n, 0n), MoveOutRefused);
 });
 
 test("M3 U's one key is not U's own key: nothing signed", async () => {
@@ -507,6 +596,32 @@ test("L1 the payload rule refuses the vault and intents.near, called straight", 
     await assert.rejects(moveOutHeld("op1", to, deps(await heldOp("sender_struck"), chain)), MoveOutRefused);
     assert.equal(chain.sent.length, 0);
   }
+});
+
+test("L1 the vault as a String or a toJSON object (=== compares identity, JSON.stringify signs the vault's name): refused by the rule and by moveOutHeld, before anything is read or signed", async () => {
+  const strings = /U, the typed account, the token and every account id are strings/;
+  for (const to of [NET.vault!, "intents.near"]) {
+    for (const look of [new String(to), { toJSON: () => to }] as unknown as string[]) {
+      assert.throws(() => checkMoveCalls(U, look, TOKEN, moveCalls(look, 1n, false, 0n), 2_500_000n, 0n), strings);
+      assert.throws(() => checkMoveCalls(U, look, TOKEN, moveCalls(look, 1n, true, STORAGE_MIN), 2_500_000n, STORAGE_MIN), strings);
+      // the typed account a string, an account id in the calls not one (a toJSON object's function is not cloned)
+      const calls = moveCalls(TO, 1n, true, STORAGE_MIN);
+      calls[0]!.args.account_id = look;
+      assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls, 2_500_000n, STORAGE_MIN), typeof look === "object" && "toJSON" in (look as object) ? /not plain data/ : strings);
+      const chain = new Chain();
+      chain.registered.add(to);
+      seedOpens = 0;
+      let reads = 0;
+      const d0 = deps(await heldOp("sender_struck"), chain);
+      const counted = d0.rpcs.map((r) => Object.fromEntries(Object.entries(r).map(([k, f]) => [k, typeof f === "function" ? (...a: unknown[]) => (reads++, (f as (...x: unknown[]) => unknown).apply(r, a)) : f]))) as unknown as typeof d0.rpcs;
+      await assert.rejects(moveOutHeld("op1", look, { ...d0, rpcs: counted }), strings);
+      assert.equal(reads, 0, "no RPC is read with it");
+      assert.equal(chain.sent.length, 0);
+      assert.equal(seedOpens, 0);
+    }
+  }
+  assert.throws(() => checkMoveCalls(new String(U) as unknown as string, TO, TOKEN, moveCalls(TO, 1n, false, 0n), 2_500_000n, 0n), strings);
+  assert.throws(() => checkMoveCalls(U, TO, new String(TOKEN) as unknown as string, moveCalls(TO, 1n, false, 0n), 2_500_000n, 0n), strings);
 });
 
 test("D3 the look-back nonce must agree on both RPCs: the second answers a lower nonce at height - SETTLE_BLOCKS only, the record stays followed", async () => {

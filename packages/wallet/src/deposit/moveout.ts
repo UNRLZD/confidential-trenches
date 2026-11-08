@@ -115,6 +115,16 @@ const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !
 const DIGITS = /^(0|[1-9][0-9]*)$/;
 const IMPLICIT = /^[0-9a-f]{64}$/;
 const big = (x: unknown): bigint | null => (typeof x === "string" && DIGITS.test(x) ? BigInt(x) : typeof x === "number" && Number.isSafeInteger(x) && x >= 0 ? BigInt(x) : null);
+/** A base58 hash of exactly 32 bytes, else null. */
+const hash32 = (x: unknown): Uint8Array | null => {
+  if (typeof x !== "string") return null;
+  try {
+    const b = base58.decode(x);
+    return b.length === 32 ? b : null;
+  } catch {
+    return null;
+  }
+};
 const resultAt = (a: unknown, at: number): Obj | undefined => {
   const r = isObj(a) && a.error === undefined ? a.result : undefined;
   return isObj(r) && r.error === undefined && r.block_height === at ? r : undefined;
@@ -132,8 +142,12 @@ function keyNonce(keys: unknown, at: number, own: string): bigint | null {
   const k = resultAt(keys, at);
   const list = k?.keys;
   if (!Array.isArray(list) || list.length !== 1 || !isObj(list[0]) || list[0].public_key !== own || !isObj(list[0].access_key)) return null;
-  return big(list[0].access_key.nonce);
+  // below 2^64 - 1, so the nonce signed next (this + 1) fits the u64 nearcore reads; a string answer is not capped by
+  // isSafeInteger, and Borsh keeps only 8 bytes of a larger one
+  const n = big(list[0].access_key.nonce);
+  return n !== null && n < U64_MAX ? n : null;
 }
+const U64_MAX = 2n ** 64n - 1n;
 /** U's key nonce at block `at` on both RPCs, equal, else null. */
 async function keyNonceAt(u: string, at: number, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<bigint | null> {
   const own = ownKey(u);
@@ -184,7 +198,7 @@ export async function readMoveOut(u: string, to: string, token: string, rpcs: re
         r.call("gas_price", [at]),
       ]);
       const head = isObj(b) && isObj(b.result) && isObj(b.result.header) ? b.result.header : undefined;
-      if (!head || head.height !== at || typeof head.hash !== "string") return null;
+      if (!head || head.height !== at || typeof head.hash !== "string" || hash32(head.hash) === null) return null;
       const nonce = keyNonce(keys, at, own);
       if (resultAt(code, at)?.code_hash !== VAULT_TOKEN_CODE_HASH) return null; // the token's code is the pin (W:928)
       const a = resultAt(acct, at);
@@ -208,6 +222,8 @@ export async function readMoveOut(u: string, to: string, token: string, rpcs: re
 class Borsh {
   private parts: Uint8Array[] = [];
   private int(x: bigint, n: number) {
+    // an integer that does not fit n bytes is refused, never cut to its low bytes (as delegate.ts's uint)
+    if (x < 0n || x >> BigInt(8 * n) !== 0n) throw new MoveOutRefused(`an integer does not fit ${n} bytes`);
     const b = new Uint8Array(n);
     for (let k = 0; k < n; k++) b[k] = Number((x >> BigInt(8 * k)) & 0xffn);
     this.parts.push(b);
@@ -241,7 +257,22 @@ const INTENTS = "intents.near";
  * The payload rule (WU-05's plain move rows): what is signed is exactly this shape, or it is refused. The typed account
  * is never U, the token, the token's network's vault or intents.near, whoever calls (review of d791adda, L1).
  */
-export function checkMoveCalls(u: string, to: string, token: string, calls: readonly MoveCall[], usdc: bigint, storageMin: bigint): void {
+export function checkMoveCalls(u: string, to: string, token: string, given: readonly MoveCall[], usdc: bigint, storageMin: bigint): SealedMove {
+  // the rule reads a deep copy, and the copy it passed is what can be signed (sealed below): a change to `given` later,
+  // or to anything it holds, reaches nothing signed. Every name is a string: === compares a String's or a toJSON
+  // object's identity while JSON.stringify signs the name it stands for (a vault passing as another account)
+  const strings = "U, the typed account, the token and every account id are strings";
+  if (typeof u !== "string" || typeof to !== "string" || typeof token !== "string") throw new MoveOutRefused(strings);
+  let calls: MoveCall[];
+  try {
+    calls = structuredClone([...given]);
+  } catch {
+    throw new MoveOutRefused("the calls are not plain data");
+  }
+  // each call is exactly method, args, gas and deposit: a field of any other name is refused, never frozen or signed
+  if (!calls.every((c) => isObj(c) && Object.keys(c).sort().join() === "args,deposit,gas,method" && isObj(c.args))) throw new MoveOutRefused("each call is method, args, gas and deposit, nothing else");
+  // the copy's account ids, read once (a getter on `given` ran in the clone and is gone)
+  if (!calls.every((c) => isObj(c) && isObj(c.args) && (c.args.receiver_id === undefined || typeof c.args.receiver_id === "string") && (c.args.account_id === undefined || typeof c.args.account_id === "string"))) throw new MoveOutRefused(strings);
   if (!IMPLICIT.test(u) || to === u || to === token) throw new MoveOutRefused("the typed account is U or the token");
   const net = Object.values(NEAR_NETWORKS).find((n) => n.usdc === token);
   if (net === undefined) throw new MoveOutRefused("the token is no release's USDC");
@@ -249,18 +280,43 @@ export function checkMoveCalls(u: string, to: string, token: string, calls: read
   const last = calls.at(-1);
   if (calls.length < 1 || calls.length > 2 || !last || last.method !== "ft_transfer" || last.deposit !== 1n || last.gas !== MOVE_GAS.ft_transfer) throw new MoveOutRefused("one ft_transfer with 1 yocto, last");
   if (Object.keys(last.args).join() !== "receiver_id,amount" || last.args.receiver_id !== to) throw new MoveOutRefused("ft_transfer names the typed account and an amount, no memo");
-  const amount = big(last.args.amount);
+  const amount = typeof last.args.amount === "string" ? big(last.args.amount) : null; // a string, as NEP-141 reads it: never a JSON number
   if (amount === null || amount < 1n || amount > usdc - 1n) throw new MoveOutRefused("the amount is above U's USDC less one base unit");
   if (calls.length === 2) {
     const r = calls[0]!;
     if (r.method !== "storage_deposit" || r.args.account_id !== to || r.args.registration_only !== true || Object.keys(r.args).length !== 2 || r.deposit !== storageMin || r.gas !== MOVE_GAS.storage_deposit)
       throw new MoveOutRefused("the registration is storage_deposit(the typed account, registration_only) with the token's minimum");
   }
+  return seal({ signer: u, receiver: token, calls });
 }
 
-/** The transaction's bytes, its hash and the signed bytes, U's key given. */
-export function signMoveTx(u: string, publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, token: string, blockHash: string, calls: readonly MoveCall[]): { hash: string; signed: string } {
-  const tx = new Borsh().string(u).u8(0).fixed(publicKey).u64(nonce).string(token).fixed(base58.decode(blockHash)).u32(calls.length);
+/** A move a check passed (card signers-own-bytes): U, the receiver and the calls, deep-frozen, the only thing signMoveTx
+ *  signs. Only a check of this module makes one (seal, module private); a copy, a look-alike or a changed one is not. */
+export type SealedMove = { readonly signer: string; readonly receiver: string; readonly calls: readonly MoveCall[] };
+const SEALED = new WeakSet<object>();
+const frozen = <T>(v: T): T => {
+  if (typeof v === "object" && v !== null) {
+    for (const x of Object.values(v)) frozen(x);
+    Object.freeze(v);
+  }
+  return v;
+};
+function seal(move: SealedMove): SealedMove {
+  const v = frozen({ signer: move.signer, receiver: move.receiver, calls: move.calls });
+  SEALED.add(v);
+  return v;
+}
+
+/** The transaction's bytes, its hash and the signed bytes, U's key given. Module private (card signers-own-bytes): it signs
+ *  only a move a check of this module sealed, as that move holds it (U, the receiver, the calls), with U's own key. */
+function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove): { hash: string; signed: string } {
+  if (!SEALED.has(move)) throw new MoveOutRefused("the move is not one a check of this module passed");
+  const { signer: u, receiver: token, calls } = move;
+  // the block hash is exactly 32 bytes: one of another length moves every field after it in the bytes nearcore reads
+  const blockHash32 = hash32(blockHash);
+  if (blockHash32 === null) throw new MoveOutRefused("the block hash is not 32 bytes of base58");
+  if (Array.from(publicKey, (b) => b.toString(16).padStart(2, "0")).join("") !== u) throw new MoveOutRefused("the key is not the move's U");
+  const tx = new Borsh().string(u).u8(0).fixed(publicKey).u64(nonce).string(token).fixed(blockHash32).u32(calls.length);
   for (const c of calls) tx.u8(2).string(c.method).bytes(new TextEncoder().encode(JSON.stringify(c.args))).u64(c.gas).u128(c.deposit);
   const bytes = tx.done();
   const digest = sha256(bytes);
@@ -362,6 +418,8 @@ async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: r
  * resumes: it sends recorded bytes again and reads them, and never signs. Answers how far it got.
  */
 export async function moveOutHeld(opId: string, to: string | null, deps: MoveOutDeps): Promise<MoveOutOutcome> {
+  // the typed account is a string or nothing, before any read (checkMoveCalls refuses it again)
+  if (to !== null && typeof to !== "string") throw new MoveOutRefused("U, the typed account, the token and every account id are strings");
   const { ops, rpcs } = deps;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const seedLock = deps.seedLock ?? (<T>(fn: () => Promise<T>) => fn());
@@ -435,9 +493,9 @@ export async function moveOutHeld(opId: string, to: string | null, deps: MoveOut
     if (read.usdc <= 1n) return { outcome: { kind: "empty" } };
     const storageMin = read.registered ? 0n : await readTokenStorageMin(network, rpcs);
     const calls = moveCalls(typed, read.usdc - 1n, !read.registered, storageMin);
-    checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);
-    const gas = calls.reduce((a, c) => a + c.gas, MOVE_GAS.send);
-    const need = gas * read.gasPrice * GAS_PRICE_MARGIN + calls.reduce((a, c) => a + c.deposit, 0n);
+    const move = checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);
+    const gas = move.calls.reduce((a, c) => a + c.gas, MOVE_GAS.send);
+    const need = gas * read.gasPrice * GAS_PRICE_MARGIN + move.calls.reduce((a, c) => a + c.deposit, 0n);
     if (read.free < need) return { outcome: { kind: "gas", need: need - read.free, u: U } };
     const nonce = read.nonce + 1n;
 
@@ -448,7 +506,7 @@ export async function moveOutHeld(opId: string, to: string | null, deps: MoveOut
         const k = depositId(seed, BigInt(op.follow.s), op.follow.i);
         try {
           if (k.id !== U) throw new MoveOutRefused("the seed's U_{s,i} is not the op's U");
-          return signMoveTx(U, k.publicKey, k.secretKey, nonce, token, read.blockHash, calls);
+          return signMoveTx(k.publicKey, k.secretKey, nonce, read.blockHash, move);
         } finally {
           k.secretKey.fill(0);
         }

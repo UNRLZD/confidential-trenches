@@ -1,0 +1,152 @@
+{
+  "_note": {
+    "good": "facts() over card signers-own-bytes' build on origin/main cbfeded6 (reviews 1-5 folded; release-98): PASS",
+    "bad": "SIGN_HOST read at 2026-11-08 07:39Z, before this card's deploy: FAIL, every mark named",
+    "planted": "the good build with one line changed each (A-J): each FAIL on the mark it breaks"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-NIDOuWAYxtGM4Gv3PY4Ok74g2SJU/Nh5VaCIw/Lxz5SLihSAhX/nFzdmoV+XmBuo\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-NIDOuWAYxtGM4Gv3PY4Ok74g2SJU/Nh5VaCIw/Lxz5SLihSAhX/nFzdmoV+XmBuo",
+    "carries": {
+      "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+      "the signer refuses a wire not in the registry before anything else": true,
+      "the signer signs, verifies and returns only the registry's copy, with its height": true,
+      "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+      "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": true,
+      "the rent back checks again and signs the teardown's checked copies, never its frames' wires": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-95ZhqfEhpjzYG3GmcWcqtIJDPhubAGv/cubDYEfnPbBZnRLNjPdhfjmmA0TQZ0lD\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-95ZhqfEhpjzYG3GmcWcqtIJDPhubAGv/cubDYEfnPbBZnRLNjPdhfjmmA0TQZ0lD",
+    "carries": {
+      "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
+      "the signer refuses a wire not in the registry before anything else": false,
+      "the signer signs, verifies and returns only the registry's copy, with its height": false,
+      "a trade leg is registered only once its verdict is ok, with its checked copy": false,
+      "a teardown's frames are copied before their simulations and registered only after their checks pass, before they are signed": false
+    }
+  },
+  "planted": {
+    "A the gate bypassed: no copy, the caller's wire": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+eHfqeQP2z3hx0RyobVSM6WXZnVh9XVVFFtHK9Gike5A+JkEtFXLCrZ0r3JGZQfM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-+eHfqeQP2z3hx0RyobVSM6WXZnVh9XVVFFtHK9Gike5A+JkEtFXLCrZ0r3JGZQfM",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": false,
+        "the signer signs, verifies and returns only the registry's copy, with its height": false,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": true,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": true
+      }
+    },
+    "B the registry keeps the caller's array, no copy": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0DHkv2ysF79BicNevSCszVHP1JTqFRZkEPOy8+CmGyXzS1zSkkbwIhjNDYzCH3xV\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-0DHkv2ysF79BicNevSCszVHP1JTqFRZkEPOy8+CmGyXzS1zSkkbwIhjNDYzCH3xV",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
+        "the signer refuses a wire not in the registry before anything else": false,
+        "the signer signs, verifies and returns only the registry's copy, with its height": false,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": false,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": false,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": false
+      }
+    },
+    "C the length not compared": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-frLah+ai4y4h2Bkbv9uayZOG1nATI912Y8mZwO54Ev7dPTtNQ/CAz7DMsMFuHra0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-frLah+ai4y4h2Bkbv9uayZOG1nATI912Y8mZwO54Ev7dPTtNQ/CAz7DMsMFuHra0",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
+        "the signer refuses a wire not in the registry before anything else": false,
+        "the signer signs, verifies and returns only the registry's copy, with its height": false,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": false,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": false,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": false
+      }
+    },
+    "D the height not compared": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EriJy3+y+v7xewjCoh8fGGxsdXk04ORRQcyCMLNSBbfyW3pirwbSCPLt3RvoYjHp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-EriJy3+y+v7xewjCoh8fGGxsdXk04ORRQcyCMLNSBbfyW3pirwbSCPLt3RvoYjHp",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
+        "the signer refuses a wire not in the registry before anything else": false,
+        "the signer signs, verifies and returns only the registry's copy, with its height": false,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": false,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": false,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": false
+      }
+    },
+    "E the signer handed the caller's message": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-U8oTXvGsCw++tIWgsfHO8Xy7c/H4fx5erj57X1a+fJ1p+Q078Fwe5q9m6+mVkEzk\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-U8oTXvGsCw++tIWgsfHO8Xy7c/H4fx5erj57X1a+fJ1p+Q078Fwe5q9m6+mVkEzk",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": true,
+        "the signer signs, verifies and returns only the registry's copy, with its height": false,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": true,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": true
+      }
+    },
+    "F a leg registered before its verdict": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bvCK7fnNVAp2T2BXc7XBQbOoiQCTtwM4Bj0Y/OqKfAKJFGZ8xLWUBWt9Mm37RwQ+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-bvCK7fnNVAp2T2BXc7XBQbOoiQCTtwM4Bj0Y/OqKfAKJFGZ8xLWUBWt9Mm37RwQ+",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": true,
+        "the signer signs, verifies and returns only the registry's copy, with its height": true,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": false,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": true,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": true
+      }
+    },
+    "G the teardown checks the live wires, not its copies": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5SexhD0599n1Yd35C58EK5/FxyBrTmjIL2CZco71f9j3oayUt61a7X92kJo+aKR3\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-5SexhD0599n1Yd35C58EK5/FxyBrTmjIL2CZco71f9j3oayUt61a7X92kJo+aKR3",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": true,
+        "the signer signs, verifies and returns only the registry's copy, with its height": true,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": false,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": false
+      }
+    },
+    "H the teardown's frames never registered": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-aATGrJaeQQRjZVX36wMujF0hf5QYMRZKOxkRGKSzlobsIYhfmHu+2euKLJ0waW7t\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-aATGrJaeQQRjZVX36wMujF0hf5QYMRZKOxkRGKSzlobsIYhfmHu+2euKLJ0waW7t",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": true,
+        "the signer signs, verifies and returns only the registry's copy, with its height": true,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": false,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": true
+      }
+    },
+    "I the rent back checks and signs the frames' wires (main 53921971's shape)": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Gq175urUndea3oqhG4c3pqf4cJGyzZVpqdW590Xh4MG9kF3molhdKnPX7eXTLG1t\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-Gq175urUndea3oqhG4c3pqf4cJGyzZVpqdW590Xh4MG9kF3molhdKnPX7eXTLG1t",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": true,
+        "the signer signs, verifies and returns only the registry's copy, with its height": true,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": true,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": false
+      }
+    },
+    "J the teardown never refuses a frame its simulation changed": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+Gr2U9D/840cYU8soc6aJC3jBkHg/Fd3SNWMHKGRSN1VZimVwYa8jWsE/2EKA0n4\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-+Gr2U9D/840cYU8soc6aJC3jBkHg/Fd3SNWMHKGRSN1VZimVwYa8jWsE/2EKA0n4",
+      "carries": {
+        "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
+        "the signer refuses a wire not in the registry before anything else": true,
+        "the signer signs, verifies and returns only the registry's copy, with its height": true,
+        "a trade leg is registered only once its verdict is ok, with its checked copy": true,
+        "a teardown's frames are copied before their simulations, refused when a simulation changed one, and registered only after their checks pass, before they are signed": false,
+        "the rent back checks again and signs the teardown's checked copies, never its frames' wires": false
+      }
+    }
+  }
+}

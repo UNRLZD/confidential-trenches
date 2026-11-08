@@ -909,8 +909,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
         return simulations;
       };
       const t = await solanaTeardownChecked(w.address, plan, accounts, [held[0][0]?.lamports ?? 0n, held[1][0]?.lamports ?? 0n], { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastHeight }, simulate);
-      checkSolanaTeardownFrames(t.frames.map((f) => f.wire), ctx, t.reads);
-      return { keep: t.plan.keep, signed: await signAll(t.frames.map((f) => f.wire)), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
+      // the copies the kit checked, handed to no one, are the bytes checked again here and signed (card signers-own-bytes)
+      checkSolanaTeardownFrames(t.wires, ctx, t.reads);
+      return { keep: t.plan.keep, signed: await signAll(t.wires), last: bh.lastHeight, unclaimed: t.reads.unclaimed };
     });
     if (teardown === null) return end("gave_up", "the teardown");
     if (teardown.ok === null) return end("holds", "W holds a token it traded: its sell has not filled");

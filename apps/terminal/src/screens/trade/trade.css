@@ -47,6 +47,9 @@
 .trb-ctaLbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .trb-cta [data-time] { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .trb-cta .trb-live { color: var(--blue); }
+/* Slow's counter holds the room of 99.9s, so the centred label does not move when it reaches 10.0s (card
+   app-legend-holds-still; Landing's runs under SLOW_MS, 4 characters) */
+.trb-cta .trb-live[data-slow] { display: inline-block; min-width: 5ch; text-align: left; font-kerning: none; }
 .trb-line { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
 .trb .trb-row { display: flex; align-items: center; gap: 8px; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; background: var(--bg-raised); font-size: 12px; font-weight: 500; line-height: 16px; color: var(--text-1); white-space: nowrap; box-sizing: border-box; }
 .trb .trb-row > svg { flex: none; color: var(--text-3); }
