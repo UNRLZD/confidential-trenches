@@ -28,6 +28,11 @@
 //   provider picks the block: a low final changes nothing (the floor is the higher), a high one the other cannot reach
 //   refuses the pass (a stop, never a wrong answer), and a fake hash fails the agreement. Money that lands after the
 //   pinned block is step 7's 72-h re-reads' (./wallets.ts afterRestore), as anything after the restore.
+// - The pass block's time (delta review 6): on providers that read blocks (`block`, ../withdraw/relay.ts relayRpc),
+//   the pass reads its block's header on both while it is served (the release pair stops serving a block by height
+//   after about 20 h on FastNEAR and 28 h on dRPC, read 8 Nov 19:58Z), both naming the agreed hash and the same time,
+//   and keeps that time with the pass (passTimeMs). Step 7's clock (./after.ts) counts from it and never reads the
+//   block again.
 // - A pass is used only while fresh and only on the providers it was opened on (review P1, P2): building a reader reads
 //   both finals once and refuses a pass more than VAULT_SYNC_LAG_MAX below the higher of them; a step that exists to see
 //   money after a height (./after.ts rereadOnOpen and secondScan) opens its own pass above it; and the pass keeps
@@ -59,6 +64,7 @@
 import { VAULT_SYNC_LAG_MAX } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
+import { blockTimeMsOf } from "../withdraw/request.ts";
 import type { IdReader, IdState } from "./wallets.ts";
 
 export const INTENTS = "intents.near";
@@ -90,7 +96,29 @@ type Ask = "final" | { height: number } | Block;
 /** The restore pass's one block, read and agreed on both providers by openRestorePass; only its own are taken. */
 export type RestorePass = { readonly network: NearNetwork; readonly rpcs: readonly [string, string]; readonly h: number; readonly hash: string };
 // each pass openRestorePass opened, with the two provider objects it was opened on (matched by identity, review P2)
-const PASSES = new WeakMap<RestorePass, readonly [NearRpc, NearRpc]>();
+// and its block's time in ms (null on providers that do not read blocks)
+const PASSES = new WeakMap<RestorePass, { readonly rpcs: readonly [NearRpc, NearRpc]; readonly ms: number | null }>();
+
+/** A NEAR provider that also reads block headers (`block`), as ../withdraw/relay.ts relayRpc. */
+export type BlockRpc = NearRpc & { block(params: { block_id: number } | { finality: "final" }, signal?: AbortSignal): Promise<unknown> };
+const readsBlocks = (r: NearRpc): r is BlockRpc => typeof (r as Partial<BlockRpc>).block === "function";
+/** What a block read by a height with no block answers (NEAR skips heights; an old block is no longer served). */
+export const NO_BLOCK = Symbol("no block");
+/** One provider's block header: its height, hash and time (ms); NO_BLOCK for UNKNOWN_BLOCK on a read by height. */
+export async function blockHeader(r: BlockRpc, params: { block_id: number } | { finality: "final" }, what: string): Promise<{ h: number; hash: string; ms: number } | typeof NO_BLOCK> {
+  const a = await r.block(params);
+  if (!isObj(a)) throw new Error(`${r.name}: ${what}: not a JSON-RPC answer`);
+  if (a.error !== undefined) {
+    const cause = isObj(a.error) && isObj(a.error.cause) ? a.error.cause.name : undefined;
+    if ("block_id" in params && cause === "UNKNOWN_BLOCK") return NO_BLOCK;
+    throw new Error(`${r.name}: ${what}: ${String(isObj(a.error) ? (a.error.name ?? a.error.message) : "an error")}`.slice(0, 200));
+  }
+  const h = isObj(a.result) && isObj(a.result.header) ? a.result.header : undefined;
+  if (!h || !Number.isSafeInteger(h.height) || (h.height as number) <= 0 || typeof h.hash !== "string" || typeof h.timestamp_nanosec !== "string")
+    throw new Error(`${r.name}: ${what}: not a block header`);
+  if ("block_id" in params && h.height !== params.block_id) throw new Error(`${r.name}: ${what}: answered block ${String(h.height)}, not ${params.block_id}`);
+  return { h: h.height as number, hash: h.hash, ms: blockTimeMsOf(h.timestamp_nanosec) };
+}
 
 /** The view's answer and its block, or null for an account the provider says does not exist (view_account only). */
 async function view(rpc: NearRpc, params: Obj, what: string, ask: Ask): Promise<{ v: unknown; b: Block | null }> {
@@ -195,8 +223,18 @@ export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, N
     const [x, y] = await Promise.all([at(0, { height: floor }, "the pass's block"), at(1, { height: floor }, "the pass's block")]);
     if (x.hash !== y.hash) throw new Error(`the RPCs' blocks at ${floor} differ (${x.hash}, ${y.hash}); the restore does not start`);
     if (opts.after !== undefined && floor <= opts.after) throw new Error(`the pass at block ${floor} is not past block ${opts.after}; read again once the chain is past it`);
+    // the block's time, read now while both serve it: both headers name the agreed hash, and both times agree (one
+    // provider's early time would end step 7's re-reads at once; delta review 6)
+    let ms: number | null = null;
+    if (readsBlocks(rpcs[0]) && readsBlocks(rpcs[1])) {
+      const hs = await Promise.all([blockHeader(rpcs[0], { block_id: floor }, "the pass's block"), blockHeader(rpcs[1], { block_id: floor }, "the pass's block")]);
+      for (const [k, y] of hs.entries()) if (y === NO_BLOCK || y.hash !== x.hash) throw new Error(`${rpcs[k]!.name}: the pass's block ${floor} is not ${x.hash}; the restore does not start`);
+      const [t0, t1] = hs as { ms: number }[];
+      if (t0!.ms !== t1!.ms) throw new Error(`the RPCs' times of the restore's block ${floor} differ; the restore does not start`);
+      ms = t0!.ms;
+    }
     const pass: RestorePass = Object.freeze({ network, rpcs: Object.freeze([rpcs[0].name, rpcs[1].name]) as readonly [string, string], h: floor, hash: x.hash });
-    PASSES.set(pass, Object.freeze([rpcs[0], rpcs[1]] as const));
+    PASSES.set(pass, Object.freeze({ rpcs: Object.freeze([rpcs[0], rpcs[1]] as const), ms }));
     return pass;
   })();
 }
@@ -206,14 +244,19 @@ export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, N
  * (the owned steps of ./after.ts take only those; review R1).
  */
 export function isRestorePass(pass: unknown, on?: { network: NearNetwork; rpcs: readonly [NearRpc, NearRpc] }): pass is RestorePass {
-  const own = typeof pass === "object" && pass !== null ? PASSES.get(pass as RestorePass) : undefined;
+  const own = typeof pass === "object" && pass !== null ? PASSES.get(pass as RestorePass)?.rpcs : undefined;
   if (own === undefined) return false;
   return on === undefined || ((pass as RestorePass).network === on.network && own[0] === on.rpcs[0] && own[1] === on.rpcs[1]);
 }
 
+/** The pass's block time in ms, read once at its open (null: opened on providers that do not read blocks, or no pass). */
+export function passTimeMs(pass: RestorePass): number | null {
+  return PASSES.get(pass)?.ms ?? null;
+}
+
 // a pass openRestorePass gave, on this network and these very providers (review P2: by identity, never by name)
 function pinOf(pass: RestorePass, network: NearNetwork, rpcs: readonly [NearRpc, NearRpc]): Block {
-  const own = PASSES.get(pass);
+  const own = PASSES.get(pass)?.rpcs;
   if (own === undefined) throw new Error("the pass is not one openRestorePass opened");
   if (pass.network !== network || own[0] !== rpcs[0] || own[1] !== rpcs[1]) throw new Error("the pass was opened on other RPCs");
   return { h: pass.h, hash: pass.hash };

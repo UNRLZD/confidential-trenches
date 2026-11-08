@@ -376,7 +376,7 @@ const timeOf = (h: number): number => T0 + (h - 1000) * 1000;
 const MVAULT = NEAR_NETWORKS.mainnet.vault;
 const MSCOPE = vaultScopeOf(keccak_256, MVAULT, USDC);
 const mid = (i: number) => depositAccount(SEED, MSCOPE, i).account;
-type StepWorld = { tip: number; vault?: number; intents?: number; skip?: Set<number>; finalMs?: number; restoreHash?: string; money: string[] };
+type StepWorld = { tip: number; vault?: number; intents?: number; skip?: Set<number>; finalMs?: number; restoreHash?: string; restoreMs?: number; retain?: number; money: string[] };
 const tree = { size: 0, depth: 0, root: "0" };
 const vaultConfig = { version: "blindfill-vault 0.1.0", asset: USDC, scope: String(MSCOPE), max_tree_depth: 32, min_deposit: "1000000", max_relay_fee_bps: 5000, page_max: VAULT_CONSTANTS.PAGE_MAX };
 function stepChain(url: string, s: StepWorld): AfterRpc {
@@ -399,9 +399,10 @@ function stepChain(url: string, s: StepWorld): AfterRpc {
     },
     block: async (p) => {
       const h = "block_id" in p ? p.block_id : s.tip;
-      if ("block_id" in p && (h > s.tip || s.skip?.has(h))) return noBlock;
+      // `retain`: the depth a provider still serves a block by height (FastNEAR about 20.7 h, dRPC about 28 h, read 8 Nov)
+      if ("block_id" in p && (h > s.tip || s.skip?.has(h) || (s.retain !== undefined && h < s.tip - s.retain))) return noBlock;
       const hash = h === 1000 && s.restoreHash ? s.restoreHash : hashOf(h);
-      const ms = "finality" in p && s.finalMs !== undefined ? s.finalMs : timeOf(h);
+      const ms = "finality" in p && s.finalMs !== undefined ? s.finalMs : h === 1000 && s.restoreMs !== undefined ? s.restoreMs : timeOf(h);
       return { jsonrpc: "2.0", result: { header: { height: h, hash, timestamp_nanosec: String(BigInt(ms) * 1_000_000n) } } };
     },
   };
@@ -410,7 +411,7 @@ function stepChain(url: string, s: StepWorld): AfterRpc {
 function stepPair(base: StepWorld) {
   const a: StepWorld = { ...base }, b: StepWorld = { ...base };
   const rpcs = [stepChain(FAST, a), stepChain(DRPC, b)] as const;
-  const clear = { vault: undefined, intents: undefined, skip: undefined, finalMs: undefined, restoreHash: undefined };
+  const clear = { vault: undefined, intents: undefined, skip: undefined, finalMs: undefined, restoreHash: undefined, restoreMs: undefined, retain: undefined };
   return { rpcs, set: (x: Partial<StepWorld>, y: Partial<StepWorld> = x) => void (Object.assign(a, clear, x), Object.assign(b, clear, y)) };
 }
 const so = { sleep: noSleep, tries: 1, first: () => 0 };
@@ -465,9 +466,6 @@ test("step 7's re-reads: due for 72 h of block time past the restore's block on 
   assert.equal((await run()).due, true);
   set({ tip: 2000 }, { tip: 2000, finalMs: timeOf(end) });
   assert.equal((await run()).due, true);
-  // the restore block's header must name the pass's hash on both providers
-  set({ tip: 2000 }, { tip: 2000, restoreHash: "F".padEnd(44, "a") });
-  await assert.rejects(run(), /^Error: https:\/\/near\.drpc\.org: the restore's block 1000 is not the pass's /);
 });
 
 test("step 7's second scan: due on its own reads of both finals and the bound block, the vault read past the bound, ids on a pass above it", async () => {
@@ -498,9 +496,45 @@ test("step 7's second scan: due on its own reads of both finals and the bound bl
   assert.deepEqual(await scan(), { due: false }, "1602's time T0 + 602 s: due past T0 + 722 s");
   set({ tip: 1723, skip: new Set([1601]) });
   assert.equal((await scan()).due, true);
-  // the restore block's header must name the pass's hash on both providers
-  set({ tip: 1723 }, { tip: 1723, restoreHash: "F".padEnd(44, "a") });
-  await assert.rejects(scan(), /^Error: https:\/\/near\.drpc\.org: the restore's block 1000 is not the pass's /);
+});
+
+// delta review 6: the release pair stops serving a block by height after about 20.7 h (FastNEAR) and 28 h (dRPC), read
+// on mainnet 8 Nov 19:58Z. The pass keeps its block's time from its open, read on both while served; the steps never
+// read the restore block again, and the second scan's bound stands in a later block once the bound is old.
+test("step 7's clock: the pass keeps its block's time from its open, agreed on both; the steps run on past the providers' block depth", async () => {
+  const HOUR = 3_600; // blocks per hour at the world's 1 s
+  const gc = { retain: Math.round(20.7 * HOUR) }, gcB = { retain: 28 * HOUR };
+  // the pass's block header on both: the agreed hash and one time, or the open is refused (P2: one provider's early time
+  // would end the re-reads at once)
+  {
+    const { rpcs, set } = stepPair({ tip: 1000, money: [] });
+    set({}, { restoreHash: "F".padEnd(44, "a") });
+    await assert.rejects(openRestorePass("mainnet", rpcs, so), /^Error: https:\/\/near\.drpc\.org: the pass's block 1000 is not \S+; the restore does not start$/);
+    set({ restoreMs: timeOf(1000) - REREAD_MS }, {});
+    await assert.rejects(openRestorePass("mainnet", rpcs, so), /^Error: the RPCs' times of the restore's block 1000 differ; the restore does not start$/);
+    set({}, { restoreMs: timeOf(1000) - REREAD_MS });
+    await assert.rejects(openRestorePass("mainnet", rpcs, so), /times of the restore's block 1000 differ/);
+  }
+  const { rpcs, set } = stepPair({ tip: 1000, money: [id(11), mid(at(0, 1))] });
+  const restored = await openRestorePass("mainnet", rpcs, so);
+  const plan = await afterRestore(SEED, store, SCOPE, await restoreDepositIds(SEED, SCOPE, r5(), await idReaderAt("mainnet", rpcs, restored, so)), restored);
+  // a header naming another time for block 1000 after the open changes nothing: the block is not read again
+  set({ tip: 2000, restoreMs: timeOf(1000) - REREAD_MS }, { tip: 2000, restoreMs: timeOf(1000) - REREAD_MS });
+  assert.equal((await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so })).due, true);
+  // 21 h on: FastNEAR no longer serves block 1000; the re-reads still read the money at 11
+  const at21 = 1000 + 21 * HOUR;
+  set({ tip: at21, ...gc }, { tip: at21, ...gcB });
+  const got = await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so });
+  assert.ok(got.due);
+  assert.deepEqual(got.ids.find((x) => x.i === 11), { lane: 3, i: 11, id: id(11), state: "money" });
+  // the second scan first run then: due, on a later block's time for the long-gone bound block, and it reads
+  const scanned = await secondScan({ seed64: SEED, network: "mainnet", rpcs, restored, wallets: { wallets: [], unread: [] }, gap: 3, opts: { ...so, margin: 2 } });
+  assert.ok(scanned.due);
+  assert.deepEqual(scanned.ids.lanes[0]!.money, [at(0, 1)]);
+  // past 72 h on both: the re-reads end, never throwing
+  const at73 = 1000 + 73 * HOUR;
+  set({ tip: at73, ...gc }, { tip: at73, ...gcB });
+  assert.deepEqual(await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so }), { due: false });
 });
 
 // ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------
