@@ -6,6 +6,8 @@ import { ROUTES } from "../../routes/routes.ts";
 import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
+import { firstShape, hintOf, readHint, shapeOf, writeHint } from "./hint.ts";
+import type { Hint } from "./hint.ts";
 import { headerModel, usd } from "./model.ts";
 import type { HeaderModel } from "./model.ts";
 import { useDepositSheet } from "../deposit/source.tsx";
@@ -26,11 +28,25 @@ function Balance({ m }: { m: HeaderModel }) {
 }
 
 /** The desktop top bar's right cluster. */
+/** The account side's shape (hint.ts, card app-header-first-paint-auth): the stored hint read in the first render,
+ *  before the first paint (none: "out", a new visitor), kept while the state loads; then hint.ts shapeOf. The hint is
+ *  written whenever a snapshot holds a state. */
+export function useAccountShape(): Hint {
+  const src = useSigninSource();
+  const [first] = useState(() => firstShape(readHint()));
+  const landed = hintOf(src.snapshot);
+  useEffect(() => {
+    if (landed) writeHint(landed);
+  }, [landed]);
+  return shapeOf(headerModel(src.snapshot).kind, first);
+}
+
 export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean }) {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
   const deposit = useDepositSheet();
   const m = headerModel(src.snapshot, useBalance(src.snapshot));
+  const shape = useAccountShape();
   const [menu, setMenu] = useState(initialMenu);
   const box = useRef<HTMLDivElement>(null);
 
@@ -52,6 +68,15 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
 
   // The skeleton (S1.2), signed out (S1.1) and signed in (S1.3/S1.4) are three clusters, each its own key: when the
   // state lands the one drawn replaces the skeleton at the bar's end, so nothing on screen moves across it (BAR-04).
+  // S1.2 where the hint says signed out: Sign in's own box, blank, so Sign in lands in it with nothing moving
+  if (m.kind === "loading" && shape === "out")
+    return (
+      <div className="tbr" data-header="S1.2" key="loading-out">
+        <span className="btn-signin sk" aria-hidden="true" style={{ width: "auto", height: 42, borderRadius: 11, display: "flex", alignItems: "center", color: "transparent" }}>
+          <W id="signIn" />
+        </span>
+      </div>
+    );
   if (m.kind === "out")
     return (
       <div className="tbr" data-header="S1.1" key="out">
@@ -133,7 +158,19 @@ export function PhoneAccount() {
   const { setOpen } = useSigninSheet();
   const deposit = useDepositSheet();
   const m = headerModel(src.snapshot, useBalance(src.snapshot));
-  // as on desktop: the skeleton, Sign in and the balance pill are each their own key, so one replaces another (BAR-04)
+  const shape = useAccountShape();
+  // as on desktop: the skeleton, Sign in and the balance pill are each their own key, so one replaces another (BAR-04);
+  // where the hint says signed out, the skeleton is Sign in's own box, blank
+  if (m.kind === "loading" && shape === "out")
+    return (
+      <div className="tbr-ph" key="loading-out">
+        <span className="hit44" data-header="S1.2" aria-hidden="true">
+          <span className="signin" style={{ color: "transparent" }}>
+            <W id="signIn" />
+          </span>
+        </span>
+      </div>
+    );
   if (m.kind === "out")
     return (
       <div className="tbr-ph" key="out">

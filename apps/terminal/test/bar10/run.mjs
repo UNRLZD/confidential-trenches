@@ -126,6 +126,11 @@ try {
   const fetchFn = async (u) => new Response(readFileSync(path.join(dir, decodeURIComponent(new URL(u).pathname))));
   // `late`: the answers come late (LATE); a page closed meanwhile drops its answer, which is no fault of the screen
   const answering = (late) => async (ctx) => {
+    // the sign-in hint (card app-header-first-paint-auth, src/screens/signin/hint.ts) as a signed-in session leaves it:
+    // written "in" in APP_HOST's storage when the snapshot first held signed in, so each load is a signed-in reload
+    await ctx.addInitScript(({ app }) => {
+      if (location.origin === app) localStorage.setItem("ct-signin-hint", "in");
+    }, { app: APP_HOST });
     if (late) await ctx.addInitScript(HOLD_SHELL, { app: APP_HOST, ms: LATE.shellMs });
     await ctx.route(LISTS_URL, async (r) => {
       if (late) await wait(LATE.helperMs);

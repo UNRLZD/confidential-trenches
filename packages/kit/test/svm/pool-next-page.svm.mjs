@@ -72,9 +72,9 @@ const sizes = () => {
   return kit.solanaPoolTreeSizes({ owner: a.programAddress, data: Uint8Array.from(a.data) }, PROGRAM);
 };
 const pre = () => BigInt("0x" + randomBytes(31).toString("hex")) + 1n;
-const VALUE = kit.SOLANA_POOL_MIN_DEPOSIT;
+const VALUE = kit.solanaPoolNoteFloor(rent); // the least note the kit builds (audit S-01)
 const depositWire = (note, s, six = false, u = depositor) => {
-  const ix = kit.solanaPoolDepositIx(PROGRAM, u.address, note, s);
+  const ix = kit.solanaPoolDepositIx(PROGRAM, u.address, note, s, rent);
   const ixs = [six ? { ...ix, accounts: ix.accounts.slice(0, 6) } : ix];
   const { message } = kit.solanaCompileV0(u.address, ixs, svm.latestBlockhash(), []);
   const wire = new Uint8Array(1 + 64 + message.length);

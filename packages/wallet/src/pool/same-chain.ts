@@ -170,7 +170,7 @@ export function solanaSameChainDeposit(a: {
   const cost = solanaPoolDepositCost(a.fee, a.rent, a.sizes, { mark: next.held, statePage, labelPage });
   const step = sameChainNext({ ...a, next, cost, floor: solanaRentMin(a.rent, 0) });
   if (step.kind !== "deposit") return { ...step, u };
-  return { ...step, u, tx: solanaPoolDepositTx(a.program, u, { value: step.value, precommitment: step.precommitment }, a.sizes, a.blockhash) };
+  return { ...step, u, tx: solanaPoolDepositTx(a.program, u, { value: step.value, precommitment: step.precommitment }, a.sizes, a.blockhash, a.rent) };
 }
 
 /** The deposit to send on the EVM pool: the pinned pool, msg.value = the value, and deposit(value, precommitment). */
