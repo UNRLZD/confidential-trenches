@@ -20,6 +20,7 @@
 // helper-sender-fee-proof, review M1: a sale is counted paid by the Paid log of the helper's collector, so any other
 // address would let every sale read as paid), every sell answers its own status and code with no hash, and every answer
 // carries a full-sha X-Helper-Commit.
+// After: helper
 //   node scripts/live-checks/helper-sell-fee-recipient.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

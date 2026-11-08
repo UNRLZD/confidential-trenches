@@ -9,6 +9,7 @@
 // each path answers 200 text/html with the index's bytes (sha256) and the harness serves SIGN_HOST's build with spa;
 // it fails when SIGN_HOST answers a path with no file otherwise (a 404.html shipped, the _headers file served) or the
 // harness does not fall back, since then the two differ.
+// After: sign
 //   node scripts/live-checks/terminal-harness-sign-spa.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";

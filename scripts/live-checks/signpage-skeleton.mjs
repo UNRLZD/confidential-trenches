@@ -11,6 +11,7 @@
 //   - Integrity-Policy, Origin-Agent-Cluster, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and
 //     Permissions-Policy equal the policy's, and no X-Frame-Options, Cross-Origin-Embedder-Policy or report-only CSP is
 //     sent.
+// After: sign
 //   node scripts/live-checks/signpage-skeleton.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 // packages/signpage/scripts/deploy.mjs runs judge() on the build's _headers before any upload.

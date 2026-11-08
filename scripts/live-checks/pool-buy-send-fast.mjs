@@ -20,6 +20,7 @@
 //   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
 //     under PACE_P50_MS (the page's buy reads its two providers this way, one step after another);
 //   - every answer carries a full-sha X-Helper-Commit and echoes SIGN_HOST in Access-Control-Allow-Origin.
+// After: helper
 //   node scripts/live-checks/pool-buy-send-fast.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

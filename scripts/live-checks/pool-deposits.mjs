@@ -7,6 +7,7 @@
 // finalized: the deposit tx with no error, paid and signed by the run's U, calling the pinned program; the mark at the
 // run's value and nonce, the program's; the label leaf keccak256(scope, nonce) mod p and the state leaf the note's
 // commitment, both worked out here; U at 0 lamports (the kit's cost was exactly what the program took).
+// After: sign
 //   node scripts/live-checks/pool-deposits.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
 // error exit 2.

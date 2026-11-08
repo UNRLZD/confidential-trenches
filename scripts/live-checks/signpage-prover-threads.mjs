@@ -15,6 +15,7 @@
 //     and snarkjs 0.7.5's groth16.verify accepts it with the pinned withdraw.vkey;
 //   - the browser fetched /prover-thread.js and no other worker script; no CSP or Trusted Types violation but the two
 //     the planted workers make.
+// After: sign --browser webkit
 //   node scripts/live-checks/signpage-prover-threads.mjs [--base <https url>] [--browser webkit|chromium] [--proofs <n>] [--record <file>]
 //     --base: a build's own address (a Pages preview) read as SIGN_HOST is, its own origin in place of SIGN_HOST's
 //   node scripts/live-checks/signpage-prover-threads.mjs --harness [--site <dir>] [...]

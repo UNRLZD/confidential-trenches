@@ -25,6 +25,7 @@
 //     when it ran, and the run record's feeTo), and its receipt, on both RPCs, carries that collector's Paid(W, fee):
 //     topics [Paid, W], one data word exactly the sell's fee (the collector emits msg.value); and every chain has a run
 //     that sold through the helper after its redeploy.
+// After: helper
 //   node scripts/live-checks/evm-testnet-delegate-review3.mjs [--base <url>] [--record <file>] [--write-record]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes { notes, rpcs, deployments, good, bad, helper, runs } to <file> (evm-testnet-delegate-review3.answers.json,

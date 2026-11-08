@@ -8,6 +8,7 @@
 //   - /app.js holds this card's strings, which minifying keeps (string literals): the move's refusal prefix and its
 //     payload rule's refusal of U or the token as the typed account, the page's mark (dataset.held = move-out) and its
 //     draft button word.
+// After: sign
 //   node scripts/live-checks/held-deposit-way-out.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/held-deposit-way-out.mjs --local [--record <file>]   this tree's committed build
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each

@@ -13,6 +13,7 @@
 // HTTP 403 "Archive requests require a personal token" from 1,000 blocks), and on two seats whose logs differ. A refused
 // log read is asked again twice, as the wallet's pager asks a refusal of a size the provider answered (Pocket's backends
 // differ: EVM_LOG_REFUSED_AGAIN).
+// After: helper
 //   node scripts/live-checks/robinhood-mainnet-rpcs.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of robinhood-mainnet-rpcs.answers.json, and two bad runs: a real

@@ -15,6 +15,7 @@
 //     table's creation events over the row's pool block, read here on the chain's providers (MAKER_RPCS: two that
 //     answer and agree), name the same pad as the row, or none for an untagged row. A row the read does not settle is
 //     said, not failed; a sample with tagged rows and none of them settled is a FAIL, since then nothing was re-read.
+// After: helper
 //   node scripts/live-checks/market-data-evm.mjs [--base <url>] [--chain base] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read (the helper's answer and every RPC answer).
 import "../net-window.mjs";

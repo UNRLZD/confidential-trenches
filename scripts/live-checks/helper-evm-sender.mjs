@@ -33,6 +33,7 @@
 //     each sell the helper sent was sent by the fee answer's sell_sender, with gas limit 1,000,000, W's authorization of
 //     the pinned delegate on the chain's id, and a fee at least its cost (paid to the caller by the SellDelegate these
 //     runs used; pool-review-3's pays it to the Sell's feeRecipient, the fee answer's fee_recipient).
+// After: helper
 //   node scripts/live-checks/helper-evm-sender.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

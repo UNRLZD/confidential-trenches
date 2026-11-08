@@ -13,6 +13,7 @@
 //     recomputed for another vault (helper-mainnet-vault-env.mjs decoyFor and probe), and a helper carrying mainnet
 //     refuses it at check 2 as well;
 // and every answer carries a full-sha X-Helper-Commit, APP_HOST echoed, a JSON body under 1 KB, and no tx_hash.
+// After: helper
 //   node scripts/live-checks/relayer-withdraw-send.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";

@@ -10,6 +10,7 @@
 //     itself read at HELPER_HOST (GET /v1/market/lists?chain=solana, 200);
 //   - the token read: the page read GET /v1/market/token for that same mint, 200, and its row is that mint.
 // A screenshot of every load is kept.
+// After: app
 //   node scripts/live-checks/app-no-test-token.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the

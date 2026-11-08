@@ -12,6 +12,7 @@
 //   - both answers carry a full-sha X-Helper-Commit and echo APP_HOST in Access-Control-Allow-Origin.
 // The status line says whether the watch is caught up: until the event watch exists (USDC has no halt view, W:1494),
 // halted is null, not false, and the relayers hold every move.
+// After: helper
 //   node scripts/live-checks/helper-token-watch.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

@@ -21,6 +21,7 @@
 // - Card signpage-pool-flow-answers: a read that answers null names the provider's own answer (its HTTP status, the null
 //   and its context slot), a JSON-RPC error its code and message; a 429 is read again after its Retry-After; a null at
 //   a slot behind the other provider's value is read again within the walk's bound (onTwoOperators), the same slot never.
+// After: sign
 //   node scripts/live-checks/signpage-pool-flow.mjs [--program <id>] [--table <id>] [--record <file>]
 // --program or --table reads another account in the pin's place (the recorded bad answers). PASS exit 0, FAIL exit 1,
 // error exit 2.

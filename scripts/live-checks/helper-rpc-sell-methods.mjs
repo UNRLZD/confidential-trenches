@@ -14,6 +14,7 @@
 // from: that line reads n/a with the reason.
 // A caller draws 16 requests per 10 s on the route (rpc.ts RPC_CLIENT_MAX) and the list is longer, so a 429 is waited
 // out once for its Retry-After (at most 10 s) and the request sent again.
+// After: helper
 //   node scripts/live-checks/helper-rpc-sell-methods.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

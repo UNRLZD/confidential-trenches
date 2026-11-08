@@ -19,6 +19,7 @@
 // It does not prove those lines run or refuse: that is the kit's tests at the released commit
 // (test/solana-teardown-cashback.test.ts, a mainnet wallet owed 12,742,862 recorded on two RPCs, and planted frames
 // that claim to another account), and that the served files are that commit's build is signpage-release's.
+// After: sign
 //   node scripts/live-checks/solana-teardown-cashback.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

@@ -31,6 +31,7 @@
 // open and its wait for the providers' paces and in-flight queues, evm-open and evm-queue), so a late read names its
 // cause (live run 42122733397 attempt 1: the judged token's candles came 23 s after the read, the reads before it named
 // nowhere).
+// After: helper
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";

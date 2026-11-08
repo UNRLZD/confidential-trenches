@@ -12,6 +12,7 @@
 //   - one tap on its main button asks the shell for no vault buy (kind "buy"): only pool.buy, or nothing while the box
 //     cannot price the pool.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
+// After: app
 //   node scripts/live-checks/trade-box-pool.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/trade-box-pool.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

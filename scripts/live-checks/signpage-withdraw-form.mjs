@@ -9,6 +9,7 @@
 //   - /app.js holds the form's own strings, which minifying keeps (string literals): the refusal codes not-account and
 //     no-account, the RPC answer it reads (UNKNOWN_ACCOUNT), the Withdraw button's pending mark (withdraw-relay), the
 //     form's mark (withdraw = "form") and its draft refusal words (Invalid address, Busy · Retry).
+// After: sign
 //   node scripts/live-checks/signpage-withdraw-form.mjs [--url <origin>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each
 //   marker's count, never the bytes.

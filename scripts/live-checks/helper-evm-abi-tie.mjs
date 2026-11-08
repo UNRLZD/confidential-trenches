@@ -17,6 +17,7 @@
 // It passes only when every read above holds and every helper answer carries one full-sha X-Helper-Commit, the same on
 // every read of the run (one helper answered all of it, never two builds behind one host). The selectors
 // are this file's strings, which contracts/pool-evm/test/abi-tie.test.mjs holds to contracts/pool-evm/abi.json.
+// After: helper
 //   node scripts/live-checks/helper-evm-abi-tie.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 // --in-process answers the fee read and the three POSTs from this checkout's apps/helper/src/pool/evm.ts

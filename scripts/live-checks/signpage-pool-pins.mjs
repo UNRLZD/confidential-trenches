@@ -16,6 +16,7 @@
 // signpage-pool-mainnet's, on the mainnet page; the testnet half is proven by packages/signpage/test/
 // pools-testnet.test.ts, pool-testnet.test.ts and main-testnet-pools.test.ts, and by the devnet run of
 // packages/signpage/scripts/pool-pins-devnet.mjs (signpage-pool-pins.md).
+// After: sign
 //   node scripts/live-checks/signpage-pool-pins.mjs [--harness] [--record <file>]
 //     --harness: this checkout's bundle and public/_headers stand for SIGN_HOST's /app.js and CSP (the pair read is live)
 //     PASS exit 0, FAIL exit 1, error exit 2
