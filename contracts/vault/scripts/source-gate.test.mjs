@@ -308,12 +308,28 @@ test("F4 (15, 16): on mainnet every command refuses before anything is read with
 let ownClone;
 function driverClone() {
   if (ownClone) return ownClone;
+  // The clone is built from the worktree's files, never from its history: CI's checkout is shallow, and a clone of a
+  // shallow checkout is shallow too, which the gate rightly refuses. A one-commit repo with fixed names and dates is
+  // made from every tracked file as it is on disk (the worktree's own changes and new files included, deleted ones
+  // left out, submodule links kept), and the test clones that, so the clone is whole whatever the checkout is.
+  const src = path.join(TMP, "own-source");
   const dir = path.join(TMP, "own-clone");
-  git(TMP, "clone", "-q", "--no-local", WT, dir);
-  const dirty = spawnSync("git", ["-C", WT, "ls-files", "-z", "-m", "-o", "--exclude-standard"], { encoding: "utf8" }).stdout.split("\0").filter(Boolean);
-  for (const f of dirty) if (existsSync(path.join(WT, f))) cpSync(path.join(WT, f), path.join(dir, f));
-  if (dirty.length) git(dir, "add", "--", ...dirty.filter((f) => existsSync(path.join(WT, f))));
-  if (git(dir, "status", "--porcelain")) git(dir, "commit", "-q", "-m", "the worktree's own changes");
+  git(TMP, "init", "-q", src);
+  const list = (...a) => spawnSync("git", ["-C", WT, ...a], { encoding: "utf8", env: ENV, maxBuffer: 1 << 28 }).stdout.split("\0").filter(Boolean);
+  const links = new Map(list("ls-files", "-z", "-s").map((l) => l.match(/^160000 ([0-9a-f]+) \d\t(.*)$/s)).filter(Boolean).map((m) => [m[2], m[1]]));
+  const files = [...new Set([...list("ls-files", "-z"), ...list("ls-files", "-z", "-o", "--exclude-standard")])].filter((f) => !links.has(f) && existsSync(path.join(WT, f)));
+  for (const f of files) {
+    mkdirSync(path.dirname(path.join(src, f)), { recursive: true });
+    cpSync(path.join(WT, f), path.join(src, f));
+  }
+  const pathspec = path.join(TMP, "own-source.list");
+  writeFileSync(pathspec, files.join("\0"));
+  git(src, "add", "-f", `--pathspec-from-file=${pathspec}`, "--pathspec-file-nul");
+  for (const [f, sha] of links) git(src, "update-index", "--add", "--cacheinfo", `160000,${sha},${f}`);
+  const fixed = { GIT_AUTHOR_DATE: "2026-11-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-11-01T00:00:00Z" };
+  const c = spawnSync("git", ["-C", src, "commit", "-q", "-m", "the worktree as it is on disk"], { encoding: "utf8", env: { ...ENV, ...fixed } });
+  assert.equal(c.status, 0, c.stderr);
+  git(TMP, "clone", "-q", "--no-local", src, dir);
   const commit = git(dir, "rev-parse", "HEAD");
   git(dir, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", commit);
   const pnpm = spawnSync("pnpm", ["--version"]).status === 0 ? ["pnpm"] : ["corepack", "pnpm"];
