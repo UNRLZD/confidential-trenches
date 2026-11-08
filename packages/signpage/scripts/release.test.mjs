@@ -3,7 +3,7 @@
 // every response under the matching _headers rules joined as Pages joins them.
 //   node --test packages/signpage/scripts/release.test.mjs
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -365,6 +365,32 @@ test("a redirect, or a host that answers a navigation and a plain fetch differen
 
 test("namesOf reads script srcs, inline scripts and preload, modulepreload and stylesheet hrefs, any case and quoting", () => {
   assert.deepEqual(namesOf(`<SCRIPT src='/a.js'></SCRIPT><script>x</script><link rel="modulepreload" href=/b.js><link rel="icon" href="/i.png"><link rel="Stylesheet" href="/s.css"><link rel="preload" as="worker" href="/w.js">`), ["/a.js", "(inline)", "/b.js", "/s.css", "/w.js"]);
+});
+
+test("the command line prints every line, its verdict last, to a pipe: a long NO MATCH is not cut off at exit", async () => {
+  // 32 BAD lines of whole CSPs, about 90 KB, which the live-check replays cut on a loaded Mac: more than a pipe holds, so
+  // the tail waits in the process until it is read
+  // (macOS writes a pipe asynchronously; process.exit() dropped what was queued, the verdict with it, 8 Nov)
+  const answers = JSON.parse(readFileSync(join(dirname(dirname(PKG)), "scripts", "live-checks", "signpage-release-at-deploy.answers.json"), "utf8"));
+  const list = onlyHost(readList(answers.bad.release), "sign");
+  const [listFile, answerFile] = [join(tmp, "late-list.json"), join(tmp, "late-answer.json")];
+  writeFileSync(listFile, JSON.stringify(list));
+  writeFileSync(answerFile, JSON.stringify(answers.bad));
+  const child = spawn(process.execPath, [join(PKG, "scripts", "check-signpage.mjs"), "--list", listFile, "--answer", answerFile], { stdio: ["ignore", "pipe", "pipe"] });
+  const chunks = [];
+  // a reader that falls behind once, as a loaded machine does: after the first chunk it waits 300 ms. At 1e1bc558 this
+  // fails about three runs in five on a Mac (the tail queued in the child when it exits), never after the fix
+  child.stdout.on("data", (c) => {
+    if (!chunks.length) {
+      child.stdout.pause();
+      setTimeout(() => child.stdout.resume(), 300);
+    }
+    chunks.push(c);
+  });
+  const code = await new Promise((r) => child.on("close", r));
+  const lines = Buffer.concat(chunks).toString("utf8").trimEnd().split("\n");
+  assert.equal(code, 1);
+  assert.match(lines.at(-1), /^NO MATCH release-105: 32 line\(s\) differ$/, `the last of ${lines.length} lines: ${lines.at(-1).slice(0, 120)}`);
 });
 
 // ---------- one host against its own build ----------

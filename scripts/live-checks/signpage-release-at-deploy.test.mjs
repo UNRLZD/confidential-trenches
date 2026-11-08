@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check } from "./signpage-release-at-deploy.mjs";
+import { check, newestTag } from "./signpage-release-at-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CHECK = path.join(HERE, "signpage-release-at-deploy.mjs");
@@ -25,6 +25,14 @@ const file = (obj) => {
 };
 const replay = (answer, tag = answer.release) => check(tag, ["--answer", file(answer)]);
 const newest = () => `release-${Math.max(...readdirSync(path.join(HERE, "../../packages/signpage/releases")).map((f) => Number(/^release-(\d+)\.json$/.exec(f)?.[1] ?? 0)))}`;
+
+test("the newest list is picked by N, not by text (release-1000 after release-999)", () => {
+  const d = mkdtempSync(path.join(tmp, "releases-"));
+  for (const t of ["release-999", "release-1000", "release-2"]) writeFileSync(path.join(d, `${t}.json`), "{}");
+  writeFileSync(path.join(d, "release-3.json.bak"), "{}");
+  assert.equal(newestTag(d), "release-1000");
+  assert.equal(newestTag(), newest());
+});
 
 test("recorded good answer: SIGN_HOST serves exactly release-102's SIGN_HOST part, every file in both modes: PASS", () => {
   const r = replay(ANSWERS.good);

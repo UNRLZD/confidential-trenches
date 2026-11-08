@@ -189,10 +189,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const answer = recorded ?? { ...(await read(list)), read_at: new Date().toISOString() };
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(answer, null, 1)}\n`);
     const { ok, lines } = judge(list, answer);
-    for (const l of lines) console.log(l);
-    process.exit(ok ? 0 : 1);
+    // exit once stdout has taken every line: a pipe on macOS is written asynchronously, and process.exit() with a long
+    // NO MATCH still queued cut it off before its verdict (8 Nov, the live-check replays on a loaded Mac)
+    process.stdout.write(`${lines.join("\n")}\n`, () => process.exit(ok ? 0 : 1));
   } catch (e) {
-    console.error(`check-signpage: ERROR: ${e.message}`);
-    process.exit(2);
+    process.stderr.write(`check-signpage: ERROR: ${e.message}\n`, () => process.exit(2));
   }
 }

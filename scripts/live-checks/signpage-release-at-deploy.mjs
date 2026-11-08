@@ -12,19 +12,31 @@
 //     writes what the run read (check-signpage's record: sizes, hashes and headers, no bodies), --answer judges such a
 //     record instead of reading SIGN_HOST
 //   PASS only when check-signpage exits 0 and its last line is MATCH release-<N>. PASS exit 0, FAIL exit 1, error exit 2.
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { onlyHost, readList, TAG } from "../../packages/signpage/scripts/check-signpage.mjs";
 import { ORIGINS, run } from "./signpage-release.mjs";
 
 const KEY = "signpage-release-at-deploy";
+const RELEASES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage/releases");
+const TAG = /^release-[1-9][0-9]*$/;
+
+/** The newest committed release list's tag, by N (release-1000 after release-999). */
+export function newestTag(dir = RELEASES) {
+  const n = readdirSync(dir).map((f) => /^release-([1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean).map(Number);
+  if (!n.length) throw new Error(`no release list in ${dir}`);
+  return `release-${Math.max(...n)}`;
+}
 const USAGE = "usage: node scripts/live-checks/signpage-release-at-deploy.mjs [--release release-<N>] [--record <file> | --answer <file>]";
 
 /** SIGN_HOST against `tag`'s list (the newest committed one when null), live or from a recorded answer: { ok, lines, release }. */
 export function check(tag = null, args = []) {
-  const list = onlyHost(readList(tag), "sign");
+  const t = tag ?? newestTag();
+  if (!TAG.test(t)) throw new Error(USAGE);
+  const full = JSON.parse(readFileSync(path.join(RELEASES, `${t}.json`), "utf8"));
+  if (!full.hosts?.SIGN_HOST) throw new Error(`${t} holds no SIGN_HOST`);
+  const list = { ...full, hosts: { SIGN_HOST: full.hosts.SIGN_HOST } };
   const tmp = mkdtempSync(path.join(tmpdir(), "ct-release-at-deploy-"));
   try {
     const file = path.join(tmp, `${list.release}.json`);
