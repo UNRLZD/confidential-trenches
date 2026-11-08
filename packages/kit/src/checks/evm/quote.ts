@@ -621,6 +621,7 @@ function agreeing<T>(
     const fire = () => {
       if (done) return;
       if (!moving) return start();
+      // the timer runs only while a provider is left (arm; each start re-arms it), so a moved request has a next
       const ks = Array.from({ length: started }, (_, n) => started - 1 - n).filter((n) => !sentK[n] && !movedK[n] && !settledK[n]);
       const stuck = ks.find((n) => STALLED.get(list[n]!)?.() === true);
       if (stuck !== undefined) {

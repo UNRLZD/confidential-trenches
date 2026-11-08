@@ -7233,3 +7233,26 @@ test("QE4 a second provider late on every exact-out batch: the spares are asked 
   // a batch is 3 calls of 6 reads
   assert.ok(asks[2]! + asks[3]! <= budget * 18, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads, ${budget} batches at most`);
 });
+
+// Card evm-buy-quote-ends-on-node: a provider that stalls, then answers. The batches queued behind its stalled requests
+// moved to the third provider; when its gate frees, each moved request is dropped unsent, never counted a failure
+// that asks a fourth: the fourth is asked only the round's spares left in its budget.
+test("QE5 a stalled provider that recovers: its moved requests are dropped unsent and ask no fourth provider", { timeout: 20_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x800);
+  const asks = [0, 0, 0, 0];
+  let stalls = 0;
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const counted = (rpc: EvmRpc, k: number): EvmRpc => async (calls) => {
+    const n = per(calls);
+    asks[k]! += n;
+    if (n > 0 && k === 1 && stalls++ < 2) await pause(2_500);
+    if (n > 0 && k === 2) await pause(1_200);
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal(asks[1], 2 * 18, "the stalled provider was sent its gate's 2 batches, the rest moved unsent");
+  assert.ok(asks[3]! <= 2 * 18, `the fourth provider is asked ${asks[3]} exact-out reads, 2 batches of spares at most`);
+});
