@@ -49,6 +49,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-buy-quote-ends-on-node.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
+  "scripts/live-checks/evm-pool-index.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
   "scripts/live-checks/evm-quote-read-gas-starve.mjs",
   "scripts/live-checks/evm-quote-warm-round.mjs",

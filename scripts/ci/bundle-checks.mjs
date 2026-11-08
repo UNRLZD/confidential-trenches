@@ -129,6 +129,7 @@ export const OUT = {
   "evm-quote-warm-round": "EVM RPC quotes",
   "evm-quote-lag-held": "EVM RPC quotes",
   "evm-quote-read-gas-starve": "EVM RPC quotes",
+  "evm-pool-index": "EVM RPC index reads on the venue's two index readers",
   "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",
