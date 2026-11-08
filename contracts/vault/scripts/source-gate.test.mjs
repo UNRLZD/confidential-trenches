@@ -180,6 +180,24 @@ test("F1: the clone's git config is git clone's own: url.insteadOf, an include, 
   refuses(wt, o.head, /not a clone's own folder/);
 });
 
+test("F1: a GIT_DIR inherited from the caller cannot point the gate at a crafted repo whose origin/main holds an unmerged commit", () => {
+  const o = origin();
+  const evil = path.join(o.root, "evil.git");
+  git(o.root, "clone", "-q", "--bare", o.bare, evil);
+  git(evil, "remote", "set-url", "origin", `${REPO}.git`);
+  git(evil, "update-ref", "refs/remotes/origin/main", o.card);
+  git(evil, "update-ref", "--no-deref", "HEAD", o.card);
+  const a = clone(o, o.card);
+  const saved = process.env.GIT_DIR;
+  process.env.GIT_DIR = evil;
+  try {
+    refuses(a, o.card, /is not on https:\/\/github\.com\/UNRLZD\/confidential-trenches's main/);
+  } finally {
+    if (saved === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = saved;
+  }
+});
+
 test("F1: what the run loads from node_modules resolves inside the clone: a planted @blindfill/kit or snarkjs is refused", () => {
   const o = origin();
   const a = clone(o);

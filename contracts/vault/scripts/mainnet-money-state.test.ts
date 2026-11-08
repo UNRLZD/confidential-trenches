@@ -390,6 +390,10 @@ test("F2: a row of P naming U is U's own only when a deposit tx of U for P with 
   assert.match(SRC, /const own = await ownDeposit\(\{ rows, want: wantOf\(\)/);
   assert.match(SRC, /const readTx = \(h: string\) => readBackBoth\(o\.urls, h, relayers\.bind\);/);
   assert.doesNotMatch(SRC, /r\.depositor === U\)/, "no row's depositor alone makes a deposit U's own");
+  // the way out when U's own tx was not heard: run/resume --deposit-tx <hash>, a tx hash, read like every heard one
+  assert.match(SRC, /const v = flags\(argv, \["--state", "--to"\], \[[^\]]*"--deposit-tx"[^\]]*\]/);
+  assert.match(SRC, /const named = v\["--deposit-tx"\];\n\s+if \(named !== undefined && !\/\^\[1-9A-HJ-NP-Za-km-z\]\{43,44\}\$\/\.test\(named\)\) throw/);
+  assert.match(SRC, /const depositTxs = \(\): string\[\] => \[\.\.\.heard\.bind, \.\.\.\(named === undefined \? \[\] : \[named\]\)\];/);
 });
 
 test("F4 (28): a run step of another seed or network, or one that pays another account than --to, is refused", () => {
