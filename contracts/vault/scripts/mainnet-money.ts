@@ -42,6 +42,7 @@
 //   node contracts/vault/scripts/mainnet-money.ts resume --state <dir> --to <account> [--network n] [--bind-relayer r]
 //        the same, refused when the folder holds no seed
 //   node contracts/vault/scripts/mainnet-money.ts open-u --state <dir> --payer <account> --key-file <path> [--network n]
+//        [--register <account>]   with --register, the payer also registers that existing account on the token
 //        the payer opens U: 0.01 NEAR (an implicit account exists once it holds NEAR) and its USDC registration,
 //        signed here from the key file (no binary of anyone else's sees it); each tx kept in <dir>/open-u.json
 //   node contracts/vault/scripts/mainnet-money.ts sweep-u --state <dir> [--network n]
@@ -151,6 +152,19 @@ export function requestProblems(req: { recipient: string; changeValue: bigint; b
   if (req.body.fund_recipient !== false) p.push(`the request's fund_recipient is ${String(req.body.fund_recipient)}, not false`);
   if (req.changeValue !== 0n) p.push(`the request leaves a change note of ${req.changeValue}`);
   return p;
+}
+
+/**
+ * [] when `account` may be registered on the token by the payer (open-u --register): a NEAR account id that exists on
+ * both RPCs and that both read as not registered (storage_balance_of null).
+ */
+export function registerProblems(account: unknown, a: { reads: readonly (null | { amount: string } | "absent")[]; registered: readonly boolean[] }): string[] {
+  if (typeof account !== "string" || !ACCOUNT_ID.test(account)) return [`--register ${String(account)}: not a NEAR account id`];
+  if (a.reads.length !== 2 || a.reads.some((r) => r === null)) return [`--register ${account}: not read on two operators`];
+  if (a.reads.some((r) => r === "absent")) return [`--register ${account}: does not exist on ${a.reads.every((r) => r === "absent") ? "either RPC" : "one RPC"}`];
+  if (a.registered.length !== 2 || a.registered[0] !== a.registered[1]) return [`--register ${account}: the two RPCs disagree on its registration`];
+  if (a.registered[0]) return [`--register ${account}: already registered on the token, nothing to send`];
+  return [];
 }
 
 /** U's signing key, derived from the seed (derive/keys.ts depositId), refused unless its public side is the run's U. */
@@ -737,7 +751,7 @@ export function relayerTxProblems(kind: "deposit" | "withdraw", t: any, want: Ru
 }
 
 async function openU(argv: string[]) {
-  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network", "--bind-relayer"]);
+  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network", "--bind-relayer", "--register"]);
   const o = await opened(networkOf(v), v["--bind-relayer"]);
   const { repoRoots, loadKey } = await import("./deploy.mjs");
   const { act } = await import("./testnet-usdc.mjs");
@@ -756,6 +770,16 @@ async function openU(argv: string[]) {
     st.write("open-u", kept);
   };
   const done = (hash: string, what: string) => log(`${what}: ${hash} read back FINAL on both RPCs, every receipt a success`);
+  // --register: an existing account the payer registers on the token, checked on both RPCs before anything is sent
+  const reg = v["--register"];
+  const regBal = reg !== undefined && ACCOUNT_ID.test(reg) ? await Promise.all(o.rpcs.map((r) => viewOn(r, o.token, "storage_balance_of", { account_id: reg }).then((x) => x !== null, () => null))) : [];
+  const rp = v["--register"] === undefined ? [] : registerProblems(reg, { reads: reg !== undefined && ACCOUNT_ID.test(reg) ? await accountOn(o.rpcs, reg).catch(() => [null, null]) : [null, null], registered: regBal.some((x) => x === null) ? [] : (regBal as boolean[]) });
+  if (rp.length) throw new Error(`refused, nothing sent: ${rp.join("; ")}`);
+  const bounds = async () => {
+    const b = await view2(o.rpcs, o.token, "storage_balance_bounds", {});
+    if (b?.min !== b?.max) throw new Error(`the token's storage_balance_bounds ${json(b)} is not min = max: nothing sent`);
+    return BigInt(b.min);
+  };
   const acct = await accountOn(o.rpcs, U);
   if (acct.every((x) => x === "absent")) done(await sendTx(o, payer, key, U, [act.transfer(U_OPEN_YOCTO)], keep(`Transfer 0.01 NEAR to U ${U}`)), `Transfer 0.01 NEAR to U ${U}`);
   else if (acct.some((x) => x === "absent")) throw new Error(`U ${U} exists on one RPC only: nothing sent; run this again in a minute`);
@@ -764,6 +788,7 @@ async function openU(argv: string[]) {
     if (b?.min !== b?.max) throw new Error(`the token's storage_balance_bounds ${json(b)} is not min = max: nothing sent`);
     done(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: U, registration_only: true }, 30n * TGAS, BigInt(b.min))], keep(`storage_deposit of U on ${o.token}`)), `storage_deposit of U on ${o.token}`);
   }
+  if (reg !== undefined) done(await sendTx(o, payer, key, o.token, [act.call("storage_deposit", { account_id: reg, registration_only: true }, 30n * TGAS, await bounds())], keep(`storage_deposit of ${reg} on ${o.token}`)), `storage_deposit of ${reg} on ${o.token}`);
   log(`U ${U} exists and is registered on both RPCs: send at least ${o.minDeposit} USDC (base units) to it from any wallet or exchange`);
   process.exit(0);
 }

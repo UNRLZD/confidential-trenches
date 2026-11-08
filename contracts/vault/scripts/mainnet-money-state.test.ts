@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { feeProblems, fingerprintOf, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { feeProblems, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
@@ -307,6 +307,20 @@ test("L4: a send's error is read from send_tx's answer, kept in the step file an
   assert.match(String(sendAnswerError({ jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "INVALID_TRANSACTION" }, data: { TxExecutionError: { InvalidTxError: "InvalidNonce" } } } })), /INVALID_TRANSACTION[^]*InvalidNonce/);
   assert.equal(sendAnswerError({ jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "TIMEOUT_ERROR" } } }), null, "a timeout is no answer");
   assert.match(SRC, /keep\(hash, err\)/);
+});
+
+test("open-u --register: the payer registers an existing, unregistered account on the token; anything else is refused before any send", () => {
+  const ok = { amount: "1" };
+  assert.deepEqual(registerProblems("owner.testnet", { reads: [ok, ok], registered: [false, false] }), []);
+  assert.match(registerProblems("Owner", { reads: [ok, ok], registered: [false, false] }).join(), /not a NEAR account id/);
+  assert.match(registerProblems("owner.testnet", { reads: ["absent", "absent"], registered: [false, false] }).join(), /does not exist/);
+  assert.match(registerProblems("owner.testnet", { reads: [ok, "absent"], registered: [false, false] }).join(), /does not exist/);
+  assert.match(registerProblems("owner.testnet", { reads: [ok, null], registered: [false, false] }).join(), /two operators/);
+  assert.match(registerProblems("owner.testnet", { reads: [ok, ok], registered: [true, true] }).join(), /already registered/);
+  assert.match(registerProblems("owner.testnet", { reads: [ok, ok], registered: [true, false] }).join(), /disagree/);
+  // checked before U's opening sends anything, and the registration's hash kept before its send like the others
+  assert.match(SRC, /const rp = v\["--register"\] === undefined \? \[\] : registerProblems\([\s\S]{0,600}if \(acct\.every/);
+  assert.match(SRC, /keep\(`storage_deposit of \$\{reg\} on \$\{o\.token\}`\)/);
 });
 
 test("the usage line names every command", () => {
