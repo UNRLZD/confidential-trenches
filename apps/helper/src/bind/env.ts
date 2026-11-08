@@ -43,16 +43,20 @@ export type BindSender = {
    * is recorded, so every signer answers id_not_ours.
    */
   intents?(body: unknown): Promise<IntentsAnswer>;
-  /** A 1Click /v0/quote answer the proxy carried, after it was answered: a live quote recorded (intents/records.ts). */
-  quoted?(body: string): void;
+  /**
+   * A 1Click /v0/quote answer the proxy carried, after it was answered: a live quote recorded (intents/records.ts).
+   * Returns at once with the record's write, a promise that never rejects (a failed write is logged only); the proxy
+   * does not wait on it.
+   */
+  quoted?(body: string): void | Promise<void>;
   /** A mainnet withdrawal our relayer carried landed to `recipient` (withdraw/send.ts onLanded): an arming A is seen. */
   armed?(recipient: string): void;
   /**
    * A 1Click /v0/status answer the proxy carried, after it was answered (create.ts onStatusAnswer): a delivery to a
-   * one-time id on a carried network's token creates that id once. Returns at once; nothing it does reaches the
-   * answer, and a failure is logged only.
+   * one-time id on a carried network's token creates that id once. Returns at once with the creation's run, a promise
+   * that never rejects; nothing it does reaches the answer, and a failure is logged only.
    */
-  delivered?(body: string): void;
+  delivered?(body: string): void | Promise<void>;
   /**
    * Each carried network's gas account (public, on chain with every deposit it signs), for /v1/health (card
    * helper-bind-relayer-mainnet): set at start from the host's lines, whether or not the account exists or is funded
@@ -256,10 +260,11 @@ export function bindSenderFromEnv(
       const fail = () => console.error("helper: intents quote_record_failed");
       try {
         const s = openIntents();
-        if (s !== null) void onQuoteAnswer(body, s).catch(fail);
+        if (s !== null) return onQuoteAnswer(body, s).then(() => undefined, fail);
       } catch {
         fail();
       }
+      return Promise.resolve();
     },
     armed(recipient) {
       try {
@@ -278,8 +283,8 @@ export function bindSenderFromEnv(
         console.error("helper: intents status_record_failed");
       }
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
-      void onStatusAnswer(body, nets).then(
-        (a) => ((l) => l !== null && console.log(l))(createLine(a)),
+      return onStatusAnswer(body, nets).then(
+        (a) => void ((l) => l !== null && console.log(l))(createLine(a)),
         () => console.error(CREATE_START_FAILED),
       );
     },
