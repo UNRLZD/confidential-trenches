@@ -174,7 +174,7 @@ test("step 7: the new lane's counter goes past the lost store's possible index, 
     const plan = await afterRestore(SEED, { lane, raiseDepositIndex: async (s, m) => (asked.push([s, m]), m) }, SCOPE, lanes, T);
     assert.deepEqual(asked, [[SCOPE, min]], `lane ${lane}`);
     assert.equal(plan.next, min);
-    assert.equal(plan.until, T + REREAD_MS);
+    assert.equal(plan.until, T + 72 * 3_600_000, "72 h of NEAR block time (a deposit address's life, D44)");
     // lane 0: 0, 8, 16 hold notes, so 24 and 32; an empty lane: its first two; lane 6: 6 a note, 22 money, so 14, 30, 38
     const of = (l: number) => plan.rereads.filter((x) => x.lane === l).map((x) => x.i);
     assert.deepEqual(of(0), [24, 32]);
