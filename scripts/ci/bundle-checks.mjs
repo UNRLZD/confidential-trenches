@@ -39,6 +39,7 @@ export const IN_PROCESS = [
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
+  viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
   viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
   viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),

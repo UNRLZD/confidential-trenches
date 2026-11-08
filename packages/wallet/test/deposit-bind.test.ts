@@ -709,6 +709,48 @@ test("amount_above_balance on SHORT_READ_CALLS - 1 calls of a note (a refund del
   assert.deepEqual(await bindDeposit(SEED, r.args, r.deps), { kind: "refused", code: "amount_above_balance" });
   assert.equal(r.sent.length, SHORT_READ_CALLS);
 });
+// Card held-deposit-way-out, review wnpt3 I2: the SHORT_READ_CALLS-th amount_above_balance settles its call before the
+// bind holds: a relayer that answers it and carries the call anyway lands the note, never held with P in the vault.
+test("I2: the SHORT_READ_CALLS-th amount_above_balance of a call the relayer carried anyway lands the note, never refused", async () => {
+  const t = await setup(Array(SHORT_READ_CALLS).fill("amount_above_balance"));
+  const send = t.deps.fetchFn;
+  let n = 0;
+  const carried = (async (url: string, init: RequestInit) => {
+    const res = await send(url, init);
+    if (++n === SHORT_READ_CALLS) lands(t.chain)(t.sent.at(-1)!);
+    return res;
+  }) as typeof fetch;
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, fetchFn: carried }));
+  assert.equal(t.sent.length, SHORT_READ_CALLS, "nothing signed after the third");
+});
+// Review of d791adda, L3: the SHORT_READ_CALLS-th call ran (U's nonce passed it, U's USDC debited) but its P lands only
+// after the window's pages are read: the bind waits for it, never holds the op with the money on its way to the vault.
+test("L3: the SHORT_READ_CALLS-th call that ran but lands after its window lands the note, never refused", async () => {
+  const t = await setup(Array(SHORT_READ_CALLS).fill("amount_above_balance"));
+  const send = t.deps.fetchFn;
+  let n = 0;
+  let late: Sent | null = null;
+  const carried = (async (url: string, init: RequestInit) => {
+    const res = await send(url, init);
+    if (++n === SHORT_READ_CALLS) {
+      late = t.sent.at(-1)!;
+      t.chain.finals.add(late.hash);
+      t.chain.a.nonce = t.chain.b.nonce = late.nonce; // it ran: U's nonce and USDC moved, P not in the pages yet
+      t.chain.balance -= AMOUNT;
+    }
+    return res;
+  }) as typeof fetch;
+  const tick = t.chain.tick;
+  let rowAt: bigint | null = null;
+  t.chain.tick = () => {
+    tick();
+    // P lands 10 blocks past the pages' read at the call's window (max_block_height + LAPSE_MARGIN + 1)
+    if (late !== null && rowAt === null && t.chain.a.height > late.mbh + 16n) (rowAt = t.chain.a.height), t.chain.addRow(late.p);
+  };
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, fetchFn: carried }));
+  assert.ok(rowAt !== null, "the bind waited past the window for P");
+  assert.equal(t.sent.length, SHORT_READ_CALLS, "nothing signed after the third");
+});
 for (const code of ["token_halted", "relayer_low"]) {
   test(`REVIEW I (expect PASS; kills M44): ${code} waits and sends the same signed bytes`, async () => {
     const t = await setup([code, "tx"]);

@@ -35,7 +35,8 @@ const M = [
   // the review of 59c2db71 (L1, L2, Info)
   ["FINAL on any of the note's nonces", F, "    return (await findDeadCall(calls, top, rpcs, relayer)) !== null;\n", "    for (const n of new Set(calls.map((c) => c.nonce))) if ((await findDeadCall(calls, n, rpcs, relayer)) !== null) return true;\n    return top < 0n;\n", V, "two nonces on a taken note"],
   ["no wait past the nonce with no relayer named", F, "      return low >= passedAt.get(id)! + REFUND_HEIGHTS;", "      return true;", V, "relayer that carries at once"],
-  ["a short read never held", B, "        if (seen.size >= SHORT_READ_CALLS) return { kind: \"refused\", code: answer.code };\n", "", V, "short of every call"],
+  ["the third short read holds unsettled (review wnpt3 I2)", B, "        if (seen.size >= SHORT_READ_CALLS) return await shortHeld(out);\n", "        if (seen.size >= SHORT_READ_CALLS) return { kind: \"refused\", code: answer.code };\n", TB, "I2:"],
+  ["a short read never held", B, "        if (seen.size >= SHORT_READ_CALLS) return await shortHeld(out);\n", "", TB, "SHORT_READ_CALLS - 1"],
   ["a failed key read keeps the poll's pace", F, "if (u === null) return { out: true, due: owed(), late: true };", "if (u === null) return { out: true, due: true, late: true };", V, "L1"],
 ];
 const src = { [B]: readFileSync(B, "utf8"), [F]: readFileSync(F, "utf8") };

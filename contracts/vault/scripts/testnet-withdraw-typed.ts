@@ -56,8 +56,8 @@ const NEAR = 10n ** 24n;
 export const W_NEAR = NEAR / 100n;
 const ROUND_MS = 10_000;
 const TGAS = 10n ** 12n;
-/** The note D deposits for this run's words, in USDC base units. */
-export const NOTE = 500_000n;
+/** The note D deposits for this run's words, in USDC base units: the vault's MIN_DEPOSIT (contracts/vault/src/constants.rs). */
+export const NOTE = 1_000_000n;
 const GAS = { prepay: 30n * TGAS, deposit: 180n * TGAS };
 const PRICE_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 const DEFAULT_OUT = `scripts/live-checks/${CARD}.md`;
@@ -215,24 +215,44 @@ async function main() {
   const seed64: Uint8Array = wordsToSeed64(entropyToWords(Uint8Array.from(words)));
   const tRpcs = [relayRpc(NET.fastnear[0]), relayRpc(NET.drpc)] as const;
   const priceRpcs = [relayRpc(NEAR_NETWORKS.mainnet.fastnear[0]), relayRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
-  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  // The note's deposit index is a fresh store's first in its lane, and a store draws its lane at random when it is
+  // first opened (the wallet store, wallet.md:247): the first run's index is kept in --state, and a rerun opens fresh
+  // stores until one draws that lane, so every run of this state plans the same note (the 04:48Z rerun planned another
+  // and its deposit found no prepay: NoPrepay).
+  let w = await openWalletStore({ indexedDB: new IDBFactory() });
+  for (let k = 0; typeof steps.note_i === "number" && w.lane !== steps.note_i % 8; k++) {
+    w.close();
+    if (k >= 400) throw new Error(`no fresh store drew lane ${steps.note_i % 8} in 400 opens`);
+    w = await openWalletStore({ indexedDB: new IDBFactory() });
+  }
   const ns = await openNoteStore(w);
-  // deposit index 0 of these words in a fresh store: the same note on every run of this state
   let note = await ns.planDeposit(scope, (ref: unknown) => noteSecrets(seed64, ref).precommitment);
+  const noteI = (note.ref as { i: number }).i;
+  if (typeof steps.note_i !== "number") (steps.note_i = noteI), save();
+  else if (noteI !== steps.note_i) throw new Error(`the note planned is index ${noteI}, this state's is ${steps.note_i}`);
   const pc: bigint = note.precommitment;
   const k = await kitModules();
   const tx = async (method: string, signer: { id: string; key: unknown }, receiver: string, actions: unknown[]) => {
     const { hash } = await send(signer.id, signer.key, receiver, actions);
-    (steps.deposit ??= { txs: [] }).txs.push({ method, hash, signer: signer.id });
+    (steps.deposit ??= { txs: [] }).txs.push({ method, hash, signer: signer.id, pc: String(pc) });
     save();
     const pr = await readBoth(hash, signer.id);
     log(`deposit: ${method} ${hash} ${pr.length ? `PROBLEMS ${pr.join("; ")}` : "read back on both operators, every receipt a success"}`);
     if (pr.length) throw new Error(`${method} did not read back as a success`);
   };
   if (!steps.deposit?.done) {
+    // a tx of another note (a run before its index was kept: its prepay, its refused deposit) goes to past, out of the
+    // record and the read-back: only this note's own txs are the deposit
+    const own = (t: { pc?: string }) => t.pc === String(pc);
+    if (steps.deposit?.txs?.some((t: { pc?: string }) => !own(t))) {
+      steps.deposit.past = [...(steps.deposit.past ?? []), ...steps.deposit.txs.filter((t: { pc?: string }) => !own(t))];
+      steps.deposit.txs = steps.deposit.txs.filter(own);
+      save();
+    }
     const usdc = BigInt(await view2(TOKEN, "ft_balance_of", { account_id: D.id }));
     if (usdc < NOTE) throw new Error(`D holds ${usdc} USDC, needs ${NOTE}`);
-    if (!steps.deposit?.txs?.some((t: { method: string }) => t.method === "storage_prepay"))
+    // a prepay of this note's own precommitment (one of another note's, from a run before its index was kept, is not)
+    if (!steps.deposit?.txs?.some((t: { method: string; pc?: string }) => t.method === "storage_prepay" && t.pc === String(pc)))
       await tx("storage_prepay", D, VAULT, [act.call("storage_prepay", { precommitment: String(pc) }, GAS.prepay, k.vaultPrepayYocto(true))]);
     await tx("ft_transfer_call (deposit)", D, TOKEN, [act.call("ft_transfer_call", { receiver_id: VAULT, amount: String(NOTE), msg: k.vaultDepositMessage(pc, D.id) }, GAS.deposit, 1n)]);
     steps.deposit.done = true;
