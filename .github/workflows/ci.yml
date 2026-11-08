@@ -220,9 +220,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the wallet package's test script
         run: pnpm --filter @blindfill/wallet run test
-      # the full-count property runs (FULL_RUNS=1) the default test keeps short (card fresh-run-margin)
-      - name: the wallet package's test:mutants script
-        run: pnpm --filter @blindfill/wallet run test:mutants
 
   test-packages:
     if: github.event_name != 'schedule'
@@ -253,7 +250,7 @@ jobs:
       - name: every bundle-reading SIGN_HOST and APP_HOST live check passes on this build
         run: pnpm --filter terminal build && node scripts/ci/bundle-checks.mjs
 
-  # The mutant sweeps: each package's test:mutants but the wallet's (card fresh-run-margin), a shard of their own (card
+  # The mutant sweeps: each package's test:mutants (card fresh-run-margin), a shard of their own (card
   # mutant-sweep-no-orphans): in test-packages, after its tests, they grew from 351 s to 502 s and the job hit its
   # 15 minutes at f3a9cbb (run 42009584431, 904 s), cutting off the live replays. The README's test command runs a
   # package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes.
@@ -265,6 +262,12 @@ jobs:
   # Five parts (cards helper-sell-sweep-in-ci, helper-release-sweep-in-ci): the helper's sell sweep runs as three
   # commands and its release sweep as one, at the seconds pull request #436's run read (MUTANT_SECONDS); five plan the
   # heaviest part at the kit's own 430 s, as six do (four would plan 484 s).
+  # Seven parts (card held-move-forgotten-tx): the wallet's sweeps, the full-count property runs (FULL_RUNS=1) among
+  # them, ran one after another in test-wallet after its tests, outside this split and its budget, and took it past its
+  # 15 minutes on pull request #474 (run 42489996177, 14:28:48Z to 14:44:04Z); they join the split at the seconds
+  # MUTANT_SECONDS reads, 961 s in all with restore-wallets' sweep, every sweep at the higher of #436's run and #474's
+  # (run 42494845995), and seven plan the heaviest part at the kit's 468 s (six would plan 542 s).
+  # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
   test-mutants:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
@@ -272,7 +275,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5]
+        part: [1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -282,7 +285,7 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      - name: every other workspace package's mutant sweeps, this part's share
+      - name: every workspace package's mutant sweeps, this part's share
         env:
           INDEX: ${{ strategy.job-index }}
           TOTAL: ${{ strategy.job-total }}
