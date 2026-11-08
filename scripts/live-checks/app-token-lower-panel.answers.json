@@ -1,0 +1,71 @@
+{
+ "good": {
+  "source": "a local build read from dist; https://ct-api.unrealized.trade",
+  "at": "2026-11-08T13:01:15.113Z",
+  "holders": {
+   "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+   "status": 200,
+   "total": 436653,
+   "top_bps": 5937,
+   "src": "chain",
+   "rows": 20,
+   "rowsOk": true
+  },
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-Cit_tH81.js",
+    "status": 200,
+    "found": [
+     "lower-tabs",
+     "lower-rows-trades",
+     "lower-rows-holders",
+     "holders-top",
+     "lower-empty",
+     "/v1/market/holders",
+     "ticket-about",
+     "about-windows",
+     "about-flow"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-D2untWcM.css",
+    "status": 200,
+    "found": [
+     ".tkl-tabs",
+     ".tkl-flowbar"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/; https://ct-api.unrealized.trade",
+  "at": "2026-11-08T13:01:17.196Z",
+  "holders": {
+   "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+   "status": 200,
+   "total": 436653,
+   "top_bps": 5937,
+   "src": "chain",
+   "rows": 20,
+   "rowsOk": true
+  },
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-Ir4Am9Oi.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-BoyDCwMZ.css",
+    "status": 200,
+    "found": []
+   }
+  ]
+ }
+}

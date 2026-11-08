@@ -37,6 +37,7 @@ export const CHANGED = [
   "scripts/live-checks/app-shell.mjs",
   "scripts/live-checks/app-toast-clears-sheet-head.mjs",
   "scripts/live-checks/app-token-chart.mjs",
+  "scripts/live-checks/app-token-lower-panel.mjs",
   "scripts/live-checks/app-token-route.mjs",
   "scripts/live-checks/base-200ms-blocks.mjs",
   "scripts/live-checks/delete-refund-readback.mjs",
@@ -182,6 +183,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
   "scripts/live-checks/wallet-withdraw-move-out.mjs",
+  "scripts/live-checks/wallet-mainnet-relayer-pins.mjs",
   "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
   "scripts/live-checks/terminal-harness-sign-spa.mjs",
 ];

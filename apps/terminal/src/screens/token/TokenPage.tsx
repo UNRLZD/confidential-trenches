@@ -19,9 +19,10 @@ import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_S
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
+import { About, LowerPanel } from "./LowerPanel.tsx";
 import { TradeMarks } from "./TradeMarks.tsx";
 import { useTrades } from "./trades.ts";
-import type { Trade as TapeTrade } from "./trades.ts";
+import type { Tape, Trade as TapeTrade } from "./trades.ts";
 import { keepRoom, legendRoom, legendText, priceRoom, useRoom } from "./legend.ts";
 import type { LegendRoom } from "./legend.ts";
 import { coinUsd, factors, QUOTE, scaleBars, supplyOf, unitDrawn, volumeIn } from "./units.ts";
@@ -46,9 +47,11 @@ import "./token.css";
 // same box in a bottom sheet from the phone bar's Buy, Sell and quick buys. The signed-in money path is trade-box-pool's.
 // Card app-phone-trade-sheet moves the sheet to trade/TradeSheet.tsx: its box stays mounted when it closes, so a running
 // buy is drawn where it is on the next open; a pushed page (/token/<chain>/<id>) has no tab bar, its bar at the bottom.
+// Card app-token-lower-panel draws R5's lower panel under the chart (desktop) and under the tiles (phone): Trades from
+// the tape the marks read, Holders from the helper's holders read; and About under the box (LowerPanel.tsx).
 
 /** A word, marked when it is still the owner's draft. */
-function W({ id }: { id: WordId }) {
+export function W({ id }: { id: WordId }) {
   const w = WORDS[id];
   return w.draft ? <span data-draft-copy={w.text}>{w.text}</span> : <>{w.text}</>;
 }
@@ -501,13 +504,18 @@ interface Ready {
  *  trade state (TokenPage's useTrade), so a buy started at one width is the buy the other width draws. */
 function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
   const { row, risk } = r.data;
-  return <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
+  return (
+    <>
+      <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
+      <About row={row} />
+    </>
+  );
 }
 
 /** The strip's and the tiles' Tax: the token read's transfer fee as the safety grid draws it (trade/safety.ts). */
 const taxOf = (r: Ready) => safetyCells(r.data.row, r.data.risk, r.nowMs).find((c) => c.id === "tax")!;
 
-function Desktop({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade }) {
+function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade; tape: Tape }) {
   // null draws the tile's skeleton: the page is loading, or its row is still filling (card token-page-fills-after)
   const s = (x: string | null | undefined) => (v === null ? null : (x ?? null));
   const tax = r ? taxOf(r) : null;
@@ -553,6 +561,7 @@ function Desktop({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: Char
           </div>
         </header>
         <Chart c={c} />
+        <LowerPanel row={r?.data.row ?? null} decimals={r?.data.decimals ?? null} tape={tape} />
       </div>
       <aside className="tkp-trade" data-slot="trade">
         {r ? <Ticket r={r} t={t} /> : <span className="tkp-sk tkp-tradesk" />}
@@ -587,7 +596,7 @@ function back() {
   else window.location.assign("/");
 }
 
-function Phone({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade }) {
+function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: ChartState; t: Trade; tape: Tape }) {
   const sheet = useTradeSheet();
   // the price and its change keep the room of the longest each has drawn for this token, so a read again that changes
   // their length moves nothing after them (legend.ts priceRoom, useRoom)
@@ -650,6 +659,7 @@ function Phone({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartS
           </div>
         ))}
       </div>
+      <LowerPanel row={r?.data.row ?? null} decimals={r?.data.decimals ?? null} tape={tape} phone />
       {v && (
         <div className="tkp-bottom" data-testid="token-bar">
           <div className="tkp-quick">
@@ -689,8 +699,8 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
   // the page's one trade state, drawn by the desktop column's box and the phone sheet's (card app-phone-trade-sheet)
   const trade = useTrade(row ? { chain: row.chain, token: row.token } : null);
-  // the tape behind the marks, read only while they are drawn
-  const tape = useTrades(ctl.trades ? (row?.chain ?? null) : null, ctl.trades ? (row?.token ?? null) : null);
+  // the tape: the lower panel's Trades and, while they are drawn, the chart's marks
+  const tape = useTrades(row?.chain ?? null, row?.token ?? null);
   if (data.status === "error" || data.status === "empty")
     return (
       <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
@@ -701,11 +711,11 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
-  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape };
+  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };
   return (
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
-      <Desktop v={v} r={ready} c={c} t={trade} />
-      <Phone v={v} r={ready} c={c} t={trade} />
+      <Desktop v={v} r={ready} c={c} t={trade} tape={tape} />
+      <Phone v={v} r={ready} c={c} t={trade} tape={tape} />
     </section>
   );
 }
