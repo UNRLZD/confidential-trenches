@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Card signers-own-bytes (reviews 4 M2 and 5 F2): every place the device, the signing page, the kit or the exit tool can
+// Card signers-own-bytes (reviews 4 M2, 5 F2 and 6 N1/N2): every place the device, the signing page, the kit or the exit tool can
 // make a signature is one of SIGN_SITES, as file:statement, and each entry names the test that proves what it signs.
 //   node scripts/ci/sign-sites.mjs [root]      (exit 1 and one line per refusal)
 // It walks packages/{wallet,kit,signpage,exit}/src with lstat (a symlink is refused, never followed), parses every code
@@ -12,7 +12,18 @@
 //   - WebCrypto's subtle in any form but x.subtle.<SUBTLE> or a const alias read only as alias.<SUBTLE>: no subtle
 //     binding, no subtle key, no computed key on crypto, globalThis, self or window;
 //   - a namespace import of @noble/curves, or import() or require() of it; a curve binding exported, handed on whole,
-//     or read with a computed key that is not a plain string.
+//     or read with a computed key that is not a plain string; a member chain from a curve or an @scure/bip32 binding
+//     (HDKey.fromMasterSeed(s).derive(p)[k]) read with one (review 6 N2);
+//   - a relative path that leaves the four trees (into node_modules, or another package); createRequire other than
+//     createRequire(x).resolve(...); eval, Function or a .constructor(...) call: code or modules made at run time
+//     (review 6 N1);
+//   - Reflect other than Reflect.ownKeys, and Object.getOwnPropertyDescriptor(s): a member read by a name the census
+//     cannot see (review 6 N2).
+// What it is: a census of signing written plainly, so that a new signature cannot land unlisted by accident or by a
+// shape a reader would miss. What it is not: proof against signing someone hides on purpose. Two kinds stay out of its
+// sight: a member read by a key built at run time from a value it cannot trace to a signer binding (const hd =
+// HDKey.fromMasterSeed(s); hd[["si", "gn"].join("")](h)), which needs the type checker; and a signature computed by hand
+// from the curve's point arithmetic and a hash, with no sign member at all (review 6's G8). Code review covers those.
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +67,7 @@ export const NODE_CRYPTO = new Set(["createHash"]);
 export const SUBTLE = new Set(["digest", "encrypt", "decrypt", "generateKey", "importKey", "exportKey", "deriveKey", "deriveBits", "wrapKey", "unwrapKey"]);
 const GLOBALS = new Set(["crypto", "globalThis", "self", "window"]);
 const CURVES = /^@noble\/curves\//;
+const BIP32 = "@scure/bip32";
 const SIGN = new Set(["sign", "signAsync"]);
 
 export const TREES = ["packages/wallet/src", "packages/kit/src", "packages/signpage/src", "packages/exit/src"];
@@ -83,6 +95,25 @@ export function readTrees(root) {
 const unwrap = (n) => {
   while (ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isTypeAssertionExpression(n) || ts.isNonNullExpression(n) || ts.isSatisfiesExpression(n)) n = n.expression;
   return n;
+};
+/** The identifier a member chain (a.b(c)[d].e) starts from, else null. */
+const rootOf = (n) => {
+  for (;;) {
+    n = unwrap(n);
+    if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isCallExpression(n)) n = n.expression;
+    else return ts.isIdentifier(n) ? n : null;
+  }
+};
+/** An identifier read as a value: not a type, a member's name, a key or a declaration's name. */
+const valueRef = (n) => {
+  const p = n.parent;
+  if (!p) return false;
+  if (ts.isTypeReferenceNode(p) || ts.isQualifiedName(p) || ts.isTypeQueryNode(p) || ts.isExpressionWithTypeArguments(p)) return false;
+  if ((ts.isPropertyAccessExpression(p) || ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isPropertySignature(p) || ts.isMethodDeclaration(p) || ts.isMethodSignature(p) || ts.isGetAccessor(p) || ts.isSetAccessor(p) || ts.isEnumMember(p)) && p.name === n) return false;
+  if (ts.isImportSpecifier(p) || ts.isExportSpecifier(p) || ts.isImportClause(p) || ts.isNamespaceImport(p)) return false;
+  if ((ts.isVariableDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isParameter(p) || ts.isBindingElement(p)) && p.name === n) return false;
+  if (ts.isBindingElement(p) && p.propertyName === n) return false;
+  return true;
 };
 /** n, widened past the parens and casts around it. */
 const outer = (n) => {
@@ -118,14 +149,21 @@ function fileCensus(file, text) {
     };
     const module = (n, spec, how) => {
       if (spec === null) return refused.push(`${at(n)}: ${how} of a module that is not a plain string`);
-      if (!spec.startsWith("./") && !spec.startsWith("../") && !ALLOWED.has(spec)) refused.push(`${at(n)}: ${how} of ${spec}, not an allowed module`);
+      if (spec.startsWith("./") || spec.startsWith("../")) {
+        // a relative path is one of the trees' own files: one that leaves them (node_modules, another package) is a
+        // module no list allows (review 6 N1)
+        const to = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
+        if (!TREES.some((t) => to.startsWith(`${t}/`))) refused.push(`${at(n)}: ${how} of ${spec}, a path out of the source trees`);
+      } else if (!ALLOWED.has(spec)) refused.push(`${at(n)}: ${how} of ${spec}, not an allowed module`);
       else if (spec === "node:crypto" && how !== "an import") refused.push(`${at(n)}: ${how} of node:crypto (only a named import of ${[...NODE_CRYPTO].join(", ")})`);
       else if (CURVES.test(spec) && how !== "an import") refused.push(`${at(n)}: ${how} of ${spec} (a curve is imported by name, never loaded at run time)`);
     };
     // the const aliases of x.subtle: read only as alias.<SUBTLE>
     const subtles = new Set();
-    // the curve bindings: every local name an @noble/curves import makes
+    // the curve bindings: every local name an @noble/curves import makes; the signer bindings add @scure/bip32's (HDKey
+    // signs), whose member chains may not be read by a computed key
     const curves = new Set();
+    const signers = new Set();
     for (const s of sf.statements) {
       if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier)) continue;
       const spec = s.moduleSpecifier.text;
@@ -135,10 +173,13 @@ function fileCensus(file, text) {
         if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) refused.push(`${at(s)}: a namespace import of node:crypto`);
         if (c.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) if (!NODE_CRYPTO.has((e.propertyName ?? e.name).text)) refused.push(`${at(e)}: node:crypto's ${(e.propertyName ?? e.name).text} imported`);
       }
+      if (spec === BIP32 && c?.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) signers.add(e.name.text);
+      if (spec === BIP32 && c?.name) signers.add(c.name.text);
+      if (spec === BIP32 && c?.namedBindings && ts.isNamespaceImport(c.namedBindings)) signers.add(c.namedBindings.name.text);
       if (!CURVES.test(spec) || !c) continue;
-      if (c.name) curves.add(c.name.text);
+      if (c.name) (curves.add(c.name.text), signers.add(c.name.text));
       if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) refused.push(`${at(s)}: a namespace import of ${spec}: import each curve by name`);
-      if (c.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) curves.add(e.name.text);
+      if (c.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) (curves.add(e.name.text), signers.add(e.name.text));
     }
     const aliases = (n) => {
       if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isVariableDeclarationList(n.parent) && (n.parent.flags & ts.NodeFlags.Const) !== 0) {
@@ -158,6 +199,26 @@ function fileCensus(file, text) {
       if (ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) {
         module(n, n.arguments.length === 1 && (ts.isStringLiteral(n.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(n.arguments[0])) ? n.arguments[0].text : null, n.expression.kind === ts.SyntaxKind.ImportKeyword ? "import()" : "require()");
       }
+      // code made at run time, and names read without a member access (review 6 N1, N2)
+      if (ts.isIdentifier(n) && valueRef(n)) {
+        if (n.text === "eval" || n.text === "Function") refused.push(`${at(n)}: ${n.text}: code made at run time is out of this census's sight`);
+        if (n.text === "Reflect" && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === "ownKeys")) refused.push(`${at(n)}: Reflect other than Reflect.ownKeys (it reads a member by a name the census cannot see)`);
+      }
+      if ((ts.isCallExpression(n) || ts.isNewExpression(n)) && n.expression) {
+        const callee = unwrap(n.expression);
+        const name = ts.isPropertyAccessExpression(callee) ? callee.name.text : ts.isElementAccessExpression(callee) ? literalKey(unwrap(callee.argumentExpression)) : null;
+        if (name === "constructor") refused.push(`${at(n)}: a constructor called through .constructor (a Function by another name)`);
+      }
+      const member = ts.isPropertyAccessExpression(n) ? n.name.text : ts.isElementAccessExpression(n) ? literalKey(unwrap(n.argumentExpression)) : null;
+      if ((member === "eval" || member === "Function") && ts.isIdentifier(unwrap(n.expression)) && GLOBALS.has(unwrap(n.expression).text)) refused.push(`${at(n)}: ${member}: code made at run time is out of this census's sight`);
+      if (member === "getOwnPropertyDescriptor" || member === "getOwnPropertyDescriptors") refused.push(`${at(n)}: ${member} (it reads a member by a name the census cannot see)`);
+      const loader = (ts.isIdentifier(n) && n.text === "createRequire" && valueRef(n)) || member === "createRequire" ? n : null;
+      if (loader !== null) {
+        // createRequire(x).resolve(...) finds a file and loads none; any other use is a require the census cannot read
+        const call = outer(loader).parent;
+        const ok = call && ts.isCallExpression(call) && outer(call.expression) === outer(loader) && ts.isPropertyAccessExpression(call.parent) && call.parent.expression === call && call.parent.name.text === "resolve" && ts.isCallExpression(call.parent.parent) && call.parent.parent.expression === call.parent;
+        if (!ok) refused.push(`${at(n)}: createRequire other than createRequire(x).resolve(...)`);
+      }
       // sign members, on any receiver; subtle in any form
       if (ts.isPropertyAccessExpression(n)) {
         if (SIGN.has(n.name.text)) add(n);
@@ -173,7 +234,8 @@ function fileCensus(file, text) {
         if (key !== null && SIGN.has(key)) add(n);
         if (key === "subtle") refused.push(`${at(n)}: WebCrypto's subtle read with a key (read it as x.subtle.<method>)`);
         const recv = unwrap(n.expression);
-        if (key === null && ts.isIdentifier(recv) && curves.has(recv.text)) refused.push(`${at(n)}: the curve ${recv.text} read with a computed key`);
+        const root = rootOf(n.expression);
+        if (key === null && root !== null && signers.has(root.text)) refused.push(`${at(n)}: ${root.text === recv.getText(sf) && curves.has(root.text) ? `the curve ${root.text}` : `a member chain of the signer ${root.text}`} read with a computed key`);
         if (key === null && ((ts.isIdentifier(recv) && (GLOBALS.has(recv.text) || subtles.has(recv.text))) || (ts.isPropertyAccessExpression(recv) && GLOBALS.has(recv.name.text)))) refused.push(`${at(n)}: ${recv.getText(sf)} read with a computed key`);
       }
       if (ts.isBindingElement(n)) {
