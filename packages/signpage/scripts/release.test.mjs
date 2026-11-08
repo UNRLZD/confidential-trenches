@@ -258,9 +258,13 @@ test("planted: the newest list is picked by N, not by text (release-100 after re
 test("planted: a list not in the ledger, and a ledger entry whose list is gone, fail; a written release is never written again", () => {
   const dir = releasesCopy();
   try {
-    writeFileSync(join(dir, "release-99.json"), readFileSync(join(dir, "release-1.json")));
-    assert.ok(releaseProblems(dir).some((l) => l.startsWith("release-99 is not in RELEASED")));
-    assert.ok(releaseProblems(dir, { ...RELEASED, "release-98": "0".repeat(64) }).includes("release-98 is in RELEASED but its list is gone"));
+    // two tags past the ledger's newest, so a cut never turns them into real ones
+    const top = Math.max(...Object.keys(RELEASED).map((k) => Number(k.slice("release-".length))));
+    const gone = `release-${top + 1}`;
+    const stray = `release-${top + 2}`;
+    writeFileSync(join(dir, `${stray}.json`), readFileSync(join(dir, "release-1.json")));
+    assert.ok(releaseProblems(dir).some((l) => l.startsWith(`${stray} is not in RELEASED`)));
+    assert.ok(releaseProblems(dir, { ...RELEASED, [gone]: "0".repeat(64) }).includes(`${gone} is in RELEASED but its list is gone`));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
