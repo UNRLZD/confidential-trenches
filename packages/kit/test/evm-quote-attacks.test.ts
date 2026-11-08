@@ -2608,7 +2608,15 @@ test("PE6 the sim's eth_call and its nonce read go from the pinned sender, with 
   }
 });
 
-test("PE8 a sender too low to pay the sale's gas drops the hooked route and freezes no sell: its balance is its own", async () => {
+// a sell quote's own verdict with what it says of the sim (card evm-sell-unfunded-sim-keeps-route): "ran" where W's sim
+// held the route, "skipped" where the sender could not pay for it, "none" where no route needed it
+const simVerdict = async (p: Promise<EvmPoolSellQuote>) => {
+  let sim: unknown;
+  const verdict = await sellVerdict(p.then((q) => ((sim = (q as { sim?: unknown }).sim), q)));
+  return { verdict, sim };
+};
+
+test("PE8 a sender too low to pay the sale's gas skips the sim and keeps the hooked route at its keep-min quote, freezing no sell: its balance is its own", async () => {
   const token = "0x00000000000000000000000000000000000c0ebe";
   const market: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
   // a hook W's own sell clears at twice the market: with the sender funded it sets the reference, so W's bought route is
@@ -2617,19 +2625,59 @@ test("PE8 a sender too low to pay the sale's gas drops the hooked route and free
   const pools = [market, hooked];
   const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
   const logs = scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]);
-  const funded = await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, logs, DELEGATED));
-  // the sale goes through it at that price (card evm-sell-hook-converge)
-  viaHook(funded, hooked.key, 2n * AMOUNT);
+  const on = (bal?: Record<string, bigint>) => evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, bal), chain(pools, 1, 5_000_000, undefined, bal)], NOW, logs, DELEGATED);
+  signed.length = 0;
+  const funded = await simVerdict(on());
+  // the sale goes through it at that price (card evm-sell-hook-converge), held by W's sim
+  viaHook(funded.verdict, hooked.key, 2n * AMOUNT);
+  assert.equal(funded.sim, "ran");
+  assert.equal(signed.length, 1, "W signed the sim");
   // the sender holding exactly the sim's gas x maxFeePerGas: the sim runs
   const cost = (SALE_GAS - 25_000n) * (BASE_FEE + 1_000_000n);
-  const exact = { [SENDER]: cost };
-  viaHook(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, exact), chain(pools, 1, 5_000_000, undefined, exact)], NOW, logs, DELEGATED)), hooked.key, 2n * AMOUNT);
-  // one wei short on both providers (an eth_call it cannot pay for is the node's error, not a revert): the hooked route
-  // is dropped and the sale prices at the market
-  const short = { [SENDER]: cost - 1n };
-  atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, short), chain(pools, 1, 5_000_000, undefined, short)], NOW, logs, DELEGATED)));
-  // and one with no ETH at all
-  atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, {}), chain(pools, 1, 5_000_000, undefined, {})], NOW, logs, DELEGATED)));
+  const exact = await simVerdict(on({ [SENDER]: cost }));
+  viaHook(exact.verdict, hooked.key, 2n * AMOUNT);
+  assert.equal(exact.sim, "ran");
+  // one wei short on both providers (an eth_call it cannot pay for is the node's error, not a revert): the sim is
+  // skipped, and the hooked route stays in the pick at the lower of its quotes, as on a chain that pins no sender (PE5)
+  signed.length = 0;
+  const short = await simVerdict(on({ [SENDER]: cost - 1n }));
+  viaHook(short.verdict, hooked.key, 2n * AMOUNT);
+  assert.equal(short.sim, "skipped");
+  // and one with no ETH at all, as both mainnet sell senders held on 7 Nov (review a42f9c16, Low 1)
+  const none = await simVerdict(on({}));
+  viaHook(none.verdict, hooked.key, 2n * AMOUNT);
+  assert.equal(none.sim, "skipped");
+  assert.deepEqual(signed, [], "no sim is signed where it cannot run");
+  // where no route needs the sim, the quote says none ran
+  const plain = await simVerdict(evmPoolSellQuoteWith(req, [chain([market], 0, 5_000_000, undefined, {}), chain([market], 1, 5_000_000, undefined, {})], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }]), DELEGATED));
+  atMarket(plain.verdict);
+  assert.equal(plain.sim, "none");
+});
+
+test("PE9 an unfunded sell sender never drops the token's real market behind a hook the venue does not list: a seeded pool beside it sets no price (card evm-sell-unfunded-sim-keeps-route)", async () => {
+  const token = "0x00000000000000000000000000000000000c0ece";
+  // the token's real market behind a hook the venue does not list, whose quote with its hook as it is reads half again
+  // above its quote with the hook replaced; its keep-min quote is the lower, the amount itself. The seeded 1% pool
+  // beside it, which the sell builder takes, gives a tenth of that
+  const market = real(token, (a) => a + a / 2n);
+  const pools = [seeded(token), market];
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
+  const logs = scanner(5_000_000, [{ key: market.key, at: 4_500_000 }]);
+  const on = (bal?: Record<string, bigint>) => evmPoolSellQuoteWith(req, [chain(pools, 0, 5_000_000, undefined, bal), chain(pools, 1, 5_000_000, undefined, bal)], NOW, logs, DELEGATED);
+  // both providers' sender holding nothing, and one wei short of the sim's gas: the hooked route stays in the pick at
+  // its keep-min quote, never the seeded pool's tenth
+  const cost = (SALE_GAS - 25_000n) * (BASE_FEE + 1_000_000n);
+  for (const bal of [{}, { [SENDER]: cost - 1n }]) {
+    signed.length = 0;
+    const v = await simVerdict(on(bal));
+    viaHook(v.verdict, market.key, AMOUNT);
+    assert.equal(v.sim, "skipped", show(bal));
+    assert.deepEqual(signed, [], "no sim is signed where it cannot run");
+  }
+  // funded, W's sim holds the same route at the same quote
+  const funded = await simVerdict(on());
+  viaHook(funded.verdict, market.key, AMOUNT);
+  assert.equal(funded.sim, "ran");
 });
 
 // ------------------------------------------------------------------ the warm round (card evm-quote-warm-round)
