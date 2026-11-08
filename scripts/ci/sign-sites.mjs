@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Card signers-own-bytes (reviews 4 M2, 5 F2 and 6 N1/N2): every place the device, the signing page, the kit or the exit tool can
+// Card signers-own-bytes (reviews 4 M2, 5 F2 and 6 N1-N3): every place the device, the signing page, the kit or the exit tool can
 // make a signature is one of SIGN_SITES, as file:statement, and each entry names the test that proves what it signs.
 //   node scripts/ci/sign-sites.mjs [root]      (exit 1 and one line per refusal)
 // It walks packages/{wallet,kit,signpage,exit}/src with lstat (a symlink is refused, never followed), parses every code
@@ -14,16 +14,20 @@
 //   - a namespace import of @noble/curves, or import() or require() of it; a curve binding exported, handed on whole,
 //     or read with a computed key that is not a plain string; a member chain from a curve or an @scure/bip32 binding
 //     (HDKey.fromMasterSeed(s).derive(p)[k]) read with one (review 6 N2);
-//   - a relative path that leaves the four trees (into node_modules, or another package); createRequire other than
-//     createRequire(x).resolve(...); eval, Function or a .constructor(...) call: code or modules made at run time
-//     (review 6 N1);
-//   - Reflect other than Reflect.ownKeys, and Object.getOwnPropertyDescriptor(s): a member read by a name the census
-//     cannot see (review 6 N2).
-// What it is: a census of signing written plainly, so that a new signature cannot land unlisted by accident or by a
-// shape a reader would miss. What it is not: proof against signing someone hides on purpose. Two kinds stay out of its
-// sight: a member read by a key built at run time from a value it cannot trace to a signer binding (const hd =
-// HDKey.fromMasterSeed(s); hd[["si", "gn"].join("")](h)), which needs the type checker; and a signature computed by hand
-// from the curve's point arithmetic and a hash, with no sign member at all (review 6's G8). Code review covers those.
+//   - a relative path that leaves the four trees (into node_modules, or another package) (review 6 N1);
+//   - node:module other than a named import of createRequire by its own name, and createRequire other than
+//     createRequire(x).resolve(...) (review 6 N1, N3);
+//   - the names of NAMES (eval, Function, Reflect, constructor, getBuiltinModule) in every position but a type and a
+//     declared name (an object literal's key, a class member, a parameter): as a value, as a member's name on any
+//     receiver, as a pattern's key, in an extends clause; the one use allowed is Reflect.ownKeys (review 6 N3);
+//   - Object.getOwnPropertyDescriptor(s); a computed key on a member chain from a curve or @scure/bip32 binding, in an
+//     expression or a pattern (review 6 N2, N3).
+// What it is: a tripwire for signing written plainly, so that a new signature cannot land unlisted by accident or in a
+// shape a reader would miss; it matches the names above in every position, not by what they do. What it is not: proof
+// against signing hidden on purpose. A member read by a key built at run time off a value it cannot trace to a signer
+// binding (const hd = HDKey.fromMasterSeed(s); hd[["si", "gn"].join("")](h)) needs the type checker, and a signature
+// computed by hand from the curve's point arithmetic and a hash (review 6's G8) has no name to match: code review covers
+// those. This is the census's last round of rules: a further evasion is named here, not answered with another rule.
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,16 +108,26 @@ const rootOf = (n) => {
     else return ts.isIdentifier(n) ? n : null;
   }
 };
-/** An identifier read as a value: not a type, a member's name, a key or a declaration's name. */
-const valueRef = (n) => {
+/** The names refused in every position but a type and a declared name (review 6 N3): code made at run time (eval,
+ *  Function, constructor), a member read by a name the census cannot see (Reflect), a module loaded with no import
+ *  (getBuiltinModule). */
+export const NAMES = new Set(["eval", "Function", "Reflect", "constructor", "getBuiltinModule"]);
+/** `n` names a type, or is a name being declared (an object literal's key, a class or interface member, a parameter). */
+const typeOrDeclared = (n) => {
+  let t = n;
+  while (t.parent && ts.isQualifiedName(t.parent)) t = t.parent;
+  const q = t.parent;
+  if (q && (ts.isTypeReferenceNode(q) || ts.isTypeQueryNode(q))) return true;
   const p = n.parent;
-  if (!p) return false;
-  if (ts.isTypeReferenceNode(p) || ts.isQualifiedName(p) || ts.isTypeQueryNode(p) || ts.isExpressionWithTypeArguments(p)) return false;
-  if ((ts.isPropertyAccessExpression(p) || ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isPropertySignature(p) || ts.isMethodDeclaration(p) || ts.isMethodSignature(p) || ts.isGetAccessor(p) || ts.isSetAccessor(p) || ts.isEnumMember(p)) && p.name === n) return false;
-  if (ts.isImportSpecifier(p) || ts.isExportSpecifier(p) || ts.isImportClause(p) || ts.isNamespaceImport(p)) return false;
-  if ((ts.isVariableDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) || ts.isParameter(p) || ts.isBindingElement(p)) && p.name === n) return false;
-  if (ts.isBindingElement(p) && p.propertyName === n) return false;
-  return true;
+  return !!p && (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isPropertySignature(p) || ts.isMethodDeclaration(p) || ts.isMethodSignature(p) || ts.isGetAccessor(p) || ts.isSetAccessor(p) || ts.isEnumMember(p) || ts.isParameter(p)) && p.name === n;
+};
+/** The one use of Reflect allowed: Reflect.ownKeys, which reads keys and calls nothing. */
+const ownKeys = (n) => ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === "ownKeys";
+/** The expression a binding pattern reads from (const { a } = x, nested patterns included), else null. */
+const patternSource = (e) => {
+  let p = e.parent;
+  while (p && (ts.isObjectBindingPattern(p) || ts.isArrayBindingPattern(p) || ts.isBindingElement(p))) p = p.parent;
+  return p && (ts.isVariableDeclaration(p) || ts.isParameter(p)) && p.initializer ? p.initializer : null;
 };
 /** n, widened past the parens and casts around it. */
 const outer = (n) => {
@@ -155,6 +169,7 @@ function fileCensus(file, text) {
         const to = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
         if (!TREES.some((t) => to.startsWith(`${t}/`))) refused.push(`${at(n)}: ${how} of ${spec}, a path out of the source trees`);
       } else if (!ALLOWED.has(spec)) refused.push(`${at(n)}: ${how} of ${spec}, not an allowed module`);
+      else if (spec === "node:module" && how !== "an import") refused.push(`${at(n)}: ${how} of node:module (only a named import of createRequire)`);
       else if (spec === "node:crypto" && how !== "an import") refused.push(`${at(n)}: ${how} of node:crypto (only a named import of ${[...NODE_CRYPTO].join(", ")})`);
       else if (CURVES.test(spec) && how !== "an import") refused.push(`${at(n)}: ${how} of ${spec} (a curve is imported by name, never loaded at run time)`);
     };
@@ -168,6 +183,11 @@ function fileCensus(file, text) {
       if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier)) continue;
       const spec = s.moduleSpecifier.text;
       const c = s.importClause;
+      if (spec === "node:module") {
+        const named = c?.namedBindings && ts.isNamedImports(c.namedBindings) ? c.namedBindings.elements : [];
+        if (!c || c.name || (c.namedBindings && !ts.isNamedImports(c.namedBindings)) || named.length === 0) refused.push(`${at(s)}: node:module other than a named import of createRequire`);
+        for (const e of named) if (e.propertyName || e.name.text !== "createRequire") refused.push(`${at(e)}: node:module's ${(e.propertyName ?? e.name).text}${e.propertyName ? ` as ${e.name.text}` : ""} (only createRequire, by its own name)`);
+      }
       if (spec === "node:crypto" && c && !c.isTypeOnly) {
         if (c.name) refused.push(`${at(s)}: a default import of node:crypto`);
         if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) refused.push(`${at(s)}: a namespace import of node:crypto`);
@@ -199,20 +219,20 @@ function fileCensus(file, text) {
       if (ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) {
         module(n, n.arguments.length === 1 && (ts.isStringLiteral(n.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(n.arguments[0])) ? n.arguments[0].text : null, n.expression.kind === ts.SyntaxKind.ImportKeyword ? "import()" : "require()");
       }
-      // code made at run time, and names read without a member access (review 6 N1, N2)
-      if (ts.isIdentifier(n) && valueRef(n)) {
-        if (n.text === "eval" || n.text === "Function") refused.push(`${at(n)}: ${n.text}: code made at run time is out of this census's sight`);
-        if (n.text === "Reflect" && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === "ownKeys")) refused.push(`${at(n)}: Reflect other than Reflect.ownKeys (it reads a member by a name the census cannot see)`);
-      }
-      if ((ts.isCallExpression(n) || ts.isNewExpression(n)) && n.expression) {
-        const callee = unwrap(n.expression);
-        const name = ts.isPropertyAccessExpression(callee) ? callee.name.text : ts.isElementAccessExpression(callee) ? literalKey(unwrap(callee.argumentExpression)) : null;
-        if (name === "constructor") refused.push(`${at(n)}: a constructor called through .constructor (a Function by another name)`);
+      // the names of NAMES in every position but a type and a declared name: a value, a member's name on any receiver
+      // (a.eval, a["eval"]), a pattern's key ({ eval: e } = globalThis), an extends clause (review 6 N3)
+      if (ts.isIdentifier(n) && NAMES.has(n.text) && !typeOrDeclared(n) && !(n.text === "Reflect" && ownKeys(n))) refused.push(`${at(n)}: ${n.text}, a name the census refuses in any position but a type or a declared name`);
+      if (ts.isElementAccessExpression(n) && NAMES.has(literalKey(unwrap(n.argumentExpression)) ?? "")) refused.push(`${at(n)}: ${literalKey(unwrap(n.argumentExpression))}, a name the census refuses in any position but a type or a declared name`);
+      if (ts.isBindingElement(n) && n.propertyName && !ts.isIdentifier(n.propertyName) && NAMES.has(nameOf(n.propertyName) ?? "")) refused.push(`${at(n)}: ${nameOf(n.propertyName)}, a name the census refuses in any position but a type or a declared name`);
+      // a pattern's computed key on a signer's member chain: const { [k]: s } = HDKey.prototype
+      if (ts.isBindingElement(n) && n.propertyName && ts.isComputedPropertyName(n.propertyName) && literalKey(unwrap(n.propertyName.expression)) === null) {
+        const src = patternSource(n);
+        const root = src ? rootOf(src) : null;
+        if (root !== null && signers.has(root.text)) refused.push(`${at(n)}: a member chain of the signer ${root.text} read with a computed key`);
       }
       const member = ts.isPropertyAccessExpression(n) ? n.name.text : ts.isElementAccessExpression(n) ? literalKey(unwrap(n.argumentExpression)) : null;
-      if ((member === "eval" || member === "Function") && ts.isIdentifier(unwrap(n.expression)) && GLOBALS.has(unwrap(n.expression).text)) refused.push(`${at(n)}: ${member}: code made at run time is out of this census's sight`);
       if (member === "getOwnPropertyDescriptor" || member === "getOwnPropertyDescriptors") refused.push(`${at(n)}: ${member} (it reads a member by a name the census cannot see)`);
-      const loader = (ts.isIdentifier(n) && n.text === "createRequire" && valueRef(n)) || member === "createRequire" ? n : null;
+      const loader = (ts.isIdentifier(n) && n.text === "createRequire" && !typeOrDeclared(n) && !ts.isImportSpecifier(n.parent)) || member === "createRequire" ? n : null;
       if (loader !== null) {
         // createRequire(x).resolve(...) finds a file and loads none; any other use is a require the census cannot read
         const call = outer(loader).parent;

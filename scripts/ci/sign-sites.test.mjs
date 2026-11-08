@@ -139,28 +139,28 @@ const E = "packages/exit/src";
 
 test("planted: review 6's escapes (G1-G7, G5b, G6b, G7b) each fail the gate, each a real signature", () => {
   const cases = {
-    "G1 Reflect.get(hd, \"sign\") on an HDKey": [{ [`${W}/g.ts`]: `${HD}export const g = (seed: Uint8Array, h: Uint8Array) => { const hd = HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"); return Reflect.get(hd, "sign").call(hd, h); };\n` }, /g\.ts:2: Reflect other than Reflect\.ownKeys/],
+    "G1 Reflect.get(hd, \"sign\") on an HDKey": [{ [`${W}/g.ts`]: `${HD}export const g = (seed: Uint8Array, h: Uint8Array) => { const hd = HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"); return Reflect.get(hd, "sign").call(hd, h); };\n` }, /g\.ts:2: Reflect, a name the census refuses/],
     "G2 a built key on an HDKey's member chain": [{ [`${W}/g.ts`]: `${HD}const k = ["si", "gn"].join("") as "sign";\nexport const g = (seed: Uint8Array, h: Uint8Array) => HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0")[k](h);\n` }, /g\.ts:3: a member chain of the signer HDKey read with a computed key/],
     "G3 getOwnPropertyDescriptor(proto, \"sign\")": [{ [`${W}/g.ts`]: `${HD}export const g = (seed: Uint8Array, h: Uint8Array) => { const hd = HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"); return Object.getOwnPropertyDescriptor(Object.getPrototypeOf(hd), "sign")!.value.call(hd, h); };\n` }, /g\.ts:2: getOwnPropertyDescriptor/],
-    "G4 WebCrypto through Reflect.get": [{ [`${W}/g.ts`]: `export const g = (k: CryptoKey, d: Uint8Array) => { const s = Reflect.get(crypto, "subtle"); return Reflect.get(s, "sign").call(s, "Ed25519", k, d); };\n` }, /g\.ts:1: Reflect other than Reflect\.ownKeys/],
+    "G4 WebCrypto through Reflect.get": [{ [`${W}/g.ts`]: `export const g = (k: CryptoKey, d: Uint8Array) => { const s = Reflect.get(crypto, "subtle"); return Reflect.get(s, "sign").call(s, "Ed25519", k, d); };\n` }, /g\.ts:1: Reflect, a name the census refuses/],
     "G5 createRequire loads the curve, read by a built key": [{ [`${E}/g.ts`]: `import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nconst c = req("@noble/curves/ed25519.js").ed25519;\nconst k = ["si", "gn"].join("");\nexport const g = (d: Uint8Array, s: Uint8Array) => c[k](d, s);\n` }, /exit\/src\/g\.ts:2: createRequire other than createRequire\(x\)\.resolve/],
     "G5b createRequire loads node:crypto": [{ [`${E}/g.ts`]: `import { createRequire } from "node:module";\nconst nc = createRequire(import.meta.url)("node:" + "crypto");\nexport const g = (d: Uint8Array, key: unknown) => Reflect.apply(Reflect.get(nc, "si" + "gn"), nc, [null, d, key]);\n` }, /g\.ts:2: createRequire other than/],
     "G6 a relative path into node_modules": [{ [`${W}/g.ts`]: `import { ed25519 as e } from "../../../node_modules/.pnpm/@noble+curves@2.4.0/node_modules/@noble/curves/ed25519.js";\nconst k = ["si", "gn"].join("");\nexport const g = (d: Uint8Array, s: Uint8Array) => (e as any)[k](d, s);\n` }, /g\.ts:1: an import of \.\.\/\.\.\/\.\.\/node_modules\/.*, a path out of the source trees/],
     "G6b a relative path to ethers": [{ [`${W}/g.ts`]: `import { Wallet } from "../../../node_modules/.pnpm/ethers@6.13.5/node_modules/ethers/lib.esm/index.js";\nexport const g = (pk: string, m: string) => new Wallet(pk).signMessageSync(m);\n` }, /a path out of the source trees/],
-    "G7 new Function holds the import and the call": [{ [`${E}/g.ts`]: `export const g = new Function("d", "s", "return import('@noble/curves/ed25519.js').then((c) => c.ed25519.sign(d, s))");\n` }, /g\.ts:1: Function: code made at run time/],
-    "G7b indirect eval": [{ [`${E}/g.ts`]: `export const g = (d: Uint8Array, s: Uint8Array) => (0, eval)("import('@noble/curves/ed25519.js')").then((c: any) => Reflect.get(c.ed25519, "sign")(d, s));\n` }, /g\.ts:1: eval: code made at run time/],
+    "G7 new Function holds the import and the call": [{ [`${E}/g.ts`]: `export const g = new Function("d", "s", "return import('@noble/curves/ed25519.js').then((c) => c.ed25519.sign(d, s))");\n` }, /g\.ts:1: Function, a name the census refuses/],
+    "G7b indirect eval": [{ [`${E}/g.ts`]: `export const g = (d: Uint8Array, s: Uint8Array) => (0, eval)("import('@noble/curves/ed25519.js')").then((c: any) => Reflect.get(c.ed25519, "sign")(d, s));\n` }, /g\.ts:1: eval, a name the census refuses/],
   };
   for (const [name, [files, want]] of Object.entries(cases)) refuses(name, files, want);
 });
 
 test("planted: the other run-time and by-name forms fail; the trees' own uses pass", () => {
   const cases = [
-    ["globalThis.eval", { [`${E}/g.ts`]: 'export const g = (c: string) => globalThis.eval(c);\n' }, /eval: code made at run time/],
-    ["a Function through .constructor", { [`${E}/g.ts`]: 'export const g = (c: string) => (() => {}).constructor(c);\n' }, /a constructor called through \.constructor/],
-    ["new through a bracketed constructor", { [`${E}/g.ts`]: 'export const g = (c: string) => new (async () => {})["constructor"](c);\n' }, /a constructor called through \.constructor/],
+    ["globalThis.eval", { [`${E}/g.ts`]: 'export const g = (c: string) => globalThis.eval(c);\n' }, /eval, a name the census refuses/],
+    ["a Function through .constructor", { [`${E}/g.ts`]: 'export const g = (c: string) => (() => {}).constructor(c);\n' }, /constructor, a name the census refuses/],
+    ["new through a bracketed constructor", { [`${E}/g.ts`]: 'export const g = (c: string) => new (async () => {})["constructor"](c);\n' }, /constructor, a name the census refuses/],
     ["getOwnPropertyDescriptors", { [`${W}/g.ts`]: "export const g = (o: object) => Object.getOwnPropertyDescriptors(o);\n" }, /getOwnPropertyDescriptors/],
-    ["Reflect handed on", { [`${W}/g.ts`]: "export const R = Reflect;\n" }, /Reflect other than Reflect\.ownKeys/],
-    ["createRequire through node:module's namespace", { [`${E}/g.ts`]: 'import * as m from "node:module";\nexport const r = m.createRequire(import.meta.url);\n' }, /createRequire other than/],
+    ["Reflect handed on", { [`${W}/g.ts`]: "export const R = Reflect;\n" }, /Reflect, a name the census refuses/],
+    ["createRequire through node:module's namespace", { [`${E}/g.ts`]: 'import * as m from "node:module";\nexport const r = m.createRequire(import.meta.url);\n' }, /node:module other than a named import of createRequire/],
     ["createRequire kept, then resolved", { [`${E}/g.ts`]: 'import { createRequire } from "node:module";\nconst r = createRequire(import.meta.url);\nexport const p = r.resolve("x");\n' }, /createRequire other than/],
     ["a relative path to another package", { [`${W}/g.ts`]: 'export { x } from "../../../apps/helper/src/x.ts";\n' }, /a path out of the source trees/],
     ["a relative import() out of the trees", { [`${W}/g.ts`]: 'export const g = () => import("../../../node_modules/tweetnacl/nacl.js");\n' }, /import\(\) of .*, a path out of the source trees/],
@@ -171,6 +171,43 @@ test("planted: the other run-time and by-name forms fail; the trees' own uses pa
   // Function type, a property named eval: none refused
   const fine = 'import { createRequire } from "node:module";\nimport { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";\nexport const p = createRequire(import.meta.url).resolve("snarkjs");\nexport const k = (o: object) => Reflect.ownKeys(o);\nexport type F = Function;\nexport const o = { eval: 1, Function: 2 };\nexport const c = solanaCompileV0;\n';
   assert.deepEqual(plant({ "packages/signpage/src/g.ts": fine }), []);
+});
+
+const ETH = "../../../node_modules/.pnpm/ethers@6.13.5/node_modules/ethers/lib.commonjs/index.js";
+const NAME = (n) => new RegExp(`: ${n}, a name the census refuses in any position but a type or a declared name$`);
+
+test("planted: review 6's second escapes (H1-H7b, I1-I4) each fail with their own refusal; the trees' own uses pass", () => {
+  const cases = {
+    "H1 createRequire renamed on import": [{ [`${W}/h.ts`]: `import { createRequire as cr } from "node:module";\nconst { Wallet } = cr(import.meta.url)("${ETH}");\nexport const h1 = (pk: string, m: string): string => new Wallet(pk).signMessageSync(m);\n` }, /h\.ts:1: node:module's createRequire as cr \(only createRequire, by its own name\)/],
+    "H2 .constructor read, then called by another name": [{ [`${E}/h.ts`]: `const F = (() => {}).constructor as FunctionConstructor;\nexport const h2 = F("d", "s", "return import('@noble/curves/ed25519.js').then((c) => c.ed25519.sign(d, s))");\n` }, NAME("constructor")],
+    "H2b .constructor bound by a pattern": [{ [`${E}/h.ts`]: `const { constructor: F } = (() => {}) as unknown as { constructor: FunctionConstructor };\nexport const h2b = F("d", "s", "return import('@noble/curves/ed25519.js').then((c) => c.ed25519.sign(d, s))");\n` }, NAME("constructor")],
+    "H3 Reflect read off globalThis": [{ [`${W}/h.ts`]: `${HD}export const h3 = (seed: Uint8Array, h: Uint8Array) => { const hd = HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"); return globalThis.Reflect.get(hd, "sign").call(hd, h) as Uint8Array; };\n` }, NAME("Reflect")],
+    "H4 a computed key in a pattern on a signer chain": [{ [`${W}/h.ts`]: `${HD}const k = ["si", "gn"].join("");\nconst { [k]: s } = HDKey.prototype as any;\nexport const h4 = (seed: Uint8Array, h: Uint8Array): Uint8Array => s.call(HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"), h);\n` }, /h\.ts:3: a member chain of the signer HDKey read with a computed key/],
+    "H5 process.getBuiltinModule loads node:crypto, no import": [{ [`${E}/h.ts`]: `const nc: any = process.getBuiltinModule("node:crypto");\nconst k = ["si", "gn"].join("");\nexport const h5 = (d: Uint8Array, key: unknown): Uint8Array => nc[k](null, d, key);\n` }, NAME("getBuiltinModule")],
+    "H6 node:module's Module._load": [{ [`${W}/h.ts`]: `import { Module } from "node:module";\nconst c = (Module as any)._load(new URL("../node_modules/@noble/curves/ed25519.js", import.meta.url).pathname, null).ed25519;\nconst k = ["si", "gn"].join("");\nexport const h6 = (d: Uint8Array, s: Uint8Array): Uint8Array => c[k](d, s);\n` }, /h\.ts:1: node:module's Module \(only createRequire, by its own name\)/],
+    "H7 eval on Node's global": [{ [`${E}/h.ts`]: `export const h7 = (d: Uint8Array, s: Uint8Array) => (global as any).eval("import('@noble/curves/ed25519.js')").then((c: any) => c.ed25519[["si", "gn"].join("")](d, s) as Uint8Array);\n` }, NAME("eval")],
+    "H7b eval on globalThis.globalThis": [{ [`${E}/h.ts`]: `export const h7b = (d: Uint8Array, s: Uint8Array) => (globalThis.globalThis as any).eval("import('@noble/curves/ed25519.js')").then((c: any) => c.ed25519[["si", "gn"].join("")](d, s) as Uint8Array);\n` }, NAME("eval")],
+    "I1 a class that extends Function": [{ [`${E}/i.ts`]: `class F extends Function {}\nexport const i1 = new F("d", "s", "return import('@noble/curves/ed25519.js').then((c) => c.ed25519.sign(d, s))") as (d: Uint8Array, s: Uint8Array) => Promise<Uint8Array>;\n` }, NAME("Function")],
+    "I2 Function bound by a pattern from globalThis": [{ [`${E}/i.ts`]: `const { Function: F } = globalThis;\nexport const i2 = F("d", "s", "return import('@noble/curves/ed25519.js').then((c) => c.ed25519.sign(d, s))") as (d: Uint8Array, s: Uint8Array) => Promise<Uint8Array>;\n` }, NAME("Function")],
+    "I3 Reflect bound by a pattern from globalThis": [{ [`${W}/i.ts`]: `${HD}const { Reflect: R } = globalThis;\nexport const i3 = (seed: Uint8Array, h: Uint8Array) => { const hd = HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"); return R.get(hd, "sign").call(hd, h) as Uint8Array; };\n` }, NAME("Reflect")],
+    "I4 eval bound by a pattern from globalThis": [{ [`${E}/i.ts`]: `const { eval: e } = globalThis;\nexport const i4 = (d: Uint8Array, s: Uint8Array) => e("import('@noble/curves/ed25519.js')").then((c: any) => c.ed25519[["si", "gn"].join("")](d, s) as Uint8Array);\n` }, NAME("eval")],
+  };
+  assert.equal(Object.keys(cases).length, 13);
+  for (const [name, [files, want]] of Object.entries(cases)) refuses(name, files, want);
+  // more of the same rule: a string key in a pattern, a bracketed member, node:module by default or by import()
+  refuses("a string key in a pattern", { [`${E}/i.ts`]: 'const { "eval": e } = globalThis;\nexport const i = e;\n' }, /eval, a name the census refuses/);
+  refuses("a bracketed member", { [`${E}/i.ts`]: 'export const i = (globalThis as any)["Function"];\n' }, /Function, a name the census refuses/);
+  refuses("node:module by default", { [`${E}/i.ts`]: 'import m from "node:module";\nexport const i = m;\n' }, /node:module other than a named import of createRequire/);
+  refuses("node:module by import()", { [`${E}/i.ts`]: 'export const i = () => import("node:module");\n' }, /import\(\) of node:module/);
+  // the trees' own uses, as they are written there, pass: Reflect.ownKeys, prover/build.mjs's createRequire(x).resolve,
+  // passkey.ts's { eval: ... } key, and a Function or Reflect type
+  const tree = readTrees(ROOT);
+  const ownKeys = Object.entries(tree).filter(([, t]) => t.includes("Reflect.ownKeys(")).length;
+  assert.ok(ownKeys >= 4, `Reflect.ownKeys in ${ownKeys} files`);
+  assert.match(tree["packages/kit/src/prover/build.mjs"], /createRequire\(import\.meta\.url\)\.resolve\("snarkjs"\)/);
+  assert.match(tree["packages/wallet/src/signin/passkey.ts"], /\{ prf: \{ eval: \{ first: prfInput\(\) \} \} \}/);
+  assert.deepEqual(check(tree, SIGN_SITES, exists), []);
+  assert.deepEqual(plant({ "packages/signpage/src/g.ts": "export type F = Function;\nexport type R = typeof Reflect;\nexport const o = { eval: 1, Function: 2, constructor() {} };\nexport class C { eval = 1; Reflect() {} }\nexport const f = (eval_: number) => eval_;\n" }), []);
 });
 
 test("planted: a second signature in a listed site, a listed site gone, or a proof test that does not exist fails", () => {
