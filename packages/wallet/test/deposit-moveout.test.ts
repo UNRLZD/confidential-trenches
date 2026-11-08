@@ -10,7 +10,7 @@ import { VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { checkMoveCalls, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { buildRegisterOut, checkMoveCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -34,6 +34,8 @@ class Chain {
   near = NEAR / 10n; // 0.1 N
   usage = 182n;
   usdc = 2_500_000n;
+  /** what U holds inside intents.near (mt_balance_of on nep141:<token>); null: the view fails */
+  held: bigint | null = 3_000_000n;
   registered = new Set<string>();
   keys = 1;
   /** U's one key is another key (not U's own) */
@@ -43,7 +45,7 @@ class Chain {
   /** U's key nonce at a height (default: the current one at every height) */
   nonceAt: (h: number) => bigint = () => this.nonce;
   /** what the second RPC answers differently, at the same height */
-  skewB: Partial<{ nonce: bigint; usdc: bigint; registered: boolean; gas: bigint; hash: string; near: bigint; code: string }> = {};
+  skewB: Partial<{ nonce: bigint; usdc: bigint; registered: boolean; gas: bigint; hash: string; near: bigint; code: string; held: bigint }> = {};
   /** the second RPC's own tx states (default: the same as the first's) */
   txsB: Map<string, "ok" | "failed"> | null = null;
   code = VAULT_TOKEN_CODE_HASH;
@@ -77,6 +79,11 @@ class Chain {
         const args = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
         if (p.method_name === "ft_balance_of") return view((sk.usdc ?? this.usdc).toString(), h);
         if (p.method_name === "storage_balance_of") return view((sk.registered ?? this.registered.has(args.account_id)) ? { total: STORAGE_MIN.toString(), available: "0" } : null, h);
+        if (p.method_name === "mt_balance_of" && p.account_id === "intents.near" && args.account_id === U && args.token_id === `nep141:${TOKEN}`) {
+          const v = sk.held ?? this.held;
+          if (v === null) throw new Error("no view");
+          return view(v.toString(), h);
+        }
         if (p.method_name === "storage_balance_bounds") return view({ min: STORAGE_MIN.toString(), max: STORAGE_MIN.toString() }, h);
         throw new Error(`unexpected ${String(p.method_name)}`);
       },
@@ -275,6 +282,53 @@ test("the payload rule refuses a memo, another receiver, an amount at U's whole 
     () => checkMoveCalls(U, TOKEN, TOKEN, moveCalls(TOKEN, 1n, false, 0n), 2_500_000n, 0n),
   ];
   for (const f of bad) assert.throws(f, MoveOutRefused);
+});
+
+test("the ft_withdraw rule (card exit-ids-out) refuses a memo, a msg, another token or receiver, the vault, more than held less the keep, and a second call", () => {
+  const ok = withdrawCalls(TO, 2_999_999n, TOKEN);
+  checkWithdrawCalls(U, TO, TOKEN, ok, 3_000_000n);
+  checkWithdrawCalls(U, TO, TOKEN, withdrawCalls(TO, 3_000_000n, TOKEN), 3_000_000n, 0n); // A: all
+  const c = ok[0]!;
+  const bad = [
+    () => checkWithdrawCalls(U, TO, TOKEN, withdrawCalls(TO, 3_000_000n, TOKEN), 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, memo: "x" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, msg: "{}" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, token: "other.testnet" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, receiver_id: "bob.testnet" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, NET.vault, TOKEN, withdrawCalls(NET.vault, 1n, TOKEN), 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [c, c], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, deposit: 0n }], 3_000_000n),
+  ];
+  for (const f of bad) assert.throws(f, MoveOutRefused);
+});
+
+test("readWithdrawOut (card exit-ids-out): what U holds inside intents.near at readMoveOut's block on both RPCs, equal, else unread", async () => {
+  const chain = new Chain();
+  chain.b.height = 1003;
+  const r = await readWithdrawOut(U, TO, TOKEN, chain.rpcs());
+  assert.ok(r !== null);
+  assert.equal(r.held, 3_000_000n);
+  assert.equal(r.height, 1000, "the lower final height, as readMoveOut reads");
+  assert.equal(r.nonce, 7n);
+  assert.ok(!("usdc" in r), "the token's balance is not the amount moved");
+  chain.skewB = { held: 3_000_001n };
+  assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "two RPCs that differ");
+  chain.skewB = {};
+  chain.held = null;
+  assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "a failed view is unread, never a zero");
+  chain.held = 3_000_000n;
+  chain.skewB = { usdc: 1n };
+  assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "readMoveOut's own reads must agree too");
+});
+
+test("the exit's typed-account rule refuses exactly the accounts checkMoveCalls refuses (card exit-ids-out)", () => {
+  const k = depositId(SEED, 1n, 0);
+  const others = ["bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc];
+  for (const to of [NET.vault, "intents.near", TOKEN, U, ...others]) {
+    const held = (() => { try { checkMoveCalls(U, to, TOKEN, moveCalls(to, 1n, false, 0n), 2n, 0n); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : "other"; } })();
+    const exit = (() => { try { buildRegisterOut({ read: { nonce: 1n, blockHash: "11111111111111111111111111111111", registered: false }, key: { ...k, secretKey: k.secretKey.slice() }, to, token: TOKEN, storageMin: STORAGE_MIN }); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : "other"; } })();
+    assert.equal(exit, held, to);
+  }
 });
 
 test("bytes both RPCs refuse for U's NEAR answer gas and are kept: once U holds the cost the same bytes land, none signed anew", async () => {
