@@ -1598,6 +1598,27 @@ test("owed cashback on a coin that is not a cashback coin, its claim failing: th
   assert.equal(w.owed.get(W.address)?.passes, 1);
 });
 
+// The review of c1fd2d20, 2b: a load that reads W the same skips the pass only after an end W's own state decides (under
+// the floor, holding, an account kept). An "owed" end waits on the program taking the claim, which no read of W shows:
+// each load tries the claim again, and the load after the program takes it claims and sweeps.
+test("an owed claim is tried again on every load though W reads the same, and claimed once the program takes it", async () => {
+  const plant: Plant = { venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true };
+  const w = await world(plant);
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  await settle(w);
+  const loaded: PoolSellHost = { ...w.host, wallets: async () => [{ ...wallet(AMOUNT, false, VF.pumpswap.mint), holdings: { native: 1n, tokens: new Map([[VF.pumpswap.mint, { amount: 0n, frozen: false }]]), unreadable: [] } }] };
+  for (let i = 0; i < 2; i++) {
+    w.told.length = 0;
+    await resumeRentBacks(loaded, fakeLocks());
+    assert.equal(w.told.at(-1)?.state, "owed", JSON.stringify(w.told));
+  }
+  plant.claimFails = false;
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.equal(w.c.accounts.get(solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM)), undefined, "claimed and closed");
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
+});
+
 // Review L3 of 38faee89: one RPC's word that nothing is owed never lowers what W keeps: RPC B reads W's PumpSwap volume
 // account owing nothing, RPC A reads its cashback; the sell keeps the claim's cost.
 test("the sell counts a volume account owed a claim when either RPC reads it owed: what W keeps holds the claim's cost", async () => {
