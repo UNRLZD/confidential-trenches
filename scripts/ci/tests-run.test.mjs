@@ -253,18 +253,17 @@ test("planted: a sweep in test:mutants that no ci.yml line runs fails; run by -r
     assert.deepEqual(unrunWith(ci("pnpm -r --if-present run test:mutants")), ["packages/k/test/b.test.mjs"]);
     // a test:mutants line for a package whose script is test:mutant (a typo) vouches for nothing
     assert.deepEqual(unrunWith(ci("pnpm -r --if-present --no-bail run test", "pnpm -r --if-present run test:mutant")), ["packages/k/test/mutants/m.test.mjs"]);
-    // the matrix split (card ci-mutants-sharded): its line runs every package's sweeps but the wallet's, each from its
-    // package's folder; the wallet's own line still runs its, and a split line inside an echo runs nothing
+    // the matrix split (card ci-mutants-sharded): its line runs every package's sweeps, the wallet's included (card
+    // held-move-forgotten-tx), each from its package's folder, and a split line inside an echo runs nothing
     put("packages/w/package.json", JSON.stringify({ name: "@blindfill/wallet", scripts: { test: 'node --test "test/*.test.ts"', "test:mutants": "FULL_RUNS=1 node --test test/a.test.ts test/mutants/wm.test.mjs" } }));
     put("packages/w/test/mutants/wm.test.mjs", "");
     execFileSync("git", ["add", "--", "packages/w/test/mutants/wm.test.mjs"], { cwd: dir });
     const tests = "pnpm -r --if-present --no-bail run test";
     const shard = 'node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"';
-    assert.deepEqual(unrunWith(ci(tests, shard, "pnpm --filter @blindfill/wallet run test:mutants")), []);
-    assert.deepEqual(unrunWith(ci(tests, shard)), ["packages/w/test/mutants/wm.test.mjs"]);
+    assert.deepEqual(unrunWith(ci(tests, shard)), []);
     assert.deepEqual(unrunWith(ci(tests, "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
-    assert.deepEqual(unrunWith(ci(tests, `echo ${shard}`, "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
-    assert.deepEqual(unrunWith(ci(tests, "node scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"", "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
+    assert.deepEqual(unrunWith(ci(tests, `echo ${shard}`)), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);
+    assert.deepEqual(unrunWith(ci(tests, "node scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"")), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
