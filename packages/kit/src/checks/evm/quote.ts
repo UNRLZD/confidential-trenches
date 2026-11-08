@@ -274,8 +274,9 @@ function quoteCall(chain: EvmPoolChain, quoter: { v3: string | undefined; v4: st
 // whose call reverts or runs out of gas does not fit
 const SEL_BUY_SWAP = "25faf2a3"; // buySwap((address,bytes,uint256,address),address,uint256)
 export const EVM_BUY_SWAP_GAS = 500_000n;
-export const EVM_BUY_SWAP_FIT = (EVM_BUY_SWAP_GAS * 100n) / 105n;
-const FIT_TEXT = `${EVM_BUY_SWAP_FIT} gas (the pool guarantees ${EVM_BUY_SWAP_GAS}, less a 5% margin)`;
+// BUY_SWAP_GAS / 1.05, rounded down (GF5 holds the sum); literals, so a bundle that never quotes a buy drops them
+export const EVM_BUY_SWAP_FIT = 476_190n;
+const FIT_TEXT = "476190 gas (the pool guarantees 500000, less a 5% margin)";
 // keccak256("blindfill.buy.gas.v1")[12:]: an address no one holds a key to, with no balance of any token
 const GAS_W = "9116a1e7147d594ae107fe8b0e67f9d4de4b1e76";
 

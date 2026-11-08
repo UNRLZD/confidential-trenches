@@ -6974,6 +6974,7 @@ test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its 
     for (let k = 2; k < tx.data.length; k += 2) cost += tx.data.slice(k, k + 2) === "00" ? 4n : 16n;
     assert.equal(BigInt(tx.gas) - cost, GF_FIT, "the swap's execution capped at EVM_BUY_SWAP_FIT");
     assert.equal(quoteMod.EVM_BUY_SWAP_FIT, GF_FIT);
+    assert.equal(quoteMod.EVM_BUY_SWAP_FIT, (quoteMod.EVM_BUY_SWAP_GAS * 100n) / 105n, "500,000 / 1.05, rounded down");
   }
   for (const err of [{ code: -32000, message: "out of gas" }, { code: -32003, message: "out of gas: gas required exceeds: 476190" }]) {
     await assert.rejects(run(err), (e: unknown) => e instanceof EvmQuoteError && e.code === "over_gas_floor" && e.reference === null, err.message);
