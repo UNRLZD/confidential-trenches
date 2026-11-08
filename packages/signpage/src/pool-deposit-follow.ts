@@ -54,6 +54,8 @@ export interface PoolFollowRecord {
   deadline_ms: number;
   origin: string;
   min_out: string;
+  /** The refund carry's last move (poolRefundMover), written before it is sent. */
+  move?: MoveRecord;
 }
 
 /** The pool follow's stages, as kit messages.ts PoolDepositStage names them. */
@@ -206,7 +208,7 @@ export interface PoolFollowHost {
   store(): Promise<{ get(s: "ops", k: string): Promise<unknown>; update(s: "ops", k: string, change: (v: unknown) => unknown): Promise<unknown>; keys(s: "ops"): Promise<string[]> }>;
   /** The chain reads and the deposit for X's pool (its pinned pair, the page's pool.deposit), or null when the page
    *  pins no pool there: the op waits, followed again at the next landing. */
-  deps(f: PoolFollowRecord): Omit<PoolFollowDeps, "stage" | "signal"> | null;
+  deps(f: PoolFollowRecord, op: { move(): Promise<MoveRecord | undefined>; record(m: MoveRecord): Promise<void> }): Omit<PoolFollowDeps, "stage" | "signal"> | null;
   /** The decimals of X's coin (kit POOL_ASSET_DECIMALS). */
   decimals(chain: PoolChain): number;
   locks?: () => Pick<LockManager, "request"> | null;
@@ -226,7 +228,14 @@ export function poolFollows(h: PoolFollowHost) {
       const ops = await h.store();
       const now = await ops.get("ops", id);
       if (!isPoolOp(now) || poolFollowEnded(now)) return;
-      const d = h.deps(f);
+      // the refund carry's move, kept in the op's follow record (written before its send)
+      const d = h.deps(f, {
+        move: async () => {
+          const v = await ops.get("ops", id);
+          return isPoolOp(v) ? v.follow.move : undefined;
+        },
+        record: async (m) => void (await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, follow: { ...v.follow, move: m } } : undefined))),
+      });
       if (d === null) return;
       const stage = async (s: PoolFollowStage) => {
         await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: s } : undefined));
@@ -284,14 +293,12 @@ export function poolFollows(h: PoolFollowHost) {
 }
 
 /**
- * The page's pool.deposit kind (pool-deposit.ts poolDepositKind, or its EVM twin) run to its end for the follow: its
- * answer, and when that is "sent", the end it posts as progress (filled, part_filled, not_landed; card
+ * The page's pool.deposit handler (src/pool-kinds.ts poolKinds, the kind the app asks) run to its end for the follow:
+ * its answer, and when that is "sent", the end it posts as progress (filled, part_filled, not_landed; card
  * pool-deposit-sent-end). A kind that posts no end before the signal stops it reads "down" (read again next round).
  */
 export function depositToEnd(
-  kind: (ask: { kind: "pool.deposit"; chain: PoolChain; token: null; amount: bigint; slippageBps: 0; decimals: number }, ctx: { id: string; sha: string; progress(s: string): void; route(): void }) =>
-    | { error: string }
-    | { after: Promise<void>; answer(): { result: { stage: string } } | { error: string } },
+  kind: (params: Record<string, unknown>, ctx: { id: string; sha: string; progress(s: string): void; route(): void }) => unknown,
   chain: PoolChain,
   decimals: number,
   amount: bigint,
@@ -309,23 +316,32 @@ export function depositToEnd(
     if (signal.aborted) return fin("down");
     signal.addEventListener("abort", stop, { once: true });
     const ENDS = new Set(["filled", "part_filled", "not_landed"]);
-    const codeOf = (c: string): PoolDepositEnd => (c === "not_allowed" || c === "not_funded" || c === "failed" ? c : "down");
-    const r = kind({ kind: "pool.deposit", chain, token: null, amount, slippageBps: 0, decimals }, {
-      id: `pool-follow-${chain}`,
-      sha: "",
-      progress: (s) => void (ENDS.has(s) && fin(s as PoolDepositEnd)),
-      route: () => {},
-    });
-    if ("error" in r) return fin(codeOf(r.error));
-    r.after.then(
-      () => {
-        const a = r.answer();
-        if ("error" in a) return fin(codeOf(a.error));
-        if (ENDS.has(a.result.stage)) fin(a.result.stage as PoolDepositEnd);
-        // "sent": its end comes as progress
-      },
-      () => fin("down"),
-    );
+    const codeOf = (c: unknown): PoolDepositEnd => (c === "not_allowed" || c === "not_funded" || c === "failed" ? c : "down");
+    type Answer = { result: { stage: string } } | { error: string };
+    const read = (a: Answer | null | undefined): void => {
+      if (!a) return fin("not_allowed");
+      if ("error" in a) return fin(codeOf(a.error));
+      if (ENDS.has(a.result.stage)) fin(a.result.stage as PoolDepositEnd);
+      // "sent": its end comes as progress
+    };
+    const s = amount.toString().padStart(decimals + 1, "0");
+    const whole = s.slice(0, s.length - decimals), frac = s.slice(s.length - decimals).replace(/0+$/, "");
+    let r: unknown;
+    try {
+      r = kind({ chain, amount: frac ? `${whole}.${frac}` : whole }, {
+        id: `pool-follow-${chain}`,
+        sha: "",
+        progress: (st) => void (ENDS.has(st) && fin(st as PoolDepositEnd)),
+        route: () => {},
+      });
+    } catch {
+      return fin("down");
+    }
+    if (r === null || typeof r !== "object") return fin("not_allowed");
+    if ("after" in r) {
+      const d = r as { after: Promise<void>; answer(): Answer | null };
+      d.after.then(() => read(d.answer()), () => fin("down"));
+    } else read(r as Answer);
   });
 }
 

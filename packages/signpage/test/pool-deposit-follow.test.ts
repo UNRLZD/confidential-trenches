@@ -197,21 +197,26 @@ test("the page's follower: the op written under the request's id, its stages kep
   assert.deepEqual(w.deposits, [10_000_000n]);
 });
 
-test("depositToEnd: a sent answer waits for its end as progress; refusals and a stop read as codes", async () => {
+test("depositToEnd: the page's handler asked for the amount at the coin's decimals; a sent answer waits for its end as progress", async () => {
   const { depositToEnd } = await import("../src/pool-deposit-follow.ts");
   const ac = new AbortController();
-  const sentThen = (end: string) => (_ask: unknown, ctx: { progress(s: string): void }) => ({
+  const asked: unknown[] = [];
+  const sentThen = (end: string) => (params: unknown, ctx: { progress(s: string): void }) => (asked.push(params), {
+    running: true,
     after: Promise.resolve().then(() => setTimeout(() => (ctx.progress("sent"), ctx.progress(end)), 1)),
-    answer: () => ({ result: { stage: "sent" } }),
+    answer: () => ({ result: { stage: "sent", txs: [] } }),
   });
-  assert.equal(await depositToEnd(sentThen("filled") as never, "solana", 9, 10_000_000n, ac.signal), "filled");
-  assert.equal(await depositToEnd(sentThen("not_landed") as never, "solana", 9, 10_000_000n, ac.signal), "not_landed");
-  assert.equal(await depositToEnd((() => ({ error: "not_funded" })) as never, "solana", 9, 1n, ac.signal), "not_funded");
-  assert.equal(await depositToEnd((() => ({ after: Promise.resolve(), answer: () => ({ error: "busy" }) })) as never, "solana", 9, 1n, ac.signal), "down");
-  assert.equal(await depositToEnd((() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled" } }) })) as never, "solana", 9, 1n, ac.signal), "filled");
+  assert.equal(await depositToEnd(sentThen("filled"), "solana", 9, 10_000_000n, ac.signal), "filled");
+  assert.deepEqual(asked[0], { chain: "solana", amount: "0.01" });
+  assert.equal(await depositToEnd(sentThen("not_landed"), "solana", 9, 1_230_000_000n, ac.signal), "not_landed");
+  assert.deepEqual(asked[1], { chain: "solana", amount: "1.23" });
+  assert.equal(await depositToEnd(() => ({ error: "not_funded" }), "solana", 9, 1n, ac.signal), "not_funded");
+  assert.equal(await depositToEnd(() => null, "solana", 9, 1n, ac.signal), "not_allowed");
+  assert.equal(await depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ error: "busy" }) }), "solana", 9, 1n, ac.signal), "down");
+  assert.equal(await depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled" } }) }), "solana", 9, 1n, ac.signal), "filled");
   // a sent answer whose end never comes: the stop reads down
   const stop = new AbortController();
-  const hang = depositToEnd((() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "sent" } }) })) as never, "solana", 9, 1n, stop.signal);
+  const hang = depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "sent" } }) }), "solana", 9, 1n, stop.signal);
   stop.abort();
   assert.equal(await hang, "down");
 });
