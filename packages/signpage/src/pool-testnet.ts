@@ -50,7 +50,7 @@ import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaP
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { buyMints, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
@@ -527,6 +527,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       },
       take: async (id, attempt) => (await q()).take(id, attempt),
       seed64: page.seed64,
+      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
+      bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
       settle: async (noteId) => {
         const seed64 = await page.seed64();
@@ -589,6 +591,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       },
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
       owed: owedRentBacks(page.store),
+      bought: buyMints(page.store),
       // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
       end: () => void notes?.then((n) => n.close(), () => {}),

@@ -192,6 +192,9 @@ type Plant = {
    *  "deposit" (another's deposit, a leaf on both trees) (the delta review of 5059541a, T1 and T2) */
   insertCount?: number;
   insertKind?: "release" | "deposit";
+  /** W's buy record (pool-buy.ts BuyMints): the venue's mint when not given; null, none (a buy from before it was
+   *  written, or a restored device) */
+  buy?: { mint: string; program: string } | null;
 };
 
 /** One chain: the planted accounts, the program's deposit applied to a signed sell. */
@@ -645,8 +648,11 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
   const sent: string[] = [];
   const owed = new Map<string, OwedRentBack>();
   const told: RentBackTold[] = [];
+  const bought = new Map<string, { mint: string; program: string }>();
+  if (plant.buy !== null) bought.set(W.address, plant.buy ?? { mint: VF[plant.venue ?? "pump"].mint, program: VF[plant.venue ?? "pump"].mintRead.owner });
   const host: PoolSellHost = {
     pin: PIN,
+    bought: { get: async (a) => bought.get(a), put: async (a, m) => void bought.set(a, m) },
     rpcs: c.rpcs,
     notes: async () => ns,
     seed64: async () => {
@@ -2075,6 +2081,49 @@ test("a full sell from a W that also holds a mint it never traded: that account 
   assert.equal(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)), false);
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "W swept");
   assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
+});
+
+// Delta review 7 of 08290868 (item 1): W's own coin is the mint its one buy bought (the buy's record). A full sell of
+// an airdropped mint while W still holds its own coin swept W to 0, and any later sell of that coin was refused
+// not_funded (W pays its fee up front). The rent back now holds while W holds any unit of its buy mint.
+test("W's own unsold coin and a fully sold airdrop: the rent back holds, W keeps its SOL and its coin's account", async () => {
+  const air = VF.pumpswap.mint;
+  const own = solanaAta(W.address, MINT, TOKEN_PROGRAM);
+  const holding: BuyWallet = { ...wallet(AMOUNT, false, air), holdings: { native: 0n, tokens: new Map([[air, { amount: AMOUNT, frozen: false }], [MINT, { amount: 5n, frozen: false }]]), unreadable: [] } };
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, buy: { mint: MINT, program: TOKEN_PROGRAM } }, [holding]);
+  const before = { owner: TOKEN_PROGRAM, lamports: TOKEN_RENT, data: tokenAccount(5n, 1, MINT) };
+  w.c.accounts.set(own, before);
+  const a = await runPoolSell(w.host, { ...ASK, token: air });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(w.c.accounts.get(own), before, "W's own coin's account as it was");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
+  assert.ok((w.c.accounts.get(W.address)?.lamports ?? 0) > 0, "W keeps its SOL for its coin's sell");
+  assert.equal(w.told.at(-1)?.state, "holds", JSON.stringify(w.told));
+});
+
+// With no buy record (a buy from before it was written, or a restored device), W holding any token its record does not
+// name holds the pass (49adc30e's rule): W's own coin is never stranded; at worst W's rent waits
+test("no buy record and a token W's record does not name: the rent back holds, W keeps its SOL, that account untouched", async () => {
+  const other = VF.pumpswap.mint;
+  const at = solanaAta(W.address, other, TOKEN_PROGRAM);
+  const holding: BuyWallet = { ...wallet(AMOUNT), holdings: { native: 0n, tokens: new Map([[MINT, { amount: AMOUNT, frozen: false }], [other, { amount: 5n, frozen: false }]]), unreadable: [] } };
+  const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], buy: null }, [holding]);
+  const before = { owner: TOKEN_PROGRAM, lamports: TOKEN_RENT, data: tokenAccount(5n, 1, other) };
+  w.c.accounts.set(at, before);
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.deepEqual(w.c.accounts.get(at), before);
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "no sweep");
+  assert.ok((w.c.accounts.get(W.address)?.lamports ?? 0) > 0);
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => [t.state, t.detail]), [["holds", "W holds a token and no buy of W's is recorded"]]);
+  // what W read as names the page's holdings then: the same next load runs no pass; once they change, a pass runs
+  const told = w.told.length;
+  const same: PoolSellHost = { ...w.host, wallets: async () => [holding] };
+  await resumeRentBacks(same, fakeLocks());
+  assert.equal(w.told.length, told, JSON.stringify(w.told.slice(told)));
+  const gone: PoolSellHost = { ...w.host, wallets: async () => [{ ...holding, holdings: { native: 0n, tokens: new Map([[MINT, { amount: 0n, frozen: false }]]), unreadable: [] } }] };
+  await resumeRentBacks(gone, fakeLocks());
+  assert.ok(w.told.length > told, "the holdings changed: a pass runs");
 });
 
 test("the sweep's rule: W the only signer, the deposit alone, its value exactly W's lamports less the fee and the deposit's rents, at least the pool's least deposit", async () => {

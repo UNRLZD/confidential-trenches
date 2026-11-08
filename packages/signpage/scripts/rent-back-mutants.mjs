@@ -7,7 +7,10 @@ import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SELL = `${W}/src/pool-sell.ts`;
 const KIT = `${W}/../kit/src/checks/solana/checks.ts`;
+const BUY = `${W}/src/pool-buy.ts`;
 const T = "test/pool-sell.test.ts";
+const KC = "../kit/test/solana-teardown-cashback.test.ts";
+const TB = "test/pool-buy.test.ts";
 // [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
 const M = [
@@ -41,6 +44,16 @@ const M = [
   ["review 6 N21-sweep-refused-gives-up", SELL, T, "      if (now.k === \"refused\") return { end: \"refused\" as const, detail: now.why };", "      if (now.k === \"refused\") return { end: \"gave_up\" as const, detail: now.why };"],
   ["review 6 N22-busy-detail-plain", SELL, T, "e === BUSY ? \"a sell took the sell lock between tries: W waits for the next load\" : faultOf(e)", "faultOf(e)"],
   ["review 6 N24-sell-back-ifAvailable", SELL, T, "later.back = (locks) => withHolds(locks, w.address, false, wait,", "later.back = (locks) => withHolds(locks, w.address, true, wait,"],
+  // delta review 7 of 08290868's plants on the claim's prefund (F1)
+  ["review 7 P7 a made account read as unmade", KIT, KC, "        if (toRead === null) {", "        if (true) {"],
+  ["review 7 P9 the open's lamports bound without the prefund", KIT, KC, "lam - c.prefund > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim", "lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim"],
+  // delta review 7 of 08290868, item 1: W's buy mint (the buy's record) holds the pass while W holds any of it
+  ["review 7 A1 the buy record not read into the pass", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null };", "const x: RentBack = { ...given, buy: buy ? buy : null };"],
+  ["review 7 A2 no buy record: the page's holdings decide nothing", SELL, T, '    if (x.buy === null && [...w.holdings.tokens].some(([mint, t]) => !mints.has(mint) && t.amount > 0n)) return end("holds", "W holds a token and no buy of W\'s is recorded");\n', ""],
+  ["review 7 A3 a buy record read as none", SELL, T, "    if (x.buy === null && [...w.holdings.tokens]", "    if ([...w.holdings.tokens]"],
+  ["review 7 A4 no buy record: the holdings left out of what W read as", SELL, T, "const tokens = x.buy === null ?", "const tokens = false ?"],
+  ["review 7 A5 the buy writes no record", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n", ""],
+  ["review 7 A6 the buy's record written after its send", BUY, TB, [["      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound });", "      try { return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound }); } finally { await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram }); }"]]],
 ];
 // ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
 const only = process.env.ONLY;
