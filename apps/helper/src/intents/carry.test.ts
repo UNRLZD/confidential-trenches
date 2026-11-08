@@ -1378,3 +1378,461 @@ test("survivor pins: two intents at once to one unregistered receiver pay one st
   assert.equal(code(a), "receiver_not_registered");
   s.store.close();
 });
+
+// ---- the delta review 3 of 46611eeb (its probes R3-1 to R3-6, ported): every write after an await is a compare-and-set on the
+// registration it judged ----
+const until = async (f: () => boolean) => {
+  for (let i = 0; i < 200 && !f(); i++) await new Promise((ok) => setTimeout(ok, 5));
+  assert.ok(f(), "condition never reached");
+};
+const regsOf = (s: { r: { sent: Sent[] } }) => s.r.sent.filter((t) => t.action.method === "storage_deposit").length;
+/** Intents to a registered account until the cap answers; the count carried. */
+const fill = async (s: ReturnType<typeof setup>, u: string) => {
+  for (let k = 0; k < 8; k++) {
+    const a = await s.carry.carry(signedIntent(u, withdraw("alice.near")));
+    await s.carry.idle();
+    if (code(a) !== "sent") return code(a);
+  }
+  return "never capped";
+};
+
+test("R3-1 a reservation spent by a concurrent intent while its registration's outcome is read is not re-created: one signer gets at most INTENTS_SENDS_MAX sends", async () => {
+  // every storage_deposit's outcome stays unknown until the test releases it
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const a = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => regsOf(s) === 1);
+  // the registration lands on chain; A's outcome read has not come back yet
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  const b = await s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  assert.equal(code(b), "sent", "B reads the receiver registered and spends the reservation");
+  assert.equal(s.store.signer(u).registration?.reserved, false, "spent");
+  s.r.release();
+  const aa = await a;
+  await s.carry.idle();
+  const last = await fill(s, u);
+  const signed = s.r.sent.length;
+  s.store.close();
+  assert.ok(signed <= INTENTS_SENDS_MAX, `${signed} sends signed for one signer (A answered ${code(aa)}, then ${last}); INTENTS_SENDS_MAX ${INTENTS_SENDS_MAX}`);
+});
+
+test("R3-2 a stale earlier-tx read never frees a newer live claim: sent stays the slots held, and one signer gets at most INTENTS_SENDS_MAX sends", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  // an earlier receiver registration, signed (it failed on chain): its slot and its reservation, as register() writes them
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { receiver: "fresh.near", state: "pending", tx: T, reserved: true } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    if (++calls === 2) await g.p; // Y's read of T answers late
+    return failedFinal(t);
+  };
+  const x = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  const y = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  assert.equal(code(await x), "registration_failed");
+  await until(() => calls === 2);
+  // Z: a new claim on the freed registration, its storage_deposit signed and out
+  const z = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => regsOf(s) === 1);
+  const before = s.store.signer(u);
+  g.open();
+  assert.equal(code(await y), "registration_failed");
+  const after = s.store.signer(u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  s.r.release();
+  const za = await z;
+  await s.carry.idle();
+  const mid = { sent: s.store.signer(u).sent, signed: 1 + s.r.sent.length };
+  const last = await fill(s, u);
+  const signed = 1 + s.r.sent.length; // T, then every send here
+  s.store.close();
+  assert.deepEqual(after.registration, before.registration, `Y's stale read of T wiped Z's live claim (${JSON.stringify(before.registration?.tx?.tx_hash?.slice(0, 6))} -> ${JSON.stringify(after.registration)}); sent ${before.sent} -> ${after.sent}`);
+  assert.equal(mid.sent, mid.signed, `sent ${mid.sent} for ${mid.signed} signed (Z answered ${code(za)})`);
+  assert.ok(signed <= INTENTS_SENDS_MAX, `${signed} sends signed for one signer, then ${last}`);
+});
+
+test("R3-3 two status polls at once, the first registration of U failing: the second pays nothing until the backoff step", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const r = relayer((a) => (a.method === "storage_deposit" ? "failed" : "ran"));
+  const g = gateP();
+  let heldCalls = 0;
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => (++heldCalls === 1 && (await g.p), false), now: () => NOW, resolveEveryMs: 1 });
+  const u = hex();
+  await seeSigner(store, u);
+  chain.storage.set(`${USDC}/${u}`, "null");
+  const b = carry.registerSeen(u); // poll 1: its token-watch read answers late
+  await until(() => heldCalls === 1);
+  assert.equal(await carry.registerSeen(u), "registration_failed"); // poll 2: paid, failed, backoff written
+  const owed = store.owed(u);
+  g.open();
+  const bb = await b;
+  const regs = r.sent.filter((x) => x.action.method === "storage_deposit").length;
+  store.close();
+  assert.equal(regs, 1, `${regs} storage_deposits for U at one instant (poll 1 answered ${bb}; the backoff said next at +${(owed!.next_ms - NOW) / 1000}s)`);
+});
+
+test("R3-4 (old PROBE-5, honest chain, a legacy claim with no reserved field): after a restart sent equals the slots held", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const s = setup({ dir });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.store.putSigner({ ...s.store.signer(u), sent: 1, registration: { receiver: "fresh.near", state: "pending", tx: null } });
+  s.store.close();
+  const t = setup({ dir });
+  t.chain.storage.set(`${USDC}/fresh.near`, "null");
+  assert.equal(code(await t.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  await t.carry.idle();
+  const rec = t.store.signer(u);
+  t.store.close();
+  assert.equal(rec.sent, t.r.sent.length, `sent ${rec.sent} for ${t.r.sent.length} signed`);
+});
+
+test("R3-5 a reservation whose intent is answered relayer_low stays, and is spent by the retried intent (never twice, never lost)", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  // the gas account drops under the intents floor right after the registration
+  const funds = s.r.funds;
+  let n = 0;
+  s.r.balance = async () => (++n >= 2 ? INTENTS_FLOOR_YOCTO - 1n : funds);
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "relayer_low");
+  assert.deepEqual([s.store.signer(u).sent, s.store.signer(u).registration?.reserved, s.store.signer(u).registration?.state], [2, true, "landed"]);
+  s.r.balance = async () => funds;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  await s.carry.idle();
+  assert.deepEqual([s.store.signer(u).sent, s.store.signer(u).registration?.reserved], [2, false]);
+  const last = await fill(s, u);
+  assert.equal(last, "signer_cap");
+  assert.equal(s.r.sent.length, INTENTS_SENDS_MAX);
+  s.store.close();
+});
+
+test("R3-2b the stale free as a loop: a signer that owns its receiver (registered by us, unregistered by it before our read) gets receiver registrations paid with no bound", async () => {
+  const s = setup({ outcome: () => "ran" }); // each storage_deposit lands; the receiver's owner unregisters it before our two-provider read
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const D = { deadline: "2026-11-08T18:00:00.000Z" };
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"), D))), "in_flight"); // R0 paid
+  const resolve = s.r.resolve;
+  const send = s.r.send;
+  const trail: string[] = [];
+  for (let k = 0; k < 6; k++) {
+    s.clock.ms += OWN_SETTLE_MS + 1;
+    const T = s.store.signer(u).registration!.tx!;
+    const gy = gateP();
+    const gz = gateP();
+    let calls = 0;
+    s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+      if (t.tx_hash === T.tx_hash && ++calls === 2) await gy.p; // Y's read of the last registration answers late
+      return resolve(t, o);
+    };
+    let zFirst = true;
+    s.r.send = (async (...a: Parameters<typeof send>) => {
+      if (zFirst) {
+        zFirst = false;
+        await gz.p; // Z's registration waits in the relayer's queue, its claim written
+      }
+      return send(...a);
+    }) as typeof send;
+    const x = s.carry.carry(signedIntent(u, withdraw("fresh.near"), D));
+    const y = s.carry.carry(signedIntent(u, withdraw("fresh.near"), D));
+    const xa = code(await x);
+    await until(() => calls === 2);
+    let zDone = false;
+    const z = s.carry.carry(signedIntent(u, withdraw("fresh.near"), D)).finally(() => (zDone = true));
+    await until(() => zDone || s.store.signer(u).registration !== null);
+    gy.open();
+    const ya = code(await y);
+    gz.open();
+    const za = code(await z);
+    trail.push(`${xa}/${ya}/${za} sent=${s.store.signer(u).sent}`);
+    if (s.store.signer(u).registration?.tx == null) break; // no new registration out: the loop is over
+  }
+  s.r.resolve = resolve;
+  s.r.send = send;
+  const regs = regsOf(s);
+  s.store.close();
+  assert.ok(regs <= INTENTS_SENDS_MAX - 1, `${regs} receiver registrations paid for one signer: ${trail.join(", ")}`);
+});
+
+test("R3-6 reclaim at step 6 never frees a live take: an intent waiting in the relayer's queue (in taking) and a receiver claim waiting there (no tx yet) keep their slots", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  const g = gateP();
+  const send = s.r.send;
+  let first = true;
+  s.r.send = (async (...a: Parameters<typeof send>) => {
+    if (first) {
+      first = false;
+      await g.p;
+    }
+    return send(...a);
+  }) as typeof send;
+  // A: an intent to a registered account, its slot taken, waiting before its signing
+  const a = s.carry.carry(signedIntent(u, withdraw("alice.near")));
+  await until(() => (s.store.signer(u).taking ?? []).length === 1);
+  // B runs step 6's reclaim meanwhile
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("alice.near")))), "sent");
+  assert.deepEqual([s.store.signer(u).sent, (s.store.signer(u).taking ?? []).length], [2, 1], "A's slot kept while it waits");
+  g.open();
+  assert.equal(code(await a), "sent");
+  await s.carry.idle();
+  assert.deepEqual([s.store.signer(u).sent, s.store.signer(u).taking], [2, []]);
+  // C: a receiver claim waiting before its signing; D's reclaim must leave it
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const g2 = gateP();
+  let first2 = true;
+  s.r.send = (async (...x: Parameters<typeof send>) => {
+    if (first2) {
+      first2 = false;
+      await g2.p;
+    }
+    return send(...x);
+  }) as typeof send;
+  const c = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => s.store.signer(u).registration !== null);
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  assert.deepEqual([s.store.signer(u).sent, s.store.signer(u).registration?.state, s.store.signer(u).registration?.tx], [4, "pending", null]);
+  g2.open();
+  assert.equal(code(await c), "sent");
+  await s.carry.idle();
+  assert.deepEqual([s.store.signer(u).sent, s.r.sent.length], [4, 4]);
+  s.store.close();
+});
+
+// ---- the compare-and-set at each write site, one stale judge each (delta review 3's rule) ----
+const dropped = (t: TxRef): TxOutcome => ({ kind: "dropped", tx_hash: t.tx_hash, why: "(b)" });
+
+test("R3-2 (dropped): a stale read of an earlier receiver tx that reads dropped never frees the new claim made after it", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { receiver: "fresh.near", state: "pending", tx: T, reserved: true } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    if (++calls === 2) await g.p; // Y's read of T answers late
+    return dropped(t);
+  };
+  const x = s.carry.carry(signedIntent(u, withdraw("fresh.near"))); // X: T dropped, both slots back, X claims anew
+  const y = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => calls === 2 && regsOf(s) === 1);
+  const before = s.store.signer(u);
+  assert.deepEqual([before.sent, before.registration?.reserved, before.registration?.tx === null], [2, true, false], "X's claim: its two slots, signed");
+  g.open();
+  assert.equal(code(await y), "in_flight", "Y finds X's claim out");
+  assert.deepEqual(s.store.signer(u), before, "Y's stale read of T left X's claim alone");
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  s.r.release();
+  assert.equal(code(await x), "sent");
+  await s.carry.idle();
+  assert.equal(s.store.signer(u).sent, s.r.sent.length, "sent as signed here (T never landed: its slots back)");
+  s.store.close();
+});
+
+test("R3-2 (at): a stale read of an earlier receiver tx never writes its settle time onto the new claim made after it", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { receiver: "fresh.near", state: "pending", tx: T, reserved: true } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  const ranT = (t: TxRef): TxOutcome => ({ kind: "final", tx_hash: t.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] });
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    if (++calls === 1) await g.p; // Y: its read of T (no settle time yet) answers late
+    return ranT(t);
+  };
+  const y = s.carry.carry(signedIntent(u, withdraw("fresh.near"), { deadline: "2026-11-07T18:10:00.000Z" }));
+  await until(() => calls === 1);
+  // X: ran, unregistered: its settle time written; past it, W frees T; Z claims anew, its storage_deposit out
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"), { deadline: "2026-11-07T18:10:00.000Z" }))), "registration_failed");
+  const z = s.carry.carry(signedIntent(u, withdraw("fresh.near"), { deadline: "2026-11-07T18:10:00.000Z" }));
+  await until(() => regsOf(s) === 1);
+  const before = s.store.signer(u);
+  assert.equal(before.registration?.at, undefined, "Z has not run: no settle time");
+  g.open();
+  await y;
+  assert.deepEqual(s.store.signer(u).registration, before.registration, "Y's stale judge of T left Z's claim alone");
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  s.r.release();
+  assert.equal(code(await z), "sent");
+  await s.carry.idle();
+  s.store.close();
+});
+
+test("R3-1 (in the queue): a reservation spent while its claim waits in the relayer's queue is not re-created by the signing", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const g = gateP();
+  const send = s.r.send;
+  let first = true;
+  s.r.send = (async (...a: Parameters<typeof send>) => {
+    if (first) {
+      first = false;
+      await g.p; // A's registration waits in the queue, its claim written, nothing signed
+    }
+    return send(...a);
+  }) as typeof send;
+  const a = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => s.store.signer(u).registration !== null);
+  // the receiver is registered by another payer meanwhile; B reads it so and spends A's reservation
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "sent");
+  assert.equal(s.store.signer(u).registration?.reserved, false);
+  g.open();
+  await a;
+  await s.carry.idle();
+  assert.equal(s.store.signer(u).registration?.reserved, false, "the signing kept it spent");
+  await fill(s, u);
+  assert.ok(s.r.sent.length <= INTENTS_SENDS_MAX, `${s.r.sent.length} sends for one signer`);
+  s.store.close();
+});
+
+test("R3-2 (own, dropped): a stale read of U's earlier tx that reads dropped never frees the new claim made after it", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: T } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    if (++calls === 2) await g.p;
+    return dropped(t);
+  };
+  const x = s.carry.registerSeen(u); // T dropped: X claims anew
+  const y = s.carry.registerSeen(u);
+  await until(() => calls === 2 && regsOf(s) === 1);
+  const before = s.store.signer(u).own;
+  assert.ok(before?.tx != null && before.tx.tx_hash !== T.tx_hash, "X's new claim, signed");
+  g.open();
+  assert.equal(await y, "in_flight");
+  assert.deepEqual(s.store.signer(u).own, before, "Y's stale read of T left X's claim alone");
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  s.r.release();
+  assert.equal(await x, "registered");
+  assert.equal(regsOf(s), 1);
+  s.store.close();
+});
+
+test("the slot invariant over a concurrent round: two requests on one signer at once on each path; after each step sent equals the signed slots plus the live reservation plus the live takes", async () => {
+  let mode: "ran" | "failed" | "lie" = "ran";
+  let chain!: Chain;
+  const s = setup({
+    outcome: (a) => {
+      if (a.method !== "storage_deposit") return "ran";
+      if (mode === "failed") return "failed";
+      if (mode === "ran") chain.storage.set(`${a.receiver}/${JSON.parse(a.args).account_id}`, "registered");
+      return "ran";
+    },
+  });
+  chain = s.chain;
+  const u = hex();
+  await seeSigner(s.store, u);
+  chain.storage.set(`${USDC}/${u}`, "null");
+  const D = { deadline: "2026-11-07T18:10:00.000Z" };
+  const check = (step: string) => {
+    const r = s.store.signer(u);
+    const signed = s.r.sent.filter((t) => t.action.method === "execute_intents" || JSON.parse(t.action.args).account_id !== u).length;
+    const live = (r.registration?.reserved === true ? 1 : 0) + (r.taking ?? []).length;
+    assert.equal(r.sent ?? 0, signed + live, `${step}: sent ${r.sent} for ${signed} signed + ${live} live (${JSON.stringify(r.registration)})`);
+    assert.ok((r.sent ?? 0) <= INTENTS_SENDS_MAX, `${step}: sent ${r.sent}`);
+  };
+  const both = async (f: () => Promise<unknown>) => {
+    await Promise.all([f(), f()]);
+    await s.carry.idle();
+  };
+  await both(() => s.carry.registerSeen(u));
+  check("U's own, two polls");
+  assert.equal(regsOf(s), 1, "U's own paid once");
+  mode = "failed";
+  chain.storage.set(`${USDC}/bad.near`, "null");
+  await both(() => s.carry.carry(signedIntent(u, withdraw("bad.near"), D)));
+  check("a receiver failing on chain");
+  mode = "lie";
+  chain.storage.set(`${USDC}/gone.near`, "null");
+  await both(() => s.carry.carry(signedIntent(u, withdraw("gone.near"), D)));
+  check("a receiver that ran and reads unregistered");
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  await both(() => s.carry.carry(signedIntent(u, withdraw("gone.near"), D)));
+  check("the same, past the settle time");
+  mode = "ran";
+  chain.storage.set(`${USDC}/fresh.near`, "null");
+  await both(() => s.carry.carry(signedIntent(u, withdraw("fresh.near"), D)));
+  check("an honest receiver");
+  for (let k = 0; k < 3; k++) {
+    await both(() => s.carry.carry(signedIntent(u, withdraw("alice.near"), D)));
+    check(`intents to a registered account, round ${k + 1}`);
+  }
+  const m = s.r.sent.map((t) => t.action.method);
+  assert.ok(m.filter((t) => t === "execute_intents").length + m.filter((t) => t === "storage_deposit").length - 1 <= INTENTS_SENDS_MAX, "the cap, U's own aside");
+  s.store.close();
+});
+
+test("R3-F4: a spent reservation whose intent is never signed goes back only to the registration it was spent from: freed and claimed again since, its slot is given back", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const gB = gateP();
+  const send = s.r.send;
+  let n = 0;
+  s.r.send = (async (...a: Parameters<typeof send>) => {
+    if (++n === 2) {
+      await gB.p; // B's intent: its slot (R's reservation) spent, then the relayer refuses before the signing
+      throw new Error("relayer: the gas account's key is not a full-access key at final");
+    }
+    return send(...a);
+  }) as typeof send;
+  // R's outcome is unknown until the test calls it failed (one lookup's word)
+  let rFails = false;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => (t.tx_hash === s.r.sent[0]?.tx.tx_hash && rFails ? failedFinal(t) : resolve(t, o));
+  const a = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => regsOf(s) === 1);
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered"); // R landed, its outcome not read yet
+  const b = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => n === 2);
+  assert.equal(s.store.signer(u).registration?.reserved, false, "B spent R's reservation");
+  s.chain.storage.set(`${USDC}/fresh.near`, "null"); // its owner unregisters it
+  rFails = true;
+  assert.equal(code(await a), "registration_failed", "R read failed: freed");
+  const c = s.carry.carry(signedIntent(u, withdraw("fresh.near"))); // R2: a new claim on the same receiver, out
+  await until(() => regsOf(s) === 2);
+  gB.open();
+  assert.equal(code(await b), "upstream");
+  const r = s.store.signer(u);
+  assert.equal(r.sent, regsOf(s) + (r.registration?.reserved === true ? 1 : 0) + (r.taking ?? []).length, `sent ${r.sent} for R and R2 signed: ${JSON.stringify(r.registration)}`);
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  s.r.release();
+  await c;
+  await s.carry.idle();
+  s.store.close();
+});
