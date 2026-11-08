@@ -62,12 +62,10 @@
 @media (max-width: 1023.98px) {
   .tb .searchwrap, .tb .srch-chip { display: none; }
   .tb .tb-searchBtn { display: flex; flex: none; margin-left: auto; }
-  .tb .tb-searchBtn ~ .tbr { margin-left: 0; }
 }
 
 /* the phone header's search button (R5 .phh .sfi): 44 px, before the account side */
 .phh .sfi { width: 44px; justify-content: center; color: var(--text-2); margin: 0 -6px 0 auto; }
-.phh .sfi ~ .tbr-ph { margin-left: 0; }
 
 /* the sheet: the phone's search, over the whole page (R5 .phh and .phh .sf for its top row; the rail's chips) */
 .srch-sheet { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; background: var(--m-ink); color: var(--text-1); font-family: var(--font-ui); }
@@ -86,5 +84,5 @@
    and the signed-in cluster each draw inside a box at least as wide as the widest of them (a balance up to 11
    characters), drawn at its end. The chain chip and the search sit before that box, so the account landing moves
    neither (BAR-10 CLS 0). */
-.tb .tbr { min-width: 264px; justify-content: flex-end; }
-.phh .tbr-ph { min-width: 148px; justify-content: flex-end; }
+.tb-acct { flex: none; min-width: 264px; display: flex; justify-content: flex-end; }
+.phh-acct { flex: none; min-width: 148px; display: flex; justify-content: flex-end; }

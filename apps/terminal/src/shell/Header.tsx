@@ -30,7 +30,9 @@ export function Header() {
       <SearchField />
       <SearchButton />
       <ChainChip />
-      <AccountCluster />
+      <div className="tb-acct">
+        <AccountCluster />
+      </div>
     </header>
   );
 }
@@ -44,7 +46,9 @@ export function PhoneHeader() {
         <Logo phone />
       </Link>
       <SearchButton phone />
-      <PhoneAccount />
+      <div className="phh-acct">
+        <PhoneAccount />
+      </div>
     </header>
   );
 }
