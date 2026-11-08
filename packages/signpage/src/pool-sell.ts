@@ -534,7 +534,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaRentMin(rent, 0);
     // the rents the deposit takes from W, as the program prices them (review L1): its mark and both pages topped up to
     // their rent at their new length, less what each holds (anyone may send lamports to one), read on both RPCs
-    const rents = solanaDepositRents(rent, sizes, await depositHeld(rpcs, program, sizes, pre, wait));
+    // with the next pages named, priced at the kit's window (an insert landing first can carry the entries onto the next
+    // page, which the deposit then opens at W's cost); what it does not spend stays on W for its next sell or the sweep
+    const rents = solanaDepositRents(rent, sizes, await depositHeld(rpcs, program, sizes, pre, wait), next);
     const short = fa + made + rents + after - lamports;
     const reserve = short > 0n ? short : 0n;
     // a partial sell whose reserve passes the cap is refused, never shrunk: the rest would be stranded on W; selling more

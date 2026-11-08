@@ -13,8 +13,11 @@
 //
 // Per chain and op:
 // - Solana deposit, tag 1 (contracts/pool-solana/src/deposit.rs: accounts pool, depositor, state page, label page,
-//   precommitment mark, system; data tag, value u64 LE, precommitment 32 B): the pinned program and pool, W the depositor
-//   and the only signer, the value the request's, the precommitment the device's, the pages at the tree sizes read.
+//   precommitment mark, system, then since d3edab1 each tree's next page; data tag, value u64 LE, precommitment 32 B):
+//   the pinned program and pool, W the depositor and the only signer, the value the request's, the precommitment the
+//   device's, the pages at the tree sizes read and the next pages after them (state.rs page_for: an insert that lands
+//   first and turns a page carries the entry there). A deposit and a sweep take the eight only; a sell's deposit back
+//   takes the six too, when its transaction would pass 1,232 bytes with the eight.
 // - Solana withdraw, tag 2 (src/release.rs): the device's own release, byte for byte, through the pinned program and
 //   pool, paid to W, the pinned fee payer and W the only signers, the relay fee within its cap and the cap within the
 //   device's, the deadline ahead; then exactly one transfer, from W to the address typed on SIGN_HOST, of the release's
@@ -80,6 +83,7 @@ import {
   type SolanaPoolRelease,
   type SolanaRent,
 } from "../../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_NEXT_PAGE_WINDOW } from "../../../kit/src/trade/solana/pool-deposit.ts";
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
@@ -363,12 +367,12 @@ const sameList = (got: Ix["accounts"], want: readonly { key: string; signer: boo
 };
 
 /** One tag 1 deposit into the pinned pool by `depositor`: its value, read from its bytes. */
-function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, precommitment: bigint, reads: SolanaPoolReads): bigint {
+function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, precommitment: bigint, reads: SolanaPoolReads, six = false): bigint {
   if (x.program !== pin.program) return refuse("program");
   if (x.data.length !== SOLANA_POOL_DEPOSIT_LEN || x.data[0] !== SOLANA_POOL_TAG_DEPOSIT) return refuse("deposit_data");
-  // tag 1 takes the six, or the six then each tree's next page (deposit.rs:72-76 since d3edab1, state.rs page_for): every
-  // sender names them where they fit (a sell's largest transaction does not); either form moves only what its bytes say
-  if (x.accounts.length !== 6 && x.accounts.length !== 8) return refuse("deposit_accounts");
+  // tag 1: the six, then each tree's next page (deposit.rs:72-76 since d3edab1, state.rs page_for); the six alone only
+  // where the caller takes them (`six`: a sell's deposit back, whose largest transaction does not fit the eight)
+  if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");
   const [pool, from, statePage, labelPage, mark, system, nextState, nextLabel] = x.accounts;
   if (!same(pool, pin.pool, false, true)) return refuse("pool");
   if (!same(from, depositor, true, true)) return refuse("depositor");
@@ -576,7 +580,7 @@ export function checkSolanaSell(
     if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
   }
   if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");
-  const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads);
+  const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);
   return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back };
@@ -620,7 +624,7 @@ export type SolanaDepositHeld = { mark: readonly [bigint | null, bigint | null];
  * one entry more than the tree's size in that page) is topped up to its rent at its new length, less what it holds
  * already (anyone may send lamports to a page or a mark's address). `held` must be the same on both RPCs.
  */
-export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number; labelSize: number }, held: SolanaDepositHeld): bigint {
+export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number; labelSize: number }, held: SolanaDepositHeld, window = false): bigint {
   const one = (pair: readonly [bigint | null, bigint | null], len: number): bigint => {
     if (pair[0] !== pair[1]) return refuse("deposit_reads");
     const have = pair[0] ?? 0n;
@@ -628,7 +632,16 @@ export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number;
     return need > 0n ? need : 0n;
   };
   const page = (size: number): number => SWEEP_PAGE_HEADER + ((size % SWEEP_PAGE_ENTRIES) + 1) * SWEEP_PAGE_ENTRY;
-  return one(held.mark, SWEEP_MARK_LEN) + one(held.state, page(sizes.stateSize)) + one(held.label, page(sizes.labelSize));
+  // `window` (a deposit naming the next pages, card pool-senders-next-page): a tree within SOLANA_POOL_NEXT_PAGE_WINDOW
+  // entries of its page's end is priced at the next page's opening when that is more, as the kit's
+  // solanaPoolDepositCost prices it, so an insert that lands first and turns the page leaves W what it was priced to keep
+  const open = solanaRentMin(rent, SWEEP_PAGE_HEADER + SWEEP_PAGE_ENTRY);
+  const tree = (pair: readonly [bigint | null, bigint | null], size: number): bigint => {
+    const here = one(pair, page(size));
+    const near = SWEEP_PAGE_ENTRIES - (size % SWEEP_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
+    return window && near && open > here ? open : here;
+  };
+  return one(held.mark, SWEEP_MARK_LEN) + tree(held.state, sizes.stateSize) + tree(held.label, sizes.labelSize);
 }
 
 /**

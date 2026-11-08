@@ -440,7 +440,9 @@ export async function finishPoolOnward(
     if (balance === 0n) return done(pending.last ? "sent" : "stopped");
     if (toRefused(pending.to, h.pin, solanaPoolAccount(h.pin.program), [W])) return null;
     await checkTo(h, pending.to);
-    const on = await sendOnward(h, ask, l, j, pending.to, [], { minSlot, feeCap: BigInt(pending.feeCap) });
+    // the release's own accounts, as both RPCs read the spend: To may be none of them (review LOW 4: a resumed send
+    // passed none, so only the checks above held it)
+    const on = await sendOnward(h, ask, l, j, pending.to, owner.accounts, { minSlot, feeCap: BigInt(pending.feeCap) });
     if (on.state === "ok") return done(pending.last ? "sent" : "stopped", [{ chain: "solana", hash: on.signature }], { [on.signature]: on.amount.toString() });
     if (on.state === "fee") return { stage: "in_transit", txs: [], arrived: {}, feeNeeded: on.need.toString() };
     return null;

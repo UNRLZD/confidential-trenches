@@ -502,6 +502,33 @@ test("a To refused at the finish keeps the send owed: null, nothing sent, the pa
   assert.equal(wd.balance.get(W), 5_005_000n);
 });
 
+// Card pool-senders-next-page, review LOW 4: a resumed send onward passed no release accounts to the rule, so a To
+// naming one the To checks do not read (the mark, a page or the next page the release names, none of them made yet)
+// was sent W's part. The finish reads the release's accounts with its spend, on both RPCs, and refuses each as To.
+test("a resumed send onward to an account the release names is refused: the send stays owed, the part on W", async () => {
+  for (const keep of [true, false]) {
+    const wd = await world([30_000_000n], { settleUnspent: true });
+    const a = await runPoolWithdraw(wd.host, ASK, TO, 5_000_000n, COST);
+    assert.equal(a.stage, "in_transit");
+    wd.plant.settleUnspent = false;
+    const W = wd.binds[0]!.recipient;
+    const wire = [...wd.landed.values()][0]!;
+    const m = solanaDecodeMessage(wire.subarray(1 + 64 * wire[0]!));
+    const rel = m.instructions.find((ix) => m.staticKeys[ix.programIndex] === PROGRAM)!;
+    const named = rel.accounts.map((i) => m.staticKeys[i]!);
+    // the ones no other check refuses: not W, the pool, the fee payer or a program, and no account the RPCs serve
+    const unread = named.filter((k) => ![W, POOL, FEE_PAYER, PROGRAM, SOLANA_SYSTEM_PROGRAM, solanaPoolPage(PROGRAM, 0, 0), solanaPoolPage(PROGRAM, 1, 0)].includes(k) && !k.startsWith("Sysvar"));
+    assert.ok(unread.length > 0, named.join(" "));
+    const p = keep ? a.pending! : noRelease(a.pending!);
+    for (const to of unread) assert.equal(await finishPoolOnward(wd.host, { ...p, to }), null, `${keep} ${to}`);
+    assert.equal(wd.onwards().length, 0);
+    assert.equal(wd.balance.get(W), 5_000_000n + W_FEE);
+    // the user's own To still goes
+    assert.equal((await finishPoolOnward(wd.host, p))?.stage, "sent");
+    assert.equal(wd.balance.get(TO), 5_000_000n);
+  }
+});
+
 // LOW 1: an op's stage never moves back (review probe-merge: a stale finish after the run's sent)
 test("a withdraw op's stage never moves back: a stale stopped never overwrites sent, a later part's proving never its in_transit", () => {
   const sent = { kind: "withdraw", stage: "sent", txs: [{ chain: "solana", hash: "rel1" }, { chain: "solana", hash: "on1" }], created_ms: 1 };
@@ -1043,15 +1070,24 @@ const chainOf = (txs: Record<string, { tx: Uint8Array; meta: Record<string, unkn
     if (m === "getSignaturesForAddress") return (p[1] as { before?: string }).before === undefined ? Object.keys(txs).map((signature) => ({ signature, slot: 9, err: null })) : [];
     throw new Error(m);
   }) as SolanaRpc;
+/** The tag 3's own accounts, its lookups' keys resolved (the kit's message.ts order): the ones spendOwner gives back
+ *  with a spend that is mine, for the send onward to refuse as To (review LOW 4). */
+const ixAccounts = ({ tx, loaded }: { tx: Uint8Array; loaded: { writable: string[]; readonly: string[] } }): string[] => {
+  const m = solanaDecodeMessage(tx.subarray(129));
+  const keys = [...m.staticKeys, ...loaded.writable, ...loaded.readonly];
+  return [...new Set(m.instructions.find((ix) => keys[ix.programIndex] === PROGRAM)!.accounts.map((i) => keys[i]!))];
+};
 const ownerOf = (rpc: SolanaRpc, release?: string) => spendOwner([rpc, rpc], { program: PROGRAM, feePayer: FEE_PAYER }, BUY_W, NH, contextOfBuy(BUY_RELEASE), 0, release, new Map());
 
 test("this device's own landed tag 3 is its spend: mine by its signature, and mine from W's history", async () => {
   const { tx, loaded } = await buyTx(BUY_RELEASE, BUY_SIG);
   const rpc = chainOf({ [BUY_SIG]: { tx, meta: { err: null, loadedAddresses: loaded } } });
-  assert.deepEqual(await ownerOf(rpc, BUY_SIG), { mine: BUY_SIG });
-  assert.deepEqual(await ownerOf(rpc), { mine: BUY_SIG }, "the spend's own signature, from W's history");
+  const accounts = ixAccounts({ tx, loaded });
+  assert.ok(accounts.includes(BUY_W) && accounts.length > 3);
+  assert.deepEqual(await ownerOf(rpc, BUY_SIG), { mine: BUY_SIG, accounts });
+  assert.deepEqual(await ownerOf(rpc), { mine: BUY_SIG, accounts }, "the spend's own signature, from W's history");
   // a hint that is not the spend (the helper's word for another transaction): the spend found in W's history names its own
-  assert.deepEqual(await ownerOf(rpc, OTHER_BUY_SIG), { mine: BUY_SIG });
+  assert.deepEqual(await ownerOf(rpc, OTHER_BUY_SIG), { mine: BUY_SIG, accounts });
 });
 
 test("a tag 3 to W under another attempt's context (another device's salt) is another's spend: other", async () => {
@@ -1076,7 +1112,7 @@ test("a tag 3 whose loaded keys are not known (none, a count off, a key that is 
 
 test("tag 3's flags as the program reads them: the next-page bit beside the compressed one is still the spend; an unknown bit never is", async () => {
   const next = await buyTx(BUY_RELEASE, BUY_SIG, (d) => void (d[1] = 3));
-  assert.deepEqual(await ownerOf(chainOf({ [BUY_SIG]: { tx: next.tx, meta: { err: null, loadedAddresses: next.loaded } } }), BUY_SIG), { mine: BUY_SIG });
+  assert.deepEqual(await ownerOf(chainOf({ [BUY_SIG]: { tx: next.tx, meta: { err: null, loadedAddresses: next.loaded } } }), BUY_SIG), { mine: BUY_SIG, accounts: ixAccounts(next) });
   const bad = await buyTx(BUY_RELEASE, BUY_SIG, (d) => void (d[1] = 5));
   assert.equal(await ownerOf(chainOf({ [BUY_SIG]: { tx: bad.tx, meta: { err: null, loadedAddresses: bad.loaded } } }), BUY_SIG), null);
 });

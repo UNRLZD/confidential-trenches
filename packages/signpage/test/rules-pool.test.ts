@@ -241,6 +241,26 @@ test("Solana deposit: another program, pool, depositor, amount, precommitment, p
   assert.throws(() => checkSolanaDeposit(ok([cuLimit, depositIx()]), depAsk, solCtx({ solana: undefined }), SOL_READS), refusedAs("solana_not_pinned"));
 });
 
+// Card pool-senders-next-page, review of 14b04117: the trees on different pages (releases grow the state tree alone),
+// each tree's next page from its own size; the next page's privileges held; a plain deposit takes the eight only.
+test("Solana deposit: each tree's next page from its own size, the trees on different pages; a read-only next page or the six alone is refused", () => {
+  const next = (tree: 0 | 1, size: number) => solanaPoolPage(PROGRAM, tree, (Math.floor(size / 1024) + 1) * 1024);
+  for (const [s, l] of [[1030, 1000], [1000, 1030]] as const) {
+    const reads = { ...SOL_READS, stateSize: s, labelSize: l };
+    const dep = (o: Parameters<typeof depositIx>[0] = {}) => wire(SOL_W, [cuLimit, depositIx({ state: s, label: l, nextState: next(0, s), nextLabel: next(1, l), ...o })]);
+    assert.equal(checkSolanaDeposit(dep(), depAsk, solCtx(), reads).amount, 2_000_000_000n, `${s}/${l}`);
+    // the state tree's next page from the label tree's size, and the label's from the state's: refused
+    assert.throws(() => checkSolanaDeposit(dep({ nextState: next(0, l) }), depAsk, solCtx(), reads), refusedAs("state_page"), `${s}/${l} state`);
+    assert.throws(() => checkSolanaDeposit(dep({ nextLabel: next(1, s) }), depAsk, solCtx(), reads), refusedAs("label_page"), `${s}/${l} label`);
+  }
+  // the right next page, read-only: refused
+  const ro = (i: 6 | 7) => { const x = depositIx(); x.accounts[i] = { ...x.accounts[i]!, writable: false }; return wire(SOL_W, [cuLimit, x]); };
+  assert.throws(() => checkSolanaDeposit(ro(6), depAsk, solCtx(), SOL_READS), refusedAs("state_page"));
+  assert.throws(() => checkSolanaDeposit(ro(7), depAsk, solCtx(), SOL_READS), refusedAs("label_page"));
+  // the six alone: every deposit the device builds names the next pages, so a plain deposit takes the eight only
+  assert.throws(() => checkSolanaDeposit(wire(SOL_W, [cuLimit, depositIx({ six: true })]), depAsk, solCtx(), SOL_READS), refusedAs("deposit_accounts"));
+});
+
 // ---------- Solana withdraw (tag 2) ----------
 
 const release: SolanaPoolRelease = { ...fxRelease, deadlineMs: NOW + 120_000n };
@@ -406,6 +426,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   assert.throws(() => atCap(floor - 1n), refusedAs("reserve"));
   // a higher min out the bytes carry is fine, its deposit that min out less the reserve
   assert.equal(checkSolanaSell(sellWire({ minOut: floor + 10n }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE).back, floor + 10n - RESERVE);
+  // the deposit back in the six as well (card pool-senders-next-page: a sell over 1,232 bytes with the eight, the PumpSwap
+  // cashback sell with no lookup table, sends the form before d3edab1); the next pages wrong are still refused
+  assert.equal(checkSolanaSell(sellWire({ dep: { six: true } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE).back, floor - RESERVE);
+  assert.throws(() => checkSolanaSell(sellWire({ dep: { nextState: key(45) } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE), refusedAs("state_page"));
   for (const [w, rule] of [
     [sellWire({ minOut: floor - 1n }), "min_out"],
     [sellWire({ amount: amount - 1n }), "sell"],
@@ -683,7 +707,9 @@ test("no rule reads a field from a server: the rule file imports no fetch, helpe
   assert.doesNotMatch(code, /helper\/v1|withdraw\/relay|solanaJsonRpc|solanaHelperRpc|readSolana[A-Z]\w*\(|evmAgreed|evmNow|RELEASE_HELPER|TRADE_HELPER/);
   const imports = [...src.matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
   // trade/evm/quoted.ts: the record of the builds the device's own quotes made (card evm-buy-hookdata-fee); the rules
-  // call only its two predicates, which read no server (the line above holds that the file calls no reader)
-  assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-buy|trade\/evm\/(buy|sell)-unpinned|trade\/evm\/quoted|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
+  // call only its two predicates, which read no server (the line above holds that the file calls no reader);
+  // trade/solana/pool-deposit.ts: its constant SOLANA_POOL_NEXT_PAGE_WINDOW (card pool-senders-next-page), a module of
+  // pure builders with no reader
+  assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-(buy|deposit)|trade\/evm\/(buy|sell)-unpinned|trade\/evm\/quoted|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
   assert.deepEqual([...code.matchAll(/\b(evmQuoted\w*|evmIsQuoted\w*)\b/g)].map((m) => m[1]).filter((n) => !/^evmIsQuoted(Buy|Sell)$/.test(n!)), [], "the rules call quoted.ts's predicates only, never its builders");
 });

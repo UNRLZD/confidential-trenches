@@ -21,7 +21,7 @@ import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/de
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
-import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolFee, solanaPoolPage, solanaPoolSellNeed, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolBuySellNeed, solanaPoolFee, solanaPoolNextPage, solanaPoolPage, solanaPoolSellNeed, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pairDown } from "./outage.ts";
@@ -34,9 +34,8 @@ import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../
 import { POOL_RENT_BACK_MS, POOL_RENT_BACK_PASSES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSweepFloor, solanaWithdrawMinPart, withdrawNoteFloor } from "../src/rules/pool.ts";
+import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSweepFloor, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
 import { tradeLock, type TradeStore } from "../src/trade.ts";
-import type { PoolAsk } from "../src/rules/pool.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const L = 7n;
@@ -164,6 +163,11 @@ type Plant = {
   wrongAccountTakes?: boolean;
   /** getLatestBlockhash's blockhash (BLOCKHASH when not given): a later load's, so a frame built again is a new one */
   blockhash?: string;
+  /** leaves on the label tree (`leaves` when not given): releases grow the state tree alone, so the trees drift apart */
+  labelLeaves?: number;
+  /** one state leaf (a release's change note) lands after the sell's reads and before the sell itself (card
+   *  pool-senders-next-page): at a page's last slot it carries the sell's state entry onto the next page */
+  insertFirst?: boolean;
 };
 
 /** One chain: the planted accounts, the program's deposit applied to a signed sell. */
@@ -175,17 +179,20 @@ function chain(plant: Plant = {}) {
   pool.set(enc.encode("bfpool01"));
   const pv = new DataView(pool.buffer);
   const n0 = plant.leaves ?? N;
-  pv.setBigUint64(9, BigInt(n0), true); // the nonce: n0 deposits so far
+  const l0 = plant.labelLeaves ?? n0;
+  pv.setBigUint64(9, BigInt(l0), true); // the nonce: l0 deposits so far (each deposit adds one label; a release, a state leaf alone)
   pv.setBigUint64(49, BigInt(n0), true);
-  pv.setBigUint64(49 + 1065, BigInt(n0), true);
+  pv.setBigUint64(49 + 1065, BigInt(l0), true);
   accounts.set(POOL, { owner: PROGRAM, lamports: 1, data: pool });
-  accounts.set(solanaPoolPage(PROGRAM, 0, 0), { owner: PROGRAM, lamports: 1, data: pageBytes(0, Array.from({ length: n0 }, (_, i) => 1000n + BigInt(i))) });
-  accounts.set(solanaPoolPage(PROGRAM, 1, 0), { owner: PROGRAM, lamports: 1, data: pageBytes(1, Array.from({ length: n0 }, (_, i) => vaultLabelOf(keccak_256, SCOPE, BigInt(i + 1)))) });
-  // each page at its rent for its length, as the program leaves it (review M3: pages planted at 1 lamport hid the top-up)
+  // each tree's leaves on its pages of 1,024 (state.rs page_for), each page at its rent for its length, as the program
+  // leaves it (review M3: pages planted at 1 lamport hid the top-up)
+  const leavesOf = { 0: Array.from({ length: n0 }, (_, i) => 1000n + BigInt(i)), 1: Array.from({ length: l0 }, (_, i) => vaultLabelOf(keccak_256, SCOPE, BigInt(i + 1))) };
   for (const tree of [0, 1] as const) {
-    const at = solanaPoolPage(PROGRAM, tree, 0);
-    const pg = accounts.get(at)!;
-    accounts.set(at, { ...pg, lamports: Number(solanaRentMin(rent, pg.data.length)) });
+    for (let p = 0; p === 0 || p * 1024 < leavesOf[tree].length; p++) {
+      const data = pageBytes(tree, leavesOf[tree].slice(p * 1024, (p + 1) * 1024), p);
+      for (let i = 0; 16 + i * 72 < data.length; i++) new DataView(data.buffer).setBigInt64(16 + i * 72 + 64, BigInt(p * 1024 + i + 1), true); // each leaf's time, after every leaf before it
+      accounts.set(solanaPoolPage(PROGRAM, tree, p * 1024), { owner: PROGRAM, lamports: Number(solanaRentMin(rent, data.length)), data });
+    }
   }
   accounts.set(fx.rent.account, { owner: fx.rent.answers[0].owner, lamports: 1, data: base64.decode(fx.rent.answers[0].data) });
   accounts.set(mint, { owner: mintRead.owner, lamports: 1, data: base64.decode(mintRead.data[0]) });
@@ -244,6 +251,7 @@ function chain(plant: Plant = {}) {
   const deposits: { pre: bigint; value: bigint; sweep: boolean }[] = [];
   let throttled = 0;
   let wrongDone = false;
+  let insertDone = false;
   let tearFailed = false;
   /** What a deposit on `pre` takes from its payer beyond its value, as the program prices it (state.rs create_pda and
    *  the page insert): the mark and each page topped up to its rent at its new length, less what it holds. */
@@ -468,6 +476,19 @@ function chain(plant: Plant = {}) {
               txs.set(sig, { tx, err: { InstructionError: [0, "planted"] } });
               return sig;
             }
+          }
+          if (plant.insertFirst && !insertDone && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM) {
+            insertDone = true;
+            // a release's change note: one state leaf at the state tree's size, its page topped up by its payer
+            const size = Number(pv.getBigUint64(49, true));
+            const at = solanaPoolPage(PROGRAM, 0, size);
+            const pg = accounts.get(at) ?? { owner: PROGRAM, lamports: 0, data: pageBytes(0, [], Math.floor(size / 1024)) };
+            const data = new Uint8Array(pg.data.length + 72);
+            data.set(pg.data);
+            data.set(be32(777_777n), pg.data.length);
+            new DataView(data.buffer).setBigInt64(pg.data.length + 64, BigInt(size + 1), true);
+            accounts.set(at, { ...pg, data, lamports: Math.max(pg.lamports, Number(solanaRentMin(rent, data.length))) });
+            pv.setBigUint64(49, BigInt(size + 1), true);
           }
           if (!txs.has(sig) && plant.lands !== false) {
             try {
@@ -1499,7 +1520,7 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
       { key: solanaPoolPage(PROGRAM, 1, sizes.labelSize), signer: false, writable: true },
       { key: markOf(p), signer: false, writable: true },
       { key: "11111111111111111111111111111111", signer: false, writable: false },
-      // each tree's next page (card pool-senders-next-page: the rule takes the six with them, never alone)
+      // each tree's next page (card pool-senders-next-page: the sweep's rule takes the eight only)
       { key: solanaPoolPage(PROGRAM, 0, (Math.floor(sizes.stateSize / 1024) + 1) * 1024), signer: false, writable: true },
       { key: solanaPoolPage(PROGRAM, 1, (Math.floor(sizes.labelSize / 1024) + 1) * 1024), signer: false, writable: true },
     ],
@@ -1524,6 +1545,9 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
   refused(() => checkSolanaSweep(wire([{ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, 1, 0, 0, 0, 0, 0, 0, 0) }, dep(lamports - costs)] as never), ctx, reads, lamports, rent, held), "instructions");
   refused(() => checkSolanaSweep(wire([dep(lamports - costs), dep(1n)] as never), ctx, reads, lamports, rent, held), "instructions");
   refused(() => checkSolanaSweep(wire([dep(lamports - costs, FEE_PAYER)], FEE_PAYER), ctx, reads, lamports, rent, held), "signers");
+  // the six, the form before d3edab1: a sweep the device builds always names the next pages
+  const six = dep(lamports - costs);
+  refused(() => checkSolanaSweep(wire([{ ...six, accounts: six.accounts.slice(0, 6) }]), ctx, reads, lamports, rent, held), "deposit_accounts");
   const small = costs + SOLANA_POOL_MIN_DEPOSIT - 1n;
   refused(() => checkSolanaSweep(wire([dep(small - costs)]), ctx, reads, small, rent, held), "amount");
 });
@@ -1791,4 +1815,46 @@ test("the sell's deposit names each tree's next page when the sell fits 1,232 by
   const b = depositOf(big);
   assert.equal(b.keys.length, 6, `pumpswap cashback: ${b.size} B`);
   assert.ok(b.size + 64 > 1232, `pumpswap cashback: ${b.size} B fits the next pages`);
+});
+
+// Review of 14b04117, M1: the sell's reserve priced the deposit's pages at the read sizes only. One state leaf landing
+// between the read and the sell (a release's change note) carries the sell's state entry onto the next page, which
+// costs rent(16 + 72) where the read page's top-up was 72 bytes; at exactly min out W then ended under the next sell's
+// need. The reserve prices an 8-account deposit with the kit's next-page window (solanaPoolDepositCost's rule).
+test("a partial sell at a page's last slots, with one insert between its read and its landing, still leaves W the next sell's need", async () => {
+  const probe = await world({});
+  const venue = await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT);
+  const need = solanaPoolBuySellNeed(venue, rent);
+  const w = await world({ leaves: 1023, labelLeaves: 1000, insertFirst: true, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT)]);
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.ok(w.c.accounts.has(solanaPoolPage(PROGRAM, 0, 1024)), "the sell's state entry opened the next page");
+  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+  assert.ok(left >= need, `W keeps ${left}, short of ${need} by ${need - left}`);
+});
+
+// Review of 14b04117, M2: the trees sit on different pages (releases grow the state tree alone), so each tree's next
+// page comes from its own size.
+test("the sell's and the sweep's deposits name each tree's own next page when the trees are on different pages", async () => {
+  for (const [stateSize, labelSize] of [[1030, 1000], [1000, 1030]] as const) {
+    const w = await world({ leaves: stateSize, labelLeaves: labelSize, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
+    const a = await runPoolSell(w.host, ASK);
+    assert.equal("stage" in a && a.stage, "filled", `${stateSize}/${labelSize} ${JSON.stringify(a)}`);
+    const sent = w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)));
+    const deps = sent.filter((m) => m.staticKeys[m.instructions.at(-1)!.programIndex] === PROGRAM);
+    // the sell, then W's sweep (a transaction of the deposit alone, review L1: the sweep takes eight only)
+    assert.ok(deps[0]!.instructions.length > 1, "the sell first");
+    assert.ok(deps.some((m) => m.instructions.length === 1), `${stateSize}/${labelSize}: a sweep sent`);
+    const dedup = new Set<string>();
+    for (const m of deps) {
+      const ix = m.instructions.at(-1)!;
+      if (dedup.has(base64.encode(ix.data))) continue;
+      dedup.add(base64.encode(ix.data));
+      const keys = ix.accounts.map((i) => m.staticKeys[i]);
+      const sizes = m.instructions.length === 1 ? [stateSize + 1, labelSize + 1] : [stateSize, labelSize]; // the sweep lands after the sell
+      assert.equal(keys.length, 8, `${stateSize}/${labelSize}`);
+      assert.deepEqual(keys.slice(2, 4), [solanaPoolPage(PROGRAM, 0, sizes[0]!), solanaPoolPage(PROGRAM, 1, sizes[1]!)]);
+      assert.deepEqual(keys.slice(6), [solanaPoolNextPage(PROGRAM, 0, sizes[0]!), solanaPoolNextPage(PROGRAM, 1, sizes[1]!)], `${stateSize}/${labelSize} ${m.instructions.length === 1 ? "sweep" : "sell"}`);
+    }
+  }
 });

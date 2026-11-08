@@ -15,7 +15,8 @@ const note = { value: 10_000_000n, precommitment: 12345n };
 const next = (tree: 0 | 1, size: number) => solanaPoolPage(PROGRAM, tree, (Math.floor(size / 1024) + 1) * 1024);
 
 test("tag 1 names each tree's next page as accounts 6 and 7, writable, the page after the one its size reads", () => {
-  for (const [s, l] of [[0, 0], [6, 5], [1023, 1022], [1024, 2047], [5000, 4999]] as const) {
+  // the trees on different pages too (releases grow the state tree alone): each tree's next page from its own size
+  for (const [s, l] of [[0, 0], [6, 5], [1023, 1022], [1024, 2047], [5000, 4999], [1030, 1000], [1000, 1030]] as const) {
     const ix = solanaPoolDepositIx(PROGRAM, DEPOSITOR, note, { stateSize: s, labelSize: l });
     assert.equal(ix.accounts.length, 8, `sizes ${s}/${l}`);
     assert.deepEqual(ix.accounts[6], { key: next(0, s), signer: false, writable: true });
@@ -121,6 +122,12 @@ test("the check refuses a tag 3 whose next page is not the state tree's next pag
   const v = checkSolanaPoolBuy(wire, cfg, release, venue, req, reads);
   assert.ok(!v.ok);
   assert.ok(v.results.some((r) => r.id === "RELEASE" && !r.ok), JSON.stringify(v.results));
+});
+
+test("a venue step naming the state tree's next page is never built: the pool refuses an inner account of its own", async () => {
+  const { venue, req, chain } = await setup("pump");
+  const v = { ...venue, feeRecipient: next(0, chain.stateSize) } as SolanaPoolBuyVenue;
+  assert.throws(() => buildSolanaPoolBuy(cfg, release, v, req, chain, { pick: () => 0 }), /a step names the pool, its accounts or the fee payer/);
 });
 
 function tableMeta(): number[] {
