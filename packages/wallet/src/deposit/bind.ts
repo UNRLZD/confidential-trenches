@@ -115,8 +115,8 @@ if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(TX_METHOD)) throw n
  * only makes the read fail: the tx must carry U's own signed call.
  * Mainnet: the deposit carry's gas account, the implicit account apps/helper/deploy/bind-relayer-key.sh made on the
  * helper's server, as the helper's GET /v1/health names it (bind.mainnet), holding one full-access key, its own, on
- * both release RPCs (read 2026-11-08 03:06Z: test/vectors/mainnet-relayer-pins.json, held by
- * test/release-relayer-pins.test.ts). Testnet: none; the rehearsal names its gas account itself.
+ * rpc.mainnet.near.org and free.rpc.fastnear.com (read 2026-11-08 11:29Z: test/vectors/mainnet-relayer-pins.json, held
+ * by test/release-relayer-pins.test.ts). Testnet: none; the rehearsal names its gas account itself.
  */
 export const RELEASE_RELAYER: Readonly<Record<NearNetwork, string | null>> = Object.freeze({
   mainnet: "f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc",

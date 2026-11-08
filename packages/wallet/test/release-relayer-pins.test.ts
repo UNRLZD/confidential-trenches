@@ -1,14 +1,16 @@
 // The release's mainnet relayer pins (card wallet-mainnet-relayer-pins): deposit/bind.ts RELEASE_RELAYER.mainnet, the
 // deposit carry's gas account, and withdraw/relay.ts RELEASE_WITHDRAW_RELAYER.mainnet, the withdrawal relayer and its
-// fee recipient, are each the account the release's helper names, read on mainnet's release pair before it is written.
+// fee recipient, are each the account the server script printed, read on two public mainnet RPCs before it was written;
+// the chain reads decide each pin, and the helper's answers are held equal to it.
 //   node --test test/release-relayer-pins.test.ts      (from packages/wallet)
 // The reads are test/vectors/mainnet-relayer-pins.json (test/record-relayer-pins.mjs; its recorded_at says when):
 // - each relayer account is a 64-hex implicit account (as bind-relayer-key.sh and withdraw-relayer-key.sh make them)
 //   that exists on both RPCs and holds exactly one key, full access, its own implicit key: the public key the server
 //   script printed (it prints ed25519:<base58 of the key whose hex is the account>);
-// - the withdrawal pin is null while the helper's fee answer names no mainnet relayer (404 not_found), and once it
-//   does, it is that answer's pair, its fee recipient fees.unrlzd.near (owner 7 Nov 09:27Z) registered on mainnet
-//   USDC on both RPCs;
+// - each pin is the account read on chain, and the helper names the same (GET /v1/health bind.mainnet; GET
+//   /v1/withdraw/fee's relayer_account and fee_recipient, byte for byte); the fee recipient is fees.unrlzd.near
+//   (owner 7 Nov 09:27Z), registered on mainnet USDC on both RPCs;
+// - the device takes a fee answer only when it names the written pair: another relayer or fee recipient is refused;
 // - neither pin is the throwaway relayer of helper-mainnet-vault-env's Mac test run, and the two are not one account.
 // Planted reads (a second key, a function-call key, another key, one RPC, the throwaway, an unregistered recipient)
 // each fail, so the rule bites.
@@ -18,7 +20,7 @@ import { test } from "node:test";
 import { base58, hex } from "@scure/base";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import { RELEASE_RELAYER } from "../src/deposit/bind.ts";
-import { RELEASE_WITHDRAW_RELAYER } from "../src/withdraw/relay.ts";
+import { askWithdrawFee, RELEASE_WITHDRAW_RELAYER, WITHDRAW_FEE_URL } from "../src/withdraw/relay.ts";
 
 type Rpc = { url: string; status: number; json: any };
 type Account = { id: string; view_account: Rpc[]; view_access_key_list: Rpc[] };
@@ -37,7 +39,8 @@ const FEE_RECIPIENT = "fees.unrlzd.near";
 /** helper-mainnet-vault-env's Mac test run's relayer (scripts/live-checks/helper-mainnet-vault-env.answers.json): never a pin. */
 const THROWAWAY = "9747fa11a4de38cecc3b9086239633a2164a81c8e7b03a39bd3f1522438717d6";
 const MAIN = NEAR_NETWORKS.mainnet;
-const PAIR = [MAIN.fastnear[0], MAIN.drpc];
+/** Two public mainnet RPCs of two providers: NEAR's own and FastNEAR's free one. */
+const PAIR = ["https://rpc.mainnet.near.org", "https://free.rpc.fastnear.com"];
 const IMPLICIT = /^[0-9a-f]{64}$/;
 const implicitKey = (id: string): string => `ed25519:${base58.encode(hex.decode(id))}`;
 
@@ -73,28 +76,46 @@ function registeredProblems(id: string, rs: Registered[]): string[] {
 }
 
 test("the deposit pin is the carry the helper names, existing on both RPCs with one full-access key, its own", () => {
-  assert.equal(V.helper.health.status, 200);
-  const named = V.helper.health.bind?.mainnet;
-  assert.equal(RELEASE_RELAYER.mainnet, named, "RELEASE_RELAYER.mainnet is the helper's bind.mainnet");
+  assert.ok(V.bind !== null);
+  assert.equal(RELEASE_RELAYER.mainnet, V.bind.id, "RELEASE_RELAYER.mainnet is the account read on chain");
   assert.deepEqual(relayerProblems(RELEASE_RELAYER.mainnet, V.bind), []);
+  assert.equal(V.helper.health.status, 200);
+  assert.equal(V.helper.health.bind?.mainnet, RELEASE_RELAYER.mainnet, "the helper's bind.mainnet is the pin");
   assert.equal(RELEASE_RELAYER.testnet, null, "testnet names none: the rehearsal names its gas account itself");
   assert.ok(Object.isFrozen(RELEASE_RELAYER));
 });
 
-test("the withdrawal pin is null while the helper names no mainnet relayer, else the fee answer's pair, each read on both RPCs", () => {
+test("the withdrawal pin is the relayer read on chain and fees.unrlzd.near, and the helper's fee answer names that pair", () => {
   const pin = RELEASE_WITHDRAW_RELAYER.mainnet;
-  if (V.helper.fee.status === 404) {
-    assert.deepEqual(V.helper.fee.body, { error: { code: "not_found" } });
-    assert.equal(pin, null, "no mainnet withdrawal relayer is pinned before the helper names one");
-    return;
-  }
-  assert.equal(V.helper.fee.status, 200);
-  assert.ok(pin !== null && Object.isFrozen(pin));
-  assert.deepEqual({ ...pin }, { relayer_account: V.helper.fee.body.relayer_account, fee_recipient: V.helper.fee.body.fee_recipient });
+  assert.ok(pin !== null && Object.isFrozen(pin), "RELEASE_WITHDRAW_RELAYER.mainnet is written and frozen");
+  assert.ok(V.withdraw_relayer !== null);
+  assert.deepEqual(Object.keys(pin).sort(), ["fee_recipient", "relayer_account"]);
+  assert.equal(pin.relayer_account, V.withdraw_relayer.id, "the relayer pin is the account read on chain");
   assert.equal(pin.fee_recipient, FEE_RECIPIENT);
   assert.deepEqual(relayerProblems(pin.relayer_account, V.withdraw_relayer), []);
   assert.deepEqual(registeredProblems(pin.fee_recipient, V.fee_recipients), []);
   assert.notEqual(pin.relayer_account, RELEASE_RELAYER.mainnet, "the deposit carry and the withdrawal relayer are two accounts");
+  assert.equal(V.helper.fee.status, 200);
+  assert.deepEqual({ relayer_account: V.helper.fee.body.relayer_account, fee_recipient: V.helper.fee.body.fee_recipient }, { ...pin }, "the helper names the pin's pair");
+});
+
+test("the device takes the recorded fee answer with the written pair, and refuses one naming another relayer or fee recipient", async () => {
+  const pin = RELEASE_WITHDRAW_RELAYER.mainnet;
+  assert.ok(pin !== null);
+  const answer = V.helper.fee.body as Record<string, unknown>;
+  const seen: string[] = [];
+  const helper = (body: unknown): typeof fetch =>
+    (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+  const ask = (body: unknown) => askWithdrawFee({ token: MAIN.usdc, relayer: pin, amount: 1_000_000_000n, fetchFn: helper(body) });
+  const fee = await ask(answer);
+  assert.equal(fee.relayFee, BigInt(answer.relay_fee as string));
+  assert.equal(fee.feeRecipient, FEE_RECIPIENT);
+  assert.equal(seen[0], `${WITHDRAW_FEE_URL}?token=${MAIN.usdc}`);
+  for (const over of [{ relayer_account: THROWAWAY }, { relayer_account: RELEASE_RELAYER.mainnet }, { fee_recipient: "unrlzd.near" }, { fee_recipient: pin.relayer_account }])
+    await assert.rejects(ask({ ...answer, ...over }), /withdraw relay refused \(relayer\): the answer names a relayer that is not the release's/, JSON.stringify(over));
 });
 
 test("the fee recipient the owner named is registered on mainnet USDC on both RPCs", () => {
@@ -114,7 +135,7 @@ test("planted: a second key, a function-call key, another key, one RPC, an absen
     ["a second key", edit((a) => a.view_access_key_list[1]!.json.result.keys.push({ ...key0, public_key: implicitKey(THROWAWAY) }))],
     ["a function-call key", edit((a) => (a.view_access_key_list[0]!.json.result.keys[0].access_key.permission = { FunctionCall: { allowance: null, receiver_id: "x.near", method_names: [] } }))],
     ["another key", edit((a) => (a.view_access_key_list[1]!.json.result.keys[0].public_key = implicitKey(THROWAWAY)))],
-    ["one RPC", edit((a) => (a.view_access_key_list[1]!.url = MAIN.fastnear[1]))],
+    ["one RPC", edit((a) => (a.view_access_key_list[1]!.url = PAIR[0]!))],
     ["absent", edit((a) => (a.view_account[0] = { ...a.view_account[0]!, json: { error: { cause: { name: "UNKNOWN_ACCOUNT" } } } }))],
   ];
   for (const [why, a] of bads) assert.notDeepEqual(relayerProblems(id, a), [], why);
@@ -122,5 +143,5 @@ test("planted: a second key, a function-call key, another key, one RPC, an absen
   assert.match(relayerProblems("bind.unrlzd.near", V.bind).join(), /not a 64-hex implicit account/);
   const unregistered = structuredClone(V.fee_recipients);
   unregistered[0]!.storage_balance_of[1]!.json.result.result = [...Buffer.from("null")];
-  assert.match(registeredProblems(FEE_RECIPIENT, unregistered).join(), /not registered on mainnet USDC on https:\/\/near\.drpc\.org/);
+  assert.match(registeredProblems(FEE_RECIPIENT, unregistered).join(), /not registered on mainnet USDC on https:\/\/free\.rpc\.fastnear\.com/);
 });

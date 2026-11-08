@@ -80,14 +80,19 @@ export const RELEASE_HELPER = "https://ct-api.unrealized.trade";
  * against and what the withdrawal pays its fee to), written here and never read from a helper; null where the release
  * names none, and no withdrawal is asked there (card signpage-withdraw-handoff). Testnet: VT-T02's R and F
  * (contracts/vault/deployments/testnet-t02-run.json), the pair the deployed helper's GET /v1/withdraw/fee names for the
- * testnet token (read 2026-11-06 15:58Z; R and F in that run record). Mainnet: null until the helper's GET
- * /v1/withdraw/fee names the relayer apps/helper/deploy/withdraw-relayer-key.sh makes, fee recipient fees.unrlzd.near
- * (owner 7 Nov 09:27Z); test/release-relayer-pins.test.ts holds it to that answer and to reads on both release RPCs.
+ * testnet token (read 2026-11-06 15:58Z; R and F in that run record). Mainnet: the implicit relayer account
+ * apps/helper/deploy/withdraw-relayer-key.sh made on the helper's server, holding one full-access key, its own, on
+ * rpc.mainnet.near.org and free.rpc.fastnear.com, and fee recipient fees.unrlzd.near (owner 7 Nov 09:27Z), registered
+ * on mainnet USDC on both (read 2026-11-08 11:29Z: test/vectors/mainnet-relayer-pins.json, held by
+ * test/release-relayer-pins.test.ts); the helper's GET /v1/withdraw/fee names the same pair.
  * Testnet's pair is the testnet build's only (POOL_TESTNET, as ../pool/solana.ts folds the devnet pins): SIGN_HOST's
  * build folds it to null and carries neither id. Node and the tests read it with __SIGN_NETWORK__ = "testnet" set.
  */
 export const RELEASE_WITHDRAW_RELAYER: Readonly<Record<NearNetwork, HelperReleaseRelayer | null>> = Object.freeze({
-  mainnet: null,
+  mainnet: Object.freeze({
+    relayer_account: "4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756",
+    fee_recipient: "fees.unrlzd.near",
+  }),
   testnet: POOL_TESTNET
     ? Object.freeze({
         relayer_account: "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow (a public account id)
