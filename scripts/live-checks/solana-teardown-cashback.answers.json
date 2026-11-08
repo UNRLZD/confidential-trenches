@@ -1,13 +1,13 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet) after review M1, L1 and L2 of 11c963f9 folded, on main 4729bfb8: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "this card's SIGN_HOST build (mainnet) as card/sol-w-sweep carries it on main daa758ea (review M1, L1 and L2 of 11c963f9 folded): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
     "bad": "main 3a57948a's build (mainnet): no claims, no claim rules: FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-08T05:02:00.964Z, before this card's deploy: FAIL",
     "beforeFold": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: any SIM refusal turned every claim off and W's owed record was dropped: FAIL on the marks review M1 and L1 changed"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7UcKMDvoa1ap2FIH6IfZ3H5zfhBwK5IRsfef8pfA2R3mjjZt2yAofiPnkNdSlpGy\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-7UcKMDvoa1ap2FIH6IfZ3H5zfhBwK5IRsfef8pfA2R3mjjZt2yAofiPnkNdSlpGy",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-VHI5s/Xv1C1kcwT2nbhFaw+Gk4n0RqxbmNzubfxt/UsJtaeQNeaHV0o0AX6Ik582\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-VHI5s/Xv1C1kcwT2nbhFaw+Gk4n0RqxbmNzubfxt/UsJtaeQNeaHV0o0AX6Ik582",
     "carries": {
       "PumpSwap's claim_cashback": true,
       "pump's claim_cashback_v2": true,
