@@ -1,7 +1,8 @@
 // The testnet build's withdraw form (card signpage-withdraw-handoff): with __SIGN_NETWORK__ "testnet", as
 // scripts/build-app.mjs folds it for the testnet build, the form's network is testnet and every read it makes, the
-// fee's and the kept hand-off's, goes to the testnet release pair (mainnet's pair for the price only). The form gives
-// no hand-off on this build either: Withdraw stays pending until the typed account is paid (wallet-withdraw-move-out).
+// fee's and the hand-off's, goes to the testnet release pair (mainnet's pair for the price only). The form offers the
+// hand-off on this build, the one whose release names a relayer: the vault pays the typed account straight
+// (wallet-withdraw-move-out). SIGN_HOST's build names no relayer and offers none (test/withdraw-form.test.ts).
 // Its own process: the build's network is read once, when the module loads. Every read is answered "no" here: only
 // where it goes is held.
 //   node --test test/withdraw-handoff-testnet.test.ts   (from packages/signpage)
@@ -34,12 +35,12 @@ function recording(answer?: (url: string) => Response | undefined): { urls: stri
   return { urls, restore: () => void (globalThis.fetch = real) };
 }
 
-test("the testnet build's form is testnet's, reads only, and offers no hand-off", () => {
+test("the testnet build's form is testnet's and offers the hand-off", () => {
   assert.equal(PAGE_NETWORK, "testnet");
   const d = withdrawFormDeps(page);
   assert.equal(d.network, "testnet");
   assert.deepEqual(d.rpcs.map((r) => r.name), [T.fastnear[0], T.drpc]);
-  assert.equal(d.handoff, undefined);
+  assert.equal(typeof d.handoff, "function");
   assert.ok(RELEASE_WITHDRAW_RELAYER.testnet, "the testnet build carries the testnet relayer");
 });
 

@@ -43,6 +43,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-in-shell";
 // what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
@@ -548,7 +549,7 @@ async function main() {
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const routes = harness ? Object.fromEntries(await Promise.all(KINDS.map(async (k) => [k, await harnessRoute(build, k)]))) : null;
   const expect = opt("--expect") ?? (harness ? "in" : "out");
-  const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, the stand-in shell` : "live";
+  const source = harness ? `harness, terminal build ${named(build)}, the stand-in shell` : "live";
   const rec = await collect({ launchers, shots, source, expect, routes });
   const record = opt("--record");
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);

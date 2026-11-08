@@ -34,6 +34,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { headersOf } from "./signpage-postmessage.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "signpage-pool-mainnet";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -197,7 +198,7 @@ async function main() {
   const browser = await launchBrowser("chromium");
   let rec;
   try {
-    rec = await collect({ browser, dir, source: local ? `local, SIGN_HOST answered from ${given ?? "this checkout's packages/signpage build"}` : `live ${SIGN_URL}` });
+    rec = await collect({ browser, dir, source: local ? `local, SIGN_HOST answered from ${given ? named(given) : "this checkout's packages/signpage build"}` : `live ${SIGN_URL}` });
   } finally {
     await browser.close();
     if (local && !given) rmSync(dir, { recursive: true, force: true });

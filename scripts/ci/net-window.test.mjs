@@ -33,6 +33,7 @@ export const CHANGED = [
   "scripts/live-checks/app-quick-buy-one-tap.mjs",
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-shell.mjs",
+  "scripts/live-checks/app-toast-clears-sheet-head.mjs",
   "scripts/live-checks/app-token-chart.mjs",
   "scripts/live-checks/app-token-route.mjs",
   "scripts/live-checks/base-200ms-blocks.mjs",
@@ -169,6 +170,7 @@ export const CHANGED = [
   "scripts/live-checks/vault-kit-settle.mjs",
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
+  "scripts/live-checks/wallet-withdraw-move-out.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

@@ -2,18 +2,18 @@
  "good": {
   "key": "held-deposit-way-out",
   "url": "local build",
-  "at": "2026-11-08T01:57:57.886Z",
+  "at": "2026-11-08T02:05:16.537Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-MPnS7gSmuxqn9XodhCC5+xXVigTEx5RkrojacExyQY+RcuGKmU1mU221pBQJvxCZ",
+   "integrity": "sha384-TGDAEKvRjysf+67WkmCEQZOFFaH2/+4Gv3MmBx9W+1rMN8UMOjLQ1Yk38+v9sXho",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 739731,
-   "sha384": "sha384-MPnS7gSmuxqn9XodhCC5+xXVigTEx5RkrojacExyQY+RcuGKmU1mU221pBQJvxCZ",
+   "bytes": 748223,
+   "sha384": "sha384-TGDAEKvRjysf+67WkmCEQZOFFaH2/+4Gv3MmBx9W+1rMN8UMOjLQ1Yk38+v9sXho",
    "markers": {
     "move out refused: ": 1,
     "the typed account is U or the token": 1,

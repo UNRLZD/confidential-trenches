@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-no-blank-pages";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -228,8 +229,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const { harnessRoute } = await import("./app-in-shell.mjs");
       // the stand-in shell's signed-out state ("tap"), as a first visit is
       route = await harnessRoute(build, "tap");
-      const rel = path.relative(REPO, build);
-      source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : build}, signed out`;
+      source = `harness, terminal build ${named(build)}, signed out`;
     }
     const rec = await collect({ shots: opt("--shots", undefined), route, source });
     const file = opt("--record", null);

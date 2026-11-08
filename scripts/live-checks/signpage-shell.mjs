@@ -52,6 +52,7 @@ import { fileURLToPath } from "node:url";
 import { SIGNPAGE_IFRAME_ATTRIBUTES, SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "signpage-shell";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -363,7 +364,7 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     sign = await siteServer(realpathSync(site ?? built));
   }
   const d = await driverFor(engine, serveWith(sign, requests), live, size);
-  const rec = { engine, view: { name: width, width: size.width, height: size.height, inner: null }, source: live ? `live ${SIGN}` : `harness, SIGN_HOST from ${site ?? "packages/signpage's committed build"}`, at: new Date().toISOString(), browser: d.version, topology: null, steps: {}, messages: [], requests, errors: [] };
+  const rec = { engine, view: { name: width, width: size.width, height: size.height, inner: null }, source: live ? `live ${SIGN}` : `harness, SIGN_HOST from ${site ? named(site) : "packages/signpage's committed build"}`, at: new Date().toISOString(), browser: d.version, topology: null, steps: {}, messages: [], requests, errors: [] };
   const reports = () => d.messages().filter((m) => m.frame?.host === APP_HOST);
   const msgs = () => reports().filter((m) => m.data?.kind === "message").map((m) => ({ t: m.data.t, data: m.data.data }));
   const top = async (not) => {

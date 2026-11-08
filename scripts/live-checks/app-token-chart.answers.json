@@ -1,6 +1,6 @@
 {
  "good": {
-  "source": "harness: the build /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "source": "harness: the build dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
   "at": "2026-11-03T19:33:54.116Z",
   "lists": {
    "url": "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana",
@@ -606,7 +606,7 @@
      "src": "geckoterminal",
      "count": 8
     },
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/good-shots/0-desktop.png"
+    "shot": "0-desktop.png"
    },
    {
     "width": "phone",
@@ -625,11 +625,11 @@
      "src": "geckoterminal",
      "count": 8
     },
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/good-shots/1-phone.png"
+    "shot": "1-phone.png"
    }
   ],
   "browser": "156.0.8078.80",
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/good-shots"
+  "shots": "good-shots"
  },
  "bad": {
   "source": "live",
@@ -1230,7 +1230,7 @@
     "canvases": 0,
     "vendor": false,
     "read": null,
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/bad-shots/0-desktop.png"
+    "shot": "0-desktop.png"
    },
    {
     "width": "phone",
@@ -1241,10 +1241,10 @@
     "canvases": 0,
     "vendor": false,
     "read": null,
-    "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/bad-shots/1-phone.png"
+    "shot": "1-phone.png"
    }
   ],
   "browser": "156.0.8078.80",
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/bad-shots"
+  "shots": "bad-shots"
  }
 }
