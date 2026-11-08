@@ -26,7 +26,7 @@ import { runPoolDeposit } from "../src/pool-deposit.ts";
 const OUT = process.argv[2];
 if (!OUT) throw new Error("usage: pool-deposit-devnet.mjs <out.json>");
 // the devnet pin of the testnet build (src/pool-testnet.ts, ../../wallet/src/pool/solana.ts SOL_POOLS.devnet)
-const PIN = { program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
+const PIN = { program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
 const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
 const RETURN_TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx"; // the deploy run's (pool-sol-deploy.devnet.json return_to)
 const RUNG = 10_000_000n;

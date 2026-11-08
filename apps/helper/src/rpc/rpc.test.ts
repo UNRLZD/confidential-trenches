@@ -119,7 +119,7 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
 // pool program; an open or wider scan would spend the keyed provider's quota. SPENT and PRE are the two requests the
 // wallet's solanaMarks sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
 // with minContextSlot 7): a 13-byte spent mark and a 17-byte pre-mark, memcmp at 9 on size - 9 bytes ending in tag 1.
-const DEV_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+const DEV_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 const MAIN_PROGRAM = "11111111111111111111111111111111";
 type ScanConfig = Record<string, unknown>;
 const SPENT: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] };
