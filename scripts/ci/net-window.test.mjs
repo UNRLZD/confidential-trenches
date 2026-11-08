@@ -168,6 +168,7 @@ export const CHANGED = [
   "scripts/live-checks/solana-written-accounts-whole.mjs",
   "scripts/live-checks/solana-teardown-cashback.mjs",
   "scripts/live-checks/sol-w-sweep.mjs",
+  "scripts/live-checks/intents-u-registered-first.mjs",
   "scripts/live-checks/solana-mint-supply-moves.mjs",
   "scripts/live-checks/solana-release-reads-paced.mjs",
   "scripts/live-checks/token-page-fills-after.mjs",
