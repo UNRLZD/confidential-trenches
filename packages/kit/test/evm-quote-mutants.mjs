@@ -749,10 +749,18 @@ export const MUTANTS = [
   [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } } };", R, "PE1 "],
   [QUOTE, "override: asW, tx }]);", "override: asW }]);", R, "PE6 "],
   // the sender's balance is its own (review point 4, 4 Nov): a balance override on it, on the nonce read or the sim, is caught,
-  // and a sender too low to pay the sim's gas, read at the block, drops the sim's routes, never the sale
+  // and a sender too low to pay the sim's gas, read at the block, skips the sim and keeps every route at its keep-min
+  // value (card evm-sell-unfunded-sim-keeps-route: dropping them let a seeded pool set the price), never the sale
   [QUOTE, "override: asW, tx }]);", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) } }, tx }]);", R, "PE6 "],
   [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) }, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", R, "PE6 "],
-  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return routes.filter", "if (false) return routes.filter", R, "PE8 "],
+  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return { routes, sim: \"skipped\" };", "if (false) return { routes, sim: \"skipped\" };", R, "PE8 "],
+  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return { routes, sim: \"skipped\" };", "if (false) return { routes, sim: \"skipped\" };", R, "PE9 "],
+  [QUOTE, "return { routes, sim: \"skipped\" };", "return { routes: routes.filter((r) => !toSim.includes(r)), sim: \"skipped\" };", R, "PE9 "],
+  [QUOTE, "return { routes, sim: \"skipped\" };", "return { routes, sim: \"ran\" };", R, "PE8 "],
+  [QUOTE, "return { routes, sim: \"skipped\" };", "return { routes, sim: \"ran\" };", R, "PE9 "],
+  [QUOTE, "if (toSim.length === 0) return { routes, sim: \"none\" };", "if (toSim.length === 0) return { routes, sim: \"ran\" };", R, "PE8 "],
+  [QUOTE, "return { routes: routes.filter((r) => !failed.has(r)), sim: \"ran\" };", "return { routes: routes.filter((r) => !failed.has(r)), sim: \"skipped\" };", R, "PE8 "],
+  [QUOTE, "feeMax, hooked, releases, sim });", "feeMax, hooked, releases });", R, "PE9 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas * maxFee - 1n)", R, "PE8 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut <= gas * maxFee)", R, "PE8 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas)", R, "PE8 "],
@@ -851,7 +859,7 @@ export const MUTANTS = [
   // the quote's own read (review of 982a19bd, F1): the device's list, the finalized block, the pages, the agreed block,
   // the agreement up to it, the logs' checks
   [QUOTE, "evmSellSentOf(req.sent) ?? refuse(", "evmSellSentOf(req.sent ?? []) ?? refuse(", S, NR],
-  [QUOTE, "hooked, releases });", "hooked });", S, NR],
+  [QUOTE, "hooked, releases, sim });", "hooked, sim });", S, NR],
   [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (false) return refuse(", S, NR],
   [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (n - fin.number >= EVM_SELL_TAIL_MAX) return refuse(", S, NR],
   [QUOTE, "for (let a = low(fin.number + 1n, n); ", "for (let a = low(fin.number, n); ", S, NR],
