@@ -241,6 +241,14 @@ async function main() {
     if (pr.length) throw new Error(`${method} did not read back as a success`);
   };
   if (!steps.deposit?.done) {
+    // a tx of another note (a run before its index was kept: its prepay, its refused deposit) goes to past, out of the
+    // record and the read-back: only this note's own txs are the deposit
+    const own = (t: { pc?: string }) => t.pc === String(pc);
+    if (steps.deposit?.txs?.some((t: { pc?: string }) => !own(t))) {
+      steps.deposit.past = [...(steps.deposit.past ?? []), ...steps.deposit.txs.filter((t: { pc?: string }) => !own(t))];
+      steps.deposit.txs = steps.deposit.txs.filter(own);
+      save();
+    }
     const usdc = BigInt(await view2(TOKEN, "ft_balance_of", { account_id: D.id }));
     if (usdc < NOTE) throw new Error(`D holds ${usdc} USDC, needs ${NOTE}`);
     // a prepay of this note's own precommitment (one of another note's, from a run before its index was kept, is not)
