@@ -64,6 +64,12 @@ test("step 4: an arm's sol, evm (Robinhood only) and hop-evm (Base) wallets are 
   assert.ok(!JSON.stringify(got, (_k, v) => (typeof v === "bigint" ? String(v) : v)).includes("secret"), "no key leaves");
 });
 
+test("step 4: two withdrawals of one label are two arms, each with its own wallets", async () => {
+  const r = { notes: [note(dep(0)), note(ch(L1, 0))], spends: [spend(L1, 0, dep(0)), spend(L1, 1, ch(L1, 0))] };
+  const got = await restoreWallets(SEED, r, reader([`solana ${addr("sol", L1, 0)}`, `near ${addr("near", L1, 1)}`]).read);
+  assert.deepEqual(got.wallets.map((w) => [w.c, w.l, w.j, w.note]), [["sol", L1, 0, refKey(dep(0))], ["near", L1, 1, refKey(ch(L1, 0))]]);
+});
+
 test("step 4: each of the six chain tags is found on its own chain read", async () => {
   for (const c of [...ARM_TAGS, ...HOP_TAGS] as d.Chain[]) {
     for (const chain of ALL_CHAINS[c]) {
