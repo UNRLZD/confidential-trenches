@@ -427,10 +427,13 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
       setAt(null);
       setVersion((v) => v + 1);
     }
+    // the library's own last bar, its close in the helper's unit (USD per token) whatever unit the chart draws, so a check
+    // that sets it beside the helper's bars reads the same number (the drawn bars are the helper's, scaled one to one)
     const list = d.chart.getDataList();
     el.dataset.bars = String(list.length);
     const last = list.at(-1);
-    el.dataset.last = last ? `${last.timestamp}:${last.close}` : "";
+    const usdLast = last ? ready.bars.find((b) => b.timestamp === last.timestamp) : undefined;
+    el.dataset.last = last && usdLast ? `${last.timestamp}:${usdLast.close}` : "";
   }, [shown, ready, bars]);
   // the controls, after each mount and on each change
   const { scale, indicators, volume, grid, lastLine, range } = c.ctl;
