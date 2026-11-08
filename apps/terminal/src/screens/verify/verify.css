@@ -58,6 +58,17 @@
 .vfy .t3 { color: var(--text-3); }
 .vfy .sk { display: inline-block; width: 90px; height: 12px; background: #181818; border-radius: 6px; animation: vfy-skp 1.2s linear infinite; vertical-align: middle; }
 
+/* the pools (card verify-pools): a heading, then a row per chain as the vault's rows; an opened row's block and RPCs as
+   the vault's meta, and its two explorer links, each a 44 px tap */
+.vpools { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.vsec { margin: 0; padding: 0 2px; font: 600 13px var(--font-ui); color: var(--text-2); }
+.vpool { border-top: 1px solid var(--border-row); }
+.vpool .vchecks { border-top: 0; }
+.vpool .vmeta { margin: 0; padding: 4px 14px 6px; }
+.vlinks { display: flex; gap: 8px; padding: 4px 14px 12px; }
+.vlink { flex: 1 1 0; min-width: 0; min-height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--border-strong); font: 500 13px var(--font-ui); color: var(--text-1); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vlink:hover { border-color: var(--text-3); }
+
 @media (prefers-reduced-motion: reduce) { .vfy .sk, .vdot.load { animation: none; } .vrow .chev { transition: none; } }
 
 /* phone: a full page (S18: a pushed page from Account) */
