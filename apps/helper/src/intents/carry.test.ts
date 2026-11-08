@@ -1443,7 +1443,8 @@ test("R3-2 a stale earlier-tx read never frees a newer live claim: sent stays th
   await until(() => regsOf(s) === 1);
   const before = s.store.signer(u);
   g.open();
-  assert.equal(code(await y), "registration_failed");
+  // T's failure is X's, which freed it: Y's stale read reports none (delta review 4, P2-1)
+  assert.equal(code(await y), "in_flight");
   const after = s.store.signer(u);
   s.chain.storage.set(`${USDC}/fresh.near`, "registered");
   s.r.release();
@@ -1907,4 +1908,439 @@ test("R3-2 (landed): a stale read of an earlier receiver tx that reads it regist
   await z;
   await s.carry.idle();
   s.store.close();
+});
+
+// ---- delta review 4: its probes PR4-1, PR4-2, PR4-2b and PR4-4 to PR4-10 (PR4-3 and PR4-3b are card helper-judge-two-agree's) ----
+test("PR4-1 one failed own registration (honest: it did fail) judged by K concurrent polls counts one try for the backoff", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: T } });
+  s.store.owe({ signer: u, tries: 0, next_ms: 0 });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return failedFinal(t);
+  };
+  const K = 5;
+  const polls = Array.from({ length: K }, () => s.carry.registerSeen(u));
+  await until(() => calls === K);
+  g.open();
+  const answers = await Promise.all(polls);
+  const owed = s.store.owed(u)!;
+  s.store.close();
+  assert.equal(owed.tries, 1, `one failed payment counted ${owed.tries} tries: the next payment waits ${(owed.next_ms - NOW) / 60000} min, not 2`);
+  assert.equal(owed.next_ms - NOW, SWEEP_MS * 2, "one try's backoff");
+  // only the poll that freed the claim reports its failure; the others read it judged
+  assert.deepEqual([...answers].sort(), ["in_flight", "in_flight", "in_flight", "in_flight", "registration_failed"]);
+});
+
+test("PR4-2 (registerSeen) a stale own failure that lands after another poll read U registered: answer and owed record", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: T } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return failedFinal(t); // one lookup's word: it landed
+  };
+  const a = s.carry.registerSeen(u);
+  await until(() => calls === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  assert.equal(s.store.owed(u), null, "B: owed no more");
+  g.open();
+  const aa = await a;
+  const owedAfter = s.store.owed(u);
+  s.clock.ms = NOW + 100 * SWEEP_MS;
+  await s.carry.sweep();
+  const owedAfterSweep = s.store.owed(u);
+  const sendsBefore = s.r.sent.length;
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "null"]]) } });
+  t.clock.ms = NOW + 200 * SWEEP_MS;
+  await t.carry.sweep();
+  await t.carry.sweep();
+  const owedAfterRestart = t.store.owed(u);
+  t.store.close();
+  assert.equal(sendsBefore + t.r.sent.length, 0, "no gas");
+  assert.equal(aa, "registered", "A answered for a U read registered");
+  assert.equal(owedAfter, null, "a stray owed record for a U read registered");
+});
+
+test("PR4-2b (carry) the device's intent while a stale own failure lands after another poll read U registered", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: T } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return failedFinal(t);
+  };
+  const to = await moveQuote(s.store, { refundTo: u, recipient: u });
+  const a = s.carry.carry(signedIntent(u, transfer(to)));
+  await until(() => calls === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  g.open();
+  const aa = code(await a);
+  await s.carry.idle();
+  s.store.close();
+  assert.equal(aa, "sent", "U read registered: the intent goes");
+});
+
+const ranFinal = (tx: TxRef): TxOutcome => ({ kind: "final", tx_hash: tx.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] });
+
+test("PR4-4 a spent reservation whose intent's send throws before its signing goes back to its registration and leaves no take behind: one signer still gets at most INTENTS_SENDS_MAX sends", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const send = s.r.send;
+  let n = 0;
+  s.r.send = (async (...a: Parameters<typeof send>) => {
+    if (a[0].kind === "call" && a[0].method === "execute_intents" && ++n === 1) throw new Error("an RPC error before the signing");
+    return send(...a);
+  }) as typeof send;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "upstream");
+  const r1 = s.store.signer(u);
+  const codes: string[] = [];
+  for (let k = 0; k < 6; k++) {
+    codes.push(code(await s.carry.carry(signedIntent(u, withdraw(k === 0 ? "fresh.near" : "alice.near")))));
+    await s.carry.idle();
+  }
+  s.store.close();
+  assert.deepEqual([r1.sent, r1.taking, r1.registration?.reserved], [2, [], true], "the reservation back, no take left");
+  assert.ok(s.r.sent.length <= INTENTS_SENDS_MAX, `${s.r.sent.length} sends for one signer`);
+});
+
+test("PR4-5 U's earlier tx read ran past the settle time by a stale poll, after another poll read U registered: the read record stays (a restart, U later unregistered: nothing paid)", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "landed", tx: T, at: NOW } });
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return ranFinal(t);
+  };
+  const a = s.carry.registerSeen(u);
+  await until(() => calls === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  g.open();
+  const aa = await a;
+  const read = s.store.signer(u).own?.read;
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "null"]]) } });
+  t.clock.ms = NOW + 100 * SWEEP_MS;
+  const ta = await t.carry.registerSeen(u);
+  t.store.close();
+  assert.equal(read, true, "the read record kept");
+  assert.equal(t.r.sent.length, 0, "never paid again");
+});
+
+test("PR4-6 U's claim refused by the queue's guard (held), after another poll read U registered: the read record stays", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const r = relayer((a) => {
+    if (a.method === "storage_deposit") chain.storage.set(`${a.receiver}/${JSON.parse(a.args).account_id}`, "registered");
+    return "ran";
+  });
+  const g = gateP();
+  let heldCalls = 0;
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => (++heldCalls === 2 ? (await g.p, true) : false), now: () => NOW, resolveEveryMs: 1 });
+  const u = hex();
+  await seeSigner(store, u);
+  chain.storage.set(`${USDC}/${u}`, "null");
+  const a = carry.registerSeen(u);
+  await until(() => heldCalls === 2);
+  chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await carry.registerSeen(u), "registered");
+  g.open();
+  const aa = await a;
+  const read = store.signer(u).own?.read;
+  store.close();
+  assert.equal(read, true, "the read record kept");
+});
+
+test("PR4-7 a receiver claim in flight freed by another request's lookup (final failed), its own read then ran and registered: the record stays well formed", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    const x = s.r.sent.find((y) => y.tx.tx_hash === t.tx_hash);
+    if (x?.action.method !== "storage_deposit") return resolve(t, o);
+    calls++;
+    if (calls === 1) {
+      await g.p; // A's settle read, parked
+      return ranFinal(t);
+    }
+    return failedFinal(t); // B's read: one lookup says failed
+  };
+  const a = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => calls === 1);
+  const b = code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"))));
+  const mid = s.store.signer(u).registration;
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered");
+  g.open();
+  const aa = code(await a);
+  await s.carry.idle();
+  const rec = s.store.signer(u);
+  s.store.close();
+  assert.ok(rec.registration === null || typeof rec.registration.receiver === "string", `a record with no receiver: ${JSON.stringify(rec.registration)}`);
+  assert.deepEqual([b, mid, aa], ["registration_failed", null, "sent"], "B freed it and reports the failure; A's claim, freed, writes nothing and its intent goes on the receiver read registered");
+});
+
+/** After `act`, a restart with U read unregistered (its owner unregistered it) and every backoff passed: what is paid. */
+const afterRestart = async (s: ReturnType<typeof setup>, u: string) => {
+  const read = s.store.signer(u).own?.read;
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "null"]]) } });
+  t.clock.ms = NOW + 1000 * SWEEP_MS;
+  const a = await t.carry.registerSeen(u);
+  const sends = t.r.sent.length;
+  t.store.close();
+  return { read, a, sends };
+};
+
+test("PR4-8 U's claim whose relayer send throws before its signing, after another poll read U registered: the read record stays", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const g = gateP();
+  let entered = false;
+  s.r.send = (async () => {
+    entered = true;
+    await g.p;
+    throw new Error("an RPC error before the signing");
+  }) as typeof s.r.send;
+  const a = s.carry.registerSeen(u);
+  await until(() => entered);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  g.open();
+  const aa = await a;
+  const r = await afterRestart(s, u);
+  assert.equal(r.read, true, "the read record kept");
+  assert.equal(r.sends, 0, "never paid again");
+});
+
+test("PR4-9 U's claim read ran after another poll read U registered: the read record stays", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const a = s.carry.registerSeen(u);
+  await until(() => regsOf(s) === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  s.r.release();
+  const aa = await a;
+  const r = await afterRestart(s, u);
+  assert.equal(r.read, true, "the read record kept");
+  assert.equal(r.sends, 0, "never paid again");
+});
+
+test("PR4-10 U's earlier tx (no settle time yet) read ran by a stale poll after another poll read U registered: the read record stays", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: T } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return ranFinal(t);
+  };
+  const a = s.carry.registerSeen(u);
+  await until(() => calls === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  g.open();
+  const aa = await a;
+  const r = await afterRestart(s, u);
+  assert.equal(r.read, true, "the read record kept");
+  assert.equal(r.sends, 0, "never paid again");
+});
+
+test("PR4-9b U's claim read ran after another poll read U registered, U then unregistered by its owner before the claim's own read: the read record stays", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const a = s.carry.registerSeen(u);
+  await until(() => regsOf(s) === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await s.carry.registerSeen(u), "registered");
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  s.r.release();
+  const aa = await a;
+  const read = s.store.signer(u).own?.read;
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "null"]]) } });
+  const resolve = t.r.resolve;
+  t.r.resolve = async (x: TxRef, o: { resend: boolean }) => ((await resolve(x, o)) ?? ranFinal(x));
+  t.clock.ms = NOW + 1000 * SWEEP_MS;
+  const b1 = await t.carry.registerSeen(u);
+  t.clock.ms = NOW + 3000 * SWEEP_MS;
+  const b2 = await t.carry.registerSeen(u);
+  const sends = t.r.sent.length;
+  t.store.close();
+  assert.equal(read, true, "the read record kept");
+  assert.equal(sends, 0, "never paid again");
+});
+
+// ---- the fold's own pins: tries read at the write (N4), a read record never freed by a stale judge, the receiver's
+// failures reported only by the request that freed the registration ----
+
+test("R4-N4: a failure of U's own claim made after another poll's failure counts both tries (tries read at the write, not before the awaits)", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "failed" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  s.store.owe({ signer: u, tries: 0, next_ms: 0 });
+  const g = gateP();
+  let calls = 0;
+  const balance = s.r.balance;
+  s.r.balance = async () => {
+    if (++calls === 1) await g.p; // A, parked before its claim
+    return balance();
+  };
+  const a = s.carry.registerSeen(u);
+  await until(() => calls === 1);
+  assert.equal(await s.carry.registerSeen(u), "registration_failed", "B's claim failed");
+  assert.equal(s.store.owed(u)!.tries, 1);
+  s.clock.ms = s.store.owed(u)!.next_ms + 1; // B's backoff passed
+  g.open();
+  assert.equal(await a, "registration_failed", "A's own claim failed");
+  const owed = s.store.owed(u)!;
+  s.store.close();
+  assert.equal(regsOf(s), 2, "two claims, two payments");
+  assert.equal(owed.tries, 2, `two failed payments counted ${owed.tries}`);
+});
+
+test("R4-read: a poll whose own storage read was before another poll read U registered never frees the read record (no owed record, a restart with U unregistered pays nothing)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const r = relayer(() => "ran");
+  const reads = intentsReads(providers(chain), () => NOW);
+  const storage = reads.storage;
+  const g = gateP();
+  let parked = false;
+  // A's read is answered at the block it was asked at, before U read registered
+  reads.storage = async (t, acct) => (parked ? storage(t, acct) : ((parked = true), await g.p, "none"));
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads, relayer: r, held: async () => false, now: () => NOW, resolveEveryMs: 1 });
+  const u = hex();
+  await seeSigner(store, u);
+  const T = earlierTx();
+  store.putSigner({ ...store.signer(u), own: { receiver: u, state: "pending", tx: T } });
+  r.resolve = async (t: TxRef) => failedFinal(t); // one lookup's word: it landed
+  const a = carry.registerSeen(u);
+  await until(() => parked);
+  chain.storage.set(`${USDC}/${u}`, "registered");
+  assert.equal(await carry.registerSeen(u), "registered");
+  g.open();
+  const aa = await a;
+  const read = store.signer(u).own?.read;
+  const owed = store.owed(u);
+  store.close();
+  const t = setup({ dir, chain: { storage: new Map([[`${USDC}/${u}`, "null"]]) } });
+  t.clock.ms = NOW + 1000 * SWEEP_MS;
+  const ta = await t.carry.registerSeen(u);
+  const sends = t.r.sent.length;
+  t.store.close();
+  assert.deepEqual([aa, read, owed], ["registered", true, null], "A answers for a U read registered and leaves its record");
+  assert.deepEqual([ta, sends], ["registered", 0], "never paid again");
+});
+
+test("R4-recv: one failed receiver registration judged by two requests: only the one that freed it answers registration_failed, its reserved slot back once", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { id: "r1", receiver: "fresh.near", state: "pending", tx: T, reserved: true } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return failedFinal(t);
+  };
+  const both = [s.carry.carry(signedIntent(u, withdraw("fresh.near"))), s.carry.carry(signedIntent(u, withdraw("fresh.near")))];
+  await until(() => calls === 2);
+  g.open();
+  const codes = (await Promise.all(both)).map(code).sort();
+  const rec = s.store.signer(u);
+  s.store.close();
+  assert.deepEqual(codes, ["in_flight", "registration_failed"]);
+  assert.deepEqual([rec.sent, rec.registration, s.r.sent.length], [1, null, 0]);
+});
+
+test("R4-recv-claim: a receiver claim freed by another request's lookup, its own read then final failed: it answers in_flight, the failure is the other's", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    const x = s.r.sent.find((y) => y.tx.tx_hash === t.tx_hash);
+    if (x?.action.method !== "storage_deposit") return resolve(t, o);
+    if (++calls === 1) await g.p; // A's settle read, parked
+    return failedFinal(t);
+  };
+  const a = s.carry.carry(signedIntent(u, withdraw("fresh.near")));
+  await until(() => calls === 1);
+  const b = code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"))));
+  g.open();
+  const aa = code(await a);
+  await s.carry.idle();
+  const rec = s.store.signer(u);
+  s.store.close();
+  assert.deepEqual([b, aa], ["registration_failed", "in_flight"]);
+  assert.deepEqual([rec.sent, rec.registration, regsOf(s)], [1, null, 1], "one paid slot counted, the reservation back once");
 });

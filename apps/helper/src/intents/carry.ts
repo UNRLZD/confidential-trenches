@@ -367,16 +367,13 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         const at = was.at ?? now();
         if (was.at === undefined) cas(signer, "registration", id, (g, r) => ({ ...r, registration: { ...g, at: g.at ?? at } }));
         if (now() - at < OWN_SETTLE_MS) return no("in_flight");
-        free(signer, id, 1);
-        return no("registration_failed");
+        // a failure is reported only by the request that freed the registration it judged (delta review 4, P2-1)
+        return free(signer, id, 1) ? no("registration_failed") : no("in_flight");
       }
       // a final that did not run is one lookup's word (a lying provider can call a landed one failed): freed, never
       // paid again at once; the next request reads the receiver on both providers first. Dropped is read on both
       // (its key's nonce at F): both slots back, and a new one may go now (the claim below reads the record again).
-      if (o.kind === "final") {
-        free(signer, id, 1);
-        return no("registration_failed");
-      }
+      if (o.kind === "final") return free(signer, id, 1) ? no("registration_failed") : no("in_flight");
       free(signer, id, 2);
     }
     // held: refused early, with no balance read and no relayer start; the queue's guard reads it again at the signing
@@ -400,10 +397,8 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         return no(held === true ? "in_flight" : "upstream");
       }
       if (o.kind === "unknown") return no("in_flight"); // kept pending under its transaction: no second one meanwhile
-      if (!ran(o)) {
-        free(signer, claim, 1); // the reserved slot back; the paid one stays counted
-        return no("registration_failed");
-      }
+      // the reserved slot back; the paid one stays counted. Freed already by another request's read: its failure to report
+      if (!ran(o)) return free(signer, claim, 1) ? no("registration_failed") : no("in_flight");
       // landed is a read: both providers at their final block (F4); until then pending under its transaction
       cas(signer, "registration", claim, (g, r) => ({ ...r, registration: { ...g, at: g.at ?? now() } }));
       let after: "registered" | "none" = "none";
@@ -438,6 +433,8 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     if (st === "registered") return null;
     const key = `own/${signer}`;
     const was = store.signer(signer).own ?? null;
+    // read registered by another poll since this one's storage read: done, and its record is never judged or freed
+    if (was?.read === true) return null;
     if (was !== null && was.tx !== null) {
       // the same signed bytes go out again unless the token is held (as the deposit carry, bind/send.ts): they land
       // at most once, so a crash between the claim and the broadcast never leaves U unregistered (delta review F3).
@@ -450,15 +447,15 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         if (was.at === undefined) cas(signer, "own", id, (g, r) => ({ ...r, own: { ...g, state: "landed", at: g.at ?? at } }));
         if (now() - at < OWN_SETTLE_MS) return no("in_flight");
         // ran, yet U still reads unregistered on both providers past the settle time (its owner unregistered it, or a
-        // provider lags): a failure for the backoff, so the next payment waits its step (delta review F1)
-        freeOwn(signer, id);
-        return no("registration_failed");
+        // provider lags): a failure for the backoff, so the next payment waits its step (delta review F1). Reported only
+        // by the request that freed it, so one failure is one try (delta review 4, P2-1)
+        return freeOwn(signer, id) ? no("registration_failed") : no("in_flight");
       }
-      freeOwn(signer, id);
+      const freed = freeOwn(signer, id);
       // a final that did not run is one lookup's word (a lying provider can call a landed one failed): freed, never
       // paid again at once; the next payment waits the backoff and goes only once both providers read U unregistered
       // (the storage read above, next time). Dropped is read on both (its key's nonce at F), so a new one may go now.
-      if (o.kind === "final") return no("registration_failed");
+      if (o.kind === "final") return freed ? no("registration_failed") : no("in_flight");
     }
     // held: refused early, with no balance read and no relayer start; the queue's guard reads it again at the signing
     if (await holds()) return no("in_flight");
@@ -488,10 +485,7 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         freeOwn(signer, claim);
         return no("upstream");
       }
-      if (!ran(o)) {
-        freeOwn(signer, claim);
-        return no("registration_failed");
-      }
+      if (!ran(o)) return freeOwn(signer, claim) ? no("registration_failed") : no("in_flight");
       cas(signer, "own", claim, (g, r) => ({ ...r, own: { ...g, state: "landed", at: g.at ?? now() } }));
     } finally {
       registering.delete(key);
@@ -537,6 +531,9 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     }
     const a = await registerOwn(signer, untilMs);
     if (a === null) return done();
+    // U read registered on both by another poll meanwhile (its done() ran): done, whatever this one judged; no
+    // backoff for it (delta review 4, P2-2)
+    if (ownDone.has(signer)) return null;
     if (codeOf(a) === "registration_failed") {
       const tries = (store.owed(signer)?.tries ?? 0) + 1; // read at the write: another poll's failure counted too
       store.owe({ signer, tries, next_ms: now() + Math.min(SWEEP_MS * 2 ** tries, RETRY_MAX_MS) });
