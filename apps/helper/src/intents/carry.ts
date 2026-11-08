@@ -537,8 +537,6 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     }
     const a = await registerOwn(signer, untilMs);
     if (a === null) return done();
-    // another poll read U registered while this one ran: nothing owed, nothing to back off
-    if (ownDone.has(signer)) return null;
     if (codeOf(a) === "registration_failed") {
       const tries = (store.owed(signer)?.tries ?? 0) + 1; // read at the write: another poll's failure counted too
       store.owe({ signer, tries, next_ms: now() + Math.min(SWEEP_MS * 2 ** tries, RETRY_MAX_MS) });
@@ -640,11 +638,10 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       const spend = reservedFor(rec, i);
       const spentFrom = spend ? idOf(rec.registration) : undefined;
       store.putSigner({ ...rec, sent: (rec.sent ?? 0) + (spend ? 0 : 1), taking: [...(rec.taking ?? []), x.nonce], registration: spend ? { ...rec.registration!, reserved: false } : rec.registration });
-      // nothing signed: its slot back, once (only while its take is still in `taking`); a spent reservation goes back
-      // to the registration it was spent from only, by its identity, else its slot is given back
+      // nothing signed: its slot back; a spent reservation goes back to the registration it was spent from only, by
+      // its identity, else its slot is given back
       const giveBack = () => {
         const r = store.signer(x.signer);
-        if (!(r.taking ?? []).includes(x.nonce)) return;
         const taking = (r.taking ?? []).filter((n) => n !== x.nonce);
         if (spend && cas(x.signer, "registration", spentFrom, (g, c) => ({ ...c, taking, registration: { ...g, reserved: true } }))) return;
         store.putSigner({ ...r, taking, sent: Math.max(0, (r.sent ?? 0) - 1) });

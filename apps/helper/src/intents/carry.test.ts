@@ -1836,3 +1836,67 @@ test("R3-F4: a spent reservation whose intent is never signed goes back only to 
   await s.carry.idle();
   s.store.close();
 });
+
+test("R3 (own, read): U read registered while an earlier claim's outcome is out; that claim then read failed (one lookup's word) never clears the read record", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  let lie = false;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => (lie && t.tx_hash === s.r.sent[0]?.tx.tx_hash ? failedFinal(t) : resolve(t, o));
+  const b = s.carry.registerSeen(u); // B's registration out, its outcome unknown
+  await until(() => regsOf(s) === 1);
+  s.chain.storage.set(`${USDC}/${u}`, "registered"); // it landed
+  assert.equal(await s.carry.registerSeen(u), "registered"); // A reads U registered on both: done
+  lie = true;
+  await b;
+  assert.equal(s.store.signer(u).own?.read, true, "B's stale failure left the read record alone");
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "null"]]) } });
+  assert.equal(await t.carry.registerSeen(u), "registered", "after a restart: never paid again");
+  assert.equal(t.r.sent.length, 0);
+  t.store.close();
+});
+
+test("R3-2 (landed): a stale read of an earlier receiver tx that reads it registered never marks the new claim made after it landed", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { receiver: "fresh.near", state: "pending", tx: T, reserved: true, at: NOW } });
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  const ranT = (t: TxRef): TxOutcome => ({ kind: "final", tx_hash: t.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] });
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    if (++calls === 1) await g.p; // Y: its read of T answers late
+    return ranT(t);
+  };
+  const D = { deadline: "2026-11-07T18:10:00.000Z" };
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  const y = s.carry.carry(signedIntent(u, withdraw("fresh.near"), D));
+  await until(() => calls === 1);
+  // W: T ran, unregistered past the settle time: freed; Z claims anew, waiting in the queue
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"), D))), "registration_failed");
+  const gz = gateP();
+  const send = s.r.send;
+  s.r.send = (async (...a: Parameters<typeof send>) => {
+    if (a[0].kind === "call" && a[0].method === "storage_deposit") await gz.p; // Z's registration waits in the queue
+    return send(...a);
+  }) as typeof send;
+  const z = s.carry.carry(signedIntent(u, withdraw("fresh.near"), D));
+  await until(() => s.store.signer(u).registration !== null);
+  const before = s.store.signer(u).registration;
+  s.chain.storage.set(`${USDC}/fresh.near`, "registered"); // another payer registers it; Y reads it so
+  g.open();
+  assert.equal(code(await y), "sent");
+  assert.equal(s.store.signer(u).registration?.state, before?.state, "Y's stale judge of T never marked Z landed");
+  gz.open();
+  s.r.release();
+  await z;
+  await s.carry.idle();
+  s.store.close();
+});
