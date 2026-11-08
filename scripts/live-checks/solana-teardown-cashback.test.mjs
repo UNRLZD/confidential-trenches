@@ -59,7 +59,7 @@ const JS = [
   "p=typeof d==`string`&&d===f&&u.includes(d)?d:null,m=`its claim did not simulate on either provider: A ${c(o)}, B ${c(s)}`,h={...r};for(let e of p===null?u:[p])h[e]=m;return h}",
   "for(let t=0;t<2;t++){let t=Pf(s.verdict,s.wires,s.reads.simulations,s.reads.unclaimed);if(t===null||Object.keys(t).length===Object.keys(s.reads.unclaimed??{}).length)return s;s=await o(Mf(e,n,t),t)}return s}",
   "if(v.ok.keep.length>0)return h(v.ok.unclaimed===void 0?`kept`:`owed`,v.ok.keep.map(e=>`${e.address}: ${e.why}`).join(`; `));",
-  "if(n!==`sent`&&n!==`gave_up`&&n!==`owed`)return await e.owed?.drop(t.address);",
+  "async function ZR(e,t,n,r){try{if(n===`nothing`)return await e.owed?.drop(t.address);",
   "if(t!==e.fromAmount-e.amount&&y.push(`${o}: ${e.from} holds ${t??`nothing read`} after the claim (want ${e.fromAmount-e.amount})`),e.unwrap)continue;",
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
@@ -80,7 +80,7 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("t<2;", "t<1;"), 8],
     [JS.replace("s=await o(Mf(e,n,t),t)", "s=await o(Mf(e,n,t))"), 8],
     [JS.replace("v.ok.unclaimed===void 0?`kept`:`owed`", "`kept`"), 9],
-    [JS.replace("&&n!==`owed`)", ")"), 10],
+    [JS.replace("if(n===`nothing`)", "if(n!==`sent`&&n!==`gave_up`)"), 10],
     [JS.replace("if(t!==e.fromAmount-e.amount&&", "if(false&&"), 11],
   ];
   for (const [js, i] of planted) {

@@ -326,6 +326,26 @@ test("a buy: checked, signed by W in slot 1, taken before it leaves, read back o
   assert.equal(m.blockhash, BLOCKHASH);
 });
 
+// Card sol-w-sweep, delta review 7 of 08290868: the buy writes W's buy mint (and its token program, the venue's) before
+// its send, so the rent back after a later sell knows W's own coin; a buy whose send fails keeps the record (it can only
+// make a rent back hold); a write that fails sends nothing
+test("the buy writes W's buy mint before its send; a send that fails keeps it; a write that fails sends nothing", async () => {
+  const rec = new Map<string, { mint: string; program: string }>();
+  const w = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 1_000 });
+  w.host.bought = { get: async (a) => rec.get(a), put: async (a, m) => void (w.log.push("bought"), rec.set(a, m)) };
+  const a = await runPoolBuy(w.host, ASK);
+  assert.deepEqual(a, { stage: "not_landed", txs: [] });
+  const order = w.log.filter((x) => x === "bought" || x === "send");
+  assert.deepEqual(order, ["bought", "send"]);
+  assert.deepEqual(rec.get(W.address), { mint: ASK.token, program: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" });
+  const x = await world();
+  x.host.bought = { get: async () => undefined, put: async () => { throw new Error("store down"); } };
+  const b = await runPoolBuy(x.host, ASK);
+  assert.ok("error" in b, JSON.stringify(b));
+  assert.equal(x.sends.length, 0, "nothing sent");
+  assert.equal(x.state(), "HELD", "nothing taken");
+});
+
 test("a quote off the request (older than the device's slot allows) is refused: nothing signed, taken or sent", async () => {
   const w = await world({ slotAhead: 40 });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "quote_check_failed" });

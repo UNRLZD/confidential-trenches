@@ -1,19 +1,26 @@
-// Every command and path README.md names runs or exists: a judge or a coding agent who copies one gets it to run.
-//   node scripts/ci/readme-commands.mjs [README.md]      (exit 1 and one line per problem)
+// Every command and path the docs name runs or exists: a judge or a coding agent who copies one gets it to run.
+// The docs are every tracked README.md (the root's, each package's, each folder's) and every tracked .md under docs/,
+// docs/performance.md included, which scripts/perf-table.mjs writes.
+//   node scripts/ci/readme-commands.mjs [<doc>...]       (every doc when none is named; exit 1 and one line per problem)
 //   node scripts/ci/readme-commands.mjs --agent-steps [README.md]
 //       prints the commands of the "For AI agents and scripts" section, one per line, exactly as README.md writes them
 //       (card readme-fresh-run: scripts/ci/readme-fresh-run.mjs runs these on a clean machine, never a copy of them)
 //
-// What it reads, decided from what README.md writes:
+// What it reads, decided from what the docs write (a doc's folder is the folder its file is in):
 // - Commands: each inline code span and each line of a fenced block, split at `&&`, `||`, `;` and `|`. A piece that
 //   starts with `pnpm` names a script unless its command is a pnpm built-in (install, exec, ...): `pnpm run <x>` and
-//   `pnpm <x>` (pnpm runs `pnpm test` and `pnpm start` as scripts) must name a script of the root package.json, of the
-//   `--dir`/`-C` folder's package.json, of the `--filter` package, or, with `-r`, of at least one workspace package.
+//   `pnpm <x>` (pnpm runs `pnpm test` and `pnpm start` as scripts) must name a script of the root package.json (or of
+//   the doc folder's package.json, for a package's README), of the `--dir`/`-C` folder's package.json, of the
+//   `--filter` package, or, with `-r`, of at least one workspace package.
 // - Paths: a single-word code span, or a word of a command, that holds a `/` and ends in `/` (a folder, as every Layout
-//   row writes it) or in a file extension (`scripts/ci/money-gate.mjs`); a word with `*` must match at least one file.
-//   `UNRLZD/confidential-trenches-proofs`, a GitHub repository's name, is neither, and URLs (`://`) are skipped.
-// - Links: every relative markdown link target and every `src`/`srcset`, without its `#anchor`.
+//   row writes it) or in a file extension (`scripts/ci/money-gate.mjs`), with or without a `:<line>` or
+//   `:<line>-<line>` after it; it must exist from the repository root or from the doc's folder (a package README's
+//   `src/index.ts`). A word with `*` must match at least one file. `UNRLZD/confidential-trenches-proofs`, a GitHub
+//   repository's name, is neither, and URLs (`://`) are skipped.
+// - Links: every relative markdown link target and every `src`/`srcset`, without its `#anchor`, from the doc's folder
+//   as GitHub resolves it (a leading `/` is the repository root).
 // - `<...>` placeholders and `$VARIABLES` are skipped: they name nothing yet.
+import { execFileSync } from "node:child_process";
 import { existsSync, globSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,8 +45,8 @@ export function workspacePackages(root) {
   }));
 }
 
-// the problem with one `pnpm ...` piece, or null
-function pnpmProblem(words, root) {
+// the problem with one `pnpm ...` piece, or null; docDir is the doc's folder, relative to root
+function pnpmProblem(words, root, docDir) {
   let dir = null, filter = null, recursive = false, i = 1;
   while (i < words.length && words[i].startsWith("-")) {
     const w = words[i];
@@ -71,30 +78,37 @@ function pnpmProblem(words, root) {
     if (filter && !pkgs.length) return `no workspace package "${filter}"`;
     return pkgs.some(({ pkg }) => has(pkg)) ? null : `no script "${script}" in ${filter ? `package "${filter}"` : "any workspace package"}`;
   }
-  return has(JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"))) ? null : `no script "${script}" in package.json`;
+  const own = path.join(root, docDir, "package.json");
+  const pkgs = [path.join(root, "package.json"), ...(docDir !== "." && existsSync(own) ? [own] : [])];
+  if (pkgs.some((f) => has(JSON.parse(readFileSync(f, "utf8"))))) return null;
+  return `no script "${script}" in package.json${pkgs.length > 1 ? ` or ${docDir}/package.json` : ""}`;
 }
 
-// a word that names a repo path: a "/" in it, ending in "/" or in a file extension; never a URL or a placeholder
-function pathProblem(word, root) {
-  const w = unquote(word);
+// a word that names a repo path: a "/" in it, ending in "/" or in a file extension (a `:<line>` after it allowed);
+// never a URL or a placeholder. It exists from root or from the doc's folder.
+function pathProblem(word, root, docDir) {
+  const w = unquote(word).replace(/(\.[A-Za-z0-9]+):\d+(?:-\d+)?$/, "$1");
   if (!w.includes("/") || w.includes("://") || w.startsWith("@") || placeholder(w) || /[{}()=:,]/.test(w)) return null;
   if (!/\/$/.test(w) && !/\/[^/]*\.[A-Za-z0-9]+$/.test(w)) return null;
-  if (w.includes("*")) return globSync(w, { cwd: root }).length ? null : `no file matches ${w}`;
-  return existsSync(path.join(root, w)) ? null : `no such path ${w}`;
+  const bases = [...new Set([root, path.join(root, docDir)])];
+  if (w.includes("*")) return bases.some((b) => globSync(w, { cwd: b }).length) ? null : `no file matches ${w}`;
+  return bases.some((b) => existsSync(path.join(b, w))) ? null : `no such path ${w}`;
 }
 
-function linkProblem(target, root) {
+function linkProblem(target, root, docDir) {
   const t = target.trim().replace(/#.*$/, "");
   if (!t || /^[a-z][a-z0-9+.-]*:/i.test(t) || placeholder(t)) return null;
-  return existsSync(path.join(root, t)) ? null : `no such path ${t}`;
+  return existsSync(t.startsWith("/") ? path.join(root, t) : path.join(root, docDir, t)) ? null : `no such path ${t}`;
 }
 
-// every problem in the README text, as "README.md:<line>: <what>: <problem>", checked against the tree at root
-export function problems(text, root) {
+// every problem in one doc's text, as "<doc>:<line>: <what>: <problem>", checked against the tree at root; doc is the
+// doc's path relative to root (README.md, docs/security.md, packages/kit/README.md)
+export function problems(text, root, doc = "README.md") {
   const out = [];
+  const docDir = path.posix.dirname(doc);
   let fence = false;
   text.split(/\r?\n/).forEach((line, n) => {
-    const at = (what, p) => p && out.push(`README.md:${n + 1}: ${what}: ${p}`);
+    const at = (what, p) => p && out.push(`${doc}:${n + 1}: ${what}: ${p}`);
     if (/^\s*(```|~~~)/.test(line)) {
       fence = !fence;
       return;
@@ -104,16 +118,28 @@ export function problems(text, root) {
       for (const piece of c.split(/&&|\|\||[;|]/)) {
         const words = piece.trim().split(/\s+/).filter(Boolean).map(unquote);
         while (words.length && /^[A-Z_][A-Z0-9_]*=/.test(words[0])) words.shift(); // FOO=bar pnpm ...
-        if (words[0] === "pnpm") at(piece.trim(), pnpmProblem(words, root));
-        for (const w of words) at(w, pathProblem(w, root));
+        if (words[0] === "pnpm") at(piece.trim(), pnpmProblem(words, root, docDir));
+        for (const w of words) at(w, pathProblem(w, root, docDir));
       }
     }
     if (fence) return;
     const prose = line.replace(/`[^`]*`/g, "");
-    for (const m of prose.matchAll(/\]\(([^)\s]+)\)/g)) at(m[1], linkProblem(m[1], root));
-    for (const m of prose.matchAll(/\b(?:src|srcset)="([^"]+)"/g)) at(m[1], linkProblem(m[1].split(/\s/)[0], root));
+    for (const m of prose.matchAll(/\]\(([^)\s]+)\)/g)) at(m[1], linkProblem(m[1], root, docDir));
+    for (const m of prose.matchAll(/\b(?:src|srcset)="([^"]+)"/g)) at(m[1], linkProblem(m[1].split(/\s/)[0], root, docDir));
   });
   return out;
+}
+
+// the docs this gate reads: every tracked README.md in any folder and every tracked .md under docs/, from git's index
+// (a file on disk that git does not track is no doc of the repository)
+export function docFiles(root) {
+  const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--", ":(glob)**/README.md", ":(glob)docs/**/*.md"], { encoding: "utf8" });
+  return out.split("\0").filter(Boolean).sort();
+}
+
+// every problem in every doc of the tree at root
+export function docProblems(root, docs = docFiles(root)) {
+  return docs.flatMap((d) => problems(readFileSync(path.join(root, d), "utf8"), root, d));
 }
 
 export const AGENT_HEADING = /^#{2,4}\s+For AI agents and scripts\s*$/;
@@ -146,18 +172,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const args = process.argv.slice(2);
   const steps = args.includes("--agent-steps");
-  const file = args.find((a) => !a.startsWith("--")) ?? path.join(root, "README.md");
+  const named = args.filter((a) => !a.startsWith("--"));
   if (steps) {
     try {
-      console.log(agentSteps(readFileSync(file, "utf8")).join("\n"));
+      console.log(agentSteps(readFileSync(named[0] ?? path.join(root, "README.md"), "utf8")).join("\n"));
     } catch (e) {
       console.error(e.message);
       process.exit(1);
     }
     process.exit(0);
   }
-  const found = problems(readFileSync(file, "utf8"), root);
+  const docs = named.length ? named.map((f) => path.relative(root, path.resolve(f)).split(path.sep).join("/")) : docFiles(root);
+  const found = docProblems(root, docs);
   for (const p of found) console.log(p);
-  console.log(found.length ? `${found.length} problem(s)` : "every command and path README.md names runs or exists");
+  console.log(found.length ? `${found.length} problem(s)` : `every command and path the ${docs.length} doc(s) name runs or exists: ${docs.join(", ")}`);
   process.exit(found.length ? 1 : 0);
 }
