@@ -96,7 +96,7 @@ const M = [
   ["delta review 7 P3: a time-less pass taken", AFT, [["if (ms === null) throw", "if (false) throw"]], ID, "step 7's clock: header reads"],
   ["review R2: the pass holds the caller's own array", IDR, [["rpcs: Object.freeze([rpcs[0], rpcs[1]] as const), ms }", "rpcs, ms }"]], ID, "a stale pass"],
   ["review R3: the second scan runs before it is due", AFT, [["  if (!secondScanDue(at, now, boundMs)) return { due: false };\n", ""]], ID, "second scan:"],
-  ["review R3: the second scan's bound is the restore's block", AFT, [["await boundTimesMs(rpcs, bound, now)", "await boundTimesMs(rpcs, restored.h, now)"]], ID, "second scan:"],
+  ["review R3: the second scan's bound is the restore's block", AFT, [["await boundTimesMs(rpcs, bound, now, o)", "await boundTimesMs(rpcs, restored.h, now, o)"]], ID, "second scan:"],
   ["review R3: a skipped bound block stops the scan", IDR, [['if ("block_id" in params && cause === "UNKNOWN_BLOCK") return NO_BLOCK;', ""]], ID, "second scan:"],
   ["review R3: the second scan's vault read below its bound", AFT, [["    atLeast: bound,\n", ""]], ID, "second scan:"],
   ["review R3: restoreNotes drops atLeast", NOTES, [["height: a.atLeast ?? 0 }", "height: 0 }"]], ID, "second scan:"],
