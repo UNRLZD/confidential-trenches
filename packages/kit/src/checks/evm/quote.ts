@@ -228,6 +228,8 @@ function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
     v4: own("v4"),
     nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true,
     providers: Object.hasOwn(v, "providers") ? v.providers : undefined,
+    // the venue's reads per call and request bytes; a venue with none sends 6 a call in requests of 24,000 bytes at most
+    reads: readLimits(Object.hasOwn(v, "reads") ? v.reads : undefined),
     traceProviders: Object.hasOwn(v, "traceProviders") ? v.traceProviders : undefined,
     maxLag: Object.hasOwn(v, "maxLag") && Number.isSafeInteger(v.maxLag) ? BigInt(v.maxLag!) : 0n,
     hookedPools: Object.hasOwn(v, "hookedPools") ? v.hookedPools! : [],
@@ -382,7 +384,7 @@ function answerOf(a: unknown, who: string, raw = false, oog = false): Answer | s
 // Multicall3 (github.com/mds1/multicall3), the same address on every chain; eth_getCode on all four providers
 // (mainnet.base.org, base-rpc.publicnode.com, rpc.mainnet.chain.robinhood.com, robinhood.drpc.org, 2026-11-03 18:00Z):
 // 3,808 bytes, keccak 0xd5c15df6…e770891 on each. The reads but the hookless one go in aggregate3 calls (see
-// readsPerCall below).
+// readBoth below).
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const SEL_AGGREGATE3 = "82ad56cb"; // aggregate3((address,bool,bytes)[])
 const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
@@ -440,20 +442,31 @@ function unslots(a: unknown, n: number, who: string): bigint[] {
   return Array.from({ length: n }, (_, k) => w(2 + k));
 }
 
-// Reads per aggregate3 call, and calls per JSON-RPC batch: base-rpc.publicnode.com caps an eth_call at 50,000,000 gas,
-// which one call of 90 quotes of 100 ETH passed (read 2026-11-03 19:00Z), and robinhood.drpc.org's free plan takes a
-// batch of 3 calls at most. 64 a call (card evm-buy-quote-in-window): a cold Robinhood WETH-USDG quote's 2,303 reads
-// at 6 a call were 128 batches, which ran past the 10-13 s that three of the chain's five providers keep a block's
-// state. Its exact-out reads cost about 100,000 gas each: 96 in one call estimated 9,700,145 gas and answered 26,176
-// bytes in 155-377 ms on publicnode, dRPC and Robinhood's own RPC, and 192 in one call 19,386,740 gas, 52,288 bytes,
-// 205-537 ms (2026-11-08 12:4xZ from this Mac): 64 is a third of that, under any provider's cap. At 64 a call a cold
-// WETH-USDG quote's reads were answered with no state refused on robinhood-rpc.publicnode.com, robinhood.drpc.org and
-// rpc.mainnet.chain.robinhood.com (2026-11-08 13:4xZ, two runs: publicnode and dRPC the pair, then dRPC and
-// Robinhood's own).
-let readsPerCall = 64;
-/** Sets the reads per aggregate3 call: for the tests that count a round's batches (not in the index). */
-export const evmReadsPerCall = (n = 64): void => void (readsPerCall = n);
+// Calls per JSON-RPC batch: robinhood.drpc.org's free plan takes a batch of 3 calls at most. The reads per aggregate3
+// call and the most bytes a request may hold are each chain's (its venue's `reads`, trade/evm/buy-unpinned.ts, where
+// each value's reads are): base-rpc.publicnode.com caps an eth_call at 50,000,000 gas, which one call of 90 quotes of
+// 100 ETH passed (read 2026-11-03 19:00Z) but 64 of a 100 ETH buy's heavier reads did not (review of 2c02f7df).
+type ReadLimits = { perCall: number; maxBytes: number };
+const READS_DEFAULT: ReadLimits = { perCall: 6, maxBytes: 24_000 };
+function readLimits(r: unknown): ReadLimits {
+  if (r === undefined) return READS_DEFAULT;
+  // own fields only, as every venue field is read (a polluted Object.prototype names no limit)
+  const own = (k: "perCall" | "maxBytes") => (typeof r === "object" && r !== null && Object.hasOwn(r, k) ? (r as Record<string, unknown>)[k] : undefined);
+  const perCall = own("perCall");
+  const maxBytes = own("maxBytes");
+  if (!Number.isSafeInteger(perCall) || (perCall as number) < 1 || !Number.isSafeInteger(maxBytes) || (maxBytes as number) < 1_000) return refuse("bad_request", "a venue's reads are a whole perCall and maxBytes");
+  return { perCall: perCall as number, maxBytes: maxBytes as number };
+}
+// a test's reads per call in place of every venue's (the tests whose recordings were made at 6), or undefined
+let readsOverride: number | undefined;
+/** Sets the reads per aggregate3 call on every chain, or with no argument gives each chain its venue's back: for the
+ *  tests that count a round's batches or replay recordings made at 6 (not in the index). */
+export const evmReadsPerCall = (n?: number): void => void (readsOverride = n);
 const CALLS_PER_BATCH = 3;
+/** A call's bytes in a request body as evmJsonRpc writes it (its id at most 2 digits and a comma), and a batch's own
+ *  brackets: a batch's body is BATCH_BYTES plus its calls'. */
+const bytesOf = (c: EvmRpcCall): number => JSON.stringify({ jsonrpc: "2.0", id: 99, method: c.method, params: c.params }).length + 1;
+const BATCH_BYTES = 2;
 // an extsload read costs one storage read (2,100 gas cold, EIP-2929): 64 of them are far inside any provider's cap
 const STATE_READS_PER_CALL = 64;
 // A round with more PoolManager state reads than two such calls sends them as PoolManager.extsload(bytes32[]) calls of
@@ -469,9 +482,11 @@ const SLOTS_FROM = 2 * STATE_READS_PER_CALL;
 const SLOTS_PER_CALL = 500;
 
 /** Both providers' answers to `reads` at `hash`, which must be the same: the reads without a state override in
- *  aggregate3 calls of readsPerCall, the grouped reads of each hook in their own aggregate3 calls with that hook's
- *  override alone, any other read with one in its own call, sent in batches of CALLS_PER_BATCH at once. */
-async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[]): Promise<Answer[]> {
+ *  aggregate3 calls of the venue's perCall, the grouped reads of each hook in their own aggregate3 calls with that hook's
+ *  override alone, any other read with one in its own call, sent in batches of CALLS_PER_BATCH at once; each call and
+ *  each batch kept to the venue's maxBytes (a call holding one read past it is sent alone). */
+async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits): Promise<Answer[]> {
+  const perCall = readsOverride ?? lim.perCall;
   const at = { blockHash: hash, requireCanonical: true };
   const plain = reads.flatMap((r, i) => (r.override === undefined && r.state !== true ? [i] : []));
   const one = (r: Read) => r.override === undefined && r.state === true && r.data.length === 74 && r.data.startsWith("0x" + SEL_EXTSLOAD);
@@ -489,16 +504,25 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     if (r.override !== undefined && r.group !== undefined) append(groups, r.group, i);
   });
   const lone = reads.flatMap((r, i) => (r.override !== undefined && r.group === undefined ? [i] : []));
+  const callOf = (part: number[]): EvmRpcCall => {
+    const o = reads[part[0]!]!.override;
+    const p: unknown[] = [{ to: MULTICALL3, data: aggregate(part.map((i) => reads[i]!)) }, at];
+    return { method: "eth_call", params: o === undefined ? p : [...p, o] };
+  };
+  // a part whose call is past maxBytes is sent as its halves, down to one read
   const parts: number[][] = [];
-  for (let k = 0; k < plain.length; k += readsPerCall) parts.push(plain.slice(k, k + readsPerCall));
-  for (let k = 0; k < state.length; k += STATE_READS_PER_CALL) parts.push(state.slice(k, k + STATE_READS_PER_CALL));
-  for (const g of groups.values()) for (let k = 0; k < g.length; k += readsPerCall) parts.push(g.slice(k, k + readsPerCall));
+  const fit = (part: number[]): void => {
+    if (part.length > 1 && bytesOf(callOf(part)) > lim.maxBytes) {
+      const mid = Math.ceil(part.length / 2);
+      fit(part.slice(0, mid));
+      fit(part.slice(mid));
+    } else parts.push(part);
+  };
+  for (let k = 0; k < plain.length; k += perCall) fit(plain.slice(k, k + perCall));
+  for (let k = 0; k < state.length; k += STATE_READS_PER_CALL) fit(state.slice(k, k + STATE_READS_PER_CALL));
+  for (const g of groups.values()) for (let k = 0; k < g.length; k += perCall) fit(g.slice(k, k + perCall));
   const calls: EvmRpcCall[] = [
-    ...parts.map((part) => {
-      const o = reads[part[0]!]!.override;
-      const p: unknown[] = [{ to: MULTICALL3, data: aggregate(part.map((i) => reads[i]!)) }, at];
-      return { method: "eth_call", params: o === undefined ? p : [...p, o] };
-    }),
+    ...parts.map(callOf),
     ...slotParts.map((part) => ({
       method: "eth_call",
       params: [{ to: reads[part[0]!]!.to, data: "0x" + SEL_EXTSLOADS + word(32n) + word(BigInt(part.length)) + part.map((i) => reads[i]!.data.slice(10)).join("") }, at],
@@ -522,14 +546,25 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   // budget is (Finagle's RetryBudget, gRPC's retry throttling): two, plus one per five batches, so a provider slowed by
   // the quote's own load is not handed the load again; a batch whose answer failed or differs asks the next provider
   // whatever the budget.
-  const n = Math.ceil(calls.length / CALLS_PER_BATCH);
+  // batches of CALLS_PER_BATCH calls in order, each request body kept to maxBytes (a call past it alone)
+  const starts: number[] = [];
+  for (let c = 0, size = Infinity, k = CALLS_PER_BATCH; c < calls.length; c++) {
+    const b = bytesOf(calls[c]!);
+    if (k === CALLS_PER_BATCH || size + b > lim.maxBytes) {
+      starts.push(c);
+      size = BATCH_BYTES;
+      k = 0;
+    }
+    size += b;
+    k++;
+  }
+  const n = starts.length;
   let spares = 2 + Math.ceil(n / 5);
   const late = () => spares > 0 && (spares--, true);
   const all: Answer[] = new Array(reads.length);
   await Promise.all(
-    Array.from({ length: n }, async (_, n) => {
-      const c0 = n * CALLS_PER_BATCH;
-      const batch = calls.slice(c0, c0 + CALLS_PER_BATCH);
+    starts.map(async (c0, n) => {
+      const batch = calls.slice(c0, starts[n + 1] ?? calls.length);
       const answersOf = async (rpc: EvmRpc, p: number, gate: Gated): Promise<[number, Answer][]> => {
         const b = await askAt(rpc, batch, gate);
         return batch.flatMap((_, j) => decode[c0 + j]!(b[j], `provider ${p + 1}`));
@@ -1787,8 +1822,8 @@ const DEADLINE = new WeakMap<readonly EvmRpc[], Deadline>();
 
 /** The reads at the agreed block's hash and that block's confirmation in one round; the confirmation is judged first,
  *  so nothing read is used before it passes. */
-async function readAgreed(confirm: () => Promise<void>, rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[]): Promise<Answer[]> {
-  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, hash, reads)]);
+async function readAgreed(confirm: () => Promise<void>, rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits): Promise<Answer[]> {
+  const [confirmed, read] = await Promise.allSettled([confirm(), readBoth(rpcs, hash, reads, lim)]);
   if (confirmed.status === "rejected") throw confirmed.reason;
   if (read.status === "rejected") throw read.reason;
   return read.value;
@@ -1949,7 +1984,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       }
       if (ask.size === 0) return lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
       const asked = [...ask.values()];
-      const a = await readBoth(rpcs, block.hash, asked);
+      const a = await readBoth(rpcs, block.hash, asked, v.reads);
       asked.forEach((r, i) => fit.set(r.data, a[i]!.kind === "out"));
     }
   };
@@ -2137,9 +2172,10 @@ async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate"
   // for is a node's error, not a revert ("insufficient funds for gas * price + value"), so where the sender is too low
   // to pay the sim's gas the sim cannot run: it is skipped and every route keeps its keep-min value, never dropped, never
   // a refusal
-  const [bal] = await readBoth(rpcs, block.hash, [{ to: lower(MULTICALL3), data: "0x" + SEL_ETH_BALANCE + sender.slice(2).toLowerCase().padStart(64, "0") }]);
+  const lim = venue(chain).reads;
+  const [bal] = await readBoth(rpcs, block.hash, [{ to: lower(MULTICALL3), data: "0x" + SEL_ETH_BALANCE + sender.slice(2).toLowerCase().padStart(64, "0") }], lim);
   if (bal!.kind !== "out" || bal!.amountOut < gas * maxFee) return { routes, sim: "skipped" };
-  const [n] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + SEL_NONCE, override: asW, tx }]);
+  const [n] = await readBoth(rpcs, block.hash, [{ to: lower(w), data: "0x" + SEL_NONCE, override: asW, tx }], lim);
   if (n!.kind !== "out") return refuse("no_quote", "W's sell nonce does not read through the sell delegate");
   const reads: Read[] = toSim.map((r) => {
     const s = evmSellRouteOf(r.route) as EvmV4SellRoute;
@@ -2147,7 +2183,7 @@ async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate"
     const sig = signSim(sim, block.timestamp);
     return { to: lower(w), data: evmSellCallData(sim, 0n, sig), override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };
   });
-  const ans = await readBoth(rpcs, block.hash, reads);
+  const ans = await readBoth(rpcs, block.hash, reads, lim);
   const kept: Filled[] = [];
   for (const r of routes) {
     const i = toSim.indexOf(r);
@@ -2478,7 +2514,7 @@ async function routeSet(a: {
     }
   }
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
-  const ans = await readAgreed(confirm, rpcs, block.hash, reads);
+  const ans = await readAgreed(confirm, rpcs, block.hash, reads, v.reads);
   // the block is the same on both providers: the scan keeps what it read up to it
   scanned?.commit();
   const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);
@@ -2525,7 +2561,7 @@ async function routeSet(a: {
     if (more.length === 0) return;
     const base = reads.length;
     reads.push(...more);
-    ans.push(...(await readBoth(rpcs, block.hash, reads.slice(base))));
+    ans.push(...(await readBoth(rpcs, block.hash, reads.slice(base), v.reads)));
   };
   const hopTo = (c: string, k: EvmPoolKey) => ({ currency: c, fee: k.fee, tickSpacing: k.tickSpacing, hooks: k.hooks, hookData: "0x" });
   const ok = v4 && v.poolManager !== undefined;
@@ -3040,7 +3076,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
     if (f === null || f === 0n || f >= 1n << 160n) return refuse("no_quote", "the v3 quoter names no factory");
     const [pool] = await readBoth(rpcs, block.hash, [
       { to: "0x" + f.toString(16).padStart(40, "0"), data: "0x" + SEL_GET_POOL + word(BigInt(t)) + word(BigInt(route.tokens[1]!)) + word(BigInt(route.fees[0]!)) },
-    ]);
+    ], v.reads);
     const p = pool!.kind === "out" ? pool!.amountOut : 0n;
     if (p === 0n || p >= 1n << 160n) return refuse("no_quote", "the v3 factory names no pool for the route's first hop");
     to = "0x" + p.toString(16).padStart(40, "0");
@@ -3049,7 +3085,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   const [probe, ...chainFees] = await readBoth(rpcs, block.hash, [
     { to: lower(w), data: "0x" + word(BigInt(t)) + word(BigInt(to)) + word(amountIn), override: { [lower(w)]: { code: EVM_SELL_PROBE_CODE } } },
     ...evmPoolChainFeeReads(chain, EVM_POOL_SELL_GAS),
-  ]);
+  ], v.reads);
   if (probe!.kind !== "out" || probe!.amountOut !== amountIn) {
     return refuse("fee_on_transfer", `W's transfer of ${amountIn} of the token to ${to} ${probe!.kind === "out" ? `delivers ${probe!.amountOut}` : "reverts"}`);
   }
@@ -3818,7 +3854,7 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // (the parent block with the system slots and the trade's traced pre-state, at the trade's block's number, time and
   // base fee), so a price an earlier transaction of the block moved, or a hook it armed, is the market the trade met
   // (review of de4e3ed5, 1)
-  const [held] = await readBoth(rpcs, blk.parentHash, [{ ...held0, override: base, env }]);
+  const [held] = await readBoth(rpcs, blk.parentHash, [{ ...held0, override: base, env }], venue(chain).reads);
   // while no trace was read, this [] and step 4's read the parent basis, which the trade's pre-state could turn into a
   // ban: asked again too (review of fb923143, 2)
   if (held!.kind !== "out" || held!.amountOut < quote.minOut) return unread ? again() : [];

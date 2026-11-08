@@ -7121,7 +7121,7 @@ test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap 
 // exact-out round late: that batch alone goes to a spare, and every other exact-out read is asked of two providers.
 // a fresh token with rh-cold-quote's shape: its hookless native 0.3% pool and 99 seeded currencies, 89 of them unable to
 // give Q (each case its own token and currencies: a scan and a plan are kept per token for the module's life)
-// the QE cases count a round's batches at 6 reads a call (the kit sends 64: a batch here is 3 calls of 6 reads, 18)
+// the QE cases count a round's batches at 6 reads a call (Robinhood's venue sends 64: a batch here is 3 calls of 6 reads, 18)
 const sixACall = (f: () => Promise<void>) => async () => {
   quoteMod.evmReadsPerCall(6);
   try {
@@ -7412,8 +7412,68 @@ test("QE12 a scan held past its bound stops whole: no halves and no spare's span
     console.log("QE12", JSON.stringify({ code: (v as { code?: string }).code, held, spare, asks }));
     assert.equal((v as { code?: string }).code, "rpc_error");
     assert.ok(held > 0, "the first provider was asked");
-    assert.ok(asks <= 2 * held + 8, `${asks} scan requests asked for ${held} held past the bound`);
+    // each held request asked once, and one more queued behind them refused at the bound: none after
+    assert.equal(asks, held + 1, `${asks} scan requests asked for ${held} held past the bound`);
   } finally {
     evmScanBound?.();
+  }
+});
+
+// Review of 2c02f7df (LOW): a Base cold scan starts with 101 requests at 20 at once; the first provider holds every
+// getLogs until the bound, so the 81 queued at the gate meet the bound in take(), not in send(). As a plain rpc_error
+// there each was asked as its halves and handed to the spare (13,236 requests asked; 102 now).
+test("QE13 a Base cold scan held past its bound: the requests queued at its gate ask nothing more", { timeout: 60_000 }, async () => {
+  const { evmScanAsks } = quoteMod as unknown as { evmScanAsks: () => number };
+  const token = "0x00000000000000000000000000000000000ba5f9";
+  const pools = [seeded(token), real(token)];
+  const base = scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }]);
+  let held = 0;
+  const first: EvmRpc = (calls, signal) => {
+    if (!calls.some((c) => c.method === "eth_getLogs")) return base(calls);
+    held++;
+    return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason)));
+  };
+  evmScanBound?.(1_000);
+  const asks0 = evmScanAsks();
+  try {
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0), chain(pools, 1)], NOW, [first, base]));
+    const asks = evmScanAsks() - asks0;
+    console.log("QE13", JSON.stringify({ code: (v as { code?: string }).code, held, asks }));
+    assert.equal((v as { code?: string }).code, "rpc_error");
+    assert.ok(asks <= 1 + 101 + 2 * held, `${asks} scan requests asked`);
+  } finally {
+    evmScanBound?.();
+  }
+});
+
+// Review of 2c02f7df (MEDIUM): reads per call and request bytes are each chain's. On Base 64 of a 100 ETH buy's reads
+// needed 77.3M gas, past publicnode's 50M cap, and Pocket declines a request past 26,000-28,000 bytes; Robinhood's five
+// took 3 calls of 64 and 200,000 bytes.
+test("QE14 each venue's reads per call and request bytes are pinned, and no Base request passes its 24,000 bytes even at 64 reads a call", async () => {
+  const vs = builder.evmPoolVenues() as unknown as Record<string, { reads?: { perCall: number; maxBytes: number } }>;
+  assert.deepEqual({ ...vs.base!.reads }, { perCall: 6, maxBytes: 24_000 });
+  assert.deepEqual({ ...vs.robinhood!.reads }, { perCall: 64, maxBytes: 200_000 });
+  assert.deepEqual({ ...vs["base-sepolia"]!.reads }, { perCall: 6, maxBytes: 24_000 });
+  assert.deepEqual({ ...vs["robinhood-testnet"]!.reads }, { perCall: 6, maxBytes: 24_000 });
+  // a Base quote of a token with 99 pools, its reads forced to 64 a call: every request body (as evmJsonRpc writes it)
+  // stays within 24,000 bytes, and the quote is made
+  const token = freshToken();
+  const { pools } = qeCase(token, 0xe00);
+  const logs = pools.slice(1).map((p, i) => ({ key: p.key, at: 4_500_000 + i }));
+  const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+  const sizes: number[] = [];
+  const sized = (rpc: EvmRpc): EvmRpc => async (calls, signal) => {
+    if (calls.some((c) => c.method === "eth_call")) sizes.push(JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params }))).length);
+    return rpc(calls, signal);
+  };
+  quoteMod.evmReadsPerCall(64);
+  try {
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [sized(chain(pools, 0)), sized(chain(pools, 1))], NOW, scanner(5_000_000, logs)));
+    console.log("QE14", JSON.stringify({ accepted: v.accepted, code: (v as { code?: string }).code, requests: sizes.length, max: Math.max(...sizes) }));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    assert.ok(Math.max(...sizes) > 6_000, `the reads were heavy enough to test: largest request ${Math.max(...sizes)} bytes`);
+    assert.ok(sizes.every((n) => n <= 24_000), `requests of ${sizes.filter((n) => n > 24_000).join(",")} bytes`);
+  } finally {
+    quoteMod.evmReadsPerCall();
   }
 });
