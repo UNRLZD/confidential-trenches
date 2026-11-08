@@ -51,6 +51,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-sell-hook-converge.mjs",
   "scripts/live-checks/evm-sell-hook-intrablock.mjs",
   "scripts/live-checks/evm-sell-no-release-in-flight.mjs",
+  "scripts/live-checks/evm-sell-unfunded-sim-keeps-route.mjs",
   "scripts/live-checks/evm-sell-v4.mjs",
   "scripts/live-checks/evm-testnet-delegate-review3.mjs",
   "scripts/live-checks/evm-venues-pin.mjs",
