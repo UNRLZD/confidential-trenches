@@ -236,13 +236,15 @@ plain_value() {
 # default): "<total>,<per client>" with the share under the total less the helper's own-read reserve (src/rpc/rpc.ts
 # RPC_RESERVE: Solana 3; src/proxy/proxy.ts PROXY_RESERVE: Jupiter 34; every other 0); for RPC_BUDGET_* the share at
 # least a full batch (RPC_BATCH_MAX, 10) and an optional third number, one method's limit, from 10 plus the reserve to
-# the total.
+# the total; for PROXY_BUDGET_ONECLICK the share at least one deposit sheet open (src/proxy/proxy.ts PROXY_MIN_SHARE,
+# DEPOSIT_SHEET_CALLS: 5).
 budget_ok() {
-  local name="$1" v="$2" n='[123456789][0123456789]{0,6}' reserve=0
+  local name="$1" v="$2" n='[123456789][0123456789]{0,6}' reserve=0 least=1
   [[ -z "$v" ]] && return 0
   case "$name" in
     RPC_BUDGET_SOLANA) reserve=3 ;;
     PROXY_BUDGET_JUPITER) reserve=34 ;;
+    PROXY_BUDGET_ONECLICK) least=5 ;;
   esac
   if [[ "$name" == RPC_BUDGET_* ]]; then
     local re="^($n),($n)(,($n))?\$"
@@ -253,7 +255,7 @@ budget_ok() {
   else
     local re="^($n),($n)\$"
     [[ "$v" =~ $re ]] || return 1
-    ((BASH_REMATCH[2] < BASH_REMATCH[1] - reserve))
+    ((BASH_REMATCH[2] < BASH_REMATCH[1] - reserve && BASH_REMATCH[2] >= least))
   fi
 }
 

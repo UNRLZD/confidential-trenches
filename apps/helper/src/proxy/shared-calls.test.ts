@@ -70,7 +70,7 @@ test("card helper-deploy-reads-fast: two helpers on one Jupiter key through a de
   assert.deepEqual(readdirSync(join(dir, shared.CALLS_DIR)).sort(), [`${NEW}.json`]);
 });
 
-test("card helper-deploy-reads-fast: another helper's calls file is hostile input: a stranger's name, a file past CALLS_FILE_MAX, bad JSON, a malformed time, a __proto__ key, and the seed's bounds (whole ms, no later than a second on, VENDOR_SEED_MAX a vendor)", () => {
+test("card helper-deploy-reads-fast: another helper's calls file is hostile input: a stranger's name, a file past CALLS_FILE_MAX, bad JSON, a malformed time, a __proto__ key, and the seed's bounds (whole ms, no later than a second on, the seed cap a vendor)", () => {
   const j = jupiterFree();
   const dir = mkdtempSync(join(tmpdir(), "ct-shared-calls-"));
   const d = join(dir, shared.CALLS_DIR);
@@ -89,7 +89,7 @@ test("card helper-deploy-reads-fast: another helper's calls file is hostile inpu
   assert.equal(Object.getPrototypeOf(read), null);
   assert.deepEqual({ ...read }, JSON.parse(`{"jupiter":[${t + 120_000},1.5,"2",null,${t}],"__proto__":[${t}],"evil":[${t}]}`), "only the one well-named, bounded, parsed, timed file read");
   assert.equal(({} as Record<string, unknown>).push, undefined, "a __proto__ key reached no prototype");
-  // the seed counts only whole ms times no later than a second on, and at most VENDOR_SEED_MAX a vendor
+  // the seed counts only whole ms times no later than a second on, and at most the seed cap (proxy.ts vendorSeedMax) a vendor
   const p = proxyOn(j);
   p.seed(read);
   assert.deepEqual(p.calls().jupiter, [], "the seeded calls are the others', never this helper's own");

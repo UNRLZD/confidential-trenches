@@ -15,7 +15,8 @@ import { join } from "node:path";
 import { VENDOR_WINDOW_MS, type Peers } from "./proxy.ts";
 
 export const CALLS_DIR = "vendor-calls";
-/** A file's size limit: VENDOR_SEED_MAX ms times for each of the four vendors, about 15 bytes each, with room. */
+/** A file's size limit: about 17,000 ms times at about 15 bytes each, the four vendors' seed caps (proxy.ts
+ *  vendorSeedMax) with room at the defaults. */
 export const CALLS_FILE_MAX = 256 * 1024;
 /** The most other helpers' files read: a deploy runs two helpers. */
 export const CALLS_FILES_MAX = 8;

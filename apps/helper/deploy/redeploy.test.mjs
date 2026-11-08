@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { budgetFromEnv } from "../src/limits/limits.ts";
 import { RPC_BATCH_MAX } from "../src/rpc/methods.ts";
 import { RPC_RESERVE } from "../src/rpc/rpc.ts";
-import { PROXY_RESERVE } from "../src/proxy/proxy.ts";
+import { PROXY_MIN_SHARE, PROXY_RESERVE } from "../src/proxy/proxy.ts";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "redeploy.sh");
 const REL = "apps/helper/deploy/redeploy.sh";
@@ -262,6 +262,8 @@ const rules = {
   RPC_BUDGET_BASE: { minShare: RPC_BATCH_MAX, perMethod: true, reserve: RPC_RESERVE.base },
   PROXY_BUDGET_JUPITER: { reserve: PROXY_RESERVE.jupiter },
   PROXY_BUDGET_RELAY: { reserve: PROXY_RESERVE.relay },
+  // card deposit-sheet-oneclick-budget review LOW 3: 1Click's share is never under one deposit sheet open
+  PROXY_BUDGET_ONECLICK: { reserve: PROXY_RESERVE.oneclick, minShare: PROXY_MIN_SHARE.oneclick },
 };
 const helperTakes = (name, v) => {
   try {
@@ -369,7 +371,7 @@ test("a vendor key unset (in the shell or deploy/.env) with no PROXY_BUDGET_<VEN
         assert.equal(s.head(), s.A);
       }
       // the key in deploy/.env (none in the shell), or the keyless plan named: the redeploy goes ahead
-      for (const [shell, body] of [[{ [key]: null }, `${base}${key}=${SECRET}\n`], [{ [key]: null }, `${base}${budget}=100,2\n`], [{ [key]: "", [budget]: "100,2" }, base]]) {
+      for (const [shell, body] of [[{ [key]: null }, `${base}${key}=${SECRET}\n`], [{ [key]: null }, `${base}${budget}=100,5\n`], [{ [key]: "", [budget]: "100,5" }, base]]) {
         writeFileSync(s.env, body, { mode: 0o600 });
         const r = s.runWith(shell, s.B);
         assert.equal(r.status, 0, `${key}: ${r.out}`);

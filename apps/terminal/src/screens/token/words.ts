@@ -53,6 +53,28 @@ export const WORDS = {
   watchAdd: ok("Add {sym} to watchlist", "R5 token.js token-watch aria-label (unpressed)"),
   watchRemove: ok("Remove {sym} from watchlist", "R5 token.js token-watch and token-390.html m-token-watch aria-label (pressed)"),
   noData: ok("No data", "owner 3 Nov 20:26Z, picked; card app-token-chart: the chart's empty state (the helper holds no bars for this token and timeframe)"),
+  // the chart's toolbar and bottom bar (card app-chart-controls), each in R5 token.js U.chartPanel at design-lock-r5
+  // (and trenches-1440.html's clock); the menus' rows R5 does not draw are drafts
+  indicators: ok("Indicators", "R5 token.js U.chartPanel chart-indicators"),
+  display: ok("Display", "R5 token.js U.chartPanel chart-display"),
+  mcap: ok("MCap", "R5 token.js U.chartPanel chart-mode (`Price / MCap`)"),
+  usdUnit: ok("USD", "R5 token.js U.chartPanel chart-denom (`USD / NEAR`)"),
+  rangeAll: ok("All", "R5 token.js U.chartPanel chart-range-All"),
+  utc: ok("UTC", "R5 trenches-1440.html clock (`14:37:53 UTC`)"),
+  pct: ok("%", "R5 token.js U.chartPanel chart-scale-pct"),
+  pctTitle: ok("Percent scale", "R5 token.js U.chartPanel chart-scale-pct title"),
+  log: ok("log", "R5 token.js U.chartPanel chart-scale-log"),
+  logTitle: ok("Log scale", "R5 token.js U.chartPanel chart-scale-log title"),
+  auto: ok("auto", "R5 token.js U.chartPanel chart-scale-auto"),
+  autoTitle: ok("Auto-fit the price scale", "R5 token.js U.chartPanel chart-scale-auto title"),
+  trades: ok("Trades", "R5 token.js U.lowerTabs lower-tab-trades; here the Display menu's row for the trade marks"),
+  gridLines: { text: "Grid lines", source: "draft, card app-chart-controls: the Display menu's row (the live UNRLZD terminal's chart/display.ts)", draft: true },
+  lastLine: { text: "Last price line", source: "draft, card app-chart-controls: the Display menu's row (the live UNRLZD terminal's chart/display.ts)", draft: true },
+  indMA: { text: "MA", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
+  indEMA: { text: "EMA", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
+  indBOLL: { text: "BOLL", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
+  indRSI: { text: "RSI", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
+  indMACD: { text: "MACD", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

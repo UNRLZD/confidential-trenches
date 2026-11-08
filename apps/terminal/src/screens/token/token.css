@@ -66,6 +66,8 @@
 .tkp-tfs { flex: none; height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border-panel); }
 .tkp-tf { height: 28px; min-width: 36px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); font: 12px var(--font-num); cursor: pointer; }
 .tkp-tf[aria-pressed="true"] { background: var(--bg-raised); color: var(--text-1); }
+/* a timeframe the helper does not serve for this chain (1s off Solana): drawn, not usable */
+.tkp-tf:disabled { opacity: 0.35; cursor: default; }
 .tkp-plot { position: relative; flex: 1; min-height: 0; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 63px, #161616 63px, #161616 64px); }
 .tkp-plotsk { position: absolute; inset: 14px 62px 20px 12px; }
 /* the chart (card app-token-chart): the library's canvas fills the plot, which keeps its size in every state; the CSS
@@ -79,8 +81,32 @@
 .tkp-legend [data-dir="up"] { color: var(--acc); }
 .tkp-legend [data-dir="down"] { color: var(--sell); }
 .tkp-plotmsg { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); font-size: 13px; }
-/* CoinGecko's label sits over the volume pane, on its own backing so the bars never cross it */
-.tkp-vendor { position: absolute; left: 6px; bottom: 30px; z-index: 2; pointer-events: none; padding: 1px 6px; border-radius: 4px; background: rgba(10, 10, 10, 0.88); font-size: 12px; color: var(--text-3); white-space: nowrap; }
+/* CoinGecko's label: in the desktop's bottom bar (R5 .ct-vendor); on the phone, with no bottom bar, over the volume
+   pane on its own backing so the bars never cross it */
+.tkp-vendor { flex: none; margin-left: 10px; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.tkp-vendor-ph { position: absolute; left: 6px; bottom: 30px; z-index: 2; margin: 0; pointer-events: none; padding: 1px 6px; border-radius: 4px; background: rgba(10, 10, 10, 0.88); }
+/* the toolbar's and the bottom bar's controls (card app-chart-controls), after R5 unrlzd.css .cp-toolbar, .cp-bottom,
+   .cp-sep, .cp-toggle, .cp-displayLabel, .cp-menu, .cp-item and button.cp-clock */
+.tkp-csep { flex: none; width: 1px; height: 18px; margin: 0 6px; background: var(--border-panel); }
+.tkp-grow { flex: 1; min-width: 8px; }
+.tkp-tog { flex: none; height: 28px; display: inline-flex; align-items: center; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: 13px var(--font-ui); color: var(--text-3); cursor: pointer; white-space: nowrap; }
+.tkp-tog:disabled { cursor: default; }
+.tkp-tog [data-on="true"] { color: var(--paper, #f4f4f2); }
+/* the slash between a toggle's two units, spaced as R5's text (a flex item's own spaces are dropped) */
+.tkp-slash { padding: 0 0.3em; }
+/* the coin's slot holds the longest symbol (NEAR) before and after the chain is known, so the row never moves */
+.tkp-quote { display: inline-block; min-width: 2.75em; text-align: left; }
+.tkp-toglbl { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+.tkp-tog[aria-expanded="true"] .tkp-toglbl, .tkp-tog:hover .tkp-toglbl { color: var(--text-1); }
+.tkp-mwrap { position: relative; flex: none; display: inline-flex; }
+.tkp-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 6; min-width: 180px; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: var(--bg-floating, #141414); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.tkp-mi { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text-2); font: 13px var(--font-num); text-align: left; cursor: pointer; white-space: nowrap; }
+.tkp-mi:hover { background: var(--bg-raised); color: var(--text-1); }
+.tkp-mi[aria-checked="true"] { color: var(--text-1); }
+.tkp-mbox { flex: none; width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--border-active); }
+.tkp-mi[aria-checked="true"] .tkp-mbox { background: var(--acc); box-shadow: none; }
+.tkp-bottombar { flex: none; height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-top: 1px solid var(--border-panel); font-size: 12px; white-space: nowrap; }
+.tkp-clock { flex: none; font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-3); }
 /* the trade column: the box (its own panel, with the safety grid under it) scrolls inside the column, so the page never moves */
 .tkp-trade { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .tkp-tradesk { width: 100%; height: 100%; border-radius: 14px; }
@@ -121,7 +147,8 @@
   .tkp-plot { flex: none; height: 300px; }
   .tkp-legend { left: 16px; max-width: calc(100% - 96px); }
   .tkp-tfs-ph { height: auto; justify-content: space-between; padding: 10px 12px 0; border: 0; }
-  .tkp-tfs-ph .tkp-tf { height: 44px; min-width: 52px; border-radius: 12px; font-size: 14px; }
+  /* seven timeframes in one row at 360 (7 x 46 + the row's 24 of padding): each still a 44 px tap target */
+  .tkp-tfs-ph .tkp-tf { height: 44px; min-width: 46px; border-radius: 12px; font-size: 14px; }
   .tkp-mtiles { display: flex; gap: 8px; overflow-x: auto; padding: 16px 16px 4px; scrollbar-width: none; }
   .tkp-mtiles::-webkit-scrollbar { display: none; }
   .tkp-mtile { flex: none; width: 124px; padding: 12px; border-radius: 16px; background: var(--m-ink-panel); box-shadow: inset 0 0 0 1px var(--m-line-soft); display: flex; flex-direction: column; gap: 6px; min-width: 0; }

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { KLineData } from "klinecharts";
 import { useParams } from "react-router";
 import { parseTokenRoute } from "../../routes/routes.ts";
 import type { MarketChain } from "../discover/fields.ts";
-import { DASH, price, usd } from "../discover/format.ts";
+import { DASH } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
@@ -15,10 +15,15 @@ import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { TradeToast } from "../trade/TradeToast.tsx";
 import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
-import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles } from "./candles.ts";
+import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
-import { liveBars, mountChart, unmountChart } from "./chart.ts";
-import type { Drawn } from "./chart.ts";
+import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
+import type { Drawn, IndicatorId, Scale } from "./chart.ts";
+import { TradeMarks } from "./TradeMarks.tsx";
+import { useTrades } from "./trades.ts";
+import type { Trade as TapeTrade } from "./trades.ts";
+import { coinUsd, factors, QUOTE, scaleBars, supplyOf, unitDrawn, valueText, volumeIn } from "./units.ts";
+import type { ChartUnit } from "./units.ts";
 import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
 import type { TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
@@ -69,6 +74,9 @@ const ICONS: Record<string, readonly (string | readonly [string, Record<string, 
   copy: [["rect", { x: 4, y: 4, width: 6.5, height: 6.5, rx: 1.2 }], "M8 4V2.7c0-.7-.5-1.2-1.2-1.2H2.7c-.7 0-1.2.5-1.2 1.2v4.1c0 .7.5 1.2 1.2 1.2H4"],
   share: ["M6 7.5V1.5M3.5 4L6 1.5 8.5 4", "M2 7v2.5c0 .6.4 1 1 1h6c.6 0 1-.4 1-1V7"],
   back: ["M7.5 2.5L4 6l3.5 3.5"],
+  // the chart toolbar's (R5 token.js TOOL's formula icon, app.js I.chevDown)
+  formula: ["M7 1.5c-1.5 0-2 1-2 2.5v5c0 1.5-.5 2-2 2", "M3 5h4.5", "M8 7l2.5 3M10.5 7L8 10"],
+  chevDown: ["M3 4.5l3 3 3-3"],
 };
 function Ic({ n, size = 13, stroke = 1.25, filled = false }: { n: keyof typeof ICONS; size?: number; stroke?: number; filled?: boolean }) {
   return (
@@ -148,7 +156,7 @@ function Links({ v }: { v: TokenView }) {
 }
 
 /** R5's legend timeframe (token.js TF_LEGEND): 15m reads `15`, 1H `1H`. */
-const TF_LEGEND: Record<ChartTf, string> = { "1m": "1", "5m": "5", "15m": "15", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TF_LEGEND: Record<ChartTf, string> = { "1s": "1s", "1m": "1", "5m": "5", "15m": "15", "1H": "1H", "4H": "4H", "1D": "1D" };
 const MINUS = "\u2212";
 
 /** The chart's candle read, one per page (the desktop and the phone draw the same): `token` null while the token read
@@ -178,18 +186,53 @@ function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf
   return { data, retry };
 }
 
+/** The chart's controls (card app-chart-controls, R5 token.js U.chartPanel), one set per page, drawn by the desktop's
+ *  toolbar and bottom bar and followed by the phone's chart too. MCap is R5's default (chart-mode data-mc="true"). */
+interface Controls {
+  unit: ChartUnit;
+  scale: Scale;
+  indicators: ReadonlySet<IndicatorId>;
+  volume: boolean;
+  grid: boolean;
+  lastLine: boolean;
+  trades: boolean;
+  /** The bottom bar's range (RANGES), until a timeframe is picked. */
+  range: string | null;
+}
+const CONTROLS: Controls = { unit: { mc: true, quote: false }, scale: "normal", indicators: new Set(), volume: true, grid: true, lastLine: true, trades: true, range: null };
+
+const DAY = 86_400_000;
+/** R5's bottom-bar ranges (token.js U.chartPanel) and the timeframe each is drawn at (the live UNRLZD terminal's
+ *  RANGES): the span's newest bars across the plot; All draws every bar read. */
+const RANGES: readonly { id: string; ms: number | null; tf: ChartTf | null }[] = [
+  { id: "1D", ms: DAY, tf: "5m" },
+  { id: "7D", ms: 7 * DAY, tf: "1H" },
+  { id: "30D", ms: 30 * DAY, tf: "4H" },
+  { id: "180D", ms: 180 * DAY, tf: "1D" },
+  { id: "All", ms: null, tf: null },
+];
+
 /** The shared chart state the desktop and the phone draw. */
 interface ChartState {
   sym: string | null;
+  chain: MarketChain | null;
   tf: ChartTf;
-  onTf: (t: ChartTf) => void;
+  /** A timeframe picked; `range` true when a bottom-bar range picked it (the range stays on). */
+  onTf: (t: ChartTf, range?: boolean) => void;
   data: CandleData;
   retry: () => void;
+  ctl: Controls;
+  set: (p: Partial<Controls>) => void;
+  /** The token's supply (MCap) and its chain coin's USD price (the coin unit); null when not read. */
+  supply: number | null;
+  coin: number | null;
+  /** The token's newest trades, drawn as marks while Display's Trades is on (trades.ts). */
+  trades: readonly TapeTrade[];
 }
 
 /** R5's legend (token.js U.legend): the bar under the crosshair, else the newest; its colour is its close against the
  *  bar before it. On the phone only the close and the change (R5 unrlzd.css .cp-lgKv[data-ohl]). */
-function Legend({ sym, tf, bars, at, precision, phone }: { sym: string; tf: ChartTf; bars: readonly Bar[]; at: KLineData | null; precision: number; phone?: boolean }) {
+function Legend({ sym, tf, bars, at, precision, unit, phone }: { sym: string; tf: ChartTf; bars: readonly Bar[]; at: KLineData | null; precision: number; unit: ChartUnit; phone?: boolean }) {
   let i = bars.length - 1;
   if (at) {
     const j = bars.findIndex((b) => b.timestamp === at.timestamp);
@@ -198,7 +241,7 @@ function Legend({ sym, tf, bars, at, precision, phone }: { sym: string; tf: Char
   const k = bars[i]!;
   const prev = bars[i - 1] ?? k;
   const dir = k.close >= prev.close ? "up" : "down";
-  const p = (x: number) => price(x.toFixed(precision));
+  const p = (x: number) => valueText(unit, x.toFixed(precision));
   const d = k.close - prev.close;
   const pc = prev.close ? (d / prev.close) * 100 : 0;
   const ch = `${d >= 0 ? "+" : MINUS}${p(Math.abs(d))} (${pc >= 0 ? "+" : MINUS}${Math.abs(pc).toFixed(2)}%)`;
@@ -221,24 +264,146 @@ function Legend({ sym, tf, bars, at, precision, phone }: { sym: string; tf: Char
       </span>
       <span className="tkp-lgrow">
         <span className="tkp-lgkv">
-          <W id="vol" /> <span data-dir={dir}>{k.volume > 0 ? usd(k.volume.toFixed(2)) : DASH}</span>
+          <W id="vol" /> <span data-dir={dir}>{k.volume > 0 ? volumeIn(unit, k.volume.toFixed(2)) : DASH}</span>
         </span>
       </span>
     </div>
   );
 }
 
-/** The price chart (S7.2's chart panel): the timeframes, then the plot. The plot keeps its size in every state, so a
- *  read landing moves nothing (BAR-10 CLS): the skeleton while loading, the candles with the price axis, the volume pane
- *  and the crosshair when ready, `No data` when the helper holds no bars, `Offline` and Retry on a failed read.
- *  CoinGecko's label shows while any drawn bar is GeckoTerminal's (none over no bars). The library draws only once the
- *  plot is on screen (the page holds both layouts; one is display: none). */
+/** A menu under its toolbar button (R5 .cp-menu): rows that each turn one thing on or off. Closes on a press outside
+ *  it or Escape. */
+function Menu({ id, label, open, onOpen, rows }: { id: string; label: ReactNode; open: boolean; onOpen: (o: boolean) => void; rows: readonly { k: string; word: WordId; on: boolean; set: (on: boolean) => void }[] }) {
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && onOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open, onOpen]);
+  return (
+    <span className="tkp-mwrap" ref={box}>
+      <button type="button" className="tkp-tog" data-testid={`chart-${id}`} aria-haspopup="menu" aria-expanded={open} onClick={() => onOpen(!open)}>
+        <span className="tkp-toglbl">{label}</span>
+      </button>
+      {open && (
+        <span className="tkp-menu" role="menu" data-testid={`chart-${id}-menu`}>
+          {rows.map((r) => (
+            <button key={r.k} type="button" role="menuitemcheckbox" aria-checked={r.on} className="tkp-mi" data-testid={`chart-${id}-${r.k}`} onClick={() => r.set(!r.on)}>
+              <span className="tkp-mbox" aria-hidden="true" />
+              <W id={r.word} />
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** R5's toolbar (token.js U.chartPanel chart-toolbar): the timeframes (1s on where it is served), Indicators, Display,
+ *  Price / MCap and USD / the chain's coin. A toggle with no number behind it (no supply, no coin price read) is drawn
+ *  and cannot be turned on. Every slot is drawn at its final width from the first paint (the coin's in a slot that
+ *  holds the longest symbol), so nothing in the row moves when the token's read lands (BAR-10 CLS). */
+function Toolbar({ c, unit }: { c: ChartState; unit: ChartUnit }) {
+  const [menu, setMenu] = useState<string | null>(null);
+  const onMenu = (id: string) => (o: boolean) => setMenu(o ? id : null);
+  const { ctl, set } = c;
+  const ind = (id: IndicatorId) => ({ k: id, word: `ind${id}` as WordId, on: ctl.indicators.has(id), set: (on: boolean) => set({ indicators: new Set(INDICATORS.map((i) => i.id).filter((x) => (x === id ? on : ctl.indicators.has(x)))) }) });
+  const pair = (a: ReactNode, b: ReactNode, second: boolean) => (
+    <>
+      <span data-on={!second}>{a}</span>
+      <span className="tkp-slash"> / </span>
+      <span data-on={second}>{b}</span>
+    </>
+  );
+  return (
+    <div className="tkp-tfs" data-testid="chart-toolbar">
+      {CHART_TFS.map((t) => (
+        <button key={t} type="button" className="tkp-tf" data-testid={`chart-tf-${t}`} aria-pressed={t === c.tf} disabled={!tfServed(c.chain, t)} onClick={() => c.onTf(t)}>{t}</button>
+      ))}
+      <span className="tkp-csep" />
+      <Menu id="indicators" label={<><Ic n="formula" size={14} /><W id="indicators" /></>} open={menu === "indicators"} onOpen={onMenu("indicators")} rows={[{ k: "vol", word: "vol", on: ctl.volume, set: (on) => set({ volume: on }) }, ...INDICATORS.map((i) => ind(i.id))]} />
+      <Menu id="display" label={<><W id="display" /><Ic n="chevDown" size={12} /></>} open={menu === "display"} onOpen={onMenu("display")} rows={[
+        { k: "trades", word: "trades", on: ctl.trades, set: (on) => set({ trades: on }) },
+        { k: "grid", word: "gridLines", on: ctl.grid, set: (on) => set({ grid: on }) },
+        { k: "last", word: "lastLine", on: ctl.lastLine, set: (on) => set({ lastLine: on }) },
+      ]} />
+      <span className="tkp-csep" />
+      <button type="button" className="tkp-tog" data-testid="chart-mode" data-mc={unit.mc} aria-pressed={unit.mc} disabled={c.supply === null} onClick={() => set({ unit: { ...ctl.unit, mc: !unit.mc } })}>
+        {pair(<W id="price" />, <W id="mcap" />, unit.mc)}
+      </button>
+      <button type="button" className="tkp-tog" data-testid="chart-denom" data-usd={!unit.quote} aria-pressed={unit.quote} disabled={c.coin === null} onClick={() => set({ unit: { ...ctl.unit, quote: !unit.quote } })}>
+        {pair(<W id="usdUnit" />, <span className="tkp-quote">{c.chain ? QUOTE[c.chain] : ""}</span>, unit.quote)}
+      </button>
+    </div>
+  );
+}
+
+/** The clock (R5 chart-clock): the chart's time zone, UTC, to the second. */
+function Clock() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span className="tkp-clock" data-testid="chart-clock">
+      {new Date(now).toISOString().slice(11, 19)} <W id="utc" />
+    </span>
+  );
+}
+
+/** R5's bottom bar (token.js U.chartPanel chart-bottom): the ranges, CoinGecko's label while a bar is theirs, the
+ *  clock, and the price scale: %, log, auto. */
+function BottomBar({ c, gecko, auto, onAuto }: { c: ChartState; gecko: boolean; auto: boolean; onAuto: () => void }) {
+  const { ctl, set } = c;
+  const scale = (s: Scale) => set({ scale: ctl.scale === s ? "normal" : s });
+  return (
+    <div className="tkp-bottombar" data-testid="chart-bottom">
+      {RANGES.map((r) => (
+        <button key={r.id} type="button" className="tkp-tf" data-testid={`chart-range-${r.id}`} aria-pressed={ctl.range === r.id} onClick={() => {
+          set({ range: r.id });
+          if (r.tf) c.onTf(r.tf, true);
+        }}>
+          {r.id === "All" ? <W id="rangeAll" /> : r.id}
+        </button>
+      ))}
+      {gecko && <span className="tkp-vendor" data-testid="chart-vendor"><W id="gecko" /></span>}
+      <span className="tkp-grow" />
+      <Clock />
+      <span className="tkp-csep" />
+      <button type="button" className="tkp-tf" data-testid="chart-scale-pct" title={WORDS.pctTitle.text} aria-pressed={ctl.scale === "percentage"} onClick={() => scale("percentage")}><W id="pct" /></button>
+      <button type="button" className="tkp-tf" data-testid="chart-scale-log" title={WORDS.logTitle.text} aria-pressed={ctl.scale === "logarithm"} onClick={() => scale("logarithm")}><W id="log" /></button>
+      <button type="button" className="tkp-tf" data-testid="chart-scale-auto" title={WORDS.autoTitle.text} aria-pressed={auto} onClick={onAuto}><W id="auto" /></button>
+    </div>
+  );
+}
+
+/** The price chart (S7.2's chart panel): on the desktop R5's toolbar, the plot and R5's bottom bar; on the phone the
+ *  plot, then its timeframes. The plot keeps its size in every state, so a read landing moves nothing (BAR-10 CLS): the
+ *  skeleton while loading, the candles with the price axis, the volume pane and the crosshair when ready, `No data`
+ *  when the helper holds no bars, `Offline` and Retry on a failed read. CoinGecko's label shows while any drawn bar is
+ *  GeckoTerminal's (none over no bars): in the desktop's bottom bar, over the phone's volume pane. The bars are drawn
+ *  in the toolbar's unit (units.ts). The library draws only once the plot is on screen (the page holds both layouts;
+ *  one is display: none). */
 function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const drawn = useRef<Drawn | null>(null);
   const [shown, setShown] = useState(false);
   const [at, setAt] = useState<KLineData | null>(null);
+  // bumped on every full redraw (a new read, timeframe or unit) and every mount, for what follows the drawn bars
+  const [version, setVersion] = useState(0);
+  const [auto, setAuto] = useState(true);
   const ready = c.data.status === "ready" ? c.data : null;
+  const unit = unitDrawn(c.ctl.unit, c.supply, c.coin);
+  const f = factors(unit, c.supply, c.coin);
+  const bars = useMemo(() => (ready ? scaleBars(ready.bars, f) : null), [ready, f.price, f.volume]);
+  const precision = useMemo(() => (bars ? pricePrecision(bars) : 2), [bars]);
   useEffect(() => {
     const el = host.current!;
     const ro = new ResizeObserver(() => setShown(el.clientWidth > 0 && el.clientHeight > 0));
@@ -251,30 +416,55 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
   }, []);
   useEffect(() => {
     const el = host.current!;
-    if (!shown || ready === null) return;
+    if (!shown || ready === null || bars === null) return;
+    const fresh = drawn.current === null;
     drawn.current ??= mountChart(el, phone === true, setAt);
-    if (drawn.current === null) return;
-    // a live read moves the last bar in place (the crosshair kept); a new read or timeframe draws them all again
-    if (liveBars(drawn.current, c.sym ?? "", ready.tf, ready.bars, ready.precision)) setAt(null);
-    const list = drawn.current.chart.getDataList();
+    const d = drawn.current;
+    if (d === null) return;
+    d.unit = unit;
+    // a live read moves the last bar in place (the crosshair kept); a new read, timeframe or unit draws them all again
+    if (liveBars(d, c.sym ?? "", ready.tf, bars, precision) || fresh) {
+      setAt(null);
+      setVersion((v) => v + 1);
+    }
+    // the library's own last bar, its close in the helper's unit (USD per token) whatever unit the chart draws, so a check
+    // that sets it beside the helper's bars reads the same number (the drawn bars are the helper's, scaled one to one)
+    const list = d.chart.getDataList();
     el.dataset.bars = String(list.length);
     const last = list.at(-1);
-    el.dataset.last = last ? `${last.timestamp}:${last.close}` : "";
-  }, [shown, ready]);
-  const tfs = (
-    <div className={phone ? "tkp-tfs tkp-tfs-ph" : "tkp-tfs"}>
-      {CHART_TFS.map((t) => (
-        <button key={t} type="button" className="tkp-tf" aria-pressed={t === c.tf} onClick={() => c.onTf(t)}>{t}</button>
-      ))}
-    </div>
-  );
+    const usdLast = last ? ready.bars.find((b) => b.timestamp === last.timestamp) : undefined;
+    el.dataset.last = last && usdLast ? `${last.timestamp}:${usdLast.close}` : "";
+  }, [shown, ready, bars]);
+  // the controls, after each mount and on each change
+  const { scale, indicators, volume, grid, lastLine, range } = c.ctl;
+  useEffect(() => {
+    const d = drawn.current;
+    if (d === null) return;
+    setScale(d, scale, phone === true);
+    setIndicators(d, indicators, volume, phone === true);
+    setDisplay(d, grid, lastLine);
+    setAuto(isAuto(d));
+  }, [version === 0, scale, indicators, volume, grid, lastLine]);
+  // a range fits its span's bars once they are drawn at its timeframe (All: every bar read)
+  useEffect(() => {
+    const d = drawn.current;
+    const r = RANGES.find((x) => x.id === range);
+    if (d === null || ready === null || !r || (r.tf !== null && r.tf !== ready.tf)) return;
+    fitBars(d, r.ms === null ? null : Math.ceil(r.ms / (TF_SECONDS[ready.tf] * 1000)));
+  }, [range, version]);
+  const onAuto = () => {
+    if (drawn.current) fitPrice(drawn.current);
+    setAuto(true);
+  };
   const s = c.data.status;
+  const gecko = c.data.status === "ready" || c.data.status === "empty" ? c.data.gecko && c.data.status === "ready" : false;
   return (
     <section className="tkp-chart" data-slot="chart" data-chart={s} aria-label={WORDS.chart.text}>
-      {!phone && tfs}
-      <div className="tkp-plot" data-drawn={ready !== null} onMouseLeave={() => setAt(null)}>
+      {!phone && <Toolbar c={c} unit={unit} />}
+      <div className="tkp-plot" data-drawn={ready !== null} data-unit={`${unit.mc ? "mc" : "price"}/${unit.quote ? "coin" : "usd"}`} onMouseLeave={() => setAt(null)} onPointerUp={() => drawn.current && setAuto(isAuto(drawn.current))}>
         <div className="tkp-kc" ref={host} data-testid="chart-canvas" />
-        {ready && c.sym && <Legend sym={c.sym} tf={ready.tf} bars={ready.bars} at={at} precision={ready.precision} phone={phone} />}
+        {ready && c.ctl.trades && c.sym && <TradeMarks chart={drawn.current?.chart ?? null} bars={ready.bars} tf={ready.tf} factor={f.price} symbol={c.sym} phone={phone === true} version={version} trades={c.trades} />}
+        {ready && bars && c.sym && <Legend sym={c.sym} tf={ready.tf} bars={bars} at={at} precision={precision} unit={unit} phone={phone} />}
         {s === "loading" && <span className="tkp-sk tkp-plotsk" />}
         {s === "empty" && <span className="tkp-plotmsg"><W id="noData" /></span>}
         {s === "error" && (
@@ -283,9 +473,16 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
             <button type="button" className="tkp-retry" onClick={c.retry}>{WORDS.retry.text}</button>
           </span>
         )}
-        {ready?.gecko && <span className="tkp-vendor" data-testid="chart-vendor"><W id="gecko" /></span>}
+        {phone && gecko && <span className="tkp-vendor tkp-vendor-ph" data-testid="chart-vendor"><W id="gecko" /></span>}
       </div>
-      {phone && tfs}
+      {!phone && <BottomBar c={c} gecko={gecko} auto={auto} onAuto={onAuto} />}
+      {phone && (
+        <div className="tkp-tfs tkp-tfs-ph">
+          {CHART_TFS.map((t) => (
+            <button key={t} type="button" className="tkp-tf" aria-pressed={t === c.tf} disabled={!tfServed(c.chain, t)} onClick={() => c.onTf(t)}>{t}</button>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -475,9 +672,17 @@ function Phone({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartS
 export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: TokenData; nowMs: number; onRetry: () => void; pushed?: boolean }) {
   const row = data.status === "ready" ? data.row : null;
   const [tf, setTf] = useState<ChartTf>(DEFAULT_TF);
+  const [ctl, setCtl] = useState<Controls>(CONTROLS);
+  const set = useCallback((p: Partial<Controls>) => setCtl((x) => ({ ...x, ...p })), []);
+  const onTf = useCallback((t: ChartTf, range?: boolean) => {
+    setTf(t);
+    if (!range) setCtl((x) => (x.range === null ? x : { ...x, range: null }));
+  }, []);
   const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
   // the page's one trade state, drawn by the desktop column's box and the phone sheet's (card app-phone-trade-sheet)
   const trade = useTrade(row ? { chain: row.chain, token: row.token } : null);
+  // the tape behind the marks, read only while they are drawn
+  const tape = useTrades(ctl.trades ? (row?.chain ?? null) : null, ctl.trades ? (row?.token ?? null) : null);
   if (data.status === "error" || data.status === "empty")
     return (
       <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
@@ -487,7 +692,8 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
     );
   const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
-  const c: ChartState = { sym: v?.symbol ?? null, tf, onTf: setTf, data: candles, retry };
+  // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
+  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape };
   return (
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} t={trade} />
