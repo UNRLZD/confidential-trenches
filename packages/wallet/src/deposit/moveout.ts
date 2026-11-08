@@ -258,8 +258,10 @@ export function checkMoveCalls(u: string, to: string, token: string, calls: read
   }
 }
 
-/** The transaction's bytes, its hash and the signed bytes, U's key given. */
-export function signMoveTx(u: string, publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, token: string, blockHash: string, calls: readonly MoveCall[]): { hash: string; signed: string } {
+/** The transaction's bytes, its hash and the signed bytes, U's key given. Module private (card signers-own-bytes): it signs
+ *  the calls it is handed, so only moveOutHeld, which builds them (moveCalls) and checks them (checkMoveCalls) first,
+ *  reaches it. */
+function signMoveTx(u: string, publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, token: string, blockHash: string, calls: readonly MoveCall[]): { hash: string; signed: string } {
   const tx = new Borsh().string(u).u8(0).fixed(publicKey).u64(nonce).string(token).fixed(base58.decode(blockHash)).u32(calls.length);
   for (const c of calls) tx.u8(2).string(c.method).bytes(new TextEncoder().encode(JSON.stringify(c.args))).u64(c.gas).u128(c.deposit);
   const bytes = tx.done();
