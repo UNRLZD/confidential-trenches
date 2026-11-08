@@ -835,16 +835,19 @@ export async function solanaTeardownChecked(
   lamports: readonly [bigint, bigint],
   chain: { blockhash: string; lastValidBlockHeight: number },
   simulate: (frames: readonly SolanaAssembled[]) => Promise<SolanaTeardownReads["simulations"]>,
-): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
+): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; wires: Uint8Array[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
   const once = async (p: SolanaTeardownPlan, unclaimed?: SolanaTeardownUnclaimed) => {
     const frames = buildSolanaTeardown(wallet, p, chain);
+    // the bytes checked are copies taken before the first await and handed to no one (card signers-own-bytes): the
+    // caller signs only these (own-wires.ts), so a change to a frame while it simulates is never signed
+    const wires = frames.map((f) => Uint8Array.from(f.wire));
     const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }) };
-    return { plan: p, frames, reads, verdict: checkSolanaTeardown(frames.map((f) => f.wire), wallet, reads) };
+    return { plan: p, frames, wires, reads, verdict: checkSolanaTeardown(wires, wallet, reads) };
   };
   let t = await once(plan);
   // each pass turns at least one more program's claim off, and there are two pump programs
   for (let i = 0; i < 2; i++) {
-    const off = solanaTeardownUnclaimed(t.verdict, t.frames.map((f) => f.wire), t.reads.simulations, t.reads.unclaimed);
+    const off = solanaTeardownUnclaimed(t.verdict, t.wires, t.reads.simulations, t.reads.unclaimed);
     if (off === null || Object.keys(off).length === Object.keys(t.reads.unclaimed ?? {}).length) return t;
     t = await once(solanaTeardownPlan(wallet, accounts, off), off);
   }

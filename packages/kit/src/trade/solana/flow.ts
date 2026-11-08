@@ -710,9 +710,9 @@ async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps:
   }
   const bh = await readSolanaBlockhashBoth(deps.providers);
   // a claim that does not simulate is planned around once, claims off (solanaTeardownChecked): the closes still go
-  const { frames, verdict } = await solanaTeardownChecked(w, plan, accounts, [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], bh, (fs) => Promise.all(fs.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers))));
+  // the copies checked are the only bytes signed (own-wires.ts): solanaTeardownChecked takes them before its first await
+  const { frames, wires: checkedWires, verdict } = await solanaTeardownChecked(w, plan, accounts, [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], bh, (fs) => Promise.all(fs.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers))));
   if (!verdict.ok || frames.length === 0) return { verdict, frames: frames.length, ...(verdict.ok ? {} : { refused: "teardown checks" }) };
-  const checkedWires = frames.map((f) => Uint8Array.from(f.wire));
   frames.forEach((f, i) => ownSolanaWire(f, checkedWires[i]!));
   const set = await signSet(deps, frames.map((f) => ({ wallet: w, tx: f })));
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };

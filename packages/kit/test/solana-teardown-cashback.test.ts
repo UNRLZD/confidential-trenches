@@ -536,3 +536,21 @@ test("L2: nothing planned around when the plan claims nothing, or when a check o
   const long = { err: "y".repeat(500), wallet: 0n, accounts: {} };
   assert.equal(solanaTeardownUnclaimed(simOnly, wires, [[long, long]])?.[SOLANA_PUMP_AMM_PROGRAM], `its claim did not simulate on either provider: A "${"y".repeat(119)}, B "${"y".repeat(119)}`);
 });
+
+// Card signers-own-bytes: the bytes solanaTeardownChecked checks are copies taken before it simulates and handed to no
+// one; a frame changed while it simulates leaves them as built, so the caller signs only what was checked.
+test("solanaTeardownChecked checks, and returns as `wires`, copies taken before the simulation: a frame changed while it simulates is not what is checked or signed", async () => {
+  const accounts = stableWorld();
+  const plan = solanaTeardownPlan(W, accounts);
+  const built = buildSolanaTeardown(W, plan, R.chain).map((f) => Uint8Array.from(f.wire));
+  const t = await solanaTeardownChecked(W, plan, accounts, [W0, W0], R.chain, async (fs) => {
+    for (const f of fs) f.wire[1] = (f.wire[1]! ^ 1) & 0xff; // a byte of the wire changed in place
+    return fs.map((f) => [cleanSim(plan, f), cleanSim(plan, f)] as const);
+  });
+  assert.equal(t.wires.length, built.length);
+  t.wires.forEach((w, i) => {
+    assert.deepEqual(w, built[i], `frame ${i}: the checked copy is the frame as built`);
+    assert.notDeepEqual(t.frames[i]!.wire, w, `frame ${i}: the frame itself was changed while it simulated`);
+  });
+  assert.deepEqual(failed(checkSolanaTeardown(t.wires, W, t.reads)), failed(t.verdict), "the verdict is the copies' verdict");
+});
