@@ -59,12 +59,12 @@ svg { display: block; flex: none; }
 .ft .health .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px rgba(var(--blue-rgb), .5); }
 .ft .health.off { color: var(--sell); }
 /* the connection, its round trip and the block keep one width from the first paint, so a read that lands, or a round
-   trip of more digits, moves nothing beside them (BAR-10's zero layout shift): each right-aligned in the widest it draws
-   (Offline; Connection 5000 ms, the read's timeout; a nine-digit block) in the footer's monospace digits */
-.ft .health { min-width: calc(13px + 7ch); justify-content: flex-end; }
+   trip of more digits, moves nothing (BAR-10's zero layout shift): each holds the widest it draws (Offline; Connection
+   5000 ms, the read's timeout; a nine-digit block) in the footer's monospace digits, its label fixed at its start */
+.ft .health { min-width: calc(13px + 7ch); }
 .ft .health.wait { visibility: hidden; }
-.ft .conn { min-width: 18ch; text-align: right; }
-.ft [data-block] { min-width: 17ch; text-align: right; }
+.ft .conn { min-width: 18ch; }
+.ft [data-block] { min-width: 17ch; }
 .ft .conn { flex: none; color: var(--text-3); }
 .ft .links { flex: none; display: flex; gap: 14px; font-family: var(--font-ui); color: var(--text-3); }
 .ft .links span { font-family: var(--font-num); }
