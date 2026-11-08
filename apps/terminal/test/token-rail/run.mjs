@@ -78,8 +78,13 @@ async function build() {
 
 const json = (status, body) => ({ status, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) });
 
-async function open(browser, route, w, reads) {
+async function open(browser, route, w, reads, hint) {
   const ctx = await browser.newContext({ viewport: { width: w.width, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce" });
+  // the sign-in hint (card app-header-first-paint-auth, src/screens/signin/hint.ts) as the session's last load left it in
+  // APP_HOST's storage: "in" signed in, "out" signed out, so each view is a reload in its own state
+  await ctx.addInitScript(({ app, hint }) => {
+    if (location.origin === app) localStorage.setItem("ct-signin-hint", hint);
+  }, { app: APP_HOST, hint });
   await ctx.route("**/*", (r) => {
     const u = new URL(r.request().url());
     if (u.origin === HELPER && u.pathname === "/v1/market/lists") {
@@ -172,7 +177,7 @@ try {
       n++;
       const tag = `@${w.name} ${k.name}`;
       const reads = { lists: 0 };
-      const { ctx, page, f, errors } = await open(browser, route, w, reads);
+      const { ctx, page, f, errors } = await open(browser, route, w, reads, k.name);
       const top = TRENDING[0];
       check(await ready(f, top), `${tag}: / did not draw the top Trending token ${top}`);
       if (w.mode !== "hidden") await f.waitForSelector('[data-testid="token-rail"][data-state="ready"]', { timeout: 10_000 }).catch(() => {});
