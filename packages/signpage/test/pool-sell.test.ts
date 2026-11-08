@@ -2257,6 +2257,33 @@ for (const [what, plant, why] of [
   });
 }
 
+// Card sol-rent-back-dust-burn: a balance is a stranger's only on the sell's own record, read ok: a record from before
+// this card (no sell), or a sell that failed on both RPCs, makes W's balance its own (holds, what W read as kept)
+for (const what of ["no record of its sell (an owed record written before this card)", "a recorded sell that failed on both RPCs"] as const) {
+  test(`a balance on W's token account with ${what} holds: nothing burned or closed`, async () => {
+    const plant: Plant = { ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], dustAfterFill: 1n, noPostBalances: true };
+    const w = await world(plant);
+    const a = await runPoolSell(w.host, ASK);
+    assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+    assert.equal(w.told.at(-1)?.state, "gave_up", "the meta says nothing: a fault, owed");
+    delete plant.noPostBalances;
+    const rec = w.owed.get(W.address)!;
+    if (what.startsWith("no record")) {
+      const { sell: _, ...old } = rec;
+      w.owed.set(W.address, old);
+    } else {
+      const sig = base58.encode(base64.decode(rec.sell![MINT]!.tx).subarray(1, 65));
+      w.c.txs.set(sig, { ...w.c.txs.get(sig)!, err: { InstructionError: [0, "planted"] } });
+    }
+    const loaded: PoolSellHost = { ...w.host, wallets: async () => [{ ...wallet(AMOUNT), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 1n, frozen: false }]]), unreadable: [] } }] };
+    await resumeRentBacks(loaded, fakeLocks());
+    assert.deepEqual(w.c.burned, []);
+    assert.equal(w.c.accounts.has(ATA), true);
+    assert.equal(w.told.at(-1)?.state, "holds", JSON.stringify(w.told.slice(-2)));
+    assert.notEqual(w.owed.get(W.address)?.seen, undefined, "W's own state: what W read as kept");
+  });
+}
+
 // Card sol-rent-back-dust-burn: a W whose own full sell left a balance (a partial fill the record did not foresee) holds
 // it as its own: nothing burned, nothing closed, the pass ends holds and stores what W read
 test("a W whose full sell's meta reads a balance left on its account holds it: nothing burned or closed, the pass ends holds", async () => {
