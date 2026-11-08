@@ -50,6 +50,22 @@ services:
       ROBINHOOD_RPC_URL_DRPC_1: ${ROBINHOOD_RPC_URL_DRPC_1:-}
       ROBINHOOD_RPC_URL_DRPC_2: ${ROBINHOOD_RPC_URL_DRPC_2:-}
       ROBINHOOD_RPC_URL_DRPC_3: ${ROBINHOOD_RPC_URL_DRPC_3:-}
+      # BlockVectra Robinhood reader (off when all four are empty). To opt in, set the exact URL below,
+      # the server-only header key, and an explicit positive daily CU budget; partial/invalid settings stop startup.
+      # Only https://api.blockvectra.com/v1/robinhood_mainnet receives x-api-key; never put the key in a URL.
+      # Singleton posts, 1000-block pool spans and the existing 500-block chainwide cap; two companies must agree.
+      # Client budgeting snapshot: public Plans saved 2026-11-08 16:20 UTC (not installed prices or remaining quota).
+      # Block/log/call cost 5/30/15 CU; receipt/transaction lookups use *=10; chainId costs 1 CU.
+      # The same DayPeers account covers all helper reads at 100 CU/s, burst 400, even with a larger paid plan.
+      # This client budget is not a server hard cap or an exact bill. Choose the day budget from your own allowance.
+      ROBINHOOD_RPC_URL_BLOCKVECTRA: ${ROBINHOOD_RPC_URL_BLOCKVECTRA:-}
+      ROBINHOOD_RPC_KEY_BLOCKVECTRA: ${ROBINHOOD_RPC_KEY_BLOCKVECTRA:-}
+      RPC_DAY_BLOCKVECTRA: ${RPC_DAY_BLOCKVECTRA:-}
+      # Optional explicit refresh after reviewing current Plans: JSON with asOf and method_weights, e.g.
+      # {"asOf":"2026-11-09T00:00:00Z","method_weights":[{"method":"*","cu_weight":10},{"method":"eth_getLogs","cu_weight":30}]}
+      # Supply the full reviewed weights for actual use. Exact > longest prefix > *; all weights must be positive.
+      # Empty: the saved profile in src/rpc/blockvectra.ts. No Plans network request is made by the helper.
+      RPC_BLOCKVECTRA_PRICING_PROFILE: ${RPC_BLOCKVECTRA_PRICING_PROFILE:-}
       SOLANA_RPC_URL_QUICKNODE: ${SOLANA_RPC_URL_QUICKNODE:-}
       SOLANA_RPC_URL_DRPC_1: ${SOLANA_RPC_URL_DRPC_1:-}
       SOLANA_RPC_URL_DRPC_2: ${SOLANA_RPC_URL_DRPC_2:-}

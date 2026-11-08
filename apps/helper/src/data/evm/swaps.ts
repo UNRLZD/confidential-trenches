@@ -51,6 +51,7 @@
 // Display only: nothing here feeds a signature. Every provider value is hostile input: a log counts only when its
 // emitter, topic0, topic count and data length match the venue exactly; an amount must fit its type and its legs have
 // opposite signs; counts, ranges and the books are bounded.
+import { BLOCKVECTRA_URL, blockvectraHeaders, blockvectraLeaks, type Blockvectra } from "../../rpc/blockvectra.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
@@ -309,6 +310,7 @@ export const HEADER_TIMED: ReadonlySet<string> = new Set(["https://rpc.mainnet.c
  *  cold window is 3 reads on them, not 30. [design: 1,000: the widest every one of them answered within 2 s, and the
  *  busiest filter's 1,000 blocks (a pool's swaps, under the whole PoolManager's 1,500 logs) fit ANSWER_MAX and LOGS_MAX.] */
 const WIDE_SPAN: Readonly<Record<string, number>> = {
+  [BLOCKVECTRA_URL]: 1_000,
   "https://robinhood.api.pocket.network": 1_000,
   "https://rpc-robinhood.blockmachine.io": 1_000,
   "https://robinhood.daybreak-rpc.network": 1_000,
@@ -321,6 +323,7 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
  *  (publicnode 6, Tenderly 3; Sentio 5, its own most, 2026-11-06 22:45Z). */
 const BATCH_SIZE: Readonly<Record<string, number>> = {
   ...BATCH_MAX,
+  [BLOCKVECTRA_URL]: 1,
   "https://base-rpc.publicnode.com": 6,
   "https://base.gateway.tenderly.co": 3,
   "https://rpc.sentio.xyz/base": 5,
@@ -774,7 +777,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; blockvectra?: Blockvectra; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -856,8 +859,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // for them before it takes a place, so it never holds one asleep (card helper-deploy-reads-fast: background posts
     // asleep on the pace in the places held a caller's read 2.6 s in the queue behind them)
     const wait = patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS;
-    const send = (part: Call[]) => async () => ((await paceFor(url, part.length, patient)) ? one(url, part) : null);
-    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceFor(url, part.length, patient)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
+    const send = (part: Call[]) => async () => ((await paceFor(url, part, patient)) ? one(url, part) : null);
+    const got = await Promise.all(parts.map(async (part) => (fgNow() ? slot(url, part.length, wait, send(part)) : (await paceFor(url, part, patient)) ? slot(url, part.length, wait, () => one(url, part)) : null)));
     // a part given back from the queue (slot) is no answer for its requests alone: the parts answered are kept, and only
     // its requests are asked of the next provider
     if (got.every((g) => g === GAVE_UP)) return null;
@@ -929,11 +932,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  its units, the hold read again after each wait; past PACE_WAIT_MAX_MS of waits it is another provider's, past
    *  PACE_PATIENT_MS when no other provider answered it (agreed's last round). False when it is not to be sent here. A
    *  foreground read (a caller's, card helper-deploy-reads-fast) also draws the CALLER_ROOM background leaves. */
-  async function paceFor(url: string, calls: number, patient: boolean): Promise<boolean> {
+  async function paceFor(url: string, calls: Call[], patient: boolean): Promise<boolean> {
     if (holds.heldFor(url) > 0) return false;
     const bg = !fgNow();
     let slept = 0;
-    for (let w = holds.take(url, calls, bg); w > 0; w = holds.take(url, calls, bg)) {
+    for (let w = holds.take(url, calls.length, bg, false, calls.map((c) => c.method)); w > 0; w = holds.take(url, calls.length, bg, false, calls.map((c) => c.method))) {
       if (slept + w > (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) return (waited(slept), paced.set(url, (paced.get(url) ?? 0) + 1), false);
       await new Promise((go) => setTimeout(go, w));
       slept += w;
@@ -951,7 +954,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     try {
       const r = await doFetch(url, {
         method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
+        headers: { accept: "application/json", "content-type": "application/json", ...blockvectraHeaders(deps.blockvectra, url) },
         body: JSON.stringify(part.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params }))),
         redirect: "error",
         signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -968,7 +971,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return null;
       }
       const text = await r.text();
-      if (text.length > ANSWER_MAX) return null;
+      if (text.length > ANSWER_MAX || blockvectraLeaks(deps.blockvectra, text)) return null;
       const parsed: unknown = JSON.parse(text);
       const answers = Array.isArray(parsed) ? parsed : [parsed];
       const got: Reply[] = part.map(() => ({ ok: false, wait: 0 }));
@@ -1003,7 +1006,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `urls` less a provider that takes one request a post (BATCH_SIZE 1: daybreak, blockvectra) when `calls` would be
    *  more than one post to it: it takes single-post reads only (card helper-robinhood-capacity fold 5: at fa4b98d a
    *  cold dozen sent daybreak 94 eth_getLogs posts, each wide read 3 to 6 of them in its 3 slots). */
-  const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => batchOf(u) > 1 || calls <= 1);
+  const single = (urls: readonly string[], calls: number): string[] => urls.filter((u) => batchOf(u) > 1 || calls <= 1 || (deps.blockvectra !== undefined && u === BLOCKVECTRA_URL));
   /** A provider's free budget, in calls: what its pace lets background reads send within the next second (the free
    *  units above CALLER_ROOM and a second's refill, times the calls a post carries where it counts posts), less the calls
    *  already out or queued to it (slot), so a dozen walks starting at once see each other's reads. A provider with no

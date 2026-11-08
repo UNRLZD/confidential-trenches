@@ -41,6 +41,7 @@
 //                           a content type other than JSON, a body that is not JSON, an empty batch, a request that is
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
+import { BLOCKVECTRA_ENV, BLOCKVECTRA_URL, blockvectraFromEnv, blockvectraHeaders, blockvectraLeaks } from "./blockvectra.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
@@ -292,7 +293,7 @@ const ID_MAX = 128;
 export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: string | null; keyed: readonly string[] }>> = {
   solana: { env: "SOLANA_RPC_URL", fallback: "https://api.mainnet-beta.solana.com", keyed: ["SOLANA_RPC_URL", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"] },
   base: { env: "BASE_RPC_URL", fallback: "https://mainnet.base.org", keyed: ["BASE_RPC_URL", "BASE_RPC_URL_QUICKNODE", "BASE_RPC_URL_DRPC_1", "BASE_RPC_URL_DRPC_2", "BASE_RPC_URL_DRPC_3"] },
-  robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com", keyed: ["ROBINHOOD_RPC_URL", "ROBINHOOD_RPC_URL_QUICKNODE", "ROBINHOOD_RPC_URL_DRPC_1", "ROBINHOOD_RPC_URL_DRPC_2", "ROBINHOOD_RPC_URL_DRPC_3"] },
+  robinhood: { env: "ROBINHOOD_RPC_URL", fallback: "https://rpc.mainnet.chain.robinhood.com", keyed: ["ROBINHOOD_RPC_URL", "ROBINHOOD_RPC_URL_QUICKNODE", "ROBINHOOD_RPC_URL_DRPC_1", "ROBINHOOD_RPC_URL_DRPC_2", "ROBINHOOD_RPC_URL_DRPC_3", BLOCKVECTRA_ENV] },
   near: { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com", keyed: ["NEAR_RPC_URL_FASTNEAR", "NEAR_RPC_URL", "NEAR_RPC_URL_B"] },
   // the testnet build's second provider: a keyed devnet URL of another operator than api.devnet.solana.com, which the
   // page reads itself as its first (packages/signpage/src/pool-testnet.ts TESTNET_RPCS); none set: off (503), never
@@ -307,6 +308,7 @@ export const KEYED_PROVIDER: Readonly<Record<string, KeyedProvider>> = {
   ROBINHOOD_RPC_URL_QUICKNODE: "quicknode",
   ...Object.fromEntries(["SOLANA", "BASE", "ROBINHOOD"].flatMap((c) => [1, 2, 3].map((n) => [`${c}_RPC_URL_DRPC_${n}`, "drpc" as const]))),
   NEAR_RPC_URL_FASTNEAR: "fastnear",
+  [BLOCKVECTRA_ENV]: "blockvectra",
 };
 /** The account a keyed name draws its pace, hold and daily budget from (the owner, 7 Nov 09:16Z and 09:27Z): each
  *  QuickNode endpoint its own account ("quicknode-base", "quicknode-robinhood", "quicknode-solana"); each dRPC key its own
@@ -328,10 +330,12 @@ export function keyedSpares(env: Record<string, string | undefined>, chain: RpcC
  *  daily budget (limits.ts KEYED_DAY, or RPC_DAY_<COMPANY>) and the units one call on its chain spends (KEYED_COST). */
 export function keyedPaces(env: Record<string, string | undefined>): Record<string, Pace> {
   const out: Record<string, Pace> = {};
+  const blockvectra = blockvectraFromEnv(env);
   for (const chain of RPC_CHAINS) {
     const family = chain === "near" ? "near" : EVM_CHAINS.has(chain) ? "evm" : "solana";
     for (const k of readUpstreams(env)[chain].keyed) {
       const co = KEYED_PROVIDER[k.env];
+      if (co === "blockvectra") { out[k.url] = blockvectra!.pace; continue; }
       if (co !== undefined) out[k.url] = { ...KEYED_PACE[co], group: keyedAccountOf(k.env), day: keyedDayOf(env, co), cost: KEYED_COST[co][family] };
     }
   }
@@ -340,6 +344,11 @@ export function keyedPaces(env: Record<string, string | undefined>): Record<stri
 /** A company's daily budget: RPC_DAY_<COMPANY> when set (a whole number of its units, 1 to 13 digits; the start stops
  *  on any other, naming the variable), else its plan's (KEYED_DAY). */
 export function keyedDayOf(env: Record<string, string | undefined>, co: KeyedProvider): number {
+  if (co === "blockvectra") {
+    const config = blockvectraFromEnv(env);
+    if (config === undefined) throw new Error("BlockVectra RPC_DAY_BLOCKVECTRA requires explicit provider configuration");
+    return config.pace.day!;
+  }
   const name = keyedDayEnv(co);
   const v = env[name];
   if (v === undefined || v === "") return KEYED_DAY[co];
@@ -416,6 +425,7 @@ function forms(secrets: string[]): Buffer[] {
  * and every path segment of 16 characters or more, where providers put keys) are what an answer must never hold.
  */
 export function readUpstreams(env: Record<string, string | undefined>): Record<RpcChain, Upstream> {
+  const blockvectra = blockvectraFromEnv(env);
   const out = {} as Record<RpcChain, Upstream>;
   for (const chain of RPC_CHAINS) {
     const { fallback } = RPC_UPSTREAMS[chain];
@@ -423,6 +433,7 @@ export function readUpstreams(env: Record<string, string | undefined>): Record<R
     for (const name of RPC_UPSTREAMS[chain].keyed) {
       const set = env[name];
       if (set === undefined || set === "") continue;
+      if (set === BLOCKVECTRA_URL && name !== BLOCKVECTRA_ENV) throw new Error(`BlockVectra endpoint must use ${BLOCKVECTRA_ENV}`);
       let u: URL;
       try {
         u = new URL(set);
@@ -430,9 +441,9 @@ export function readUpstreams(env: Record<string, string | undefined>): Record<R
         throw new Error(`${name} must be an http(s) URL`);
       }
       if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "" || /\s/.test(set)) throw new Error(`${name} must be an http(s) URL with no fragment`);
-      const secrets = [set, u.href, u.username, u.password, ...u.searchParams.values(), ...u.pathname.split("/").filter((s) => s.length >= 16)];
+      const secrets = [...(name === BLOCKVECTRA_ENV ? [blockvectra!.key] : []), set, u.href, u.username, u.password, ...u.searchParams.values(), ...u.pathname.split("/").filter((s) => s.length >= 16)];
       // the same URL under two names is one provider: asked once, at its first place
-      const keyless = u.username === "" && u.password === "" && [...u.searchParams.values()].every((v) => v === "") && u.pathname.split("/").every((s) => s.length < 16);
+      const keyless = name !== BLOCKVECTRA_ENV && u.username === "" && u.password === "" && [...u.searchParams.values()].every((v) => v === "") && u.pathname.split("/").every((s) => s.length < 16);
       if (!keyed.some((k) => k.url === set)) keyed.push({ env: name, url: set, host: u.host, forms: forms(secrets.filter((s) => s.length >= 8)), keyless });
     }
     const first = keyed[0];
@@ -521,6 +532,7 @@ function check(chain: RpcChain, r: unknown, scan: readonly string[] = []): Recor
 
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
+  const blockvectra = blockvectraFromEnv(env);
   // the budgets', holds' and paces' clock: monotonic, in epoch ms (a wall clock that steps back would hold callers
   // for the step's length; card helper-crowd-429)
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
@@ -774,7 +786,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           continue;
         }
         // review M3: a URL past its day's budget is out until the next UTC day, which is no wait: down for this read
-        if (holds.dayOut(url, methods.length)) {
+        if (holds.dayOut(url, methods.length, methods)) {
           down = true;
           continue;
         }
@@ -790,7 +802,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, gate);
           continue;
         }
-        const room = holds.take(url, methods.length, false);
+        const room = holds.take(url, methods.length, false, false, methods);
         if (room > 0) {
           soonestMs = Math.min(soonestMs, room);
           continue;
@@ -800,7 +812,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         sent = true;
         const from = now();
         try {
-          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
+          r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...blockvectraHeaders(blockvectra, url) }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
           if (r.status === 429) {
             await r.body?.cancel();
             sentTo(url, from);
@@ -846,7 +858,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // largest span named is kept for the caller when every provider caps (card helper-evm-range-cap-walk)
         // an answer that holds this provider's key in any form is that provider down for this read: never kept, so a
         // clean cap or refusal from another still answers (review fold 1)
-        const leaks = secretForms.some((f) => Buffer.from(text, "utf8").includes(f));
+        const leaks = secretForms.some((f) => Buffer.from(text, "utf8").includes(f)) || blockvectraLeaks(blockvectra, text);
         const span = evmCapSpan(c, answer);
         if (span !== null) {
           if (leaks) down = true;
@@ -1028,7 +1040,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // background read (limits.ts take: it leaves CALLER_ROOM for callers' reads)
     if (key === null) {
       if (!isSpare(chain, url)) return 0;
-      const ms = holdsAll.heldMs(url) || holdsAll.take(url, 1, true);
+      const ms = holdsAll.heldMs(url) || holdsAll.take(url, 1, true, false, [method]);
       return ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : 0;
     }
     // card helper-crowd-429: on a paced provider the read also takes a place in its second, now or never (a wait skips
@@ -1061,7 +1073,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  URL with no key in it as "<company's domain> keyless <last probe>" (review M3: not a second key of its company);
    *  never a path, a query or a key. */
   function keyedHealth(): Record<KeyedChain, string[]> {
-    return Object.fromEntries(KEYED_CHAINS.map((c) => [c, upstreams[c].keyed.map((k) => `${companyOf(k.host)}${keyTag(k.env)}${k.keyless ? " keyless" : ""} ${probed.get(k.url) ?? "unread"}`)])) as Record<KeyedChain, string[]>;
+    // The opt-in adds a nineteenth slot: use "wrong" for "wrong chain" in that configuration so the full
+    // diagnostic still fits the kit's 1 KB health bound. Without BlockVectra the existing labels are unchanged.
+    const stateOf = (url: string): string => {
+      const state = probed.get(url) ?? "unread";
+      return blockvectra !== undefined && state === "wrong chain" ? "wrong" : state;
+    };
+    return Object.fromEntries(KEYED_CHAINS.map((c) => [c, upstreams[c].keyed.map((k) => `${companyOf(k.host)}${keyTag(k.env)}${k.keyless ? " keyless" : ""} ${stateOf(k.url)}`)])) as Record<KeyedChain, string[]>;
   }
   /**
    * One identity read of every keyed URL (KEYED_IDENTITY: the chain id or genesis it must answer), each under its
@@ -1077,11 +1095,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           const age = now() - (probedAt.get(k.url) ?? -Infinity);
           if (age < (probed.get(k.url) === "answers" ? KEYED_PROBE_MS : KEYED_RETRY_MS)) return;
           if (k.url === upstreams[c].url && budget.heldFor(c, true) > 0) return;
-          if (holdsAll.heldMs(k.url) > 0 || holdsAll.take(k.url, 1, true) > 0) return;
+          if (holdsAll.heldMs(k.url) > 0 || holdsAll.take(k.url, 1, true, false, [JSON.parse(KEYED_IDENTITY[c].body).method]) > 0) return;
           probedAt.set(k.url, now());
           let state: KeyedState = "down";
           try {
-            const r = await doFetch(k.url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: KEYED_IDENTITY[c].body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+            const r = await doFetch(k.url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...blockvectraHeaders(blockvectra, k.url) }, body: KEYED_IDENTITY[c].body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
             if (r.status === 429) {
               await r.body?.cancel();
               holdsAll.hold(k.url, upstreamRetryAfterS(r.headers, now()));

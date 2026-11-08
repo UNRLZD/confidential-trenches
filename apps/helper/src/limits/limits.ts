@@ -138,10 +138,10 @@ export type ProviderHolds = {
   heldFor(url: string): number;
   heldMs(url: string): number;
   hold(url: string, seconds: number): void;
-  take(url: string, calls: number, background: boolean, sender?: boolean): number;
+  take(url: string, calls: number, background: boolean, sender?: boolean, methods?: readonly string[]): number;
   /** True when `url`'s daily budget (Pace day) cannot fit `calls` more today: out for the rest of the UTC day, which is
    *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429). */
-  dayOut(url: string, calls: number): boolean;
+  dayOut(url: string, calls: number, methods?: readonly string[]): boolean;
   reserve(url: string): void;
   room(url: string): number;
   paceOf(url: string): Pace | undefined;
@@ -152,8 +152,9 @@ export type ProviderHolds = {
  *  that company draws from, where its limit is the account's across chains (card rpc-keyed-lists: one key per company,
  *  so its Base, Robinhood and Solana endpoints share it); `batch`, the most requests one post may carry; `day`, the
  *  units the group (else the URL) may spend in one UTC day, and `cost`, the units one call spends (1 when unset): its
- *  plan's month, credit- or compute-metered, as a daily budget (KEYED_DAY). */
-export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number; day?: number; cost?: number };
+ *  plan's month, credit- or compute-metered, as a daily budget (KEYED_DAY). `methodCost`, when set, prices each
+ *  method in CU and paces those same CU; methods must accompany every take/dayOut. BlockVectra's day has no default. */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number; day?: number; cost?: number; methodCost?: (method: string) => number };
 /**
  * Each paced provider, set under the point where it refuses (reads cited):
  *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
@@ -228,7 +229,7 @@ export const KEYED_PACE = {
   drpc: { perS: 8, burst: 8, unit: "call", group: "drpc", batch: 3 },
   fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
 } as const satisfies Readonly<Record<string, Pace>>;
-export type KeyedProvider = keyof typeof KEYED_PACE;
+export type KeyedProvider = keyof typeof KEYED_PACE | "blockvectra";
 /**
  * Each keyed account's daily budget (card rpc-keyed-lists, review M2), in its company's unit, from its plan's month
  * over 31 days (dRPC's 30-day period over 30) so no month passes the plan: past it that company is sent nothing more that UTC day (limits.ts take) and
@@ -241,12 +242,12 @@ export type KeyedProvider = keyof typeof KEYED_PACE;
  *   - FastNear, requests: the smallest paid plan, Dev's "10M RPC requests/month" (fastnear.com, read 07:29Z):
  *     10,000,000 / 31 = 322,580 a day.
  */
-export const KEYED_DAY: Readonly<Record<KeyedProvider, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580 };
+export const KEYED_DAY: Readonly<Record<Exclude<KeyedProvider, "blockvectra">, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580 };
 /** The units one call spends at each company, by chain family: QuickNode's "All methods" 20 credits on Base (and every
  *  EVM chain listed) and 30 on Solana (quicknode.com/api-credits, read 2026-11-07 09:15Z); dRPC's 20 CU for every
  *  method it lists but eth_chainId (0), eth_call, eth_getLogs, getSignaturesForAddress and getTransaction included, none
  *  above 20 (drpc.org/docs/pricing/compute-units, read 09:16Z); FastNear's one request a call. */
-export const KEYED_COST: Readonly<Record<KeyedProvider, Readonly<Record<"evm" | "solana" | "near", number>>>> = {
+export const KEYED_COST: Readonly<Record<Exclude<KeyedProvider, "blockvectra">, Readonly<Record<"evm" | "solana" | "near", number>>>> = {
   quicknode: { evm: 20, solana: 30, near: 20 },
   drpc: { evm: 20, solana: 20, near: 20 },
   fastnear: { evm: 1, solana: 1, near: 1 },
@@ -346,7 +347,15 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       pending.unref?.();
     }
   };
-  const dayOut = (k: string, p: Pace, calls: number, t: number): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > p.day;
+  // Method-priced providers fail closed if a caller omitted the methods. Legacy providers keep call pricing.
+  const costOf = (p: Pace, calls: number, methods?: readonly string[]): number => {
+    if (p.methodCost === undefined) return Math.max(calls, 1) * (p.cost ?? 1);
+    if (methods === undefined || methods.length !== calls || calls < 1) return Infinity;
+    const costs = methods.map(p.methodCost);
+    const sum = costs.reduce((a, b) => a + b, 0);
+    return costs.every((n) => Number.isSafeInteger(n) && n > 0) && Number.isSafeInteger(sum) ? sum : Infinity;
+  };
+  const dayOut = (k: string, p: Pace, calls: number, t: number, methods?: readonly string[]): boolean => p.day !== undefined && usedToday(k, t) + costOf(p, calls, methods) > p.day;
   // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
   const fill = (url: string, p: Pace) => {
     const t = now();
@@ -358,7 +367,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     return b;
   };
   return {
-    take(url, calls, background, sender = false) {
+    take(url, calls, background, sender = false, methods) {
       const p = pace[url];
       if (p === undefined) return 0;
       const b = fill(url, p);
@@ -366,8 +375,8 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const k = p.group ?? url;
       // the day's budget (review M2): a draw it cannot fit waits for the next UTC day, so every path asks another
       // provider; a pool sender's few reads are never refused by it (pool/evm.ts pacedEvmRpc waits out what take names)
-      const need = Math.max(calls, 1) * (p.cost ?? 1);
-      if (!sender && dayOut(k, p, calls, t)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
+      const need = costOf(p, calls, methods);
+      if ((!sender || p.methodCost !== undefined) && dayOut(k, p, calls, t, methods)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
       const spend = () => {
         if (p.day === undefined) return;
         const day = Math.floor(t / DAY_MS);
@@ -379,7 +388,8 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
       const floor = background ? p.burst * CALLER_ROOM : sender || !reserved.has(url) ? 0 : p.burst * SENDER_ROOM;
       // a post larger than the bucket waits for a full one
-      const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
+      if (p.methodCost !== undefined && (!Number.isFinite(need) || need > p.burst - floor)) return DAY_MS;
+      const units = p.methodCost !== undefined ? need : Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
       // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
       const keep = (ms: number) => callerWaits.set(k, Math.max(callerWaits.get(k) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
@@ -392,9 +402,9 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       if (!background) keep(Math.max(w, CALLER_HOLD_MS));
       return w;
     },
-    dayOut(url, calls) {
+    dayOut(url, calls, methods) {
       const p = pace[url];
-      return p !== undefined && dayOut(p.group ?? url, p, calls, now());
+      return p !== undefined && dayOut(p.group ?? url, p, calls, now(), methods);
     },
     reserve(url) {
       reserved.add(url);

@@ -8,6 +8,7 @@
 // the new image, with the environment compose gives the helper, before any helper is started or stopped, so a set the
 // start would refuse stops the redeploy there instead of after the swap's wait (REDEPLOY_READY_S) with a new helper
 // that never gets ready. deploy/vault-lines.sh moves the two vault lines to the deploy record's vault.
+import { keyedPaces } from "./rpc/rpc.ts";
 import { bindSenderFromEnv } from "./bind/env.ts";
 import { evmPoolSendersFromEnv } from "./pool/evm.ts";
 import { solanaPoolSendersFromEnv } from "./pool/solana.ts";
@@ -47,6 +48,7 @@ export function checkSenderEnv(env: Record<string, string | undefined>, mainnetV
 
 if (import.meta.main) {
   try {
+    keyedPaces(process.env);
     checkPoolEnv(process.env);
     checkSenderEnv(process.env);
   } catch (e) {

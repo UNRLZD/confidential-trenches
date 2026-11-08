@@ -20,6 +20,7 @@
  * Every answer carries X-Helper-Commit and Vary: Origin. Cross-origin reads are allowed for exactly APP_HOST and
  * SIGN_HOST, never `*` and never with credentials (H7 "Cross-origin reads").
  */
+import { BLOCKVECTRA_URL, blockvectraFromEnv } from "./rpc/blockvectra.ts";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER_CORS, HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
@@ -617,6 +618,8 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
 export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds): Swaps {
+  const blockvectra = blockvectraFromEnv(env);
+  holds ??= providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(env) });
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -636,7 +639,8 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       gecko,
       holds,
       rpcs: evmSwapRpcs(env, chain),
-      index: INDEX_RPCS[chain],
+      index: evmIndexRpcs(env, chain),
+      blockvectra,
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens)
       listed: lists.listed,
@@ -652,6 +656,13 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
     lists.onAnswer?.(() => void snapshot().then((x) => (x === null ? undefined : swaps.ahead([...x.tokens]))).catch(() => undefined));
   }
   return out;
+}
+
+/** Only the qualified Robinhood keyed endpoint joins the existing chainwide index providers. */
+export function evmIndexRpcs(env: Record<string, string | undefined>, chain: "base" | "robinhood"): readonly string[] | undefined {
+  const config = blockvectraFromEnv(env);
+  const existing = INDEX_RPCS[chain];
+  return chain === "robinhood" && config !== undefined ? [BLOCKVECTRA_URL, ...(existing ?? [])] : existing;
 }
 
 /**

@@ -104,11 +104,11 @@ test("GET /v1/health lists each network the bind sender carries with its gas acc
 
 // review FIX 1 (card helper-bind-relayer-mainnet): the kit's frozen row bounds GET /v1/health at 1 KB
 // (packages/kit/src/helper/v1.ts HELPER_V1_PATHS), so the body is held at its longest full config, not with empty lists:
-// every one of the 18 keyed names set (rpc/rpc.ts RPC_UPSTREAMS keyed) on the companies the host uses, each in its
-// longest state ("wrong chain", NEAR's two spares keyless), every Solana slot on "fallback", the longest release, not
+// every one of the 19 keyed names set (rpc/rpc.ts RPC_UPSTREAMS keyed) on the companies the host uses, each in its
+// longest opt-in state ("wrong", NEAR's two spares keyless), every Solana slot on "fallback", the longest release, not
 // ready, and both networks carried by the real bind sender with 64-hex gas accounts (the longest account id). A field
 // that grows the body past the bound fails here.
-test("GET /v1/health stays within the kit's 1 KB at the helper's longest full config: 18 keyed URLs in their longest state, Solana on fallback, both bind carries", async (t) => {
+test("GET /v1/health stays within the kit's 1 KB at the helper's longest full config: 19 keyed URLs in their longest state, Solana on fallback, both bind carries", async (t) => {
   const { bindSenderFromEnv } = await import("./bind/env.ts");
   const { MAINNET_VAULT } = await import("./withdraw/send.ts");
   const { RPC_UPSTREAMS, KEYED_CHAINS } = await import("./rpc/rpc.ts");
@@ -129,11 +129,12 @@ test("GET /v1/health stays within the kit's 1 KB at the helper's longest full co
   const companies = {
     solana: ["helius-rpc.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
     base: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
-    robinhood: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3"],
+    robinhood: ["alchemy.com", "quiknode.pro", "drpc.live key1", "drpc.live key2", "drpc.live key3", "blockvectra.com"],
     near: ["fastnear.com", "fastnear.com keyless", "lava.build keyless"],
   };
-  const keyed = Object.fromEntries(KEYED_CHAINS.map((c) => [c, companies[c].map((co) => `${co} wrong chain`)])) as Record<(typeof KEYED_CHAINS)[number], string[]>;
-  assert.equal(Object.values(keyed).flat().length, 18);
+  // With BlockVectra enabled, rpc.ts uses "wrong" for wrong-chain probes to keep the nineteenth slot within 1 KB.
+  const keyed = Object.fromEntries(KEYED_CHAINS.map((c) => [c, companies[c].map((co) => `${co} wrong`)])) as Record<(typeof KEYED_CHAINS)[number], string[]>;
+  assert.equal(Object.values(keyed).flat().length, 19);
   assert.deepEqual(Object.fromEntries(KEYED_CHAINS.map((c) => [c, keyed[c].length])), Object.fromEntries(KEYED_CHAINS.map((c) => [c, RPC_UPSTREAMS[c].keyed.length])), "one entry per keyed name");
   const rpc = { ...createRpc({}), keyed: () => keyed } as ReturnType<typeof createRpc>;
   const fallback = { rpc: "fallback", holders: "fallback", trades: "fallback", stream: "fallback" } as const;
