@@ -1,0 +1,34 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-08T00:26:17.646Z",
+  "pageStatus": 200,
+  "css": [
+   {
+    "url": "/assets/style-B59pDiyQ.css",
+    "status": 200,
+    "rule": {
+     "selectors": [
+      ".tsh[data-open=true] .rs-toast",
+      ".tsh[data-open=true]~.rs-toast"
+     ],
+     "top": 8
+    }
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 8 Nov 2026) and read from disk (--root); its stylesheet moves the open sheet's toast to top 8 px"
+ },
+ "bad": {
+  "source": "https://confidential.unrealized.trade/",
+  "at": "2026-11-08T00:12:50.842Z",
+  "pageStatus": 200,
+  "css": [
+   {
+    "url": "/assets/style-Dxalcrg2.css",
+    "status": 200,
+    "rule": null
+   }
+  ],
+  "note": "APP_HOST as deployed before this card (read 8 Nov 2026 over https): no rule moves the toast while the sheet is open (it stays at 68 px, over the head row)"
+ }
+}
