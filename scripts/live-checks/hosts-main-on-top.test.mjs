@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctCerts, ctNames, CUTOVER_BY, CUTOVER_REVOKED, REFUSED_ORIGINS, verdict, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
+import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctCerts, ctNames, CUTOVER_BY, CUTOVER_GRACE_MS, CUTOVER_REVOKED, REFUSED_ORIGINS, verdict, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "hosts-main-on-top.answers.json"), "utf8"));
@@ -144,17 +144,21 @@ test("planted certificate cases: an unexpired child certificate FAILs only read 
   assert.deepEqual([r.ok, r.inconclusive, bad(r).map((l) => l.split(":")[0])], [false, false, ["BAD child certificates"]]);
   r = judge(spot(cert([api], { id: "17921097554" })));
   assert.deepEqual([r.ok, r.inconclusive, bad(r).length], [false, true, 0]);
-  // the deadline (delta review M3): one the cutover revokes, read not revoked an hour and a second after CUTOVER_BY,
-  // FAILs; read at CUTOVER_BY + 1 h exactly, or before, it waits
+  // the deadline (delta review M3, N1, N6): one the cutover revokes, read not revoked 30 h and a second after
+  // CUTOVER_BY, FAILs; read at CUTOVER_BY + 30 h exactly, or before, it waits. 30 h: a CA has up to 24 h to publish
+  // a revocation in its CRL (CA/B Baseline Requirements 4.9.7), and certspotter needs time for one more read.
+  // Times and text come from CUTOVER_BY, so setting it again at merge is one edit.
+  const H30 = 30 * 60 * 60 * 1000;
+  assert.equal(CUTOVER_GRACE_MS, H30, "the grace is 30 h (BR 4.9.7: 24 h to the CRL, then one certspotter read)");
   const late = (ms) => ({ ...read, checked_at: new Date(Date.parse(CUTOVER_BY) + ms).toISOString() });
-  const afterDeadline = of(cert([api], { id: "18102517185", revocation: late(3_601_000) }));
+  const afterDeadline = of(cert([api], { id: "18102517185", revocation: late(H30 + 1000) }));
   assert.deepEqual([afterDeadline.fail.length, afterDeadline.wait.length], [1, 0], "read after the deadline");
-  assert.match(afterDeadline.fail[0], /which the cutover revokes by 2026-11-09T13:00:00Z, is read not revoked at 2026-11-09T14:00:01/);
-  for (const ms of [3_600_000, 0, -86_400_000]) {
+  assert.ok(afterDeadline.fail[0].endsWith(`which the cutover revokes by ${CUTOVER_BY}, is read not revoked at ${late(H30 + 1000).checked_at}`), afterDeadline.fail[0]);
+  for (const ms of [H30, 24 * 60 * 60 * 1000, 3_601_000, 0, -86_400_000]) {
     const g = of(cert([api], { id: "18102517185", revocation: late(ms) }));
     assert.deepEqual([g.fail.length, g.wait.length], [0, 1], `read at CUTOVER_BY ${ms} ms`);
   }
-  r = judge(spot(cert([api], { id: "17921097554", revocation: late(7_200_000) })));
+  r = judge(spot(cert([api], { id: "17921097554", revocation: late(H30 + 1000) })));
   assert.deepEqual([r.ok, r.inconclusive, bad(r).map((l) => l.split(":")[0])], [false, false, ["BAD child certificates"]]);
   // INCONCLUSIVE never hides another line's FAIL
   const both = spot(cert([api], { id: "17921097554" }));

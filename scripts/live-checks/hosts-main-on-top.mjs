@@ -39,7 +39,7 @@
 //     The line FAILs only on an unexpired child certificate certspotter has read as not revoked that is not one the
 //     cutover revoked (CUTOVER_REVOKED, each proven by the CA's own answers in scripts/deploy/hosts-cutover.sh). It is
 //     INCONCLUSIVE, never PASS or FAIL, when certspotter is unread, gives no revocation, or still lists one of those as
-//     not revoked on a read before CUTOVER_BY + 1 h (it reads the CA's lists on its own schedule): a deploy cannot make
+//     not revoked on a read before CUTOVER_BY + 30 h (it reads the CA's lists on its own schedule): a deploy cannot make
 //     or keep a certificate, so this line never fails one. A read after that deadline that still lists one of them as
 //     not revoked FAILs: the cutover did not revoke it. The check then ends INCONCLUSIVE (exit 2) if every other line
 //     holds.
@@ -69,13 +69,17 @@ export const WEBAUTHN = "/.well-known/webauthn";
 export const REFUSED_ORIGINS = [`https://sign.${SIGN_HOST}`, "https://evil.example"];
 /** The certificates the cutover revokes at Let's Encrypt (certspotter ids): api.'s, the three ctwatch-test. ones and
  *  SIGN_HOST's own of 2026-10-20. ctCerts judges the four children's: until certspotter reads one revoked, on a read
- *  before CUTOVER_BY + 1 h, the certificate line is INCONCLUSIVE; after it, FAIL. SIGN_HOST's own (17883777060) is
+ *  before CUTOVER_BY + 30 h, the certificate line is INCONCLUSIVE; after it, FAIL. SIGN_HOST's own (17883777060) is
  *  listed for the record only: it names no child, so ctCerts never judges it. */
 export const CUTOVER_REVOKED = ["18102517185", "17921097554", "17921221760", "17921365530", "17883777060"];
-/** The time the cutover's paste must be done by; certspotter gets one hour more to read its revocations. Set again at
- *  the card's merge, right before the owner's paste. */
+/** The time the cutover's paste must be done by. Set again at the card's merge, right before the owner's paste; the
+ *  cutover refuses to start after it. */
 export const CUTOVER_BY = "2026-11-09T13:00:00Z";
-export const CUTOVER_GRACE_MS = 60 * 60 * 1000;
+/** How long after CUTOVER_BY certspotter may still read a revoked certificate as good: 30 h. Let's Encrypt has up to
+ *  24 h to publish a revocation in its CRL (CA/B Baseline Requirements 4.9.7: a CA "MUST update and publish a new CRL
+ *  within twenty-four (24) hours after recording a Certificate as revoked"), and certspotter reads the CRLs on its own
+ *  schedule, so 6 h more covers its next read. A read inside it waits (INCONCLUSIVE), never FAILs. */
+export const CUTOVER_GRACE_MS = 30 * 60 * 60 * 1000;
 /** Child certificates that may stay good, each with its reason. */
 export const CERTS_ALLOWED = [
   { names: [`sign.${SIGN_HOST}`], issuer: "Google Trust Services", why: "Pages' certificate for the old sign.: Cloudflare holds its key, and Cloudflare serves SIGN_HOST itself" },
