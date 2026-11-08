@@ -79,6 +79,10 @@ export function opOf(id: string, rec: unknown): Operation | null {
   // a deposit's facts (kit messages.ts DepositFacts, card kit-deposit-calls): each copied only when set; the kit's
   // schema below holds each to its stages
   if (rec.kind === "deposit") for (const k of DEPOSIT_FACT_KEYS) if (rec[k] !== undefined) op[k] = rec[k];
+  // the held money moved out (the wallet's moveOutHeld ends the op held with follow.why "moved_out" on its own move's
+  // record, follow.out; card held-move-forgotten-tx): the app draws no Held mark for it. An op follow.ts ends moved_out
+  // with no move of its own (a withdraw.open took the money; its USDC may still reach U) stays Held, with its Withdraw
+  if (rec.kind === "deposit" && rec.stage === "held" && isRecord(rec.follow) && rec.follow.why === "moved_out" && isRecord(rec.follow.out)) op.moved_out = true;
   const probe = stateOf(true, undefined, [op as Operation]);
   return SIGNPAGE_RESULT_SCHEMAS.state(probe) ? (op as Operation) : null;
 }

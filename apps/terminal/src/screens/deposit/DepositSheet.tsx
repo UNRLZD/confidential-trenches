@@ -116,6 +116,15 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         <p className="dline"><W id="refundedLine" /></p>
       </>
     );
+  } else if (s === "moved") {
+    // the held money moved out (card held-move-forgotten-tx): no Held mark and no withdraw, nothing waits under its id
+    body = (
+      <>
+        <Stat tone="blue" label={<W id="moved" />} />
+        <Recent rows={recentRows(state?.ops)} />
+      </>
+    );
+    foot = <Action kind="paper" on onClick={onClose} control="deposit-done"><W id="done" /></Action>;
   } else if (HELD_STATES.has(s)) {
     body = (
       <>

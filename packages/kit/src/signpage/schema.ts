@@ -152,11 +152,12 @@ const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<strin
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);
 
 /** A deposit's facts (messages.ts DepositFacts), each checked by type here and by stage in depositFactsFit. */
-const DEPOSIT_FACTS = { refunded: bool, hold: oneOf(DEPOSIT_HOLDS), held_id: str, since_ms: uint, amount_usd: dec };
+const DEPOSIT_FACTS = { refunded: bool, hold: oneOf(DEPOSIT_HOLDS), held_id: str, since_ms: uint, amount_usd: dec, moved_out: lit(true) };
 /** Each fact only on the stages it belongs to, so the app never draws a stage with a fact the device cannot have set. */
 const depositFactsFit = (v: unknown): boolean => {
-  const d = v as { stage: (typeof DEPOSIT)[number]; refunded?: unknown; hold?: unknown; held_id?: unknown; since_ms?: unknown; amount_usd?: unknown };
+  const d = v as { stage: (typeof DEPOSIT)[number]; refunded?: unknown; hold?: unknown; held_id?: unknown; since_ms?: unknown; amount_usd?: unknown; moved_out?: unknown };
   if (d.hold !== undefined && d.stage !== "halted") return false;
+  if (d.moved_out !== undefined && d.stage !== "held") return false;
   if (d.amount_usd !== undefined && d.stage !== "done") return false;
   if (d.held_id !== undefined && !DEPOSIT_HELD_STAGES.includes(d.stage)) return false;
   if (d.refunded !== undefined && !DEPOSIT_REFUNDED_STAGES.includes(d.stage)) return false;

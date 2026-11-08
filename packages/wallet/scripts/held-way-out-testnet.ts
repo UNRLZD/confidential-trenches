@@ -106,7 +106,7 @@ async function main() {
   const rpcs = [counted(moveOutRpc(NET.fastnear[0])), counted(moveOutRpc(NET.drpc))] as const;
   const before = { u: await view(SEND, TOKEN, "ft_balance_of", { account_id: U }), x: await view(SEND, TOKEN, "ft_balance_of", { account_id: X }), xReg: await view(SEND, TOKEN, "storage_balance_of", { account_id: X }) };
   const t0 = Date.now();
-  let first = await moveOutHeld("held-run", X, { ops, rpcs, seed64: async () => seed.slice(), pollMs: 1_000 });
+  let first = await moveOutHeld("held-run", X, { ops, rpcs, archival: NET.archival.map((u) => moveOutRpc(u)), seed64: async () => seed.slice(), pollMs: 1_000 });
   const asked: string[] = [first.kind];
   // U short of NEAR: the "typed account" (H, the stand-in) sends U what the device asks, then the same tap again
   let topUp = 0n;
@@ -114,17 +114,17 @@ async function main() {
     topUp = first.need;
     txs.push([await holderSend(secret, pub, U, [act.transfer(first.need)]), HOLDER]);
     await sleep(3_000);
-    first = await moveOutHeld("held-run", X, { ops, rpcs, seed64: async () => seed.slice(), pollMs: 1_000 });
+    first = await moveOutHeld("held-run", X, { ops, rpcs, archival: NET.archival.map((u) => moveOutRpc(u)), seed64: async () => seed.slice(), pollMs: 1_000 });
     asked.push(first.kind);
   }
   secret.fill(0);
-  for (let k = 0; first.kind === "sent" && k < 10; k++) (first = await moveOutHeld("held-run", null, { ops, rpcs, seed64: async () => seed.slice(), pollMs: 1_000 })), asked.push(first.kind);
+  for (let k = 0; first.kind === "sent" && k < 10; k++) (first = await moveOutHeld("held-run", null, { ops, rpcs, archival: NET.archival.map((u) => moveOutRpc(u)), seed64: async () => seed.slice(), pollMs: 1_000 })), asked.push(first.kind);
   const ms = Date.now() - t0;
   log(`first: ${first.kind}`);
   if (first.kind !== "moved") throw new Error(`the move did not land: ${JSON.stringify(first, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`);
   const sentBefore = sends;
   let opened = 0;
-  const again = await moveOutHeld("held-run", "someone-else.testnet", { ops, rpcs, seed64: async () => (opened++, seed.slice()), pollMs: 1_000 });
+  const again = await moveOutHeld("held-run", "someone-else.testnet", { ops, rpcs, archival: NET.archival.map((u) => moveOutRpc(u)), seed64: async () => (opened++, seed.slice()), pollMs: 1_000 });
   if (again.kind !== "moved" || sends !== sentBefore || opened !== 0) throw new Error("the second call signed or sent something");
   const rec = ((await ops.get("ops", "held-run")) as DepositOp).follow;
   txs.push([rec.out!.hash, U]);

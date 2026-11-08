@@ -17,7 +17,7 @@ test("the module imports nothing, and names no field token (the bundle then hold
   const src = readFileSync(new URL("../src/near/networks.ts", import.meta.url), "utf8");
   assert.deepEqual(src.split("\n").filter((l) => /^\s*(import|export .* from)\b/.test(l)), []);
   assert.doesNotMatch(src, /\btoken\s*:/i);
-  for (const net of Object.values(near.NEAR_NETWORKS)) assert.deepEqual(Object.keys(net), ["usdc", "vault", "fastnear", "drpc"]);
+  for (const net of Object.values(near.NEAR_NETWORKS)) assert.deepEqual(Object.keys(net), ["usdc", "vault", "fastnear", "drpc", "archival"]);
 });
 
 test("the entry exports the pair rule and its network type, the very same functions, and not the table or the provider", async () => {

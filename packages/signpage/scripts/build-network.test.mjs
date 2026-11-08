@@ -37,7 +37,8 @@ test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card 
   const headers = readFileSync(join(PKG, "public/_headers"), "utf8");
   const connect = /connect-src ([^;]*);/.exec(headers)?.[1] ?? "";
   for (const h of ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://near-testnet.drpc.org"]) assert.ok(!connect.split(" ").includes(h), `SIGN_HOST's connect-src names ${h}`);
-  for (const h of ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]) assert.ok(connect.split(" ").includes(h), `SIGN_HOST's connect-src lacks ${h}`);
+  for (const h of ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org", "https://archival-rpc.mainnet.fastnear.com"]) assert.ok(connect.split(" ").includes(h), `SIGN_HOST's connect-src lacks ${h}`);
+  for (const h of ["https://archival-rpc.testnet.near.org", "https://archival-rpc.testnet.fastnear.com"]) assert.ok(!connect.split(" ").includes(h), `SIGN_HOST's connect-src names ${h}`); // near-rpc-operators: one operator (testnet's archival list: on no mainnet policy)
 });
 
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {

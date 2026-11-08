@@ -14,18 +14,20 @@
 //   (main.ts's run() drops a step while its opening step is busy: review of d791adda, H1), and the tap waits for it.
 // - Every answer that names an account (moved, sent, failed) writes that account into the field, read-only: the move's
 //   account is the one shown, whatever was typed (a reload, another tab). After failed, the tap signs anew to it.
-// - Every word is a draft until the owner picks it (data-draft-copy names its key in HELD_WORDS or WITHDRAW_WORDS).
+// - Every word is a draft until the owner picks it (data-draft-copy names its key in HELD_WORDS or WITHDRAW_WORDS);
+//   Moved is picked (owner 8 Nov 07:50Z) and has no mark.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import type { MoveOutOutcome, MoveOutRecord } from "../../../wallet/src/deposit/moveout.ts";
 import { type AddressCode, checkRecipient, type RecipientCheck } from "./checks.ts";
 import { CHECK_IDLE_MS, refusalWords, WITHDRAW_WORDS } from "./form.ts";
 
-// DRAFT COPY, new with this card: every word below is the owner's pick to make.
+// DRAFT COPY, new with this card: every word below is the owner's pick to make, but `moved`, which the owner picked
+// (owner 8 Nov 07:50Z, card held-move-forgotten-tx) and is drawn with no draft mark.
 export const HELD_WORDS = {
   "move-out": "Move out", // the button
   link: "This links your deposit to this account.", // W:469: the move links the 1Click send to the typed account
-  moved: "Moved",
+  moved: "Moved", // owner 8 Nov 07:50Z: final
   sent: "Sending",
   gas: "Send NEAR to the deposit account from the account you typed:", // then the amount and U's id (W:469, W:934: from the typed account only)
   empty: "Nothing to move",
@@ -126,6 +128,19 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
     draw(null, false);
   };
   const shown = (o: MoveOutOutcome): void => {
+    if (o.kind === "open") {
+      // a replaced record (it never ran; card held-move-forgotten-tx): no outcome line, never "not moved"; the account
+      // is typed again, its last value checked as if typed
+      fixed = null;
+      input.readOnly = false;
+      page.dataset.outcome = "open";
+      outcome.hidden = true;
+      outcome.replaceChildren();
+      delete outcome.dataset.draftCopy;
+      draw(null, input.value.trim() === "");
+      if (input.value.trim() !== "") void check();
+      return;
+    }
     if (o.kind === "moved" || o.kind === "sent" || o.kind === "failed") fix(o.to);
     page.dataset.outcome = o.kind;
     outcome.hidden = false;
@@ -140,7 +155,8 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
       return;
     }
     const key = o.kind === "unread" ? "busy" : o.kind;
-    outcome.dataset.draftCopy = key;
+    if (key === "moved") delete outcome.dataset.draftCopy;
+    else outcome.dataset.draftCopy = key;
     outcome.textContent = o.kind === "unread" ? WITHDRAW_WORDS.busy : HELD_WORDS[o.kind];
   };
 
