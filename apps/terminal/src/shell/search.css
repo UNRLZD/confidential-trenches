@@ -1,0 +1,88 @@
+/* The top bar's search (Search.tsx). Values are R5's (research repo design/proto/assets/proto.css .searchwrap, .search,
+   .sph, .chainchip, .tb-searchBtn, .bell, .phh .sfi, .phh .sf at design-lock-r5); the result rows are the rail's
+   (screens/token/rail.css .tkr-row, R5 .rr) and the chain menu the account menu's (screens/signin/signin.css .amenu).
+   Desktop sizes are layout px on the 1920 design, drawn at --fit-zoom (fit.ts). The menus and the sheet are drawn over
+   the page (absolute or fixed), so opening one moves nothing. Tokens are set on the search's own boxes, R5's :root. */
+.searchwrap, .srch-chip, .tb-searchBtn, .srch-sheet {
+  --bg-panel: #111111; --bg-drawer: #0c0c0c; --border-panel: #1f1f1f; --border-row: #171717; --border-strong: #2a2a2a;
+  --border-active: #383838; --bg-row-hover: #161616; --acc: #50e397; --sell: #ff5d4d; --blue: #5b8cff;
+  --m-ink: #0a0a0a; --m-ink-field: #141414; --m-line: #1f1f1f;
+}
+:where(.searchwrap, .srch-chip, .srch-sheet) button, :where(.tb-searchBtn, .phh .sfi) { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+
+/* the field (R5 .searchwrap, .search, .sph) */
+.searchwrap { position: relative; flex: 1; min-width: 0; display: flex; justify-content: center; }
+.search { width: 100%; max-width: 520px; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 13px; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 11px; color: var(--text-3); }
+.searchwrap[data-open="true"] .search { border-color: var(--border-active); }
+.srch-in { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; padding: 0; background: transparent; color: var(--text-1); font: 14px var(--font-ui); }
+.srch-in::placeholder { color: var(--text-3); opacity: 1; }
+
+/* the results under the field: the field's width, over the page */
+.srch-pop { position: absolute; top: calc(100% + 8px); width: 100%; max-width: 520px; z-index: 70; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; padding: 6px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6); max-height: min(560px, calc(100dvh / var(--fit-zoom, 1) - 96px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.srch-pop::-webkit-scrollbar { display: none; }
+.srch-head { height: 30px; padding: 0 10px; display: flex; align-items: center; font: 600 12px var(--font-ui); color: var(--text-3); }
+.srch-msg { min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); font-size: 13px; }
+.srch-retry { height: 32px; padding: 0 14px; border-radius: 9px; background: var(--bg-raised); color: var(--text-1); font: 600 13px var(--font-ui); }
+
+/* a result: the rail's row (rail.css .tkr-row) */
+.srr { height: 60px; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 11px; color: inherit; text-decoration: none; }
+.srr[aria-selected="true"] { background: var(--bg-row-hover); }
+.srr:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.srr-a { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.srr-s { display: flex; align-items: baseline; gap: 8px; min-width: 0; font: 600 15px var(--font-ui); white-space: nowrap; overflow: hidden; }
+.srr-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 12px var(--font-ui); color: var(--text-3); }
+.srr-p { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srr-b { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; white-space: nowrap; }
+.srr-mc { font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; }
+.srr-mc u { text-decoration: none; font-size: 11px; color: var(--text-3); margin-left: 4px; }
+.srr-c { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-3); }
+.srr-c[data-dir="up"] { color: var(--acc); }
+.srr-c[data-dir="down"] { color: var(--sell); }
+.srr-sk { display: block; background: #181818; border-radius: 6px; animation: srch-skp 1.2s linear infinite; }
+.srr-skc { width: 40px; height: 40px; border-radius: 50%; flex: none; }
+@keyframes srch-skp { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .srr-sk { animation: none; } }
+
+/* the chain chip and its menu (R5 .chainchip; the menu as signin.css .amenu): the chip sits 12 px before the account
+   cluster, as in R5's .tbr */
+.srch-chip { position: relative; flex: none; margin-right: -8px; }
+.chainchip { height: 34px; padding: 0 10px 0 11px; display: flex; align-items: center; gap: 7px; border-radius: 8px; background: var(--bg-panel); border: 1px solid var(--border-panel); font: 600 13px var(--font-ui); color: var(--text-1); white-space: nowrap; }
+.chainchip .ic { color: var(--text-3); }
+.chainchip[aria-expanded="true"] { border-color: var(--border-active); }
+.srch-cm { display: block; flex: none; border-radius: 50%; background: #000; overflow: hidden; }
+.srch-cm img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.srch-menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 200px; z-index: 70; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; padding: 6px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; }
+.srch-mrow { height: 44px; padding: 0 12px; border-radius: 10px; display: flex; align-items: center; gap: 10px; font: 500 15px var(--font-ui); color: var(--text-1); text-align: left; }
+.srch-mrow .ic { color: var(--text-3); }
+.srch-mrow:hover, .srch-mrow[aria-checked="true"] { background: var(--bg-raised); }
+
+/* the narrow top bar's search button (R5 .tb-searchBtn, .bell): from 768 to 1024 px the field and the chip give way to it */
+.tb .tb-searchBtn { display: none; }
+.tb-searchBtn { width: 40px; height: 40px; border-radius: 11px; background: var(--bg-panel); border: 1px solid var(--border-panel); align-items: center; justify-content: center; color: var(--text-2); }
+@media (max-width: 1023.98px) {
+  .tb .searchwrap, .tb .srch-chip { display: none; }
+  .tb .tb-searchBtn { display: flex; flex: none; margin-left: auto; }
+}
+
+/* the phone header's search button (R5 .phh .sfi): 44 px, before the account side */
+.phh .sfi { width: 44px; justify-content: center; color: var(--text-2); margin: 0 -6px 0 auto; }
+
+/* the sheet: the phone's search, over the whole page (R5 .phh and .phh .sf for its top row; the rail's chips) */
+.srch-sheet { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; background: var(--m-ink); color: var(--text-1); font-family: var(--font-ui); }
+.srch-top { height: 56px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 4px; box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.05); }
+.srch-back { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--text-2); }
+.srch-sf { flex: 1; min-width: 0; height: 40px; border-radius: 12px; background: var(--m-ink-field); box-shadow: inset 0 0 0 1px var(--m-line); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--text-3); }
+.srch-sf .srch-in { font-size: 16px; }
+.srch-chips { height: 48px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
+.srch-chips::-webkit-scrollbar { display: none; }
+.srch-cchip { position: relative; flex: none; height: 30px; padding: 0 11px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--font-ui); color: var(--text-2); box-shadow: inset 0 0 0 1px var(--border-panel); white-space: nowrap; }
+.srch-cchip::after { content: ""; position: absolute; inset: -7px 0; }
+.srch-cchip[aria-pressed="true"] { background: var(--border-strong); color: var(--text-1); box-shadow: none; }
+.srch-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 6px calc(12px + env(safe-area-inset-bottom)); }
+
+/* The account side keeps one width from the first paint (as the footer's parts do, shell.css .ft): its skeleton, Sign in
+   and the signed-in cluster each draw inside a box at least as wide as the widest of them (a balance up to 11
+   characters), drawn at its end. The chain chip and the search sit before that box, so the account landing moves
+   neither (BAR-10 CLS 0). */
+.tb-acct { flex: none; min-width: 264px; display: flex; justify-content: flex-end; }
+.phh-acct { flex: none; min-width: 148px; display: flex; justify-content: flex-end; }

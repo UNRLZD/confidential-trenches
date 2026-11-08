@@ -15,7 +15,9 @@ import "./rail.css";
 // lists (rail.ts), each row a link to its token's page, the page's own token marked. The desktop's width modes
 // (token.css .tkp-desk, rail.css): the full rail (340) from 1500 px, the slim rail (78: the rings, and the expand
 // button that draws the full rail over the chart) from 1180, none under it. Its column is sized from the first paint,
-// and its rows hold one height loading or drawn, so nothing moves when the lists land (BAR-10 CLS 0).
+// and its rows hold one height loading or drawn, so nothing moves when the lists land (BAR-10 CLS 0). The rows are
+// fixed slots, keyed by their place: a refresh that adds, drops or reorders tokens redraws each slot in place with its
+// new token, so no drawn row is pushed down or up (a row keyed by its token moved a slot each time one landed above it).
 
 type List = "trending" | "new";
 const LISTS: readonly { key: List; word: "railTrending" | "railNew" }[] = [
@@ -110,7 +112,7 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
         </div>
       ) : rows && rows.length ? (
         <div className="tkr-rows" role="list">
-          {rows.map((r) => <Row key={r.token} r={r} nowMs={nowMs} sel={r.chain === chain && r.token === token} />)}
+          {rows.map((r, i) => <Row key={i} r={r} nowMs={nowMs} sel={r.chain === chain && r.token === token} />)}
         </div>
       ) : (
         <div className="tkr-rows tkr-msg">{WORDS.noTokens.text}</div>

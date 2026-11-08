@@ -111,6 +111,7 @@ export const OUT = {
   "app-launchpad-badges": "a browser and the helper",
   "app-token-lower-panel": "the helper's holders answer",
   "app-token-rail": "the helper's lists answer",
+  "app-header-search-chain": "the helper's lists and token answers (its behaviour run is in test:e2e)",
   "app-token-route": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",
