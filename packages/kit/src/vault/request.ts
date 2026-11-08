@@ -21,7 +21,11 @@ export type VaultWithdrawRequestArgs = {
   vaultId: string;
   token: string;
   recipient: string;
-  /** NEAR, in yocto, for the recipient's token registration: 0 for a registered account. */
+  /**
+   * NEAR, in yocto, for the recipient's token registration: the token's storage_balance_bounds().min for every
+   * recipient, registered or not. The helper's relayer carries only that minimum and refuses any other value, 0
+   * included, as register_deposit_wrong (apps/helper/src/withdraw/send.ts:308).
+   */
   registerDeposit: bigint;
   feeRecipient: string;
   /** The fee, in the token's base units; 0 when the user sends the withdrawal. */
