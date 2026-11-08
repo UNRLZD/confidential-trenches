@@ -54,6 +54,7 @@ import {
   type SolanaHeld,
   type SolanaTeardownPlan,
   type SolanaTeardownReads,
+  type SolanaTeardownUnclaimed,
   type SolanaTeardownSimulation,
   type SolanaTeardownVerdict,
 } from "../../checks/solana/checks.ts";
@@ -808,16 +809,14 @@ function solanaClaimInstruction(wallet: string, c: SolanaClaim): SolanaApiInstru
 export const SOLANA_SIMULATE_ACCOUNTS_MAX = 4;
 
 /**
- * One provider's simulation of one teardown frame (sigVerify false, replaceRecentBlockhash true, at `confirmed`),
- * reading back the wallet and every given address: one call per group of three addresses with the wallet. Each answer
- * is hostile: shape-checked, and every call must report the same wallet lamports; the first error is returned as err.
- */
-/**
  * The teardown for one wallet, built, simulated by `simulate` (each frame on both providers) and judged by
- * checkSolanaTeardown on those reads; when only its simulation refuses a plan that claims cashback
- * (solanaTeardownUnclaimed), planned, built, simulated and judged once more with claims off, so a claim that does not
- * land never holds back the closes that would. `reads` are what the verdict judged: the caller's signing rule judges the
- * same. `plan` is solanaTeardownPlan over `accounts` (the caller's, so a plan that throws stays the caller's to handle).
+ * checkSolanaTeardown on those reads. When only its simulation refuses a plan that claims cashback, and the frame that
+ * carries the claims errs on both providers while every other frame is clean on both (solanaTeardownUnclaimed, review
+ * M1 of 11c963f9), it is planned, built, simulated and judged again with the failing program's claim off, then, if the
+ * other program's claim fails too, with that one off as well (review L1: at most two more simulations), so a claim that
+ * does not land never holds back the closes or the claim that would. Any other refusal stands: the caller reads again.
+ * `reads` are what the verdict judged: the caller's signing rule judges the same. `plan` is solanaTeardownPlan over
+ * `accounts` (the caller's, so a plan that throws stays the caller's to handle).
  */
 export async function solanaTeardownChecked(
   wallet: string,
@@ -827,16 +826,26 @@ export async function solanaTeardownChecked(
   chain: { blockhash: string; lastValidBlockHeight: number },
   simulate: (frames: readonly SolanaAssembled[]) => Promise<SolanaTeardownReads["simulations"]>,
 ): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
-  const once = async (p: SolanaTeardownPlan, unclaimed?: string) => {
+  const once = async (p: SolanaTeardownPlan, unclaimed?: SolanaTeardownUnclaimed) => {
     const frames = buildSolanaTeardown(wallet, p, chain);
     const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }) };
     return { plan: p, frames, reads, verdict: checkSolanaTeardown(frames.map((f) => f.wire), wallet, reads) };
   };
-  const first = await once(plan);
-  const unclaimed = solanaTeardownUnclaimed(first.verdict);
-  return unclaimed === null ? first : once(solanaTeardownPlan(wallet, accounts, unclaimed), unclaimed);
+  let t = await once(plan);
+  // each pass turns at least one more program's claim off, and there are two pump programs
+  for (let i = 0; i < 2; i++) {
+    const off = solanaTeardownUnclaimed(t.verdict, t.frames.map((f) => f.wire), t.reads.simulations, t.reads.unclaimed);
+    if (off === null || Object.keys(off).length === Object.keys(t.reads.unclaimed ?? {}).length) return t;
+    t = await once(solanaTeardownPlan(wallet, accounts, off), off);
+  }
+  return t;
 }
 
+/**
+ * One provider's simulation of one teardown frame (sigVerify false, replaceRecentBlockhash true, at `confirmed`),
+ * reading back the wallet and every given address: one call per group of three addresses with the wallet. Each answer
+ * is hostile: shape-checked, and every call must report the same wallet lamports; the first error is returned as err.
+ */
 export async function simulateSolanaTeardown(rpc: SolanaRpc, wire: Uint8Array, wallet: string, addresses: readonly string[]): Promise<SolanaTeardownSimulation> {
   const lamports = (a: unknown, what: string): bigint | null => {
     if (a === null) return null;
