@@ -73,7 +73,7 @@ const M = [
   ["review P1: a stale pass taken", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (false)"]], ID, "a stale pass"],
   ["review P1: a pass exactly 120 below the finals refused", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (pass.h <= Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)"]], ID, "a stale pass"],
   ["review P1 fold: freshness judged against the lower final", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (pass.h < Math.min(a.h, b.h) - VAULT_SYNC_LAG_MAX)"]], ID, "a stale pass"],
-  ["review P1: a scan's pass not held above its height", IDR, [["if (opts.after !== undefined && floor <= opts.after) throw", "if (false) throw"]], ID, "a stale pass"],
+  ["review P1: a scan's pass not held above its height", IDR, [["if (opts.after !== undefined && floor <= opts.after) throw", "if (false) throw"]], ID, "step 7's"],
   ["review P1: the second scan's pass at its bound height taken", AFT, [["openRestorePass(network, rpcs, passOpts(o, bound));", "openRestorePass(network, rpcs, passOpts(o, bound - 1));"]], ID, "second scan:"],
   ["review P1: the re-reads' pass at the restore's height taken", AFT, [["openRestorePass(network, rpcs, passOpts(o, restored.h));", "openRestorePass(network, rpcs, passOpts(o, restored.h - 1));"]], ID, "step 7's re-reads"],
   ["review P2: a pass's providers matched by name", IDR, [["own[0] !== rpcs[0] || own[1] !== rpcs[1]", "own[0].name !== rpcs[0].name || own[1].name !== rpcs[1].name"]], ID, "a stale pass"],
