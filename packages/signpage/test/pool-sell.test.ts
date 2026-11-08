@@ -2778,6 +2778,28 @@ test("a W that fully sells a second mint keeps the first mint's accounts in its 
   assert.deepEqual(w.owed.get(W.address)?.mints.map((m) => m.mint), [first.mint, MINT]);
 });
 
+// Review 5 of 38e59182, info: a pass's end writes the record as it is then, its mints merged with the pass's own, so a
+// record written meanwhile with fewer (a tab on an older page, which wrote its sell's mints alone) loses none of them
+test("a pass's end keeps the pass's mints when the record was written meanwhile with fewer", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const other = { mint: "So11111111111111111111111111111111111111112", program: TOKEN_PROGRAM };
+  await w.host.owed!.put({ address: W.address, l: wallet(AMOUNT).l.toString(), j: wallet(AMOUNT).j, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  const told = w.host.told;
+  let written = false;
+  w.host.told = (x) => {
+    if (!written && x.step === "rent_back") {
+      written = true;
+      w.owed.set(W.address, { ...w.owed.get(W.address)!, mints: [other] });
+    }
+    told?.(x);
+  };
+  // W still holds the token: the pass ends holds, the record kept
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(written, true);
+  assert.equal(w.told.at(-1)?.state, "holds", JSON.stringify(w.told));
+  assert.deepEqual(w.owed.get(W.address)?.mints.map((m) => m.mint).sort(), [MINT, other.mint].sort());
+});
+
 test("L3: a floor end keeps what W read as only when W stays under the floor at the cheapest deposit (both pages open): one under it only for a page's growth runs again", async () => {
   const { w, loaded } = await floorWorld();
   const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
