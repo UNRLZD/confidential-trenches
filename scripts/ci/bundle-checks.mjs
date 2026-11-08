@@ -61,6 +61,7 @@ export const CHILD_RUNS = [
   { key: "signpage-buy-route-events", host: "app", args: ["--local", "--host", "app"] },
   { key: "app-buy-route-strip", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
