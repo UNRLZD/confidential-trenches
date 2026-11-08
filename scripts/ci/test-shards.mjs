@@ -49,18 +49,25 @@ export function e2ePart(script, index, total) {
 // when the job does not run it
 export const MUTANTS_ELSEWHERE = { "@blindfill/wallet": "test-wallet" };
 
-// seconds each sweep took on CI, all of them in one runner at once (main d208a681: run 42399498783, job 128483988200),
-// keyed `<package folder>: <command>`; scripts/ci/test-shards.test.mjs fails on a key that names no sweep
+// seconds each sweep took on CI, rounded up, read from each part's own log (main ad1136e1's pull request #436: run
+// 42430511830, its six test-mutants jobs), keyed `<package folder>: <command>`; scripts/ci/test-shards.test.mjs fails on
+// a key that names no sweep
 export const MUTANT_SECONDS = {
-  'packages/kit: node --test "test/mutants/*.test.mjs"': 466,
-  "packages/kit: node test/evm-quote-mutants.mjs": 372,
-  "packages/signpage: node --test test/pool-deposit-mutants.test.mjs": 281,
-  "packages/signpage: node --test test/rules-pool-mutants.test.mjs": 197,
-  "packages/signpage: node --test test/rules-refund-mutants.test.mjs": 65,
-  "packages/signpage: node --test test/kit-version-mutants.test.mjs": 15,
+  'packages/kit: node --test "test/mutants/*.test.mjs"': 430,
+  "packages/kit: node test/evm-quote-mutants.mjs": 376,
+  "packages/signpage: node --test test/pool-deposit-mutants.test.mjs": 223,
+  "packages/signpage: node --test test/rules-pool-mutants.test.mjs": 71,
+  "packages/signpage: node --test test/rules-refund-mutants.test.mjs": 44,
+  "packages/signpage: node --test test/kit-version-mutants.test.mjs": 18,
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 15,
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 1/3": 226,
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 2/3": 301,
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 162,
+  // card helper-release-sweep-in-ci: not yet on CI; 30 s whole in one run off CI beside rules-refund-mutants (36 s
+  // there, 44 s above), so 30 x 44 / 36, rounded up
+  "apps/helper: node test/pool-evm/release-mutants.mjs": 37,
 };
-// a sweep with no measured time yet: about the middle one measured (197 s)
+// a sweep with no measured time yet: about the middle ones measured (162 and 223 s)
 export const NEW_SWEEP_SECONDS = 200;
 // a part's planned seconds at most, well inside test-mutants' 15 minutes; ci.yml's matrix lists enough parts to hold it
 export const PART_BUDGET_SECONDS = 540;

@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { isGecko, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
 import { HELPER_HOST, LISTS_URL, pickOf } from "./app-token-route.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-token-chart";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -107,7 +108,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   const rows = lb?.lists?.trending_1h ?? lb?.lists?.trending ?? null;
   const lists = { url: LISTS_URL, status: lr.status, as_of_ms: lb?.as_of_ms ?? null, trending: Array.isArray(rows) ? rows.map((r) => ({ mint: r?.token, symbol: r?.symbol, vol_1h_usd: r?.vol_1h_usd ?? null })) : null };
   const mint = lists.trending ? pickOf(lists.trending) : null;
-  const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), lists, candles: null, loads: [] };
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), lists, candles: null, loads: [] };
   if (mint) {
     // the helper's GeckoTerminal budget is shared: a 429 is read again after its Retry-After, as the page does
     let cr = null;
@@ -151,8 +152,9 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
       }
       await page.waitForTimeout(700);
       if (app) m = await app.evaluate(MEASURE).catch(() => m);
-      const shot = path.join(shots, `${i}-${w.name}.png`);
-      await page.screenshot({ path: shot });
+      // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+      const shot = `${i}-${w.name}.png`;
+      await page.screenshot({ path: path.join(shots, shot) });
       const rb = read ? await read.json().catch(() => null) : null;
       rec.loads.push({
         width: w.name,
@@ -180,7 +182,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const rec = await collect({ build: opt("--build", null), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
+    // the record leaves out where this machine kept the shots
+    if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);

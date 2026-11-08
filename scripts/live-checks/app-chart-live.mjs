@@ -34,6 +34,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-chart-live";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -229,8 +230,9 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
     }
   }
   const originEnd = app ? await app.evaluate(() => performance.timeOrigin).catch(() => null) : null;
-  const shot = path.join(shots, `${n}-${i}-${w.name}.png`);
-  await page.screenshot({ path: shot });
+  // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+  const shot = `${n}-${i}-${w.name}.png`;
+  await page.screenshot({ path: path.join(shots, shot) });
   await ctx.close();
   return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, errors, shot };
 }
@@ -262,7 +264,7 @@ async function watch(browser, pick, harness, shots, n) {
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
   const cands = await candidates();
-  const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), candidates: cands.map((c) => ({ chain: c.chain, symbol: c.symbol })), attempts: [], shots };
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), candidates: cands.map((c) => ({ chain: c.chain, symbol: c.symbol })), attempts: [], shots };
   let harness = null;
   if (build) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
@@ -295,7 +297,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const rec = await collect({ build: opt("--build", null), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
+    // the record leaves out where this machine kept the shots
+    if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
     for (const x of lines) console.log(x);
     console.log(`screenshots: ${rec.shots}`);

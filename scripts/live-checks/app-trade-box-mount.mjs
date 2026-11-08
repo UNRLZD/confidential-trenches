@@ -20,6 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { count, usd } from "../../apps/terminal/src/screens/discover/format.ts";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-trade-box-mount";
 export const APP_HOST = "https://confidential.unrealized.trade";
@@ -216,7 +217,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
     harness = await harnessRoute(path.resolve(build), "tap");
   }
   const browser = await launchBrowser("chromium");
-  const rec = { source: build ? `harness: the build ${build} at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), loads: [] };
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, signed out, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const [i, w] of LOADS.entries()) {
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
@@ -236,8 +237,9 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
         await page.waitForTimeout(400);
         load.page = await f.evaluate(MEASURE, w.isMobile ? "phone" : "desk");
         Object.assign(load, { route: load.page.route, state: load.page.state, shown: load.page.shown, symbol: load.page.symbol });
-        load.shot = path.join(shots, `${i}-${w.name}.png`);
-        await page.screenshot({ path: load.shot });
+        // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+        load.shot = `${i}-${w.name}.png`;
+        await page.screenshot({ path: path.join(shots, load.shot) });
         const sheetUp = () => f.locator('[data-sheet="signin"]').waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false);
         if (!w.isMobile) {
           await f.locator('.tkp-desk [data-testid="trade-cta"]').click({ timeout: 5_000 }).catch(() => {});
@@ -257,8 +259,8 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
           await page.screenshot({ path: path.join(shots, `${i}-${w.name}-signin.png`) });
         }
       } else {
-        load.shot = path.join(shots, `${i}-${w.name}.png`);
-        await page.screenshot({ path: load.shot });
+        load.shot = `${i}-${w.name}.png`;
+        await page.screenshot({ path: path.join(shots, load.shot) });
       }
       const tb = token ? await token.json().catch(() => null) : null;
       const row = tb?.row ?? null;
@@ -291,7 +293,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const rec = await collect({ build: opt("--build", null), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
+    // the record leaves out where this machine kept the shots
+    if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);

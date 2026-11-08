@@ -12,16 +12,19 @@
 //   relayer, byte for byte), refused when above the device's own fee_max (../../../wallet/src/withdraw/feemax.ts, LD5 on
 //   the device's own reads), taken at the largest register_deposit any A can need (the token's storage minimum,
 //   readTokenStorageMin), so the form names no A before a note is picked. A refusal leaves the fee unread (Busy · Retry).
-// - No hand-off on any build (withdrawFormDeps gives none, so the form draws Withdraw pending): the wallet's withdraw path
-//   pays the note's arming account A_{l,j} (request.ts: the kit makes every withdrawal's recipient A, W:671), and the
-//   move from A to the typed account (the plain move out row, W:929; card wallet-withdraw-move-out) is not on this page
-//   yet. That card gives the form withdrawHandoff: the relayer's quote again for the typed amount (above the drawn fee:
-//   the form draws the new fee and nothing is proved), the vault's two trees read by the kit's vaultSync on the pair at
-//   one block (their roots the vault's), T the lower of the pair's final block times (agreeing within 60 s, W:650), then
-//   the wallet's withdrawRequest (the kit's request and circuit input, this page's prover worker, the picked note's own
-//   A and its register_deposit, fee_max bound again; the note RESERVED with its request body) and relayWithdraw (POST
-//   /v1/withdraw, followed on the vault's pages to landed, expired or unmatched). The seed is zeroed once the request
-//   is made and the relay has taken its one derivation; the wait ends on sign out or at HANDOFF_WAIT_MAX_MS.
+// - The hand-off (card wallet-withdraw-move-out), offered wherever the release names a vault and a relayer (the
+//   testnet build today; SIGN_HOST's once the release writes mainnet's relayer with its vault): the vault pays the
+//   NEAR account the user typed straight, as Privacy Pools v1 and the exit tool's vault withdraw row (W:931) do, with
+//   fund_recipient false and register_deposit the token's minimum, read on the pair naming no account (typedRegisterDepositOf); A ties
+//   nothing more (W:1021), so no hop through the note's A is made. The relayer's quote again for the typed amount
+//   (above the drawn fee: the form draws the new fee and nothing is proved), the vault's two trees read by the kit's
+//   vaultSync on the pair at one block (their roots the vault's), T the lower of the pair's final block times (agreeing
+//   within 60 s, W:650), then the wallet's withdrawRequest (this page's prover worker, fee_max bound again; the note
+//   RESERVED with its request body) and relayWithdraw (POST /v1/withdraw, followed on the vault's pages to landed,
+//   expired or unmatched). An own landing is then followed to its arrival (../../../wallet/src/withdraw/arrival.ts:
+//   the spend row on the pair paid to the typed account, refunded, or paid elsewhere). The seed is zeroed once the
+//   request is made and the relay has taken its one derivation; the wait ends on sign out or at HANDOFF_WAIT_MAX_MS.
+//   Nothing is signed or sent after the relay, so a page that dies after it leaves nothing to send again.
 // - withdrawSettle, on every load: the RESERVED notes a closed page left are followed to settled from their stored
 //   request (landed, expired, or SPENT on a spend whose change is not the device's); a HELD one no live tab holds the
 //   note store frees when it opens.
@@ -31,7 +34,8 @@ import type { VaultProver } from "../../../kit/src/prover/prove.ts";
 import { VaultTree } from "../../../kit/src/vault/inputs.ts";
 import { vaultSync, vaultSyncStart } from "../../../kit/src/vault/sync.ts";
 import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, nearRpc } from "../../../kit/src/near/networks.ts";
-import { armingRegisterDepositOf, readTokenStorageMin } from "../../../wallet/src/arming/accounts.ts";
+import { readTokenStorageMin, typedRegisterDepositOf } from "../../../wallet/src/arming/accounts.ts";
+import { arrivalOf, type ArrivalOutcome, withdrawArrival } from "../../../wallet/src/withdraw/arrival.ts";
 import { changeIndex } from "../../../wallet/src/derive/index.ts";
 import { readNotes, type NoteRecord, type NoteStore } from "../../../wallet/src/notes/store.ts";
 import { POOL_TESTNET } from "../../../wallet/src/pool/network.ts";
@@ -74,10 +78,14 @@ export type HandoffOver = {
   relay?: (seed64: Uint8Array, req: WithdrawRequest, deps: RelayDeps) => Promise<RelayOutcome>;
   /** HANDOFF_WAIT_MAX_MS otherwise. */
   waitMs?: number;
+  /** withdrawArrival otherwise. */
+  arrival?: typeof withdrawArrival;
+  /** The pair the arrival is read on (rpcs otherwise). */
+  arrivalRpcs?: readonly [RelayRpc, RelayRpc];
 };
 
 /** What a tap's hand-off ends in: the relay's outcome, or a fresh quote above the fee the form drew (nothing proved). */
-export type HandoffEnd = { kind: RelayOutcome["kind"] } | { kind: "fee"; fee: bigint };
+export type HandoffEnd = { kind: RelayOutcome["kind"] | ArrivalOutcome["kind"] } | { kind: "fee"; fee: bigint };
 
 const pairOf = (network: NearNetwork): readonly [RelayRpc, RelayRpc] => {
   const net = NEAR_NETWORKS[network];
@@ -125,15 +133,16 @@ const waitSignal = (page: HandoffPage, over: HandoffOver): AbortSignal => {
 };
 
 /**
- * The form's reads on the build's network. No hand-off on any build: the wallet's withdraw path pays the note's A, and
- * the move from A to the typed account (card wallet-withdraw-move-out) is not on this page yet, so Withdraw is drawn
- * pending (./form.ts data-pending) and nothing is proved or sent from the form.
+ * The form's reads on the build's network, and the hand-off wherever the release names a vault and a relayer
+ * (withdrawHandoff; elsewhere none, and Withdraw is drawn pending, ./form.ts data-pending).
  */
 export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): WithdrawFormDeps {
   const n = netOf(over);
   const { network, net, rpcs, priceRpcs, relayer, scope, fetchFn } = n;
   const available = async (): Promise<bigint> => (scope === null ? 0n : withdrawable(await readNotes(await page.store()), scope));
+  const handoff = withdrawHandoff(page, over);
   return {
+    ...(handoff === null ? {} : { handoff }),
     network,
     rpcs: over.rpcs ?? [nearRpc(net.fastnear[0]), nearRpc(net.drpc)],
     available,
@@ -153,8 +162,8 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
 }
 
 /**
- * The tap's hand-off, for the card that pays the typed account (wallet-withdraw-move-out) to give the form; null where
- * the network names no vault or relayer. A fresh quote above the fee the form drew ends it before any proof
+ * The tap's hand-off: the vault pays the typed account straight (card wallet-withdraw-move-out); null where the network
+ * names no vault or relayer. A fresh quote above the fee the form drew ends it before any proof
  * ({ kind: "fee" }: the form draws the new fee). The seed is zeroed once the request is made and the relay has read it
  * (relayWithdraw takes its one derivation before its first await, relay.ts); the relay's wait ends on sign out or at
  * HANDOFF_WAIT_MAX_MS, its note left RESERVED with its request for the settle pass (withdrawSettle).
@@ -176,6 +185,8 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
     const notes = await page.notes();
     const seed = await page.seed64();
     let going: Promise<RelayOutcome>;
+    // one deadline per tap: the relay's wait and the arrival read after it share HANDOFF_WAIT_MAX_MS
+    const signal = waitSignal(page, over);
     try {
       const req = await withdrawRequest({
         seed64: seed,
@@ -184,26 +195,27 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         vaultId: vault,
         token: net.usdc,
         ...trees,
-        registerDepositOf: armingRegisterDepositOf(network, rpcs),
+        registerDepositOf: typedRegisterDepositOf(network, rpcs),
         feeRecipient: quote.feeRecipient,
         relayFee: quote.relayFee,
         network,
         rpcs,
         priceRpcs,
         amount: w.amount,
+        to: w.recipient,
         deadlineMs: withdrawDeadlineMs(ns),
         blockTimestampNanosec: ns,
       });
-      going = relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal: waitSignal(page, over) });
+      going = relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal });
     } finally {
       seed.fill(0);
     }
-    return { kind: (await going).kind };
+    return { kind: await arrivedOf(await going, w.recipient, n, over, signal) };
   };
 }
 
 /** What one settle pass did, by note id. */
-export type SettlePass = { outcomes: Record<string, RelayOutcome["kind"] | "spent" | "failed"> };
+export type SettlePass = { outcomes: Record<string, RelayOutcome["kind"] | ArrivalOutcome["kind"] | "spent" | "failed"> };
 
 /**
  * The settle pass a page runs on load (modelled on ../../../wallet/src/pool/solana-restore.ts solanaSettleReserved):
@@ -228,11 +240,17 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
   if (due.length === 0) return out;
   const seed = await page.seed64();
   const going: [string, Promise<RelayOutcome>][] = [];
+  const typed = new Map<string, string>(); // note id -> the typed account a stored request pays straight
+  const signals = new Map<string, AbortSignal>(); // note id -> its one deadline, shared by its relay and its arrival
   try {
     for (const n of due) {
       // one note's bad stored request (or a relay that throws at once) fails that note alone; the pass goes on
       try {
-        going.push([n.id, relay(seed, storedRequest(n), { notes, network, rpcs, priceRpcs, fetchFn, signal: waitSignal(page, over) })]);
+        const req = storedRequest(n);
+        if (req.body.fund_recipient === false) typed.set(n.id, req.recipient);
+        const signal = waitSignal(page, over);
+        signals.set(n.id, signal);
+        going.push([n.id, relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal })]);
       } catch (e) {
         going.push([n.id, Promise.reject(e)]);
       }
@@ -240,9 +258,10 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
   } finally {
     seed.fill(0);
   }
-  // each is awaited in turn below: a later note's refusal waits for its turn with a handler, never unhandled meanwhile
-  for (const [, p] of going) p.catch(() => {});
-  for (const [id, p] of going) {
+  // each note is followed from its own relay to its own arrival, all at once, each under its own deadline: a note held
+  // to its bound never cuts another note's arrival (review of a6903d91, N1). Each is awaited at once with a handler,
+  // so a later note's refusal is never unhandled while an earlier one waits.
+  const settled = going.map(async ([id, p]): Promise<SettlePass["outcomes"][string]> => {
     try {
       const o = await p;
       // a spend whose new leaf is not this seed's change: only a ragequit (context 0, vault.md l.99) inserts no change,
@@ -250,13 +269,35 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
       // RESERVED, "unmatched" for the form to show, never dropped
       if (o.kind === "unmatched" && o.spend.context === 0n) {
         await notes.move(id, "RESERVED", "SPENT");
-        out.outcomes[id] = "spent";
-      } else out.outcomes[id] = o.kind;
+        return "spent";
+      }
+      return typed.get(id) === undefined ? o.kind : await arrivedOf(o, typed.get(id)!, n, over, signals.get(id)!);
     } catch {
-      out.outcomes[id] = "failed";
+      return "failed";
     }
-  }
+  });
+  const ends = await Promise.all(settled);
+  going.forEach(([id], i) => (out.outcomes[id] = ends[i]!));
   return out;
+}
+
+/**
+ * After a landing of a withdrawal that pays the typed account straight: what the spend row says of the payout to that
+ * account (../../../wallet/src/withdraw/arrival.ts: paid to it, refunded, or paid elsewhere). An own landing is followed
+ * on the pair until its payout has run, under the same deadline as its relay (`signal`); a landing by another attempt of
+ * these words (another device, own false) ends on the row already read, so one paid to another account reads
+ * "elsewhere". The relay's kind otherwise. A wait cut short (sign out, the bound, a read that never settles), or a row
+ * still in flight, ends "landed": nothing is sent or signed after the relay, so a rerun has nothing to send again.
+ */
+async function arrivedOf(o: RelayOutcome, recipient: string, n: Net, over: HandoffOver, signal: AbortSignal): Promise<RelayOutcome["kind"] | ArrivalOutcome["kind"]> {
+  if (o.kind !== "landed") return o.kind;
+  if (!o.own) return arrivalOf(o.spend, recipient)?.kind ?? "landed";
+  try {
+    const a = await (over.arrival ?? withdrawArrival)({ network: n.network, rpcs: over.arrivalRpcs ?? n.rpcs, nullifierHash: o.spend.nullifierHash, recipient, signal });
+    return a.kind;
+  } catch {
+    return "landed";
+  }
 }
 
 // A RESERVED note's request as withdrawRequest made it: its body as stored, the change and refund refs of its label.

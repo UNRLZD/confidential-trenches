@@ -70,10 +70,10 @@ test("recorded good answer with the helper up: the health parts and CORS headers
   assert.ok(r.lines.includes("ok  from a stranger's Origin, Access-Control-Allow-Origin is absent"));
 });
 
-test("recorded real run on GitHub main and kit-v1, before the cap was added: the cap and its code missing: FAIL", async () => {
+test("recorded real run on GitHub main and kit-v1, before the cap was added: the cap and its code missing, fund_recipient still true: FAIL", async () => {
   const r = await check({ fetchFn: replay(REC.live_kit_v1), now: Date.parse("2026-11-01T08:32:10Z"), tag: "kit-v1", requireHealth: true });
   assert.equal(r.ok, false);
-  assert.deepEqual(failed(r), ["main", "kit-v1"].flatMap((ref) => [`BAD ${ref}: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES`, `BAD ${ref}: every frozen value equals its pin: differs: HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS`]));
+  assert.deepEqual(failed(r), ["main", "kit-v1"].flatMap((ref) => [`BAD ${ref}: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES`, `BAD ${ref}: every money-path shape equals its pin: differs: HelperWithdrawRequest`, `BAD ${ref}: every frozen value equals its pin: differs: HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS`]));
   assert.ok(r.lines.includes("ok  main's v1.ts equals the tag kit-v1's byte for byte"));
 });
 
@@ -143,7 +143,9 @@ test("more bad answers, each caught by exactly the lines named", () => {
     ["a third intent kind", (t) => t.replace("export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw;", 'export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw | { intent: "mt_withdraw" };'), [/intent kinds \[ft_withdraw,mt_withdraw,transfer\]/, /^every money-path shape equals its pin: differs: HelperIntent$/]],
     ["the deposit carried by ft_withdraw", (t) => t.replace('export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_transfer_call",', 'export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_withdraw",'), [/HelperBindDeposit's action is HelperFunctionCall<"ft_withdraw"/, /^every money-path shape equals its pin: differs: HelperBindDeposit$/]],
     ["the onward receiver loosened", (t) => t.replace("  receiver_id: typeof HELPER_ONWARD_RECEIVER;", "  receiver_id: HelperNearAccount;"), [/^every money-path shape equals its pin: differs: HelperOnwardArgs$/]],
-    ["fund_recipient optional", (t) => t.replace("  fund_recipient: true;", "  fund_recipient?: boolean;"), [/^every money-path shape equals its pin: differs: HelperWithdrawRequest$/]],
+    ["fund_recipient optional", (t) => t.replace("  fund_recipient: boolean;", "  fund_recipient?: boolean;"), [/^every money-path shape equals its pin: differs: HelperWithdrawRequest$/]],
+    // card wallet-withdraw-move-out widened it to a boolean (the vault pays a typed NEAR account straight): back to kit-v1's true fails
+    ["fund_recipient pinned true again", (t) => t.replace("  fund_recipient: boolean;", "  fund_recipient: true;"), [/^every money-path shape equals its pin: differs: HelperWithdrawRequest$/]],
     ["a base64 signature", (t) => t.replace("  signature: HelperEd25519Signature;", "  signature: HelperBase64;"), [/^every money-path shape equals its pin: differs: HelperSignedIntent$/]],
     ["status items unbounded", (t) => t.replace("export const HELPER_STATUS_ITEMS_MAX = 100;", "export const HELPER_STATUS_ITEMS_MAX = 1000;"), [/^every frozen value equals its pin: differs: HELPER_STATUS_ITEMS_MAX$/]],
     ["salt in any case", (t) => t.replace("export const HELPER_SALT_PATTERN = /^[0-9a-f]{32}$/;", "export const HELPER_SALT_PATTERN = /^[0-9a-fA-F]{32}$/;"), [/^every frozen value equals its pin: differs: HELPER_SALT_PATTERN$/]],

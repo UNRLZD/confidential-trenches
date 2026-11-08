@@ -21,6 +21,7 @@ import { realpathSync, writeFileSync } from "node:fs";
 import { request } from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-release-sri";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -163,7 +164,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const harness = a.includes("--harness");
     const root = path.resolve(opt("--root", path.join(REPO, "apps/terminal/dist")));
-    const answer = harness ? { ...(await readHarness(root)), source: `harness, ${root}` } : await read(opt("--url", URL_));
+    const answer = harness ? { ...(await readHarness(root)), source: `harness, ${named(root)}` } : await read(opt("--url", URL_));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(answer, null, 1)}\n`);
     const { ok, lines } = judge(answer);
     for (const l of lines) console.log(l);

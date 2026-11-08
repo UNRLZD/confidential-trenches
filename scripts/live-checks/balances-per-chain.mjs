@@ -30,6 +30,7 @@ import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { watchErrors } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "balances-per-chain";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -189,7 +190,7 @@ export async function collect({ build, shots }) {
   mkdirSync(shots, { recursive: true });
   const browser = await launchBrowser("chromium");
   const handler = await route(build);
-  const rec = { at: new Date().toISOString(), browser: browser.version(), source: build ? `harness, terminal build ${path.relative(REPO, build) || build}` : `live ${APP_HOST}`, answer: ANSWER, runs: [] };
+  const rec = { at: new Date().toISOString(), browser: browser.version(), source: build ? `harness, terminal build ${named(build)}` : `live ${APP_HOST}`, answer: ANSWER, runs: [] };
   try {
     for (const w of WIDTHS) rec.runs.push(await runOne(browser, w, shots, handler));
   } finally {
