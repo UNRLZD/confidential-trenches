@@ -7,6 +7,7 @@
 // its tallest (8% of the window) and its 44 px grab handle.
 // The geometry itself (the toast's box does not meet the head row's at 360, 390 and 430) is the terminal's own browser
 // run: apps/terminal/test/trade-sheet/run.mjs.
+// After: app
 //   node scripts/live-checks/app-toast-clears-sheet-head.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-toast-clears-sheet-head.mjs --root <dir> [--record <file>]   the same read on a local
 //     build (apps/terminal/dist, built first) read from disk
@@ -18,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-toast-clears-sheet-head";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 /** The highest `top` the open sheet's toast may have, in px. */
 export const MAX_TOP = 8;
 const IN_SHEET = ".tsh[data-open=true] .rs-toast";

@@ -19,6 +19,7 @@
 //     grid, oldest first, USD values decimal strings. src is "geckoterminal" for a mint the lists do not hold, else
 //     "chain" or "chain,geckoterminal" (the helper's own bars, the vendor's only before them,
 //     apps/helper/src/data/solana/trades.ts); when the bars include ours, own_from_s (before as_of_ms) is our first bar.
+// After: helper
 //   node scripts/live-checks/market-data-solana-token.mjs [--base <url>] [--token <mint>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more page reads.
 import "../net-window.mjs";
@@ -26,8 +27,8 @@ import { writeFileSync } from "node:fs";
 import { ROW_FIELDS as TERMINAL_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 
 const KEY = "market-data-solana-token";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const MINT = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
 export const READS = {
   token: (m) => `/v1/market/token?chain=solana&token=${m}`,

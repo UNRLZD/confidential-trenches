@@ -306,7 +306,7 @@ export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze
  * and neither testnet has a fourth keyless operator that answers a W's read from the browser (below), so there a second
  * provider out leaves one.
  * Each answers a W's Transfer read (eth_getLogs, Transfer's topic, topic 2 = the W, no address) at the chain's head and
- * 2,000,000 blocks back, and a CORS preflight from https://sign.confidential.unrealized.trade (POST, content-type)
+ * 2,000,000 blocks back, and a CORS preflight from https://confidential.unrealized.trade (POST, content-type)
  * with 204 or 200 and that origin or *. testnet-run takes these too; evmRestoreNotes never names a W to a provider of
  * the pool's own list, so one that is (Robinhood testnet's own and Base Sepolia's Pocket, below) is dropped from the W
  * reads there, and thirdweb takes its seat. None is an operator of the kit's providers (evmPoolVenues) but two, each

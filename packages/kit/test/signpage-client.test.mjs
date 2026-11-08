@@ -16,8 +16,8 @@ const C = await import(`${SRC}signpage/client.ts`);
 const S = await import(`${SRC}signpage/schema.ts`);
 const MSG = await import(`${SRC}signpage/messages.ts`);
 
-const URL_ = "https://sign.confidential.unrealized.trade/";
-const ORIGIN = "https://sign.confidential.unrealized.trade";
+const URL_ = "https://confidential.unrealized.trade/";
+const ORIGIN = "https://confidential.unrealized.trade";
 const DOWN = { ok: false, error: { code: "signpage_down" } };
 const TIMEOUT = { ok: false, error: { code: "client_timeout" } };
 
@@ -152,7 +152,7 @@ test("the hidden iframe: exact attributes, SIGN_HOST's release URL with no query
 });
 
 test("only an https release URL with no query, fragment or credentials is taken", () => {
-  for (const bad of ["http://sign.confidential.unrealized.trade/", `${URL_}?flow=x`, `${URL_}#x`, "https://u:p@sign.confidential.unrealized.trade/", "https://sign.confidential.unrealized.trade"]) {
+  for (const bad of ["http://confidential.unrealized.trade/", `${URL_}?flow=x`, `${URL_}#x`, "https://u:p@confidential.unrealized.trade/", "https://confidential.unrealized.trade"]) {
     assert.throws(() => C.createSignpageClient({ url: bad, host: makeHost().host }), TypeError, bad);
   }
 });
@@ -790,9 +790,9 @@ test("answers dropped with no state change: wrong origin, wrong source, wrong id
   sparse.length = 2 ** 32 - 1;
   const cases = [
     ["a same-site sibling", good, "https://evil.ct.test", win, "origin"],
-    ["APP_HOST itself", good, "https://confidential.unrealized.trade", win, "origin"],
-    ["SIGN_HOST over http", good, "http://sign.confidential.unrealized.trade", win, "origin"],
-    ["SIGN_HOST with a port", good, "https://sign.confidential.unrealized.trade:8443", win, "origin"],
+    ["APP_HOST itself", good, "https://ct-app.unrealized.trade", win, "origin"],
+    ["SIGN_HOST over http", good, "http://confidential.unrealized.trade", win, "origin"],
+    ["SIGN_HOST with a port", good, "https://confidential.unrealized.trade:8443", win, "origin"],
     ["a cross-site host", good, "https://app.other.test", win, "origin"],
     ["SIGN_HOST's origin from another window", good, ORIGIN, new FakeChild(), "source"],
     ["SIGN_HOST's origin with no source", good, ORIGIN, null, "source"],

@@ -8,15 +8,16 @@
 //     no_ready_set and over_held, which no other kind has);
 //   - with --record-file <run.md>: every "Tx: solana <signature>" line of the run record is a landed transaction with no
 //     error on two public RPCs (api.mainnet-beta.solana.com and solana-rpc.publicnode.com).
+// After: sign
 //   node scripts/live-checks/signpage-solana-trade.mjs [--record-file <run.md>] [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the answer read; --answer replays one (the test's).
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const TRADE_HOSTS = [
-  "https://api.confidential.unrealized.trade",
+  "https://ct-api.unrealized.trade",
   "https://solana-rpc.publicnode.com",
   "https://sender.helius-rpc.com",
   "https://mainnet.block-engine.jito.wtf",

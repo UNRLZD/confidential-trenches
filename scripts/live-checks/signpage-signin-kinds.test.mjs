@@ -154,13 +154,13 @@ test("planted on the good answer: a recorded 429 names its resource's origin and
   const kept = [];
   watch({ on: (ev, f) => (hooks[ev] = f) }, kept);
   const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
-  hooks.console(msg(text, { url: "https://api.confidential.unrealized.trade/v1/relay/status?id=abc" }));
+  hooks.console(msg(text, { url: "https://ct-api.unrealized.trade/v1/relay/status?id=abc" }));
   hooks.console({ type: () => "warning", text: () => "a warning", location: () => ({ url: "https://x.example/" }) });
   hooks.console(msg("Uncaught boom", undefined));
   hooks.pageerror(new Error("boom"));
-  assert.deepEqual(kept, [`console: ${text} (https://api.confidential.unrealized.trade/v1/relay/status)`, "console: Uncaught boom", "pageerror: boom"]);
+  assert.deepEqual(kept, [`console: ${text} (https://ct-api.unrealized.trade/v1/relay/status)`, "console: Uncaught boom", "pageerror: boom"]);
   for (const [line, want] of [
-    [kept[0], `console: ${text} (https://api.confidential.unrealized.trade/v1/relay/status)`],
+    [kept[0], `console: ${text} (https://ct-api.unrealized.trade/v1/relay/status)`],
     [kept[1], "console: Uncaught boom"],
     [kept[2], "pageerror: boom"],
   ]) {

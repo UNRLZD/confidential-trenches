@@ -11,6 +11,7 @@
 //   - Integrity-Policy, Origin-Agent-Cluster, HSTS, COOP, CORP, Referrer-Policy, X-Content-Type-Options and
 //     Permissions-Policy equal the policy's, and no X-Frame-Options, Cross-Origin-Embedder-Policy or report-only CSP is
 //     sent.
+// After: sign
 //   node scripts/live-checks/signpage-skeleton.mjs [--url <url>] [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes the answer the run read ({ url, status, headers }) to <file>, so the check's test can replay it.
 // packages/signpage/scripts/deploy.mjs runs judge() on the build's _headers before any upload.
@@ -20,11 +21,11 @@ import { fileURLToPath } from "node:url";
 import { evmOrigins } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "signpage-skeleton";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const URL_ = `${SIGN}/`;
-export const APP = "https://confidential.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const STRANGER = "https://example.com";
-const HELPER = "api.confidential.unrealized.trade";
+const HELPER = "ct-api.unrealized.trade";
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org";
 // the Solana trade's own (card signpage-solana-trade): provider A of LD1 and the kit's three device-direct send paths
 // (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps

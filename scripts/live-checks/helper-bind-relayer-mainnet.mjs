@@ -11,6 +11,7 @@
 // nothing and moves no money.
 // Before mainnet-v1.json exists there is no mainnet vault to carry for: scripts/ci/helper-live-checks.mjs lists the check
 // not-applicable then, and run by hand it stops with exit 2.
+// After: helper
 //   node scripts/live-checks/helper-bind-relayer-mainnet.mjs --commit <sha> [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,8 +19,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KEY = "helper-bind-relayer-mainnet";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The mainnet vault's deploy record: the bind carry never falls back to mainnet-test.json (bind-relayer-key.sh). */
 export const RECORD = path.join(HERE, "../../contracts/vault/deployments/mainnet-v1.json");

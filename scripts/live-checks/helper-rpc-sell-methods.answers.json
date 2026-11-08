@@ -1,6 +1,6 @@
 {
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "at": "2026-11-07T04:08:21.178Z",
   "methods": [
    "getAccountInfo",
@@ -32,7 +32,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"object\"}"
    },
@@ -43,7 +43,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"object\"}"
    },
@@ -54,7 +54,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"object\"}"
    },
@@ -65,7 +65,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":\"object\"}"
    },
@@ -76,7 +76,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32602,\"message\":\"Invalid param: not a Token mint\"}}"
    },
@@ -87,7 +87,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":\"object\"}"
    },
@@ -98,7 +98,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":\"object\"}"
    },
@@ -109,7 +109,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"Transaction simulation failed: Transaction did not pass signature verification\"}}"
    },
@@ -120,7 +120,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":\"object\"}"
    },
@@ -131,7 +131,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":null}"
    },
@@ -142,7 +142,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":11,\"result\":444391060}"
    },
@@ -153,7 +153,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":12,\"result\":1488440}"
    },
@@ -164,7 +164,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":13,\"result\":\"object\"}"
    },
@@ -175,7 +175,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":14,\"result\":466372277}"
    },
@@ -186,7 +186,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":15,\"result\":\"array\"}"
    },
@@ -197,7 +197,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":16,\"result\":\"object\"}"
    },
@@ -208,7 +208,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":17,\"result\":null}"
    },
@@ -219,7 +219,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "ea97ceff8da00ea1e80207d275d08ad8d61818a0",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":18,\"result\":\"object\"}"
    }
@@ -258,7 +258,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"object\"}"
    },
@@ -269,7 +269,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"object\"}"
    },
@@ -280,7 +280,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"object\"}"
    },
@@ -291,7 +291,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":\"object\"}"
    },
@@ -302,7 +302,7 @@
     "status": 429,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
      "retry-after": "10"
     },
     "body": "{\"error\":{\"code\":\"rate_limited\"}}"
@@ -314,7 +314,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":\"object\"}"
    },
@@ -325,7 +325,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":\"object\"}"
    },
@@ -336,7 +336,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"Transaction simulation failed\"}}"
    },
@@ -347,7 +347,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":\"object\"}"
    },
@@ -358,7 +358,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":null}"
    },
@@ -369,7 +369,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":11,\"result\":444391041}"
    },
@@ -380,7 +380,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":12,\"result\":1488440}"
    },
@@ -391,7 +391,7 @@
     "status": 200,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":13,\"result\":\"object\"}"
    },
@@ -402,7 +402,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -413,7 +413,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -424,7 +424,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -435,7 +435,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    },
@@ -446,7 +446,7 @@
     "status": 400,
     "headers": {
      "x-helper-commit": "c297f61711f3a9c9c2b1ff2e27b4bb1da0634970",
-     "access-control-allow-origin": "https://sign.confidential.unrealized.trade"
+     "access-control-allow-origin": "https://confidential.unrealized.trade"
     },
     "body": "{\"error\":{\"code\":\"method_not_allowed\"}}"
    }

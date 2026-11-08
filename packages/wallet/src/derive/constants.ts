@@ -1,8 +1,14 @@
 // The wallet's frozen identifiers (docs/plan1/wallet.md §2.2 at research ffcba5e; frozen with the kit at Nov 1 06:00Z).
-// Changing SIGN_HOST or the PRF input changes every passkey user's seed (wallet.md:56, S-B8), so neither ever changes.
+// Changing SIGN_HOST or the PRF input changes every passkey user's seed (wallet.md:56, S-B8), so neither changes again.
+// SIGN_HOST moved once, before any user (card hosts-main-on-top, owner 1 Nov 16:45Z, owner-decisions.md:357), from its
+// child "sign." to this name: a passkey made there derives a different seed here, the typed 12 words do not.
 
-// The signing page's permanent address and the passkey's rp.id (owner-decisions.md:263; wallet.md:47, :54-56).
-export const SIGN_HOST = "sign.confidential.unrealized.trade";
+// The signing page's permanent address and the passkey's rp.id (owner-decisions.md:263, :357; wallet.md:47, :54-56).
+// It is the main address, the one the address bar shows while trading. WebAuthn lets a page on any child host claim a
+// parent rp.id, so no name under it may serve anything else: the terminal's code is on ct-app.unrealized.trade and the
+// helper on ct-api.unrealized.trade, siblings that cannot claim it (scripts/ci/host-children.mjs refuses a child in the
+// tree, the live check hosts-main-on-top a child or wildcard in DNS).
+export const SIGN_HOST = "confidential.unrealized.trade";
 
 // The passkey PRF input, and the step from the PRF output to the 16 bytes of entropy (wallet.md:47):
 // entropy = HKDF-SHA256(PRF output, salt "confidential-trenches/v1", info "wallet/entropy", 16 B).

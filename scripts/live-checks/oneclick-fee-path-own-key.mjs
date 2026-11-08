@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card oneclick-fee-path-own-key on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds,
+// Live check of card oneclick-fee-path-own-key on SIGN_HOST (https://confidential.unrealized.trade). What it holds,
 // and only that: the served /app.js is the one index.html pins (its sha384), and in it, read from a real parse of the
 // bundle (rolldown's parseAst, ESTree), the device's 1Click fee by path (packages/kit/src/checks/oneclick.ts
 // oneClickFeeBps) reads its two fee tables only as own keys and refuses any other path by name:
@@ -27,6 +27,7 @@
 // assignment to an earlier var (`var T; ... T = {...}`) rather than by its declarator.
 // This file reaches no package code (the import check holds it): its test holds TABLES to the kit's own exports. The
 // parser is the kit's own dev dependency, loaded through the kit's package.json as pool-sol-deploy.mjs loads snarkjs.
+// After: sign
 //   node scripts/live-checks/oneclick-fee-path-own-key.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -37,7 +38,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "oneclick-fee-path-own-key";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const REFUSAL = "no such 1Click path";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");

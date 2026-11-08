@@ -85,7 +85,7 @@ export interface TradeHost {
 
 /** The release's helper: the wallet's RELEASE_HELPER (withdraw/relay.ts; test/trade.test.ts holds them equal), not imported, so
  * the page's bundle carries none of the relay's NEAR code. */
-export const TRADE_HELPER = "https://api.confidential.unrealized.trade";
+export const TRADE_HELPER = "https://ct-api.unrealized.trade";
 
 /** Provider A of LD1, reached from the device: PublicNode's keyless Solana RPC (the kit's dry run's, solana-flow-dry.ts). */
 export const SOLANA_PROVIDER_A = "https://solana-rpc.publicnode.com";

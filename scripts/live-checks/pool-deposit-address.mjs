@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-deposit-address on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card pool-deposit-address on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified:
 //   - naming ahead (deposit-name.ts): the page's namer is handed the page's pinned pools less NEAR, each with its scope
 //     (main.ts pagePoolScopes), names the vault's scope and each pool's, each in its own try (one scope that fails names
@@ -17,6 +17,7 @@
 // What each does is held by the card's tests (packages/signpage/test/deposit-name.test.ts and
 // pool-deposit-address.test.ts); the recorded answers are facts() over each tree's packages/signpage/index.html and
 // public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/pool-deposit-address.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -25,7 +26,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-deposit-address";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const N = "[\\w$]+";
 const esc = (s) => s.replace(/[$]/g, "\\$");

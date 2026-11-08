@@ -22,6 +22,7 @@
 //   Every answer carries a full-sha X-Helper-Commit, equal to --commit when given.
 // Not readable live: check 7's refusal of a register_deposit other than the minimum (only a valid proof reaches check 7;
 // apps/helper/src/withdraw/send.test.ts holds it).
+// After: helper --commit {commit}
 //   node scripts/live-checks/relayer-cost-guards.mjs [--commit <sha>] [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -32,8 +33,8 @@ import { b58decode, plant, RENT_RPCS } from "./helper-pool-senders.mjs";
 import { PAIRS, TOKENS } from "./relayer-withdraw-fee.mjs";
 
 const KEY = "relayer-cost-guards";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const PIN = REGISTER_DEPOSIT_MAX;
 const SHA = /^[0-9a-f]{40}$/;
 const DEC = /^(0|[1-9][0-9]{0,38})$/;

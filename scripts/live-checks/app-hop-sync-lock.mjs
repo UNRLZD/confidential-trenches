@@ -7,6 +7,7 @@
 // the real shell does and never drawing a screen, which holds that moment open. At 390 x 844 (phone, dpr 2, touch) and
 // 1440 x 900 (desktop, dpr 1): Sign in, then the passkey way; once the shell has answered, the same way again. Want one
 // signin.open, the way still locked, and no line under it.
+// After: app
 //   node scripts/live-checks/app-hop-sync-lock.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-hop-sync-lock.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
@@ -23,9 +24,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-hop-sync-lock";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HELPER_HOST = "https://api.confidential.unrealized.trade";
+const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signed-out account the stand-in shell sends: the sign-in sheet offers its ways. */
 export const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 export const WIDTHS = [

@@ -28,7 +28,7 @@ const SIGN_HEADERS = `# a comment
   Cache-Control: public, max-age=31536000, immutable
 `;
 const APP_HEADERS = `/*
-  Content-Security-Policy: default-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade
+  Content-Security-Policy: default-src 'none'; frame-ancestors https://confidential.unrealized.trade
   Integrity-Policy: blocked-destinations=(script)
 `;
 const SITES = {
@@ -103,7 +103,7 @@ test("the list names every served file at its published path, index.html at /, n
   const bytes = Buffer.from(SITES.SIGN_HOST["app.js"]);
   assert.deepEqual([app.bytes, app.sha256, app.sha384], [bytes.length, createHash("sha256").update(bytes).digest("hex"), `sha384-${createHash("sha384").update(bytes).digest("base64")}`]);
   assert.equal(LIST.hosts.SIGN_HOST.headers_file.sha256, createHash("sha256").update(SIGN_HEADERS).digest("hex"));
-  assert.equal(LIST.hosts.SIGN_HOST.origin, "https://sign.confidential.unrealized.trade");
+  assert.equal(LIST.hosts.SIGN_HOST.origin, "https://confidential.unrealized.trade");
   assert.equal(LIST.release, "release-1");
 });
 
@@ -299,7 +299,7 @@ test("a missing file: no MATCH, the path named (Pages answers it with the fallba
   const gone = await read(LIST, pages(SITES), "/p");
   delete gone.hosts.APP_HOST.files["/assets/style.css"];
   noMatch(judge(LIST, gone), "APP_HOST /assets/style.css (navigate): not read");
-  noMatch(judge(LIST, { ...gone, hosts: { SIGN_HOST: gone.hosts.SIGN_HOST } }), "APP_HOST https://confidential.unrealized.trade: not read");
+  noMatch(judge(LIST, { ...gone, hosts: { SIGN_HOST: gone.hosts.SIGN_HOST } }), "APP_HOST https://ct-app.unrealized.trade: not read");
 });
 
 test("an extra script on a host: no MATCH, the script named", async () => {

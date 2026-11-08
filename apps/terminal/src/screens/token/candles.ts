@@ -33,7 +33,7 @@ export const CANDLES_LIMIT = 500;
 
 /** HELPER_HOST's candle read (the CSP's connect-src names the host, public/_headers). */
 export const CANDLES_URL = (chain: MarketChain, token: string, tf: ChartTf, limit = CANDLES_LIMIT) =>
-  `https://api.confidential.unrealized.trade/v1/market/candles?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}&tf=${TF_API[tf]}&limit=${limit}`;
+  `https://ct-api.unrealized.trade/v1/market/candles?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}&tf=${TF_API[tf]}&limit=${limit}`;
 const TIMEOUT_MS = 10_000;
 
 /** One bar as the chart draws it: time in ms, USD numbers. */

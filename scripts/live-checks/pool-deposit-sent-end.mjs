@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-deposit-sent-end on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card pool-deposit-sent-end on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and in it, as minified (review 7: each mark
 // pins the helpers and the hand-off its rule rests on, not only the rule's own shape):
 //   - Solana end read (pool-deposit.ts noteEnd): the note's own record first, read only (records: no note store opened;
@@ -28,6 +28,7 @@
 // What each does is held by the card's tests (packages/signpage/test/pool-deposit.test.ts and pool-deposit-evm.test.ts,
 // each "pool-deposit-sent-end" and "review 8"); the recorded answers are facts() over each tree's
 // packages/signpage/index.html and public/app.js (this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/pool-deposit-sent-end.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -36,7 +37,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "pool-deposit-sent-end";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const Q = "[`\"']";

@@ -20,6 +20,7 @@
 //   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
 //     under PACE_P50_MS (the page's buy reads its two providers this way, one step after another);
 //   - every answer carries a full-sha X-Helper-Commit and echoes SIGN_HOST in Access-Control-Allow-Origin.
+// After: helper
 //   node scripts/live-checks/pool-buy-send-fast.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -27,8 +28,8 @@ import { writeFileSync } from "node:fs";
 import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const KEY = "pool-buy-send-fast";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 export const PACE_READS = 6;
 /** [design: 1 s: a public endpoint at 1 request a second answers every other read of a run like this 429, and a
  *  keyed provider answers a getSlot in tens of ms; the median keeps one slow read from deciding.] */

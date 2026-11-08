@@ -12,6 +12,7 @@
 //   - relay_fee is at most the fee_max the device computes now (and P1's half of it is printed);
 //   - valid_until_block is still open at the device's agreed height and at most 100 + 30 blocks past it;
 // and another token answers 404 not_found, every answer under 1 KB with a full-sha X-Helper-Commit and APP_HOST echoed.
+// After: helper
 //   node scripts/live-checks/relayer-withdraw-fee.mjs [--base <url>] [--relayer-mainnet <account>[,<fee_recipient>]]
 //     [--relayer-testnet <account>[,<fee_recipient>]] [--fastnear-mainnet <url>] [--fastnear-testnet <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. The release names no relayer yet (wallet deposit/bind.ts RELEASE_RELAYER),
@@ -20,8 +21,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "relayer-withdraw-fee";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", testnet: "bf-usdc-20261101t022248.testnet" }; // gitleaks:allow (public account ids)
 export const OTHER = "usdt.tether-token.near";
 export const PAIRS = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] };

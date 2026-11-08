@@ -465,7 +465,8 @@ export const MUTANTS = [
   [QUOTE, "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops.reverse()) });", "return Object.freeze({ venue: r.venue, hops: Object.freeze(hops) });", R, "P4 "],
   // card evm-quote-exec-sim: a route through an unlisted hook above the builder's best counts only where W's own sell
   // through it executes (the sim), where the chain pins a sell delegate; elsewhere the lower of its two quotes stays
-  [QUOTE, 'const toSim = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) === "sim");', "const toSim: Filled[] = [];", R, "PE a pool"],
+  [QUOTE, 'const hooked = routes.filter((r) => r.amountOut > floor && simRule(chain, r.route, pins) !== "quoter");', "const hooked: Filled[] = [];", R, "PE a pool"],
+  [QUOTE, 'const toSim = hooked.filter((r) => simRule(chain, r.route, pins) === "sim");', "const toSim: Filled[] = [];", R, "PE a pool"],
   [QUOTE, 'return pins.sellDelegate !== undefined && pins.sellSender !== undefined ? "sim" : "keep-min";', 'return "sim";', R, "PE (keep-min)"],
   [QUOTE, 'return pins.sellDelegate !== undefined && pins.sellSender !== undefined ? "sim" : "keep-min";', 'return "keep-min";', R, "PE a pool"],
   [QUOTE, 'if (typeof signSim !== "function") return refuse("bad_request",', 'if (false) return refuse("bad_request",', R, "PE a pool"],
@@ -749,10 +750,27 @@ export const MUTANTS = [
   [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } } };", R, "PE1 "],
   [QUOTE, "override: asW, tx }]);", "override: asW }]);", R, "PE6 "],
   // the sender's balance is its own (review point 4, 4 Nov): a balance override on it, on the nonce read or the sim, is caught,
-  // and a sender too low to pay the sim's gas, read at the block, drops the sim's routes, never the sale
+  // and a sender too low to pay the sim's gas, read at the block, skips the sim and keeps every route at its keep-min
+  // value (card evm-sell-unfunded-sim-keeps-route: dropping them let a seeded pool set the price), never the sale
   [QUOTE, "override: asW, tx }]);", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) } }, tx }]);", R, "PE6 "],
   [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) }, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", R, "PE6 "],
-  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return routes.filter", "if (false) return routes.filter", R, "PE8 "],
+  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return { routes, sim: \"skipped\" };", "if (false) return { routes, sim: \"skipped\" };", R, "PE8 "],
+  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return { routes, sim: \"skipped\" };", "if (false) return { routes, sim: \"skipped\" };", R, "PE9 "],
+  [QUOTE, "maxFee) return { routes, sim: \"skipped\" };", "maxFee) return { routes: routes.filter((r) => !toSim.includes(r)), sim: \"skipped\" };", R, "PE9 "],
+  [QUOTE, "maxFee) return { routes, sim: \"skipped\" };", "maxFee) return { routes, sim: \"ran\" };", R, "PE8 "],
+  [QUOTE, "maxFee) return { routes, sim: \"skipped\" };", "maxFee) return { routes, sim: \"ran\" };", R, "PE9 "],
+  [QUOTE, "if (hooked.length === 0) return { routes, sim: \"none\" };", "if (hooked.length === 0) return { routes, sim: \"ran\" };", R, "PE8 "],
+  [QUOTE, "return { routes: kept, sim: \"ran\" };", "return { routes: kept, sim: \"skipped\" };", R, "PE8 "],
+  // review of 1c31d81a: a balance read that does not answer skips the sim (L1); a chain that pins no delegate or sender
+  // says the sim was skipped (L3); a simmed route counts at the lower of its keep-min value and W's gain in the sim,
+  // dropped only where the sim reverts at one wei above the floor (M1)
+  [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut", "if (bal!.amountOut", R, "PE11 "],
+  [QUOTE, "if (toSim.length === 0) return { routes, sim: \"skipped\" };", "if (toSim.length === 0) return { routes, sim: \"none\" };", R, "PE12 "],
+  [QUOTE, "minOut: floor + 1n,", "minOut: r.amountOut,", R, "PE10 "],
+  [QUOTE, "kept.push(a.amountOut < r.amountOut ? { route: r.route, amountOut: a.amountOut } : r);", "kept.push(r);", R, "PE10 "],
+  [QUOTE, "kept.push(a.amountOut < r.amountOut ? { route: r.route, amountOut: a.amountOut } : r);", "kept.push({ route: r.route, amountOut: a.amountOut });", R, "PE9 "],
+  [QUOTE, "    if (i < 0) kept.push(r);\n", "    if (i < 0) continue;\n", R, "PE a pool"],
+  [QUOTE, "feeMax, hooked, releases, sim });", "feeMax, hooked, releases });", R, "PE9 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas * maxFee - 1n)", R, "PE8 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut <= gas * maxFee)", R, "PE8 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas)", R, "PE8 "],
@@ -851,7 +869,7 @@ export const MUTANTS = [
   // the quote's own read (review of 982a19bd, F1): the device's list, the finalized block, the pages, the agreed block,
   // the agreement up to it, the logs' checks
   [QUOTE, "evmSellSentOf(req.sent) ?? refuse(", "evmSellSentOf(req.sent ?? []) ?? refuse(", S, NR],
-  [QUOTE, "hooked, releases });", "hooked });", S, NR],
+  [QUOTE, "hooked, releases, sim });", "hooked, sim });", S, NR],
   [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (false) return refuse(", S, NR],
   [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (n - fin.number >= EVM_SELL_TAIL_MAX) return refuse(", S, NR],
   [QUOTE, "for (let a = low(fin.number + 1n, n); ", "for (let a = low(fin.number, n); ", S, NR],

@@ -9,14 +9,15 @@
 //   - each unlisted method answers 400 { error: { code: "method_not_allowed" } }: refused, never forwarded;
 //   - every answer carries a full-sha X-Helper-Commit, echoes APP_HOST in Access-Control-Allow-Origin, has
 //     Vary: Origin and no Access-Control-Allow-Credentials.
+// After: helper
 //   node scripts/live-checks/helper-rpc-proxy.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-rpc-proxy";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 const SHA = /^[0-9a-f]{40}$/;
 const HEX = /^0x[0-9a-f]+$/;
 

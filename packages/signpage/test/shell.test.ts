@@ -65,7 +65,7 @@ test("a message from another window or another origin is dropped: no answer", as
   s.send(ask(), { source: other });
   s.send(ask(), { source: null });
   s.send(ask(), { source: globalThis });
-  for (const origin of ["https://sign.confidential.unrealized.trade", "https://example.com", "http://confidential.unrealized.trade", "null", ""]) s.send(ask(), { origin });
+  for (const origin of ["https://confidential.unrealized.trade", "https://example.com", "http://ct-app.unrealized.trade", "null", ""]) s.send(ask(), { origin });
   await s.idle();
   assert.equal(s.posted.length, before);
 });
@@ -85,7 +85,7 @@ test("ready goes to the frame's window once on each load of the frame, never bef
 });
 
 // ------------------------------------------------------------------------------------------------ mountShell on a fake DOM
-const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
+const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 type FakeEl = {
   tagName: string; id: string; hidden: boolean; style: Record<string, string>; src: string;
   contentWindow: { postMessage(m: unknown, o: string): void } | null;

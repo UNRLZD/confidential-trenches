@@ -30,6 +30,7 @@
 //      At both widths in a watch with a verdict: no reload (one time origin), live reads (limit 2) made, at most one
 //      full read (limit 500) a minute after the first, no console error and no page error in the terminal's frame.
 // A screenshot of every load is kept.
+// After: app
 //   node scripts/live-checks/app-chart-live.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
@@ -44,8 +45,8 @@ import { consoleError, pageError } from "./console-errors.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-chart-live";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const CHAINS = ["solana", "base"];
 const CANDLES = `${HELPER_HOST}/v1/market/candles?`;
 export const LOADS = [

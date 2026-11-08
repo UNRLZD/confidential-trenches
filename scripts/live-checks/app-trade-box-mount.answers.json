@@ -6,8 +6,8 @@
   "loads": [
    {
     "width": "desktop",
-    "opened": "https://confidential.unrealized.trade/",
-    "frame": "https://confidential.unrealized.trade/",
+    "opened": "https://ct-app.unrealized.trade/",
+    "frame": "https://ct-app.unrealized.trade/",
     "route": "token",
     "state": "ready",
     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
@@ -126,7 +126,7 @@
      "chartRight": 1098
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "status": 200,
      "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
      "read": {
@@ -161,8 +161,8 @@
    },
    {
     "width": "phone",
-    "opened": "https://confidential.unrealized.trade/",
-    "frame": "https://confidential.unrealized.trade/",
+    "opened": "https://ct-app.unrealized.trade/",
+    "frame": "https://ct-app.unrealized.trade/",
     "route": "token",
     "state": "ready",
     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
@@ -177,7 +177,7 @@
      "chartRight": 0
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "status": 200,
      "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
      "read": {
@@ -338,8 +338,8 @@
   "loads": [
    {
     "width": "desktop",
-    "opened": "https://confidential.unrealized.trade/",
-    "frame": "https://confidential.unrealized.trade/",
+    "opened": "https://ct-app.unrealized.trade/",
+    "frame": "https://ct-app.unrealized.trade/",
     "route": "token",
     "state": "ready",
     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
@@ -354,7 +354,7 @@
      "chartRight": 1098
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "status": 200,
      "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
      "read": {
@@ -389,8 +389,8 @@
    },
    {
     "width": "phone",
-    "opened": "https://confidential.unrealized.trade/",
-    "frame": "https://confidential.unrealized.trade/",
+    "opened": "https://ct-app.unrealized.trade/",
+    "frame": "https://ct-app.unrealized.trade/",
     "route": "token",
     "state": "ready",
     "shown": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
@@ -405,7 +405,7 @@
      "chartRight": 0
     },
     "token": {
-     "url": "https://api.confidential.unrealized.trade/v1/market/token",
+     "url": "https://ct-api.unrealized.trade/v1/market/token",
      "status": 200,
      "rowMint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
      "read": {

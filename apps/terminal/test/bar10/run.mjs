@@ -34,10 +34,10 @@ const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : undefined;
 const recordAt = args.indexOf("--record");
 const RECORD = recordAt >= 0 ? path.resolve(args[recordAt + 1]) : undefined;
 
-const LISTS_URL = "https://api.confidential.unrealized.trade/v1/market/lists?chain=solana";
-const isTokenRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/token";
-const isCandleRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/candles";
-const isTradesRead = (u) => u.origin === "https://api.confidential.unrealized.trade" && u.pathname === "/v1/market/trades";
+const LISTS_URL = "https://ct-api.unrealized.trade/v1/market/lists?chain=solana";
+const isTokenRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/token";
+const isCandleRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/candles";
+const isTradesRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/trades";
 
 /** The helper's answer: every list of the fixtures, edge rows after the recorded ones; New also holds the rows on a
  *  curve, as the live one does, so the percent pills are on its first screen. */

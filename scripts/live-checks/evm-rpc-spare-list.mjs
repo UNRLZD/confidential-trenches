@@ -33,6 +33,7 @@
 //   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
 //   - the deployed helper's read HISTORY_BACK blocks back answers 200 with a result list on each chain;
 //   - each maker list holds MIN_MAKERS on hosts of their own, and each spare past the second answers both reads.
+// After: helper
 //   node scripts/live-checks/evm-rpc-spare-list.mjs [--base <url>] [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-rpc-spare-list.answers.json).
 // Reads only: no key, no transaction, no money moves.
@@ -40,8 +41,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { EvmQuoteError, evmPoolBuyQuote, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
-export const APP_ORIGIN = "https://confidential.unrealized.trade";
-export const HELPER = "https://api.confidential.unrealized.trade";
+export const APP_ORIGIN = "https://ct-app.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
 const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 // a W as topic 2: any address reads the same way (an empty list is a list)
 const W_TOPIC = "0x" + "0".repeat(24) + "809286a10000000000000000000000000000078e";

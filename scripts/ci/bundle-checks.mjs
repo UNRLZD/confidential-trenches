@@ -23,8 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const SIGN_DIR = path.join(ROOT, "packages/signpage");
 export const APP_DIR = path.join(ROOT, "apps/terminal/dist");
 
@@ -41,6 +41,7 @@ export const IN_PROCESS = [
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
   viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
   viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
+  viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
   viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
@@ -74,6 +75,7 @@ export const CHILD_RUNS = [
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",
@@ -125,6 +127,7 @@ export const OUT = {
   "token-page-fills-after": "a browser and the helper",
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
+  "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
 };
 
 /** A fetch that answers from the build folders: SIGN_HOST's / and index.html, every other path public/<path>; APP_HOST's dist/<path>. */

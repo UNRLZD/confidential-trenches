@@ -12,6 +12,7 @@
 //   - an unknown id, APP_HOST/token/solana/<a made-up id>: the page's not-found state (data-token-page="empty", no
 //     token drawn), its token read answered 404.
 // A screenshot of every load is kept.
+// After: app
 //   node scripts/live-checks/app-token-route.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
@@ -26,9 +27,9 @@ import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-token-route";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const SIGN_HOST = "https://sign.confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const SIGN_HOST = "https://confidential.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
 export const TOKEN_URL = (mint) => `${HELPER_HOST}/v1/market/token?chain=solana&token=${encodeURIComponent(mint)}`;
 /** The id the unknown load opens: no mint of any chain. */

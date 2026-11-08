@@ -13,6 +13,7 @@
 // way (a 405, a 404, another address) leaves the device reading nothing, so no deposit moves past waiting.
 // The recorded answers: facts() over this card's committed SIGN_HOST build (packages/signpage/index.html and
 // public/app.js) and the helper's live answer; the bad one SIGN_HOST as served before the card and the helper asked by GET.
+// After: sign
 //   node scripts/live-checks/wallet-deposit-follow.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -21,9 +22,9 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "wallet-deposit-follow";
-export const SIGN = "https://sign.confidential.unrealized.trade";
-export const HELPER = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
+export const HELPER = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const STATUS_PATH = "/v1/proxy/oneclick/v0/status";
 export const LOCK = "ct-wallet/deposit-follow/";
 /** The G1 arm-swap live run's deposit address (research proofs/g1-arm-swap, packages/kit/test/fixtures/oneclick-quotes.json live). */

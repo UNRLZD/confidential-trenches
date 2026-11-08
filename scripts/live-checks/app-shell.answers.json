@@ -1,99 +1,99 @@
 {
  "good": {
-  "url": "https://confidential.unrealized.trade",
+  "url": "https://ct-app.unrealized.trade",
   "source": "bar10, the build inside the stand-in shell, answers at once",
   "at": "2026-11-04T10:01:58.631Z",
   "browser": "157.0.8103.38",
   "headers": {
-   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "src": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
     "integrity": "sha384-WcEAop7sW7C5gP3gasn2m4jSuYTTB/K6xHQVxRBa6kXHRznriVhSI3OrXBmaB0lr",
     "served": "sha384-WcEAop7sW7C5gP3gasn2m4jSuYTTB/K6xHQVxRBa6kXHRznriVhSI3OrXBmaB0lr"
    }
   ],
   "loadedScripts": [
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/discover",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/discover",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/portfolio",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/portfolio",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/orders",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/orders",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/profile",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/profile",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/verify",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/verify",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
     "frame": "https://confidential.unrealized.trade/privacy",
-    "app": true
-   },
-   {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/privacy",
     "app": false
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-CLrhrwPo.js",
-    "frame": "https://confidential.unrealized.trade/terms",
+    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "frame": "https://ct-app.unrealized.trade/terms",
     "app": true
    },
    {
-    "url": "https://sign.confidential.unrealized.trade/shell.js",
-    "frame": "https://sign.confidential.unrealized.trade/terms",
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/terms",
     "app": false
    }
   ],
@@ -103,7 +103,7 @@
     "path": "/",
     "expect": "token",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/",
+    "top": "https://confidential.unrealized.trade/",
     "route": "token",
     "violations": [],
     "consoleErrors": [],
@@ -120,7 +120,7 @@
     "path": "/discover",
     "expect": "discover",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/discover",
+    "top": "https://confidential.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
     "consoleErrors": [],
@@ -137,7 +137,7 @@
     "path": "/portfolio",
     "expect": "portfolio",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/portfolio",
+    "top": "https://confidential.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [],
@@ -154,7 +154,7 @@
     "path": "/orders",
     "expect": "orders",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/orders",
+    "top": "https://confidential.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
     "consoleErrors": [],
@@ -171,7 +171,7 @@
     "path": "/profile",
     "expect": "profile",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/profile",
+    "top": "https://confidential.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
     "consoleErrors": [],
@@ -188,7 +188,7 @@
     "path": "/verify",
     "expect": "verify",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/verify",
+    "top": "https://confidential.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
     "consoleErrors": [],
@@ -205,7 +205,7 @@
     "path": "/privacy",
     "expect": "privacy",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/privacy",
+    "top": "https://confidential.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
     "consoleErrors": [],
@@ -222,7 +222,7 @@
     "path": "/terms",
     "expect": "terms",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/terms",
+    "top": "https://confidential.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
     "consoleErrors": [],
@@ -239,7 +239,7 @@
     "path": "/",
     "expect": "token",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/",
+    "top": "https://confidential.unrealized.trade/",
     "route": "token",
     "violations": [],
     "consoleErrors": [],
@@ -256,7 +256,7 @@
     "path": "/discover",
     "expect": "discover",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/discover",
+    "top": "https://confidential.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
     "consoleErrors": [],
@@ -273,7 +273,7 @@
     "path": "/portfolio",
     "expect": "portfolio",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/portfolio",
+    "top": "https://confidential.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [],
@@ -290,7 +290,7 @@
     "path": "/orders",
     "expect": "orders",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/orders",
+    "top": "https://confidential.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
     "consoleErrors": [],
@@ -307,7 +307,7 @@
     "path": "/profile",
     "expect": "profile",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/profile",
+    "top": "https://confidential.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
     "consoleErrors": [],
@@ -324,7 +324,7 @@
     "path": "/verify",
     "expect": "verify",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/verify",
+    "top": "https://confidential.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
     "consoleErrors": [],
@@ -341,7 +341,7 @@
     "path": "/privacy",
     "expect": "privacy",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/privacy",
+    "top": "https://confidential.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
     "consoleErrors": [],
@@ -358,7 +358,7 @@
     "path": "/terms",
     "expect": "terms",
     "framed": true,
-    "top": "https://sign.confidential.unrealized.trade/terms",
+    "top": "https://confidential.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
     "consoleErrors": [],
@@ -450,60 +450,60 @@
   "shots": "<shots>"
  },
  "bad": {
-  "url": "https://confidential.unrealized.trade",
+  "url": "https://ct-app.unrealized.trade",
   "source": "harness, <build>",
   "at": "2026-11-01T14:08:16.267Z",
   "browser": "153.0.8010.12",
   "headers": {
-   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://sign.confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src https://confidential.unrealized.trade; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
+    "src": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
     "integrity": "sha384-wWYzzK+UkdIsuiOfDtcGB1y2eoWYS4kHIYLvSJW0Msm+qZ0+/CaihAHjZiCtwmwt",
     "served": "sha384-wWYzzK+UkdIsuiOfDtcGB1y2eoWYS4kHIYLvSJW0Msm+qZ0+/CaihAHjZiCtwmwt"
    }
   ],
   "loadedScripts": [
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/discover",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/discover",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/portfolio",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/portfolio",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/orders",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/orders",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/profile",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/profile",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/verify",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/verify",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/privacy",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/privacy",
     "app": true
    },
    {
-    "url": "https://confidential.unrealized.trade/assets/index-BZbRfUUY.js",
-    "frame": "https://confidential.unrealized.trade/terms",
+    "url": "https://ct-app.unrealized.trade/assets/index-BZbRfUUY.js",
+    "frame": "https://ct-app.unrealized.trade/terms",
     "app": true
    }
   ],
@@ -513,14 +513,14 @@
     "path": "/",
     "expect": "token",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/",
+    "top": "https://ct-app.unrealized.trade/",
     "route": "token",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -534,14 +534,14 @@
     "path": "/discover",
     "expect": "discover",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/discover",
+    "top": "https://ct-app.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -555,14 +555,14 @@
     "path": "/portfolio",
     "expect": "portfolio",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/portfolio",
+    "top": "https://ct-app.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -576,14 +576,14 @@
     "path": "/orders",
     "expect": "orders",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/orders",
+    "top": "https://ct-app.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -597,14 +597,14 @@
     "path": "/profile",
     "expect": "profile",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/profile",
+    "top": "https://ct-app.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -618,14 +618,14 @@
     "path": "/verify",
     "expect": "verify",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/verify",
+    "top": "https://ct-app.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -639,13 +639,13 @@
     "path": "/privacy",
     "expect": "privacy",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/privacy",
+    "top": "https://ct-app.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -659,14 +659,14 @@
     "path": "/terms",
     "expect": "terms",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/terms",
+    "top": "https://ct-app.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0006003903318601018,
     "shiftCount": 1,
@@ -680,13 +680,13 @@
     "path": "/",
     "expect": "token",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/",
+    "top": "https://ct-app.unrealized.trade/",
     "route": "token",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -700,13 +700,13 @@
     "path": "/discover",
     "expect": "discover",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/discover",
+    "top": "https://ct-app.unrealized.trade/discover",
     "route": "discover",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -720,14 +720,14 @@
     "path": "/portfolio",
     "expect": "portfolio",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/portfolio",
+    "top": "https://ct-app.unrealized.trade/portfolio",
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -741,14 +741,14 @@
     "path": "/orders",
     "expect": "orders",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/orders",
+    "top": "https://ct-app.unrealized.trade/orders",
     "route": "orders",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -762,13 +762,13 @@
     "path": "/profile",
     "expect": "profile",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/profile",
+    "top": "https://ct-app.unrealized.trade/profile",
     "route": "profile",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -782,14 +782,14 @@
     "path": "/verify",
     "expect": "verify",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/verify",
+    "top": "https://ct-app.unrealized.trade/verify",
     "route": "verify",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -803,14 +803,14 @@
     "path": "/privacy",
     "expect": "privacy",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/privacy",
+    "top": "https://ct-app.unrealized.trade/privacy",
     "route": "privacy",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -824,14 +824,14 @@
     "path": "/terms",
     "expect": "terms",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/terms",
+    "top": "https://ct-app.unrealized.trade/terms",
     "route": "terms",
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ],
     "cls": 0.0003194688585069444,
     "shiftCount": 1,
@@ -874,10 +874,10 @@
     "cls": 0,
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    },
    {
@@ -924,27 +924,27 @@
     "cls": 0,
     "violations": [],
     "consoleErrors": [
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
-     "Framing 'https://sign.confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+     "Framing 'https://confidential.unrealized.trade/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n"
     ]
    }
   ],
   "shots": "<shots>"
  },
  "badIntegrity": {
-  "url": "https://confidential.unrealized.trade",
+  "url": "https://ct-app.unrealized.trade",
   "source": "harness, <build>",
   "at": "2026-11-01T14:11:23.707Z",
   "browser": "153.0.8010.12",
   "headers": {
-   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://api.confidential.unrealized.trade; font-src 'self'; connect-src 'self' https://api.confidential.unrealized.trade wss://api.confidential.unrealized.trade https://sign.confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://sign.confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "https://confidential.unrealized.trade/assets/index-B0JF93OJ.js",
+    "src": "https://ct-app.unrealized.trade/assets/index-B0JF93OJ.js",
     "integrity": "",
     "served": "sha384-p7ybGfHnE97cUNZ9ooym/iymD1xKKdRCeDHtOVASemGD86QsvxC5/KkWV9TKROkV"
    }
@@ -956,7 +956,7 @@
     "path": "/",
     "expect": "token",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/",
+    "top": "https://ct-app.unrealized.trade/",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -972,7 +972,7 @@
     "path": "/discover",
     "expect": "discover",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/discover",
+    "top": "https://ct-app.unrealized.trade/discover",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -988,7 +988,7 @@
     "path": "/portfolio",
     "expect": "portfolio",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/portfolio",
+    "top": "https://ct-app.unrealized.trade/portfolio",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1004,7 +1004,7 @@
     "path": "/orders",
     "expect": "orders",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/orders",
+    "top": "https://ct-app.unrealized.trade/orders",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1020,7 +1020,7 @@
     "path": "/profile",
     "expect": "profile",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/profile",
+    "top": "https://ct-app.unrealized.trade/profile",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1036,7 +1036,7 @@
     "path": "/verify",
     "expect": "verify",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/verify",
+    "top": "https://ct-app.unrealized.trade/verify",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1052,7 +1052,7 @@
     "path": "/privacy",
     "expect": "privacy",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/privacy",
+    "top": "https://ct-app.unrealized.trade/privacy",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1068,7 +1068,7 @@
     "path": "/terms",
     "expect": "terms",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/terms",
+    "top": "https://ct-app.unrealized.trade/terms",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1084,7 +1084,7 @@
     "path": "/",
     "expect": "token",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/",
+    "top": "https://ct-app.unrealized.trade/",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1100,7 +1100,7 @@
     "path": "/discover",
     "expect": "discover",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/discover",
+    "top": "https://ct-app.unrealized.trade/discover",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1116,7 +1116,7 @@
     "path": "/portfolio",
     "expect": "portfolio",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/portfolio",
+    "top": "https://ct-app.unrealized.trade/portfolio",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1132,7 +1132,7 @@
     "path": "/orders",
     "expect": "orders",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/orders",
+    "top": "https://ct-app.unrealized.trade/orders",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1148,7 +1148,7 @@
     "path": "/profile",
     "expect": "profile",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/profile",
+    "top": "https://ct-app.unrealized.trade/profile",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1164,7 +1164,7 @@
     "path": "/verify",
     "expect": "verify",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/verify",
+    "top": "https://ct-app.unrealized.trade/verify",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1180,7 +1180,7 @@
     "path": "/privacy",
     "expect": "privacy",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/privacy",
+    "top": "https://ct-app.unrealized.trade/privacy",
     "route": null,
     "violations": [],
     "consoleErrors": [],
@@ -1196,7 +1196,7 @@
     "path": "/terms",
     "expect": "terms",
     "framed": false,
-    "top": "https://confidential.unrealized.trade/terms",
+    "top": "https://ct-app.unrealized.trade/terms",
     "route": null,
     "violations": [],
     "consoleErrors": [],

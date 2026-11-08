@@ -1,7 +1,15 @@
 # HELPER_HOST behind Caddy's automatic HTTPS (an ACME certificate for the name, no CA sign-up). Nothing here writes a
 # client IP: no access log (Caddy writes one only when a site has a `log` directive), and the loggers that print a
 # request (http.log.error with its remote_ip, http.stdlib's TLS handshake lines) are left out of the default log.
-# HELPER_SITE is set only by the local proof, which serves plain http on a local port.
+# HELPER_SITE is set by the local proof, which serves plain http on a local port, and by the redeploy that moves the
+# helper's name (card hosts-main-on-top), which serves both names until the old one's record is deleted:
+#   HELPER_SITE="ct-api.unrealized.trade, <the old name>" apps/helper/deploy/redeploy.sh ...
+# Caddy puts the value in when it adapts this file, so a list of names is one site with a certificate for each. It
+# takes the value from its container's environment, set when the container is made, so a reload never changes the
+# names: redeploy.sh makes caddy again when the HELPER_SITE compose resolves differs from the running caddy's, keeping
+# its certificates in the caddy_data volume (compose.yaml), and reloads it otherwise.
+# HELPER_HOST is a sibling of SIGN_HOST, never under it: a host under SIGN_HOST could claim its passkeys
+# (scripts/ci/host-children.mjs refuses one in this tree).
 # The admin endpoint is a unix socket in the caddy_config volume, reachable only from inside the container (never a TCP
 # port): redeploy.sh reloads this file through it with `docker compose exec`, so a change here reaches Caddy with no gap.
 # Every answer a caller asks to have compressed is sent zstd or gzip (card solana-quote-under-1s: a cold page's first
@@ -14,7 +22,7 @@
 	}
 }
 
-{$HELPER_SITE:api.confidential.unrealized.trade} {
+{$HELPER_SITE:ct-api.unrealized.trade} {
 	encode zstd gzip
 	reverse_proxy helper:8080 {
 		transport http {

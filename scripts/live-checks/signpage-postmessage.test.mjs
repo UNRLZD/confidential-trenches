@@ -67,7 +67,7 @@ test("deposit.quote: the good run with one change each: FAIL; a signed-in addres
   const quoteAnswer = (rec) => rec.deposit.log.find((m) => m.data?.id === rec.deposit.ids.quote);
   const stateAnswer = (rec) => rec.deposit.log.find((m) => m.data?.id === rec.deposit.ids.state);
   const U = "5d".repeat(32);
-  const asked = (rec, over = {}) => ({ url: "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote", method: "POST", body: { recipient: U, refundTo: U, ...over } });
+  const asked = (rec, over = {}) => ({ url: "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote", method: "POST", body: { recipient: U, refundTo: U, ...over } });
   const signedInOk = (rec) => {
     stateAnswer(rec).data.result.signed_in = true;
     quoteAnswer(rec).data = { v: 1, id: rec.deposit.ids.quote, ok: true, result: { deposit_address: "addr", origin_asset: rec.deposit.asked.origin_asset, amount_in: "25", min_amount_out: "24.7", deadline: "2026-11-05T00:00:00.000Z", time_estimate_s: 20 } };
@@ -122,11 +122,11 @@ test("recorded bad run: a page that answers every origin: FAIL on every stranger
 test("the good run with one change each: FAIL", () => {
   const cases = {
     "APP_HOST's frame loads": (rec) => (run(rec, APP_HOST, "served").loaded = true),
-    "a message reaches APP_HOST": (rec) => run(rec, APP_HOST, "served").messages.push({ t: 1, origin: "https://sign.confidential.unrealized.trade", fromFrame: true, data: { v: 1, type: "ready", release: "x", api: 1 } }),
+    "a message reaches APP_HOST": (rec) => run(rec, APP_HOST, "served").messages.push({ t: 1, origin: "https://confidential.unrealized.trade", fromFrame: true, data: { v: 1, type: "ready", release: "x", api: 1 } }),
     "the APP_HOST run missing": (rec) => (rec.runs = rec.runs.filter((r) => r.parent !== APP_HOST)),
     "a stranger's frame loads under the served headers": (rec) => (run(rec, "https://example.com", "served").loaded = true),
     "a stranger's lifted frame runs no script": (rec) => (run(rec, "https://evil.ct.test", "lifted").scriptRan = false),
-    "a message reaches a lifted stranger": (rec) => run(rec, "https://app.other.test", "lifted").messages.push({ t: 1, origin: "https://sign.confidential.unrealized.trade", fromFrame: true, data: { v: 1, type: "ready" } }),
+    "a message reaches a lifted stranger": (rec) => run(rec, "https://app.other.test", "lifted").messages.push({ t: 1, origin: "https://confidential.unrealized.trade", fromFrame: true, data: { v: 1, type: "ready" } }),
     "a stranger run missing": (rec) => (rec.runs = rec.runs.filter((r) => r.parent !== "https://app.other.test")),
   };
   for (const [name, change] of Object.entries(cases)) {
@@ -149,10 +149,10 @@ test("planted on the good answer: a frame whose script was refused names the ref
   const kept = [];
   const hook = onConsole(kept);
   const msg = (t, location) => ({ type: () => "error", text: () => t, location: () => location });
-  hook(msg(text, { url: "https://sign.confidential.unrealized.trade/app.js?v=9" }));
+  hook(msg(text, { url: "https://confidential.unrealized.trade/app.js?v=9" }));
   hook(msg("Refused to load the script because it violates the following Content Security Policy directive", undefined));
   hook({ type: () => "log", text: () => "a log line", location: () => ({ url: "https://x.example/" }) });
-  assert.deepEqual(kept, [`${text} (https://sign.confidential.unrealized.trade/app.js)`, "Refused to load the script because it violates the following Content Security Policy directive"]);
+  assert.deepEqual(kept, [`${text} (https://confidential.unrealized.trade/app.js)`, "Refused to load the script because it violates the following Content Security Policy directive"]);
   for (const line of kept) {
     const rec = clone(GOOD);
     const s = run(rec, "https://evil.ct.test", "lifted");

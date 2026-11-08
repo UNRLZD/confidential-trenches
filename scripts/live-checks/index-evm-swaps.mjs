@@ -31,6 +31,7 @@
 // open and its wait for the providers' paces and in-flight queues, evm-open and evm-queue), so a late read names its
 // cause (live run 42122733397 attempt 1: the judged token's candles came 23 s after the read, the reads before it named
 // nowhere).
+// After: helper
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
@@ -39,8 +40,8 @@ import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "index-evm-swaps";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const SAMPLE = 5;
 /** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base (200 ms blocks since block 53556127,
  *  lists.ts BLOCK_CLOCK), 6 s on Robinhood. */

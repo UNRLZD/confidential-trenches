@@ -13,6 +13,7 @@
 //     recomputed for another vault (helper-mainnet-vault-env.mjs decoyFor and probe), and a helper carrying mainnet
 //     refuses it at check 2 as well;
 // and every answer carries a full-sha X-Helper-Commit, APP_HOST echoed, a JSON body under 1 KB, and no tx_hash.
+// After: helper
 //   node scripts/live-checks/relayer-withdraw-send.mjs [--base <url>] [--record <file>]   PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -24,8 +25,8 @@ import { createRequire } from "node:module";
 // @noble/hashes from the helper's own dependencies (apps/ is outside Blindfill), as helper-mainnet-vault-env.mjs loads it
 const { keccak_256 } = createRequire(new URL("../../apps/helper/package.json", import.meta.url))("@noble/hashes/sha3.js");
 
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = { mainnet: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", testnet: "bf-usdc-20261101t022248.testnet" }; // gitleaks:allow (public account ids)
 const SHA = /^[0-9a-f]{40}$/;
 const HERE = path.dirname(fileURLToPath(import.meta.url));

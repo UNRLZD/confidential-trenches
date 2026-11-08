@@ -20,7 +20,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "rpc-keyed-lists.answers.json"), "utf8"));
 const replay = (a) => async (url, init) => {
   assert.equal(new URL(url).pathname, "/v1/health");
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   return new Response(a.body, { status: a.status });
 };
 const rpcOf = () => JSON.parse(A.good.body).rpc;
@@ -33,7 +33,7 @@ test("recorded good answer (every chain's keyed companies in order, each answeri
 });
 
 test("recorded deploy answer (af75100a after the owner's keys: Solana on Helius and QuickNode, Base and Robinhood on QuickNode and dRPC's three keys, NEAR on FastNear): PASS", async () => {
-  const r = judge(await read("https://api.confidential.unrealized.trade", replay(A.deploy)));
+  const r = judge(await read("https://ct-api.unrealized.trade", replay(A.deploy)));
   assert.ok(r.ok, r.lines.join("\n"));
   assert.ok(r.lines.includes("ok  solana: in the order helius-rpc.com, quiknode.pro"), r.lines.join("\n"));
 });

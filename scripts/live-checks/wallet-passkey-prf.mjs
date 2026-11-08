@@ -46,6 +46,7 @@
 //     on Backup within 500 ms of it drawn draws no words, and one after the window opens the backup with 12 words. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
 //     "invalid-code" and stores nothing; the 12 words of A.8's seed (16 zero bytes, built from the pinned BIP-39 list)
 //     sign in as A.8's T_0, the check's own derivation, with code_saved true.
+// After: sign
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-passkey-prf.mjs --harness [--site <dir>] ...   the same steps on the app's browser
 //     harness (apps/terminal/test/harness) with SIGN_HOST's real name mapped to it, serving SIGN_HOST's build
@@ -64,8 +65,8 @@ import { consoleError } from "./console-errors.mjs";
 
 const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const SIGN_HOST = "sign.confidential.unrealized.trade";
-export const APP_HOST = "confidential.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
+export const SIGN_HOST = "confidential.unrealized.trade";
+export const APP_HOST = "ct-app.unrealized.trade"; // the one parent SIGN_HOST's frame-ancestors allows
 const FRAME_PARENT = `<!doctype html><iframe src="https://${SIGN_HOST}/"></iframe>`;
 /** The harness's APP_HOST page inside the shell: the terminal's first controls, a link and a button. */
 export const APP_STAND_IN = `<!doctype html><title>APP_HOST</title><a href="/">Trenches</a> <button type="button">Sign in</button>`;
@@ -86,7 +87,7 @@ export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector defau
 // is a state the shell never has: the frame comes first in the document, so Tab went into the terminal and Tab then
 // Enter never reached Sign out. In a frame (none: the CSP's frame-ancestors 'none') there is no layer.
 const HOLD_LAYER = () => {
-  if (location.hostname !== "sign.confidential.unrealized.trade" || window.top !== window) return;
+  if (location.hostname !== "confidential.unrealized.trade" || window.top !== window) return;
   const inert = () => {
     const f = document.getElementById("app");
     if (f && !f.inert) f.inert = true;

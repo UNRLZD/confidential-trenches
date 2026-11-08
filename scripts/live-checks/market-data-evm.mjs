@@ -15,6 +15,7 @@
 //     table's creation events over the row's pool block, read here on the chain's providers (MAKER_RPCS: two that
 //     answer and agree), name the same pad as the row, or none for an untagged row. A row the read does not settle is
 //     said, not failed; a sample with tagged rows and none of them settled is a FAIL, since then nothing was re-read.
+// After: helper
 //   node scripts/live-checks/market-data-evm.mjs [--base <url>] [--chain base] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read (the helper's answer and every RPC answer).
 import "../net-window.mjs";
@@ -24,8 +25,8 @@ import { ROW_FIELDS, ROW_REQUIRED } from "../../apps/terminal/src/screens/discov
 import { FACTORIES, readMakers } from "../../apps/helper/src/data/evm/lists.ts";
 
 const KEY = "market-data-evm";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 /** The chains whose lists the helper serves (fold 1: Base). */
 export const CHAINS = ["base", "robinhood"];
 export const FIELDS = [...ROW_FIELDS];

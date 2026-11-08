@@ -37,7 +37,7 @@ test("the bad run, a Base page no provider answers, fails at its deadline, namin
   const r = await check((network, url, method, params) => (method === "eth_getLogs" ? new Promise(() => {}) : replay(network, url, method, params)), { wait: false, jobs: BASE, deadlineMs: 2_000, onLine: (ok, l) => printed.push([ok, l]) });
   assert.ok(performance.now() - t0 < 10_000);
   assert.equal(r.ok, false);
-  assert.match(r.lines[0], /^base: no end in 2\.0 s \(\d+ calls\): stuck on eth_getLogs \d+\.\.\d+ \(10000 blocks\) on api\.confidential\.unrealized\.trade, try 1, no answer in \d+\.\d s$/);
+  assert.match(r.lines[0], /^base: no end in 2\.0 s \(\d+ calls\): stuck on eth_getLogs \d+\.\.\d+ \(10000 blocks\) on ct-api\.unrealized\.trade, try 1, no answer in \d+\.\d s$/);
   assert.deepEqual(printed, [[false, r.lines[0]]]);
 });
 
@@ -45,5 +45,5 @@ test("the bad run, a Base page throttled past the deadline, fails then, naming t
   const replay = replayer(A.good);
   const r = await check((network, url, method, params) => (method === "eth_getLogs" ? Promise.resolve({ error: "HTTP 429", name: "Error", afterMs: 9_000 }) : replay(network, url, method, params)), { wait: true, jobs: BASE, deadlineMs: 6_000 });
   assert.equal(r.ok, false);
-  assert.match(r.lines[0], /^base: no end in 6\.0 s \(\d+ calls\): stuck on eth_getLogs \d+\.\.\d+ \(10000 blocks\) on api\.confidential\.unrealized\.trade, try \d+, refused \(HTTP 429\), Retry-After 9\.0 s, \d+\.\d s waited since$/);
+  assert.match(r.lines[0], /^base: no end in 6\.0 s \(\d+ calls\): stuck on eth_getLogs \d+\.\.\d+ \(10000 blocks\) on ct-api\.unrealized\.trade, try \d+, refused \(HTTP 429\), Retry-After 9\.0 s, \d+\.\d s waited since$/);
 });

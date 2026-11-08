@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card sol-buy-rent-back on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card sol-buy-rent-back on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and its pool sell (packages/signpage/src/
 // pool-sell.ts rentBack), as minified, gives the rent a Solana pool buy locked in W back after a full sell:
 //   - the teardown frames' rule (rules/pool.ts checkSolanaTeardownFrames, its refusal `teardown`), which only the pool
@@ -13,6 +13,7 @@
 // a partial sell closing nothing) and by the card's devnet run (sol-buy-rent-back.md).
 // The recorded answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg) of each tree (mainnet, as
 // SIGN_HOST serves; this file reaches no package code: the import check holds it).
+// After: sign
 //   node scripts/live-checks/sol-buy-rent-back.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -21,7 +22,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "sol-buy-rent-back";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The minified marks of each piece, as the bundle spells them. */

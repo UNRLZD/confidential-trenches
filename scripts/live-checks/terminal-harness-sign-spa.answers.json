@@ -1,0 +1,72 @@
+{
+ "key": "terminal-harness-sign-spa",
+ "about": "good: SIGN_HOST read live 2026-11-08T07:34:00.558Z with this card's harness (defaultSites serves sign.ct.test with spa: true): PASS. bad: the same live answers with main 4729bfb8's harness, which serves sign.ct.test with no fallback (a path with no file 404): FAIL on the harness line alone.",
+ "good": {
+  "at": "2026-11-08T07:34:00.558Z",
+  "origin": "https://sign.confidential.unrealized.trade",
+  "answers": {
+   "/": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   },
+   "/favicon.ico": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   },
+   "/_headers": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   },
+   "/no-such-path": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   }
+  },
+  "harness": {
+   "sign": "sign.ct.test",
+   "spa": true
+  }
+ },
+ "bad": {
+  "at": "2026-11-08T07:34:00.558Z",
+  "origin": "https://sign.confidential.unrealized.trade",
+  "answers": {
+   "/": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   },
+   "/favicon.ico": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   },
+   "/_headers": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   },
+   "/no-such-path": {
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "bytes": 382,
+    "sha256": "1d3987bbbea6f17bf2081fd2b4578fd4d320b47e479718435513ae02b3cfb931"
+   }
+  },
+  "harness": {
+   "sign": "sign.ct.test",
+   "spa": false
+  }
+ }
+}
