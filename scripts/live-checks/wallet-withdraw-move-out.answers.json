@@ -1,0 +1,77 @@
+{
+ "good": {
+  "key": "wallet-withdraw-move-out",
+  "url": "local build",
+  "at": "2026-11-08T01:21:29.360Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-cZdY562e2HncJCSjRZY9cJtnVoZqLsmELktM8WVoGJybAuHxkVNDkIRoxw3S04lA",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 735333,
+   "sha384": "sha384-cZdY562e2HncJCSjRZY9cJtnVoZqLsmELktM8WVoGJybAuHxkVNDkIRoxw3S04lA",
+   "markers": {
+    "to: not a NEAR account id": 1,
+    "to: the vault, intents.near or the token": 1,
+    "nullifierHash or recipient: not given": 1,
+    "dataset.notice=`unmatched`": 1,
+    "Withdrawal unmatched": 1,
+    "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:": 1
+   }
+  }
+ },
+ "bad_live_before": {
+  "key": "wallet-withdraw-move-out",
+  "url": "https://sign.confidential.unrealized.trade",
+  "at": "2026-11-08T00:25:02.526Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 727246,
+   "sha384": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
+   "markers": {
+    "to: not a NEAR account id": 0,
+    "to: the vault, intents.near or the token": 0,
+    "nullifierHash or recipient: not given": 0,
+    "dataset.notice=`unmatched`": 0,
+    "Withdrawal unmatched": 0,
+    "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:": 0
+   }
+  }
+ },
+ "bad_handoff_drop": {
+  "key": "wallet-withdraw-move-out",
+  "url": "local build with to: w.recipient dropped from handoff.ts",
+  "at": "2026-11-08T00:13:46.274Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-HMzZiFnv6B6y4Stpl4aVd0b6a5MvezMAFS4YUdKV3UAhfo0h3opsK9VcmmQEZ5Cw",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 735304,
+   "sha384": "sha384-HMzZiFnv6B6y4Stpl4aVd0b6a5MvezMAFS4YUdKV3UAhfo0h3opsK9VcmmQEZ5Cw",
+   "markers": {
+    "to: not a NEAR account id": 1,
+    "to: the vault, intents.near or the token": 1,
+    "nullifierHash or recipient: not given": 1,
+    "dataset.notice=`unmatched`": 1,
+    "Withdrawal unmatched": 1,
+    "hand-off: amount:<w>.amount,to:<w>.recipient,deadlineMs:": 0
+   }
+  }
+ }
+}

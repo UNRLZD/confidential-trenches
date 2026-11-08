@@ -24,7 +24,8 @@
 //     and the Solana RPC method isBlockhashValid, last on the Solana list (card solana-set-send's dead check); the
 //     pin is exact, so any other method, place or chain fails (card kit-freeze-pin-blockhash); and POST /v1/bind's
 //     answer bound HELPER_BIND_ANSWER_MS (45 s), which the helper answers within and the device's send waits for, one
-//     number both read (card wallet-bind-carry-wait);
+//     number both read (card wallet-bind-carry-wait); and one widening, HelperWithdrawRequest's fund_recipient from
+//     true to a boolean (false: the vault pays the NEAR account the user typed straight; card wallet-withdraw-move-out);
 //   - after 06:00Z, main's v1.ts equals the tag's byte for byte.
 // Once the helper answers (card helper-host-health), it also reads https://api.confidential.unrealized.trade/v1/health
 // from APP_HOST's Origin and from a stranger's, and compares its parts, X-Helper-Commit and CORS headers with the file.
@@ -101,7 +102,7 @@ export const SHAPES = {
   HelperReleaseRelayer: "export interface HelperReleaseRelayer { readonly relayer_account: HelperNearAccount; readonly fee_recipient: HelperNearAccount; }",
   HelperWithdrawal: "export interface HelperWithdrawal { recipient: HelperNearAccount; register_deposit: HelperDecimal; fee_recipient: HelperNearAccount; relay_fee: HelperDecimal; refund_precommitment: HelperDecimal; deadline_ms: number; salt: string; }",
   HelperGroth16Proof: "export interface HelperGroth16Proof { a: [ string, string ]; b: [ [ string, string ], [ string, string ] ]; c: [ string, string ]; }",
-  HelperWithdrawRequest: "export interface HelperWithdrawRequest { withdrawal: HelperWithdrawal; proof: HelperGroth16Proof; public_signals: [ string, string, string, string, string, string, string, string ]; fund_recipient: true; token: HelperNearAccount; }",
+  HelperWithdrawRequest: "export interface HelperWithdrawRequest { withdrawal: HelperWithdrawal; proof: HelperGroth16Proof; public_signals: [ string, string, string, string, string, string, string, string ]; fund_recipient: boolean; token: HelperNearAccount; }",
   HelperWithdrawAnswer: "export interface HelperWithdrawAnswer { tx_hash: HelperTxHash; state: \"submitted\"; }",
   HelperWithdrawStatusAnswer: "export interface HelperWithdrawStatusAnswer { state: \"submitted\" | \"final\" | \"failed\"; block: number | null; receipts_ok: boolean | null; }",
   HelperBindRequest: "export interface HelperBindRequest { signed_delegate: HelperBase64; }",

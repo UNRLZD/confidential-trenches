@@ -111,3 +111,11 @@ export function armingRegisterDepositOf(network: NearNetwork, rpcs: readonly [Ne
     return readTokenStorageMin(network, rpcs);
   };
 }
+
+/**
+ * withdrawRequest's registerDepositOf for a withdrawal the vault pays straight to the NEAR account the user typed (card
+ * wallet-withdraw-move-out): armingRegisterDepositOf itself. The token's minimum is every recipient's register_deposit,
+ * registered or not (card relayer-cost-guards, audit V-03), so the typed account's registration decides nothing and is
+ * never read: no request names it (review F2). Its own name, so a caller paying a typed account says so.
+ */
+export const typedRegisterDepositOf: typeof armingRegisterDepositOf = armingRegisterDepositOf;
