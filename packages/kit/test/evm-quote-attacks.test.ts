@@ -7071,3 +7071,46 @@ test("GF11 out of gas is no fit only for the swap read: the same words to any ot
   const route = v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED }]);
   await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [oog(chain(pools, 0)), oog(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: hooked.key, at: 4_500_000 }])), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error");
 });
+
+test("GF12 when no route in the band fits, the rest of the list is read in one round, not one route a round (review 2 of c9a8df14, L1)", async () => {
+  const token = "0x00000000000000000000000000000000000f2f20";
+  const [K1, K2] = [10, 30];
+  const own: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => (a * 6n) / 10n };
+  const above: ModelPool[] = Array.from({ length: K1 }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => (a * 7n) / 10n, gas: 600_000n }));
+  const below: ModelPool[] = Array.from({ length: K2 }, (_, i) => ({ key: keyOf(token, NATIVE, 4000 + i, 50, NATIVE), give: (a) => (a * 55n) / 100n, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, own, ...above, ...below];
+  const logs = [own, ...above, ...below].map((p) => ({ key: p.key, at: 4_500_000 }));
+  const sizes: number[] = [];
+  const spy = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const n = calls.filter((c) => String((c.params[0] as { data?: string }).data).startsWith("0x" + SEL_BUY_SWAP)).length;
+    if (n > 0) sizes.push(n);
+    return rpc(calls);
+  };
+  const route = v4Route([{ currency: token, fee: 2500, tickSpacing: 50, hooks: NATIVE }]);
+  const q = await evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [spy(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs));
+  assert.ok(!("code" in q), show(q));
+  assert.equal(q.amountOut, (AMOUNT * 6n) / 10n);
+  assert.deepEqual(q.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) }, show(q.reference));
+  const reads = sizes.reduce((a, b) => a + b, 0);
+  assert.ok(reads >= K1 + K2 + 2, `${reads} swap reads`);
+  // the first round's own read, K1 in round 0, K2 + 1 in round 1, three to a request
+  assert.ok(sizes.length <= 1 + Math.ceil(K1 / 3) + Math.ceil((K2 + 1) / 3), `${sizes.length} requests (${sizes.join(",")}): one route a round`);
+});
+
+test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap of 0 or less, never a malformed call (review 2 of c9a8df14, L2)", () => {
+  const token = "0x00000000000000000000000000000000000f1f13";
+  const hash = "0x" + "ab".repeat(32);
+  const route = gfSeededRoute(token);
+  for (const amount of [-1n, 0n, 1n << 127n, 1n << 256n]) {
+    assert.throws(() => quoteMod.evmBuySwapFitCall("base", route, amount, hash), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request", String(amount));
+  }
+  for (const exec of [0n, -(10n ** 7n)]) {
+    assert.throws(() => quoteMod.evmBuySwapFitCall("base", route, AMOUNT, hash, exec), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request", String(exec));
+  }
+  for (const amount of [1n, (1n << 127n) - 1n]) {
+    const c = quoteMod.evmBuySwapFitCall("base", route, amount, hash)!;
+    assert.match(c.tx.data, /^0x([0-9a-f]{2})+$/);
+    assert.match(c.tx.gas, /^0x[0-9a-f]+$/);
+    assert.match(c.override[c.tx.to]!.balance, /^0x[0-9a-f]+$/);
+  }
+});
