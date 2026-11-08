@@ -34,8 +34,9 @@ const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "
 // the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name and the lower panel's
 // and About's words R5 marks as draft copy (card app-token-lower-panel, on the owner's next picks page). Discover's list
 // age line and launchpad menu title, the chart menus' rows, the deposit sheet's To label, Portfolio's export label and
-// wallets heading were kept on 8 Nov (words-nov8.json, below).
-const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: [], portfolio: ["more"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "sells5m", "vol5m"], verify: [], withdraw: [] };
+// wallets heading were kept on 8 Nov (words-nov8.json, below). Verify's pool words (card verify-pools, on the owner's
+// next picks page).
+const STILL_DRAFT: Record<string, string[]> = { deposit: [], discover: [], portfolio: ["more"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "sells5m", "vol5m"], verify: ["authority", "blockscout", "hoodscan", "owner", "pools", "proxy", "solanaExplorer"], withdraw: [] };
 
 test("the list: 104 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 104);

@@ -204,6 +204,53 @@ test("harness: Verify's mainnet reads are answered from the recorded read of the
   }
 });
 
+// Verify on mainnet reads each pool on its pair as the release names it (card verify-pools); the harness answers those
+// reads from the recorded real reads (apps/terminal/test/verify/pool-reads.json), so the page's own livePools, its
+// fetch put through the harness, draws every pool row as the recording does, and no console error comes of an aborted
+// read. A read the recording does not hold and every other origin stay aborted.
+test("harness: Verify's mainnet pool reads are answered from the recorded reads on the release's pairs; the page's pool rows draw as recorded", async () => {
+  const { mkdtempSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { harnessRoute } = await import("./app-in-shell.mjs");
+  const { VERIFY_RELEASES } = await import("../../apps/terminal/src/screens/verify/release.ts");
+  const { livePools, poolRow, POOL_CHAINS } = await import("../../apps/terminal/src/screens/verify/pools.ts");
+  const REC = JSON.parse(readFileSync(path.join(HERE, "../../apps/terminal/test/verify/pool-reads.json"), "utf8"));
+  const pools = VERIFY_RELEASES.mainnet.pools;
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-harness-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  try {
+    const route = await harnessRoute(dir, "signed");
+    const ask = async (url, body) => {
+      let out = null;
+      await route({ request: () => ({ url: () => url, postData: () => body }), fulfill: async (a) => void (out = { kind: "fulfill", ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
+      return out;
+    };
+    const asked = [];
+    const fetchFn = async (url, init) => {
+      const got = await ask(new URL(url).href, init.body);
+      asked.push([new URL(url).origin, got.kind]);
+      if (got.kind !== "fulfill") throw new TypeError("Failed to fetch");
+      assert.equal(got.headers["access-control-allow-origin"], APP_HOST);
+      return new Response(got.body, { status: got.status, headers: got.headers });
+    };
+    const view = await livePools(pools, fetchFn);
+    for (const [i, c] of POOL_CHAINS.entries()) {
+      const want = await poolRow(REC[c], pools[c]);
+      assert.equal(want.status, "ok", `${c}: the recording reads ok`);
+      assert.deepEqual(view.rows[i], want, c);
+    }
+    const origins = new Set(POOL_CHAINS.flatMap((c) => pools[c].rpcs.map((u) => new URL(u).origin)));
+    assert.deepEqual(new Set(asked.map(([o]) => o)), origins, "every pair the release names was read");
+    assert.ok(asked.every(([, k]) => k === "fulfill"), "no pool read aborted");
+    const sol = pools.solana.rpcs[0];
+    assert.deepEqual(await ask(`${sol}/`, JSON.stringify({ jsonrpc: "2.0", id: "verify", method: "getMultipleAccounts", params: [["11111111111111111111111111111111"], { encoding: "base64", commitment: "finalized" }] })), { kind: "abort", error: "namenotresolved" });
+    assert.deepEqual(await ask(`${sol}/`, "not json"), { kind: "abort", error: "namenotresolved" });
+    assert.deepEqual(await ask("https://api.mainnet-beta.solana.com/", JSON.stringify({ jsonrpc: "2.0", id: "verify", method: "getMultipleAccounts", params: [] })), { kind: "abort", error: "namenotresolved" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("planted on the good answer: a recorded 429 names its resource's origin and path in the BAD line, and an error with no location still fails (card live-console-url)", () => {
   const text = "Failed to load resource: the server responded with a status of 429 ()";
   const helper = "https://ct-api.unrealized.trade";

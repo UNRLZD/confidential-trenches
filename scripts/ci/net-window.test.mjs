@@ -197,6 +197,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-mainnet-relayer-pins.mjs",
   "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
   "scripts/live-checks/terminal-harness-sign-spa.mjs",
+  "scripts/live-checks/verify-pools.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.
