@@ -232,7 +232,7 @@ interface ChartState {
 
 /** R5's legend (token.js U.legend): the bar under the crosshair, else the newest; its colour is its close against the
  *  bar before it. On the phone only the close and the change (R5 unrlzd.css .cp-lgKv[data-ohl]). */
-function Legend({ sym, tf, bars, at, precision, unit, phone }: { sym: string; tf: ChartTf; bars: readonly Bar[]; at: KLineData | null; precision: number; unit: ChartUnit; phone?: boolean }) {
+export function Legend({ sym, tf, bars, at, precision, unit, phone }: { sym: string; tf: ChartTf; bars: readonly Bar[]; at: KLineData | null; precision: number; unit: ChartUnit; phone?: boolean }) {
   let i = bars.length - 1;
   if (at) {
     const j = bars.findIndex((b) => b.timestamp === at.timestamp);
