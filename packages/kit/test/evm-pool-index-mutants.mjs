@@ -23,6 +23,8 @@ const F6 = "F6: past the hard pool cap the index refuses by name";
 const HALVES = "a span answered with an error is asked as its halves";
 const LIMITED = "a rate limit answered inside a batch is asked again";
 const LAG = "a sync whose readers lag the last sync's head";
+const FLOOD = "one reader's made-up pools never refuse the index as too many";
+const F6B = F6;
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -49,7 +51,11 @@ export const MUTANTS = [
   // F5: the log's id word trusted
   ["if (id !== t[1]!.toLowerCase()) return null;", "", F5],
   // F6: no cap
-  ["if (count > c.cap) return refuse(", "if (false) return refuse(", F6],
+  ["count += both.length;\n    if (count > c.cap) return refuse(", "count += both.length;\n    if (false) return refuse(", F6],
+  // one reader's pools counted before F5
+  ["count += both.length;\n", "count += both.length + one.length;\n", FLOOD],
+  // F5's held pools not counted
+  ["count += held.size;", "", F6B],
   // the halves: an error answer is no cut
   ["if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : { hash: \"\", pools: new Map(), cut: true };", "", HALVES],
   // a rate limit in a batch asked as halves

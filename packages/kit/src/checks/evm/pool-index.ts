@@ -76,6 +76,8 @@ export const INDEX_TRIES = 4;
 const INDEX_LIMITED_WAITS = 8;
 /** Halves a sync may ask past each starting span's first split. */
 export const INDEX_HALVES = 64;
+/** The PoolManager state reads (F5) in one batch. */
+const INDEX_STATE_BATCH = 500;
 const BACKOFF_MS = 500;
 const SEL_EXTSLOAD = "1e2eaeaf"; // PoolManager.extsload(bytes32)
 const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
@@ -247,8 +249,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     const one: EvmIndexedPool[] = [];
     for (const [id, p] of x.pools) (y.pools.has(id) ? both : one).push(p);
     for (const [id, p] of y.pools) if (!x.pools.has(id)) one.push(p);
-    count += both.length + one.length;
-    // F6: never past the cap
+    // F6: never past the cap, counting the pools both readers report (one reader's alone count once F5 holds them, so
+    // one operator's made-up logs never refuse the index as too many)
+    count += both.length;
     if (count > c.cap) return refuse("too_many_pools", `chain ${c.chainId} has more than ${c.cap} pools, the index's cap`);
     proved.push({ a: j.a, b: j.b, pools: both, one });
     return [];
@@ -300,11 +303,21 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   // F5: a pool one reader reported, held by the PoolManager at N on both readers, or no pool; where that is not
   // answered, the spans that hold such a pool are not proven
   const ones = proved.flatMap((p) => p.one);
+  // more pools one reader alone reported than the cap: the readers disagree past any honest lag, and none is read
+  if (ones.length > c.cap) return refuse("rpc_disagree", `the index readers disagree on ${ones.length} pools, more than the cap ${c.cap}`);
   const held = new Set<string>();
   if (ones.length > 0) {
     const calls = ones.map((p) => ({ method: "eth_call", params: [{ to: pm, data: "0x" + SEL_EXTSLOAD + stateSlot(p.id).slice(2) }, { blockHash: pin }] }));
-    const outs = await Promise.all(([0, 1] as const).map((r) => ask(r, calls)));
-    const res = (o: readonly unknown[] | null, i: number) => (o?.[i] as { result?: unknown } | null | undefined)?.result;
+    // INDEX_STATE_BATCH reads a batch, one batch at a time on each reader
+    const outs = await Promise.all(([0, 1] as const).map(async (r) => {
+      const all: unknown[] = [];
+      for (let i = 0; i < calls.length; i += INDEX_STATE_BATCH) {
+        const part = calls.slice(i, i + INDEX_STATE_BATCH);
+        all.push(...((await ask(r, part)) ?? part.map(() => null)));
+      }
+      return all;
+    }));
+    const res = (o: readonly unknown[], i: number) => (o[i] as { result?: unknown } | null | undefined)?.result;
     const ok = (x: unknown): x is string => typeof x === "string" && /^0x[0-9a-fA-F]{64}$/.test(x);
     const unread = new Set<string>();
     ones.forEach((p, i) => {
@@ -317,6 +330,8 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       error ??= new EvmQuoteError("rpc_error", `the index readers did not answer the PoolManager's state of ${unread.size} pool(s)`);
       proved = proved.filter((p) => !p.one.some((o) => unread.has(o.id)));
     }
+    count += held.size;
+    if (count > c.cap) return refuse("too_many_pools", `chain ${c.chainId} has more than ${c.cap} pools, the index's cap`);
   }
   const seen = new Set(old?.pools.map((p) => p.id) ?? []);
   const fresh: EvmIndexedPool[] = [];

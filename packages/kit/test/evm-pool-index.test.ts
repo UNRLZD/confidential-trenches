@@ -221,6 +221,9 @@ test("F6: past the hard pool cap the index refuses by name and never serves a pa
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "too_many_pools" && /more than 5 pools/.test(e.message));
   const atCap = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }, { cap: 6 }));
   assert.equal(atCap.pools!.length, 6);
+  // pools one reader alone reported that the state holds count too
+  const state = new Set(ps.map((p) => evmPoolIdOf(p.key)));
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, state, calls: [] }, { head, pools: ps.slice(0, 4), state, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "too_many_pools");
 });
 
 test("a span answered with an error is asked as its halves on both, and a 429 waits without spending a try", async () => {
@@ -253,4 +256,16 @@ test("a sync whose readers lag the last sync's head keeps what that sync stored"
   assert.equal(r2.coversThrough, lag);
   assert.equal(r2.index!.through, r.index!.through);
   assert.ok(r2.index!.spans.every(([, y]) => y <= r2.index!.through));
+});
+
+test("one reader's made-up pools never refuse the index as too many: only pools both report or the state holds count", async () => {
+  const head = 1_000_000;
+  const ps = pools(5, head);
+  const fakes = Array.from({ length: 18 }, (_, i) => ({ key: key(100 + i), block: head - 1_000 - i }));
+  const state = new Set(ps.map((p) => evmPoolIdOf(p.key)));
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [...ps, ...fakes], state, calls: [] }, { head, pools: ps, state, calls: [] }, { cap: 20 }));
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+  // past the cap of them, the readers disagree by name
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [...ps, ...fakes], state, calls: [] }, { head, pools: ps, state, calls: [] }, { cap: 10 })), (e: Error & { code?: string }) => e.code === "rpc_disagree");
 });
