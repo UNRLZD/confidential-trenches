@@ -18,7 +18,8 @@ function rpc(by: Record<string, unknown | number | Error>, log: { url: string; b
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     log.push({ url, body: JSON.parse(String(init?.body)) });
-    const a = by[url];
+    assert.ok(url.endsWith("/?ct=footer"), url);
+    const a = by[url.replace("/?ct=footer", "")];
     if (a instanceof Error || a === undefined) throw a ?? new TypeError("fetch failed");
     if (typeof a === "number") return new Response("{}", { status: a });
     return new Response(JSON.stringify(a), { status: 200, headers: { "content-type": "application/json" } });
@@ -36,7 +37,7 @@ test("the read: NEAR's final block from the first RPC, with its round trip", asy
   const r = await readFinalBlock([A, B], rpc({ [A]: blockAnswer(223_500_123) }, log), () => (t += 142));
   assert.deepEqual(r, { height: 223_500_123, ms: 142 });
   assert.equal(log.length, 1);
-  assert.deepEqual(log[0], { url: A, body: { jsonrpc: "2.0", id: "ct-footer", method: "block", params: { finality: "final" } } });
+  assert.deepEqual(log[0], { url: `${A}/?ct=footer`, body: { jsonrpc: "2.0", id: "ct-footer", method: "block", params: { finality: "final" } } });
 });
 
 test("the read: the second RPC when the first fails, refuses or answers no height; null when both do", async () => {
@@ -44,7 +45,7 @@ test("the read: the second RPC when the first fails, refuses or answers no heigh
     const log: { url: string; body: unknown }[] = [];
     const r = await readFinalBlock([A, B], rpc({ [A]: first, [B]: blockAnswer(223_500_120) }, log), () => 0);
     assert.equal(r?.height, 223_500_120, JSON.stringify(first));
-    assert.deepEqual(log.map((l) => l.url), [A, B]);
+    assert.deepEqual(log.map((l) => l.url), [`${A}/?ct=footer`, `${B}/?ct=footer`]);
   }
   assert.equal(await readFinalBlock([A, B], rpc({ [A]: 500, [B]: new TypeError("fetch failed") }), () => 0), null);
 });

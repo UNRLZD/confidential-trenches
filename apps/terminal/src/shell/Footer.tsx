@@ -57,12 +57,11 @@ export function Footer() {
           </span>
         ))}
       </span>
-      {conn.kind !== "wait" && (
-        <span className={conn.kind === "on" ? "health" : "health off"} data-conn={conn.kind}>
-          <span className="d" />
-          {conn.kind === "on" ? w("stable") : w("offline")}
-        </span>
-      )}
+      {/* drawn from the first paint, hidden until the first read ends, so its arrival moves nothing (BAR-10) */}
+      <span className={`health${conn.kind === "off" ? " off" : conn.kind === "wait" ? " wait" : ""}`} data-conn={conn.kind}>
+        <span className="d" />
+        {conn.kind === "off" ? w("offline") : w("stable")}
+      </span>
       <span className="conn">
         {w("connection")} {conn.kind === "on" ? `${conn.ms} ms` : "—"}
       </span>

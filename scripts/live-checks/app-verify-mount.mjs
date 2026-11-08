@@ -72,7 +72,20 @@ export function pinsProblems(network, pins, record) {
 }
 
 // ------------------------------------------------------------------------------------------------ the verdict
-const nearPosts = (reqs) => (reqs ?? []).filter((x) => x.method === "POST" && operatorOf(x.url) !== null);
+/** The footer's block read (card app-footer-bar, apps/terminal/src/shell/footer.ts): at the RPC's root with
+ *  ?ct=footer, JSON-RPC id "ct-footer", `block` at finality final, naming no account. Not Verify's: it is left out of
+ *  the panel's reads and its timing, and held to that exact form, on the named pair, in every phase. */
+const isFooterUrl = (u) => {
+  try {
+    const x = new URL(u);
+    return x.pathname === "/" && x.search === "?ct=footer";
+  } catch {
+    return false;
+  }
+};
+const isFooterRead = (x) => isFooterUrl(x.url) && x.rpcId === "ct-footer" && x.rpcMethod === "block" && x.rpcParams === JSON.stringify({ finality: "final" }) && x.account === null;
+const nearPosts = (reqs) => (reqs ?? []).filter((x) => x.method === "POST" && operatorOf(x.url) !== null && !isFooterUrl(x.url));
+const footerPosts = (reqs) => (reqs ?? []).filter((x) => x.method === "POST" && operatorOf(x.url) !== null && isFooterUrl(x.url));
 
 /** One drawn panel and the requests of that open, judged for a network with or without a vault named. */
 function judgePanel(say, n, p, reqs, rec, named) {
@@ -107,7 +120,7 @@ function judgeTiming(say, n, r, k, since, rec, named) {
     return;
   }
   if (!named) return say(true, `${n}: from loading to ${leave.state}`);
-  const began = (r.rpcTiming ?? []).filter((e) => operatorOf(e.name) !== null && e.start >= since && e.start < leave.t);
+  const began = (r.rpcTiming ?? []).filter((e) => operatorOf(e.name) !== null && !isFooterUrl(e.name) && e.start >= since && e.start < leave.t);
   const pending = began.filter((e) => !(e.end > 0 && e.end <= leave.t));
   const rpcs = rec.rpcs ?? [];
   const answered = rpcs.filter((u) => began.some((e) => sameHost(e.name, u) && e.end > 0 && e.end <= leave.t));
@@ -122,8 +135,10 @@ function judgeAllRequests(say, n, r, rec, named) {
   const offPair = posts.filter((x) => !(rec.rpcs ?? []).some((u) => sameHost(x.url, u)));
   const offAccount = posts.filter((x) => !accounts.has(x.account));
   const outside = posts.filter((x) => x.rpcId === "verify" && x.phase !== "open" && x.phase !== "reopen");
-  const bad = [...offPair.map((x) => `${host(x.url)} (not the pair) in ${x.phase}`), ...offAccount.map((x) => `account ${x.account ?? "none"} in ${x.phase}`), ...outside.map((x) => `a Verify read in ${x.phase}`)];
-  say(bad.length === 0, `${n}: ${posts.length} NEAR request(s) over the run, each to the pair, each of ${[...accounts].join(" or ")}, Verify's only while open${bad.length ? `; not so: ${bad.join("; ")}` : ""}`);
+  const footer = footerPosts(r.requests);
+  const footerBad = footer.filter((x) => !isFooterRead(x) || !(rec.rpcs ?? []).some((u) => sameHost(x.url, u)));
+  const bad = [...offPair.map((x) => `${host(x.url)} (not the pair) in ${x.phase}`), ...offAccount.map((x) => `account ${x.account ?? "none"} in ${x.phase}`), ...outside.map((x) => `a Verify read in ${x.phase}`), ...footerBad.map((x) => `a footer-tagged ${x.rpcMethod ?? "request"} to ${host(x.url)}${x.account ? ` naming ${x.account}` : ""} in ${x.phase}, not the footer's block read on the pair`)];
+  say(bad.length === 0, `${n}: ${posts.length} NEAR request(s) over the run, each to the pair, each of ${[...accounts].join(" or ")}, Verify's only while open${footer.length ? `; and ${footer.length} footer block read(s)` : ""}${bad.length ? `; not so: ${bad.join("; ")}` : ""}`);
 }
 
 /** The check's error hooks on its page: every console error and page error of the terminal's frame (an APP_HOST
@@ -253,6 +268,8 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
           }
           e.account = body?.params?.account_id ?? null;
           e.rpcId = body?.id ?? null;
+          e.rpcMethod = body?.method ?? null;
+          e.rpcParams = body?.params === undefined ? null : JSON.stringify(body.params);
         }
         byReq.set(q, e);
         run.requests.push(e);
@@ -331,7 +348,8 @@ export async function collect({ shots, route = null, network, source, beforeReop
 export async function harnessRoute(build, rpcs, rpc = (route) => route.continue()) {
   const { harnessRoute: shell } = await import("./app-in-shell.mjs");
   const inner = await shell(build, "signed");
-  return (route) => (rpcs.some((u) => sameHost(route.request().url(), u)) ? rpc(route) : inner(route));
+  // the footer's block read is the shell harness's to answer (app-in-shell.mjs, a local chain), never the recording's
+  return (route) => (rpcs.some((u) => sameHost(route.request().url(), u)) && !isFooterUrl(route.request().url()) ? rpc(route) : inner(route));
 }
 
 // ------------------------------------------------------------------------------------------------ main

@@ -45,13 +45,19 @@ export const footerRpcs = (network: NearNetwork): readonly string[] => VERIFY_RE
 
 export type BlockRead = { height: number; ms: number };
 
+/** The footer's reads go to each RPC's root with this query (both pairs answer it as at the root), so a check that
+ *  reads the page's NEAR requests by address alone, such as Verify's (scripts/live-checks/app-verify-mount.mjs), tells
+ *  the footer's block read from Verify's own reads. */
+export const FOOTER_QUERY = "ct=footer";
+export const footerUrl = (rpc: string): string => `${rpc.replace(/\/$/, "")}/?${FOOTER_QUERY}`;
+
 /** NEAR's final block from the first RPC of `rpcs` that answers one, with that answer's round trip in ms; null when none does. */
 export async function readFinalBlock(rpcs: readonly string[], fetchFn: typeof fetch = fetch, clock: () => number = () => performance.now()): Promise<BlockRead | null> {
   const body = JSON.stringify({ jsonrpc: "2.0", id: "ct-footer", method: "block", params: { finality: "final" } });
   for (const url of rpcs) {
     const t0 = clock();
     try {
-      const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(BLOCK_READ_MS) });
+      const res = await fetchFn(footerUrl(url), { method: "POST", headers: { "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(BLOCK_READ_MS) });
       if (!res.ok) continue;
       const height = ((await res.json()) as { result?: { header?: { height?: unknown } } })?.result?.header?.height;
       if (typeof height === "number" && Number.isSafeInteger(height) && height > 0) return { height, ms: Math.round(clock() - t0) };
