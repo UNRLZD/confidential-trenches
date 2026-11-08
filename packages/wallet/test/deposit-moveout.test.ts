@@ -2,6 +2,7 @@
 // (src/deposit/moveout.ts). A fake chain answers both RPCs of the testnet release pair; the signed bytes are decoded
 // and checked against nearcore's borsh by hand.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -355,9 +356,10 @@ test("review 2 of exit-ids-out: a typed account or token that is not a string is
     const signed = base64.decode(m.signed);
     const txBytes = signed.slice(0, signed.length - 65);
     assert.ok(ed25519.verify(signed.slice(signed.length - 64), sha256(txBytes), k.publicKey), `${name}: signed by the key it checked`);
-    // M2 (review 3 M1): the builder's own copy of the key is zeroed whole, on a build and on a refusal. Every 32-byte
-    // array that holds the secret when its length is read during the call is recorded by identity (the builder reads
-    // its copy's length), and after the call each one but the caller's own must read all zero.
+    // M2 (review 3 M1): the builder's own copy of the key is zeroed whole, on a build and on a refusal. The arrays
+    // whose length is read while they hold the secret during the call are recorded by identity (the builder reads its
+    // copy's length), and after the call each one but the caller's own must read all zero. A copy whose length is never
+    // read that way is out of this spy's sight: the source pin below holds every expression that touches the secret.
     for (const refuse of [false, "read", "key"] as const) {
       const lengthOf = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), "length")!;
       const seen = new Set<Uint8Array>();
@@ -398,6 +400,20 @@ test("review 3 of exit-ids-out: a storage minimum at or past 2^128 is refused by
     assert.throws(() => buildRegisterOut({ read, key: key(), to: TO, token: TOKEN, storageMin: min }), MoveOutRefused);
   }
   buildRegisterOut({ read, key: key(), to: TO, token: TOKEN, storageMin: (1n << 128n) - 1n });
+  // the largest storage minimum a u128 holds is built, and signed as itself (review 4, L2)
+  const top = buildMoveOut({ read, key: key(), kind: "id", to: TO, token: TOKEN, storageMin: (1n << 128n) - 1n });
+  assert.equal(top.calls[0]!.method, "storage_deposit");
+  assert.equal(top.calls[0]!.deposit, (1n << 128n) - 1n);
+  const bytes = base64.decode(top.signed);
+  const tx = bytes.slice(0, bytes.length - 65);
+  // the storage_deposit action's deposit, the u128 just before the ft_transfer action's tag (2) and method name
+  const name = new TextEncoder().encode("ft_transfer");
+  let at = -1;
+  for (let i = tx.length - name.length; i >= 0 && at < 0; i--) if (name.every((b, j) => tx[i + j] === b)) at = i;
+  const end = at - 4 - 1; // the method name's u32 length and the FunctionCall tag
+  const dep = tx.slice(end - 16, end);
+  assert.equal(dep.length, 16);
+  assert.ok(dep.every((b) => b === 0xff), "the signed deposit is 2^128 - 1, not a wrapped value");
   for (const name of [NET.vault, "intents.near"]) {
     for (const to of [new String(name), { toJSON: () => name }] as unknown as string[]) {
       assert.throws(() => checkWithdrawCalls(U, to, TOKEN, withdrawCalls(to, 1n, TOKEN), 2n), MoveOutRefused, `withdraw ${name}`);
@@ -407,6 +423,36 @@ test("review 3 of exit-ids-out: a storage minimum at or past 2^128 is refused by
     assert.throws(() => checkWithdrawCalls(U, TO, tok, withdrawCalls(TO, 1n, tok), 2n), MoveOutRefused);
     assert.throws(() => checkRegisterCalls(U, TO, tok, [{ method: "storage_deposit", args: { account_id: TO, registration_only: true }, gas: MOVE_GAS.storage_deposit, deposit: STORAGE_MIN }], STORAGE_MIN), MoveOutRefused);
   }
+});
+
+/**
+ * Every expression in moveout.ts that touches a secret key, as text (review 4, L1): no in-process spy sees a copy kept
+ * in a module array, a 64-byte secret-and-public copy or a DataView over a copied buffer, so each line that names
+ * secretKey or sk is pinned here. A new copy site fails this test until it is reviewed and the pin is changed with it.
+ */
+const SECRET_LINES = [
+  "function signMoveTx(u: string, publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, token: string, blockHash: string, calls: readonly (MoveCall | WithdrawCall)[]): { hash: string; signed: string } {",
+  "const signature = ed25519.sign(digest, secretKey);",
+  "secretKey: Uint8Array;",
+  "const id = k.id, pk = k.publicKey, sk = k.secretKey;",
+  'if (!(sk instanceof Uint8Array) || !(pk instanceof Uint8Array)) throw new MoveOutRefused("the key is not a 32-byte ed25519 pair");',
+  "const key = { id, publicKey: new Uint8Array(pk), secretKey: new Uint8Array(sk) };",
+  "if (key.secretKey.length !== 32 || key.publicKey.length !== 32 || typeof id !== \"string\" || !IMPLICIT.test(id) || hex(key.publicKey) !== id || hex(ed25519.getPublicKey(key.secretKey)) !== id) {",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.id, key.publicKey, key.secretKey, nonce, token, read.blockHash, calls);",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.id, key.publicKey, key.secretKey, nonce, token, read.blockHash, calls);",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.id, key.publicKey, key.secretKey, nonce, INTENTS, read.blockHash, calls);",
+  "key.secretKey.fill(0);",
+  "return signMoveTx(U, k.publicKey, k.secretKey, nonce, token, read.blockHash, calls);",
+  "k.secretKey.fill(0);",
+];
+test("moveout.ts touches a secret key only in the pinned expressions (review 4, L1)", () => {
+  const src = readFileSync(new URL("../src/deposit/moveout.ts", import.meta.url), "utf8");
+  const code = src.split("\n").map((l) => l.trim()).filter((l) => !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
+  const touched = code.filter((l) => /\b(secretKey|sk)\b/.test(l));
+  assert.deepEqual(touched.slice().sort(), SECRET_LINES.slice().sort());
 });
 
 test("the exit's typed-account rule refuses exactly what checkMoveCalls refuses, over every moving account, token and typed account (card exit-ids-out)", () => {
