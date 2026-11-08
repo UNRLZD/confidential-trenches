@@ -74,7 +74,7 @@ test("readLists: GET /v1/market/lists?chain=solana on HELPER_HOST with the kit's
     return reply(answer())(url, init);
   };
   const s = await readLists(f);
-  assert.deepEqual(calls.map((c) => c.url), ["https://api.confidential.unrealized.trade/v1/market/lists?chain=solana"]);
+  assert.deepEqual(calls.map((c) => c.url), ["https://ct-api.unrealized.trade/v1/market/lists?chain=solana"]);
   assert.equal(HELPER_URL, calls[0]!.url);
   assert.equal(calls[0]!.init.credentials, "omit");
   assert.equal(calls[0]!.init.referrerPolicy, "no-referrer");

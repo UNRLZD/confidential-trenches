@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card kit-deposit-calls on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card kit-deposit-calls on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and its code, as minified, carries every stage
 // a deposit can reach and the facts beside it (packages/kit/src/signpage/messages.ts DEPOSIT_STAGES, DEPOSIT_HOLDS,
 // DepositFacts), which the kit's schema (src/signpage/schema.ts) checks on the deposit op and on deposit.confirm:
@@ -21,7 +21,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "kit-deposit-calls";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 export const STAGES = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted", "failed", "short", "expired", "refund_move"];

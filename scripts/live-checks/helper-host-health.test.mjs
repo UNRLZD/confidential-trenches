@@ -36,17 +36,17 @@ const replay = (a) => async (url, init) => {
 };
 
 test("recorded good answer: 200, the six parts, delegate up and POST /v1/bind mounted, the commit, the two origins echoed, example.com none: PASS", async () => {
-  const r = judge(await read("https://api.confidential.unrealized.trade", replay(A.good)), COMMIT);
+  const r = judge(await read("https://ct-api.unrealized.trade", replay(A.good)), COMMIT);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes('ok  POST /v1/bind with no SignedDelegateAction answers 400 "bad_shape", want 400 "bad_shape"'), r.lines.join("\n"));
-  assert.ok(r.lines.includes('ok  [https://confidential.unrealized.trade] Access-Control-Allow-Origin: "https://confidential.unrealized.trade"'));
+  assert.ok(r.lines.includes('ok  [https://ct-app.unrealized.trade] Access-Control-Allow-Origin: "https://ct-app.unrealized.trade"'));
   assert.ok(r.lines.includes("ok  [https://example.com] Access-Control-Allow-Origin: none"));
 });
 
 test("recorded bad answer: the helper before /v1/bind was mounted (delegate down, POST /v1/bind 404): FAIL", async () => {
   const r = judge(await read(undefined, replay(A.bad_no_bind)), A.bad_no_bind.commit);
   assert.equal(r.ok, false);
-  assert.ok(r.lines.includes('BAD [https://confidential.unrealized.trade] delegate (POST /v1/bind) is "down", want "up"'), r.lines.join("\n"));
+  assert.ok(r.lines.includes('BAD [https://ct-app.unrealized.trade] delegate (POST /v1/bind) is "down", want "up"'), r.lines.join("\n"));
   assert.ok(r.lines.includes('BAD POST /v1/bind with no SignedDelegateAction answers 404 none, want 400 "bad_shape"'), r.lines.join("\n"));
   // and nothing else in it fails: the bind reads are what this answer is refused on (and the release, which no helper
   // reported before card helper-release-bump)
@@ -56,7 +56,7 @@ test("recorded bad answer: the helper before /v1/bind was mounted (delegate down
 test("recorded good answer against its --since record: another commit, release 2 up from 1: PASS; against the deployed helper's answer with no release: PASS", async () => {
   const r = judge(await read(undefined, replay(A.good)), COMMIT, A.since_before);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.ok(r.lines.includes("ok  [https://confidential.unrealized.trade] release 2 is a whole number, 1 or more"), r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  [https://ct-app.unrealized.trade] release 2 is a whole number, 1 or more"), r.lines.join("\n"));
   assert.ok(r.lines.includes("ok  another commit than the record's (3e6cde60b504): release 2 went up from 1"), r.lines.join("\n"));
   const first = judge(A.good, COMMIT, A.deployed_no_release);
   assert.equal(first.ok, true, first.lines.join("\n"));
@@ -78,7 +78,7 @@ test("recorded bad answer: a new commit with the record's release (nothing raise
 test("recorded bad answer: the deployed helper before this card reports no release: FAIL", async () => {
   const r = judge(await read(undefined, replay(A.deployed_no_release)), A.deployed_no_release.commit);
   assert.equal(r.ok, false);
-  assert.ok(r.lines.includes("BAD [https://confidential.unrealized.trade] release none is a whole number, 1 or more"), r.lines.join("\n"));
+  assert.ok(r.lines.includes("BAD [https://ct-app.unrealized.trade] release none is a whole number, 1 or more"), r.lines.join("\n"));
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).filter((l) => !l.includes("release") && !l.includes("] ready: ")), [], "only the release (and the ready it predates) fails it");
 });
 
@@ -110,7 +110,7 @@ test("the --since comparison: the same commit keeps the release, another raises 
 test("card helper-ready-gate: recorded good answer says ready: PASS; the same helper read while it warmed (ready: false): FAIL, on ready alone", async () => {
   const good = judge(await read(undefined, replay(A.good)), COMMIT);
   assert.equal(good.ok, true, good.lines.join("\n"));
-  for (const o of ["https://confidential.unrealized.trade", "https://sign.confidential.unrealized.trade", "https://example.com"]) assert.ok(good.lines.includes(`ok  [${o}] ready: true`), good.lines.join("\n"));
+  for (const o of ["https://ct-app.unrealized.trade", "https://confidential.unrealized.trade", "https://example.com"]) assert.ok(good.lines.includes(`ok  [${o}] ready: true`), good.lines.join("\n"));
   const r = judge(await read(undefined, replay(A.bad_warming)), A.bad_warming.commit);
   assert.equal(r.ok, false);
   const bad = r.lines.filter((l) => l.startsWith("BAD"));
@@ -118,21 +118,21 @@ test("card helper-ready-gate: recorded good answer says ready: PASS; the same he
   // and a helper before this card, with no ready at all, fails on it too
   const none = structuredClone(A.good);
   for (const x of none.reads) x.body = JSON.stringify({ ...JSON.parse(x.body), ready: undefined });
-  assert.ok(judge(none, COMMIT).lines.includes("BAD [https://confidential.unrealized.trade] ready: none, want true (the helper took traffic before its warm-up was done)"));
+  assert.ok(judge(none, COMMIT).lines.includes("BAD [https://ct-app.unrealized.trade] ready: none, want true (the helper took traffic before its warm-up was done)"));
 });
 
 test("recorded bad answer: X-Helper-Commit is not main's: FAIL", async () => {
   const r = judge(await read(undefined, replay(A.bad_commit)), COMMIT);
   assert.equal(r.ok, false);
-  assert.ok(r.lines.includes(`BAD [https://sign.confidential.unrealized.trade] X-Helper-Commit: "${A.bad_commit.reads[0].headers["x-helper-commit"]}", want "${COMMIT}"`), r.lines.join("\n"));
-  assert.ok(r.lines.includes("BAD [https://confidential.unrealized.trade] body commit equals it"));
+  assert.ok(r.lines.includes(`BAD [https://confidential.unrealized.trade] X-Helper-Commit: "${A.bad_commit.reads[0].headers["x-helper-commit"]}", want "${COMMIT}"`), r.lines.join("\n"));
+  assert.ok(r.lines.includes("BAD [https://ct-app.unrealized.trade] body commit equals it"));
 });
 
 test("recorded bad answer: Access-Control-Allow-Origin: *: FAIL", async () => {
   const r = judge(await read(undefined, replay(A.bad_star)), COMMIT);
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes('BAD [https://example.com] Access-Control-Allow-Origin: "*", want none'), r.lines.join("\n"));
-  assert.ok(r.lines.includes("BAD [https://confidential.unrealized.trade] no * in Access-Control-Allow-Origin"));
+  assert.ok(r.lines.includes("BAD [https://ct-app.unrealized.trade] no * in Access-Control-Allow-Origin"));
 });
 
 test("bad answers made from the good one: a part missing, a part added, no Vary, credentials allowed, a 503: FAIL", () => {

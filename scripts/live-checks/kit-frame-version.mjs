@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card kit-frame-version on SIGN_HOST (https://sign.confidential.unrealized.trade). What it holds, and
+// Live check of card kit-frame-version on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that: the served /app.js is the one index.html pins (its sha384), and its code, as minified, sends an app on an
 // older kit only what that kit reads (packages/signpage/src/kit-version.ts):
 //   - it reads the kit's hello ({ v: 1, type: "hello", kit }, packages/kit/src/signpage/messages.ts HelloMessage), the
@@ -28,7 +28,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "kit-frame-version";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** kit-v1.4's deposit stages, and what the page must send it for each stage the kit has now. */

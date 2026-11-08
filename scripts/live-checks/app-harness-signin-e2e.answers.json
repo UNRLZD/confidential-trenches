@@ -56,7 +56,7 @@
    "sign"
   ],
   "app": {
-   "url": "https://confidential.unrealized.trade",
+   "url": "https://ct-app.unrealized.trade",
    "page": {
     "status": 200,
     "stylesheets": 1,
@@ -78,7 +78,7 @@
    }
   },
   "sign": {
-   "url": "https://sign.confidential.unrealized.trade",
+   "url": "https://confidential.unrealized.trade",
    "index": {
     "status": 200,
     "scripts": 1,
@@ -126,7 +126,7 @@
    }
   },
   "sign": {
-   "url": "https://sign.confidential.unrealized.trade",
+   "url": "https://confidential.unrealized.trade",
    "index": {
     "status": 200,
     "scripts": 1,

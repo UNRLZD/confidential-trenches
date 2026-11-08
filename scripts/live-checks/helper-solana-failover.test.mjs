@@ -13,7 +13,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-solana-failover.answers.json"), "utf8"));
 const replay = (a) => async (url, init) => {
   assert.equal(new URL(url).pathname, "/v1/health");
-  assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+  assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
   return new Response(a.body, { status: a.status });
 };
 const withSolana = (s) => ({ ...A.good, body: JSON.stringify({ ...JSON.parse(A.good.body), solana: s }) });

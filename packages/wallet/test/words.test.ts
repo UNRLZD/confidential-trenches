@@ -145,7 +145,7 @@ test("the 12 words are drawn on SIGN_HOST's top-level page only, never in a fram
   const seed = typedSeed(A8_WORDS);
   assert.ok(backupWords(seed, ON_SIGN_HOST) === A8_WORDS, "the backup shows the seed's own 12 words");
   assert.throws(() => backupWords(seed, { hostname: d.SIGN_HOST, topLevel: false }), /never in a frame/);
-  assert.throws(() => backupWords(seed, { hostname: "confidential.unrealized.trade", topLevel: true }), /only/);
+  assert.throws(() => backupWords(seed, { hostname: "ct-app.unrealized.trade", topLevel: true }), /only/);
   assert.throws(() => backupWords(seed, { hostname: `evil.${d.SIGN_HOST}`, topLevel: true }), /only/);
   // in Node there is no window and no location: refused
   assert.throws(() => backupWords(seed), /only/);

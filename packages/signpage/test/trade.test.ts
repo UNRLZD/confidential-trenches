@@ -181,7 +181,7 @@ function page(s: ReturnType<typeof store>, script: Script, providers: readonly [
     store: async () => s,
     seed64: () => (opened++, seed64()),
     deps: {
-      helper: "https://api.confidential.unrealized.trade",
+      helper: "https://ct-api.unrealized.trade",
       providers,
       reference: async () => {
         if (script.referenceDown) throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "provider.down.example");

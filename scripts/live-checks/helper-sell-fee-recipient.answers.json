@@ -2,7 +2,7 @@
  "notes": [
   "good: a local helper (apps/helper/src/server.ts start(), --base http://127.0.0.1:57041) at commit 02275347ff0b7e4826cc43a169f490104083c62b, read 2026-11-06T13:52:33.091Z (card helper-sender-fee-proof), both EVM testnet pools set in its own process: each withdraw and sell sender key sha256 of a label (a throwaway, never written), the kit's venues with each sell sender pin set to the throwaway sell key, the deployed fee answers' fee recipients (base-sepolia 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec, robinhood-testnet 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7), POOL_EVM_FEE_COLLECTOR_<NETWORK> the kit's pin, the deployed FeeCollector (base-sepolia 0x9cc4788af51677aaa7770d78277c41fb864b35e1, robinhood-testnet 0xb174f0e859f00a7b593baca38394327e3d6bf638; card evm-fee-collector), POOL_EVM_RPCS_<NETWORK> unset, so the kit's fee providers (feeProviders). The sell paying the fee collector passes every static check and stops at W's nonce read on both RPCs (auth_nonce); a sell paying the withdraw's fee recipient, 0x...beef or the helper's own sell sender is refused fee_recipient; nothing is sent. Re-recorded on HELPER_HOST once this card's merge is redeployed with both collectors set.",
   "bad_fee_recipient: card helper-sell-fee-recipient's own good run (a local helper at feb84e3a8061b193e9df5b11455050171003bc8c, read 2026-11-06 09:21Z): its fee answers name no fee_collector, and the sell paying the withdraw's fee recipient goes through to W's nonce read (auth_nonce) where it must be refused fee_recipient.",
-  "bad_deployed: HELPER_HOST (https://api.confidential.unrealized.trade) at ff8eec24c016884875ee8a577f9a15b6b7bf70c9, read 2026-11-06 09:19Z: its sell route reads the 10-field Sell, so each 11-field sell answers 400 bad_shape.",
+  "bad_deployed: HELPER_HOST (https://ct-api.unrealized.trade) at ff8eec24c016884875ee8a577f9a15b6b7bf70c9, read 2026-11-06 09:19Z: its sell route reads the 10-field Sell, so each 11-field sell answers 400 bad_shape.",
   "Each sell is built at run time with a throwaway W key; no key is recorded."
  ],
  "good": {
@@ -346,7 +346,7 @@
   ]
  },
  "bad_deployed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "pools": [
    {
     "network": "base-sepolia",

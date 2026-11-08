@@ -27,8 +27,8 @@ import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const KEY = "pool-restore-wired";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SIGN_HOST = "sign.confidential.unrealized.trade";
-const APP_HOST = "confidential.unrealized.trade";
+const SIGN_HOST = "confidential.unrealized.trade";
+const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const START = "/portfolio";
 const WAIT_MS = 20_000;

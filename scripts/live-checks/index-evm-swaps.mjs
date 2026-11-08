@@ -39,8 +39,8 @@ import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
 
 const KEY = "index-evm-swaps";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const SAMPLE = 5;
 /** Blocks behind the providers' newest a swap must be on the tape by: 24 s on Base (200 ms blocks since block 53556127,
  *  lists.ts BLOCK_CLOCK), 6 s on Robinhood. */

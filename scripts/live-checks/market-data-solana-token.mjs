@@ -26,8 +26,8 @@ import { writeFileSync } from "node:fs";
 import { ROW_FIELDS as TERMINAL_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 
 const KEY = "market-data-solana-token";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const MINT = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
 export const READS = {
   token: (m) => `/v1/market/token?chain=solana&token=${m}`,

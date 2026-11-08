@@ -33,7 +33,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-shell";
-export const APP_HOST = "https://confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 // the shell's routes (apps/terminal/src/routes/routes.ts)
 export const ROUTES = [
   ["token", "/"],

@@ -1,13 +1,13 @@
 {
  "good": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "near": {
    "mainnet": {
     "quote": {
      "readAt": "2026-11-07T19:58:24.694Z",
      "status": 404,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -41,7 +41,7 @@
      "readAt": "2026-11-07T19:58:25.880Z",
      "status": 200,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -78,7 +78,7 @@
      "readAt": "2026-11-07T19:58:27.046Z",
      "status": 200,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -98,7 +98,7 @@
       "readAt": "2026-11-07T19:58:27.463Z",
       "status": 422,
       "headers": {
-       "access-control-allow-origin": "https://confidential.unrealized.trade",
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
        "alt-svc": "h3=\":443\"; ma=2592000",
        "cache-control": "no-store",
@@ -117,7 +117,7 @@
       "readAt": "2026-11-07T19:58:28.057Z",
       "status": 422,
       "headers": {
-       "access-control-allow-origin": "https://confidential.unrealized.trade",
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
        "alt-svc": "h3=\":443\"; ma=2592000",
        "cache-control": "no-store",
@@ -134,17 +134,17 @@
     ]
    }
   ],
-  "note": "api.confidential.unrealized.trade at af75100a (X-Helper-Commit), read 2026-11-07T19:58:25.880Z with node scripts/live-checks/relayer-cost-guards.mjs --record (no --commit: the deployed helper predates this card; its quote and Solana answers are the ones this card keeps): the token minimum equal to the pin on FastNEAR and dRPC on both networks, mainnet withdrawals not carried (404), the testnet token quoted; the devnet pool refusing a zero-fee release (fee_off) and a release whose pool instruction fails in the simulation (simulation_failed, InstructionError), neither signed"
+  "note": "ct-api.unrealized.trade at af75100a (X-Helper-Commit), read 2026-11-07T19:58:25.880Z with node scripts/live-checks/relayer-cost-guards.mjs --record (no --commit: the deployed helper predates this card; its quote and Solana answers are the ones this card keeps): the token minimum equal to the pin on FastNEAR and dRPC on both networks, mainnet withdrawals not carried (404), the testnet token quoted; the devnet pool refusing a zero-fee release (fee_off) and a release whose pool instruction fails in the simulation (simulation_failed, InstructionError), neither signed"
  },
  "bad_cap": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "near": {
    "mainnet": {
     "quote": {
      "readAt": "2026-11-07T19:58:24.694Z",
      "status": 404,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -178,7 +178,7 @@
      "readAt": "2026-11-07T19:58:25.880Z",
      "status": 200,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -215,7 +215,7 @@
      "readAt": "2026-11-07T19:58:27.046Z",
      "status": 200,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -235,7 +235,7 @@
       "readAt": "2026-11-07T19:58:27.463Z",
       "status": 422,
       "headers": {
-       "access-control-allow-origin": "https://confidential.unrealized.trade",
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
        "alt-svc": "h3=\":443\"; ma=2592000",
        "cache-control": "no-store",
@@ -254,7 +254,7 @@
       "readAt": "2026-11-07T19:58:28.057Z",
       "status": 422,
       "headers": {
-       "access-control-allow-origin": "https://confidential.unrealized.trade",
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
        "alt-svc": "h3=\":443\"; ma=2592000",
        "cache-control": "no-store",
@@ -274,14 +274,14 @@
   "note": "the good run with the testnet token minimum read one yocto above the pin on both RPCs: USDC changed its bounds, so the one register_deposit the relayer carries no longer matches the chain (an alarm, whatever the quote answers)"
  },
  "bad_signed": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "near": {
    "mainnet": {
     "quote": {
      "readAt": "2026-11-07T19:58:24.694Z",
      "status": 404,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -315,7 +315,7 @@
      "readAt": "2026-11-07T19:58:25.880Z",
      "status": 200,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -352,7 +352,7 @@
      "readAt": "2026-11-07T19:58:27.046Z",
      "status": 200,
      "headers": {
-      "access-control-allow-origin": "https://confidential.unrealized.trade",
+      "access-control-allow-origin": "https://ct-app.unrealized.trade",
       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
       "alt-svc": "h3=\":443\"; ma=2592000",
       "cache-control": "no-store",
@@ -372,7 +372,7 @@
       "readAt": "2026-11-07T19:58:27.463Z",
       "status": 200,
       "headers": {
-       "access-control-allow-origin": "https://confidential.unrealized.trade",
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
        "alt-svc": "h3=\":443\"; ma=2592000",
        "cache-control": "no-store",
@@ -391,7 +391,7 @@
       "readAt": "2026-11-07T19:58:28.057Z",
       "status": 422,
       "headers": {
-       "access-control-allow-origin": "https://confidential.unrealized.trade",
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
        "alt-svc": "h3=\":443\"; ma=2592000",
        "cache-control": "no-store",

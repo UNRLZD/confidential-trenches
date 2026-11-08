@@ -539,7 +539,7 @@
  "bad": {
   "check": "pool-ready-no-flicker",
   "at": "2026-11-05T18:33:58.107Z",
-  "source": "live https://sign.confidential.unrealized.trade",
+  "source": "live https://confidential.unrealized.trade",
   "treeBundle": "sha384-Up0n/n4yaqldl5ErAJqi/++mNjD+QSaozGx0xJW3nsty2njmntrHJkrEuu8eIeRU",
   "signBundle": {
    "status": 200,

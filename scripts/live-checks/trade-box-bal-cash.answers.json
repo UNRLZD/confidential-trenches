@@ -59,7 +59,7 @@
  "bad": {
   "check": "trade-box-bal-cash",
   "at": "2026-11-04T12:45:30.449Z",
-  "source": "live https://confidential.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-D2sAQfy_.js",
   "runs": [

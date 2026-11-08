@@ -96,7 +96,7 @@
   ]
  },
  "bad_listed_dropped": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "at": "2026-11-07T06:12:24.581Z",
   "lists": {
    "status": 200,
@@ -194,7 +194,7 @@
   ]
  },
  "bad_pre_card": {
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "at": "2026-11-04T19:07:36.388Z",
   "lists": {
    "status": 200,

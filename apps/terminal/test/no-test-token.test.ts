@@ -35,7 +35,7 @@ function helper(o: { lists?: unknown; listsStatus?: number; token?: unknown; tok
     const url = String(input);
     calls.push({ url, init });
     if (url === HELPER_URL) return send(o.lists ?? listsAnswer(), o.listsStatus ?? 200);
-    if (url.startsWith("https://api.confidential.unrealized.trade/v1/market/token?")) return send(o.token ?? token.answer, o.tokenStatus ?? 200);
+    if (url.startsWith("https://ct-api.unrealized.trade/v1/market/token?")) return send(o.token ?? token.answer, o.tokenStatus ?? 200);
     throw new TypeError(`no such host: ${url}`);
   };
   return { fetchFn, calls };
@@ -102,7 +102,7 @@ test("loadTopToken: the lists, then /v1/market/token for the top of the Trending
   assert.equal(d.status, "ready");
   assert.equal(d.status === "ready" && d.row.token, TOP);
   assert.equal(d.status === "ready" && d.row.symbol, token.answer.row.symbol);
-  assert.deepEqual(calls.map((c) => c.url), [HELPER_URL, `https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${TOP}`]);
+  assert.deepEqual(calls.map((c) => c.url), [HELPER_URL, `https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=${TOP}`]);
   for (const c of calls) {
     assert.equal(c.init?.credentials, HELPER_FETCH_INIT.credentials);
     assert.equal(c.init?.referrerPolicy, HELPER_FETCH_INIT.referrerPolicy);
@@ -154,6 +154,6 @@ test("loadTopToken: every failed or wrong read is the error state, never a token
 
 test("TOKEN_URL: the helper's token read for a Solana mint, the mint encoded", () => {
   assert.equal(typeof source.TOKEN_URL, "function");
-  assert.equal(source.TOKEN_URL!(TOP), `https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=${TOP}`);
-  assert.equal(source.TOKEN_URL!("a&b=c"), "https://api.confidential.unrealized.trade/v1/market/token?chain=solana&token=a%26b%3Dc");
+  assert.equal(source.TOKEN_URL!(TOP), `https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=${TOP}`);
+  assert.equal(source.TOKEN_URL!("a&b=c"), "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=a%26b%3Dc");
 });

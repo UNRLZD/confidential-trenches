@@ -131,7 +131,7 @@ test("live path stops when every type in fsn1 is unavailable, naming the DNS cha
   };
   const c = capture();
   assert.equal(await main(["--commit", COMMIT], { fetch: all, token: () => TOKEN, sleep: async () => {}, ...c }), 1);
-  assert.match(c.out.join("\n"), /a DNS change of api\.confidential\.unrealized\.trade/);
+  assert.match(c.out.join("\n"), /a DNS change of ct-api\.unrealized\.trade/);
 });
 
 test("importing the script from a process whose argv[1] is not a file runs nothing and does not throw", () => {

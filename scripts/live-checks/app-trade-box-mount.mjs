@@ -23,8 +23,8 @@ import { count, usd } from "../../apps/terminal/src/screens/discover/format.ts";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-trade-box-mount";
-export const APP_HOST = "https://confidential.unrealized.trade";
-export const HELPER_HOST = "https://api.confidential.unrealized.trade";
+export const APP_HOST = "https://ct-app.unrealized.trade";
+export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LOADS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },

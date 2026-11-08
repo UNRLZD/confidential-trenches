@@ -25,8 +25,8 @@ import { named } from "./record-names.mjs";
 
 const KEY = "app-release-sri";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const URL_ = "https://confidential.unrealized.trade/";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const URL_ = "https://ct-app.unrealized.trade/";
+export const SIGN = "https://confidential.unrealized.trade";
 export const INTEGRITY_POLICY = "blocked-destinations=(script)";
 
 const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;

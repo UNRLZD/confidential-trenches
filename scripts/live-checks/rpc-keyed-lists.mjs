@@ -21,8 +21,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "rpc-keyed-lists";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const CHAINS = ["solana", "base", "robinhood", "near"];
 // dRPC's keys are served at lb.drpc.live/<network>/<key> (drpc.org/docs/gettingstarted/firstrequest), so drpc.live.
 // Its free plan serves no Solana (solana.drpc.org getSlot, 7 Nov 15:57Z: error 35 "chain is not available on free

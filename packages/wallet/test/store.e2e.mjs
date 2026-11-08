@@ -1,5 +1,5 @@
 // node test/store.e2e.mjs (from packages/wallet): the wallet store in headless Chromium on SIGN_HOST's own origin
-// (https://sign.confidential.unrealized.trade, answered by Playwright from this checkout; no network). WU-06
+// (https://confidential.unrealized.trade, answered by Playwright from this checkout; no network). WU-06
 // (docs/plan1/wallet.md:1045) and the card's risk, in a real browser:
 //   1. kill: a tab reserves a deposit index and its renderer is crashed (CDP Page.crash) before the index is used;
 //      a new tab gets a new index.
@@ -17,7 +17,7 @@ import { browserLabel, launchBrowser } from "../../../scripts/browsers.mjs";
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const SRC = process.env.STORE_SRC ?? join(PKG, "src/store/index.ts");
 const JS = stripTypeScriptTypes(readFileSync(SRC, "utf8"));
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 const SCOPE = "19146924376397433563414578315227104779963410245624609409577613413512870757636";
 
 async function context(browser) {

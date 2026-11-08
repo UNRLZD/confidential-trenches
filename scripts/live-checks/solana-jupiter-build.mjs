@@ -65,7 +65,7 @@ import {
 } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-jupiter-build";
-export const BASE = "https://api.confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
 /** A 503's cause entry in the helper's Server-Timing (apps/helper/src/proxy/proxy.ts Cause). */
 export const CAUSE = /(^|,\s*)cause;desc="(429|held|budget|5xx|timeout|send|key|answer)"/;
 export const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];

@@ -27,8 +27,8 @@ import { fileURLToPath } from "node:url";
 import { VAULT_CONSTANTS, vaultContextInput, vaultContextOf, vaultScopeOf } from "../../packages/kit/src/index.ts";
 
 export const KEY = "helper-mainnet-vault-env";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const USDC = VAULT_CONSTANTS.TOKEN;
 /** Two mainnet RPCs of two operators (relayer-withdraw-fee's mainnet pair). */
 export const PAIR = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];

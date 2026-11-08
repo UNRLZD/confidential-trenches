@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { defaultSites, HOSTS } from "../../apps/terminal/test/harness/harness.mjs";
 
 const KEY = "terminal-harness-sign-spa";
-export const SIGN_ORIGIN = "https://sign.confidential.unrealized.trade";
+export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 /** The paths with no file on SIGN_HOST that a run reads, after the index itself. */
 export const PATHS = Object.freeze(["/favicon.ico", "/_headers", "/no-such-path"]);
 

@@ -18,8 +18,8 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-token-watch";
-export const BASE = "https://api.confidential.unrealized.trade";
-export const APP = "https://confidential.unrealized.trade";
+export const BASE = "https://ct-api.unrealized.trade";
+export const APP = "https://ct-app.unrealized.trade";
 export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
 export const OTHER = "usdt.tether-token.near";

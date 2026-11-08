@@ -66,7 +66,7 @@ test("read() reads each chain's lists with the app's Origin until a token leaves
   const fetchFn = async (url, init) => {
     const u = new URL(url);
     calls.push(`${u.pathname}?${u.searchParams}`);
-    assert.equal(init.headers.origin, "https://confidential.unrealized.trade");
+    assert.equal(init.headers.origin, "https://ct-app.unrealized.trade");
     const chain = u.searchParams.get("chain");
     if (u.pathname === "/v1/market/lists") {
       reads[chain]++;

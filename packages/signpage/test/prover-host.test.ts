@@ -194,7 +194,7 @@ test("vault (card signpage-pool-notes-2): the proof queue's prover is the same w
 
 // ---- the kit's real startProver (client.ts) on a fake Worker and fetch ----
 
-const SIGN = "https://sign.confidential.unrealized.trade";
+const SIGN = "https://confidential.unrealized.trade";
 type Posted = { cmd: string; id: number; circuit: string };
 /** A Worker stand-in speaking worker.js's protocol; `die()` fires the error event client.ts reads as a dead worker. */
 class FakeWorker {

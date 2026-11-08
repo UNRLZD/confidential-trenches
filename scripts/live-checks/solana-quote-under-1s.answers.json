@@ -3,7 +3,7 @@
  "bad": {
   "key": "solana-quote-under-1s",
   "at": "2026-11-07T12:47:29.367Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "runs": [
    {
     "quote": 2014,
@@ -1736,7 +1736,7 @@
  "main": {
   "key": "solana-quote-under-1s",
   "at": "2026-11-07T21:13:36.916Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "runs": [
    {
     "quote": 1691,
@@ -8744,7 +8744,7 @@
  "head": {
   "key": "solana-quote-under-1s",
   "at": "2026-11-07T21:46:50.808Z",
-  "base": "https://api.confidential.unrealized.trade",
+  "base": "https://ct-api.unrealized.trade",
   "runs": [
    {
     "quote": 1919,

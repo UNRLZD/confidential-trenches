@@ -42,6 +42,6 @@ test("read() asks SIGN_HOST's / and /app.js and nothing else", async () => {
   const asked = [];
   const fetchFn = async (url) => (asked.push(url), new Response(url.endsWith("/app.js") ? `x${MARK}${LOCK}` : A.good.index));
   const a = await read(fetchFn);
-  assert.deepEqual(asked, ["https://sign.confidential.unrealized.trade/", "https://sign.confidential.unrealized.trade/app.js"]);
+  assert.deepEqual(asked, ["https://confidential.unrealized.trade/", "https://confidential.unrealized.trade/app.js"]);
   assert.deepEqual([a.value_read, a.lock], [true, true]);
 });
