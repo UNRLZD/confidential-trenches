@@ -478,6 +478,8 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   assert.throws(() => sell(-surplus, { ...P, lamports: P.lamports - 1n }), refusedAs("reserve"));
   assert.throws(() => sell(-surplus, { ...P, owed: 1 }), refusedAs("reserve"));
   assert.throws(() => sell(-surplus, { ...P, owed: 3 }), refusedAs("reserve"));
+  // three owed claims priced exactly as three: still refused, there are only two pump programs
+  assert.throws(() => sell(-surplus, { ...P, owed: 3, lamports: 5_000n + rents + solanaSellAfterFull(rent, 3) + surplus }), refusedAs("reserve"));
   assert.throws(() => sell(-surplus, { ...P, made: -1n }), refusedAs("reserve"));
   assert.throws(() => sell(-surplus, { ...P, lamports: 1 as never }), refusedAs("reserve"));
   // over the cap: what the keep holds over rent(0) the rent back's sweep carries into the user's note, so the cap leaves it

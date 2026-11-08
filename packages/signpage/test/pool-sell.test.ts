@@ -1584,6 +1584,18 @@ test("owed cashback on a coin that is not a cashback coin, its claim failing: th
   assert.equal(w.owed.get(W.address)?.passes, 1);
 });
 
+// Review L3 of 38faee89: one RPC's word that nothing is owed never lowers what W keeps: RPC B reads W's PumpSwap volume
+// account owing nothing, RPC A reads its cashback; the sell keeps the claim's cost.
+test("the sell counts a volume account owed a claim when either RPC reads it owed: what W keeps holds the claim's cost", async () => {
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const zeroed = (a: Acc): Acc => { const d = Uint8Array.from(a.data); new DataView(d.buffer).setBigUint64(74, 0n, true); return { ...a, data: d }; };
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true, mapOn: (p, address, a) => (p === 1 && address === vol ? zeroed(a) : a) });
+  await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  const sell = w.c.deposits[0]!;
+  const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
+  assert.equal(afterSell, solanaSellAfterFull(rent, 1));
+});
+
 // Review L3 and Info of 38faee89: two volume accounts owed a claim neither can take this pass (PumpSwap's cashback, its
 // claim refused; pump's stable cashback, with no USDC in the volume account's own account to pay it): the sell keeps
 // both claims' cost, the sweep goes, and W keeps exactly solanaSweepKeep for two (the owedOf 2 -> 1 mutant survived,
