@@ -104,11 +104,8 @@ export const bindMainnetPlan = (root = ROOT, commit = "{commit}") =>
 // A check the runner cannot run, with why. live.yml lists each one in the run's summary as skipped-<reason> and runs
 // nothing for it; a skip is never a pass. A test holds each reason to what the check reads.
 //   needs-secret: reads the vendor keys the host holds (helper-proxy's ENV_KEYS); a public-repo run has no secret.
-//   needs-relayer: the release names no relayer account yet (relayer-withdraw-fee's RELEASE_RELAYER), and the check
-//     takes it from --relayer-mainnet and --relayer-testnet.
 export const SKIPPED = {
   "helper-proxy": { reason: "needs-secret", detail: "JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY and ONECLICK_JWT" },
-  "relayer-withdraw-fee": { reason: "needs-relayer", detail: "the release names no relayer account yet (RELEASE_RELAYER), so the check takes --relayer-mainnet and --relayer-testnet" },
 };
 
 // Card helper-live-jup-serial: the checks that spend the helper's Jupiter budget run one after another in ONE job, never in

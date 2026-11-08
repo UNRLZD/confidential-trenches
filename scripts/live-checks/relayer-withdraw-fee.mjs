@@ -8,17 +8,20 @@
 // token's storage_balance_bounds().min (the register_deposit a fresh A pays). It passes only when, for each network:
 //   - the answer is 200 with exactly the kit's 7 fields, each in the form the device's parser takes (askWithdrawFee):
 //     relay_fee, gp and g_w canonical decimals, relay_fee below 2^128, px a decimal, valid_until_block a height;
-//   - relayer_account and fee_recipient are the release's relayer, byte for byte;
+//   - relayer_account and fee_recipient are the release's relayer, byte for byte: the pair packages/wallet/src/withdraw/
+//     relay.ts RELEASE_WITHDRAW_RELAYER writes for the network, read from this checkout's source (live.yml checks out the
+//     deployed commit) by wallet-mainnet-relayer-pins.mjs's loadWithdrawPins, never from the helper; a network the
+//     release names no relayer on FAILs;
 //   - relay_fee is at most the fee_max the device computes now (and P1's half of it is printed);
 //   - valid_until_block is still open at the device's agreed height and at most 100 + 30 blocks past it;
 // and another token answers 404 not_found, every answer under 1 KB with a full-sha X-Helper-Commit and APP_HOST echoed.
 // After: helper
-//   node scripts/live-checks/relayer-withdraw-fee.mjs [--base <url>] [--relayer-mainnet <account>[,<fee_recipient>]]
-//     [--relayer-testnet <account>[,<fee_recipient>]] [--fastnear-mainnet <url>] [--fastnear-testnet <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. The release names no relayer yet (wallet deposit/bind.ts RELEASE_RELAYER),
-//   so until it does the two --relayer flags give it.
+//   node scripts/live-checks/relayer-withdraw-fee.mjs [--base <url>] [--fastnear-mainnet <url>] [--fastnear-testnet <url>]
+//     [--record <file>] [--answer <file>]
+//   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { loadWithdrawPins } from "./wallet-mainnet-relayer-pins.mjs";
 
 const KEY = "relayer-withdraw-fee";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -28,7 +31,8 @@ export const OTHER = "usdt.tether-token.near";
 export const PAIRS = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"], testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] };
 /** The device's FastNEAR side may be either of FastNEAR's URLs (wallet deposit/account.ts NEAR_NETWORKS): --fastnear picks one. */
 export const FASTNEAR = { mainnet: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"], testnet: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"] }; // near-rpc-operators: one operator (FastNEAR's alternatives; --fastnear picks one, paired with dRPC)
-export const RELEASE_RELAYER = { mainnet: null, testnet: null };
+/** The release's withdrawal relayer on each network: relay.ts's RELEASE_WITHDRAW_RELAYER, the one source. */
+export const RELEASE_RELAYER = Object.freeze(loadWithdrawPins());
 const FIELDS = ["relayer_account", "fee_recipient", "relay_fee", "gp", "px", "g_w", "valid_until_block"];
 const DEC = /^(0|[1-9][0-9]{0,38})$/;
 const PX = /^(0|[1-9][0-9]{0,38})(\.[0-9]{1,39})?$/;
@@ -86,7 +90,7 @@ export function judge(run, relayer) {
     say(typeof b?.gp === "string" && DEC.test(b.gp) && typeof b?.g_w === "string" && DEC.test(b.g_w), `${tag} gp ${show(b?.gp)} and g_w ${show(b?.g_w)}: decimals`);
     say(typeof b?.px === "string" && PX.test(b.px), `${tag} px ${show(b?.px)}: a decimal`);
     say(Number.isSafeInteger(b?.valid_until_block) && b.valid_until_block > 0, `${tag} valid_until_block ${show(b?.valid_until_block)}: a height`);
-    if (!rel) say(false, `${tag} the release's relayer: not given (--relayer-${network})`);
+    if (!rel) say(false, `${tag} the release's relayer: relay.ts names none on ${network}`);
     else say(b?.relayer_account === rel.relayer_account && b?.fee_recipient === rel.fee_recipient, `${tag} relayer_account ${show(b?.relayer_account)}, fee_recipient ${show(b?.fee_recipient)}: the release's ${rel.relayer_account}, ${rel.fee_recipient}`);
     say(Buffer.byteLength(r.body) <= 1024, `${tag} ${Buffer.byteLength(r.body)} bytes, within 1 KB (H7)`);
     const d = run.device?.[network];
@@ -163,13 +167,6 @@ export async function read(base = BASE, fetchFn = fetch) {
   return { base, reads, device };
 }
 
-/** "<account>[,<fee_recipient>]", the fee recipient the account itself when not named. */
-export function relayerArg(s) {
-  if (typeof s !== "string" || s === "") return null;
-  const [relayer_account, fee_recipient = relayer_account] = s.split(",");
-  return { relayer_account, fee_recipient };
-}
-
 if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
@@ -182,13 +179,14 @@ if (import.meta.main) {
     }
     PAIRS[n][0] = u;
   }
-  const relayer = { mainnet: relayerArg(opt("--relayer-mainnet")) ?? RELEASE_RELAYER.mainnet, testnet: relayerArg(opt("--relayer-testnet")) ?? RELEASE_RELAYER.testnet };
   try {
-    const run = await read(opt("--base", BASE));
-    run.relayer = relayer;
-    run.pairs = PAIRS;
+    const run = opt("--answer") ? JSON.parse(readFileSync(opt("--answer"), "utf8")) : await read(opt("--base", BASE));
+    if (!opt("--answer")) {
+      run.relayer = RELEASE_RELAYER;
+      run.pairs = PAIRS;
+    }
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    const { ok, lines } = judge(run, relayer);
+    const { ok, lines } = judge(run, RELEASE_RELAYER);
     for (const l of lines) console.log(l);
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${run.base})`);
     process.exit(ok ? 0 : 1);

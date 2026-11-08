@@ -20,9 +20,9 @@
 // gives it (bad_shape, HTTP 400, SIGN_HOST's origin allowed as on every helper answer: the route is not deployed yet, so
 // that one fact is the contract's, not a recording); bad, SIGN_HOST as served on 7 Nov before the card, the same live
 // reads, and /v1/intents as the helper answered it on 7 Nov 19:18Z (HTTP 404 {error: "not_found"}, SIGN_HOST allowed).
+// After: helper
 //   node scripts/live-checks/wallet-refund-move.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
-// Runs: pending helper-id-intents, it fails on every deploy until the helper serves POST /v1/intents (H4.3), so a list would undo each deploy
 import "../net-window.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
