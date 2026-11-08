@@ -5,16 +5,23 @@
 // (checks/evm/quote.ts scanPools, card evm-buy-quote-in-window), so no quote waits on a cold build.
 //
 // One sync (evmPoolIndexSync):
-// - F4b: both readers are asked their head; the sync's block N is the lower of the two;
+// - F4b: both readers are asked their head; the sync's block N is the lower of the two, and heads more than the margin
+//   apart refuse rpc_disagree (one reader far behind would set the index's first block for good);
 // - F4c: the newest span ends at N and is asked first, its batch with block N on both readers: the two hashes must be
 //   equal (the pin), in the first read round, or the sync refuses rpc_disagree and nothing it read is kept;
 // - F4a: every span is asked of both readers, each batch holding the span's logs and its last block; a span counts only
 //   when both readers answered it, each with that block (the same hash on both) in the same batch as its logs; a span
 //   either failed is asked again of that reader, at most INDEX_TRIES times, and a span with INDEX_SPAN_LOGS logs or more
-//   on either is asked again as its two halves on both;
-// - F5: a pool that only one reader reported counts only where the PoolManager holds it at N (extsload of its state
-//   slot, by N's hash) on both readers, its id recomputed from its key; any log whose pool id is not the key's is no log;
-// - F6: past the venue's `index.cap` pools the sync refuses too_many_pools by name and serves nothing;
+//   on either is asked again as its two halves on both; a batch whose tries are spent on throws (a body past its
+//   size, a 4xx, a timeout) is asked one span a request, then as halves, under one budget of halves;
+// - F2: a pool both readers report is at the same block on both (else the span is asked again, then refused), and one
+//   pool id at two blocks, in two spans or in a span and the stored index is refused rpc_disagree: a pool initializes
+//   once;
+// - F5: a pool that only one reader reported counts only where the PoolManager's state of it at N (extsload of its
+//   state slot, by N's hash) is the same non-zero word on both readers: 0 on both is no pool, any other pair refuses
+//   rpc_disagree; its id is recomputed from its key, and any log whose pool id is not the key's is no log;
+// - F6: past the venue's `index.cap` pools both readers report, the sync refuses too_many_pools by name and serves
+//   nothing; one reader's pools that take it past (held or not) refuse rpc_disagree;
 // - F4d: what it stores ends `index.margin` blocks below N (a reorg's reach), so the next sync's gap starts there and
 //   reads the margin again; what the sync answers (`pools`) holds the margin's pools too.
 //
@@ -56,7 +63,8 @@ export type EvmPoolIndexConfig = {
   /** For the tests: the wait between tries (default: setTimeout). */
   readonly nap?: (ms: number) => Promise<void>;
 };
-export type EvmPoolIndexStats = { requests: [number, number]; getLogs: [number, number]; limited: [number, number]; failed: [number, number]; ms: number };
+/** Per reader: batches asked, getLogs asked, 429s, the longest 429 wait of one batch (ms), batches failed. */
+export type EvmPoolIndexStats = { requests: [number, number]; getLogs: [number, number]; limited: [number, number]; limitedMaxMs: [number, number]; failed: [number, number]; ms: number };
 export type EvmPoolIndexSync = {
   readonly index: EvmPoolIndexData | null;
   /** N where every block from the index's `from` to N is proven, else null (a partial index, never served). */
@@ -71,9 +79,12 @@ export type EvmPoolIndexSync = {
 const INITIALIZE = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
 /** A span answered with this many logs or more may be one its provider cut, so it is asked again as its halves. */
 export const INDEX_SPAN_LOGS = 10_000;
-/** The tries of one span on one reader (a 429 waits and does not spend one, up to INDEX_LIMITED_WAITS). */
+/** The tries of one batch on one reader (a 429 waits and does not spend one, up to INDEX_LIMITED_WAIT_MS a batch). */
 export const INDEX_TRIES = 4;
-const INDEX_LIMITED_WAITS = 8;
+/** The longest one batch waits on a reader's 429s, its Retry-After or a doubling backoff, before each 429 spends a try:
+ *  twice the longest measured, 31.5 s, of a 3M-block Robinhood build at 2 at once of 10 spans, whose
+ *  rpc.mainnet.chain.robinhood.com answered 31 of 63 batches 429 (2026-11-08 19:30Z; the 10M build's 144 of 246). */
+export const INDEX_LIMITED_WAIT_MS = 60_000;
 /** Halves a sync may ask past each starting span's first split. */
 export const INDEX_HALVES = 64;
 /** The PoolManager state reads (F5) in one batch. */
@@ -145,21 +156,30 @@ function poolOfLog(l: unknown, pm: string, a: number, b: number): EvmIndexedPool
   return Object.freeze({ id, key, block: n });
 }
 
-type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; cut: boolean };
-type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number] };
+/** A reader's answer to a span: its last block's hash and its pools; `cut` where its logs were an error or no answer
+ *  ("error") or at the cap ("full"), which is asked again as halves. */
+type Answer = { hash: string; pools: Map<string, EvmIndexedPool>; cut: "error" | "full" | null };
+/** `alone`: the reader's batches holding the span spent their tries on throws, so it is asked one span a request. */
+type Job = { a: number; b: number; ans: [Answer | null, Answer | null]; tries: [number, number]; alone: [boolean, boolean]; disagree: number };
+const jobOf = (a: number, b: number): Job => ({ a, b, ans: [null, null], tries: [0, 0], alone: [false, false], disagree: 0 });
+const NO_ANSWER: Answer = Object.freeze({ hash: "", pools: new Map(), cut: "error" as const });
 
 /** One sync of `prev` (or a new index) to the readers' agreed head; see the file's head. Refuses (throws) where nothing
- *  can be proven (the heads, the pin) and past the cap; any other failure returns what it proved. */
+ *  can be proven (the heads, the pin), where the readers disagree, and past the cap; a reader that does not answer
+ *  returns what the sync proved. One lying reader may make it refuse, never hide a pool or claim a block it did not
+ *  prove. */
 export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPoolIndexConfig): Promise<EvmPoolIndexSync> {
   const t0 = performance.now();
   const pm = c.poolManager.toLowerCase();
   const nap = c.nap ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const stats: EvmPoolIndexStats = { requests: [0, 0], getLogs: [0, 0], limited: [0, 0], failed: [0, 0], ms: 0 };
+  const stats: EvmPoolIndexStats = { requests: [0, 0], getLogs: [0, 0], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 0 };
   const done = (r: Omit<EvmPoolIndexSync, "stats">): EvmPoolIndexSync => ((stats.ms = Math.round(performance.now() - t0)), { ...r, stats });
   const old = prev !== null && prev.v === 1 && prev.chainId === c.chainId && prev.poolManager === pm ? prev : null;
 
-  // one batch on reader r, asked again (429s waited on) until answered or its tries are spent
+  // one batch on reader r, asked again until answered or its tries are spent (null); a 429 waits and spends no try,
+  // up to INDEX_LIMITED_WAIT_MS of waiting a batch, past which each 429 spends one
   async function ask(r: 0 | 1, calls: { method: string; params: unknown[] }[]): Promise<readonly unknown[] | null> {
+    let waited = 0;
     let waits = 0;
     for (let tries = 0; tries < INDEX_TRIES; ) {
       stats.requests[r]++;
@@ -168,10 +188,12 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         return await c.readers[r](calls);
       } catch (e) {
         const after = (e as { afterMs?: unknown } | null)?.afterMs;
-        if (/429|rate limit/i.test(String((e as Error)?.message)) && waits < INDEX_LIMITED_WAITS) {
+        if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {
           stats.limited[r]++;
-          waits++;
-          await nap(typeof after === "number" ? Math.min(after, 30_000) : BACKOFF_MS * 2 ** waits);
+          const ms = Math.min(typeof after === "number" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++, INDEX_LIMITED_WAIT_MS - waited);
+          waited += ms;
+          stats.limitedMaxMs[r] = Math.max(stats.limitedMaxMs[r], waited);
+          await nap(ms);
           continue;
         }
         stats.failed[r]++;
@@ -182,13 +204,16 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     return null;
   }
 
-  // F4b: the lower of the two proven heads
+  // F4b: the lower of the two proven heads, never more than the margin apart (a reader far behind would set `from`
+  // for good)
   const heads = await Promise.all(([0, 1] as const).map(async (r) => {
     const a = (await ask(r, [{ method: "eth_getBlockByNumber", params: ["latest", false] }]))?.[0] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined;
     const h = a?.result;
     return h && isQty(h.number) && isHash(h.hash) ? Number(h.number) : refuse("rpc_error", `index reader ${r + 1} answered no head`);
   }));
   const n = Math.min(heads[0]!, heads[1]!);
+  if (Math.max(heads[0]!, heads[1]!) - n > c.margin) return refuse("rpc_disagree", `the index readers' heads ${heads[0]} and ${heads[1]} are more than ${c.margin} blocks apart`);
+  // F6 (the review's): at the stored head the index stands as it was; below it the readers lag what it proved
   if (old !== null && n < old.through) return refuse("rpc_error", `the readers' head ${n} is below the index's ${old.through}`);
   const from = old?.from ?? Math.max(0, n - c.depth + 1);
   // never below what an earlier sync stored at its own, higher head (a reader that lags it is still at or above it)
@@ -196,9 +221,11 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
 
   // the jobs: every gap of the stored spans to N, in spans of c.span blocks, newest first (the one ending at N first)
   const jobs: Job[] = [];
-  for (const [a, b] of gapsOf(old?.spans ?? [], from, n).reverse()) for (let hi = b; hi >= a; hi -= c.span) jobs.push({ a: Math.max(a, hi - c.span + 1), b: hi, ans: [null, null], tries: [0, 0] });
+  for (const [a, b] of gapsOf(old?.spans ?? [], from, n).reverse()) for (let hi = b; hi >= a; hi -= c.span) jobs.push(jobOf(Math.max(a, hi - c.span + 1), hi));
   let proved: { a: number; b: number; pools: EvmIndexedPool[]; one: EvmIndexedPool[] }[] = [];
   let pin: string | null = null;
+  // F6: the pools both readers report (one reader's alone count once F5 holds them, so one operator's made-up logs
+  // never refuse the index as too many)
   let count = old?.pools.length ?? 0;
   let error: EvmQuoteError | null = null;
   // halves asked for spans answered with an error or at the log cap: each starting span's first split, and at most
@@ -212,63 +239,75 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     ]);
   // one reader's answer to a job: its logs and the job's last block, both from the same batch (F4a); `cut` where the
   // logs were answered with an error or at the cap, which no reader's words explain (M383); null where it gave neither
-  const answerOf = (out: readonly unknown[] | null, i: number, j: Job): Answer | null => {
-    const l = out?.[2 * i] as { result?: unknown; error?: unknown } | null | undefined;
-    if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : { hash: "", pools: new Map(), cut: true };
+  const answerOf = (out: readonly unknown[], i: number, j: Job): Answer | null => {
+    const l = out[2 * i] as { result?: unknown; error?: unknown } | null | undefined;
+    if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : NO_ANSWER;
     const logs = l?.result;
-    const blk = (out?.[2 * i + 1] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
+    const blk = (out[2 * i + 1] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
     if (!Array.isArray(logs) || !blk || !isHash(blk.hash) || !isQty(blk.number) || Number(blk.number) !== j.b) return null;
     const pools = new Map<string, EvmIndexedPool>();
     for (const x of logs) {
       const p = poolOfLog(x, pm, j.a, j.b);
-      if (p !== null && !pools.has(p.id)) pools.set(p.id, p);
+      if (p === null) continue;
+      // F2: one pool at two blocks in one answer is no answer an honest reader gives
+      if (pools.has(p.id) && pools.get(p.id)!.block !== p.block) return refuse("rpc_disagree", `index reader answered pool ${p.id} at two blocks`);
+      pools.set(p.id, p);
     }
-    return { hash: blk.hash.toLowerCase(), pools, cut: logs.length >= INDEX_SPAN_LOGS };
+    return { hash: blk.hash.toLowerCase(), pools, cut: logs.length >= INDEX_SPAN_LOGS ? "full" : null };
   };
 
-  // a job both readers answered: asked again as its halves where either was cut; the pin at N; the same last block on
-  // both; or asked again
+  // a job both readers answered: asked again as its halves where either was cut; the same last block and every pool
+  // both report at the same block on both (the pin at N), or asked again and then refused; else proven
   const settle = (j: Job): Job[] => {
     const [x, y] = j.ans as [Answer, Answer];
-    if (x.cut || y.cut) {
-      if (j.a === j.b) return refuse("too_many_pools", `block ${j.b} was answered with an error or ${INDEX_SPAN_LOGS} or more Initialize logs`);
+    if (x.cut !== null || y.cut !== null) {
+      // a single block: both at the log cap is too many pools; an error there is a reader's, which no chain explains
+      if (j.a === j.b) return x.cut === "full" && y.cut === "full" ? refuse("too_many_pools", `block ${j.b} holds ${INDEX_SPAN_LOGS} or more Initialize logs`) : refuse("rpc_disagree", `an index reader answered block ${j.b} with an error`);
       if ((halves -= 2) < 0) return refuse("rpc_error", "the index readers answered more spans with an error than any chain explains");
       const mid = j.a + Math.floor((j.b - j.a) / 2);
-      return [{ a: mid + 1, b: j.b, ans: [null, null], tries: [0, 0] }, { a: j.a, b: mid, ans: [null, null], tries: [0, 0] }];
+      return [jobOf(mid + 1, j.b), jobOf(j.a, mid)];
     }
-    if (j.b === n) {
-      if (x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);
-      pin = x.hash;
-    }
-    if (x.hash !== y.hash) {
+    if (j.b === n && x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);
+    const sameBlocks = [...x.pools].every(([id, p]) => !y.pools.has(id) || y.pools.get(id)!.block === p.block);
+    if (x.hash !== y.hash || !sameBlocks) {
       j.ans = [null, null];
-      if (++j.tries[0] >= INDEX_TRIES) return refuse("rpc_disagree", `the index readers do not agree on block ${j.b}`);
+      if (++j.disagree >= INDEX_TRIES) return refuse("rpc_disagree", x.hash !== y.hash ? `the index readers do not agree on block ${j.b}` : `the index readers report a pool of blocks ${j.a}-${j.b} at two blocks`);
       return [j];
     }
+    if (j.b === n) pin = x.hash;
     const both: EvmIndexedPool[] = [];
     const one: EvmIndexedPool[] = [];
     for (const [id, p] of x.pools) (y.pools.has(id) ? both : one).push(p);
     for (const [id, p] of y.pools) if (!x.pools.has(id)) one.push(p);
-    // F6: never past the cap, counting the pools both readers report (one reader's alone count once F5 holds them, so
-    // one operator's made-up logs never refuse the index as too many)
     count += both.length;
     if (count > c.cap) return refuse("too_many_pools", `chain ${c.chainId} has more than ${c.cap} pools, the index's cap`);
     proved.push({ a: j.a, b: j.b, pools: both, one });
     return [];
   };
-  // one round of `js` on both readers (each asked only what it has not answered); the jobs to ask again
+  // one round of `js` on both readers (each asked only what it has not answered: its alone spans one a request, the
+  // rest in one batch); the jobs to ask again
   const round = async (js: Job[]): Promise<Job[]> => {
     await Promise.all(([0, 1] as const).map(async (r) => {
       const want = js.filter((j) => j.ans[r] === null);
-      if (want.length === 0) return;
-      const out = await ask(r, callsOf(want));
+      const rest = want.filter((j) => !j.alone[r]);
+      const groups = [...want.filter((j) => j.alone[r]).map((j) => [j]), ...(rest.length > 0 ? [rest] : [])];
       let missed = 0;
-      want.forEach((j, i) => {
-        const a = answerOf(out, i, j);
-        if (a !== null) j.ans[r] = a;
-        else if (++j.tries[r] >= INDEX_TRIES) throw new EvmQuoteError("rpc_error", `index reader ${r + 1} did not answer blocks ${j.a}-${j.b}`);
-        else missed = Math.max(missed, j.tries[r]);
-      });
+      await Promise.all(groups.map(async (g) => {
+        const out = await ask(r, callsOf(g));
+        // F5 (the review's): tries spent on throws (a body past its size, a 4xx, a timeout): each span alone, then a
+        // span alone that still fails as its halves, under the halves' budget
+        if (out === null) {
+          for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;
+            else j.alone[r] = true;
+          return;
+        }
+        g.forEach((j, i) => {
+          const a = answerOf(out, i, j);
+          if (a !== null) j.ans[r] = a;
+          else if (++j.tries[r] >= INDEX_TRIES) throw new EvmQuoteError("rpc_error", `index reader ${r + 1} did not answer blocks ${j.a}-${j.b}`);
+          else missed = Math.max(missed, j.tries[r]);
+        });
+      }));
       if (missed > 0) await nap(BACKOFF_MS * 2 ** missed);
     }));
     return js.flatMap((j) => (j.ans[0] !== null && j.ans[1] !== null ? settle(j) : [j]));
@@ -300,8 +339,16 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   await Promise.all(Array.from({ length: c.parallel }, worker));
   if (fatal !== null) throw fatal;
 
-  // F5: a pool one reader reported, held by the PoolManager at N on both readers, or no pool; where that is not
-  // answered, the spans that hold such a pool are not proven
+  // F2: a pool initializes once, so one id at two blocks or in two spans (or in a span and the stored index) is a lie
+  const where = new Map<string, number>((old?.pools ?? []).map((p) => [p.id, p.block]));
+  for (const p of proved.flatMap((q) => [...q.pools, ...q.one])) {
+    if (where.has(p.id)) return refuse("rpc_disagree", `the index readers report pool ${p.id} at blocks ${where.get(p.id)} and ${p.block}`);
+    where.set(p.id, p.block);
+  }
+
+  // F5: a pool one reader reported counts only where the PoolManager's state of it at N is the same non-zero word on
+  // both readers; 0 on both is no pool; any other pair is a lie at one pinned hash. Where that is not answered, the
+  // spans that hold such a pool are not proven
   const ones = proved.flatMap((p) => p.one);
   // more pools one reader alone reported than the cap: the readers disagree past any honest lag, and none is read
   if (ones.length > c.cap) return refuse("rpc_disagree", `the index readers disagree on ${ones.length} pools, more than the cap ${c.cap}`);
@@ -321,26 +368,22 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     const ok = (x: unknown): x is string => typeof x === "string" && /^0x[0-9a-fA-F]{64}$/.test(x);
     const unread = new Set<string>();
     ones.forEach((p, i) => {
-      const w = [res(outs[0]!, i), res(outs[1]!, i)];
-      if (!w.every(ok)) unread.add(p.id);
+      const [u, v] = [res(outs[0]!, i), res(outs[1]!, i)];
+      if (!ok(u) || !ok(v)) unread.add(p.id);
+      else if (BigInt(u) !== BigInt(v)) refuse("rpc_disagree", `the index readers answer the PoolManager's state of pool ${p.id} at block ${n} apart`);
       // slot0's low 160 bits are the price, never 0 once the pool is initialized
-      else if (w.every((x) => BigInt.asUintN(160, BigInt(x)) !== 0n)) held.add(p.id);
+      else if (BigInt.asUintN(160, BigInt(u)) !== 0n) held.add(p.id);
     });
     if (unread.size > 0) {
       error ??= new EvmQuoteError("rpc_error", `the index readers did not answer the PoolManager's state of ${unread.size} pool(s)`);
       proved = proved.filter((p) => !p.one.some((o) => unread.has(o.id)));
     }
-    count += held.size;
-    if (count > c.cap) return refuse("too_many_pools", `chain ${c.chainId} has more than ${c.cap} pools, the index's cap`);
+    // F4 (the review's): one reader's pools, held, past the cap with the rest: the readers disagree on what counts
+    const kept = new Set(proved.flatMap((p) => p.one.map((o) => o.id)));
+    if (count + [...held].filter((id) => kept.has(id)).length > c.cap) return refuse("rpc_disagree", `the pools one index reader alone reported take chain ${c.chainId} past the cap ${c.cap}`);
   }
-  const seen = new Set(old?.pools.map((p) => p.id) ?? []);
-  const fresh: EvmIndexedPool[] = [];
-  for (const p of proved.flatMap((q) => [...q.pools, ...q.one.filter((o) => held.has(o.id))])) {
-    if (seen.has(p.id)) continue;
-    seen.add(p.id);
-    fresh.push(p);
-  }
-  // F4d: stored only to N less the margin
+  const fresh = proved.flatMap((q) => [...q.pools, ...q.one.filter((o) => held.has(o.id))]);
+  // F4d: stored only to N less the margin: each proven span to that block, and every pool read in it with it
   let spans: Spans = (old?.spans ?? []).map(([a, b]) => [a, b] as [number, number]);
   for (const p of proved) if (p.a <= stored) spans = withSpan(spans, p.a, Math.min(p.b, stored));
   const index: EvmPoolIndexData = {
@@ -349,7 +392,8 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     poolManager: pm,
     from,
     through: stored,
-    head: { number: n, hash: pin ?? old?.head.hash ?? "" },
+    // F6 (the review's): a sync that read nothing (N at the stored head) keeps the head it stood at
+    head: pin !== null ? { number: n, hash: pin } : old!.head,
     spans,
     pools: [...(old?.pools ?? []), ...fresh.filter((p) => p.block <= stored)],
   };

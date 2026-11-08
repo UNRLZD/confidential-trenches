@@ -4,7 +4,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evmPoolIdOf, evmPoolIndexSync, type EvmPoolIndexConfig, type EvmPoolIndexData } from "../src/checks/evm/pool-index.ts";
-import type { EvmPoolKey, EvmRpc, EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { EvmQuoteError, type EvmPoolKey, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import * as poolIndex from "../src/checks/evm/pool-index.ts";
+// read off the module, so this file still loads (and each test fails on its own) on a build without it
+const INDEX_LIMITED_WAIT_MS = (poolIndex as { INDEX_LIMITED_WAIT_MS?: number }).INDEX_LIMITED_WAIT_MS;
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -46,6 +49,18 @@ type Reader = {
   maxRange?: number;
   /** getLogs answered with a rate-limit error inside a 200, this many first */
   limitedInBody?: number;
+  /** the 429s' Retry-After, in ms (default 1) */
+  limitedAfterMs?: number;
+  /** a batch of more than this many calls throws (a body past its size) */
+  throwsOverCalls?: number;
+  /** a batch with a getLogs over more than this many blocks throws (a timeout) */
+  throwsOverRange?: number;
+  /** a block whose hash this reader answers as another fork's, this many times */
+  forkAt?: { b: number; times: number };
+  /** the state reads answered with an error */
+  stateError?: boolean;
+  /** more logs this reader answers to every getLogs */
+  extraLogs?: unknown[];
   calls: EvmRpcCall[][];
 };
 function reader(r: Reader): EvmRpc {
@@ -55,9 +70,11 @@ function reader(r: Reader): EvmRpc {
     r.calls.push([...calls]);
     if (r.limited !== undefined && r.limited > 0) {
       r.limited--;
-      throw Object.assign(new Error("the provider answered 429 Too Many Requests"), { afterMs: 1 });
+      throw Object.assign(new Error("the provider answered 429 Too Many Requests"), { afterMs: r.limitedAfterMs ?? 1 });
     }
     if (r.throws?.has(req)) throw new Error("the provider answered HTTP 502");
+    if (r.throwsOverCalls !== undefined && calls.length > r.throwsOverCalls) throw new Error("the answer is too long");
+    if (r.throwsOverRange !== undefined && calls.some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { toBlock: string }).toBlock) - Number((c.params[0] as { fromBlock: string }).fromBlock) + 1 > r.throwsOverRange!)) throw new Error("The operation was aborted due to timeout");
     const h = r.hash ?? ((n: number) => blockHash(n));
     return calls.map((c) => {
       if (c.method === "eth_getBlockByNumber") {
@@ -66,6 +83,10 @@ function reader(r: Reader): EvmRpc {
         if (r.noBlock !== undefined && r.noBlock.b === n && r.noBlock.times > 0) {
           r.noBlock.times--;
           return { result: null };
+        }
+        if (r.forkAt !== undefined && r.forkAt.b === n && r.forkAt.times > 0) {
+          r.forkAt.times--;
+          return { result: { number: hx(n), hash: blockHash(n, "fork") } };
         }
         return { result: { number: hx(n), hash: h(n) } };
       }
@@ -77,9 +98,10 @@ function reader(r: Reader): EvmRpc {
           r.limitedInBody--;
           return { error: { code: -32005, message: "25/second request limit reached" } };
         }
-        return { result: r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf) };
+        return { result: [...r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf), ...(r.extraLogs ?? [])] };
       }
       if (c.method === "eth_call") {
+        if (r.stateError) return { error: { code: -32000, message: "missing trie node" } };
         const data = (c.params[0] as { data: string }).data;
         const held = r.state ?? new Set(r.pools.map((p) => evmPoolIdOf(p.key)));
         const hit = [...held].some((id) => "0x1e2eaeaf" + slotOf(id).slice(2) === data);
@@ -167,7 +189,10 @@ test("F4c: the gap read ends at the agreed block, pinned by hash on both, in the
   }
   // the readers' block N differs: the sync refuses and nothing is kept
   const fork = (n: number) => (n === head ? blockHash(n, "fork") : blockHash(n));
-  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [], hash: fork })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /block 1000000/.test(e.message));
+  const fb: Reader = { head, pools: ps, calls: [], hash: fork };
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, fb)), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /block 1000000/.test(e.message));
+  // refused in the first read round: the pin is never asked again
+  assert.equal(fb.calls.flat().filter((c) => c.method === "eth_getLogs").length, 1);
 });
 
 test("F4d: stored only up to the reorg margin below the head, and the margin is read again with every gap", async () => {
@@ -210,9 +235,11 @@ test("F5: a pool only one reader reported is kept only if the PoolManager holds 
     assert.deepEqual(call[0]!.params[1], { blockHash: blockHash(head) });
     assert.equal((call[0]!.params[0] as { data: string }).data, "0x1e2eaeaf" + slotOf(evmPoolIdOf(real.key)).slice(2));
   }
-  // one reader alone saying it holds the pool is not enough
-  const halfState = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], state, calls: [] }, { head, pools: [], state: new Set(), calls: [] }));
-  assert.deepEqual(ids(halfState.pools), new Set());
+  // one reader alone saying it holds the pool is a lie at one pinned hash: the sync refuses and serves nothing (no
+  // coversThrough at all)
+  const halfState = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], state, calls: [] }, { head, pools: [], state: new Set(), calls: [] })).catch((e: unknown) => e);
+  assert.ok(halfState instanceof EvmQuoteError && halfState.code === "rpc_disagree", String(halfState));
+  assert.equal((halfState as { coversThrough?: unknown }).coversThrough, undefined);
 });
 
 test("F6: past the hard pool cap the index refuses by name and never serves a partial index", async () => {
@@ -221,9 +248,9 @@ test("F6: past the hard pool cap the index refuses by name and never serves a pa
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "too_many_pools" && /more than 5 pools/.test(e.message));
   const atCap = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }, { cap: 6 }));
   assert.equal(atCap.pools!.length, 6);
-  // pools one reader alone reported that the state holds count too
+  // pools one reader alone reported, held, that take it past the cap: the readers disagree on what counts
   const state = new Set(ps.map((p) => evmPoolIdOf(p.key)));
-  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, state, calls: [] }, { head, pools: ps.slice(0, 4), state, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "too_many_pools");
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, state, calls: [] }, { head, pools: ps.slice(0, 4), state, calls: [] }, { cap: 5 })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /past the cap 5/.test(e.message));
 });
 
 test("a span answered with an error is asked as its halves on both, and a 429 waits without spending a try", async () => {
@@ -234,7 +261,8 @@ test("a span answered with an error is asked as its halves on both, and a 429 wa
   assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
   assert.equal(r.stats.limited[0], 2);
   // a reader that answers every span with an error refuses rather than ask halves without end
-  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], maxRange: 0 }, { head, pools: ps, calls: [] })), (e: Error & { code?: string }) => e.code === "too_many_pools" || e.code === "rpc_error");
+  // a reader that answers even one block with an error: rpc_disagree at that block, never too_many_pools
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], maxRange: 0 }, { head, pools: ps, calls: [] })), (e: Error & { code?: string }) => e.code === "rpc_disagree" && /with an error/.test(e.message));
 });
 
 test("a rate limit answered inside a batch is asked again, never as halves", async () => {
@@ -268,4 +296,120 @@ test("one reader's made-up pools never refuse the index as too many: only pools 
   assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
   // past the cap of them, the readers disagree by name
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [...ps, ...fakes], state, calls: [] }, { head, pools: ps, state, calls: [] }, { cap: 10 })), (e: Error & { code?: string }) => e.code === "rpc_disagree");
+});
+
+// The money review of 44002c66 (P1-P5 its probes; F1-F8 its rulings): one lying reader may make the index refuse, never
+// hide a pool, never claim a block it did not prove.
+const real = { key: key(1), block: 1_000_000 - 5_000 }; // in the head span, below the margin
+const deep = { key: key(2), block: 1_000_000 - 55_000 }; // a deep span
+const both2 = new Set([real, deep].map((p) => evmPoolIdOf(p.key)));
+const code = (c: string, re?: RegExp) => (e: Error & { code?: string }) => e.code === c && (re === undefined || re.test(e.message));
+
+test("P1: a reader that omits a pool and answers its state 0 makes the sync refuse, never serve it hidden", async () => {
+  const head = 1_000_000;
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [] }, { head, pools: [deep], state: new Set([evmPoolIdOf(deep.key)]), calls: [] })), code("rpc_disagree", /state of pool/));
+});
+
+test("P2: both readers report a pool, one at another block of the span: asked again, then refused", async () => {
+  const head = 1_000_000;
+  const lie = { key: real.key, block: head - 100 };
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [lie, deep], state: both2, calls: [] }, { head, pools: [real, deep], state: both2, calls: [] })), code("rpc_disagree", /at two blocks/));
+});
+
+test("P3: a reader that moves a deep pool into the margin (omitting it from its span) makes the sync refuse", async () => {
+  const head = 1_000_000;
+  const lie = { key: deep.key, block: head - 100 };
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [] }, { head, pools: [real, lie], state: both2, calls: [] })), code("rpc_disagree", /at blocks/));
+  // the same pool already in the stored index, reported again in the margin: refused too
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [] }, { head, pools: [real, deep], state: both2, calls: [] }));
+  await assert.rejects(evmPoolIndexSync(r.index, cfgOf({ head: head + 50, pools: [real, deep], state: both2, calls: [] }, { head: head + 50, pools: [real, deep, { key: deep.key, block: head + 10 }], state: both2, calls: [] })), code("rpc_disagree", /at blocks/));
+});
+
+test("P4: heads more than the margin apart refuse before the index's first block is set", async () => {
+  const head = 1_000_000;
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head: 300_000, pools: [], calls: [] }, { head, pools: [real, deep], state: both2, calls: [] })), code("rpc_disagree", /more than 474 blocks apart/));
+  const r = await evmPoolIndexSync(null, cfgOf({ head: head - 474, pools: [real, deep], state: both2, calls: [] }, { head, pools: [real, deep], state: both2, calls: [] }));
+  assert.equal(r.coversThrough, head - 474);
+});
+
+test("P5: a sync at the stored head keeps the head it stood at, and one below it refuses", async () => {
+  const head = 1_000_000;
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], state: both2, calls: [] }, { head, pools: [real], state: both2, calls: [] }));
+  const t = r.index!.through;
+  const a: Reader = { head: t, pools: [real], state: both2, calls: [] };
+  const r2 = await evmPoolIndexSync(r.index, cfgOf(a, { head: t, pools: [real], state: both2, calls: [] }));
+  assert.deepEqual(r2.index!.head, r.index!.head);
+  assert.equal(r2.coversThrough, t);
+  assert.equal(a.calls.flat().filter((c) => c.method === "eth_getLogs").length, 0);
+  await assert.rejects(evmPoolIndexSync(r.index, cfgOf({ head: t - 1, pools: [real], calls: [] }, { head: t - 1, pools: [real], calls: [] })), code("rpc_error", /below the index's/));
+});
+
+test("a batch whose tries are spent on throws is asked one span a request, then as halves", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  // a batch of more than one span is past its size: each span alone answers
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], throwsOverCalls: 2 }, { head, pools: ps, calls: [] }));
+  assert.equal(r.coversThrough, head);
+  assert.deepEqual(ids(r.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+  // a span alone still times out: its halves answer
+  const h = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], throwsOverRange: 5_000 }, { head, pools: ps, calls: [] }));
+  assert.equal(h.coversThrough, head);
+  assert.deepEqual(ids(h.pools), new Set(ps.map((p) => evmPoolIdOf(p.key))));
+});
+
+test("a batch waits on 429s at most INDEX_LIMITED_WAIT_MS, then each 429 spends a try", async () => {
+  const head = 1_000_000;
+  const ps = pools(3, head);
+  let slept = 0;
+  const nap = async (ms: number) => void (slept += ms);
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], limited: 6, limitedAfterMs: 25_000 }, { head, pools: ps, calls: [] }, { nap }));
+  assert.equal(r.coversThrough, head);
+  // 25 + 25 + 10 s waited, then the three 429s left each spend a try
+  assert.equal(r.stats.failed[0], 3);
+  assert.ok(INDEX_LIMITED_WAIT_MS !== undefined && INDEX_LIMITED_WAIT_MS > 0);
+  assert.equal(r.stats.limitedMaxMs?.[0], INDEX_LIMITED_WAIT_MS);
+  assert.ok(slept < 6 * 25_000, `slept ${slept} ms`);
+});
+
+test("a span's last block on another fork on one reader is asked again, and refused when it stays", async () => {
+  const head = 1_000_000;
+  const ps = pools(5, head);
+  const b = head - 20_000;
+  const once = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [], forkAt: { b, times: 1 } }));
+  assert.equal(once.coversThrough, head);
+  await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [], forkAt: { b, times: Infinity } })), code("rpc_disagree", new RegExp(`do not agree on block ${b}$`)));
+});
+
+test("a pool whose state is not answered leaves its span unproven, the sync partial", async () => {
+  const head = 1_000_000;
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [real, deep], state: both2, calls: [], stateError: true }, { head, pools: [deep], state: both2, calls: [] }));
+  assert.equal(r.coversThrough, null);
+  assert.equal(r.error?.code, "rpc_error");
+  assert.ok(r.index!.spans.every(([x, y]) => real.block < x || real.block > y), JSON.stringify(r.index!.spans));
+  assert.ok(r.index!.spans.some(([x, y]) => deep.block >= x && deep.block <= y));
+});
+
+test("a log of another block range, another address, removed or of another event is no pool", async () => {
+  const head = 1_000_000;
+  const x = { key: key(50), block: head - 30_000 };
+  const lg = logOf(x);
+  for (const [what, bad] of [
+    ["another block range", { ...lg, blockNumber: hx(head - 200_000) }],
+    ["another address", { ...lg, address: "0x" + "12".repeat(20) }],
+    ["removed", { ...lg, removed: true }],
+    ["another event", { ...lg, topics: ["0x" + "34".repeat(32), ...lg.topics.slice(1)] }],
+  ] as const) {
+    const r = await evmPoolIndexSync(null, cfgOf({ head, pools: [real], state: both2, calls: [], extraLogs: [bad] }, { head, pools: [real], state: both2, calls: [], extraLogs: [bad] }));
+    assert.equal(r.coversThrough, head, what);
+    assert.ok(!ids(r.pools).has(evmPoolIdOf(x.key)), what);
+  }
+});
+
+test("the halves' budget spent ends the sync rpc_error, partial", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], maxRange: 625 }, { head, pools: ps, calls: [] }));
+  assert.equal(r.coversThrough, null);
+  assert.equal(r.error?.code, "rpc_error");
+  assert.match(r.error!.message, /more spans with an error than any chain explains/);
 });

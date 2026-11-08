@@ -9,7 +9,8 @@
 //     474, Robinhood 7,119) and a cap;
 //   - each reader answers the browser's CORS preflight of a JSON POST from the app's origin, and its POST, allowing it
 //     (the device reads them from the page);
-//   - every span is answered on both readers with its last block in the same batch, under INDEX_SPAN_LOGS logs, the
+//   - every span is answered on both readers, within TRIES tries each (the kit's INDEX_TRIES: a reader a block behind
+//     is asked again, its own head read in the same batch), with its last block in the same batch, under INDEX_SPAN_LOGS logs, the
 //     same last-block hash on both (block N's is the pin) and the same pools on both (by pool id), at least one pool in
 //     all, each batch within the kit's RPC timeout (10 s).
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
@@ -32,6 +33,9 @@ export const SPAN = 10_000;
 export const SPANS = 3;
 export const SPAN_LOGS = 10_000;
 export const TIMEOUT_MS = 10_000;
+/** A span's tries on one reader (the kit's INDEX_TRIES) and the wait between them. */
+export const TRIES = 4;
+export const RETRY_MS = 1_500;
 const INITIALIZE = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
 
 const operator = (u) => new URL(u).hostname.split(".").slice(-2).join(".");
@@ -71,7 +75,7 @@ export function judge(run) {
       say(x.logs < SPAN_LOGS && y.logs < SPAN_LOGS, `${chain} ${s.a}-${s.b}: under ${SPAN_LOGS} logs (${x.logs}, ${y.logs})`);
       const same = JSON.stringify([...x.ids].sort()) === JSON.stringify([...y.ids].sort());
       say(same, `${chain} ${s.a}-${s.b}: the same ${x.ids.length} pools on both${same ? "" : ` (${y.ids.length} on the second)`}`);
-      say(x.ms <= TIMEOUT_MS && y.ms <= TIMEOUT_MS, `${chain} ${s.a}-${s.b}: answered in ${x.ms} and ${y.ms} ms`);
+      say(x.ms <= TIMEOUT_MS && y.ms <= TIMEOUT_MS && (x.tries ?? 1) <= TRIES && (y.tries ?? 1) <= TRIES, `${chain} ${s.a}-${s.b}: answered in ${x.ms} and ${y.ms} ms, try ${x.tries ?? 1} and ${y.tries ?? 1}`);
       pools += x.ids.length;
     }
     say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * SPAN} blocks`);
@@ -87,8 +91,33 @@ async function post(url, body, fetchFn) {
   return { byId: new Map(arr.map((a) => [a?.id, a])), ms: Math.round(performance.now() - t) };
 }
 
+/** One reader's answer to the span a..b: its Initialize logs, its last block and its own head, in one batch, asked
+ *  again up to TRIES times (the kit's INDEX_TRIES) while it does not hold the last block yet, as the index asks it, so a
+ *  supplier a block behind that catches up does not fail a good deploy. */
+export async function readSpan(u, pm, a, b, fetchFn, sleep) {
+  let last = null;
+  for (let tries = 1; tries <= TRIES; tries++) {
+    try {
+      const { byId, ms } = await post(u, [
+        { jsonrpc: "2.0", id: 0, method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics: [INITIALIZE] }] },
+        { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["0x" + b.toString(16), false] },
+        { jsonrpc: "2.0", id: 2, method: "eth_blockNumber", params: [] },
+      ], fetchFn);
+      const logs = byId.get(0)?.result;
+      const blk = byId.get(1)?.result;
+      const head = byId.get(2)?.result;
+      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries };
+    } catch (e) {
+      last = { logs: -1, ids: [], last: null, head: null, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
+    }
+    if (last.last !== null && last.logs >= 0) return last;
+    if (tries < TRIES) await sleep(RETRY_MS);
+  }
+  return last;
+}
+
 /** One run's reads on the venue list `venues`. */
-export async function read(venues, fetchFn = fetch) {
+export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
   const chains = {};
   for (const chain of Object.keys(CHAINS)) {
     const v = venues[chain];
@@ -118,19 +147,7 @@ export async function read(venues, fetchFn = fetch) {
     for (let i = 0; i < SPANS; i++) {
       const b = n - i * ix.span;
       const a = b - ix.span + 1;
-      const on = await Promise.all(ix.readers.map(async (u) => {
-        try {
-          const { byId, ms } = await post(u, [
-            { jsonrpc: "2.0", id: 0, method: "eth_getLogs", params: [{ address: v.poolManager, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics: [INITIALIZE] }] },
-            { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["0x" + b.toString(16), false] },
-          ], fetchFn);
-          const logs = byId.get(0)?.result;
-          const blk = byId.get(1)?.result;
-          return { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, ms };
-        } catch (e) {
-          return { logs: -1, ids: [], last: null, ms: TIMEOUT_MS + 1, error: String(e?.message ?? e).slice(0, 120) };
-        }
-      }));
+      const on = await Promise.all(ix.readers.map((u) => readSpan(u, v.poolManager, a, b, fetchFn, sleep)));
       spans.push({ a, b, on });
     }
     chains[chain] = { index, preflight, heads, spans };

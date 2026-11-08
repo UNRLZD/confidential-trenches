@@ -1,8 +1,8 @@
-// Removes each of src/checks/evm/pool-index.ts's rules (F4a-F4d, F5, F6, card evm-pool-index), one at a time, and runs
-// the test named for it in test/evm-pool-index.test.ts: each named test passes on the code as it is and fails on every
-// mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs), never the kit's own, and put back after each
-// mutant (and checked to be back); exits 1 when a named test passes on its mutant, fails or runs no test on the code as
-// it is, or a mutant's text is not in its file exactly once.
+// Removes each of src/checks/evm/pool-index.ts's rules (F4a-F4d, F5, F6, card evm-pool-index, and the money review of
+// 44002c66's F1-F7), one at a time, and runs the test named for it in test/evm-pool-index.test.ts: each named test
+// passes on the code as it is and fails on every mutant. The file is changed in a copy of the kit (test/mutant-copy.mjs),
+// never the kit's own, and put back after each mutant (and checked to be back); exits 1 when a named test passes on its
+// mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly once.
 //   node packages/kit/test/evm-pool-index-mutants.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -24,44 +24,73 @@ const HALVES = "a span answered with an error is asked as its halves";
 const LIMITED = "a rate limit answered inside a batch is asked again";
 const LAG = "a sync whose readers lag the last sync's head";
 const FLOOD = "one reader's made-up pools never refuse the index as too many";
-const F6B = F6;
+const P1 = "P1: a reader that omits a pool and answers its state 0";
+const P2 = "P2: both readers report a pool, one at another block";
+const P3 = "P3: a reader that moves a deep pool into the margin";
+const P4 = "P4: heads more than the margin apart refuse";
+const P5 = "P5: a sync at the stored head keeps the head it stood at";
+const ALONE = "a batch whose tries are spent on throws is asked one span a request";
+const WAIT = "a batch waits on 429s at most INDEX_LIMITED_WAIT_MS";
+const FORK = "a span's last block on another fork on one reader is asked again";
+const UNREAD = "a pool whose state is not answered leaves its span unproven";
+const LOGS = "a log of another block range, another address, removed or of another event is no pool";
+const BUDGET = "the halves' budget spent ends the sync rpc_error";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
-  // F4a: an answer without its last block counts
+  // F4a: an answer without its last block counts; a failed span not asked again; one reader's answer enough
   ["if (!Array.isArray(logs) || !blk || !isHash(blk.hash) || !isQty(blk.number) || Number(blk.number) !== j.b) return null;", "if (!Array.isArray(logs)) return null;", F4A],
-  // F4a: a failed span is not asked again
   ["export const INDEX_TRIES = 4;", "export const INDEX_TRIES = 1;", F4A],
-  // F4a: one reader's answer is enough
   ["return js.flatMap((j) => (j.ans[0] !== null && j.ans[1] !== null ? settle(j) : [j]));", "return js.flatMap((j) => (j.ans[0] !== null || j.ans[1] !== null ? ((j.ans[0] ??= j.ans[1]), (j.ans[1] ??= j.ans[0]), settle(j)) : [j]));", F4A],
-  // F4b: the higher head
+  // F4b: the higher head; F3 (review): heads any distance apart
   ["const n = Math.min(heads[0]!, heads[1]!);", "const n = Math.max(heads[0]!, heads[1]!);", F4B],
-  // F4c: no pin
-  ['if (x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);', "", F4C],
-  // F4c: the newest span not asked alone first
+  ["if (Math.max(heads[0]!, heads[1]!) - n > c.margin) return refuse(", "if (false) return refuse(", P4],
+  // F4c: no pin at once; the newest span not asked alone first
+  ['if (j.b === n && x.hash !== y.hash) return refuse("rpc_disagree", `the index readers do not agree on block ${n}`);', "", F4C],
   ["let at = queue.shift();\n  while (at !== undefined && pin === null) {", "let at = queue.shift();\n  if (at !== undefined) queue.push(at);\n  at = undefined;\n  while (at !== undefined && pin === null) {", F4C],
-  // F4d: no margin
+  // F4d: no margin; a lagging sync lowers what an earlier one stored
   ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = n;", F4D],
-  // a lagging sync lowers what an earlier one stored
   ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = Math.max(from - 1, n - c.margin);", LAG],
-  // F5: one reader's pool kept unread
+  // F5: one reader's pool kept unread; any non-zero word enough; words apart not refused (F1); the log's id word trusted
   ["(y.pools.has(id) ? both : one).push(p);", "both.push(p);", F5],
-  // F5: one provider's state is enough
-  ["else if (w.every((x) => BigInt.asUintN(160, BigInt(x)) !== 0n)) held.add(p.id);", "else if (w.some((x) => BigInt.asUintN(160, BigInt(x)) !== 0n)) held.add(p.id);", F5],
-  // F5: the log's id word trusted
+  ["else if (BigInt.asUintN(160, BigInt(u)) !== 0n) held.add(p.id);", "else held.add(p.id);", F5],
+  ["else if (BigInt(u) !== BigInt(v)) refuse(", "else if (false) refuse(", P1],
   ["if (id !== t[1]!.toLowerCase()) return null;", "", F5],
-  // F6: no cap
+  // F7 (review): an unread state keeps its span, or leaves the sync whole
+  ["proved = proved.filter((p) => !p.one.some((o) => unread.has(o.id)));", "", UNREAD],
+  ["error ??= new EvmQuoteError(\"rpc_error\", `the index readers did not answer the PoolManager's state", "void new EvmQuoteError(\"rpc_error\", `the index readers did not answer the PoolManager's state", UNREAD],
+  // F2 (review): a pool at two blocks on the two readers; one id in two spans; a span's last block apart not asked
+  // again, or asked once
+  ["const sameBlocks = [...x.pools].every(([id, p]) => !y.pools.has(id) || y.pools.get(id)!.block === p.block);", "const sameBlocks = true;", P2],
+  ["if (where.has(p.id)) return refuse(", "if (false) return refuse(", P3],
+  ["if (x.hash !== y.hash || !sameBlocks) {", "if (!sameBlocks) {", FORK],
+  ["if (++j.disagree >= INDEX_TRIES) return refuse(", "if (++j.disagree >= 1) return refuse(", FORK],
+  // F6: no cap; one reader's pools counted before F5; held pools past the cap (F4); more single-reader pools than the cap
   ["count += both.length;\n    if (count > c.cap) return refuse(", "count += both.length;\n    if (false) return refuse(", F6],
-  // one reader's pools counted before F5
   ["count += both.length;\n", "count += both.length + one.length;\n", FLOOD],
-  // F5's held pools not counted
-  ["count += held.size;", "", F6B],
-  // the halves: an error answer is no cut
-  ["if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : { hash: \"\", pools: new Map(), cut: true };", "", HALVES],
-  // a rate limit in a batch asked as halves
-  ["return limited(l.error) ? null : { hash", "return false ? null : { hash", LIMITED],
-  // a 429 spends a try
-  ["if (/429|rate limit/i.test(String((e as Error)?.message)) && waits < INDEX_LIMITED_WAITS) {", "if (false) {", HALVES],
+  ["if (count + [...held].filter((id) => kept.has(id)).length > c.cap) return refuse(", "if (false) return refuse(", F6],
+  ["if (ones.length > c.cap) return refuse(", "if (false) return refuse(", FLOOD],
+  // F6 (review): a sync at the stored head writes N with the old hash; a head below the stored one served
+  ["head: pin !== null ? { number: n, hash: pin } : old!.head,", "head: { number: n, hash: pin ?? old!.head.hash },", P5],
+  ["if (old !== null && n < old.through) return refuse(", "if (false) return refuse(", P5],
+  // the log's checks (F7, review): block range, address, removed, event
+  ["if (n < a || n > b) return null;", "", LOGS],
+  ["if (typeof o.address !== \"string\" || o.address.toLowerCase() !== pm || !Array.isArray(t)", "if (typeof o.address !== \"string\" || !Array.isArray(t)", LOGS],
+  ["if (typeof o !== \"object\" || o === null || o.removed === true) return null;", "if (typeof o !== \"object\" || o === null) return null;", LOGS],
+  ["if (t[0]!.toLowerCase() !== INITIALIZE || !isQty(o.blockNumber)", "if (!isQty(o.blockNumber)", LOGS],
+  // the halves: an error answer is no cut; a rate limit in a batch asked as halves; one block's error named too many
+  // pools (F4); no budget (F7)
+  ["if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : NO_ANSWER;", "", HALVES],
+  ["return limited(l.error) ? null : NO_ANSWER;", "return NO_ANSWER;", LIMITED],
+  ['x.cut === "full" && y.cut === "full" ? refuse("too_many_pools"', 'true ? refuse("too_many_pools"', HALVES],
+  ["if ((halves -= 2) < 0) return refuse(", "if (false) return refuse(", BUDGET],
+  // 429s: one spends a try; no bound on a batch's wait; the wait not clipped to the bound (F5)
+  ["if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {", "if (false) {", HALVES],
+  ["if (/429|rate limit/i.test(String((e as Error)?.message)) && waited < INDEX_LIMITED_WAIT_MS) {", "if (/429|rate limit/i.test(String((e as Error)?.message))) {", WAIT],
+  ["const ms = Math.min(typeof after === \"number\" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++, INDEX_LIMITED_WAIT_MS - waited);", "const ms = typeof after === \"number\" && after >= 0 ? after : BACKOFF_MS * 2 ** waits++;", WAIT],
+  // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
+  ["else j.alone[r] = true;", "else j.ans[r] = NO_ANSWER;", ALONE],
+  ["for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;", "for (const j of g) if (j.alone[r]) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
 ];
 
 const RUN_MS = 120_000;
