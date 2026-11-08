@@ -5,7 +5,8 @@
 //   - in each unit (Price and MCap in USD), the newest bar ticks through prices of every length the chart draws
 //     ($0.0₃12 to $1,234.50, $12.30K to $1.23T), then the crosshair crosses every bar and leaves;
 //   - a resync replaces the bars with fewer, shorter ones (the slot keeps its width);
-//   - on the desktop, the footer's SOL and ETH prices tick through every length under $100,000.
+//   - on the desktop, the footer's SOL and ETH prices tick through every length under $100,000;
+//   - the trade box's Slow counter counts past 10 s inside its centred label.
 // A run passes with zero shifts after the legend's first paint, and only if the values it fed did change length (the
 // close took at least four lengths, SOL at least three), so it cannot pass on values that never moved. A FAIL names
 // each shift's element and its rects before and after.
@@ -81,7 +82,9 @@ try {
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    // a load the server refused is named by its address (the console line has none)
+    page.on("response", (r) => r.status() >= 400 && errors.push(`${r.status()} ${new URL(r.url()).pathname}`));
+    page.on("console", (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && errors.push(m.text()));
     await page.goto(BASE);
     await page.waitForSelector(".ft", { state: "attached" });
     await page.evaluate(() => document.fonts.ready);
@@ -129,6 +132,16 @@ try {
       if (log.length) fails.push(`@${w.name} footer: ${log.length} layout shift(s) while SOL and ETH ticked [${shiftsOf(log)}]`);
       if (solLengths.size < 3) fails.push(`@${w.name} footer: SOL took ${solLengths.size} length(s), not every length fed`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${w.name}-footer.png`) });
+    }
+    // the trade box's Slow counter, 6.0s to 12.0s: its label is centred, so a longer counter would move it
+    {
+      const before = await page.evaluate(() => window.__ct.shiftLog.length);
+      for (let t = 6_000; t <= 12_000; t += 500) {
+        await fx({ now: t });
+        await settle(page);
+      }
+      const log = await page.evaluate((n) => window.__ct.shiftLog.slice(n), before);
+      if (log.length) fails.push(`@${w.name} trade box: ${log.length} layout shift(s) while Slow counted past 10 s [${shiftsOf(log)}]`);
     }
     if (lengths.size < 4) fails.push(`@${w.name} legend: the close took ${lengths.size} length(s), not every length fed`);
     if (errors.length) fails.push(`@${w.name}: ${errors.length} page error(s): ${errors.join("; ")}`);

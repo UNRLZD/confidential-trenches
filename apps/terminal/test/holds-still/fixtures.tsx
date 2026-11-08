@@ -10,6 +10,8 @@ import type { Bar } from "../../src/screens/token/candles.ts";
 import { pricePrecision } from "../../src/screens/token/candles.ts";
 import { Legend } from "../../src/screens/token/TokenPage.tsx";
 import type { ChartUnit } from "../../src/screens/token/units.ts";
+import { RunLabel } from "../../src/screens/trade/States.tsx";
+import "../../src/screens/trade/trade.css";
 import { Footer } from "../../src/shell/Footer.tsx";
 import { fontsReady } from "../../src/shell/fonts.ts";
 import { SignpageFrame } from "../../src/shell/signpage-frame.tsx";
@@ -23,9 +25,11 @@ interface Fx {
   /** The pools' USD prices the footer draws (8 decimals, as a feed's price and expo). */
   sol: number;
   eth: number;
+  /** The trade box's clock: its Slow counter runs from a tap at 0. */
+  now: number;
 }
 
-let fx: Fx = { bars: [], at: null, unit: { mc: false, quote: false }, sol: 151.23, eth: 3456 };
+let fx: Fx = { bars: [], at: null, unit: { mc: false, quote: false }, sol: 151.23, eth: 3456, now: 6_000 };
 const subs = new Set<() => void>();
 const store = {
   subscribe: (f: () => void) => (subs.add(f), () => void subs.delete(f)),
@@ -69,6 +73,17 @@ function Plot() {
   return <Legend sym="PEPE" tf="15m" bars={s.bars} at={at} precision={pricePrecision(s.bars)} unit={s.unit} phone={phone} />;
 }
 
+function Cta() {
+  const s = useSyncExternalStore(store.subscribe, store.get);
+  return (
+    <div className="trb" style={{ width: 358 }}>
+      <button type="button" className="trb-cta" data-kind="live" data-testid="cta">
+        <RunLabel phase={{ k: "landing", id: "t1", at: 0 }} now={s.now} />
+      </button>
+    </div>
+  );
+}
+
 function App() {
   return (
     <SignpageFrame client={client}>
@@ -79,6 +94,7 @@ function App() {
               <Plot />
             </div>
           </div>
+          <Cta />
         </main>
         <Footer read={async () => ({ height: 223_607_563, ms: 233 })} />
       </div>
