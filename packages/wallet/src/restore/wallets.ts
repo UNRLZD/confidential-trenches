@@ -28,7 +28,7 @@
 //   the lost store named is found.
 import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
-import { RESTORE_GAP, RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
+import { checkReach, RESTORE_GAP, RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
 import { refKey } from "../notes/store.ts";
 
 /** The tags of an arm's own wallets, and of its hop targets (wallet.md l.91-100). */
@@ -158,7 +158,7 @@ export async function restoreDepositIds(
   scope: bigint,
   r: Pick<NoteRestore, "notes" | "laneHighest">,
   holds: IdReader,
-  opts: { margin?: number; walkGap?: number } = {},
+  opts: { margin?: number; walkGap?: number; reach?: readonly (number | null)[] } = {},
 ): Promise<LaneIds[]> {
   const margin = opts.margin ?? DEPOSIT_ID_MARGIN;
   if (!Number.isSafeInteger(margin) || margin < 1) throw new Error("margin is a count above 0");
@@ -166,6 +166,9 @@ export async function restoreDepositIds(
   const walkGap = opts.walkGap ?? RESTORE_GAP;
   if (!Number.isSafeInteger(walkGap) || walkGap < 1) throw new Error("walkGap is a count above 0");
   if (!Array.isArray(r.laneHighest) || r.laneHighest.length !== RESTORE_LANES) throw new Error("laneHighest: one per lane");
+  // the reach the note walk was given (restoreNotes `reach`): the index a walk-end error named, so a restore past the
+  // walk's end walks the notes to it and reads the ids on from there
+  const reach = checkReach(opts.reach);
   const noted = new Set<number>();
   for (const n of r.notes) if (n.ref.kind === "deposit" && n.ref.s === scope) noted.add(n.ref.i);
   const out: LaneIds[] = [];
@@ -183,9 +186,9 @@ export async function restoreDepositIds(
     // the note walk counts a used id with no note as a miss: when ids with history (or unread ids, which may have it)
     // run on past its end, a note there was never matched, so the restore stops instead of returning fewer notes. Held
     // each time the lane's highest moves, so a reader that keeps showing history ends the lane there, never at 2^32
-    const walked = (notes.length === 0 ? lane - RESTORE_LANES : notes[notes.length - 1]!) + RESTORE_LANES * walkGap;
+    const walked = Math.max(notes.length === 0 ? lane - RESTORE_LANES : notes[notes.length - 1]!, reach[lane] ?? -Infinity) + RESTORE_LANES * walkGap;
     const pastWalk = (at: number): void => {
-      if (at > walked) throw new Error(`lane ${lane}: ids with history or unread ids reach index ${at}, past the note walk's end at ${walked}; walk the lane on from there`);
+      if (at > walked) throw new Error(`lane ${lane}: ids with history or unread ids reach index ${at}, past the note walk's end at ${walked}; restore again with reach[${lane}] = ${at}`);
     };
     let i = lane;
     for (; i <= U32 && i <= (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin; i += RESTORE_LANES) {

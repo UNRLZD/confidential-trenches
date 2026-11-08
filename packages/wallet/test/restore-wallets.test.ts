@@ -186,7 +186,7 @@ test("step 5: ids that were used and are now empty reset the margin as money doe
   // ids with history past the note walk's end may hold notes it never matched: the restore stops
   await assert.rejects(
     restoreDepositIds(SEED, SCOPE, LANES, idReader([], [], [at(4, 0), at(4, 1), at(4, 2)]).holds, { walkGap: 2 }),
-    /lane 4: ids with history or unread ids reach index 20, past the note walk's end at 12; walk the lane on from there/,
+    /lane 4: ids with history or unread ids reach index 20, past the note walk's end at 12; restore again with reach\[4\] = 20/,
   );
   // history exactly at the walk's last index is inside it: no stop (lane 4 walked to 12 with walkGap 2)
   const edge = await restoreDepositIds(SEED, SCOPE, LANES, idReader([], [], [at(4, 1)]).holds, { walkGap: 2 });
@@ -204,7 +204,7 @@ test("step 5: a reader that answers used for every id ends at the note walk's en
   const r = await Promise.race([p.then(() => "ended", (e: Error) => e.message), new Promise<string>((res) => setTimeout(() => res("step 5 never ended"), 3_100))]);
   clearTimeout(t);
   // lane 0's last note is 16: the walk ends at 16 + 8 * 50 = 416, and the first used id past it, 424, stops the restore
-  assert.equal(r, "lane 0: ids with history or unread ids reach index 424, past the note walk's end at 416; walk the lane on from there");
+  assert.equal(r, "lane 0: ids with history or unread ids reach index 424, past the note walk's end at 416; restore again with reach[0] = 424");
   assert.equal(reads, 54, "lane 0's ids 0 .. 424, read once each");
 });
 
@@ -275,4 +275,30 @@ test("step 7: an id whose read failed and a used id now empty are re-read on eac
   const of = (l: number) => plan.rereads.filter((x) => x.lane === l).map((x) => x.i);
   assert.deepEqual(of(1), [0, 1, 2, 3, 4, 5, 6].map((k) => at(1, k)));
   assert.deepEqual(of(2), [at(2, 0), at(2, 1), at(2, 2)]);
+});
+
+// ---------- card wallet-restore-id-reader ----------
+// review 2's R29: a failed read past the note walk's end stops the restore there, as history does (plant R29 drops
+// pastWalk on the failed-read branch, and this read is the one that catches it). walkGap 3 and a note at 0: lane 0's
+// walk ends at 24, so history at 24 is inside it, 32 is never used, and the read of 40 fails.
+test("step 5 (R29): a failed id read past the note walk's end stops the restore at its index", async () => {
+  const { holds } = idReader([], [at(0, 5)], [at(0, 3)]);
+  await assert.rejects(
+    restoreDepositIds(SEED, SCOPE, { notes: [note(dep(0))], laneHighest: [0, null, null, null, null, null, null, null] }, holds, { walkGap: 3 }),
+    /^Error: lane 0: ids with history or unread ids reach index 40, past the note walk's end at 24; restore again with reach\[0\] = 40$/,
+  );
+});
+
+// review 2's gap 3: the walk-end error names an index, and a restore given it as the lane's reach walks the notes to it
+// and reads the ids on from there, so a user past the walk's end can finish.
+test("step 5: a restore given the reach the walk-end error named walks the lane to it and finishes", async () => {
+  const r = { notes: [note(dep(0))], laneHighest: [0, null, null, null, null, null, null, null] };
+  const { holds } = idReader([], [], [at(0, 3), at(0, 5)]);
+  await assert.rejects(restoreDepositIds(SEED, SCOPE, r, holds, { walkGap: 3 }), /reach index 40, past the note walk's end at 24; restore again with reach\[0\] = 40/);
+  const reach = [40, null, null, null, null, null, null, null];
+  const got = await restoreDepositIds(SEED, SCOPE, r, holds, { walkGap: 3, reach });
+  assert.deepEqual([got[0]!.used, got[0]!.highest, got[0]!.readTo], [[at(0, 3), at(0, 5)], at(0, 5), at(0, 5 + DEPOSIT_ID_MARGIN)]);
+  // a reach that is not an index of its lane, or not one per lane, is refused
+  await assert.rejects(restoreDepositIds(SEED, SCOPE, r, holds, { walkGap: 3, reach: [41, null, null, null, null, null, null, null] }), /reach\[0\]: not an index of lane 0/);
+  await assert.rejects(restoreDepositIds(SEED, SCOPE, r, holds, { walkGap: 3, reach: [40] }), /reach: one per lane/);
 });

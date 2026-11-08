@@ -446,6 +446,31 @@ test("the gap rule counts within one lane: a lane's note after gap - 1 misses is
   assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => mixed.has(p), 8).found, [lane]);
 });
 
+// card wallet-restore-id-reader: the reach step 5's walk-end error names. The walk reads to it before its gap counts, so a
+// note past a run of gap misses (ids with history and no note) is found once the user restores with that reach; and a
+// walk handed in must have read gap past its reach, so a Worker that ignored the reach stops the restore.
+test("a reach: the walk reads to it before its gap counts, and a walk handed in must end gap past it", () => {
+  const lane = 3;
+  const at = (pos: number) => sec({ kind: "deposit", s: SCOPE, i: lane + 8 * pos }).precommitment;
+  const far = new Set([at(0), at(1 + TEST_GAP)]); // TEST_GAP misses between: past the walk's end
+  const has = (p: bigint) => far.has(p);
+  assert.deepEqual(walkLane(SEED, SCOPE, lane, has, TEST_GAP).found, [lane]);
+  const reached = walkLane(SEED, SCOPE, lane, has, TEST_GAP, lane + 8 * TEST_GAP);
+  assert.deepEqual(reached.found, [lane, lane + 8 * (1 + TEST_GAP)]);
+  assert.equal(reached.last, lane + 8 * (1 + 2 * TEST_GAP));
+  // a reach below the last note changes nothing: the gap counts from the note
+  assert.deepEqual(walkLane(SEED, SCOPE, lane, (p) => p === at(5), TEST_GAP, lane + 8).last, lane + 8 * (5 + TEST_GAP));
+  assert.throws(() => walkLane(SEED, SCOPE, lane, has, TEST_GAP, lane + 1), /reach: not an index of lane 3/);
+  // restorePages: a walk handed in without the reach ends short of it
+  const pages = { deposits: [], spends: [], leaves: [] };
+  const reach = [null, null, null, lane + 8 * TEST_GAP, null, null, null, null];
+  const walks = Array.from({ length: 8 }, (_, l) => walkLane(SEED, SCOPE, l, () => false, TEST_GAP, reach[l]!));
+  assert.equal(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: walks }).laneHighest[lane], null);
+  const short = walks.map((w, l) => (l === lane ? walkLane(SEED, SCOPE, l, () => false, TEST_GAP) : w));
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: short }), new RegExp(`lane 3: the walk ended at ${lane + 8 * (TEST_GAP - 1)}, not ${lane + 8 * 2 * TEST_GAP} \\(gap ${TEST_GAP} past its last note or its reach ${lane + 8 * TEST_GAP}\\)`));
+  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach: [1] }), /reach: one per lane/);
+});
+
 test("an empty vault: no note, every lane empty", async () => {
   const v = new Vault().views();
   const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP });
@@ -976,8 +1001,11 @@ test("a deposit at index 2 is restored, with its value, through the real Worker 
   assert.deepEqual(got.laneHighest, [null, null, 2, null, null, null, null, null]);
   // the same ask with the precommitments as strings (a JSON bridge) is refused in the Worker, never walked empty
   const m = d.masters(SEED, "deposit");
-  const ask = { lane: 2, scope: SCOPE, gap: TEST_GAP, nullifier: m.nullifier, secret: m.secret, precommitments: [String(P2)] };
+  const ask = { lane: 2, scope: SCOPE, gap: TEST_GAP, reach: null, nullifier: m.nullifier, secret: m.secret, precommitments: [String(P2)] };
   assert.deepEqual(answerWalk(ask), { ok: false, error: "precommitments: not bigints" });
+  // the reach goes as a number or null, never left out or turned into a string (the walk would ignore it)
+  assert.deepEqual(answerWalk({ ...ask, reach: undefined, precommitments: [P2] }), { ok: false, error: "reach: not an index or null" });
+  assert.deepEqual(answerWalk({ ...ask, reach: "10", precommitments: [P2] }), { ok: false, error: "reach: not an index or null" });
   assert.deepEqual(answerWalk({ ...ask, scope: String(SCOPE) }), { ok: false, error: "scope and masters: not bigints" });
   const viaWorker = walkInWorkers(SEED, () => {
     const p = spawnWalker();
@@ -996,7 +1024,7 @@ test("the Worker bridge posts each Worker exactly its lane, scope, gap, the two 
   });
   await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk });
   assert.equal(posted.length, RESTORE_LANES);
-  for (const m of posted) assert.deepEqual(Object.keys(m as object).sort(), ["gap", "lane", "nullifier", "precommitments", "scope", "secret"]);
+  for (const m of posted) assert.deepEqual(Object.keys(m as object).sort(), ["gap", "lane", "nullifier", "precommitments", "reach", "scope", "secret"]);
 });
 
 test("the Worker bridge: a Worker that throws on load ends the restore with its lane named", { timeout: 10_000 }, async () => {
