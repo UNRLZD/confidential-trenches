@@ -1,0 +1,40 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet) on card/sol-rent-back-dust-burn: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "bad": "card/sol-w-sweep ca2d252a's build (mainnet), the committed packages/signpage/index.html and public/app.js there, the rent back before this card (a balance on W's token account after its full sell ends the pass holds): FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-08T12:10:47Z, before this card's deploy: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-j/9twhSANZA8bqb0CNtoKEIVhPk8bikj4q3W4zYxdjjm0WjAAvB4yl+lSn25wt/C\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-j/9twhSANZA8bqb0CNtoKEIVhPk8bikj4q3W4zYxdjjm0WjAAvB4yl+lSn25wt/C",
+    "carries": {
+      "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
+      "a balance is a stranger's only when the sell itself read ok on both RPCs left W's account at 0 alike on both; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": true,
+      "the plan burns a named balance only on an account it would close but for it: not native, no claim's destination, no extension but ImmutableOwner": true,
+      "the check passes a Burn only of exactly the plan's amount, of the account's own mint and program, the wallet signing, right before its close": true,
+      "each planned burn exactly once before its close, and none unplanned": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-avjX4uwFe9yfqvAGdKhoi/o2XsTnf3aAZNS3VXBPGleC7l+MQ3/YWLzIjBJA0ejg\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-avjX4uwFe9yfqvAGdKhoi/o2XsTnf3aAZNS3VXBPGleC7l+MQ3/YWLzIjBJA0ejg",
+    "carries": {
+      "the owed record keeps the full sell's signed bytes and last height by mint, before the send": false,
+      "a balance is a stranger's only when the sell itself read ok on both RPCs left W's account at 0 alike on both; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": false,
+      "the plan burns a named balance only on an account it would close but for it: not native, no claim's destination, no extension but ImmutableOwner": false,
+      "the check passes a Burn only of exactly the plan's amount, of the account's own mint and program, the wallet signing, right before its close": false,
+      "each planned burn exactly once before its close, and none unplanned": false
+    }
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-dtM5GN+d5c+39JCHZMB//K0bUkyrtmcvnbLrb/0tZheXrbFxKLICwsJVTkzhFSYQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-dtM5GN+d5c+39JCHZMB//K0bUkyrtmcvnbLrb/0tZheXrbFxKLICwsJVTkzhFSYQ",
+    "carries": {
+      "the owed record keeps the full sell's signed bytes and last height by mint, before the send": false,
+      "a balance is a stranger's only when the sell itself read ok on both RPCs left W's account at 0 alike on both; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": false,
+      "the plan burns a named balance only on an account it would close but for it: not native, no claim's destination, no extension but ImmutableOwner": false,
+      "the check passes a Burn only of exactly the plan's amount, of the account's own mint and program, the wallet signing, right before its close": false,
+      "each planned burn exactly once before its close, and none unplanned": false
+    }
+  }
+}

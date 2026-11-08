@@ -1,11 +1,11 @@
 {
   "_note": {
-    "good": "this card's build (mainnet) on card/sol-w-sweep with review 5 of 38e59182 folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "this card's build (mainnet) as card/sol-rent-back-dust-burn carries it (review 5 of 38e59182 folded; the plan handed the burn list, the owed record's sell passed on at a load): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-avjX4uwFe9yfqvAGdKhoi/o2XsTnf3aAZNS3VXBPGleC7l+MQ3/YWLzIjBJA0ejg\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-avjX4uwFe9yfqvAGdKhoi/o2XsTnf3aAZNS3VXBPGleC7l+MQ3/YWLzIjBJA0ejg",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-j/9twhSANZA8bqb0CNtoKEIVhPk8bikj4q3W4zYxdjjm0WjAAvB4yl+lSn25wt/C\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-j/9twhSANZA8bqb0CNtoKEIVhPk8bikj4q3W4zYxdjjm0WjAAvB4yl+lSn25wt/C",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
