@@ -128,6 +128,7 @@ export const MUTANTS = [
   ["for (const p of of.slice(budget)) unread.add(p.id);", "", S1],
   ["if (over > 0) spent ??=", "if (false) spent ??=", S1],
   ["if (spent !== null) error = spent;", "", S1],
+  ["if (t === 0) never = Math.max(0, of.length - budget);", "", S1],
   ["(a === undefined && limited(e?.error))", "false", S2],
   // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
   ["else j.alone[r] = true;", "else j.ans[r] = NO_ANSWER;", ALONE],

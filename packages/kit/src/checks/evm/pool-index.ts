@@ -406,7 +406,10 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
       let of = check.filter((p) => logged.get(p.id)!.by !== r);
       let budget = INDEX_RECEIPT_BUDGET;
       let over = 0;
+      let never = 0;
       for (let t = 0; t < INDEX_TRIES && of.length > 0; t++) {
+        // the pools the budget leaves unread (each once): those of the first round never asked, the rest not asked again
+        if (t === 0) never = Math.max(0, of.length - budget);
         over += Math.max(0, of.length - budget);
         for (const p of of.slice(budget)) unread.add(p.id);
         of = of.slice(0, budget);
@@ -434,7 +437,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         of = again;
       }
       for (const p of of) unread.add(p.id);
-      if (over > 0) spent ??= new EvmQuoteError("rpc_disagree", `index reader ${2 - r}'s one-reader pools took index reader ${r + 1} past its receipt budget of ${INDEX_RECEIPT_BUDGET} (${over} not asked)`);
+      if (over > 0) spent ??= new EvmQuoteError("rpc_disagree", `index reader ${2 - r}'s one-reader pools took index reader ${r + 1} past its receipt budget of ${INDEX_RECEIPT_BUDGET} (${over} pool(s) left unread by it, ${never} of them never asked)`);
     }
     if (spent !== null) error = spent;
     for (const id of unread) held.delete(id);
