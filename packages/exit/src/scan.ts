@@ -18,6 +18,7 @@
 //   on every path. The words string itself cannot be zeroed (a JS string), as on the device.
 import {
   entropyToWords,
+  RESTORE_GAP,
   restoreNotes,
   typedSeed,
   wordsToSeed64,
@@ -36,12 +37,13 @@ export type ExitScanArgs = {
   /** the 12 words, as typed */
   words: string;
   network: NearNetwork;
-  /** The two RPCs; the release's pair on `network`, fetched with `fetchFn`, unless given. Either way the pair must be the release's. */
+  /**
+   * The two RPCs; the release's pair on `network`, fetched with `fetchFn`, unless given. Either way the pair must be
+   * named as the release's (its two URLs, read by nearPairNetwork); what a given rpc reads is the caller's.
+   */
   rpcs?: readonly [VaultSyncRpc, VaultSyncRpc];
   fetchFn?: typeof fetch;
   signal?: AbortSignal;
-  /** tests only: the wallet's RESTORE_GAP unless given */
-  gap?: number;
 };
 
 /** What the scan found: the wallet's restore, on the release's vault and token. */
@@ -69,10 +71,21 @@ export async function withSeed64<T>(words: string, use: (seed64: Uint8Array) => 
 
 /**
  * Every note of the 12 words in the release's vault on `network`, each followed through its spends, by the wallet's
- * own restore. Throws ExitRpcRefused before any read for an unknown network or a pair that is not the release's; the
- * kit's VaultSyncStopped when the two RPCs differ by a byte; and restore's own stops on pages the vault could not write.
+ * own restore, reading the release's RESTORE_GAP indices past each lane's last note. Throws ExitRpcRefused before any
+ * read for an unknown network or a pair not named as the release's; the kit's VaultSyncStopped when the two RPCs differ
+ * by a byte; and restore's own stops on pages the vault could not write. It takes no gap: a smaller one would return
+ * fewer notes with no error, so an argument that names one is refused before any read.
  */
 export async function exitScan(a: ExitScanArgs): Promise<ExitScan> {
+  if (Object.hasOwn(a, "gap")) throw new ExitRpcRefused("the exit scan reads the release's RESTORE_GAP and takes no gap");
+  return scanAtGap(a, RESTORE_GAP);
+}
+
+/**
+ * Tests only: exitScan at a gap of the test's, so a model vault scans in milliseconds. No file but packages/exit's
+ * tests names it (test/scan.test.ts holds that); the exit tool calls exitScan.
+ */
+export async function scanAtGap(a: ExitScanArgs, gap: number): Promise<ExitScan> {
   const { network } = a;
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
   const { vault } = EXIT_NETWORKS[network];
@@ -82,7 +95,7 @@ export async function exitScan(a: ExitScanArgs): Promise<ExitScan> {
   const rpcs = a.rpcs ?? ([exitRpc(net.rpcs[0], fetchFn), exitRpc(net.rpcs[1], fetchFn)] as const);
   if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
   const r = await withSeed64(a.words, (seed64) =>
-    restoreNotes({ seed64, vault, token, rpcs, ...(a.signal ? { signal: a.signal } : {}), ...(a.gap === undefined ? {} : { gap: a.gap }) }),
+    restoreNotes({ seed64, vault, token, rpcs, ...(a.signal ? { signal: a.signal } : {}), gap }),
   );
   return { ...r, network, vault, token };
 }

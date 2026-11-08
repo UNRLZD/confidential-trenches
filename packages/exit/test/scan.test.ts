@@ -11,12 +11,13 @@
 // recomputes one, so they need not be the vault's keccak labels.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { VAULT_CONSTANTS, VAULT_FIELD_P, VaultSyncStopped, type VaultSyncRpc } from "@blindfill/kit";
-import { entropyToWords, noteCommitment, noteSecrets, refKey, RESTORE_LANES, typedSeed, wordsToSeed64, type NoteRef } from "@blindfill/kit/core";
+import { entropyToWords, noteCommitment, noteSecrets, refKey, RESTORE_GAP, RESTORE_LANES, typedSeed, wordsToSeed64, type NoteRef } from "@blindfill/kit/core";
 import { EXIT_NETWORKS, ExitRpcRefused } from "../src/rpc.ts";
-import { EXIT_TOKENS, exitScan, withSeed64, type ExitScan } from "../src/scan.ts";
+import { EXIT_TOKENS, exitScan, scanAtGap, withSeed64, type ExitScan, type ExitScanArgs } from "../src/scan.ts";
 
 const ROOT = new URL("../../../", import.meta.url);
 const record = (n: string) => JSON.parse(readFileSync(new URL(`contracts/vault/deployments/${n}`, ROOT), "utf8")) as { account_id: string; asset: string; scope: string };
@@ -154,7 +155,7 @@ function rpcs(v: View, lie?: (method: string, view: unknown) => unknown, urls: r
   });
   return [one(urls[0], false), one(urls[1], true)];
 }
-const scan = (v: Vault, words = WORDS) => exitScan({ words, network: "testnet", rpcs: rpcs(v.views()), gap: TEST_GAP });
+const scan = (v: Vault, words = WORDS) => scanAtGap({ words, network: "testnet", rpcs: rpcs(v.views()) }, TEST_GAP);
 
 // ---------- the device's truth: every note it owns in the vault, as it wrote them ----------
 type Truth = { ref: NoteRef; precommitment: bigint; leaf: Leaf; spent: boolean; parent?: string };
@@ -446,6 +447,57 @@ test("a stranger's 1 USDC on our refund R next to a bounced refund F of 500 is n
   }
 });
 
+// Review F2: every stranger leaf that can sit on our refund precommitment R or our deposit precommitment P, each of
+// F's own value where it can be (a stranger picks the value, so value never tells a twin from F): a deposit on R; their
+// own withdrawal that names R as its refund precommitment, bounced and settled (a refund leaf on R); their change leaf
+// on R; their change leaf on P. Planted before our withdraw, between our withdraw and its settle, and after the settle.
+const ORef = (ref: NoteRef) => noteSecrets(OTHER, ref);
+test("every stranger leaf on R (a deposit twin of F's value, their bounced refund on R, their change on R) and their change on P: only F and ours are taken", async () => {
+  for (const order of ["before our withdraw", "between withdraw and settle", "after settle"] as const) {
+    const v = new Vault();
+    const dep: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
+    const P = sec(dep).precommitment;
+    const leaf0 = v.deposit(P, 800_000_000n, hex64("U0"))!;
+    const l = leaf0.label;
+    const cref: NoteRef = { kind: "change", l, j: 0 };
+    const rref: NoteRef = { kind: "refund", l, j: 0 };
+    const R = sec(rref).precommitment;
+    const strangers: bigint[] = [];
+    let n = 0;
+    const theirNote = () => {
+      const s = ORef({ kind: "deposit", s: SCOPE, i: n++ });
+      return { s, leaf: v.deposit(s.precommitment, 900_000_000n, hex64(`stranger-${n}`))! };
+    };
+    const plant = () => {
+      strangers.push(v.deposit(R, 500_000_000n, hex64("stranger-twin"))!.leafIndex);
+      const a = theirNote();
+      const wa = v.withdraw(a.s.nullifierHash, 500_000_000n, { P: ORef({ kind: "change", l: a.leaf.label, j: 0 }).precommitment, value: 400_000_000n, label: a.leaf.label }, R, 5n);
+      v.payout(wa.spend, 500_000_000n);
+      strangers.push(v.settle(wa.spend)!.leafIndex);
+      const b = theirNote();
+      const wb = v.withdraw(b.s.nullifierHash, 400_000_000n, { P: R, value: 500_000_000n, label: b.leaf.label }, 99n, 6n);
+      v.payout(wb.spend, 0n);
+      strangers.push(wb.leaf!.leafIndex);
+      const c = theirNote();
+      const wc = v.withdraw(c.s.nullifierHash, 100_000_000n, { P, value: 800_000_000n, label: c.leaf.label }, 98n, 7n);
+      v.payout(wc.spend, 0n);
+      strangers.push(wc.leaf!.leafIndex);
+    };
+    if (order === "before our withdraw") plant();
+    const w = v.withdraw(sec(dep).nullifierHash, 500_000_000n, { P: sec(cref).precommitment, value: 300_000_000n, label: l }, R, 77n);
+    v.payout(w.spend, 500_000_000n);
+    if (order === "between withdraw and settle") plant();
+    const F = v.settle(w.spend)!;
+    if (order === "after settle") plant();
+    assert.equal(strangers.length, 4, `${order}: four stranger leaves planted`);
+    const r = await scan(v);
+    assert.deepEqual(r.notes.map((x) => refKey(x.ref)).sort(), [dep, cref, rref].map(refKey).sort(), `${order}: ours only`);
+    assert.deepEqual(r.notes.find((x) => refKey(x.ref) === refKey(rref))!.leaf, F, `${order}: F at the leaf the spend row names`);
+    assert.deepEqual(r.notes.find((x) => refKey(x.ref) === refKey(dep))!.leaf, leaf0, `${order}: the deposit note is the deposit row's leaf`);
+    for (const t of strangers) assert.ok(!r.notes.some((x) => x.leaf.leafIndex === t), `${order}: stranger leaf ${t} taken`);
+  }
+});
+
 test("pages the vault could never write stop the scan: our refund of value on a precommitment that is not refund(l, j)", async () => {
   const v = new Vault();
   const dep: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
@@ -467,10 +519,56 @@ test("the scan is refused before any read: an unknown network, a pair that is no
   assert.deepEqual(sent, []);
 });
 
+// Review F3: the scan stops on its signal, given before the scan or fired while a read waits; seed64 is zero either way.
+test("the scan stops on its abort signal: aborted before it starts, or while the first read waits", async () => {
+  const v = new Vault();
+  v.deposit(sec({ kind: "deposit", s: SCOPE, i: 0 }).precommitment, 800_000_000n, hex64("U0"));
+  const before = new AbortController();
+  before.abort(new Error("stopped by the user"));
+  await assert.rejects(scanAtGap({ words: WORDS, network: "testnet", rpcs: rpcs(v.views()), signal: before.signal }, TEST_GAP), /stopped by the user/);
+  const during = new AbortController();
+  const [a, b] = rpcs(v.views());
+  let reads = 0;
+  const slow = (x: VaultSyncRpc): VaultSyncRpc => ({
+    name: x.name,
+    query: async (p, sig) => {
+      reads++;
+      await new Promise((ok) => setTimeout(ok, 20));
+      during.abort(new Error("user stop"));
+      return x.query(p, sig);
+    },
+  });
+  await assert.rejects(scanAtGap({ words: WORDS, network: "testnet", rpcs: [slow(a), slow(b)], signal: during.signal }, TEST_GAP), /user stop/);
+  assert.ok(reads <= 4, `the scan stopped at its first reads (${reads} sent)`);
+  // seed64 is zero when the scan stops, and when its use throws before awaiting anything
+  let held: Uint8Array | undefined;
+  await assert.rejects(withSeed64(WORDS, ((s: Uint8Array) => {
+    held = s;
+    throw new Error("sync");
+  }) as unknown as (s: Uint8Array) => Promise<void>), /sync/);
+  assert.ok(held!.length === 64 && held!.every((x) => x === 0), "seed64 zeroed after a synchronous throw");
+});
+
+// Review F4: exitScan takes no gap; a short one would give fewer notes with no error. scanAtGap is the tests' own.
+test("exitScan takes no gap: an argument naming one is refused before any read, and only packages/exit's tests name scanAtGap", async () => {
+  const sent: string[] = [];
+  const spy = (name: string): VaultSyncRpc => ({ name, query: async () => void sent.push(name) as never });
+  const [a, b] = EXIT_NETWORKS.testnet.rpcs;
+  for (const gap of [1, TEST_GAP, RESTORE_GAP - 1, RESTORE_GAP, undefined])
+    await assert.rejects(exitScan({ words: WORDS, network: "testnet", rpcs: [spy(a), spy(b)], gap } as ExitScanArgs), /takes no gap/, String(gap));
+  assert.deepEqual(sent, []);
+  const src = readFileSync(new URL("../src/scan.ts", import.meta.url), "utf8");
+  assert.match(src, /export async function exitScan\(a: ExitScanArgs\): Promise<ExitScan> \{\n.*takes no gap.*\n  return scanAtGap\(a, RESTORE_GAP\);\n\}/, "exitScan scans at the release's RESTORE_GAP");
+  const files = execFileSync("git", ["ls-files", "-z", "--", "packages", "apps", "scripts", "contracts"], { cwd: ROOT, encoding: "utf8" }).split("\0").filter((f) => /\.(c|m)?(j|t)sx?$/.test(f));
+  assert.ok(files.length > 200, `${files.length} files read`);
+  const naming = files.filter((f) => f !== "packages/exit/src/scan.ts" && !f.startsWith("packages/exit/test/") && readFileSync(new URL(f, ROOT), "utf8").includes("scanAtGap"));
+  assert.deepEqual(naming, [], "files other than scan.ts and packages/exit's tests that name scanAtGap");
+});
+
 test("one RPC that differs by a byte stops the scan with nothing returned", async () => {
   const w = verifierOrder(rng(2));
   const drop = (method: string, view: unknown) => (method === "deposits" && Array.isArray(view) ? view.slice(1) : view);
-  await assert.rejects(exitScan({ words: WORDS, network: "testnet", rpcs: rpcs(w.v.views(), drop), gap: TEST_GAP }), (e) => e instanceof VaultSyncStopped && e.code === "disagree");
+  await assert.rejects(scanAtGap({ words: WORDS, network: "testnet", rpcs: rpcs(w.v.views(), drop) }, TEST_GAP), (e) => e instanceof VaultSyncStopped && e.code === "disagree");
 });
 
 test("the entropy is zeroed once seed64 is made, and seed64 once the scan ends, on every path", async () => {

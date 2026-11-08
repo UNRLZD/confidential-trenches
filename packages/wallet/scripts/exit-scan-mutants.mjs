@@ -32,10 +32,14 @@ const FIRST_ON_R = [
   "        const m = d ? { value: d.value, label: d.label, leafIndex: d.leafIndex } : { value: spend.refundValue, label: spend.refundLabel, leafIndex: spend.refundLeafIndex };",
   "        put(rref, rP, { ...m, commitment: noteCommitment(m.value, m.label, rP) }, key);",
 ].join("\n");
+// a deposit row on R taken as the refund only when it holds the refund's own value: a stranger picks the value, so a
+// twin of F's value must still never be taken
+const SAME_VALUE_ON_R = FIRST_ON_R.replace("d ? {", "d && d.value === spend.refundValue ? {");
 
 /** [name, [from, to] replacements, each of which must match restore.ts exactly once] */
 const M = [
   ["a deposit row on rP taken as the refund", [[PICK, FIRST_ON_R]]],
+  ["a deposit row on rP of the refund's value taken as the refund", [[PICK, SAME_VALUE_ON_R]]],
   ["refund_pending taken as settled, from the leaf on R", [[SETTLED, '      if (spend.status === "settled" || (spend.status === "refund_pending" && byP.has(rP))) {\n'], [PICK, FIRST_ON_R]]],
   ["a refund on a precommitment other than rP taken", [[STOP, ""], [PICK, PICK.replaceAll("rP", "spend.refundPrecommitment")]]],
   ["a deposit row on R taken as a deposit-kind note", [[MOVE, `    asDeposit(rref);\n${MOVE}`]]],
