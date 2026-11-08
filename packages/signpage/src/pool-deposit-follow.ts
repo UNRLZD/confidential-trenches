@@ -26,7 +26,12 @@
 // key, the words, or which note is whose.
 import type { PoolChain } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
-import type { MoveRead, OneClickStatus, StatusRead } from "../../wallet/src/deposit/follow.ts";
+import { type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
+import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
+import { readSolanaPoolCosts } from "./pool-deposit-address.ts";
+import { solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
 import { hex } from "@scure/base";
 import type { OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import type { HelperSignedIntent } from "../../kit/src/helper/v1.ts";
@@ -350,7 +355,7 @@ export interface PoolRefundHost {
   seed64(): Promise<Uint8Array>;
   seedLock<T>(fn: () => Promise<T>): Promise<T>;
   /** The op's recorded move, and its write (before the send). */
-  move(): MoveRecord | undefined;
+  move(): Promise<MoveRecord | undefined>;
   record(m: MoveRecord): Promise<void>;
   fetch?: typeof fetch;
   now?: () => number;
@@ -359,7 +364,7 @@ export interface PoolRefundHost {
 export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal: AbortSignal) => Promise<"moved" | "none" | "wait"> {
   const now = h.now ?? Date.now;
   return async (f, signal) => {
-    const m = h.move();
+    const m = await h.move();
     const r = await h.read(f, m?.nonce ?? null);
     if (r === null) return "wait";
     let prior: number | null = null;
@@ -411,5 +416,53 @@ export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal
       },
     );
     return res.kind === "sent" && res.status >= 200 && res.status < 300 ? "moved" : "wait";
+  };
+}
+
+// ------------------------------------------------------------------------------------------------ Solana's reads
+
+const lamports = (v: unknown): bigint => {
+  const x = (v as { value?: unknown } | null)?.value;
+  if (!Number.isSafeInteger(x) || (x as number) < 0) throw new Error("not a balance");
+  return BigInt(x as number);
+};
+
+/**
+ * The follow's reads on Solana (the pool kinds' own pair, two operators): 1Click's status through the helper for U_X
+ * and U_{s,i}; U_X's balance at finalized on each RPC; one deposit's costs from the fee and the Rent sysvar read now
+ * (readSolanaPoolCosts: the floor the quote was held to, its worst-case cost per rung and the rent U_X keeps); the
+ * quote's deadline past on both RPCs' finalized block time. `deposit` is the page's pool.deposit (depositToEnd).
+ */
+export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc]; program: string; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal"> {
+  const both = <T,>(f: (r: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0]), f(o.rpcs[1])]);
+  return {
+    status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
+    balances: (f) => both(async (r) => lamports(await r("getBalance", [f.u, { commitment: "finalized" }]))),
+    costs: async (f) => {
+      const { fee, rent } = await readSolanaPoolCosts(o.rpcs, o.program, f.u);
+      const floor = solanaPoolDepositFloor(fee, rent), keep = solanaRentMin(rent, 0);
+      return { floor, perRung: floor - SOL_LADDER.min - keep, keep };
+    },
+    ladder: SOL_LADDER,
+    deposit: o.deposit,
+    past: async (f) => {
+      const times = await both(async (r) => {
+        const slot = await r("getSlot", [{ commitment: "finalized" }]);
+        const t = await r("getBlockTime", [slot]);
+        if (!Number.isSafeInteger(t)) throw new Error("no block time");
+        return (t as number) * 1000;
+      });
+      return times.every((t) => t > f.deadline_ms);
+    },
+    ...(o.refund ? { refund: o.refund } : {}),
+    sleep: o.sleep ?? ((ms, signal) => new Promise<void>((ok) => {
+      const t = setTimeout(done, ms);
+      function done() {
+        clearTimeout(t);
+        signal.removeEventListener("abort", done);
+        ok();
+      }
+      signal.addEventListener("abort", done, { once: true });
+    })),
   };
 }

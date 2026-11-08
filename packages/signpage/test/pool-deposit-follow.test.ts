@@ -215,3 +215,42 @@ test("depositToEnd: a sent answer waits for its end as progress; refusals and a 
   stop.abort();
   assert.equal(await hang, "down");
 });
+
+test("Solana's reads: U_X's finalized balance per RPC, the costs at today's rent, the deadline on both clocks, the status for U_X and U_{s,i}", async () => {
+  const { solanaPoolFollowDeps } = await import("../src/pool-deposit-follow.ts");
+  const { DEPOSIT_STATUS_URL } = await import("../../wallet/src/deposit/follow.ts");
+  const { base58 } = await import("@scure/base");
+  const rentData = new Uint8Array(17);
+  new DataView(rentData.buffer).setBigUint64(0, 5_080n, true);
+  new DataView(rentData.buffer).setFloat64(8, 1, true);
+  const calls: [string, unknown][] = [];
+  const rpcOf = (url: string, bal: number, time: number) => {
+    const f = (async (method: string, params: unknown[]) => {
+      calls.push([method, params[1] ?? params[0]]);
+      if (method === "getBalance") return (params[1] as { commitment?: string })?.commitment === "finalized" ? { context: { slot: 9 }, value: bal } : { context: { slot: 9 }, value: 10 ** 12 };
+      if (method === "getAccountInfo") return { context: { slot: 1 }, value: { owner: "Sysvar1111111111111111111111111111111111111", data: [Buffer.from(rentData).toString("base64"), "base64"], lamports: 1 } };
+      if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: base58.encode(new Uint8Array(32).fill(3)), lastValidBlockHeight: 10 } };
+      if (method === "getFeeForMessage") return { context: { slot: 1 }, value: 5_000 };
+      if (method === "getSlot") return 77;
+      if (method === "getBlockTime") return time;
+      throw new Error(method);
+    }) as unknown as import("../../kit/src/trade/solana/send.ts").SolanaRpc;
+    Object.defineProperty(f, "url", { value: url });
+    return f;
+  };
+  const status = (refundTo: string) => (async (url: string) => {
+    assert.ok(String(url).startsWith(DEPOSIT_STATUS_URL));
+    return Response.json({ status: "SUCCESS", quoteResponse: { quote: { depositAddress: F.address }, quoteRequest: { recipient: F.u, refundTo } }, swapDetails: { amountOut: "20000000" } });
+  }) as typeof fetch;
+  const d = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 30, 2_000), rpcOf("https://b.example", 40, 1_000)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.refund_id) });
+  const U = base58.encode(new Uint8Array(32).fill(5));
+  const f = { ...F, u: U, deadline_ms: 1_500_000 };
+  assert.deepEqual(await d.balances(f), [30n, 40n]);
+  assert.deepEqual(await d.costs(f), { floor: 13_586_400n, perRung: 2_936_160n, keep: 650_240n });
+  assert.equal(await d.past(f), false, "one RPC's finalized clock is still before the deadline");
+  assert.equal(await d.past({ ...f, deadline_ms: 999_000 }), true);
+  const ok = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.refund_id) });
+  assert.deepEqual(await ok.status(F, new AbortController().signal), { status: "SUCCESS", delivered: 20_000_000n });
+  const bad = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.u) });
+  assert.equal(await bad.status(F, new AbortController().signal), null, "a status whose refund is not U_{s,i} is no read");
+});

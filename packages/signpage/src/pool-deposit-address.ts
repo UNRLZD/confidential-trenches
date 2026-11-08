@@ -30,7 +30,7 @@ import { POOL_DEPOSIT_NETWORK, askDepositQuote, poolDepositQuoteRequest } from "
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
-import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaRent, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaPoolDepositTx } from "../../kit/src/trade/solana/pool-deposit.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
@@ -123,6 +123,13 @@ function aboveCap(amount: bigint, decimalsIn: number, reads: readonly [string, s
  * sizes do not move it), the higher of the two. A read that does not answer throws (the host answers down).
  */
 export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<bigint> {
+  const { fee, rent } = await readSolanaPoolCosts(rpcs, program, wallet);
+  return solanaPoolDepositFloor(fee, rent);
+}
+
+/** The reads readSolanaPoolFloor prices the floor at: the Rent sysvar on both RPCs, and the higher of the two RPCs' fee
+ *  for a deposit message by `wallet`. */
+export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<{ fee: bigint; rent: SolanaRent }> {
   const rent = await readSolanaRent(rpcs);
   const fees = await Promise.all(rpcs.map(async (rpc) => {
     const bh = (await rpc("getLatestBlockhash", [{ commitment: "confirmed" }])) as { value?: { blockhash?: unknown } } | null;
@@ -133,8 +140,7 @@ export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc],
     if (!Number.isSafeInteger(v) || (v as number) < 0) throw new Error("no fee for the deposit message");
     return BigInt(v as number);
   }));
-  const fee = fees[0]! > fees[1]! ? fees[0]! : fees[1]!;
-  return solanaPoolDepositFloor(fee, rent);
+  return { fee: fees[0]! > fees[1]! ? fees[0]! : fees[1]!, rent };
 }
 
 /** The pool.address handler for ApiHost.kinds: a Deferred answered once the records, and a quote when asked, are done. */

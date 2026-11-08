@@ -57,7 +57,7 @@ function world(o: { read: MoveRead | null; move?: { nonce: string; deadline_ms: 
     decimals: () => 9,
     seed64: async () => (log.push("seed"), (o.seed ?? new Uint8Array(64)).slice()),
     seedLock: (fn) => fn(),
-    move: () => o.move,
+    move: async () => o.move,
     record: async (m) => void ((recorded = m), log.push("record")),
     now: () => NOW,
     fetch: (async (url: string, init?: RequestInit) => {
