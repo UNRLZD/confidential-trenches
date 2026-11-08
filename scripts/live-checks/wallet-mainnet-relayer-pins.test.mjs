@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { FEE_RECIPIENT, implicitKey, judge, judgeBundle, loadPins, PAIR, pinsOf, THROWAWAY } from "./wallet-mainnet-relayer-pins.mjs";
+import { FEE_RECIPIENT, implicitKey, judge, judgeBundle, loadPins, loadWithdrawPins, PAIR, pinsOf, THROWAWAY, withdrawPinsOf } from "./wallet-mainnet-relayer-pins.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-mainnet-relayer-pins.answers.json", import.meta.url), "utf8"));
 const CARRY = "f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc";
@@ -96,6 +96,14 @@ test("the pins are this checkout's source: bind.ts's mainnet carry, relay.ts's m
   assert.deepEqual(pinsOf(bind.replace('"aa"', "null"), relay("null")), { deposit: null, withdraw: null });
   assert.throws(() => pinsOf(bind.replace('"aa"', "CARRY"), relay("null")), /RELEASE_RELAYER's mainnet pin is not null or one string/);
   assert.throws(() => pinsOf(bind, relay("PAIR")), /RELEASE_WITHDRAW_RELAYER's mainnet pin is not null/);
+  // both networks' withdrawal pairs (what relayer-withdraw-fee holds the helper to)
+  assert.deepEqual(loadWithdrawPins().mainnet, loadPins().withdraw);
+  assert.equal(loadWithdrawPins().testnet.fee_recipient, "f-2b700409.bf-vt-20261102t071444.testnet"); // gitleaks:allow (a public account id)
+  const tn = (t) => `export const RELEASE_WITHDRAW_RELAYER: Readonly<Record<NearNetwork, HelperReleaseRelayer | null>> = Object.freeze({\n  mainnet: ${pair},\n  testnet: ${t},\n});`;
+  const tPair = `POOL_TESTNET\n    ? ${pair.replace('"r"', '"t"')}\n    : null`;
+  assert.deepEqual(withdrawPinsOf(tn(tPair)), { mainnet: { relayer_account: "r", fee_recipient: "fees.unrlzd.near" }, testnet: { relayer_account: "t", fee_recipient: "fees.unrlzd.near" } });
+  assert.deepEqual(withdrawPinsOf(tn("null")).testnet, null);
+  assert.throws(() => withdrawPinsOf(tn("TESTNET_PAIR")), /testnet pin is not null/);
 });
 
 test("implicitKey is the key the server script prints for its account", () => {

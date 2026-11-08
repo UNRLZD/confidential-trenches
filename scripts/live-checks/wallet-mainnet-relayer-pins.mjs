@@ -71,6 +71,25 @@ export function pinsOf(bindText, relayText) {
 }
 export const loadPins = (root = ROOT) => pinsOf(readFileSync(path.join(root, BIND_FILE), "utf8"), readFileSync(path.join(root, RELAY_FILE), "utf8"));
 
+const TESTNET_WITHDRAW_PIN = new RegExp(
+  String.raw`export const RELEASE_WITHDRAW_RELAYER\b[^=]*=\s*Object\.freeze\(\{[\s\S]*?\n\s*testnet:\s*(?:null|POOL_TESTNET\s*\?\s*Object\.freeze\(\{\s*relayer_account:\s*"([^"\n]*)",${COMMENT}\s*fee_recipient:\s*"([^"\n]*)",?${COMMENT}\s*\}\)\s*:\s*null)\s*,`,
+);
+/**
+ * The release's withdrawal relayer on each network as relay.ts writes it: mainnet's pin (pinsOf), and testnet's pair,
+ * which the testnet build carries (POOL_TESTNET) and SIGN_HOST's build folds to null. A source this cannot read throws.
+ */
+export function withdrawPinsOf(relayText) {
+  const t = TESTNET_WITHDRAW_PIN.exec(relayText);
+  if (!t) throw new Error(`${RELAY_FILE}: RELEASE_WITHDRAW_RELAYER's testnet pin is not null or one POOL_TESTNET-folded { relayer_account, fee_recipient }`);
+  const mainnet = WITHDRAW_PIN.exec(relayText);
+  if (!mainnet) throw new Error(`${RELAY_FILE}: RELEASE_WITHDRAW_RELAYER's mainnet pin is not null or one frozen { relayer_account, fee_recipient }`);
+  return {
+    mainnet: mainnet[1] === undefined ? null : { relayer_account: mainnet[1], fee_recipient: mainnet[2] },
+    testnet: t[1] === undefined ? null : { relayer_account: t[1], fee_recipient: t[2] },
+  };
+}
+export const loadWithdrawPins = (root = ROOT) => withdrawPinsOf(readFileSync(path.join(root, RELAY_FILE), "utf8"));
+
 // ---------- the bundle ----------
 
 /** What the check keeps of the bundle: the index, the served script's sha384, how many frozen copies of each pin it holds, and whether it names the throwaway. */
