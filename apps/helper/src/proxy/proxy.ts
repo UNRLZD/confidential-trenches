@@ -74,6 +74,11 @@ const HOLD_MARGIN_MS = 5;
 /** The most of one vendor's calls the other helpers may seed (card helper-deploy-reads-fast): a Developer key's 600 a minute
  *  and the second a counted minute spans, with room. */
 export const VENDOR_SEED_MAX = 1_000;
+/** The 1Click calls one deposit sheet open sends within a second (card deposit-sheet-oneclick-budget): deposit.assets
+ *  reads the token list, then one dry quote per release asset at once (packages/signpage/src/rules/deposit-dry.ts
+ *  depositAssetsKind, DEPOSIT_ASSET_CHAINS: 3), and deposit.dry one dry quote: 5, one client's share of 1Click, so no
+ *  other client's load can refuse it. */
+export const DEPOSIT_SHEET_CALLS = 5;
 /** A vendor's budget is counted over its own window: every vendor below publishes a per-minute limit. */
 export const VENDOR_WINDOW_MS = 60_000;
 /**
@@ -95,15 +100,18 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   api/api-keys, read 09:15Z): 50, the quote's. Share 2: no kit call yet; a tap's hop is one quote and one status.
  * - lifi: keys "currently default to **100 requests per minute**" (docs.li.fi/api-reference/rate-limits, read 09:15Z):
  *   100. Share 2: no kit call yet; the fallback route is one quote and one status.
- * - oneclick: no limit published (docs.near-intents.org 1click-api/authentication, read 09:16Z), so the most
- *   conservative published one above, Relay's 50 a minute: 50. Share 2: a deposit asks one quote per tap
- *   (packages/signpage/src/rules/deposit-quote.ts l.119, packages/wallet/src/deposit/quote.ts l.67), and one again.
+ * - oneclick: no limit in the docs (docs.near-intents.org 1click-api/authentication.md and the quote reference, read
+ *   2026-11-08 02:39Z), but 1Click answers its own on every call: x-ratelimit-limit-unauth 1200 and
+ *   x-ratelimit-reset-unauth 60 on /v0/quote and /v0/tokens, keyless and with our JWT alike, one counter for both
+ *   (remaining 1197 then 1196, read from the Mac 02:40Z): 1200. Share DEPOSIT_SHEET_CALLS 5 (card
+ *   deposit-sheet-oneclick-budget): one deposit sheet open, within a second. At 50 and 2 the sheet's third call went
+ *   only as lent, and from the eighth sheet in a minute it answered 429 busy or 503 with 1Click idle.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
   jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34, lend: true },
   relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
   lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
-  oneclick: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
+  oneclick: { total: 1_200, perClient: DEPOSIT_SHEET_CALLS, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
 };
 /**
  * Requests kept in each vendor's total for the helper's own reads that serve every user, which only those reads may

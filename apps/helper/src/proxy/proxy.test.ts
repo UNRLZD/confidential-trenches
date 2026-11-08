@@ -270,7 +270,7 @@ test("review F-C2: one address reading a cached proxy list 1000 times in one win
 
 test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per client>\"), else its published limit's; a bad value stops the start naming the variable", async () => {
   const M = 60_000; // every vendor's limit is a minute's
-  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34, lend: true }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0, lend: true }, oneclick: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true } });
+  assert.deepEqual(PROXY_BUDGETS, { jupiter: { total: 60, perClient: 4, windowMs: M, reserve: 34, lend: true }, relay: { total: 50, perClient: 2, windowMs: M, reserve: 0, lend: true }, lifi: { total: 100, perClient: 2, windowMs: M, reserve: 0, lend: true }, oneclick: { total: 1_200, perClient: 5, windowMs: M, reserve: 0, lend: true } });
   for (const v of VENDOR_NAMES) assert.ok(PROXY_BUDGETS[v]!.perClient < PROXY_BUDGETS[v]!.total, v);
   assert.equal(proxyBudgetEnv("oneclick"), "PROXY_BUDGET_ONECLICK");
   assert.throws(() => createProxy({ PROXY_BUDGET_RELAY: "8,8" }), /^Error: PROXY_BUDGET_RELAY must be/);
@@ -287,12 +287,34 @@ test("each vendor's budget is PROXY_BUDGET_<VENDOR> when set (\"<total>,<per cli
   assert.equal(f.seen.length, 3 + 5, "another vendor keeps its default, its share lent while the total sits idle");
 });
 
+// card deposit-sheet-oneclick-budget: the signing page's deposit sheet open asks 1Click five times through the helper
+// within a second (packages/signpage/src/rules/deposit-dry.ts: deposit.assets reads the token list, then one dry quote
+// per asset at once; deposit.dry one dry quote). At a0726204's share of 2 and total of 50 the third went only as lent,
+// and lending stops while other clients drew in the minute, so the eighth user's sheet answered 429 (busy) with 1Click idle.
+test("card deposit-sheet-oneclick-budget: one deposit sheet open (the token list, three dry quotes at once, then one dry quote) fits one client's 1Click share at any load other clients put on the helper", async () => {
+  const c = clock();
+  const f = vendor((s) => (s.url.endsWith("/v0/tokens") ? json([]) : json({ quote: {} }, 201)));
+  const p = createProxy(ENV, { burstMs: 0, fetch: f.fetch, now: c.now, sleep: c.sleep });
+  const refused: string[] = [];
+  const sheets = 40;
+  for (let k = 0; k < sheets; k++) {
+    const ip = `198.51.100.${k}`;
+    const answers = [await p.handle("oneclick", "/v0/tokens", "", "", ip)];
+    answers.push(...(await Promise.all([0, 1, 2].map(() => p.handle("oneclick", "/v0/quote", "", "{}", ip)))));
+    answers.push(await p.handle("oneclick", "/v0/quote", "", "{}", ip));
+    for (const a of answers) if (a.status !== 200 && a.status !== 201) refused.push(`sheet ${k}: ${a.status}`);
+    c.add(1_000);
+  }
+  assert.deepEqual(refused, [], "every sheet's five calls answered");
+  assert.equal(f.seen.filter((s) => s.url.endsWith("/v0/quote")).length, sheets * 4, "every dry quote reached 1Click");
+});
+
 // review F-D on the proxy: a vendor that keeps its published per-minute limit on a 60-second sliding window (the
 // helper's own Jupiter reads drawn too), and addresses at their full share until an honest first-time caller is
 // refused. At 06a656f's design budget (300 a window, 60 a caller) one or two addresses make the vendor throttle, which
 // holds the vendor for everyone; at the published defaults the vendor never throttles and it takes total / share.
 test("review F-D (proxy): at each vendor's published limit, no set of callers can make the vendor throttle; the callers' part is served in full and at least two addresses are needed to refuse an honest caller", async () => {
-  const PER_MIN = { jupiter: 60, relay: 50, lifi: 100, oneclick: 50 } as const;
+  const PER_MIN = { jupiter: 60, relay: 50, lifi: 100, oneclick: 1_200 } as const;
   const run = async (v: keyof typeof PER_MIN, env: Record<string, string>) => {
     let t = 1_800_000_000_000;
     const calls: number[] = [];
@@ -319,7 +341,8 @@ test("review F-D (proxy): at each vendor's published limit, no set of callers ca
     return { addresses: n + 1, throttledByVendor, own, served };
   };
   for (const v of VENDOR_NAMES) {
-    const today = await run(v, { [proxyBudgetEnv(v)]: "300,60" });
+    // a budget past the vendor's limit: 300 a minute, or five times a vendor's that is past it (1Click's 1,200)
+    const today = await run(v, { [proxyBudgetEnv(v)]: `${Math.max(300, 5 * PER_MIN[v])},60` });
     const now = await run(v, {});
     assert.ok(today.throttledByVendor > 0, `${v} at 06a656f's budget: the vendor throttled, so it was held for everyone`);
     assert.equal(now.throttledByVendor, 0, `${v}: the vendor never throttled`);
