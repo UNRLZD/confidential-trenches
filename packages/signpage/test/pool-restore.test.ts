@@ -3,15 +3,22 @@
 // page pins is read, what they find is written to the note store, the request is answered "started" at once, its
 // progress says "reading" within every beat and ends "done", or "stalled" when a pool fails (the others' notes still
 // written); one run at a time; auto runs once on an empty note store and never on one with notes; signed out it refuses.
+// Each pool walked has its deposit ids read (card wallet-restore-id-reader-wired: restore step 5 through the wallet's
+// IdReader) on NEAR answers replayed from mainnet (the wallet's test/vectors/id-reader-mainnet.json): a found id holds
+// its lane open, and an id unread on both providers stops the run stalled with the walk's notes written.
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey } from "../../wallet/src/notes/store.ts";
 import type { RestoredNote } from "../../wallet/src/notes/restore.ts";
+import { depositAccount, NEAR_NETWORKS, nearPairNetwork, type NearRpc } from "../../wallet/src/deposit/account.ts";
+import type { DepositIds } from "../../wallet/src/restore/wallets.ts";
 import { APP_ORIGIN, startApi } from "../src/api.ts";
+import * as restoreKind from "../src/pool-restore.ts";
 import { pagePools, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
 
 const SOL_SCOPE = 11n;
@@ -30,14 +37,72 @@ const notesOf = (scope: bigint, label: bigint, base: bigint): RestoredNote[] => 
   ];
 };
 const POOLS: readonly RestorePool[] = [
-  { chain: "solana", program: "Prog111", rpcs: () => [async () => null, async () => null] },
-  { chain: "evm", pin: { network: "base-sepolia", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, rpcs: () => [async () => null, async () => null] },
+  { chain: "solana", program: "Prog111", scope: SOL_SCOPE, rpcs: () => [async () => null, async () => null] },
+  { chain: "evm", pin: { network: "base-sepolia", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: () => [async () => null, async () => null] },
 ];
+
+// ---------- NEAR, replayed from mainnet ----------
+const FAST = NEAR_NETWORKS.mainnet.fastnear[0];
+const DRPC = NEAR_NETWORKS.mainnet.drpc;
+const REC = JSON.parse(readFileSync(new URL("../../wallet/test/vectors/id-reader-mainnet.json", import.meta.url), "utf8")) as {
+  ids: Record<string, string>;
+  answers: Record<string, unknown[]>;
+  pass: { h: number; hash: string };
+  intents: Record<string, { tokens: unknown; held: unknown }>;
+};
+/** What a deposit id of the restore answers as: one of the recorded mainnet ids, "intents" (never_used's token and account
+ *  views with money_intents's tokens inside intents.near: money held only there, a refund left under the id), or "down"
+ *  (no answer on either provider). Ids not listed answer as never_used. */
+type As = "used_storage" | "used_account" | "money_usdc" | "intents" | "down";
+const SEED = (): Uint8Array => new Uint8Array(64).fill(7);
+const idOf = (scope: bigint, i: number): string => depositAccount(SEED(), scope, i).account;
+const argsOf = (p: Record<string, unknown>): Record<string, unknown> => (typeof p.args_base64 === "string" ? JSON.parse(Buffer.from(p.args_base64, "base64").toString()) : {});
+// one provider answering from the record, by its URL and the exact params with the restore's id in place of the recorded
+// one it answers as. The chain stands at the recorded pass's block: every final read is its first recorded answer
+function replay(url: string, as: ReadonlyMap<string, As>, log: string[]): NearRpc {
+  const served = new Map<string, number>();
+  return {
+    name: url,
+    query: async (params) => {
+      const args = argsOf(params);
+      const u = (params.request_type === "view_account" ? params.account_id : args.account_id) as string;
+      let p: Record<string, unknown> = params;
+      if (u !== "intents.near") {
+        log.push(`${url} ${u}`);
+        const x = as.get(u);
+        if (x === "down") throw new Error("HTTP 503");
+        if (x === "intents" && params.account_id === "intents.near") {
+          const rec = REC.intents[url]!;
+          const a = structuredClone(params.method_name === "mt_tokens_for_owner" ? rec.tokens : rec.held) as { result: Record<string, unknown> };
+          Object.assign(a.result, { block_hash: REC.pass.hash, block_height: REC.pass.h });
+          return a;
+        }
+        const id = REC.ids[x === undefined || x === "intents" ? "never_used" : x]!;
+        p = params.request_type === "view_account" ? { ...params, account_id: id } : { ...params, args_base64: Buffer.from(JSON.stringify({ ...args, account_id: id })).toString("base64") };
+      }
+      const k = `${url} ${JSON.stringify(p)}`;
+      const xs = REC.answers[k];
+      if (xs === undefined) throw new Error(`no recorded answer for ${JSON.stringify(p)}`);
+      if (p.finality === "final") return xs[0];
+      const n = served.get(k) ?? 0;
+      served.set(k, n + 1);
+      return xs[Math.min(n, xs.length - 1)];
+    },
+  };
+}
+/** The host's deposit id reads on the replayed pair; `found` keeps each scope's step 5 answer. */
+function nearOf(as: ReadonlyMap<string, As> = new Map()) {
+  const log: string[] = [];
+  const found = new Map<bigint, DepositIds>();
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {} }, read: (scope, r) => void found.set(scope, r) };
+  return { ids, log, found };
+}
 
 let db = 0;
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
 async function world(over: Partial<PoolRestoreHost> = {}) {
+  const near = nearOf();
   const store = await openWalletStore({ name: `restore-${db++}`, indexedDB: new IDBFactory() });
   closers.push(() => store.close());
   const seeds: Uint8Array[] = [];
@@ -51,11 +116,12 @@ async function world(over: Partial<PoolRestoreHost> = {}) {
     },
     signedIn: async () => true,
     pools: () => POOLS,
+    ids: near.ids,
     solana: (async (a: { program: string }) => (seen.push(`solana ${a.program}`), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
     evm: (async (a: { pin: { network: string }; wallets?: unknown; walletRpcs?: unknown; helper?: unknown }) => (seen.push(`evm ${a.pin.network} wallets ${String(a.wallets)} ${"walletRpcs" in a || "helper" in a ? "with W reads" : "no W reads"}`), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
     ...over,
   };
-  return { store, host, seeds, seen, r: poolRestore(host) };
+  return { store, host, seeds, seen, near, r: poolRestore(host) };
 }
 
 // the page's api with only the restore kind, as the APP_HOST frame asks it
@@ -131,7 +197,7 @@ test("restore: a pool that fails ends stalled, never done, and the other pool's 
   assert.deepEqual(await listed(w.store), notesOf(SOL_SCOPE, LABEL_S, 1000n).map((n) => `${refKey(n.ref)} ${n.state}`).sort());
   await until("op stalled", async () => (await opOf(w.store, id))?.stage === "stalled");
 
-  const unread: RestorePool = { chain: "evm", pin: { network: "base", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, rpcs: null };
+  const unread: RestorePool = { chain: "evm", pin: { network: "base", pool: "0x1", feeRecipient: "0x2", fromBlock: 1n }, scope: EVM_SCOPE, rpcs: null };
   const x = await world({ pools: () => [unread] });
   const b = api(x.r.kind);
   const id2 = b.ask();
@@ -260,4 +326,94 @@ test("restore: the op record says the end before the end is posted, however slow
   await d.after;
   await until("done posted", () => atEnd.length === 1);
   assert.equal(await atEnd[0], "done");
+});
+
+// ---------- restore step 5: the deposit ids (card wallet-restore-id-reader-wired) ----------
+// each lane's ids, from its first index to its last read (the ids step 5 must read, in lane order)
+const laneIds = (scope: bigint, lane: number, to: number): string[] => {
+  const out: string[] = [];
+  for (let i = lane; i <= to; i += 8) out.push(idOf(scope, i));
+  return out;
+};
+
+test("deposit ids: every pool walked has its ids read on both providers at one block; an intents-only id and a used id each hold their lane open 21 more; the run ends done", async () => {
+  const as = new Map<string, As>([
+    [idOf(SOL_SCOPE, 24), "intents"], // lane 0, past its note at 0: a refund left inside intents.near only
+    [idOf(SOL_SCOPE, 162), "used_storage"], // lane 2, empty: its 21st id, registered on USDC and empty now
+    [idOf(EVM_SCOPE, 169), "used_account"], // lane 1, the last of the 21 past its note at 1: a NEAR account, nothing held
+  ]);
+  const n = nearOf(as);
+  const w = await world({ ids: n.ids });
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("done", () => a.posted.some((m) => m.id === id && m.stage === "done"), 20_000);
+  assert.ok(!a.posted.some((m) => m.id === id && m.stage === "stalled"));
+  const sol = n.found.get(SOL_SCOPE)!, evm = n.found.get(EVM_SCOPE)!;
+  assert.ok(sol && evm, "both pools' ids read");
+  assert.equal(sol.complete && evm.complete, true);
+  const lane = (x: DepositIds, k: number) => ({ notes: x.lanes[k]!.notes, money: x.lanes[k]!.money, used: x.lanes[k]!.used, unread: x.lanes[k]!.unread.length, highest: x.lanes[k]!.highest, readTo: x.lanes[k]!.readTo });
+  // found: the intents-only id is money and the lane reads 21 past it; the used one resets the empty lane's count
+  assert.deepEqual(lane(sol, 0), { notes: [0], money: [24], used: [], unread: 0, highest: 24, readTo: 24 + 8 * 21 });
+  assert.deepEqual(lane(sol, 1), { notes: [1], money: [], used: [], unread: 0, highest: 1, readTo: 1 + 8 * 21 });
+  assert.deepEqual(lane(sol, 2), { notes: [], money: [], used: [162], unread: 0, highest: 162, readTo: 162 + 8 * 21 });
+  assert.deepEqual(lane(evm, 1), { notes: [1], money: [], used: [169], unread: 0, highest: 169, readTo: 169 + 8 * 21 });
+  for (const k of [3, 4, 5, 6, 7]) for (const x of [sol, evm]) assert.deepEqual(lane(x, k), { notes: [], money: [], used: [], unread: 0, highest: null, readTo: k + 8 * 20 });
+  // every id asked is one of the scopes' own lanes, in lane order, up to each lane's last read; nothing else is named
+  const asked = [...new Set(n.log.map((l) => l.split(" ")[1]!))];
+  const want = [SOL_SCOPE, EVM_SCOPE].flatMap((s) => { const x = n.found.get(s)!; return x.lanes.flatMap((l) => laneIds(s, l.lane, l.readTo)); });
+  assert.deepEqual(asked, want);
+  // an id read as unused is read on both providers (the IdReader's rule): the lane's first id of an empty lane
+  const fresh = idOf(SOL_SCOPE, 3);
+  assert.deepEqual(n.log.filter((l) => l.endsWith(fresh)).map((l) => l.split(" ")[0]).sort(), [DRPC, DRPC, DRPC, FAST, FAST, FAST]);
+  // the walk's notes are written as before, and the seed zeroed once the ids are read
+  const notes = [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((x) => `${refKey(x.ref)} ${x.state}`).sort();
+  assert.deepEqual(await listed(w.store), notes);
+  assert.ok(w.seeds.length === 1 && w.seeds[0]!.every((b) => b === 0));
+});
+
+test("deposit ids: an id unread on both providers stops the run stalled, never done: no id read after it, the walk's notes written", async () => {
+  const down = idOf(EVM_SCOPE, 43); // lane 3 of the second pool, its sixth id
+  const n = nearOf(new Map([[down, "down"]]));
+  const w = await world({ ids: n.ids });
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("stalled", () => a.posted.some((m) => m.id === id && m.stage === "stalled"), 20_000);
+  assert.ok(!a.posted.some((m) => m.id === id && m.stage === "done"));
+  await until("op stalled", async () => (await opOf(w.store, id))?.stage === "stalled");
+  // both providers were asked for it, and then nothing more was read
+  const first = n.log.findIndex((l) => l.endsWith(down));
+  assert.ok(first >= 0);
+  assert.deepEqual(n.log.slice(first).map((l) => l.split(" ")[1]), [down, down]);
+  assert.deepEqual(n.log.slice(first).map((l) => l.split(" ")[0]).sort(), [DRPC, FAST]);
+  // the first pool's ids were read whole; the second's never reached an answer
+  assert.equal(n.found.get(SOL_SCOPE)?.complete, true);
+  assert.equal(n.found.has(EVM_SCOPE), false);
+  // the floor: the walk's notes are written whatever the ids read
+  const notes = [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((x) => `${refKey(x.ref)} ${x.state}`).sort();
+  assert.deepEqual(await listed(w.store), notes);
+  assert.ok(w.seeds[0]!.every((b) => b === 0));
+});
+
+test("deposit ids: a pass the providers refuse (their blocks at one height differ) stops the run stalled, no id read, the notes written", async () => {
+  const log: string[] = [];
+  const other = (url: string): NearRpc => {
+    const r = replay(url, new Map(), log);
+    return { name: url, query: async (p) => {
+      const a = (await r.query(p)) as { result?: Record<string, unknown> };
+      return p.block_id === REC.pass.h && url === DRPC ? { ...a, result: { ...a.result, block_hash: "4".repeat(44) } } : a;
+    } };
+  };
+  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {} } } });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.deepEqual(log, []);
+  assert.equal((await listed(w.store)).length, 6);
+});
+
+test("pageIdReads: this build reads deposit ids on the release pair on mainnet, where 1Click lands a pool deposit's refund; each provider reads block headers for the pass's time", () => {
+  const r = restoreKind.pageIdReads();
+  assert.ok(r !== null);
+  const rpcs = r.rpcs();
+  assert.deepEqual(rpcs.map((x) => x.name), [FAST, DRPC]);
+  assert.equal(nearPairNetwork(rpcs), "mainnet");
+  assert.ok(rpcs.every((x) => typeof (x as { block?: unknown }).block === "function"));
 });

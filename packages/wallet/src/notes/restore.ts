@@ -226,8 +226,10 @@ export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigi
 }
 
 // The last index a whole walk of the lane reads: `gap` indices of the lane past its last note or its reach, whichever
-// is higher (the lane's first gap indices when it has neither), or the lane's last index below 2^32
-function walkEnd(lane: number, found: readonly number[], gap: number, reach: number | null = null): number {
+// is higher (the lane's first gap indices when it has neither), or the lane's last index below 2^32. Exported for the
+// pools' walks, which return their notes only: step 5 (../restore/wallets.ts restoreDepositIds) holds a pool lane's ids
+// to it (the signing page's restore kind, packages/signpage/src/pool-restore.ts)
+export function walkEnd(lane: number, found: readonly number[], gap: number, reach: number | null = null): number {
   const from = Math.max(found.length === 0 ? lane - RESTORE_LANES : found[found.length - 1]!, reach ?? -Infinity);
   const end = from + RESTORE_LANES * gap;
   const top = lane + RESTORE_LANES * Math.floor((U32 - lane) / RESTORE_LANES);
