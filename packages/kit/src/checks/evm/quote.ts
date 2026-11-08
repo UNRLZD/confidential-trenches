@@ -311,6 +311,9 @@ function fitRead(chain: EvmPoolChain, v: { pool: string | undefined; adapterV3: 
  *  pins no adapter for the route's venue, and refused (bad_request) where it pins no pool. A result is a fit; a revert
  *  or out of gas is none. */
 export function evmBuySwapFitCall(chain: EvmPoolChain, route: EvmRoute, amount: bigint, blockHash: string, exec: bigint = EVM_BUY_SWAP_FIT): { tx: { from: string; to: string; data: string; gas: string }; override: Record<string, { balance: string }> } | null {
+  // the buy quote's own bound on the amount (checkAsk), and a cap above 0 (review 2 of c9a8df14, L2)
+  if (typeof amount !== "bigint" || amount <= 0n || amount >= MAX_IN) return refuse("bad_request", "the amount in is above 0 and below 2^127");
+  if (typeof exec !== "bigint" || exec <= 0n) return refuse("bad_request", "the swap's gas cap is above 0");
   const r = fitRead(chain, venue(chain), copyRoute(route), amount, blockHash, exec);
   if (r === null) return null;
   return { tx: { from: r.tx!.from, to: r.to, data: r.data, gas: r.tx!.gas }, override: r.override as Record<string, { balance: string }> };
@@ -345,7 +348,7 @@ const overflowed = (d: string) =>
 // MemoryOutOfGas "out of gas: gas exhausted during memory expansion: {0}" (:721), PrecompileOutOfGas "out of gas: gas
 // exhausted during precompiled contract execution: {0}" (:728), InvalidOperandOutOfGas "out of gas: invalid operand to
 // an opcode: {0}" (:732); geth's ErrOutOfGas "out of gas" (go-ethereum master, core/vm/errors.go:27)
-const OUT_OF_GAS_WORDS = /^out of gas(: (gas required exceeds:?|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:) \d+)?$/i;
+export const OUT_OF_GAS_WORDS = /^out of gas(: (gas required exceeds:?|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:) \d+)?$/i;
 
 /** One provider's answer to one eth_call: the quote's first word, a revert, or a refusal (`raw`: the whole result). */
 function answerOf(a: unknown, who: string, raw = false, oog = false): Answer | string {
@@ -1792,7 +1795,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // sets a price no buy reaches nor is named to a caller who re-quotes it. The route's own swap was read in the first
   // round, so a reference that is the route itself, as a device's re-quote of its own best route is, costs no round.
   // The others are read at most two rounds more, never one route a round: each pool anyone seeds behind a hook that
-  // lets only the quoter through, priced above the route, would add a round to every quote, and some tens of them
+  // checks the swap's sender and lets only the quoter through, priced above the route, would add a round to every quote, and some tens of them
   // would age every quote past EVM_QUOTE_MAX_AGE_MS (review of 498eae83, M2). The first asks, of each list whose best
   // is not known, every route that can change the verdict (`band`): the standard routes at or above the route's value
   // (all of them where the route does not fit), the native ones at or above it, the listed ones within the slippage of
@@ -2396,7 +2399,13 @@ async function routeSet(a: {
   // is, has no bound and is always quoted (LOW 1). Every pool kept is quoted; past EVM_QUOTE_MAX_QUOTED routes or
   // EVM_QUOTE_MAX_OTHER currencies the quote refuses, never cuts. The residual risk is a refusal: anyone can seed a
   // token with more pools that could beat its route than a quote reads, and its buy is then refused (too_many_pools),
-  // never bought through a seeded pool. A sell has no Q and drops nothing
+  // never bought through a seeded pool. The same holds for the swap's gas (card evm-buy-gas-floor): each such pool
+  // whose swap does not fit adds a fit read, sent alone, three to a request; about 290 of them on Robinhood at 624 ms a
+  // request push a quote past EVM_QUOTE_MAX_AGE_MS, while on Base the reads cannot cross it inside the EVM_QUOTE_MAX_QUOTED
+  // routes a quote reads (review 2 of c9a8df14): a refusal, never a wrong buy. And the fit read is sent from the pool with no
+  // fees (buySwap takes only the pool's call), so its tx.origin and tx.gasprice are not the real buy's: a hook or token
+  // that checks them can pass the read and fail the swap, which the pool lands as a failed swap, the chunk less the fee
+  // back to W (PrivacyPoolSimple.sol:78, :97). A sell has no Q and drops nothing
   const MASK160 = (1n << 160n) - 1n;
   const cdiv = (x: bigint, y: bigint) => (x + y - 1n) / y;
   // a buy's hop pays `other` for the currency it was found for: currency0 for currency1 where `other` is currency0
