@@ -12,7 +12,9 @@
 // window grown past the phone width closes it. Then the token page itself (fixtures.tsx ?page=1: TokenPage on the
 // recorded read, both widths in the page, one trade state): a buy taken to Landing in the sheet at 390 is the buy the
 // desktop column draws after a resize to 1440, Landing then Filled, one buy sent and one quote asked; and a buy taken to
-// Landing at 1440 is the buy the reopened sheet draws after a resize to 390.
+// Landing at 1440 is the buy the reopened sheet draws after a resize to 390. With the sheet open, the fill toast is clear
+// of the sheet's head row at 360, 390 and 430 (card app-toast-clears-sheet-head): the box's own toast in the sheet, and
+// on the token page the page's toast (TradeToast) over the sheet a $25 preset filled in.
 //   node apps/terminal/test/trade-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -131,6 +133,19 @@ async function openSheet(tag, page) {
 }
 
 /** The rules every drawn state holds in the sheet. */
+/** The fill toast in view does not cover the open sheet's head row (the row right under the grab handle): their boxes do
+ *  not meet (card app-toast-clears-sheet-head). */
+async function clearOfHead(tag, page) {
+  const t = page.locator('[data-testid="fill-toast"]:visible');
+  check((await t.count()) === 1, `${tag}: not one fill toast in view over the open sheet`);
+  const tb = (await t.count()) === 1 ? await t.boundingBox() : null;
+  const hb = await page.locator(".tsh-box > .tsh-grab + *").boundingBox();
+  check(!!hb, `${tag}: no head row in the sheet`);
+  if (!tb || !hb) return;
+  const meet = tb.x < hb.x + hb.width && hb.x < tb.x + tb.width && tb.y < hb.y + hb.height && hb.y < tb.y + tb.height;
+  check(!meet, `${tag}: the fill toast (top ${Math.round(tb.y)}, bottom ${Math.round(tb.y + tb.height)}) covers the sheet's head row (top ${Math.round(hb.y)}, bottom ${Math.round(hb.y + hb.height)})`);
+}
+
 async function rules(tag, page, w, external, dialogs) {
   const sb = await page.locator(".tsh-box").boundingBox();
   check(!!sb && sb.x >= -0.5 && sb.x + sb.width <= w.viewport.width + 0.5 && sb.y >= 0 && sb.y + sb.height <= w.viewport.height + 0.5, `${tag}: the sheet is outside the window (${JSON.stringify(sb)})`);
@@ -177,6 +192,7 @@ try {
         const got = await settle(() => box(page).getAttribute("data-state"), want);
         check(got === want, `${tag}: state ${got}, want ${want}`);
         if (time) check((await cta(page).locator("[data-time]").getAttribute("data-time")) === time, `${tag}: time, want ${time}`);
+        if (want === "S8.12") await clearOfHead(tag, page);
         const line = await settle(async () => norm(await box(page).locator('[data-testid="trade-max"]').innerText()), LINE);
         check(like(line, LINE), `${tag}: the line above the button "${line}", want ${LINE}`);
         const calls = await page.evaluate(() => window.__calls);
@@ -192,6 +208,30 @@ try {
           await page.screenshot({ path: path.join(SHOTS, `${name}-scrolled.png`) });
         }
       }
+      await ctx.close();
+    }
+
+    // the token page: a preset filled in the open sheet; the page's toast (TradeToast) is clear of the sheet's head row
+    {
+      const tag = `token page toast over the open sheet @${w.name}`;
+      const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
+      await ctx.addInitScript(INIT);
+      // the page's candle and logo reads go to the helper and the token's hosts: refused here, the chart draws its error
+      await ctx.route((u) => !u.href.startsWith(BASE) && !u.href.startsWith("data:"), (r) => r.abort());
+      const page = await ctx.newPage();
+      await page.clock.install({ time: NOW - 1000 });
+      await page.clock.pauseAt(NOW);
+      await page.goto(`${BASE}/?page=1&f=ready&route=1`);
+      await page.waitForSelector('.tkp[data-token-page="ready"]');
+      await page.evaluate(() => document.fonts.ready);
+      await page.locator(".tkp-phone .tkp-buy").click();
+      if (await sheet(page).waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
+        await box(page).locator('[data-preset="25.00"]').click();
+        await page.clock.runFor(1_200);
+        check((await settle(() => box(page).getAttribute("data-state"), "S8.12")) === "S8.12", `${tag}: the sheet's buy is not Filled`);
+        await clearOfHead(tag, page);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `token-page-sheet-filled-toast-${w.name}.png`) });
+      } else check(false, `${tag}: the sheet did not open`);
       await ctx.close();
     }
 
@@ -223,9 +263,11 @@ try {
         check((await page.evaluate(() => window.__calls)).length === 1, `${tag}: more than one buy`);
         check((await page.evaluate(() => document.body.style.overflow)) === "hidden", `${tag}: the page behind scrolls while the sheet is open`);
         await rules(`${tag} reopen`, page, w, external, dialogs);
+        await clearOfHead(`${tag} reopen`, page);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `reopened-filled-${w.name}.png`) });
-        // the scrim closes it too
-        await page.locator(".tsh-scrim").click({ position: { x: 20, y: 20 } });
+        // the scrim closes it too: a tap at its top corner, beside the centred toast that sits at the window's top while the
+        // sheet is open (card app-toast-clears-sheet-head; a tap on the toast closes the toast)
+        await page.locator(".tsh-scrim").click({ position: { x: 4, y: 4 } });
         check(await sheet(page).waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false), `${tag}: the scrim did not close the sheet`);
         // Escape closes an open sheet
         await openSheet(`${tag} Escape`, page);

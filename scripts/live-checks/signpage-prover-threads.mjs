@@ -33,6 +33,7 @@ import { expected, gateBuild, openBrowser, PINS, policies, siteServer, WORKER_PA
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
 import { browserLabel } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "signpage-prover-threads";
 /** The address read live: SIGN_HOST, or with --base a build's own (a Pages preview), read the same way. */
@@ -277,7 +278,7 @@ export async function collect({ harness = false, site, engine = "webkit", proofs
     }
     const thread = await readThread(serve);
     const run = await readPage(serve, engine, proofs);
-    return { source: harness ? `harness, SIGN_HOST from ${site ?? "a fresh deploy.mjs --dry-run build"}` : `live ${ORIGIN}`, at: new Date().toISOString(), browser: run.browser, files: { [THREAD_PATH]: thread }, page: run.page };
+    return { source: harness ? `harness, SIGN_HOST from ${site ? named(site) : "a fresh deploy.mjs --dry-run build"}` : `live ${ORIGIN}`, at: new Date().toISOString(), browser: run.browser, files: { [THREAD_PATH]: thread }, page: run.page };
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
