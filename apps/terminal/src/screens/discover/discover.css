@@ -3,13 +3,15 @@
    --fit-zoom (shell/fit.ts). */
 .dsc {
   --bg-panel: #0f0f0f; --border-panel: #1f1f1f; --border-strong: #2a2a2a; --border-row: #171717; --bg-row-hover: #141414;
+  --bg-floating: #151515; --border-active: #383838;
   --acc: #50e397; --sell: #ff5d4d; --sell-rgb: 255, 93, 77; --warn: #f2b543; --warn-rgb: 242, 181, 67; --blue: #5b8cff;
   display: flex; flex-direction: column; gap: 10px; padding: 0 8px 8px;
   height: calc(100dvh / var(--fit-zoom, 1) - 92px); min-height: 0;
 }
-.dsc-bar { height: 44px; flex: none; display: flex; align-items: center; padding: 0 4px; }
+.dsc-bar { height: 44px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 4px; position: relative; z-index: 5; }
 .dsc-title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-.dsc-age { margin-left: auto; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+/* the list's age line (card app-list-age), its own class: as .dsc-age it pushed every row's age to the right */
+.dsc-listage { margin-left: auto; font-size: 12px; color: var(--text-3); white-space: nowrap; }
 
 .dsc-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .dsc-col { display: flex; flex-direction: column; min-height: 0; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; overflow: hidden; }
@@ -88,7 +90,58 @@
 .dsc-dots i[data-on="true"] { background: currentColor; }
 .dsc-pl { flex: none; min-width: 36px; text-align: right; font: 600 11px var(--font-num); letter-spacing: 0.04em; color: var(--text-2); }
 
+/* the toolbar (card app-discover-toolbar): R5 unrlzd-discover.css .dd-toolbar, Segmented .sg-filter, Chip .ch-filter,
+   LaunchpadFilter .dd-padMenu, .dd-qb, and discover.css .ct-hb / .ct-csearch, values unchanged */
+.dsc-divider { width: 1px; height: 28px; background: var(--border-panel); flex: none; }
+.dsc-tools { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.dsc-chips { display: flex; gap: 6px; }
+.dsc-grow { flex: 1; }
+.dsc-seg { display: flex; padding: 3px; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 8px; }
+.dsc-segi { height: 28px; padding: 0 14px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.dsc-segi[data-on="true"] { background: var(--border-strong); color: var(--text-1); }
+.dsc-chip { height: 32px; padding: 0 12px; display: flex; align-items: center; gap: 7px; flex: none; border: 1px solid var(--border-strong); border-radius: 16px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.dsc-chip[data-on="true"] { border-color: var(--text-1); background: var(--text-1); color: var(--bg-page); }
+@media (hover: hover) and (pointer: fine) {
+  .dsc-segi[data-on="false"]:hover, .dsc-chip[data-on="false"]:hover { color: var(--text-1); }
+  .dsc-chip[data-on="false"]:hover { border-color: var(--border-active); }
+  .dsc-padrow:hover, .dsc-padclear:not(:disabled):hover { background: var(--bg-raised); color: var(--text-1); }
+  .dsc-hb:hover { color: var(--text-1); }
+}
+.dsc-suffix { font: 11px var(--font-num); font-variant-numeric: tabular-nums; opacity: 0.6; }
+.dsc-pad, .dsc-mpad { position: relative; display: flex; }
+.dsc-padmenu { position: absolute; z-index: 42; top: calc(100% + 6px); left: 0; width: 300px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; max-height: min(420px, 60vh); background: var(--bg-floating); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6); overflow: hidden; }
+.dsc-padhead { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 14px; border-bottom: 1px solid var(--border-row); }
+.dsc-padtitle { flex: 1; min-width: 0; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsc-padclear { flex: none; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.dsc-padclear:disabled { color: var(--text-3); cursor: default; }
+.dsc-padlist { overflow-y: auto; padding: 4px; overscroll-behavior: contain; }
+.dsc-padrow { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.dsc-padrow[aria-checked="true"] { color: var(--text-1); }
+.dsc-padbox { flex: none; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border-active); display: flex; align-items: center; justify-content: center; color: var(--bg-page); }
+.dsc-padrow[aria-checked="true"] .dsc-padbox { background: var(--text-1); border-color: var(--text-1); }
+.dsc-padicon { flex: none; border-radius: 4px; object-fit: cover; }
+.dsc-padname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsc-padchain { flex: none; border-radius: 50%; }
+.dsc-padcount { flex: none; font: 11px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-3); }
+.dsc-qbw { margin-left: auto; display: flex; }
+.dsc-listage + .dsc-qbw { margin-left: 0; }
+.dsc-qb { position: relative; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 9px 0 14px; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; cursor: text; }
+.dsc-qb[data-bad="true"] { border-color: var(--sell); }
+.dsc-qbbolt { color: var(--acc); display: flex; }
+.dsc-qblabel { font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.dsc-qbinput { width: 44px; background: transparent; border: 0; outline: none; padding: 1px 2px; font: 600 16px/1.3 var(--font-num); font-variant-numeric: tabular-nums; text-align: right; color: var(--text-1); }
+.dsc-qbunit { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); }
+/* the column head's buttons and search (R5 .ct-hb, .ct-csearch) */
+.dsc-hb { position: relative; flex: none; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
+.dsc-csearch { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 4px 0 12px; border-radius: 8px; background: var(--bg-page); box-shadow: inset 0 0 0 1px var(--border-active); color: var(--text-2); font-size: 14px; }
+.dsc-csinput { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: var(--text-1); font: inherit; font-size: 14px; padding: 0; }
+.dsc-csinput::placeholder { color: var(--text-3); }
+.dsc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* the phone's parts: hidden on the desktop */
+.dsc-mpause, .dsc-dock { display: none; }
+
 @media (max-width: 1099.98px) {
+  .dsc-chips { display: none; }
   .dsc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
 }
 @media (max-width: 767.98px) {
@@ -99,4 +152,35 @@
   .dsc-phone { display: block; }
   .dsc-phone .dsc-rows { overflow: visible; }
   .dsc-phone .dsc-msg { min-height: 240px; }
+  .dsc-desk { display: none; }
+  /* R5 .md-titleRow and .md-pause */
+  .dsc-bar { justify-content: space-between; }
+  .dsc-mpause { position: relative; height: 36px; padding: 0 12px; display: flex; align-items: center; gap: 7px; flex: none; border: 0; border-radius: 11px; background: #141414; box-shadow: inset 0 0 0 1px #1f1f1f; color: var(--text-1); font: 600 13px var(--font-ui); cursor: pointer; }
+  .dsc-mpause::after { content: ""; position: absolute; inset: -4px -2px; }
+  .dsc-mpause[data-on="true"] { color: var(--blue); }
+  /* R5 .md-filters and .md-filter */
+  .dsc-mfilters { position: relative; display: flex; align-items: center; gap: 6px; padding: 2px 16px 10px; border-bottom: 1px solid #161616; }
+  .dsc-mpresets { display: flex; gap: 6px; }
+  .dsc-mchip { position: relative; min-width: 44px; height: 30px; padding: 0 11px; display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; border: 0; border-radius: 15px; background: transparent; color: var(--text-3); box-shadow: inset 0 0 0 1px #1a1a1a; font: 500 12.5px var(--font-ui); white-space: nowrap; cursor: pointer; }
+  .dsc-mchip::after { content: ""; position: absolute; inset: -7px -1px; }
+  .dsc-mchip[data-on="true"] { background: #1f1f1f; color: var(--text-1); box-shadow: inset 0 0 0 1px #2a2a2a; }
+  .dsc-mpad { position: static; }
+  .dsc-mfilters .dsc-padmenu { left: 16px; right: 16px; width: auto; max-width: none; top: calc(100% - 4px); }
+  .dsc-padrow { min-height: 44px; font-size: 14px; }
+  /* R5 S5.8's held pill */
+  .dsc-mpend { display: flex; justify-content: center; padding: 10px 0 2px; }
+  .dsc-ppill { position: relative; height: 28px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 14px; background: #1c1c1c; box-shadow: inset 0 0 0 1px #2a2a2a; color: var(--blue); font: 600 12px var(--font-ui); cursor: pointer; }
+  .dsc-ppill::after { content: ""; position: absolute; inset: -8px 0; }
+  /* R5 Dock.tsx (.md-dock, .md-bar): floats over the last rows, above the tab bar; the list keeps room for it */
+  .dsc-phone > .dsc-rows { padding-bottom: 70px; }
+  .dsc-dock { position: fixed; left: 12px; right: 12px; bottom: calc(68px + env(safe-area-inset-bottom) + 10px); z-index: 8; display: flex; flex-direction: column; gap: 8px; }
+  .dsc-dockbar { height: 50px; width: 100%; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; border: 0; border-radius: 16px; background: rgba(22, 22, 22, 0.94); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: inset 0 0 0 1px #2a2a2a, 0 12px 36px rgba(0, 0, 0, 0.5); color: var(--text-1); font: inherit; cursor: pointer; }
+  .dsc-docktitle { flex: 1; min-width: 0; text-align: left; font-size: 14px; font-weight: 600; }
+  .dsc-dockamt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px var(--font-num); }
+  .dsc-dockpre { height: 32px; padding: 0 10px; display: flex; align-items: center; flex: none; border-radius: 9px; background: #2a2a2a; }
+  .dsc-chev { transition: transform 0.2s; }
+  .dsc-dockbar[aria-expanded="true"] .dsc-chev { transform: rotate(180deg); }
+  .dsc-dockpanel .dsc-qb { height: 50px; border-radius: 16px; background: #161616; border-color: #2a2a2a; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5); }
+  .dsc-dockpanel .dsc-qblabel { flex: 1; font-size: 14px; }
+  .dsc-dockpanel .dsc-qbinput { width: 96px; }
 }

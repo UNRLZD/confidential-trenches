@@ -1,0 +1,2761 @@
+{
+ "good": {
+  "source": "harness: the build apps/terminal/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-08T19:05:53.179Z",
+  "browser": "157.0.8103.38",
+  "desktop": {
+   "rows": 259,
+   "controls": [
+    "All",
+    "Fewer flags",
+    "MC ≥ $10K",
+    "Launchpad",
+    "Quick buy"
+   ],
+   "searchButtons": 4,
+   "flaggedBefore": 86,
+   "fewer": {
+    "pressed": true,
+    "rows": [
+     {
+      "symbol": "BitBob",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KOL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FLOTR",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BACK",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "NOLA",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Shrew",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FOMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FONMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CLAUDIA",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "INVISIBLE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KEVIN",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TREE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TRUG",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FONMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Aloe",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TREE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FOMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "crawlr",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TREE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "VVAULT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KOL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "STONK",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "STOKE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BTC",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ARTCOIN",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FLOAT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Kermit",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CLAUDIA",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "JUP",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CATE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SPCX",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "wNEAR",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MET",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "José",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MU",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MUSK4",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AMD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "DESSA",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "GIGAHUG",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Aiden",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SKHY",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PEPE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Normie",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "swordcat",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PUMPCADE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "UODF",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SPX",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Bonk",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TRX",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AMD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SURPLUS",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BEACHBALL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PAID",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Leonida",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "DOPE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "OWL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SLOPCORE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "HIGH",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KLED",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "HELL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "OTC",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "DacityCoin",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Pepetide",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BINGUS",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "VVV",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AVICI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "GTA 6 Coin",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ANT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BOME",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "LIT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ATR",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MRVL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SMOOVE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MORI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BTC",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MU",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TTWO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "baton",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CATE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SPCX",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "HIMS",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Ansemmas",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "swordcat",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Aiden",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "WEALTH",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "XMR",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "GIGAHUG",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AVICI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PTN",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "LMT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "MNST",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "APU",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CREAM",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TAOLF",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SURPLUS",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Pepetide",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "pill",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Leonida",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ARNOLD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FLOAT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AMD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ZCAT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "GLITCH",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PIRATE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KILROY",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ABU",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Bubbles",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "LEEROY",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SNDK",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "HABIBI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "goon",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "HATCH",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "4CHAN",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "LosL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PAWS",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "INVISIBLE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BLACKCAT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "george",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BEST",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PURR",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "STATE?",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "$HACHI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "HOOKED",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ELON",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Monitor",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Whitehouse",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "LARPCHECK",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "OTC",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Nothing",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "RETARD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "GHOST",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Anakin",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ᑓହꚡई",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Joby",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "RICO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CHAD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "LinkedInu",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ber",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SIB",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CLAWHUNTER",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "SPURDO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TOAD",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KITTY",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "CAPY",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "ANT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Chews",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "PUPS",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BEST",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BEACHBALL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FLOAT",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TREE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Kermit",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FLOTR",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FONMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BACK",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FOMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "BitBob",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KEVIN",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TREE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "Aloe",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TRUG",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FONMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KOL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "FOMO",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "INVISIBLE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "AI",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "TREE",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "crawlr",
+      "levels": [
+       "none",
+       "none"
+      ]
+     },
+     {
+      "symbol": "KOL",
+      "levels": [
+       "none",
+       "none"
+      ]
+     }
+    ]
+   },
+   "mc": {
+    "pressed": true,
+    "rows": [
+     {
+      "symbol": "SLINGOOR",
+      "mc": null
+     },
+     {
+      "symbol": "KOL",
+      "mc": 15400
+     },
+     {
+      "symbol": "FLOTR",
+      "mc": 26300
+     },
+     {
+      "symbol": "INVISIBLE",
+      "mc": null
+     },
+     {
+      "symbol": "TREE",
+      "mc": null
+     },
+     {
+      "symbol": "VVAULT",
+      "mc": 58500
+     },
+     {
+      "symbol": "KOL",
+      "mc": null
+     },
+     {
+      "symbol": "PUMP",
+      "mc": 1710000000
+     },
+     {
+      "symbol": "ZEC",
+      "mc": 135400000
+     },
+     {
+      "symbol": "STONK",
+      "mc": 41240000
+     },
+     {
+      "symbol": "STOKE",
+      "mc": 135300
+     },
+     {
+      "symbol": "BTC",
+      "mc": 533200
+     },
+     {
+      "symbol": "ANSEM",
+      "mc": 62740000
+     },
+     {
+      "symbol": "ARTCOIN",
+      "mc": 66200
+     },
+     {
+      "symbol": "SPYx",
+      "mc": 70690000
+     },
+     {
+      "symbol": "QQQx",
+      "mc": 55670000
+     },
+     {
+      "symbol": "FLOAT",
+      "mc": 11820000
+     },
+     {
+      "symbol": "Kermit",
+      "mc": 34400
+     },
+     {
+      "symbol": "NVDAx",
+      "mc": 60310000
+     },
+     {
+      "symbol": "USELESS",
+      "mc": 129580000.00000001
+     },
+     {
+      "symbol": "CLAUDIA",
+      "mc": 7580000
+     },
+     {
+      "symbol": "JUP",
+      "mc": 795440000
+     },
+     {
+      "symbol": "CATE",
+      "mc": 33350000
+     },
+     {
+      "symbol": "SPCX",
+      "mc": 13650000
+     },
+     {
+      "symbol": "RAY",
+      "mc": 470270000
+     },
+     {
+      "symbol": "wNEAR",
+      "mc": 10850000
+     },
+     {
+      "symbol": "MET",
+      "mc": 172710000
+     },
+     {
+      "symbol": "José",
+      "mc": 389200
+     },
+     {
+      "symbol": "MU",
+      "mc": 5710000
+     },
+     {
+      "symbol": "MUSK4",
+      "mc": 229500
+     },
+     {
+      "symbol": "AMD",
+      "mc": 670200
+     },
+     {
+      "symbol": "DESSA",
+      "mc": 42850000
+     },
+     {
+      "symbol": "GIGAHUG",
+      "mc": 619800
+     },
+     {
+      "symbol": "Aiden",
+      "mc": 42000
+     },
+     {
+      "symbol": "SKHY",
+      "mc": 3160000
+     },
+     {
+      "symbol": "PEPE",
+      "mc": 1350000
+     },
+     {
+      "symbol": "CARDS",
+      "mc": 192950000
+     },
+     {
+      "symbol": "Normie",
+      "mc": 223300
+     },
+     {
+      "symbol": "BC",
+      "mc": 127120000
+     },
+     {
+      "symbol": "swordcat",
+      "mc": 1200000
+     },
+     {
+      "symbol": "GOOGLx",
+      "mc": 45940000
+     },
+     {
+      "symbol": "Fartcoin",
+      "mc": 116030000
+     },
+     {
+      "symbol": "MSTRx",
+      "mc": 76980000
+     },
+     {
+      "symbol": "PUMPCADE",
+      "mc": 19950000
+     },
+     {
+      "symbol": "UODF",
+      "mc": 892220000
+     },
+     {
+      "symbol": "GEOD",
+      "mc": 70960000
+     },
+     {
+      "symbol": "Ban",
+      "mc": 43050000
+     },
+     {
+      "symbol": "SPX",
+      "mc": 29350000
+     },
+     {
+      "symbol": "Bonk",
+      "mc": 244690000
+     },
+     {
+      "symbol": "TRX",
+      "mc": 15980000
+     },
+     {
+      "symbol": "AMD",
+      "mc": 193300
+     },
+     {
+      "symbol": "xZEC",
+      "mc": 531600
+     },
+     {
+      "symbol": "ZEUS",
+      "mc": 7020000
+     },
+     {
+      "symbol": "CRCLx",
+      "mc": 55470000
+     },
+     {
+      "symbol": "TSLAx",
+      "mc": 82150000
+     },
+     {
+      "symbol": "SURPLUS",
+      "mc": 32900
+     },
+     {
+      "symbol": "INJ",
+      "mc": 1460000
+     },
+     {
+      "symbol": "Kimchi",
+      "mc": 2630000
+     },
+     {
+      "symbol": "BEACHBALL",
+      "mc": 66600
+     },
+     {
+      "symbol": "PAID",
+      "mc": 1860000
+     },
+     {
+      "symbol": "Leonida",
+      "mc": 188500
+     },
+     {
+      "symbol": "DOPE",
+      "mc": 908400
+     },
+     {
+      "symbol": "OWL",
+      "mc": 140000
+     },
+     {
+      "symbol": "SLOPCORE",
+      "mc": 327600
+     },
+     {
+      "symbol": "HIGH",
+      "mc": 1070000
+     },
+     {
+      "symbol": "ORCA",
+      "mc": 82470000
+     },
+     {
+      "symbol": "KLED",
+      "mc": 10360000
+     },
+     {
+      "symbol": "GRASS",
+      "mc": 497590000
+     },
+     {
+      "symbol": "HELL",
+      "mc": 2600000
+     },
+     {
+      "symbol": "ARX",
+      "mc": 46370000
+     },
+     {
+      "symbol": "swarms",
+      "mc": 6800000
+     },
+     {
+      "symbol": "RENDER",
+      "mc": 755640000
+     },
+     {
+      "symbol": "OTC",
+      "mc": 4980000
+     },
+     {
+      "symbol": "DacityCoin",
+      "mc": 1360000
+     },
+     {
+      "symbol": "Pepetide",
+      "mc": 148500
+     },
+     {
+      "symbol": "CBUCKS",
+      "mc": 2540000
+     },
+     {
+      "symbol": "jellyjelly",
+      "mc": 40610000
+     },
+     {
+      "symbol": "ZEREBRO",
+      "mc": 23190000
+     },
+     {
+      "symbol": "ZAMA",
+      "mc": 1160000
+     },
+     {
+      "symbol": "JTO",
+      "mc": 178110000
+     },
+     {
+      "symbol": "POPCAT",
+      "mc": 34610000
+     },
+     {
+      "symbol": "BINGUS",
+      "mc": 96800
+     },
+     {
+      "symbol": "jeff",
+      "mc": 429400
+     },
+     {
+      "symbol": "AI",
+      "mc": 35200
+     },
+     {
+      "symbol": "VVV",
+      "mc": 303200
+     },
+     {
+      "symbol": "AVICI",
+      "mc": 3680000
+     },
+     {
+      "symbol": "GTA 6 Coin",
+      "mc": 1330000
+     },
+     {
+      "symbol": "$WIF",
+      "mc": 158880000
+     },
+     {
+      "symbol": "ANT",
+      "mc": 140400
+     },
+     {
+      "symbol": "elizaOS",
+      "mc": 2720000
+     },
+     {
+      "symbol": "BOME",
+      "mc": 41980000
+     },
+     {
+      "symbol": "GP",
+      "mc": 19470000
+     },
+     {
+      "symbol": "pippin",
+      "mc": 13060000
+     },
+     {
+      "symbol": "LIT",
+      "mc": 2490000
+     },
+     {
+      "symbol": "H081",
+      "mc": 200000
+     },
+     {
+      "symbol": "BANKROLL",
+      "mc": 3020000
+     },
+     {
+      "symbol": "GRIFFAIN",
+      "mc": 10290000
+     },
+     {
+      "symbol": "ATR",
+      "mc": 391000
+     },
+     {
+      "symbol": "ZELDA",
+      "mc": 29000
+     },
+     {
+      "symbol": "ALCH",
+      "mc": 32659999.999999996
+     },
+     {
+      "symbol": "MRVL",
+      "mc": 186200
+     },
+     {
+      "symbol": "STEALF",
+      "mc": 160900
+     },
+     {
+      "symbol": "AVGOx",
+      "mc": 13650000
+     },
+     {
+      "symbol": "SMOOVE",
+      "mc": 45900
+     },
+     {
+      "symbol": "arc",
+      "mc": 33580000
+     },
+     {
+      "symbol": "MEW",
+      "mc": 31220000
+     },
+     {
+      "symbol": "MORI",
+      "mc": 2950000
+     },
+     {
+      "symbol": "BTC",
+      "mc": 525700
+     },
+     {
+      "symbol": "MU",
+      "mc": 5710000
+     },
+     {
+      "symbol": "ANSEM",
+      "mc": 62480000
+     },
+     {
+      "symbol": "TTWO",
+      "mc": 3340000
+     },
+     {
+      "symbol": "baton",
+      "mc": 5020000
+     },
+     {
+      "symbol": "CATE",
+      "mc": 33350000
+     },
+     {
+      "symbol": "SPCX",
+      "mc": 13650000
+     },
+     {
+      "symbol": "HIMS",
+      "mc": 378100
+     },
+     {
+      "symbol": "Ansemmas",
+      "mc": 121800
+     },
+     {
+      "symbol": "swordcat",
+      "mc": 1200000
+     },
+     {
+      "symbol": "Aiden",
+      "mc": 41300
+     },
+     {
+      "symbol": "WEALTH",
+      "mc": 475800
+     },
+     {
+      "symbol": "XMR",
+      "mc": 2140000
+     },
+     {
+      "symbol": "GIGAHUG",
+      "mc": 618600
+     },
+     {
+      "symbol": "AVICI",
+      "mc": 3680000
+     },
+     {
+      "symbol": "AI",
+      "mc": 35200
+     },
+     {
+      "symbol": "PTN",
+      "mc": 130300.00000000001
+     },
+     {
+      "symbol": "LMT",
+      "mc": 121800
+     },
+     {
+      "symbol": "MNST",
+      "mc": 298500
+     },
+     {
+      "symbol": "PI",
+      "mc": 300600
+     },
+     {
+      "symbol": "APU",
+      "mc": 274700
+     },
+     {
+      "symbol": "1WIN",
+      "mc": 51150000
+     },
+     {
+      "symbol": "BELIEVE",
+      "mc": 2610000
+     },
+     {
+      "symbol": "CREAM",
+      "mc": 93900
+     },
+     {
+      "symbol": "TAOLF",
+      "mc": 135100
+     },
+     {
+      "symbol": "SURPLUS",
+      "mc": 33500
+     },
+     {
+      "symbol": "Pepetide",
+      "mc": 148500
+     },
+     {
+      "symbol": "pill",
+      "mc": 644200
+     },
+     {
+      "symbol": "Leonida",
+      "mc": 188500
+     },
+     {
+      "symbol": "ARNOLD",
+      "mc": 208000
+     },
+     {
+      "symbol": "FLOAT",
+      "mc": 39500
+     },
+     {
+      "symbol": "POPCAT",
+      "mc": 34610000
+     },
+     {
+      "symbol": "AMD",
+      "mc": 193300
+     },
+     {
+      "symbol": "ZCAT",
+      "mc": 11560000
+     },
+     {
+      "symbol": "GLITCH",
+      "mc": 2200000
+     },
+     {
+      "symbol": "MNDE",
+      "mc": 16070000
+     },
+     {
+      "symbol": "CBUCKS",
+      "mc": 2540000
+     },
+     {
+      "symbol": "PIRATE",
+      "mc": 166800
+     },
+     {
+      "symbol": "KILROY",
+      "mc": 329800
+     },
+     {
+      "symbol": "MONEKO",
+      "mc": 30400
+     },
+     {
+      "symbol": "ARX",
+      "mc": 46370000
+     },
+     {
+      "symbol": "Kimchi",
+      "mc": 2630000
+     },
+     {
+      "symbol": "ABU",
+      "mc": 100300
+     },
+     {
+      "symbol": "Bubbles",
+      "mc": 178800
+     },
+     {
+      "symbol": "LEEROY",
+      "mc": 76800
+     },
+     {
+      "symbol": "SNDK",
+      "mc": 363200
+     },
+     {
+      "symbol": "HABIBI",
+      "mc": 24200
+     },
+     {
+      "symbol": "goon",
+      "mc": 41300
+     },
+     {
+      "symbol": "HATCH",
+      "mc": 26800
+     },
+     {
+      "symbol": "4CHAN",
+      "mc": 10200
+     },
+     {
+      "symbol": "LosL",
+      "mc": 1770000
+     },
+     {
+      "symbol": "DOOM",
+      "mc": 465700
+     },
+     {
+      "symbol": "PAWS",
+      "mc": 35600
+     },
+     {
+      "symbol": "INVISIBLE",
+      "mc": 17200
+     },
+     {
+      "symbol": "BLACKCAT",
+      "mc": 35300
+     },
+     {
+      "symbol": "george",
+      "mc": 173700
+     },
+     {
+      "symbol": "BEST",
+      "mc": 17100
+     },
+     {
+      "symbol": "BNB",
+      "mc": 752800
+     },
+     {
+      "symbol": "PURR",
+      "mc": 1430000
+     },
+     {
+      "symbol": "MASK",
+      "mc": 9120000
+     },
+     {
+      "symbol": "STATE?",
+      "mc": 33900
+     },
+     {
+      "symbol": "USDv",
+      "mc": 8680000
+     },
+     {
+      "symbol": "SAAR",
+      "mc": 184400
+     },
+     {
+      "symbol": "Stamp",
+      "mc": 157700
+     },
+     {
+      "symbol": "$HACHI",
+      "mc": 651900
+     },
+     {
+      "symbol": "BREAK",
+      "mc": 408100
+     },
+     {
+      "symbol": "HOOKED",
+      "mc": 456200
+     },
+     {
+      "symbol": "ELON",
+      "mc": 99600
+     },
+     {
+      "symbol": "Monitor",
+      "mc": 20000
+     },
+     {
+      "symbol": "Whitehouse",
+      "mc": 123800
+     },
+     {
+      "symbol": "LAMPORT",
+      "mc": 28500
+     },
+     {
+      "symbol": "LARPCHECK",
+      "mc": 42900
+     },
+     {
+      "symbol": "OTC",
+      "mc": 4980000
+     },
+     {
+      "symbol": "Retardia",
+      "mc": 43800
+     },
+     {
+      "symbol": "MICHI",
+      "mc": 1960000
+     },
+     {
+      "symbol": "Nothing",
+      "mc": 14400
+     },
+     {
+      "symbol": "RETARD",
+      "mc": 36700
+     },
+     {
+      "symbol": "H081",
+      "mc": 200000
+     },
+     {
+      "symbol": "GHOST",
+      "mc": 934900
+     },
+     {
+      "symbol": "💎",
+      "mc": 19800
+     },
+     {
+      "symbol": "Anakin",
+      "mc": 165600
+     },
+     {
+      "symbol": "ᑓହꚡई",
+      "mc": 65400.00000000001
+     },
+     {
+      "symbol": "Joby",
+      "mc": 899100
+     },
+     {
+      "symbol": "RICO",
+      "mc": 28700
+     },
+     {
+      "symbol": "CHAD",
+      "mc": 27900
+     },
+     {
+      "symbol": "MENSA",
+      "mc": 186400
+     },
+     {
+      "symbol": "LinkedInu",
+      "mc": 53400
+     },
+     {
+      "symbol": "ber",
+      "mc": 149600
+     },
+     {
+      "symbol": "SIB",
+      "mc": 140500
+     },
+     {
+      "symbol": "CLICKING",
+      "mc": 18000
+     },
+     {
+      "symbol": "CLAWHUNTER",
+      "mc": 346300
+     },
+     {
+      "symbol": "EEGL",
+      "mc": 98600
+     },
+     {
+      "symbol": "SPURDO",
+      "mc": 133300
+     },
+     {
+      "symbol": "TOAD",
+      "mc": 623000
+     },
+     {
+      "symbol": "KITTY",
+      "mc": 1460000
+     },
+     {
+      "symbol": "CAPY",
+      "mc": 203000
+     },
+     {
+      "symbol": "HI",
+      "mc": 102000
+     },
+     {
+      "symbol": "ANT",
+      "mc": 59800
+     },
+     {
+      "symbol": "PUPS",
+      "mc": 2710000
+     },
+     {
+      "symbol": "BEST",
+      "mc": 17100
+     },
+     {
+      "symbol": "BEACHBALL",
+      "mc": 66600
+     },
+     {
+      "symbol": "FLOAT",
+      "mc": 39500
+     },
+     {
+      "symbol": "Kermit",
+      "mc": 34400
+     },
+     {
+      "symbol": "FLOTR",
+      "mc": 26300
+     },
+     {
+      "symbol": "KOL",
+      "mc": 15400
+     },
+     {
+      "symbol": "INVISIBLE",
+      "mc": null
+     },
+     {
+      "symbol": "TREE",
+      "mc": null
+     },
+     {
+      "symbol": "KOL",
+      "mc": null
+     }
+    ]
+   },
+   "pad": {
+    "entries": 7,
+    "picked": "pump.fun",
+    "rows": [
+     {
+      "symbol": "BitBob",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "$CCOW",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BACK",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FOMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FOMOCAT",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "vrl",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FONMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "INVISIBLE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "AI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "KEVIN",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TREE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TRUG",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "RICK",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FONMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Aloe",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TREE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "tranko",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FOMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "DOOB",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "KOL",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FERSPE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ANSEM",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CLAUDIA",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CATE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "José",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "DESSA",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "GIGAHUG",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Aiden",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Normie",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "swordcat",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Fartcoin",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "PUMPCADE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "UODF",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Ban",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "AMD",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Kimchi",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "PAID",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Leonida",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "DOPE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "SLOPCORE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "HELL",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "swarms",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "OTC",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "DacityCoin",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CBUCKS",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "jellyjelly",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ZEREBRO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "AI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "GTA 6 Coin",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "pippin",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "GRIFFAIN",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ZELDA",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ALCH",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "SMOOVE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "arc",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ANSEM",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "baton",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CATE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Ansemmas",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "swordcat",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Aiden",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "WEALTH",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "GIGAHUG",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "AI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "pill",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Leonida",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ARNOLD",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "AMD",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "GLITCH",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CBUCKS",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "PIRATE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "KILROY",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "MONEKO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Kimchi",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ABU",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Bubbles",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "LEEROY",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "HABIBI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "goon",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "HATCH",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "4CHAN",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "DOOM",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "PAWS",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "INVISIBLE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BLACKCAT",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "george",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BEST",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "STATE?",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "SAAR",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Stamp",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BREAK",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Monitor",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Whitehouse",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "LARPCHECK",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "OTC",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Retardia",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "MICHI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Nothing",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "💎",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Anakin",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Joby",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "RICO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "MENSA",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "ber",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "SIB",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CLICKING",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "CLAWHUNTER",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "EEGL",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TOAD",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "HI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Chews",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BEST",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "RICK",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FONMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BACK",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FOMOCAT",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FOMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "$CCOW",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "BitBob",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "vrl",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "KEVIN",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TREE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "Aloe",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TRUG",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "DOOB",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "tranko",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FERSPE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FONMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "FOMO",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "INVISIBLE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "AI",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "TREE",
+      "pad": "pump.fun"
+     },
+     {
+      "symbol": "KOL",
+      "pad": "pump.fun"
+     }
+    ]
+   },
+   "search": {
+    "q": "SL",
+    "rows": [
+     {
+      "symbol": "SLINGOOR",
+      "name": "The White Scammer"
+     }
+    ]
+   },
+   "amountAfterReload": "40",
+   "errors": []
+  },
+  "phone": {
+   "rows": 30,
+   "chips": [
+    "All",
+    "Fewer flags",
+    "Launchpad"
+   ],
+   "pause": "Pause",
+   "resume": "Resume",
+   "held": true,
+   "dock": "$25",
+   "fewer": {
+    "rows": [
+     {
+      "symbol": "JUMP",
+      "level": "none"
+     },
+     {
+      "symbol": "RETRO",
+      "level": "none"
+     },
+     {
+      "symbol": "SHIBAGOON",
+      "level": "none"
+     },
+     {
+      "symbol": "TAOLF",
+      "level": "none"
+     },
+     {
+      "symbol": "BitBob",
+      "level": "none"
+     },
+     {
+      "symbol": "KOL",
+      "level": "none"
+     },
+     {
+      "symbol": "FLOTR",
+      "level": "none"
+     },
+     {
+      "symbol": "BACK",
+      "level": "none"
+     },
+     {
+      "symbol": "NOLA",
+      "level": "none"
+     },
+     {
+      "symbol": "Shrew",
+      "level": "none"
+     },
+     {
+      "symbol": "FOMO",
+      "level": "none"
+     },
+     {
+      "symbol": "FONMO",
+      "level": "none"
+     },
+     {
+      "symbol": "INVISIBLE",
+      "level": "none"
+     },
+     {
+      "symbol": "AI",
+      "level": "none"
+     },
+     {
+      "symbol": "KEVIN",
+      "level": "none"
+     },
+     {
+      "symbol": "TREE",
+      "level": "none"
+     },
+     {
+      "symbol": "TRUG",
+      "level": "none"
+     }
+    ]
+   },
+   "errors": []
+  }
+ },
+ "bad": {
+  "source": "live",
+  "at": "2026-11-08T19:02:03.088Z",
+  "browser": "157.0.8103.38",
+  "desktop": {
+   "rows": 260,
+   "controls": [],
+   "searchButtons": 0,
+   "flaggedBefore": 95,
+   "fewer": null,
+   "mc": null,
+   "pad": null,
+   "search": null,
+   "amountAfterReload": null,
+   "errors": []
+  },
+  "phone": {
+   "rows": 30,
+   "chips": [],
+   "pause": null,
+   "resume": null,
+   "held": false,
+   "dock": null,
+   "fewer": null,
+   "errors": []
+  }
+ }
+}
