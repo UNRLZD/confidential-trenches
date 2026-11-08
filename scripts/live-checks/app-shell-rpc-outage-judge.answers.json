@@ -1,0 +1,107 @@
+{
+ "notes": {
+  "good": "app-shell-rpc-outage-judge.mjs --harness --outage solana --record, Chrome 157 on the Mac, 8 Nov: the terminal build in the harness, the first Solana pool RPC answering every request 503",
+  "bad": "app-shell-rpc-outage-judge.mjs --harness --outage footer --record, the same run with the first NEAR RPC answering the footer block reads 503 and Verify reads on it answered"
+ },
+ "good": {
+  "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
+  "source": "harness, apps/terminal/dist, solana RPC answering 503",
+  "at": "2026-11-08T23:14:31.610Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://solana-rpc.publicnode.com/)",
+     "Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/market/candles)"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "warn",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "shot": "phone-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://solana-rpc.publicnode.com/)",
+     "Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/market/candles)"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "warn",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "shot": "desktop-verify.png"
+   }
+  ]
+ },
+ "bad": {
+  "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
+  "source": "harness, apps/terminal/dist, footer RPC answering 503",
+  "at": "2026-11-08T23:14:38.033Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "consoleErrors": [
+     "Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/market/candles)"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "shot": "phone-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/)",
+     "Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/market/candles)"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "shot": "desktop-verify.png"
+   }
+  ]
+ }
+}
