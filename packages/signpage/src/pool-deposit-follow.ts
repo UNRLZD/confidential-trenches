@@ -14,7 +14,9 @@
 // - The end: in_pool once a deposit from U_X ended filled (or part_filled with nothing of the ask open) and U_X's lower
 //   balance no longer covers one more deposit; the follow then reads on to the quote's deadline past on both RPCs'
 //   clocks (`past`), so a late second send to U_X is carried too. A deposit that ends not_landed, or a provider down, is
-//   read again next round; only the signal (a sign out) ends a follow early.
+//   read again next round; only the signal (a sign out) ends a follow early. A quote with nothing seen sent by its
+//   deadline shows expired and is read on (a late send is refunded by 1Click and carried); a stale status never shows
+//   it live again.
 // - REFUNDED: refunded is shown; the money is under U_{s,i} inside intents.near, and the refund carry (`refund`: moved
 //   with the same signer back to X's coin, to U_X, and carried on by the rounds above) is asked once per round while the
 //   status reads REFUNDED. With no `refund` given the stage stays refunded and the follow does not end (followed on at
@@ -55,7 +57,9 @@ export const POOL_STATUS_STAGE: Readonly<Record<OneClickStatus, PoolFollowStage>
   REFUNDED: "refunded",
   FAILED: "failed",
 });
-const RANK: Partial<Record<PoolFollowStage, number>> = { quote_checked: 0, expired: 0, waiting: 1, in_transit: 2, failed: 2, short: 2 };
+// expired ranks with waiting: a stale PENDING_DEPOSIT never shows a quote past its deadline as live again, and a send
+// seen after it (waiting, in transit) still shows
+const RANK: Partial<Record<PoolFollowStage, number>> = { quote_checked: 0, expired: 1, waiting: 1, in_transit: 2, failed: 2, short: 2 };
 
 /** A deposit run's end as the page's pool.deposit kind tells it (pool-deposit.ts poolDepositKind: the answer, then its
  *  end as progress), or its refusal code. */
@@ -149,7 +153,10 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
               fast = true;
             }
           }
-        } else if (shown === "quote_checked" && (await deps.past(f))) await show("expired");
+        }
+        // nothing seen sent by the deadline on both RPCs' clocks: expired, and read on (a late send to the address is
+        // refunded by 1Click, and that refund is carried as any other)
+        if (shown === "quote_checked" && (st === null || ("status" in st && st.status === "PENDING_DEPOSIT")) && (await deps.past(f))) await show("expired");
       }
     } catch {
       if (deps.signal.aborted) return shown;
@@ -158,4 +165,154 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     await deps.sleep(fast ? POOL_FOLLOW_FAST_MS : slow, deps.signal);
     if (!fast) slow = Math.min(slow * 2, POOL_FOLLOW_SLOW_MAX_MS);
   }
+}
+
+// ---------------------------------------------------------------------------------------------- on SIGN_HOST's page
+
+/** The op a pool quote's follow keeps in the wallet store's "ops" under its request's id (src/state.ts op contract):
+ *  nothing secret. `final` once in_pool is read on past the quote's deadline. */
+export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: { chain: PoolChain; hash: string }[]; created_ms: number; follow: PoolFollowRecord; final?: true };
+
+/** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
+export const POOL_FOLLOW_LOCK = "ct-wallet/pool-follow/";
+
+const FOLLOW_KEYS = ["chain", "s", "i", "u", "refund_id", "address", "deadline_ms", "origin", "min_out"] as const;
+const isPoolOp = (v: unknown): v is PoolDepositOp =>
+  typeof v === "object" && v !== null && (v as PoolDepositOp).kind === "pool_deposit" && typeof (v as PoolDepositOp).follow === "object" && (v as PoolDepositOp).follow !== null;
+/** A pool op's follow ended: in_pool read on past its quote's deadline. Every other op is followed again at each landing. */
+export const poolFollowEnded = (op: Pick<PoolDepositOp, "stage" | "final">): boolean => op.stage === "in_pool" && op.final === true;
+
+const DEC = /^[0-9]+(\.[0-9]+)?$/;
+/** A decimal at `decimals` in base units, exactly; null otherwise. */
+function baseUnits(v: unknown, decimals: number): bigint | null {
+  if (typeof v !== "string" || !DEC.test(v)) return null;
+  const [i = "", f = ""] = v.split(".");
+  return f.length > decimals ? null : BigInt(i + f.padEnd(decimals, "0"));
+}
+
+export interface PoolFollowHost {
+  store(): Promise<{ get(s: "ops", k: string): Promise<unknown>; update(s: "ops", k: string, change: (v: unknown) => unknown): Promise<unknown>; keys(s: "ops"): Promise<string[]> }>;
+  /** The chain reads and the deposit for X's pool (its pinned pair, the page's pool.deposit), or null when the page
+   *  pins no pool there: the op waits, followed again at the next landing. */
+  deps(f: PoolFollowRecord): Omit<PoolFollowDeps, "stage" | "signal"> | null;
+  /** The decimals of X's coin (kit POOL_ASSET_DECIMALS). */
+  decimals(chain: PoolChain): number;
+  locks?: () => Pick<LockManager, "request"> | null;
+  now?: () => number;
+}
+
+export function poolFollows(h: PoolFollowHost) {
+  const running = new Map<string, { p: Promise<void>; signal: AbortSignal }>();
+  let abort = new AbortController();
+  const locks = h.locks ?? (() => (typeof navigator !== "undefined" ? (navigator.locks ?? null) : null));
+
+  const follow = (id: string, f: PoolFollowRecord): Promise<void> => {
+    const had = running.get(id);
+    if (had && !had.signal.aborted) return had.p;
+    const signal = abort.signal;
+    const body = async () => {
+      const ops = await h.store();
+      const now = await ops.get("ops", id);
+      if (!isPoolOp(now) || poolFollowEnded(now)) return;
+      const d = h.deps(f);
+      if (d === null) return;
+      const stage = async (s: PoolFollowStage) => {
+        await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: s } : undefined));
+      };
+      const end = await followPoolQuote(f, { ...d, stage, signal }, now.stage);
+      // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
+      if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: "in_pool", final: true } : undefined));
+    };
+    const lm = locks();
+    // one follower per op across tabs; two ops of one U_X may run at once, since each deposit from U_X is the page's
+    // pool.deposit, one at a time on the device (POOL_DEPOSIT_LOCK), priced on U's own balance read then
+    const p: Promise<void> = (lm ? (lm.request(`${POOL_FOLLOW_LOCK}${id}`, { mode: "exclusive", signal }, body) as Promise<void>) : body())
+      .catch(() => {})
+      .finally(() => {
+        if (running.get(id)?.p === p) running.delete(id);
+      });
+    running.set(id, { p, signal });
+    return p;
+  };
+
+  return {
+    /**
+     * pool.address checked `quote` under request `id` for U_X (`u`): the op is written and followed. Throws when it
+     * cannot be written, so no address goes out that nothing follows.
+     */
+    async quoted(id: string, chain: PoolChain, quote: { deposit_address: string; origin_asset: string; min_amount_out: string; deadline: string }, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void> {
+      const deadline = Date.parse(quote.deadline);
+      if (!Number.isSafeInteger(deadline)) throw new Error("the quote's deadline is not a time");
+      const minOut = baseUnits(quote.min_amount_out, h.decimals(chain));
+      if (minOut === null) throw new Error("the quote's min_amount_out is not an amount of the pool's coin");
+      const f: PoolFollowRecord = { chain, s: u.scope.toString(), i: u.index, u: u.wallet, refund_id: u.refundId, address: quote.deposit_address, deadline_ms: deadline, origin: quote.origin_asset, min_out: minOut.toString() };
+      const ops = await h.store();
+      // a retry of the same request (the same id) keeps the op it made
+      await ops.update("ops", id, (v) => (v === undefined ? { kind: "pool_deposit", stage: "quote_checked", txs: [], created_ms: (h.now ?? Date.now)(), follow: f } : undefined));
+      const op = await ops.get("ops", id);
+      if (!isPoolOp(op) || FOLLOW_KEYS.some((k) => op.follow[k] !== f[k])) throw new Error("the request's op names another deposit");
+      void follow(id, f);
+    },
+    /** Each signed-in landing: every pool op no follow has ended is followed again. */
+    async settle(): Promise<void> {
+      const ops = await h.store();
+      for (const k of await ops.keys("ops")) {
+        const v = await ops.get("ops", k).catch(() => undefined);
+        if (isPoolOp(v) && !poolFollowEnded(v)) void follow(k, v.follow);
+      }
+    },
+    /** This tab's sign out, or the store closing: every follow stops; settle() starts them again. */
+    stop(): void {
+      abort.abort(new Error("stopped"));
+      abort = new AbortController();
+    },
+    /** Tests: the follows running now. */
+    idle: (): Promise<unknown> => Promise.all([...running.values()].map((r) => r.p)),
+  };
+}
+
+/**
+ * The page's pool.deposit kind (pool-deposit.ts poolDepositKind, or its EVM twin) run to its end for the follow: its
+ * answer, and when that is "sent", the end it posts as progress (filled, part_filled, not_landed; card
+ * pool-deposit-sent-end). A kind that posts no end before the signal stops it reads "down" (read again next round).
+ */
+export function depositToEnd(
+  kind: (ask: { kind: "pool.deposit"; chain: PoolChain; token: null; amount: bigint; slippageBps: 0; decimals: number }, ctx: { id: string; sha: string; progress(s: string): void; route(): void }) =>
+    | { error: string }
+    | { after: Promise<void>; answer(): { result: { stage: string } } | { error: string } },
+  chain: PoolChain,
+  decimals: number,
+  amount: bigint,
+  signal: AbortSignal,
+): Promise<PoolDepositEnd> {
+  return new Promise<PoolDepositEnd>((resolve) => {
+    let done = false;
+    const fin = (e: PoolDepositEnd): void => {
+      if (done) return;
+      done = true;
+      signal.removeEventListener("abort", stop);
+      resolve(e);
+    };
+    const stop = (): void => fin("down");
+    if (signal.aborted) return fin("down");
+    signal.addEventListener("abort", stop, { once: true });
+    const ENDS = new Set(["filled", "part_filled", "not_landed"]);
+    const codeOf = (c: string): PoolDepositEnd => (c === "not_allowed" || c === "not_funded" || c === "failed" ? c : "down");
+    const r = kind({ kind: "pool.deposit", chain, token: null, amount, slippageBps: 0, decimals }, {
+      id: `pool-follow-${chain}`,
+      sha: "",
+      progress: (s) => void (ENDS.has(s) && fin(s as PoolDepositEnd)),
+      route: () => {},
+    });
+    if ("error" in r) return fin(codeOf(r.error));
+    r.after.then(
+      () => {
+        const a = r.answer();
+        if ("error" in a) return fin(codeOf(a.error));
+        if (ENDS.has(a.result.stage)) fin(a.result.stage as PoolDepositEnd);
+        // "sent": its end comes as progress
+      },
+      () => fin("down"),
+    );
+  });
 }

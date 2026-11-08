@@ -146,3 +146,72 @@ test("REFUNDED: refunded shown, and with no refund carry the follow never ends a
   assert.deepEqual(c.stages, ["refunded", "refund_move", "in_pool"]);
   assert.deepEqual(c.deposits, [10_000_000n]);
 });
+
+test("a quote never paid shows expired past its deadline, a stale PENDING_DEPOSIT never shows it live again", async () => {
+  const w = world([
+    { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
+    { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
+    { bal: [0n, 0n], status: "KNOWN_DEPOSIT_TX", past: true },
+  ]);
+  assert.equal(await followPoolQuote(F, w.deps), "waiting");
+  assert.deepEqual(w.stages, ["expired", "waiting"]);
+});
+
+test("the page's follower: the op written under the request's id, its stages kept, resumed at a landing, final at in_pool", async () => {
+  const { poolFollows, poolFollowEnded } = await import("../src/pool-deposit-follow.ts");
+  const rows = new Map<string, unknown>();
+  const store = {
+    get: async (_s: "ops", k: string) => rows.get(k),
+    keys: async () => [...rows.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      const v = change(rows.get(k));
+      if (v !== undefined) rows.set(k, v);
+      return rows.get(k);
+    },
+  };
+  const w = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  let pinned = false;
+  const host = poolFollows({ store: async () => store, deps: () => (pinned ? w.deps : null), decimals: () => 9, locks: () => null, now: () => 5 });
+  const quote = { deposit_address: "DEPOSIT", origin_asset: "nep141:base-usdc", min_amount_out: "0.02", deadline: "2026-11-08T06:00:00.000Z" };
+  const u = { scope: 777n, index: 3, wallet: "U_X", refundId: "ab".repeat(32) };
+  await host.quoted("op-1", "solana", quote, u);
+  await host.idle();
+  const op = rows.get("op-1") as { kind: string; stage: string; follow: Record<string, unknown> };
+  assert.equal(op.kind, "pool_deposit");
+  assert.equal(op.stage, "quote_checked", "no pool pinned for it yet: written, waiting for a landing");
+  assert.equal(op.follow.min_out, "20000000");
+  assert.equal(op.follow.refund_id, "ab".repeat(32));
+  // the same request again keeps its op; another deposit under the same id is refused
+  await host.quoted("op-1", "solana", quote, u);
+  await assert.rejects(host.quoted("op-1", "solana", { ...quote, deposit_address: "OTHER" }, u));
+  await assert.rejects(host.quoted("op-2", "solana", { ...quote, min_amount_out: "0.0000000001" }, u));
+  pinned = true;
+  await host.settle();
+  await host.idle();
+  const done = rows.get("op-1") as { stage: "in_pool"; final?: true };
+  assert.equal(done.stage, "in_pool");
+  assert.ok(poolFollowEnded(done));
+  assert.deepEqual(w.deposits, [10_000_000n]);
+});
+
+test("depositToEnd: a sent answer waits for its end as progress; refusals and a stop read as codes", async () => {
+  const { depositToEnd } = await import("../src/pool-deposit-follow.ts");
+  const ac = new AbortController();
+  const sentThen = (end: string) => (_ask: unknown, ctx: { progress(s: string): void }) => ({
+    after: Promise.resolve().then(() => setTimeout(() => (ctx.progress("sent"), ctx.progress(end)), 1)),
+    answer: () => ({ result: { stage: "sent" } }),
+  });
+  assert.equal(await depositToEnd(sentThen("filled") as never, "solana", 9, 10_000_000n, ac.signal), "filled");
+  assert.equal(await depositToEnd(sentThen("not_landed") as never, "solana", 9, 10_000_000n, ac.signal), "not_landed");
+  assert.equal(await depositToEnd((() => ({ error: "not_funded" })) as never, "solana", 9, 1n, ac.signal), "not_funded");
+  assert.equal(await depositToEnd((() => ({ after: Promise.resolve(), answer: () => ({ error: "busy" }) })) as never, "solana", 9, 1n, ac.signal), "down");
+  assert.equal(await depositToEnd((() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled" } }) })) as never, "solana", 9, 1n, ac.signal), "filled");
+  // a sent answer whose end never comes: the stop reads down
+  const stop = new AbortController();
+  const hang = depositToEnd((() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "sent" } }) })) as never, "solana", 9, 1n, stop.signal);
+  stop.abort();
+  assert.equal(await hang, "down");
+});
