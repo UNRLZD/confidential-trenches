@@ -1,25 +1,35 @@
 #!/usr/bin/env node
-// Card signers-own-bytes (review 4 M2): every place the device, the signing page, the kit or the exit tool makes a
-// signature, as file:function, is one of SIGN_SITES, and each entry names the test that proves what that site signs.
-// A new signature anywhere in those four source trees, with no entry, fails:
+// Card signers-own-bytes (reviews 4 M2 and 5 F2): every place the device, the signing page, the kit or the exit tool can
+// make a signature is one of SIGN_SITES, as file:statement, and each entry names the test that proves what it signs.
 //   node scripts/ci/sign-sites.mjs [root]      (exit 1 and one line per refusal)
-// It reads every source file under packages/{wallet,kit,signpage,exit}/src (test files and .d.ts skipped), comments
-// out, and counts as a site each reference to sign or signAsync of a binding imported from @noble/curves (a call, a
-// bracketed or optional one, a destructuring or a value handed on), under the top-level declaration it sits in. It
-// refuses outright what would sign out of its sight: a curve binding handed on whole, a namespace import of
-// @noble/curves, a curve loaded at run time, another signing library, and WebCrypto's or node:crypto's sign.
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+// It walks packages/{wallet,kit,signpage,exit}/src with lstat (a symlink is refused, never followed), parses every code
+// file there (test-named files included) with the TypeScript parser, and reads names as the parser does, escapes
+// resolved. A site is every member named sign or signAsync, on any receiver (a.sign, a?.sign, a["sign"], a[`sign`],
+// const { sign } = a), counted under the top-level statement it sits in. It refuses outright:
+//   - a module that is not ALLOWED (relative paths aside), in an import, an export-from, import() or require(); an
+//     import() or require() whose argument is not a plain string; an export-from of any package;
+//   - a default or namespace import of node:crypto, a named one other than NODE_CRYPTO, import() or require() of it;
+//   - WebCrypto's subtle in any form but x.subtle.<SUBTLE> or a const alias read only as alias.<SUBTLE>: no subtle
+//     binding, no subtle key, no computed key on crypto, globalThis, self or window;
+//   - a namespace import of @noble/curves, or import() or require() of it; a curve binding exported, handed on whole,
+//     or read with a computed key that is not a plain string.
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
-/** Each sign site, the signatures it makes (`n`) and the test that proves what it signs. */
+/** Each sign site, the sign members it holds (`n`) and the test that proves what it signs. */
 export const SIGN_SITES = {
   "packages/wallet/src/deposit/delegate.ts:signDelegateAction": { n: 1, test: "packages/wallet/test/deposit-delegate.test.ts" },
   "packages/wallet/src/deposit/moveout.ts:signMoveTx": { n: 1, test: "packages/wallet/test/deposit-moveout-signers.test.ts" },
+  "packages/wallet/src/deposit/refund.ts:runRefundMove": { n: 1, test: "packages/wallet/test/deposit-refund.test.ts" },
   "packages/wallet/src/arming/records.ts:solanaArmedSigner": { n: 1, test: "packages/wallet/test/arm-records.test.ts" },
   "packages/kit/src/trade/evm/buy-unpinned.ts:evmPoolSignBuyUnpinned": { n: 1, test: "packages/kit/test/evm-pool-buy.test.ts" },
   "packages/kit/src/trade/evm/sell-unpinned.ts:signDigest": { n: 1, test: "packages/kit/test/evm-pool-sell.test.ts" },
   "packages/kit/src/trade/evm/sell-unpinned.ts:evmPoolSignSellAuthorizationUnpinned": { n: 1, test: "packages/kit/test/evm-pool-sell.test.ts" },
+  "packages/kit/src/trade/solana/flow.ts:signedWire": { n: 2, test: "packages/kit/test/solana-flow.test.ts" },
+  "packages/kit/src/trade/solana/flow.ts:runSolanaTrade": { n: 1, test: "packages/kit/test/solana-flow.test.ts" },
+  "packages/signpage/src/trade.ts:tradeKind": { n: 1, test: "packages/signpage/test/trade.test.ts" },
   "packages/signpage/src/rules/refund.ts:signIdIntent": { n: 1, test: "packages/signpage/test/rules-refund.test.ts" },
   "packages/signpage/src/rules/refund.ts:signReturnSolana": { n: 1, test: "packages/signpage/test/rules-refund.test.ts" },
   "packages/signpage/src/rules/refund.ts:signReturnEvm": { n: 1, test: "packages/signpage/test/rules-refund.test.ts" },
@@ -29,132 +39,191 @@ export const SIGN_SITES = {
   "packages/signpage/src/rules/pool.ts:signEvmDeposit": { n: 1, test: "packages/signpage/test/rules-pool-deposit-evm.test.ts" },
 };
 
-export const TREES = ["packages/wallet/src", "packages/kit/src", "packages/signpage/src", "packages/exit/src"];
-const SOURCE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/;
-const SKIP = /\.test\.|\.d\.ts$/;
+/** The modules the four trees may load, besides their own relative files. */
+export const ALLOWED = new Set([
+  "@blindfill/kit", "@blindfill/kit/core",
+  "@blindfill/wallet/arming/ladder", "@blindfill/wallet/arming/records", "@blindfill/wallet/derive", "@blindfill/wallet/signin/passkey", "@blindfill/wallet/signin/words", "@blindfill/wallet/store",
+  "@noble/curves/ed25519.js", "@noble/curves/secp256k1.js",
+  "@noble/hashes/hkdf.js", "@noble/hashes/hmac.js", "@noble/hashes/sha2.js", "@noble/hashes/sha3.js", "@noble/hashes/utils.js",
+  "@scure/base", "@scure/bip32", "@scure/bip39", "@scure/bip39/wordlists/english.js",
+  "@zk-kit/lean-imt",
+  "poseidon-lite/poseidon1", "poseidon-lite/poseidon2", "poseidon-lite/poseidon3", "poseidon-lite/poseidon4", "poseidon-lite/poseidon5",
+  "node:crypto", "node:fs", "node:module", "node:path", "node:url",
+]);
+/** node:crypto's names a file may import (named only): none of them signs. */
+export const NODE_CRYPTO = new Set(["createHash"]);
+/** WebCrypto's subtle members a file may read: none of them signs. */
+export const SUBTLE = new Set(["digest", "encrypt", "decrypt", "generateKey", "importKey", "exportKey", "deriveKey", "deriveBits", "wrapKey", "unwrapKey"]);
+const GLOBALS = new Set(["crypto", "globalThis", "self", "window"]);
+const CURVES = /^@noble\/curves\//;
+const SIGN = new Set(["sign", "signAsync"]);
 
-/** The source files of the four trees, as { path relative to root: text }. */
+export const TREES = ["packages/wallet/src", "packages/kit/src", "packages/signpage/src", "packages/exit/src"];
+const KIND = { ".ts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX, ".js": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS, ".jsx": ts.ScriptKind.JSX };
+
+/** The code files of the four trees, as { path relative to root: text }, and the symlinks found (refused). */
 export function readTrees(root) {
   const files = {};
+  const links = [];
   const walk = (rel) => {
     const abs = path.join(root, rel);
     if (!existsSync(abs)) return;
-    for (const e of readdirSync(abs, { withFileTypes: true })) {
-      const r = `${rel}/${e.name}`;
-      if (e.isDirectory()) walk(r);
-      else if (SOURCE.test(e.name) && !SKIP.test(e.name)) files[r] = readFileSync(path.join(root, r), "utf8");
+    for (const name of readdirSync(abs).sort()) {
+      const r = `${rel}/${name}`;
+      const st = lstatSync(path.join(root, r));
+      if (st.isSymbolicLink()) links.push(r);
+      else if (st.isDirectory()) walk(r);
+      else if (path.extname(name) in KIND) files[r] = readFileSync(path.join(root, r), "utf8");
     }
   };
   for (const t of TREES) walk(t);
-  return files;
+  return Object.defineProperty(files, "links", { value: links, enumerable: false });
 }
 
-// The source with comments blanked (`code`, strings kept) and also strings, template text and regex literals blanked
-// (`bare`), offsets kept: imports are read in `code`, every use of a curve in `bare`, so a word in a string is no use.
-export function scan(s) {
-  const code = s.split("");
-  const bare = s.split("");
-  const blank = (arr, i) => { if (arr[i] !== "\n") arr[i] = " "; };
-  const stack = []; // template depths: each entry is the brace depth at which a ${ opened
-  let depth = 0;
-  let prev = ""; // the last significant code character, to tell a regex from a division
-  let i = 0;
-  const str = (q) => { // from the opening quote at i; leaves i after the closing one
-    i++;
-    while (i < s.length && s[i] !== q && s[i] !== "\n") { if (s[i] === "\\") { blank(bare, i); i++; } blank(bare, i); i++; }
-    i++;
-  };
-  const tpl = () => { // template text from i (after a backtick or a closing brace of ${}); stops at the closing backtick or a ${
-    while (i < s.length) {
-      if (s[i] === "\\") { blank(bare, i); blank(bare, i + 1); i += 2; continue; }
-      if (s[i] === "`") { i++; prev = "`"; return; }
-      if (s[i] === "$" && s[i + 1] === "{") { stack.push(depth); depth++; i += 2; prev = "{"; return; }
-      blank(bare, i); i++;
-    }
-  };
-  while (i < s.length) {
-    const c = s[i];
-    if (c === "/" && s[i + 1] === "/") { while (i < s.length && s[i] !== "\n") { blank(code, i); blank(bare, i); i++; } continue; }
-    if (c === "/" && s[i + 1] === "*") { const e = s.indexOf("*/", i + 2); const end = e === -1 ? s.length : e + 2; for (; i < end; i++) { blank(code, i); blank(bare, i); } continue; }
-    if (c === "\"" || c === "'") { str(c); prev = c; continue; }
-    if (c === "`") { i++; tpl(); continue; }
-    if (c === "/" && (prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev) || /\b(?:return|typeof|case|in|of|void|delete|throw|new)$/.test(s.slice(Math.max(0, i - 8), i).trimEnd()))) {
-      i++;
-      let cls = false;
-      while (i < s.length && s[i] !== "\n" && (cls || s[i] !== "/")) { if (s[i] === "\\") { blank(bare, i); i++; } else if (s[i] === "[") cls = true; else if (s[i] === "]") cls = false; blank(bare, i); i++; }
-      i++;
-      prev = "/";
-      continue;
-    }
-    if (c === "{") depth++;
-    if (c === "}") { depth--; if (stack.length > 0 && stack.at(-1) === depth) { stack.pop(); i++; tpl(); continue; } }
-    if (!/\s/.test(c)) prev = c;
-    i++;
-  }
-  return { code: code.join(""), bare: bare.join("") };
-}
-const OTHER_LIBS = /^import\b[^;]*?from\s*["'](tweetnacl[^"']*|@noble\/ed25519[^"']*|@noble\/secp256k1[^"']*|@solana\/web3\.js[^"']*|@solana\/kit[^"']*|ethers[^"']*|viem[^"']*|elliptic[^"']*|libsodium[^"']*|@stablelib\/[^"']*)["']/gm;
-const RUNTIME_CURVE = /\b(?:require|import)\s*\(\s*["'`]@noble\/curves/g;
-const NATIVE_SIGN = /\bsubtle\s*\.\s*sign\b|\bcreateSign\b|(?<![\w$.])(?:crypto|nodeCrypto)\s*\.\s*sign\s*\(/g;
-const NATIVE_IMPORT = /^import\s*\{[^}]*\bsign\b[^}]*\}\s*from\s*["'](?:node:)?crypto["']/gm;
-const TOP = /^(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?(?:function\s*\*?\s*([\w$]+)|(?:const|let|var)\s+([\w$]+)|(?:abstract\s+)?class\s+([\w$]+))/gm;
+const unwrap = (n) => {
+  while (ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isTypeAssertionExpression(n) || ts.isNonNullExpression(n) || ts.isSatisfiesExpression(n)) n = n.expression;
+  return n;
+};
+/** n, widened past the parens and casts around it. */
+const outer = (n) => {
+  while (n.parent && (ts.isParenthesizedExpression(n.parent) || ts.isAsExpression(n.parent) || ts.isTypeAssertionExpression(n.parent) || ts.isNonNullExpression(n.parent) || ts.isSatisfiesExpression(n.parent))) n = n.parent;
+  return n;
+};
+const literalKey = (n) => (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isNumericLiteral(n) ? n.text : null);
+const nameOf = (n) => (n && (ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isPrivateIdentifier(n)) ? n.text : n && ts.isComputedPropertyName(n) ? literalKey(n.expression) : null);
 
-/** The sign sites in `files` ({ path: text }) as { "path:function": n }, and what is refused outright. */
-export function census(files) {
+/** One file's sign sites and refusals, kept per (path, text): a planted tree re-reads only what it changed. */
+const memo = new Map();
+function fileCensus(file, text) {
+  const key = `${file}\0${text}`;
+  if (memo.has(key)) return memo.get(key);
   const sites = {};
   const refused = [];
-  for (const [file, text] of Object.entries(files)) {
-    const { code: src, bare } = scan(text);
-    const tops = [...bare.matchAll(TOP)].map((m) => ({ at: m.index, name: m[1] ?? m[2] ?? m[3] }));
-    const where = (at) => tops.filter((t) => t.at <= at).at(-1)?.name ?? "<module>";
-    const add = (at) => {
-      const k = `${file}:${where(at)}`;
+  {
+    const kind = KIND[path.extname(file)] ?? ts.ScriptKind.TS;
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+    const at = (n) => `${file}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`;
+    const top = (n) => {
+      let decl = null;
+      while (n.parent && n.parent.kind !== ts.SyntaxKind.SourceFile) {
+        if (ts.isVariableDeclaration(n) && ts.isVariableStatement(n.parent.parent) && n.parent.parent.parent.kind === ts.SyntaxKind.SourceFile) decl = n;
+        n = n.parent;
+      }
+      const d = ts.isVariableStatement(n) ? decl ?? n.declarationList.declarations[0] : n;
+      return d?.name && ts.isIdentifier(d.name) ? d.name.text : ts.isExportAssignment(n) ? "default" : `<statement at line ${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}>`;
+    };
+    const add = (n) => {
+      const k = `${file}:${top(n)}`;
       sites[k] = (sites[k] ?? 0) + 1;
     };
-    for (const m of src.matchAll(OTHER_LIBS)) refused.push(`${file}: imports another signing library, ${m[1]}`);
-    const isCode = (at) => bare.slice(at, at + 2) === src.slice(at, at + 2);
-    for (const m of src.matchAll(RUNTIME_CURVE)) if (isCode(m.index)) refused.push(`${file}:${where(m.index)}: loads @noble/curves at run time`);
-    for (const m of [...bare.matchAll(NATIVE_SIGN), ...src.matchAll(NATIVE_IMPORT)]) refused.push(`${file}:${where(m.index)}: signs with WebCrypto or node:crypto (${m[0].trim()})`);
-    const curves = [];
-    for (const m of src.matchAll(/^import\s+(type\s+)?([^;]*?)\s*from\s*["']@noble\/curves[^"']*["']/gm)) {
-      if (m[1]) continue;
-      const clause = m[2];
-      if (/\*\s*as\s+/.test(clause)) refused.push(`${file}: a namespace import of @noble/curves (${clause.trim()}): import each curve by name`);
-      const named = /\{([^}]*)\}/.exec(clause)?.[1] ?? "";
-      for (const part of named.split(",")) {
-        const p = part.trim().replace(/^type\s+/, "");
-        if (!p || part.trim().startsWith("type ")) continue;
-        const [, local] = /^[\w$]+(?:\s+as\s+([\w$]+))?$/.exec(p) ?? [];
-        curves.push(local ?? p);
+    const module = (n, spec, how) => {
+      if (spec === null) return refused.push(`${at(n)}: ${how} of a module that is not a plain string`);
+      if (!spec.startsWith("./") && !spec.startsWith("../") && !ALLOWED.has(spec)) refused.push(`${at(n)}: ${how} of ${spec}, not an allowed module`);
+      else if (spec === "node:crypto" && how !== "an import") refused.push(`${at(n)}: ${how} of node:crypto (only a named import of ${[...NODE_CRYPTO].join(", ")})`);
+      else if (CURVES.test(spec) && how !== "an import") refused.push(`${at(n)}: ${how} of ${spec} (a curve is imported by name, never loaded at run time)`);
+    };
+    // the const aliases of x.subtle: read only as alias.<SUBTLE>
+    const subtles = new Set();
+    // the curve bindings: every local name an @noble/curves import makes
+    const curves = new Set();
+    for (const s of sf.statements) {
+      if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier)) continue;
+      const spec = s.moduleSpecifier.text;
+      const c = s.importClause;
+      if (spec === "node:crypto" && c && !c.isTypeOnly) {
+        if (c.name) refused.push(`${at(s)}: a default import of node:crypto`);
+        if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) refused.push(`${at(s)}: a namespace import of node:crypto`);
+        if (c.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) if (!NODE_CRYPTO.has((e.propertyName ?? e.name).text)) refused.push(`${at(e)}: node:crypto's ${(e.propertyName ?? e.name).text} imported`);
       }
-      const dflt = /^([\w$]+)\s*(?:,|$)/.exec(clause.trim());
-      if (dflt) curves.push(dflt[1]);
+      if (!CURVES.test(spec) || !c) continue;
+      if (c.name) curves.add(c.name.text);
+      if (c.namedBindings && ts.isNamespaceImport(c.namedBindings)) refused.push(`${at(s)}: a namespace import of ${spec}: import each curve by name`);
+      if (c.namedBindings && ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) curves.add(e.name.text);
     }
-    for (const c of curves) {
-      const e = c.replace(/\$/g, "\\$");
-      // c.sign / c?.sign / c["sign"] / c.signAsync: a site, called or not
-      for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${e}\\s*(?:\\?\\.\\s*|\\.\\s*)(?:sign|signAsync)(?![\\w$])`, "g"))) add(m.index);
-      for (const m of src.matchAll(new RegExp(`(?<![\\w$.])${e}\\s*(?:\\?\\.)?\\[\\s*["'\`](?:sign|signAsync)["'\`]\\s*\\]`, "g"))) if (isCode(m.index)) add(m.index);
-      // { sign } = c: a site
-      for (const m of bare.matchAll(new RegExp(`\\{[^{}]*\\b(?:sign|signAsync)\\b[^{}]*\\}\\s*=\\s*${e}(?![\\w$])`, "g"))) add(m.index);
-      // c handed on whole (not a member read, not the import itself): refused, since what it signs is out of sight
-      for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${e}(?![\\w$])(?!\\s*(?:\\?\\.|\\.|\\[|\\s+as\\b))`, "g"))) {
-        const line = bare.slice(bare.lastIndexOf("\n", m.index) + 1, bare.indexOf("\n", m.index) === -1 ? undefined : bare.indexOf("\n", m.index));
-        if (/^\s*import\b/.test(line)) continue;
-        refused.push(`${file}:${where(m.index)}: the curve ${c} is handed on as a value`);
+    const aliases = (n) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isVariableDeclarationList(n.parent) && (n.parent.flags & ts.NodeFlags.Const) !== 0) {
+        const init = unwrap(n.initializer);
+        if (ts.isPropertyAccessExpression(init) && init.name.text === "subtle") subtles.add(n.name.text);
       }
-    }
+      ts.forEachChild(n, aliases);
+    };
+    aliases(sf);
+    const visit = (n) => {
+      if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) {
+        const spec = ts.isStringLiteral(n.moduleSpecifier) ? n.moduleSpecifier.text : null;
+        module(n, spec, ts.isImportDeclaration(n) ? "an import" : "an export-from");
+        if (ts.isExportDeclaration(n) && spec !== null && !spec.startsWith("./") && !spec.startsWith("../")) refused.push(`${at(n)}: an export-from of the package ${spec}`);
+      }
+      if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) module(n, literalKey(n.moduleReference.expression), "an import = require");
+      if (ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) {
+        module(n, n.arguments.length === 1 && (ts.isStringLiteral(n.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(n.arguments[0])) ? n.arguments[0].text : null, n.expression.kind === ts.SyntaxKind.ImportKeyword ? "import()" : "require()");
+      }
+      // sign members, on any receiver; subtle in any form
+      if (ts.isPropertyAccessExpression(n)) {
+        if (SIGN.has(n.name.text)) add(n);
+        if (n.name.text === "subtle") {
+          const use = outer(n);
+          const p = use.parent;
+          const alias = p && ts.isVariableDeclaration(p) && p.initializer === use && ts.isIdentifier(p.name) && ts.isVariableDeclarationList(p.parent) && (p.parent.flags & ts.NodeFlags.Const) !== 0;
+          if (!alias && !(p && ts.isPropertyAccessExpression(p) && p.expression === use && SUBTLE.has(p.name.text))) refused.push(`${at(n)}: WebCrypto's subtle read other than as subtle.<${[...SUBTLE].join("|")}>`);
+        }
+      }
+      if (ts.isElementAccessExpression(n)) {
+        const key = literalKey(unwrap(n.argumentExpression));
+        if (key !== null && SIGN.has(key)) add(n);
+        if (key === "subtle") refused.push(`${at(n)}: WebCrypto's subtle read with a key (read it as x.subtle.<method>)`);
+        const recv = unwrap(n.expression);
+        if (key === null && ts.isIdentifier(recv) && curves.has(recv.text)) refused.push(`${at(n)}: the curve ${recv.text} read with a computed key`);
+        if (key === null && ((ts.isIdentifier(recv) && (GLOBALS.has(recv.text) || subtles.has(recv.text))) || (ts.isPropertyAccessExpression(recv) && GLOBALS.has(recv.name.text)))) refused.push(`${at(n)}: ${recv.getText(sf)} read with a computed key`);
+      }
+      if (ts.isBindingElement(n)) {
+        const key = nameOf(n.propertyName ?? n.name);
+        if (key !== null && SIGN.has(key)) add(n);
+        if (key === "subtle") refused.push(`${at(n)}: WebCrypto's subtle bound by a pattern (read it as x.subtle.<method>)`);
+      }
+      // a curve binding: only ever the receiver of a member read
+      if (ts.isIdentifier(n) && subtles.has(n.text) && !(ts.isVariableDeclaration(n.parent) && n.parent.name === n) && !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)) {
+        const use = outer(n);
+        const p = use.parent;
+        if (!(p && ts.isPropertyAccessExpression(p) && p.expression === use && SUBTLE.has(p.name.text))) refused.push(`${at(n)}: the subtle alias ${n.text} read other than as ${n.text}.<${[...SUBTLE].join("|")}>`);
+      }
+      if (ts.isIdentifier(n) && curves.has(n.text) && !ts.isImportSpecifier(n.parent) && !ts.isImportClause(n.parent)) {
+        const use = outer(n);
+        const p = use.parent;
+        const member = p && (ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) && p.expression === use;
+        const typeOnly = p && (ts.isTypeQueryNode(p) || ts.isQualifiedName(p));
+        if (ts.isExportSpecifier(p)) refused.push(`${at(n)}: the curve ${n.text} exported`);
+        else if (!member && !typeOnly) refused.push(`${at(n)}: the curve ${n.text} handed on as a value`);
+      }
+      if (ts.isExportAssignment(n) && ts.isIdentifier(unwrap(n.expression)) && curves.has(unwrap(n.expression).text)) refused.push(`${at(n)}: the curve exported as the default`);
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  const out = { sites, refused };
+  memo.set(key, out);
+  return out;
+}
+
+/** The sign sites in `files` ({ path: text }) as { "path:statement": n }, and what is refused outright. */
+export function census(files) {
+  const sites = {};
+  const refused = (files.links ?? []).map((l) => `${l}: a symlink in a source tree (never followed)`);
+  for (const [file, text] of Object.entries(files)) {
+    const one = fileCensus(file, text);
+    for (const [k, n] of Object.entries(one.sites)) sites[k] = (sites[k] ?? 0) + n;
+    refused.push(...one.refused);
   }
   return { sites, refused };
 }
 
-/** Every refusal for `files` against SIGN_SITES (none: the census is the list). `exists` checks a listed test. */
+/** Every refusal for `files` against `list` (none: the census is the list). `exists` checks a listed test. */
 export function check(files, list = SIGN_SITES, exists = () => true) {
   const { sites, refused } = census(files);
   const out = [...refused];
   for (const [k, n] of Object.entries(sites)) {
     if (!(k in list)) out.push(`${k}: a sign site with no entry in SIGN_SITES (add it, with the test that proves what it signs)`);
-    else if (list[k].n !== n) out.push(`${k}: ${n} signatures, SIGN_SITES says ${list[k].n}`);
+    else if (list[k].n !== n) out.push(`${k}: ${n} sign members, SIGN_SITES says ${list[k].n}`);
   }
   for (const [k, v] of Object.entries(list)) {
     if (!(k in sites)) out.push(`${k}: listed in SIGN_SITES but signs nothing (take its entry out)`);
