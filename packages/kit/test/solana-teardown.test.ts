@@ -14,7 +14,9 @@ import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TEARDOWN_CU,
   SOLANA_TOKEN_PROGRAM,
+  SOLANA_VOLUME_PROGRAMS,
   checkSolanaTeardown,
+  solanaCashbackAccounts,
   solanaTeardownAddresses,
   solanaTeardownPlan,
   solanaVolumeAccumulator,
@@ -73,19 +75,25 @@ test("recorded: real wallets on both pump programs, two providers each", () => {
       const uva = solanaVolumeAccumulator(w.wallet, p);
       assert.ok(plan.close.some((h) => h.address === uva) !== plan.keep.some((k) => k.address === uva), `${w.wallet} ${p}`);
     }
-    assert.deepEqual(w.addresses, solanaTeardownAddresses(w.wallet, w.mints));
+    // Recorded 2026-11-02, before the claims' accounts joined the list (card solana-teardown-cashback): today's list
+    // is the recorded one, then only those (test/solana-teardown-cashback.test.ts replays a capture of the full list).
+    const today = solanaTeardownAddresses(w.wallet, w.mints);
+    assert.deepEqual(today.slice(0, w.addresses.length), w.addresses);
+    const claims = new Set(SOLANA_VOLUME_PROGRAMS.flatMap((p) => { const c = solanaCashbackAccounts(w.wallet, p); return [c.from, c.to]; }));
+    for (const x of today.slice(w.addresses.length)) assert.ok(claims.has(x), x);
   }
   const plans = F.wallets.map((w) => solanaTeardownPlan(w.wallet, accountsOf(w)));
   assert.ok(plans.some((p) => p.close.some((h) => h.kind === "token" && h.program === SOLANA_TOKEN_PROGRAM)), "an SPL Token account to close");
   assert.ok(plans.some((p) => p.close.some((h) => h.kind === "token" && h.program === SOLANA_TOKEN_2022_PROGRAM)), "a Token-2022 account to close");
   assert.ok(plans.some((p) => volumeCount(p) === 2), "a wallet closing both volume accounts");
   assert.ok(plans.some((p) => p.keep.some((k) => /^holds /.test(k.why))), "a token account that stays, holding tokens");
-  // GATRKVEP…: its PumpSwap volume account is owed cashback (earned 12,742,862 lamports of WSOL, none claimed), so it
-  // stays out of every frame; the good test below reads it untouched after the frame on both providers.
+  // GATRKVEP…: its PumpSwap volume account is owed cashback (earned 12,742,862 lamports of WSOL, none claimed); this
+  // recording has no read of the volume account's WSOL account, so no claim can be planned and it stays out of every
+  // frame; the good test below reads it untouched after the frame on both providers.
   const gatr = F.wallets.findIndex((w) => w.wallet === "GATRKVEPTF8smVdYcWVody5gUc768N2HxTfVDmcCb4zp");
   assert.ok(gatr >= 0);
   const uva = solanaVolumeAccumulator(F.wallets[gatr]!.wallet, SOLANA_PUMP_AMM_PROGRAM);
-  assert.deepEqual(plans[gatr]!.keep, [{ address: uva, why: "cashback 12742862 unclaimed" }]);
+  assert.deepEqual(plans[gatr]!.keep, [{ address: uva, why: "cashback 12742862 unclaimed (the volume account's So11111111111111111111111111111111111111112 account holds nothing read)" }]);
   assert.ok(!plans[gatr]!.close.some((h) => h.address === uva));
 });
 

@@ -38,7 +38,6 @@ import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
   checkSolanaQuote,
-  checkSolanaTeardown,
   solanaVolumeAccumulator,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
@@ -60,11 +59,11 @@ import {
   SolanaBuildError,
   SolanaBuildRoom,
   assembleSolanaSwap,
-  buildSolanaTeardown,
   fetchSolanaJupiterBuild,
   fetchSolanaJupiterBuildThatFits,
   readSolanaBlockhash,
   simulateSolanaTeardown,
+  solanaTeardownChecked,
   solanaWithBlockhash,
   type SolanaAssembled,
   type SolanaBlockhash,
@@ -701,9 +700,8 @@ async function teardownOnce(req: SolanaTradeRequest, rec: SolanaLegRecord, deps:
     return { verdict: { ok: false, plan: null, results: [{ id: "READ", ok: false, detail: (e as Error).message }] }, frames: 0, refused: (e as Error).message };
   }
   const bh = await readSolanaBlockhashBoth(deps.providers);
-  const frames = buildSolanaTeardown(w, plan, bh);
-  const simulations = await Promise.all(frames.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers)));
-  const verdict = checkSolanaTeardown(frames.map((f) => f.wire), w, { accounts, wallet: [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], simulations });
+  // a claim that does not simulate is planned around once, claims off (solanaTeardownChecked): the closes still go
+  const { frames, verdict } = await solanaTeardownChecked(w, plan, accounts, [ra[0]?.lamports ?? 0n, rb[0]?.lamports ?? 0n], bh, (fs) => Promise.all(fs.map((f) => both((r) => simulateSolanaTeardown(r, f.wire, w, addresses).catch(() => null), deps.providers))));
   if (!verdict.ok || frames.length === 0) return { verdict, frames: frames.length, ...(verdict.ok ? {} : { refused: "teardown checks" }) };
   const set = await signSet(deps, frames.map((f) => ({ wallet: w, tx: f })));
   const sendOpts = { paths: deps.paths, providers: deps.providers, ...(deps.deadlineMs ? { deadlineMs: deps.deadlineMs } : {}), ...(deps.pollMs ? { pollMs: deps.pollMs } : {}), ...(deps.providerRps ? { providerRps: deps.providerRps } : {}) };

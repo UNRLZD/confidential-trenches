@@ -1130,6 +1130,25 @@ export const SOLANA_PUMP_AMM_PROGRAM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMf
 // "user_volume_accumulator" and the user), event_authority (PDA of "__event_authority"), program.
 export const SOLANA_CLOSE_VOLUME_ACCUMULATOR: readonly number[] = [249, 69, 164, 218, 150, 103, 84, 138];
 deepFreeze(SOLANA_CLOSE_VOLUME_ACCUMULATOR);
+// The cashback claims, from the same IDLs (re-read 2026-11-08 04:27Z at slots 466780585 and 466780591 on
+// api.mainnet-beta.solana.com, account data sha256 unchanged), no args each:
+// - PumpSwap claim_cashback: user (writable), user_volume_accumulator (writable), quote_mint, quote_token_program,
+//   user_volume_accumulator_wsol_token_account (writable, ATA(the volume account, quote_mint)), user_wsol_token_account
+//   (writable, ATA(user, quote_mint), which must already exist: AccountNotInitialized 3012 otherwise, simulated on
+//   GATRKVEP… 2026-11-08 04:29Z), system_program, event_authority, program.
+// - pump claim_cashback_v2: user (writable), user_volume_accumulator (writable), quote_mint, quote_token_program,
+//   associated_token_program, associated_user_volume_accumulator (writable, ATA(the volume account, quote_mint)),
+//   associated_quote_user (writable; the IDL: "any token account of quote_mint owned by user"; the device takes only
+//   ATA(user, quote_mint)), system_program, event_authority, program.
+// close_user_volume_accumulator does not check for owed cashback: simulated on 12FzhSyn… (owed 12,742,862) it closes
+// the account and leaves the WSOL in an account whose owner is gone. So a claim rides in the same frame as its close,
+// right before it.
+export const SOLANA_CLAIM_CASHBACK: readonly number[] = [37, 58, 35, 126, 190, 53, 228, 197];
+deepFreeze(SOLANA_CLAIM_CASHBACK);
+export const SOLANA_CLAIM_CASHBACK_V2: readonly number[] = [122, 243, 204, 65, 94, 116, 29, 55];
+deepFreeze(SOLANA_CLAIM_CASHBACK_V2);
+/** Pump's stable quote mint (its Global's whitelisted_quote_mints, one entry: USDC, read at slot 466781223), SPL Token. */
+export const SOLANA_PUMP_STABLE_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOLANA_VOLUME_PROGRAMS: readonly string[] = [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM];
 deepFreeze(SOLANA_VOLUME_PROGRAMS);
 /** The wallet's volume account under one pump program. */
@@ -1144,41 +1163,78 @@ const EXT_CONFIDENTIAL_FEE_AMOUNT = 17;
 /**
  * Compute units per teardown instruction, the bound each frame's limit must stay within (2 x budget + the sum over its
  * instructions): the recorded simulations used 270 (an SPL Token close), 1,616 (a Token-2022 close) and 10,396 to
- * 13,396 per volume close.
+ * 13,396 per volume close; 13,413 to open a WSOL account and 19,851 for PumpSwap's claim_cashback (12FzhSyn…).
  */
-export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000 } as const;
+export const SOLANA_TEARDOWN_CU = { budget: 300, close: 6_000, harvest: 8_000, volume: 25_000, open: 25_000, claim: 40_000 } as const;
 deepFreeze(SOLANA_TEARDOWN_CU);
 const TOKEN_ACCOUNT_LEN = 165;
+/** The most lamports an account a claim opens may hold after its frame: 2,039,280, a 165-byte account's rent at the older
+ *  rate ((128 + 165) x 3,480 x 2). A cap, not the rate: mainnet's rent for 165 bytes reads 1,488,440 ((128 + 165) x
+ *  5,080, packages/wallet/src/pool/balances.ts, 5 Nov), and whatever an open takes over real rent stays in the wallet's
+ *  own account, which only the wallet can close. */
+const SOLANA_TOKEN_ACCOUNT_RENT_MAX = 2_039_280n;
 
 /** One account as a provider answered it (getMultipleAccounts, base64). */
 export type SolanaHeldRead = { owner: string; lamports: bigint; data: Uint8Array };
 export type SolanaHeld =
   | { kind: "token"; address: string; program: string; mint: string; native: boolean; harvest: boolean; lamports: bigint }
   | { kind: "volume"; address: string; program: string; lamports: bigint };
-export type SolanaTeardownPlan = { close: SolanaHeld[]; keep: { address: string; why: string }[] };
+/**
+ * One cashback claim: `amount` of `mint` from the volume account's own account `from` to the wallet's `to`, opened
+ * first when `open` (it does not exist), closed to the wallet right after when `unwrap` (WSOL: the claim comes back as
+ * lamports). `fromAmount` and `toAmount` are the two accounts' token amounts as read.
+ */
+export type SolanaClaim = { program: string; uva: string; mint: string; from: string; to: string; amount: bigint; open: boolean; unwrap: boolean; fromAmount: bigint; toAmount: bigint };
+export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string }[] };
+/** The accounts a claim under `program` moves between: the volume account's and the wallet's, of the claim's mint. */
+export function solanaCashbackAccounts(wallet: string, program: string): { uva: string; mint: string; from: string; to: string } {
+  const mint = program === SOLANA_PUMP_AMM_PROGRAM ? SOLANA_SOL_MINT : SOLANA_PUMP_STABLE_MINT;
+  const uva = solanaVolumeAccumulator(wallet, program);
+  return { uva, mint, from: solanaAta(uva, mint, SOLANA_TOKEN_PROGRAM), to: solanaAta(wallet, mint, SOLANA_TOKEN_PROGRAM) };
+}
 
 /**
  * The addresses the wallet may hold after its trades: its account of each mint it traded (under that mint's program),
- * its wSOL account, and its volume account under each pump program. The device reads exactly these on two providers.
+ * its wSOL account, its volume account under each pump program, then each claim's two accounts (the volume account's
+ * WSOL or USDC account and the wallet's). The device reads exactly these on two providers.
  */
 export function solanaTeardownAddresses(wallet: string, mints: readonly { mint: string; program: string }[]): string[] {
   const out = [solanaAta(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), ...mints.map((m) => {
     if (!isToken(m.program)) throw new Error(`mint ${m.mint}: program ${m.program} is not Token or Token-2022`);
     return solanaAta(wallet, m.mint, m.program);
-  }), ...SOLANA_VOLUME_PROGRAMS.map((p) => solanaVolumeAccumulator(wallet, p))];
+  }), ...SOLANA_VOLUME_PROGRAMS.map((p) => solanaVolumeAccumulator(wallet, p)), ...SOLANA_VOLUME_PROGRAMS.flatMap((p) => {
+    const c = solanaCashbackAccounts(wallet, p);
+    return [c.from, c.to];
+  })];
   return [...new Set(out)];
 }
 
 /**
  * What the teardown closes and what stays, from the device's own reads of the wallet's accounts on two providers.
  * Throws when the providers disagree on any account (the caller re-reads) or an address is not the wallet's.
+ * `unclaimed`: claims off by pump program (solanaTeardownUnclaimed: the frame carrying the claims failed its simulation on
+ * both providers); each volume account owed under a program named stays open with that program's reason, and every
+ * other account, the other program's claim included, is planned as before.
  */
-export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>): SolanaTeardownPlan {
-  const plan: SolanaTeardownPlan = { close: [], keep: [] };
+export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<string, readonly [SolanaHeldRead | null, SolanaHeldRead | null]>>, unclaimed?: SolanaTeardownUnclaimed): SolanaTeardownPlan {
+  const plan: SolanaTeardownPlan = { close: [], claim: [], keep: [] };
   const volumes = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [solanaVolumeAccumulator(wallet, p), p]));
+  const cash = new Map(SOLANA_VOLUME_PROGRAMS.map((p) => [p, solanaCashbackAccounts(wallet, p)]));
+  // A volume account's own claim account: read, never closed (its owner is the volume account). Its token amount.
+  const sources = new Map([...cash.values()].map((c) => [c.from, c]));
+  const sourceAmount = new Map<string, bigint>();
+  // What each volume account owes through a claim, and what else keeps it open.
+  const owes = new Map<string, { program: string; amount: bigint; why: string; other: string[]; lamports: bigint }>();
   for (const [address, [a, b]] of Object.entries(accounts)) {
     if (!a !== !b || (a && b && (a.owner !== b.owner || a.lamports !== b.lamports || !eqBytes(a.data, b.data)))) throw new Error(`the providers disagree on ${address}`);
     if (!a) continue;
+    const src = sources.get(address);
+    if (src) {
+      const d = a.data;
+      if (a.owner !== SOLANA_TOKEN_PROGRAM || d.length !== TOKEN_ACCOUNT_LEN || base58.encode(d.subarray(0, 32)) !== src.mint || base58.encode(d.subarray(32, 64)) !== src.uva) throw new Error(`${address} is not the volume account's ${src.mint} account`);
+      sourceAmount.set(address, d[108] === 1 ? u64(d, 64) : 0n);
+      continue;
+    }
     if (volumes.has(address)) {
       if (a.owner !== volumes.get(address)) throw new Error(`${address} is owned by ${a.owner}, not ${volumes.get(address)}`);
       // UserVolumeAccumulator (the same IDLs, fields in order after the 8-byte discriminator): user @8, needs_claim bool
@@ -1191,13 +1247,14 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
       // (claim_cashback: user, the account, System), which the close returns to the wallet.
       const v = a.data;
       if (v.length < 90 || base58.encode(v.subarray(8, 40)) !== wallet) throw new Error(`${address} is not the wallet's volume account`);
-      const owed: string[] = [];
-      if (v[40] !== 0 || u64(v, 41) > 0n) owed.push(`unclaimed incentive tokens ${u64(v, 41)}`);
-      if (u64(v, 57) > 0n) owed.push(`volume ${u64(v, 57)} not settled`);
-      if (a.owner === SOLANA_PUMP_AMM_PROGRAM && u64(v, 74) > u64(v, 82)) owed.push(`cashback ${u64(v, 74) - u64(v, 82)} unclaimed`);
-      if (a.owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98)) owed.push(`stable cashback ${u64(v, 90) - u64(v, 98)} unclaimed`);
-      if (owed.length) { plan.keep.push({ address, why: owed.join(", ") }); continue; }
-      plan.close.push({ kind: "volume", address, program: a.owner, lamports: a.lamports });
+      const other: string[] = [];
+      if (v[40] !== 0 || u64(v, 41) > 0n) other.push(`unclaimed incentive tokens ${u64(v, 41)}`);
+      if (u64(v, 57) > 0n) other.push(`volume ${u64(v, 57)} not settled`);
+      // What a claim pays: PumpSwap's cashback (WSOL), pump's stable cashback (USDC); resolved after every read.
+      const amm = a.owner === SOLANA_PUMP_AMM_PROGRAM && u64(v, 74) > u64(v, 82);
+      const stable = a.owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98);
+      const amount = amm ? u64(v, 74) - u64(v, 82) : stable ? u64(v, 90) - u64(v, 98) : 0n;
+      owes.set(address, { program: a.owner, amount, why: amm ? `cashback ${amount} unclaimed` : `stable cashback ${amount} unclaimed`, other, lamports: a.lamports });
       continue;
     }
     if (!isToken(a.owner)) throw new Error(`${address} is owned by ${a.owner}, not a token program`);
@@ -1232,6 +1289,36 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
     else if (confidential) plan.keep.push({ address, why: "confidential balance" });
     else plan.close.push({ kind: "token", address, program: a.owner, mint, native, harvest: harvest && a.owner === SOLANA_TOKEN_2022_PROGRAM, lamports: a.lamports });
   }
+  // Each volume account: its claim when it owes one and both of the claim's accounts can take it, then its close when
+  // nothing else is owed. A claim that cannot run keeps the account open, so nothing owed is ever closed away.
+  for (const [address, o] of owes) {
+    const why = [...o.other];
+    if (o.amount > 0n) {
+      const c = cash.get(o.program) as ReturnType<typeof solanaCashbackAccounts>;
+      const has = sourceAmount.get(c.from);
+      const toRead = Object.hasOwn(accounts, c.to) ? (accounts[c.to] as readonly [SolanaHeldRead | null, SolanaHeldRead | null])[0] : undefined;
+      const toClose = plan.close.find((h) => h.address === c.to);
+      const toKept = plan.keep.find((k) => k.address === c.to);
+      let stop: string | null = null;
+      const off = unclaimed !== undefined && Object.hasOwn(unclaimed, o.program) ? unclaimed[o.program] : undefined;
+      if (off !== undefined) stop = off;
+      else if (has === undefined || has < o.amount) stop = `the volume account's ${c.mint} account holds ${has ?? "nothing read"}`;
+      else if (toRead === undefined) stop = `${c.to} not read`;
+      else if (toRead !== null && (toRead.owner !== SOLANA_TOKEN_PROGRAM || (o.program === SOLANA_PUMP_AMM_PROGRAM ? !toClose : toRead.data[108] !== 1))) stop = `${c.to} cannot take it${toKept ? ` (${toKept.why})` : ""}`;
+      if (stop) why.push(`${o.why} (${stop})`);
+      else {
+        const toAmount = toRead ? u64(toRead.data, 64) : 0n;
+        plan.claim.push({ program: o.program, uva: address, mint: c.mint, from: c.from, to: c.to, amount: o.amount, open: toRead === null, unwrap: o.program === SOLANA_PUMP_AMM_PROGRAM, fromAmount: has as bigint, toAmount });
+        // The wallet's USDC account takes the stable cashback and keeps it: never closed in this teardown.
+        if (o.program === SOLANA_PUMP_PROGRAM) {
+          plan.close = plan.close.filter((h) => h.address !== c.to);
+          if (!toKept) plan.keep.push({ address: c.to, why: `takes stable cashback ${o.amount} of ${c.mint}` });
+        }
+      }
+    }
+    if (why.length) plan.keep.push({ address, why: why.join(", ") });
+    else plan.close.push({ kind: "volume", address, program: o.program, lamports: o.lamports });
+  }
   return plan;
 }
 
@@ -1242,6 +1329,8 @@ export type SolanaTeardownSimulation = {
   wallet: bigint;
   /** Each account the frame closes, by address: its lamports after the frame, null when the account is gone. */
   accounts: Readonly<Record<string, bigint | null>>;
+  /** Each token account read after the frame, by address: its token amount, null when gone or not a token account. */
+  amounts?: Readonly<Record<string, bigint | null>>;
 };
 export type SolanaTeardownReads = {
   /** solanaTeardownAddresses' accounts, read on provider A and B (null: no account). */
@@ -1250,7 +1339,11 @@ export type SolanaTeardownReads = {
   wallet: readonly [bigint, bigint];
   /** Per frame, in order: its simulation on provider A and B. */
   simulations: readonly (readonly [SolanaTeardownSimulation | null, SolanaTeardownSimulation | null])[];
+  /** Claims off by program, with the reason each owed volume account stays open (solanaTeardownPlan's `unclaimed`). */
+  unclaimed?: SolanaTeardownUnclaimed;
 };
+/** Claims off, by pump program: the reason each owed volume account under it stays open. */
+export type SolanaTeardownUnclaimed = Readonly<Record<string, string>>;
 export type SolanaTeardownCheckId = "READ" | "DECODE" | "FRAME" | "COVER" | "SIM";
 export type SolanaTeardownVerdict = { ok: boolean; plan: SolanaTeardownPlan | null; results: { id: SolanaTeardownCheckId; ok: boolean; detail: string }[] };
 
@@ -1265,17 +1358,26 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
   const r = (id: SolanaTeardownCheckId, ok: boolean, detail: string) => ({ id, ok, detail });
   let plan: SolanaTeardownPlan;
   try {
-    plan = solanaTeardownPlan(wallet, reads.accounts);
+    plan = solanaTeardownPlan(wallet, reads.accounts, reads.unclaimed);
     if (reads.wallet[0] !== reads.wallet[1]) throw new Error(`the providers disagree on the wallet's lamports: ${reads.wallet[0]}/${reads.wallet[1]}`);
   } catch (err) {
     return { ok: false, plan: null, results: [r("READ", false, (err as Error).message)] };
   }
   const byAddress = new Map(plan.close.map((h) => [h.address, h]));
-  type Frame = { closes: string[]; fee: bigint };
+  const claimOf = new Map(plan.claim.map((c) => [c.uva, c]));
+  const unwrapOf = new Map(plan.claim.filter((c) => c.unwrap).map((c) => [c.to, c]));
+  type Frame = { closes: string[]; claims: SolanaClaim[]; fee: bigint };
   const frames: Frame[] = [];
   const wrong: string[] = [];
   const closed = new Map<string, number>();
   const harvested = new Map<string, number>();
+  const claimed = new Map<string, number>();
+  const opened = new Map<string, number>();
+  const unwrapped = new Map<string, number>();
+  const isClose = (x: Ix) => isToken(x.program) && x.data.length === 1 && x.data[0] === 9;
+  const isClaim = (x: Ix | undefined, c: SolanaClaim) => x?.program === c.program && eqBytes(x.data, Uint8Array.from(c.program === SOLANA_PUMP_AMM_PROGRAM ? SOLANA_CLAIM_CASHBACK : SOLANA_CLAIM_CASHBACK_V2));
+  // A claim's accounts in the IDL's order (SOLANA_CLAIM_CASHBACK, SOLANA_CLAIM_CASHBACK_V2): the wallet's own only.
+  const claimKeys = (c: SolanaClaim) => [wallet, c.uva, c.mint, SOLANA_TOKEN_PROGRAM, ...(c.program === SOLANA_PUMP_AMM_PROGRAM ? [] : [SOLANA_ATA_PROGRAM]), c.from, c.to, SOLANA_SYSTEM_PROGRAM, solanaEventAuthority(c.program), c.program];
   try {
     for (const [f, wire] of wires.entries()) {
       const tx = solanaDecodeTransaction(wire);
@@ -1294,6 +1396,7 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
       let limit: number | null = null;
       let price = 0n;
       const closes: string[] = [];
+      const claims: SolanaClaim[] = [];
       for (const [k, ix] of ixs.entries()) {
         const at = `frame ${f} ix ${k}`;
         const a = ix.accounts;
@@ -1302,6 +1405,31 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
           if (d.length === 5 && d[0] === 2 && limit === null) limit = u32(d, 1);
           else if (d.length === 9 && d[0] === 3 && price === 0n && u64(d, 1) <= SOLANA_CU_PRICE_MAX) price = u64(d, 1);
           else wrong.push(`${at}: compute budget ${hex(d)}`);
+          continue;
+        }
+        // The close of the wallet's WSOL account a claim pays into: right after that claim, to the wallet.
+        const uw = unwrapOf.get(a[0]?.key as string);
+        if (isClose(ix) && uw) {
+          if (ix.program !== SOLANA_TOKEN_PROGRAM || a.length !== 3 || a[1]?.key !== wallet || a[2]?.key !== wallet || !a[0]?.writable || !a[1]?.writable || !isClaim(ixs[k - 1], uw)) { wrong.push(`${at}: close of ${uw.to} not right after its claim`); continue; }
+          if (byAddress.has(uw.to)) { closed.set(uw.to, (closed.get(uw.to) ?? 0) + 1); closes.push(uw.to); }
+          else unwrapped.set(uw.to, (unwrapped.get(uw.to) ?? 0) + 1);
+          continue;
+        }
+        // CreateIdempotent of the wallet's own account a claim pays into, when it has none, right before that claim.
+        if (ix.program === SOLANA_ATA_PROGRAM) {
+          const c = plan.claim.find((x) => x.to === a[1]?.key);
+          const want = c && [wallet, c.to, wallet, c.mint, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM];
+          if (!c || !want || d.length !== 1 || d[0] !== 1 || a.length !== 6 || !a.every((x, i) => x.key === want[i]) || !a[0]?.signer || !a[1]?.writable || !isClaim(ixs[k + 1], c)) { wrong.push(`${at}: open of ${a[1]?.key} (want only the wallet's own claim account, right before its claim)`); continue; }
+          opened.set(c.to, (opened.get(c.to) ?? 0) + 1);
+          continue;
+        }
+        if (SOLANA_VOLUME_PROGRAMS.includes(ix.program) && !eqBytes(d, Uint8Array.from(SOLANA_CLOSE_VOLUME_ACCUMULATOR))) {
+          const c = claimOf.get(solanaVolumeAccumulator(wallet, ix.program));
+          const want = c && claimKeys(c);
+          const shape = !!want && a.length === want.length && a.every((x, i) => x.key === want[i]) && a[0]?.writable && a[1]?.writable && a[want.length - 5]?.writable && a[want.length - 4]?.writable;
+          if (!c || !isClaim(ix, c) || !shape) { wrong.push(`${at}: ${ix.program} instruction ${hex(d)} (no claim of the plan's, to ${a.map((x) => x.key).join(",")})`); continue; }
+          claimed.set(c.uva, (claimed.get(c.uva) ?? 0) + 1);
+          claims.push(c);
           continue;
         }
         if (isToken(ix.program) && d.length === 1 && d[0] === 9 && a.length === 3) {
@@ -1325,6 +1453,8 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
           const want = [wallet, uva, solanaEventAuthority(ix.program), ix.program];
           const shape = a.length === 4 && a.every((x, i) => x.key === want[i]) && a[0]?.signer && a[0]?.writable && a[1]?.writable;
           if (!h || h.kind !== "volume" || !shape || !eqBytes(d, Uint8Array.from(SOLANA_CLOSE_VOLUME_ACCUMULATOR))) { wrong.push(`${at}: ${ix.program} instruction ${hex(d)}`); continue; }
+          const owed = claimOf.get(uva);
+          if (owed && !claims.includes(owed)) { wrong.push(`${at}: close of ${uva} before its claim in this frame`); continue; }
           closed.set(uva, (closed.get(uva) ?? 0) + 1);
           closes.push(uva);
           continue;
@@ -1333,10 +1463,11 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
       }
       const fee = SOLANA_LAMPORTS_PER_SIGNATURE * BigInt(tx.signatures) + (price * BigInt(limit ?? 0) + 999_999n) / 1_000_000n;
       // A frame closes something, and asks no more compute than its instructions are allowed.
-      const cap = 2 * SOLANA_TEARDOWN_CU.budget + ixs.reduce((n, x) => n + (x.program === SOLANA_COMPUTE_BUDGET_PROGRAM ? 0 : SOLANA_VOLUME_PROGRAMS.includes(x.program) ? SOLANA_TEARDOWN_CU.volume : x.data[0] === 26 ? SOLANA_TEARDOWN_CU.harvest : SOLANA_TEARDOWN_CU.close), 0);
-      if (closes.length === 0) wrong.push(`frame ${f}: closes nothing`);
+      const cuOf = (x: Ix) => (x.program === SOLANA_COMPUTE_BUDGET_PROGRAM ? 0 : x.program === SOLANA_ATA_PROGRAM ? SOLANA_TEARDOWN_CU.open : SOLANA_VOLUME_PROGRAMS.includes(x.program) ? (eqBytes(x.data, Uint8Array.from(SOLANA_CLOSE_VOLUME_ACCUMULATOR)) ? SOLANA_TEARDOWN_CU.volume : SOLANA_TEARDOWN_CU.claim) : x.data[0] === 26 ? SOLANA_TEARDOWN_CU.harvest : SOLANA_TEARDOWN_CU.close);
+      const cap = 2 * SOLANA_TEARDOWN_CU.budget + ixs.reduce((n, x) => n + cuOf(x), 0);
+      if (closes.length === 0 && claims.length === 0) wrong.push(`frame ${f}: closes nothing`);
       if (limit === null || limit > cap) wrong.push(`frame ${f}: compute limit ${limit ?? "unset"} (want at most ${cap})`);
-      frames.push({ closes, fee });
+      frames.push({ closes, claims, fee });
     }
   } catch (err) {
     return { ok: false, plan, results: [r("READ", true, `${plan.close.length} to close, ${plan.keep.length} stay`), r("DECODE", false, (err as Error).message)] };
@@ -1347,28 +1478,97 @@ export function checkSolanaTeardown(wires: readonly Uint8Array[], wallet: string
     if (n !== 1) cover.push(`${h.address} closed ${n} times (want 1)`);
     if (h.kind === "token" && h.harvest && (harvested.get(h.address) ?? 0) !== 1) cover.push(`${h.address} harvested ${harvested.get(h.address) ?? 0} times before its close (want 1)`);
   }
+  for (const c of plan.claim) {
+    if ((claimed.get(c.uva) ?? 0) !== 1) cover.push(`${c.uva}'s cashback claimed ${claimed.get(c.uva) ?? 0} times (want 1)`);
+    if ((opened.get(c.to) ?? 0) !== (c.open ? 1 : 0)) cover.push(`${c.to} opened ${opened.get(c.to) ?? 0} times (want ${c.open ? 1 : 0})`);
+    if (c.unwrap && c.open && (unwrapped.get(c.to) ?? 0) !== 1) cover.push(`${c.to} closed ${unwrapped.get(c.to) ?? 0} times after its claim (want 1)`);
+  }
   const sim: string[] = [];
   if (reads.simulations.length !== frames.length) sim.push(`${reads.simulations.length} simulations for ${frames.length} frames`);
   for (const [f, fr] of frames.entries()) {
-    const gain = fr.closes.reduce((s, x) => s + (byAddress.get(x) as SolanaHeld).lamports, 0n);
+    // The wallet gains the lamports of what the frame closes and every WSOL claim, less the fee and the rent of a
+    // USDC account the frame opens for a claim (that account the wallet's own, holding the claim).
+    const gain = fr.closes.reduce((s, x) => s + (byAddress.get(x) as SolanaHeld).lamports, 0n) + fr.claims.reduce((s, c) => s + (c.unwrap ? c.amount : 0n), 0n);
     for (const [p, s] of (reads.simulations[f] ?? [null, null]).entries()) {
       const at = `frame ${f} provider ${p === 0 ? "A" : "B"}`;
       if (!s) { sim.push(`${at}: no simulation`); continue; }
       if (s.err !== null) { sim.push(`${at}: simulation error ${JSON.stringify(s.err)}`); continue; }
-      for (const x of fr.closes) {
+      const gone = [...fr.closes, ...fr.claims.filter((c) => c.unwrap && c.open).map((c) => c.to)];
+      for (const x of gone) {
         const post = Object.hasOwn(s.accounts, x) ? s.accounts[x] : undefined;
         if (post === undefined) sim.push(`${at}: ${x} not read after`);
         else if (post !== null && post !== 0n) sim.push(`${at}: ${x} still holds ${post} lamports`);
       }
-      if (s.wallet - reads.wallet[0] !== gain - fr.fee) sim.push(`${at}: the wallet gains ${s.wallet - reads.wallet[0]} (want ${gain} less the fee ${fr.fee})`);
+      let rent = 0n;
+      for (const c of fr.claims) {
+        const from = s.amounts && Object.hasOwn(s.amounts, c.from) ? s.amounts[c.from] : undefined;
+        if (from !== c.fromAmount - c.amount) sim.push(`${at}: ${c.from} holds ${from ?? "nothing read"} after the claim (want ${c.fromAmount - c.amount})`);
+        if (c.unwrap) continue;
+        const to = s.amounts && Object.hasOwn(s.amounts, c.to) ? s.amounts[c.to] : undefined;
+        if (to !== c.toAmount + c.amount) sim.push(`${at}: ${c.to} holds ${to ?? "nothing read"} after the claim (want ${c.toAmount + c.amount})`);
+        const lam = Object.hasOwn(s.accounts, c.to) ? s.accounts[c.to] : undefined;
+        if (c.open) {
+          if (typeof lam !== "bigint" || lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim.push(`${at}: ${c.to} opened with ${lam ?? "nothing read"} lamports (want at most ${SOLANA_TOKEN_ACCOUNT_RENT_MAX})`);
+          else rent += lam;
+        }
+      }
+      if (s.wallet - reads.wallet[0] !== gain - fr.fee - rent) sim.push(`${at}: the wallet gains ${s.wallet - reads.wallet[0]} (want ${gain} less the fee ${fr.fee}${rent ? ` and the rent ${rent}` : ""})`);
     }
   }
   const results = [
     r("READ", true, `${plan.close.length} to close, ${plan.keep.length} stay${plan.keep.length ? ` (${plan.keep.map((k) => `${k.address}: ${k.why}`).join("; ")})` : ""}`),
     r("DECODE", true, `${frames.length} frame(s)`),
-    r("FRAME", wrong.length === 0, wrong.join("; ") || "only closes to the wallet, harvests right before their close, and the compute budget"),
-    r("COVER", cover.length === 0, cover.join("; ") || `every one of ${plan.close.length} closed once`),
-    r("SIM", sim.length === 0, sim.join("; ") || "every frame clean on both providers, every closed account gone, every lamport back less the fee"),
+    r("FRAME", wrong.length === 0, wrong.join("; ") || "only closes to the wallet, harvests right before their close, claims to the wallet right before their close, and the compute budget"),
+    r("COVER", cover.length === 0, cover.join("; ") || `every one of ${plan.close.length} closed once, every one of ${plan.claim.length} claims once`),
+    r("SIM", sim.length === 0, sim.join("; ") || "every frame clean on both providers, every closed account gone, every claim paid in full to the wallet, every lamport back less the fee"),
   ];
   return { ok: results.every((x) => x.ok), plan, results };
+}
+
+/**
+ * Whether a refused teardown goes again with claims off, and for which pump programs, with the reason each owed volume
+ * account then stays open (review M1 of 11c963f9). Only when every check passed but SIM, the plan claims something, every
+ * frame before the last simulates clean on both providers and the last, which carries the claims, errs on both: a
+ * program's refusal (a layout it no longer takes, cashback switched off, more compute than its budget) shows on both,
+ * a provider's lag or a hostile provider on one, and that stays a refusal the caller reads again. The program off is
+ * the one whose instruction both providers name as failing, when that is a claim's (review L1: a failing claim keeps
+ * only its own account open); otherwise every claim's. `already`: the programs a previous try turned off, kept. With
+ * claims off nothing owed is closed away; the caller keeps the wallet owed, so a later pass claims it. Null otherwise.
+ */
+export function solanaTeardownUnclaimed(v: SolanaTeardownVerdict, wires: readonly Uint8Array[], simulations: SolanaTeardownReads["simulations"], already: SolanaTeardownUnclaimed = {}): SolanaTeardownUnclaimed | null {
+  if (v.ok || !v.plan || v.plan.claim.length === 0 || v.results.some((x) => !x.ok && x.id !== "SIM")) return null;
+  if (wires.length === 0 || simulations.length !== wires.length) return null;
+  const clean = (s: SolanaTeardownSimulation | null): boolean => s !== null && s.err === null;
+  const errs = (s: SolanaTeardownSimulation | null): boolean => s !== null && s.err !== null && s.err !== undefined;
+  if (!simulations.slice(0, -1).every(([a, b]) => clean(a) && clean(b))) return null;
+  const [a, b] = simulations.at(-1)!;
+  if (!errs(a) || !errs(b)) return null;
+  const err = (s: SolanaTeardownSimulation): string => {
+    try {
+      return JSON.stringify(s.err).slice(0, 120);
+    } catch {
+      return "an error";
+    }
+  };
+  // the instruction each provider names as failing, by its program
+  let failing: readonly [string | null, string | null];
+  try {
+    const m = solanaDecodeTransaction(wires.at(-1)!).message;
+    const at = (s: SolanaTeardownSimulation): string | null => {
+      const e = (s.err as { InstructionError?: unknown } | null)?.InstructionError;
+      const i = Array.isArray(e) ? e[0] : undefined;
+      const x = typeof i === "number" && Number.isSafeInteger(i) ? m.instructions[i] : undefined;
+      return x ? (m.staticKeys[x.programIndex] ?? null) : null;
+    };
+    failing = [at(a!), at(b!)];
+  } catch {
+    failing = [null, null];
+  }
+  const claimed = [...new Set(v.plan.claim.map((c) => c.program))];
+  const [fa, fb] = failing;
+  const one = typeof fa === "string" && fa === fb && claimed.includes(fa) ? fa : null;
+  const why = `its claim did not simulate on either provider: A ${err(a!)}, B ${err(b!)}`;
+  const off: Record<string, string> = { ...already };
+  for (const p of one === null ? claimed : [one]) off[p] = why;
+  return off;
 }
