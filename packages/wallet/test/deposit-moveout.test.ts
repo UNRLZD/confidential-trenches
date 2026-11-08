@@ -10,7 +10,7 @@ import { VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { buildRegisterOut, checkMoveCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -298,6 +298,7 @@ test("the ft_withdraw rule (card exit-ids-out) refuses a memo, a msg, another to
     () => checkWithdrawCalls(U, NET.vault, TOKEN, withdrawCalls(NET.vault, 1n, TOKEN), 3_000_000n),
     () => checkWithdrawCalls(U, TO, TOKEN, [c, c], 3_000_000n),
     () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, deposit: 0n }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, "other.testnet", withdrawCalls(TO, 1n, "other.testnet"), 3_000_000n),
   ];
   for (const f of bad) assert.throws(f, MoveOutRefused);
 });
@@ -321,14 +322,68 @@ test("readWithdrawOut (card exit-ids-out): what U holds inside intents.near at r
   assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "readMoveOut's own reads must agree too");
 });
 
-test("the exit's typed-account rule refuses exactly the accounts checkMoveCalls refuses (card exit-ids-out)", () => {
+test("the exit's typed-account rule refuses exactly what checkMoveCalls refuses, over every moving account, token and typed account (card exit-ids-out)", () => {
   const k = depositId(SEED, 1n, 0);
-  const others = ["bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc];
-  for (const to of [NET.vault, "intents.near", TOKEN, U, ...others]) {
-    const held = (() => { try { checkMoveCalls(U, to, TOKEN, moveCalls(to, 1n, false, 0n), 2n, 0n); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : "other"; } })();
-    const exit = (() => { try { buildRegisterOut({ read: { nonce: 1n, blockHash: "11111111111111111111111111111111", registered: false }, key: { ...k, secretKey: k.secretKey.slice() }, to, token: TOKEN, storageMin: STORAGE_MIN }); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : "other"; } })();
-    assert.equal(exit, held, to);
+  const tos = [NET.vault, "intents.near", TOKEN, U, "bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc, "other.testnet"];
+  const verdict = (f: () => unknown) => { try { f(); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : `other: ${String(e)}`; } };
+  let oks = 0;
+  for (const u of [U, "bob.testnet"]) {
+    for (const token of [TOKEN, NEAR_NETWORKS.mainnet.usdc, "other.testnet"]) {
+      for (const to of tos) {
+        const held = verdict(() => checkMoveCalls(u, to, token, moveCalls(to, 1n, false, 0n), 2n, 0n));
+        const withdraw = verdict(() => checkWithdrawCalls(u, to, token, withdrawCalls(to, 1n, token), 2n));
+        assert.equal(withdraw, held, `withdraw: ${u} ${token} ${to}`);
+        if (u === U) {
+          const register = verdict(() => buildRegisterOut({ read: { nonce: 1n, blockHash: "11111111111111111111111111111111", registered: false, u, to, token }, key: { ...k, secretKey: k.secretKey.slice() }, to, token, storageMin: STORAGE_MIN }));
+          assert.equal(register, held, `register: ${token} ${to}`);
+        }
+        if (held === "ok") oks++;
+      }
+    }
   }
+  assert.ok(oks >= 4, "some cases pass, so the loop tests the refusals and not a broken setup");
+});
+
+test("each exit builder signs what it checked: a getter that answers the check one value and the signer another changes nothing (card exit-ids-out, review M1)", () => {
+  const k = depositId(SEED, 1n, 0);
+  const BH = "11111111111111111111111111111111";
+  const flip = <T,>(first: T, later: T) => { let n = 0; return () => (n++ === 0 ? first : later); };
+  const signedText = (m: { signed: string }) => new TextDecoder().decode(base64.decode(m.signed));
+  const keyOf = () => ({ ...k, secretKey: k.secretKey.slice() });
+  const getterArgs = <A extends object>(base: A, field: keyof A & string, later: unknown) => Object.defineProperty({ ...base }, field, { get: flip((base as Record<string, unknown>)[field], later), enumerable: true });
+  const read = { height: 1000, blockHash: BH, nonce: 7n, free: NEAR, usdc: 2_500_000n, registered: false, gasPrice: 100_000_000n, u: U, to: TO, token: TOKEN };
+  const move = { read, key: keyOf(), kind: "id" as const, to: TO, token: TOKEN, storageMin: STORAGE_MIN };
+  for (const [field, later] of [["to", "evil.testnet"], ["token", "evil.testnet"], ["storageMin", 9n], ["kind", "arm"]] as const) {
+    const m = buildMoveOut(getterArgs({ ...move, key: keyOf() }, field, later));
+    assert.ok(!signedText(m).includes("evil"), `buildMoveOut ${field}`);
+    assert.equal(m.amount, 2_499_999n);
+    assert.equal(m.receiver, TOKEN);
+  }
+  const reg = { read: { nonce: 7n, blockHash: BH, registered: false, u: U, to: TO, token: TOKEN }, key: keyOf(), to: TO, token: TOKEN, storageMin: STORAGE_MIN };
+  for (const [field, later] of [["to", "evil.testnet"], ["token", "evil.testnet"], ["storageMin", 9n]] as const) {
+    const m = buildRegisterOut(getterArgs({ ...reg, key: keyOf() }, field, later));
+    assert.ok(!signedText(m).includes("evil"), `buildRegisterOut ${field}`);
+    assert.equal(m.receiver, TOKEN);
+    assert.equal(m.calls[0]!.deposit, STORAGE_MIN);
+  }
+  const wd = { read: { ...read, held: 3_000_000n, registered: true }, key: keyOf(), kind: "id" as const, to: TO, token: TOKEN };
+  for (const [field, later] of [["to", "evil.testnet"], ["token", "evil.testnet"], ["kind", "arm"]] as const) {
+    const m = buildWithdrawOut(getterArgs({ ...wd, key: keyOf() }, field, later));
+    assert.ok(!signedText(m).includes("evil"), `buildWithdrawOut ${field}`);
+    assert.equal(m.amount, 2_999_999n);
+  }
+  // the key's id and the read's fields, flipped after the first read
+  const k2 = depositId(SEED, 1n, 1);
+  const keyFlip = Object.defineProperty({ ...keyOf() }, "id", { get: flip(k.id, k2.id), enumerable: true });
+  assert.equal(new TextDecoder().decode(base64.decode(buildMoveOut({ ...move, key: keyFlip }).signed)).includes(k.id), true);
+  const readFlip = Object.defineProperty({ ...read }, "blockHash", { get: flip(BH, "evil"), enumerable: true });
+  buildMoveOut({ ...move, key: keyOf(), read: readFlip }); // read once: the second answer is never asked for
+  // a read of another account, typed account or token is refused
+  for (const [f, v] of [["u", k2.id], ["to", "bob.testnet"], ["token", NEAR_NETWORKS.mainnet.usdc]] as const) assert.throws(() => buildMoveOut({ ...move, key: keyOf(), read: { ...read, [f]: v } }), MoveOutRefused, f);
+  // an unknown kind, and storageMin 0 for an unregistered typed account, are refused
+  assert.throws(() => buildMoveOut({ ...move, key: keyOf(), kind: "all" as "id" }), MoveOutRefused);
+  assert.throws(() => buildMoveOut({ ...move, key: keyOf(), storageMin: 0n }), MoveOutRefused);
+  assert.throws(() => buildWithdrawOut({ ...wd, key: keyOf(), kind: "W" as "id" }), MoveOutRefused);
 });
 
 test("bytes both RPCs refuse for U's NEAR answer gas and are kept: once U holds the cost the same bytes land, none signed anew", async () => {

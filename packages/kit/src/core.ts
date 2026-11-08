@@ -30,11 +30,14 @@ export {
   buildWithdrawOut,
   moveOutRpc,
   MoveOutRefused,
-  readMoveOut,
+  readMoveOutFor,
   readWithdrawOut,
   type BuiltMove,
-  type MoveOutRead,
+  type MoveOutReadFor,
   type MoveOutRpc,
   type OwnKey,
-  type WithdrawOutRead,
+  type RegisterOutReadFor,
+  type WithdrawOutReadFor,
 } from "../../wallet/src/deposit/moveout.ts";
+// the wallet's bound on two providers' final heights, which the exit tool's reads hold too
+export { HEIGHT_SPREAD_MAX } from "../../wallet/src/deposit/account.ts";

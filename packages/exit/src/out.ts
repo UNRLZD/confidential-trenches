@@ -24,11 +24,13 @@ import {
   refundId,
   returnId,
   type BuiltMove,
-  type MoveOutRead,
+  HEIGHT_SPREAD_MAX,
+  type MoveOutReadFor,
   type OwnKey,
-  type WithdrawOutRead,
+  type RegisterOutReadFor,
+  type WithdrawOutReadFor,
 } from "@blindfill/kit/core";
-import { nearPairNetwork, nearPairRule, type NearNetwork, type VaultSyncRpc } from "@blindfill/kit";
+import { nearPairNetwork, nearPairRule, VAULT_SYNC_BUSY_WAITS_MS, vaultViewBusy, type NearNetwork, type VaultSyncRpc } from "@blindfill/kit";
 import { EXIT_NETWORKS, ExitRpcRefused } from "./rpc.ts";
 import { EXIT_TOKENS } from "./scan.ts";
 
@@ -66,7 +68,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const DIGITS = /^(0|[1-9][0-9]*)$/;
 const args64 = (a: Obj) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(a))));
 
-/** The account's own key from seed64. The caller zeroes secretKey (signWith does). */
+/** The account's own key from seed64. The caller zeroes secretKey (exitBuildMove does, on every path). */
 export function exitKey(seed64: Uint8Array, a: ExitAccount): OwnKey {
   if (!(seed64 instanceof Uint8Array) || seed64.length !== 64) throw new ExitRpcRefused("seed64 must be 64 bytes");
   switch (a.kind) {
@@ -106,42 +108,64 @@ const amountOf = (v: unknown, what: string): bigint => {
   return BigInt(v);
 };
 
-/**
- * What each id holds on `network`'s token and inside intents.near, on the release's two RPCs at one block: the lower of
- * their final heights. Throws ExitRpcRefused before any read for an unknown network, a pair not the release's or an id
- * that is not a 64-hex implicit account; ExitOutStopped when a read fails or the two differ. A halt on either RPC reads
- * as halted for that id.
- */
-export async function exitHoldings(a: { network: NearNetwork; ids: readonly string[]; rpcs: readonly [VaultSyncRpc, VaultSyncRpc] }): Promise<{ height: number; holdings: ExitHolding[] }> {
-  const { network, rpcs } = a;
-  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
-  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
-  for (const id of a.ids) if (typeof id !== "string" || !HEX64.test(id)) throw new ExitRpcRefused(`${JSON.stringify(id)} is not a 64-hex implicit account`);
-  const token = EXIT_TOKENS[network];
-  const intents = EXIT_INTENTS[network];
+/** A query on one RPC, asked again after each of the kit's busy waits while it answers busy (dRPC's free-plan 408), then a stop. */
+async function ask(r: VaultSyncRpc, params: Record<string, unknown>, sleep: (ms: number) => Promise<void>): Promise<unknown> {
+  for (let i = 0; ; i++) {
+    const ans = await r.query(params).catch(() => null);
+    if (!vaultViewBusy(ans)) return ans;
+    const wait = VAULT_SYNC_BUSY_WAITS_MS[i];
+    if (wait === undefined) throw new ExitOutStopped(`${r.name}: busy ${i + 1} times`);
+    await sleep(wait);
+  }
+}
+const realSleep = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
+
+/** The block both RPCs read at: the lower of their final heights, which may spread HEIGHT_SPREAD_MAX blocks at most (the wallet's bound). */
+async function finalAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], token: string, sleep: (ms: number) => Promise<void>): Promise<number> {
   const finals = await Promise.all(
     rpcs.map(async (r) => {
-      const ans = await r.query({ request_type: "view_account", account_id: token, finality: "final" }).catch(() => null);
+      const ans = await ask(r, { request_type: "view_account", account_id: token, finality: "final" }, sleep);
       const h = isObj(ans) && isObj(ans.result) ? ans.result.block_height : undefined;
       if (typeof h !== "number" || !Number.isSafeInteger(h) || h <= 0) throw new ExitOutStopped(`${r.name}: no final height`);
       return h;
     }),
   );
-  const at = Math.min(...finals);
-  const side = (r: VaultSyncRpc) =>
-    Promise.all(
-      a.ids.map(async (id) => {
-        const bal = await r.query({ request_type: "call_function", account_id: token, method_name: "ft_balance_of", args_base64: args64({ account_id: id }), block_id: at }).catch(() => null);
-        const mt = intents === null ? null : await r.query({ request_type: "call_function", account_id: intents, method_name: "mt_balance_of", args_base64: args64({ account_id: id, token_id: `nep141:${token}` }), block_id: at }).catch(() => null);
-        return { bal, mt };
-      }),
-    );
+  if (Math.max(...finals) - Math.min(...finals) > HEIGHT_SPREAD_MAX) throw new ExitOutStopped(`the two RPCs' final heights spread ${Math.max(...finals) - Math.min(...finals)} blocks, over ${HEIGHT_SPREAD_MAX}`);
+  return Math.min(...finals);
+}
+
+/**
+ * What each id holds on `network`'s token and inside intents.near, on the release's two RPCs at one block: the lower of
+ * their final heights. Throws ExitRpcRefused before any read for an unknown network, a pair not the release's or an id
+ * that is not a 64-hex implicit account; ExitOutStopped when a read fails, the two differ, or their heights spread too
+ * far. A halt on both RPCs reads as halted for that id; a halt on one only is a split, and stops the read. Each RPC is
+ * asked one query at a time, and a busy answer is asked again after the kit's waits. `sleep` is for tests only.
+ */
+export async function exitHoldings(a: { network: NearNetwork; ids: readonly string[]; rpcs: readonly [VaultSyncRpc, VaultSyncRpc] }, sleep: (ms: number) => Promise<void> = realSleep): Promise<{ height: number; holdings: ExitHolding[] }> {
+  const { network, rpcs } = a;
+  const ids = [...a.ids];
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
+  for (const id of ids) if (typeof id !== "string" || !HEX64.test(id)) throw new ExitRpcRefused(`${JSON.stringify(id)} is not a 64-hex implicit account`);
+  const token = EXIT_TOKENS[network];
+  const intents = EXIT_INTENTS[network];
+  const at = await finalAt(rpcs, token, sleep);
+  const side = async (r: VaultSyncRpc) => {
+    const out: { bal: unknown; mt: unknown }[] = [];
+    for (const id of ids) {
+      const bal = await ask(r, { request_type: "call_function", account_id: token, method_name: "ft_balance_of", args_base64: args64({ account_id: id }), block_id: at }, sleep);
+      const mt = intents === null ? null : await ask(r, { request_type: "call_function", account_id: intents, method_name: "mt_balance_of", args_base64: args64({ account_id: id, token_id: `nep141:${token}` }), block_id: at }, sleep);
+      out.push({ bal, mt });
+    }
+    return out;
+  };
   const [x, y] = await Promise.all(rpcs.map(side));
-  const holdings = a.ids.map((id, k): ExitHolding => {
+  const holdings = ids.map((id, k): ExitHolding => {
     const p = x![k]!, q = y![k]!;
-    // the halt first: a FiatToken: paused error on either RPC is a halt, whatever the other says
     let tok: ExitHolding["token"];
-    if (isHalt(p.bal) || isHalt(q.bal)) tok = { state: "halted" };
+    const [hp, hq] = [isHalt(p.bal), isHalt(q.bal)];
+    if (hp && hq) tok = { state: "halted" };
+    else if (hp || hq) throw new ExitOutStopped(`${rpcs[hp ? 0 : 1].name} reads USDC halted for ${id} and ${rpcs[hp ? 1 : 0].name} does not`);
     else {
       const m = amountOf(viewValue(p.bal, at, `${rpcs[0].name} ft_balance_of(${id})`), "ft_balance_of");
       const n = amountOf(viewValue(q.bal, at, `${rpcs[1].name} ft_balance_of(${id})`), "ft_balance_of");
@@ -160,29 +184,75 @@ export async function exitHoldings(a: { network: NearNetwork; ids: readonly stri
   return { height: at, holdings };
 }
 
+// ---------- the typed account ----------
+// The signing page's address rule (packages/signpage/src/withdraw/checks.ts addressForm and checkRecipient, l.44-89),
+// here because packages/exit may import only its own files and the kit's entries: a NEAR account id, 2-64 characters
+// in NEAR's form; never the network's vault, intents.near or its token; and a named account must exist on both RPCs,
+// read at one block. A named account that does not exist is refused: money sent there waits for whoever creates that
+// name. An implicit account (64 hex, or 0x and 40 hex) needs no read: only its key's holder can use it.
+const ACCOUNT = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+const IMPLICIT_ANY = /^([0-9a-f]{64}|0x[0-9a-f]{40})$/;
+
+/** A typed account exitRecipient checked; exitBuildMove takes only these. */
+export type ExitRecipient = { readonly account: string; readonly network: NearNetwork };
+const CHECKED = new WeakSet<object>();
+export type ExitRecipientCheck = { ok: true; recipient: ExitRecipient } | { ok: false; code: "not-account" | "vault" | "intents" | "token" | "no-account" | "unread" };
+
+function seen(answer: unknown, at: number): "exists" | "absent" | "unread" {
+  if (!isObj(answer)) return "unread";
+  const { result, error } = answer;
+  if (result !== undefined && error === undefined) return isObj(result) && result.block_height === at && typeof result.amount === "string" && typeof result.code_hash === "string" ? "exists" : "unread";
+  if (error !== undefined && result === undefined && isObj(error) && isObj(error.cause) && error.cause.name === "UNKNOWN_ACCOUNT") return "absent";
+  return "unread";
+}
+
+/** The typed account checked for `network` on its release pair; a pair that is not the network's throws ExitRpcRefused. `sleep` is for tests only. */
+export async function exitRecipient(typed: unknown, network: NearNetwork, rpcs: readonly [VaultSyncRpc, VaultSyncRpc], sleep: (ms: number) => Promise<void> = realSleep): Promise<ExitRecipientCheck> {
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
+  if (typeof typed !== "string") return { ok: false, code: "not-account" };
+  const account = typed.trim();
+  if (account.length < 2 || account.length > 64 || !ACCOUNT.test(account)) return { ok: false, code: "not-account" };
+  if (account === EXIT_NETWORKS[network].vault) return { ok: false, code: "vault" };
+  if (account === "intents.near") return { ok: false, code: "intents" };
+  if (account === EXIT_TOKENS[network]) return { ok: false, code: "token" };
+  if (!IMPLICIT_ANY.test(account)) {
+    const at = await finalAt(rpcs, EXIT_TOKENS[network], sleep);
+    const reads = await Promise.all(rpcs.map((r) => ask(r, { request_type: "view_account", account_id: account, block_id: at }, sleep).then((x) => seen(x, at))));
+    if (reads[0] === "absent" && reads[1] === "absent") return { ok: false, code: "no-account" };
+    if (reads[0] !== "exists" || reads[1] !== "exists") return { ok: false, code: "unread" };
+  }
+  const recipient: ExitRecipient = Object.freeze({ account, network });
+  CHECKED.add(recipient);
+  return { ok: true, recipient };
+}
+
 /** One move the tool builds: on the token (with the registration when due), the registration alone, or out of intents.near. */
 export type ExitMove =
-  | { leg: "token"; read: MoveOutRead; storageMin: bigint }
-  | { leg: "register"; read: Pick<MoveOutRead, "nonce" | "blockHash" | "registered">; storageMin: bigint }
-  | { leg: "intents"; read: WithdrawOutRead };
+  | { leg: "token"; read: MoveOutReadFor; storageMin: bigint }
+  | { leg: "register"; read: RegisterOutReadFor; storageMin: bigint }
+  | { leg: "intents"; read: WithdrawOutReadFor };
 
 /**
- * One move of `account`'s money on `network` to the typed account `to`, built and checked by the wallet's builder and
- * signed with the account's own key, which is zeroed before this returns, whichever way. The caller self-submits the
- * signed bytes. The intents leg is refused on a network with no intents.near. `keyOf` is exitKey unless a test says.
+ * One move of `account`'s money on `network` to `to`, a typed account exitRecipient checked for that network, built and
+ * checked by the wallet's builder and signed with the account's own key, which is zeroed before this returns, whichever
+ * way. The caller self-submits the signed bytes. The intents leg is refused on a network with no intents.near. `keyOf`
+ * is exitKey unless a test says.
  */
-export function exitBuildMove(a: { seed64: Uint8Array; account: ExitAccount; network: NearNetwork; to: string; move: ExitMove }, keyOf: typeof exitKey = exitKey): BuiltMove {
-  if (!Object.hasOwn(EXIT_NETWORKS, a.network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(a.network)}`);
-  const token = EXIT_TOKENS[a.network];
-  if (a.move.leg === "intents" && EXIT_INTENTS[a.network] === null) throw new ExitRpcRefused(`${a.network} has no intents.near`);
-  const key = keyOf(a.seed64, a.account);
+export function exitBuildMove(a: { seed64: Uint8Array; account: ExitAccount; network: NearNetwork; to: ExitRecipient; move: ExitMove }, keyOf: typeof exitKey = exitKey): BuiltMove {
+  const { seed64, account, network, to, move } = a;
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (!isObj(to) || !CHECKED.has(to) || to.network !== network) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
+  const typed = to.account;
+  const token = EXIT_TOKENS[network];
+  if (move.leg === "intents" && EXIT_INTENTS[network] === null) throw new ExitRpcRefused(`${network} has no intents.near`);
+  const key = keyOf(seed64, account);
   try {
-    const kind = a.account.kind === "A" ? "arm" : "id";
-    const m = a.move;
-    if (m.leg === "token") return buildMoveOut({ read: m.read, key, kind, to: a.to, token, storageMin: m.storageMin });
-    if (m.leg === "register") return buildRegisterOut({ read: m.read, key, to: a.to, token, storageMin: m.storageMin });
-    if (m.leg === "intents") return buildWithdrawOut({ read: m.read, key, kind, to: a.to, token });
-    throw new ExitRpcRefused(`no move leg ${JSON.stringify((m as { leg?: unknown }).leg)}`);
+    const kind = account.kind === "A" ? "arm" : "id";
+    if (move.leg === "token") return buildMoveOut({ read: move.read, key, kind, to: typed, token, storageMin: move.storageMin });
+    if (move.leg === "register") return buildRegisterOut({ read: move.read, key, to: typed, token, storageMin: move.storageMin });
+    if (move.leg === "intents") return buildWithdrawOut({ read: move.read, key, kind, to: typed, token });
+    throw new ExitRpcRefused(`no move leg ${JSON.stringify((move as { leg?: unknown }).leg)}`);
   } finally {
     key.secretKey.fill(0);
   }
