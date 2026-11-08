@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEVNET_PROVIDERS, recorder } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, devnetPin, recorder } from "./pool-sol-deploy.mjs";
 import { check as checkRun, readSignFlow } from "./signpage-pool-notes.mjs";
 
 const KEY = "pool-deposits";
@@ -100,7 +100,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const precommitment = opt("--precommitment") ?? run.precommitment;
     const evm = await readSignEvm();
     const r = await check({ run, precommitment, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, evm });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, evm, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment: devnetPin().record, precommitment, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, evm, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);
