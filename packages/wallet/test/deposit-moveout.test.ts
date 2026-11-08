@@ -503,3 +503,66 @@ test("L1 the payload rule refuses the vault and intents.near, called straight", 
     assert.equal(chain.sent.length, 0);
   }
 });
+
+test("D3 the look-back nonce must agree on both RPCs: the second answers a lower nonce at height - SETTLE_BLOCKS only, the record stays followed", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  // another tx of U took nonce 8 at 1050 and U's USDC; SETTLE_BLOCKS + 1 later both RPCs agree on every height but one
+  chain.nonce = 8n;
+  chain.usdc = 0n;
+  chain.nonceAt = (h) => (h >= 1050 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1050 + SETTLE_BLOCKS + 1;
+  const back = chain.a.height - SETTLE_BLOCKS;
+  const [a, b] = chain.rpcs();
+  const lagging: MoveOutRpc = {
+    ...b,
+    query: async (p) => {
+      const r = await b.query(p);
+      if (p.request_type !== "view_access_key_list" || (p as { block_id?: number }).block_id !== back) return r;
+      const res = (r as { result: { keys: { access_key: { nonce: number } }[] } }).result;
+      return { result: { ...res, keys: res.keys.map((k) => ({ ...k, access_key: { ...k.access_key, nonce: 7 } })) } };
+    },
+  };
+  seedOpens = 0;
+  const out = await moveOutHeld("op1", null, { ...deps(ops, chain), rpcs: [a, lagging] });
+  assert.equal(out.kind, "sent", "one RPC's look-back nonce alone never settles a record");
+  assert.equal(seedOpens, 0);
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out_past, undefined);
+});
+
+test("D3 the token's code hash read with no answer on one RPC: nothing signed", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const [a, b] = chain.rpcs();
+  const mute: MoveOutRpc = {
+    ...b,
+    query: async (p) => (p.request_type === "view_account" && (p as { account_id?: string }).account_id === TOKEN ? { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } } : b.query(p)),
+  };
+  seedOpens = 0;
+  assert.deepEqual(await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), rpcs: [a, mute] }), { kind: "unread" });
+  assert.equal(chain.sent.length, 0);
+  assert.equal(seedOpens, 0);
+});
+
+test("D4 another op of U holds a gone record (FINAL failed): the tap clears it to that op's out_past and signs this op's own move", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.registered.add("bob.testnet");
+  chain.onSend = (_s, h) => (chain.txs.set(h, "failed"), (chain.nonce += 1n));
+  const ops = await heldOp("note");
+  await ops.put("ops", "op2", { ...((await ops.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "failed");
+  chain.onSend = (_s, h) => chain.land(h);
+  const b = await moveOutHeld("op2", "bob.testnet", deps(ops, chain));
+  assert.equal(b.kind, "moved");
+  assert.equal((b as { to: string }).to, "bob.testnet", "op2's own account, not op1's");
+  const op1 = (await ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op1.follow.out, undefined, "op1's gone record is cleared");
+  assert.deepEqual(op1.follow.out_past?.map((r) => r.hash), [(first as { hash: string }).hash], "and kept as op1's history");
+  assert.equal(((await ops.get("ops", "op2")) as DepositOp).follow.out?.to, "bob.testnet");
+  assert.deepEqual([...new Set(chain.sent)].map((x) => decode(x).nonce), [8n, 9n]);
+});

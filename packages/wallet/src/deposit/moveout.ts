@@ -270,10 +270,15 @@ export function signMoveTx(u: string, publicKey: Uint8Array, secretKey: Uint8Arr
 }
 
 // ---------- reading the transaction back ----------
-/** One RPC's read of the move's tx: ok (FINAL, every receipt a success), failed (FINAL, a failure), or unknown. */
-async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "failed" | "unknown"> {
+/**
+ * One RPC's read of the move's tx: ok (FINAL, every receipt a success), failed (FINAL, a failure), absent (the RPC's own
+ * UNKNOWN_TRANSACTION, as scripts/ci/money-gate.mjs reads "missing"), or unknown: a timeout, a 429 or 5xx, receipts
+ * still running or any other answer is no word on whether the tx exists.
+ */
+async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "failed" | "absent" | "unknown"> {
   try {
     const a = await r.tx({ tx_hash: hash, sender_account_id: u, wait_until: "FINAL" });
+    if (isObj(a) && isObj(a.error) && isObj(a.error.cause) && a.error.cause.name === "UNKNOWN_TRANSACTION") return "absent";
     const res = isObj(a) && a.error === undefined ? a.result : undefined;
     if (!isObj(res) || res.final_execution_status !== "FINAL" || !isObj(res.transaction) || res.transaction.hash !== hash || res.transaction.signer_id !== u) return "unknown";
     const outs = res.receipts_outcome;
@@ -285,8 +290,8 @@ async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "
     return "unknown";
   }
 }
-/** The tx on both RPCs: ok, failed or unknown when both read the same; split when they differ (then nothing is decided). */
-async function readBoth(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, u: string): Promise<"ok" | "failed" | "unknown" | "split"> {
+/** The tx on both RPCs: ok, failed, absent or unknown when both read the same; split when they differ (then nothing is decided). */
+async function readBoth(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, u: string): Promise<"ok" | "failed" | "absent" | "unknown" | "split"> {
   const [a, b] = await Promise.all(rpcs.map((r) => txState(r, hash, u)));
   return a === b ? a! : "split";
 }
@@ -334,11 +339,12 @@ type Gone = { gone: "failed" | "expired" | "taken"; usdc: bigint | null };
 async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<"live" | Gone> {
   const st = await readBoth(rpcs, had.hash, U);
   if (st === "failed") return { gone: "failed", usdc: null };
-  if (st !== "unknown") return "live";
+  if (st !== "absent" && st !== "unknown") return "live";
   const r = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
   if (r === null) return "live";
   if (r.nonce < BigInt(had.nonce) && BigInt(r.height) > BigInt(had.height) + TX_VALIDITY_BLOCKS) return { gone: "expired", usdc: r.usdc };
-  if (r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {
+  // taken: only when both RPCs say the tx does not exist; a read that times out may be U's own move still running
+  if (st === "absent" && r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {
     const past = await keyNonceAt(U, r.height - SETTLE_BLOCKS, rpcs).catch(() => null);
     if (past !== null && past >= BigInt(had.nonce)) return { gone: "taken", usdc: r.usdc };
   }
