@@ -39,8 +39,8 @@ const FEE_RECIPIENT = "fees.unrlzd.near";
 /** helper-mainnet-vault-env's Mac test run's relayer (scripts/live-checks/helper-mainnet-vault-env.answers.json): never a pin. */
 const THROWAWAY = "9747fa11a4de38cecc3b9086239633a2164a81c8e7b03a39bd3f1522438717d6";
 const MAIN = NEAR_NETWORKS.mainnet;
-/** Two public mainnet RPCs of two providers: NEAR's own and FastNEAR's free one. */
-const PAIR = ["https://rpc.mainnet.near.org", "https://free.rpc.fastnear.com"];
+/** Mainnet's release pair, two operators (scripts/ci/near-rpc-operators.mjs): FastNEAR and dRPC. */
+const PAIR = [MAIN.fastnear[0], MAIN.drpc];
 const IMPLICIT = /^[0-9a-f]{64}$/;
 const implicitKey = (id: string): string => `ed25519:${base58.encode(hex.decode(id))}`;
 
@@ -136,6 +136,7 @@ test("planted: a second key, a function-call key, another key, one RPC, an absen
     ["a function-call key", edit((a) => (a.view_access_key_list[0]!.json.result.keys[0].access_key.permission = { FunctionCall: { allowance: null, receiver_id: "x.near", method_names: [] } }))],
     ["another key", edit((a) => (a.view_access_key_list[1]!.json.result.keys[0].public_key = implicitKey(THROWAWAY)))],
     ["one RPC", edit((a) => (a.view_access_key_list[1]!.url = PAIR[0]!))],
+    ["one operator", edit((a) => (a.view_access_key_list[1]!.url = MAIN.fastnear[1]))],
     ["absent", edit((a) => (a.view_account[0] = { ...a.view_account[0]!, json: { error: { cause: { name: "UNKNOWN_ACCOUNT" } } } }))],
   ];
   for (const [why, a] of bads) assert.notDeepEqual(relayerProblems(id, a), [], why);
@@ -143,5 +144,5 @@ test("planted: a second key, a function-call key, another key, one RPC, an absen
   assert.match(relayerProblems("bind.unrlzd.near", V.bind).join(), /not a 64-hex implicit account/);
   const unregistered = structuredClone(V.fee_recipients);
   unregistered[0]!.storage_balance_of[1]!.json.result.result = [...Buffer.from("null")];
-  assert.match(registeredProblems(FEE_RECIPIENT, unregistered).join(), /not registered on mainnet USDC on https:\/\/free\.rpc\.fastnear\.com/);
+  assert.match(registeredProblems(FEE_RECIPIENT, unregistered).join(), /not registered on mainnet USDC on https:\/\/near\.drpc\.org/);
 });

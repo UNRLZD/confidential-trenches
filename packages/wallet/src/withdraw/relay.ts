@@ -82,8 +82,8 @@ export const RELEASE_HELPER = "https://ct-api.unrealized.trade";
  * (contracts/vault/deployments/testnet-t02-run.json), the pair the deployed helper's GET /v1/withdraw/fee names for the
  * testnet token (read 2026-11-06 15:58Z; R and F in that run record). Mainnet: the implicit relayer account
  * apps/helper/deploy/withdraw-relayer-key.sh made on the helper's server, holding one full-access key, its own, on
- * rpc.mainnet.near.org and free.rpc.fastnear.com, and fee recipient fees.unrlzd.near (owner 7 Nov 09:27Z), registered
- * on mainnet USDC on both (read 2026-11-08 11:29Z: test/vectors/mainnet-relayer-pins.json, held by
+ * the release pair's two operators, rpc.mainnet.fastnear.com and near.drpc.org, and fee recipient fees.unrlzd.near (owner
+ * 7 Nov 09:27Z), registered on mainnet USDC on both (test/vectors/mainnet-relayer-pins.json, held by
  * test/release-relayer-pins.test.ts); the helper's GET /v1/withdraw/fee names the same pair.
  * Testnet's pair is the testnet build's only (POOL_TESTNET, as ../pool/solana.ts folds the devnet pins): SIGN_HOST's
  * build folds it to null and carries neither id. Node and the tests read it with __SIGN_NETWORK__ = "testnet" set.

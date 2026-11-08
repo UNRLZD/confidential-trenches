@@ -4,7 +4,7 @@
 // The two accounts are the ones the server scripts printed (apps/helper/deploy/bind-relayer-key.sh and
 // withdraw-relayer-key.sh), given here, never taken from the helper: the chain reads decide each pin, and the helper's
 // answers are recorded beside them only to be held equal.
-// - Two public mainnet RPCs of two providers (rpc.mainnet.near.org, NEAR's own, and free.rpc.fastnear.com): view_account and
+// - Mainnet's release pair, two operators (rpc.mainnet.fastnear.com and near.drpc.org, the kit's NEAR_NETWORKS.mainnet): view_account and
 //   view_access_key_list of each account, and storage_balance_of on mainnet USDC for the fee recipient the owner named
 //   (fees.unrlzd.near, owner 7 Nov 09:27Z) and for the one the fee answer names.
 // - The release's helper, as SIGN_HOST reads it: GET /v1/health (its `bind.mainnet`) and GET /v1/withdraw/fee for
@@ -13,7 +13,7 @@ import { writeFileSync } from "node:fs";
 
 const HELPER = "https://ct-api.unrealized.trade";
 const ORIGIN = "https://confidential.unrealized.trade";
-const PAIR = ["https://rpc.mainnet.near.org", "https://free.rpc.fastnear.com"];
+const PAIR = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 const FEE_RECIPIENT = "fees.unrlzd.near";
 const [out, carry, withdrawRelayer] = process.argv.slice(2);
