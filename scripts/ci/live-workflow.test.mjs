@@ -146,16 +146,19 @@ test("the helper's skipped checks are the ones the runner cannot run, with the r
   const fee = await import("../live-checks/relayer-withdraw-fee.mjs");
   assert.equal(SKIPPED["helper-proxy"].reason, "needs-secret");
   assert.ok(proxy.ENV_KEYS.length > 0 && proxy.ENV_KEYS.every((k) => SKIPPED["helper-proxy"].detail.includes(k)), "it names every key the check reads");
-  assert.equal(SKIPPED["relayer-withdraw-fee"].reason, "needs-relayer");
-  assert.deepEqual(fee.RELEASE_RELAYER, { mainnet: null, testnet: null }, "the release names a relayer now: run the check, drop the skip");
-  assert.deepEqual(Object.keys(SKIPPED).sort(), ["helper-proxy", "relayer-withdraw-fee"], "a new skip needs a reason this test checks");
+  // relayer-withdraw-fee ran skipped (needs-relayer) while the release named no withdrawal relayer; it reads relay.ts's
+  // pairs now (card wallet-mainnet-relayer-pins), so it runs after every helper deploy, and a null pin FAILs it.
+  assert.ok(fee.RELEASE_RELAYER.mainnet !== null && fee.RELEASE_RELAYER.testnet !== null, "the release names both withdrawal relayers: the check runs");
+  assert.equal(SKIPPED["relayer-withdraw-fee"], undefined);
+  assert.deepEqual(Object.keys(SKIPPED).sort(), ["helper-proxy"], "a new skip needs a reason this test checks");
   const plan = await planFor("helper", { commit: COMMIT });
   const na = [
     ...(existsSync(path.join(ROOT, "scripts/live-checks/pool-sol-deploy.mainnet.json")) ? [] : ["skipped-not-applicable: helper-pool-senders"]),
     ...(existsSync(path.join(ROOT, "contracts/vault/deployments/mainnet-v1.json")) ? [] : ["skipped-not-applicable: helper-bind-relayer-mainnet"]),
   ];
-  assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-relayer: relayer-withdraw-fee", "skipped-needs-secret: helper-proxy", ...na].sort());
+  assert.deepEqual(plan.skipped.map((s) => `skipped-${s.reason}: ${s.key}`).sort(), ["skipped-needs-secret: helper-proxy", ...na].sort());
   assert.ok(!plan.include.some((e) => keysOf(e).some((k) => SKIPPED[k])), "a skipped check is never in the matrix");
+  assert.ok(plan.include.some((e) => keysOf(e).includes("relayer-withdraw-fee") && !e.chrome), "relayer-withdraw-fee runs on HELPER_HOST");
   for (const key of ["solana-jupiter-build", "wallet-per-buy", "helper-usdc-pending-pause"]) assert.ok(plan.include.some((e) => keysOf(e).includes(key) && !e.chrome), `${key} runs on HELPER_HOST (card live-checks-listed)`);
 });
 
@@ -306,7 +309,7 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
     const b = await planFor("helper", { commit: COMMIT, root: devnet });
     assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"]);
     assert.deepEqual(b.skipped.filter((s) => s.key === "helper-pool-senders").map((s) => s.detail), ["no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist"]);
-    assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-bind-relayer-mainnet", "helper-pool-senders", "helper-proxy", "relayer-withdraw-fee"], "the whole skips stay skipped");
+    assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-bind-relayer-mainnet", "helper-pool-senders", "helper-proxy"], "the whole skips stay skipped");
   } finally {
     for (const r of [none, devnet]) rmSync(r, { recursive: true, force: true });
   }

@@ -6,6 +6,8 @@
 // assets/token.js U.header and U.about, token-390.html's tiles, bar and timeframes) and owner-words-pass
 // (docs/owner-decisions.md:351), and the new draft words (owner 1 Nov 16:45Z, keep).
 
+import { WORDS as DISCOVER } from "../discover/words.ts";
+
 export interface Word {
   text: string;
   source: string;
@@ -75,6 +77,35 @@ export const WORDS = {
   indBOLL: { text: "BOLL", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
   indRSI: { text: "RSI", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
   indMACD: { text: "MACD", source: "draft, card app-chart-controls: the Indicators menu's row (the live UNRLZD terminal's chart/indicators.ts)", draft: true },
+  // the lower panel and About (card app-token-lower-panel), R5 token.js U.lowerTabs, U.tradesTab, U.holdersTab and
+  // U.about at design-lock-r5: R5's own labels are kept; the ones R5 marks as draft copy (P.dc) are drafts here.
+  // The tabs reuse `holders` and `trades`, the MC column `mc`, the rows' sides `buy` and `sell`, the top share `top10`,
+  // an empty tab `noData`.
+  buyShort: ok("B", "R5 token.js U.tradesTab lp-short (the phone's side column)"),
+  sellShort: ok("S", "R5 token.js U.tradesTab lp-short (the phone's side column)"),
+  burnSub: ok("Burn · not circulating", "R5 token.js U.holdersTab lp-sub (`${kind} · not circulating`, kind burn: `Burn`)"),
+  flowBuys: ok("buys", "R5 token.js U.about tk-flowLbl"),
+  flowSells: ok("sells", "R5 token.js U.about tk-flowLbl"),
+  colAge: { text: "Age", source: "draft, card app-token-lower-panel: R5 token.js U.tradesTab P.dc(\"Age\", \"CN-113\")", draft: true },
+  colType: { text: "Type", source: "draft, card app-token-lower-panel: R5 token.js U.tradesTab P.dc(\"Type\", \"CN-113\")", draft: true },
+  colBs: { text: "B/S", source: "draft, card app-token-lower-panel: R5 token.js U.tradesTab P.dc(\"B/S\", \"CN-113\")", draft: true },
+  colAmount: { text: "Amount", source: "draft, card app-token-lower-panel: R5 token.js U.tradesTab P.dc(\"Amount\", \"CN-09\")", draft: true },
+  colTotal: { text: "Total $", source: "draft, card app-token-lower-panel: R5 token.js U.tradesTab P.dc(\"Total $\", \"CN-09\")", draft: true },
+  colTrader: { text: "Trader", source: "draft, card app-token-lower-panel: R5 token.js U.tradesTab and U.holdersTab P.dc(\"Trader\")", draft: true },
+  colPosition: { text: "Position", source: "draft, card app-token-lower-panel: R5 token.js U.holdersTab P.dc(\"Position\", \"CN-09\")", draft: true },
+  colShare: { text: "Share of supply", source: "draft, card app-token-lower-panel: R5 token.js U.holdersTab P.dc(\"Share of supply\", \"CN-09\")", draft: true },
+  creatorTag: { text: "CREATOR", source: "draft, card app-token-lower-panel: R5 token.js TAG.dev P.dc(\"CREATOR\")", draft: true },
+  about: { text: "About", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(`About ${sym}`, \"CN-112\"), the symbol after it is data", draft: true },
+  vol5m: { text: "5m vol", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"5m vol\", \"CN-107\")", draft: true },
+  buys5m: { text: "Buys", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"Buys\", \"CN-107\")", draft: true },
+  sells5m: { text: "Sells", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"Sells\", \"CN-107\")", draft: true },
+  net5m: { text: "Net", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"Net\", \"CN-107\")", draft: true },
+  // the left rail (card app-token-rail): Discover's own words for its lists and states, the same entries, so a pick
+  // changes both screens; the slim rail's button is R5's (trenches-1440.html rail-expand aria-label)
+  railTrending: DISCOVER.colTrending,
+  railNew: DISCOVER.colNew,
+  noTokens: DISCOVER.noTokens,
+  expand: ok("Expand", "R5 trenches-1440.html rail-expand aria-label"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

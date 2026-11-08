@@ -1,0 +1,103 @@
+/* The token page's lower panel and About (card app-token-lower-panel). Values are R5's (research repo
+   design/proto/assets/u/unrlzd.css .lp-*, .tk-about, .tk-change*, .tk-flow*, .mt-tab* and token.css at design-lock-r5).
+   Desktop sizes are layout px on the 1920 design, drawn at --fit-zoom (shell/fit.ts). */
+.tkl { flex: 0 0 40%; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; overflow: hidden; }
+.tkl-tabs { height: 50px; flex: none; display: flex; align-items: center; gap: 22px; padding: 0 18px; border-bottom: 1px solid var(--border-panel); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tkl-tabs::-webkit-scrollbar { display: none; }
+.tkl-tab { position: relative; flex: none; white-space: nowrap; padding: 0; border: 0; background: transparent; font: 600 15px var(--font-ui); color: var(--text-3); cursor: pointer; }
+.tkl-tab::after { content: ""; position: absolute; inset: -15px -6px; }
+.tkl-tab[aria-selected="true"] { color: var(--text-1); }
+/* the holders count's slot: the widest count (discover/format.ts count: "(12.35M)", 8 characters) at the tab's size in
+   the number face, drawn empty before the row lands, so no tab moves when it does (BAR-10 CLS 0) */
+.tkl-tabn { display: inline-block; width: 8ch; margin-left: 0.3em; text-align: left; vertical-align: baseline; white-space: nowrap; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.tkl-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tkl-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.tkl-skel { display: flex; flex-direction: column; gap: 14px; padding: 12px 16px; }
+.tkl-skel .tkp-sk { height: 24px; }
+.tkl-empty { flex: 1; min-height: 120px; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 13px; }
+
+/* the table grid (Trades): R5 .lp-thead, .lp-trow, .lp-trades.ct-nogas */
+.tkl-thead, .tkl-trow { display: grid; gap: 10px; align-items: center; padding: 0 18px; }
+.tkl-thead { height: 34px; flex: none; font-size: 12px; color: var(--text-3); border-bottom: 1px solid var(--border-panel); }
+.tkl-thead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkl-tr { grid-template-columns: 56px 40px minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1.2fr) minmax(0, 2fr); }
+.tkl-trow { min-height: 36px; border-bottom: 1px solid var(--bg-floating, #141414); }
+.tkl-trow:hover { background: var(--bg-row-hover, #141414); }
+.tkl-c { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 13px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-1); }
+.tkl-dim { color: var(--text-3); }
+.tkl-trow[data-side="buy"] .tkl-side { color: var(--acc); }
+.tkl-trow[data-side="sell"] .tkl-side { color: var(--sell); }
+.tkl-trow [data-col="type"] { font-family: var(--font-ui); }
+.tkl-total { position: relative; min-width: 0; padding: 0 6px; }
+.tkl-total .tkl-c { position: relative; display: block; }
+.tkl-bar { position: absolute; left: 0; top: 5px; bottom: 5px; border-radius: 3px; }
+.tkl-trow[data-side="buy"] .tkl-bar { background: rgba(var(--acc-rgb), 0.13); }
+.tkl-trow[data-side="sell"] .tkl-bar { background: rgba(var(--sell-rgb), 0.13); }
+.tkl-who { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tkl-tag { flex: none; font-size: 11px; font-weight: 700; padding: 2px 5px; border-radius: 4px; background: rgba(242, 181, 67, 0.14); color: var(--warn, #f2b543); }
+
+/* Holders: R5 .lp-heads, .lp-row, .lp-trader, .lp-cell, .lp-share */
+.tkl-hr { display: grid; gap: 14px; align-items: center; padding: 0 18px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr); }
+.tkl-sum { flex: none; display: flex; align-items: baseline; gap: 8px; padding: 10px 18px 0; }
+.tkl-sumlbl { font-size: 12px; color: var(--text-3); }
+.tkl-sumval { font: 13px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-1); }
+.tkl-thead.tkl-hr { height: 36px; gap: 14px; }
+.tkl-hrow { padding: 12px 18px; border-bottom: 1px solid var(--bg-floating, #141414); }
+.tkl-trader { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tkl-namerow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tkl-name { min-width: 0; font: 600 14px var(--font-num); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkl-sub { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkl-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tkl-v, .tkl-vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.tkl-v { font-size: 14px; color: var(--text-1); }
+.tkl-vs { font-size: 11px; color: var(--text-3); }
+.tkl-hrow[data-burn] .tkl-v { color: var(--text-3); }
+.tkl-share { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tkl-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-raised); overflow: hidden; }
+.tkl-fill { height: 100%; border-radius: 3px; background: var(--text-3); }
+.tkl-fill[data-creator] { background: var(--warn, #f2b543); }
+.tkl-pct { flex: none; width: 48px; text-align: right; white-space: nowrap; font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); }
+
+/* About: R5 .tk-panel.tk-about, .tk-changes, .tk-change, .ct-five, .tk-flow */
+.tkl-about { margin-top: 8px; display: flex; flex-direction: column; gap: 14px; padding: 16px; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 14px; }
+.tkl-ahead > span { display: block; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkl-changes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.tkl-change { padding: 8px 4px; border-radius: 9px; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.tkl-change > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkl-change > span:first-child { font-size: 11px; color: var(--text-2); }
+.tkl-change > span:last-child { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-1); }
+.tkl-change[data-tone="acc"] { background: rgba(var(--acc-rgb), 0.07); }
+.tkl-change[data-tone="acc"] > span:last-child { color: var(--acc); }
+.tkl-change[data-tone="sell"] { background: rgba(var(--sell-rgb), 0.08); }
+.tkl-change[data-tone="sell"] > span:last-child { color: var(--sell); }
+.tkl-change[data-tone="none"] > span:last-child { color: var(--text-3); }
+.tkl-change.tkl-five { background: var(--bg-raised); }
+/* R5's 5m vol value is drawn in the text colour (U.about t5 `var(--text-1)`), not dimmed */
+.tkl-change[data-tone="plain"] > span:last-child { color: var(--text-1); }
+.tkl-mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.tkl-flow { display: flex; flex-direction: column; gap: 6px; }
+.tkl-flow > div:first-child { display: flex; justify-content: space-between; font-size: 13px; }
+.tkl-flowlbl { color: var(--text-2); }
+.tkl-flowbar { display: flex; gap: 4px; height: 5px; }
+.tkl-flowbar > div { height: 100%; border-radius: 3px; }
+.tkl-flowbar > div:first-child { background: var(--acc); }
+.tkl-flowbar > div:last-child { background: var(--sell); flex: 1; }
+.tkl-flowbar[data-unknown="true"] > div { background: var(--bg-raised); }
+
+/* phone: R5 token-390.html .mt-tabs, .mt-tab and .mt-lower; the list flows in the page, which scrolls */
+@media (max-width: 767.98px) {
+  .tkl { flex: none; margin-top: 16px; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+  .tkl-tabs { height: 46px; gap: 20px; padding: 0 16px; border-bottom: 1px solid var(--m-line-soft); }
+  .tkl-tab { height: 46px; display: flex; align-items: center; font-size: 14.5px; color: var(--m-text-4, #6b6b6b); }
+  .tkl-tab::after { inset: auto 0 -1px; height: 2px; border-radius: 2px; background: transparent; }
+  .tkl-tab[aria-selected="true"] { color: var(--m-text, #f4f4f2); }
+  .tkl-tabn { width: 6ch; margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--m-text-4, #6b6b6b); }
+  .tkl-tab[aria-selected="true"]::after { background: var(--m-text, #f4f4f2); }
+  .tkl-thead, .tkl-trow, .tkl-hr, .tkl-sum { padding-left: 16px; padding-right: 16px; }
+  .tkl-tr { grid-template-columns: 40px 24px 96px minmax(0, 1fr); }
+  .tkl-trow { min-height: 44px; }
+  .tkl-hr { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+  .tkl-name { font-size: 13px; }
+  .tkl-list { overflow: visible; }
+  .tkl-about { margin: 8px 16px 0; }
+}

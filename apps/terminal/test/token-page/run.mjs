@@ -13,7 +13,11 @@
 // nothing), Retry reads the lists again, and on the phone the bottom bar sits above the tab bar and the last tile
 // scrolls clear of it and the tile row scrolls sideways inside itself with every tile in reach (the page never does). Requests to any other host are
 // refused and listed. Draft words drawn are listed.
-//   node apps/terminal/test/token-page/run.mjs [--shots <dir>] [--only <id,id>]     PASS exit 0, FAIL exit 1
+// The lower panel and About (card app-token-lower-panel): the tabs in R5's order, Trades the tape's rows (or No data),
+// Holders the helper's holder rows with the read's count and top share, or Jupiter's count and top share and No data
+// for the rows; About's window tiles and flow bar in the trade column (the desktop) and the trade sheet (the phone).
+// --signed-out runs the same states in the shell signed out.
+//   node apps/terminal/test/token-page/run.mjs [--shots <dir>] [--only <id,id>] [--signed-out]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -64,7 +68,15 @@ const STATES = [
   // the toolbar, the bottom bar and the trade marks (card app-chart-controls): GeckoTerminal's bars with a tape of
   // trades in them; each control is used once and read back
   { id: "chart-controls", top: "pool", state: "ready", curve: false, trades: true },
+  // the lower panel and About (card app-token-lower-panel): the tape and the holders key's rows; Jupiter's fallback (no
+  // rows); a chain the helper serves no tape or holders for (404s); the phone's trade sheet scrolled to About
+  { id: "lower-trades", top: "curve", state: "ready", curve: true, lower: "trades", tape: true, holders: "chain" },
+  { id: "lower-holders", top: "curve", state: "ready", curve: true, lower: "holders", tape: true, holders: "chain" },
+  { id: "lower-jupiter", top: "curve", state: "ready", curve: true, lower: "holders", holders: "jupiter" },
+  { id: "lower-none", top: "curve", state: "ready", curve: true, lower: "trades", holders: 404, tape404: true },
+  { id: "lower-about", top: "curve", state: "ready", curve: true, lower: "about", tape: true, holders: "chain" },
 ];
+const SIGNED_OUT = args.includes("--signed-out");
 /** The page's live read interval (src/screens/token/candles.ts LIVE_MS). */
 const LIVE_MS = 1_000;
 
@@ -155,13 +167,28 @@ function helperAnswer(s, url, calls) {
     a.headers["access-control-expose-headers"] = "X-Helper-Source";
     return a;
   }
+  if (url.pathname === "/v1/market/holders") {
+    const row = live(s.top);
+    if (typeof s.holders === "number" || url.searchParams.get("token") !== row.token) return json(typeof s.holders === "number" ? s.holders : 404, { error: { code: "not_found" } });
+    return json(200, s.holders === "chain" ? { holders: HOLDERS, total: HOLDERS_TOTAL, top_bps: HOLDERS_TOP, src: "chain", as_of_ms: Date.now() } : { holders: [], total: row.holders, top_bps: row.top10_bps, src: "jupiter", as_of_ms: Date.now() });
+  }
   if (url.pathname === "/v1/market/trades") {
     const row = live(s.top);
-    if (!s.trades || url.searchParams.get("token") !== row.token) return json(200, { trades: [], src: "chain", as_of_ms: Date.now() });
+    if (s.tape404) return json(404, { error: { code: "not_found" } });
+    if (!(s.trades || s.tape) || url.searchParams.get("token") !== row.token) return json(200, { trades: [], src: "chain", as_of_ms: Date.now() });
     return json(200, { trades: tape(row.price_usd), src: "chain", as_of_ms: Date.now() });
   }
   return null;
 }
+
+/** The holders key's answer (06b Holders, merged per owner): twelve owners of a 1B supply at 6 decimals, the biggest
+ *  the curve's own account, one burnt; the count and top share differ from the token row's so the run tells them apart. */
+const HOLDERS = Array.from({ length: 12 }, (_, i) => {
+  const bps = [1840, 410, 322, 260, 211, 190, 150, 133, 120, 98, 80, 64][i];
+  return { addr: i === 3 ? "1nc1nerator11111111111111111111111111111111" : `Holder${String(i).padStart(2, "0")}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`, amt: String(BigInt(bps) * 100_000_000_000n), bps, ...(i === 3 ? { kind: "burn" } : {}) };
+});
+const HOLDERS_TOTAL = 2703;
+const HOLDERS_TOP = 3694;
 
 /** TAPE_COUNT trades, newest first, one in every third of the newest 15m bars, at the bar's close: buys and sells by
  *  five traders, as the helper's tape (apps/helper/src/data/solana/trades.ts trades). */
@@ -224,7 +251,7 @@ async function openAt(browser, route, w, s, calls) {
 }
 
 const dir = await build();
-const route = await harnessRoute(dir, "signed");
+const route = await harnessRoute(dir, SIGNED_OUT ? "tap" : "signed");
 const browser = await launchBrowser("chromium");
 let n = 0;
 try {
@@ -272,7 +299,8 @@ try {
         const drawnRow = await f.evaluate(async (box) => {
           await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
           const root = document.querySelector(box);
-          const av = root?.querySelector(".tok-avw");
+          // the identity's avatar (the desktop header, the phone nav row), not the left rail's first row (card app-token-rail)
+          const av = root?.querySelector(":is(.tkp-head, .tkp-nav) .tok-avw");
           if (!av) return null;
           // cut: outside the nearest box that clips its content, or the viewport
           let c = null;
@@ -472,6 +500,66 @@ try {
         check(back, `${tag}: Retry lost the page`);
         check(calls.lists === before + 1, `${tag}: Retry read the lists ${calls.lists - before} times, not once`);
       }
+      if (drawn && s.lower) {
+        const box = phone ? ".tkp-phone" : ".tkp-desk";
+        const lp = `${box} [data-testid="lower-panel"]`;
+        const tabs = await f.$$eval(`${lp} [data-testid^="lower-tab-"]`, (els) => els.map((e) => e.textContent.trim()));
+        const row = live(s.top);
+        const count = s.holders === "chain" ? "2,703" : "2,680";
+        const wantTabs = phone ? ["Trades", `Holders${count}`] : [`Holders(${count})`, "Trades"];
+        // the tab's count comes from the token row until the Holders tab has read
+        const rowTabs = phone ? ["Trades", "Holders2,680"] : ["Holders(2,680)", "Trades"];
+        check(JSON.stringify(tabs) === JSON.stringify(rowTabs), `${tag}: the tabs read ${JSON.stringify(tabs)}, want ${JSON.stringify(rowTabs)}`);
+        if (s.lower === "trades") {
+          if (s.tape) {
+            await f.waitForSelector(`${lp} [data-testid="lower-rows-trades"]`, { timeout: 8_000 }).catch(() => {});
+            const rows = await f.$$eval(`${lp} [data-testid="lower-rows-trades"] [data-testid="lower-row"]`, (els) => els.map((e) => ({ side: e.getAttribute("data-side"), cells: [...e.children].map((c) => c.textContent.trim()) })));
+            check(rows.length === TAPE_COUNT, `${tag}: ${rows.length} trade rows, want ${TAPE_COUNT}`);
+            const t0 = tape(row.price_usd)[0];
+            const want0 = phone ? ["S", `$${Number(t0.usd).toFixed(2)}`] : ["Sell", `$${Number(t0.usd).toFixed(2)}`];
+            check(rows[0] && rows[0].side === t0.side && rows[0].cells[1] === want0[0] && rows[0].cells.includes(want0[1]) && rows[0].cells.at(-1) === t0.trader, `${tag}: the first trade row reads ${JSON.stringify(rows[0])}`);
+            check((await f.locator(`${lp} [data-testid="trades-heads"] [data-col="mc"]`).count()) === (phone ? 0 : 1), `${tag}: the MC column ${phone ? "drawn on the phone" : "missing"}`);
+          } else {
+            const empty = await f.locator(`${lp} [data-testid="lower-empty"]`).textContent({ timeout: 8_000 }).catch(() => null);
+            check(empty?.trim() === "No data", `${tag}: the tape's empty state reads ${empty}`);
+          }
+        }
+        if (s.lower === "holders") {
+          await f.locator(`${lp} [data-testid="lower-tab-holders"]`).click();
+          await f.waitForSelector(`${lp} [data-testid="holders-top"]`, { timeout: 8_000 }).catch(() => {});
+          await f.waitForFunction(([sel, want]) => document.querySelector(sel)?.textContent.trim().endsWith(want), [`${lp} [data-testid="lower-tab-holders"]`, phone ? count : `(${count})`], { timeout: 8_000 }).catch(() => {});
+          const tabs2 = await f.$$eval(`${lp} [data-testid^="lower-tab-"]`, (els) => els.map((e) => e.textContent.trim()));
+          check(JSON.stringify(tabs2) === JSON.stringify(wantTabs), `${tag}: the tabs read ${JSON.stringify(tabs2)} after the read, want ${JSON.stringify(wantTabs)}`);
+          const top = (await f.locator(`${lp} [data-testid="holders-top"]`).textContent().catch(() => ""))?.trim();
+          const wantTop = s.holders === "chain" ? "Top 10 hold37%" : "Top 10 hold21%";
+          check(top === wantTop, `${tag}: the top share reads ${top}, want ${wantTop}`);
+          const rows = await f.$$eval(`${lp} [data-testid="lower-rows-holders"] [data-testid="lower-row"]`, (els) => els.map((e) => ({ burn: e.hasAttribute("data-burn"), share: e.querySelector("[data-testid=row-share]")?.textContent.trim(), text: e.textContent.trim() })));
+          if (s.holders === "chain") {
+            check(rows.length === HOLDERS.length, `${tag}: ${rows.length} holder rows, want ${HOLDERS.length}`);
+            // 18.40% of a 1B supply at $0.0000273: 184M tokens, $5.02K
+            check(rows[0]?.share === "18.4%" && rows[0]?.text.includes("$5.02K") && rows[0]?.text.includes("184.00M GLOW"), `${tag}: the first holder row reads ${JSON.stringify(rows[0])}`);
+            check(rows[3]?.burn === true && rows[3]?.text.includes("Burn · not circulating"), `${tag}: the burnt row reads ${JSON.stringify(rows[3])}`);
+          } else {
+            check(rows.length === 0, `${tag}: ${rows.length} holder rows from Jupiter's fallback`);
+            const empty = (await f.locator(`${lp} [data-testid="lower-empty"]`).textContent().catch(() => ""))?.trim();
+            check(empty === "No data", `${tag}: the rows' empty state reads ${empty}`);
+          }
+        }
+        if (s.lower === "about") {
+          if (phone) {
+            await f.locator(".tkp-buy").click();
+            await f.waitForSelector(".tkp-phone [role=dialog] [data-testid=ticket-about]", { timeout: 8_000 }).catch(() => {});
+          }
+          const ab = `${phone ? ".tkp-phone [role=dialog]" : ".tkp-desk .tkp-trade"} [data-testid="ticket-about"]`;
+          await f.locator(ab).scrollIntoViewIfNeeded().catch(() => {});
+          await page.waitForTimeout(400);
+          const a = await f.$eval(ab, (e) => ({ head: e.querySelector(".tkl-ahead")?.textContent.trim(), windows: [...e.querySelectorAll("[data-testid=about-windows] > *")].map((c) => c.textContent.trim()), five: [...e.querySelectorAll("[data-testid=about-5m] > *")].map((c) => c.textContent.trim()), flow: [...(e.querySelector("[data-testid=about-flow] > div")?.children ?? [])].map((c) => c.textContent.replace(/\s+/g, " ").trim()), bar: e.querySelector(".tkl-flowbar > div")?.style.width })).catch(() => null);
+          const want = { head: "About GLOW", windows: ["5M+2.14%", "1H−3.80%", "4H+12.90%", "1D+8.02%"], five: ["5m vol$4.82K", "Buys61", "Sells44", "Net+$730.00"], flow: ["1,904 buys", "1,611 sells"], bar: `${((1904 / 3515) * 100).toFixed(1)}%` };
+          check(JSON.stringify(a) === JSON.stringify(want), `${tag}: About reads ${JSON.stringify(a)}, want ${JSON.stringify(want)}`);
+        } else await f.locator(lp).scrollIntoViewIfNeeded().catch(() => {});
+        if (phone && s.lower !== "about") await f.evaluate((sel) => window.scrollBy(0, document.querySelector(sel).getBoundingClientRect().top - 60), lp);
+        console.log(`${tag}: lower panel ${s.lower} checked`);
+      }
       for (const d of await f.$$eval("[data-draft-copy]", (els) => els.map((e) => e.getAttribute("data-draft-copy")))) {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(s.id);
@@ -481,7 +569,7 @@ try {
         if (!drafts.has(label)) drafts.set(label, new Set());
         drafts.get(label).add(`${s.id} (accessible name)`);
       }
-      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${s.id}-${w.name}.png`) });
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${s.id}-${w.name}${SIGNED_OUT ? "-out" : ""}.png`) });
       await ctx.close();
     }
   }

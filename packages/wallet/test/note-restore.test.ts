@@ -26,7 +26,7 @@ const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const OTHER = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16).fill(0x7f)));
 const TEST_GAP = 64; // the property's walk; every generated lane gap is checked to be below it (RESTORE_GAP is tested below)
 // card fresh-run-margin: the default run keeps the property's first seeded cases and the gap rule at a gap of TEST_GAP;
-// FULL_RUNS=1 (the package's test:mutants script, CI's test-wallet job) runs every case and the rule at RESTORE_GAP
+// FULL_RUNS=1 (the package's test:mutants script, run by CI's test-mutants split) runs every case and the rule at RESTORE_GAP
 const FULL = process.env.FULL_RUNS === "1";
 const CHAIN_TAGS = Object.keys(d.CHAINS) as d.Chain[];
 
@@ -947,4 +947,68 @@ test("refund by leaf: a stranger's 1 USDC on R, before or after the settle, is n
       ws.close();
     }
   }
+});
+
+// ---------- the walk in real Workers (card wallet-restore-wallets) ----------
+// node:worker_threads clones messages as a browser's postMessage does (bigint stays bigint); test/walk-worker-node.mjs
+// runs src/restore/walk-worker.ts in one as a module Worker runs it.
+import { Worker } from "node:worker_threads";
+import { walkInWorkers, answerWalk, type WalkPort } from "../src/restore/walk.ts";
+const spawned: Worker[] = [];
+function spawnWalker(): WalkPort {
+  const w = new Worker(new URL("./walk-worker-node.mjs", import.meta.url));
+  spawned.push(w);
+  return {
+    postMessage: (m) => w.postMessage(m),
+    addEventListener: (type, f) => void w.on(type, type === "message" ? (data: unknown) => f({ data }) : () => f({})),
+    terminate: () => void w.terminate(),
+  };
+}
+
+test("a deposit at index 2 is restored, with its value, through the real Worker bridge; a bridge sending strings is refused", async () => {
+  const v = new Vault();
+  const P2 = sec({ kind: "deposit", s: SCOPE, i: 2 }).precommitment;
+  v.deposit(123n, 9_000_000n, hex64("stranger")); // a stranger's row first
+  const leaf = v.deposit(P2, 7_000_000n, hex64("u2"))!;
+  const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk: walkInWorkers(SEED, spawnWalker) });
+  assert.equal(spawned.length, RESTORE_LANES, "one Worker per lane");
+  assert.deepEqual(got.notes.map((n) => [refKey(n.ref), n.leaf.value, n.leaf.leafIndex, n.state]), [[refKey({ kind: "deposit", s: SCOPE, i: 2 }), 7_000_000n, leaf.leafIndex, "UNSPENT"]]);
+  assert.deepEqual(got.laneHighest, [null, null, 2, null, null, null, null, null]);
+  // the same ask with the precommitments as strings (a JSON bridge) is refused in the Worker, never walked empty
+  const m = d.masters(SEED, "deposit");
+  const ask = { lane: 2, scope: SCOPE, gap: TEST_GAP, nullifier: m.nullifier, secret: m.secret, precommitments: [String(P2)] };
+  assert.deepEqual(answerWalk(ask), { ok: false, error: "precommitments: not bigints" });
+  assert.deepEqual(answerWalk({ ...ask, scope: String(SCOPE) }), { ok: false, error: "scope and masters: not bigints" });
+  const viaWorker = walkInWorkers(SEED, () => {
+    const p = spawnWalker();
+    return { ...p, postMessage: (a) => p.postMessage({ ...(a as object), precommitments: (a as { precommitments: bigint[] }).precommitments.map(String) }) };
+  });
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk: viaWorker }), /lane \d: the walk worker refused: precommitments: not bigints/);
+});
+
+test("the Worker bridge posts each Worker exactly its lane, scope, gap, the two masters and the precommitments, never the seed", async () => {
+  const v = new Vault();
+  v.deposit(sec({ kind: "deposit", s: SCOPE, i: 2 }).precommitment, 7_000_000n, hex64("u2"));
+  const posted: unknown[] = [];
+  const walk = walkInWorkers(SEED, () => {
+    const p = spawnWalker();
+    return { ...p, postMessage: (m) => (posted.push(m), p.postMessage(m)) };
+  });
+  await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk });
+  assert.equal(posted.length, RESTORE_LANES);
+  for (const m of posted) assert.deepEqual(Object.keys(m as object).sort(), ["gap", "lane", "nullifier", "precommitments", "scope", "secret"]);
+});
+
+test("the Worker bridge: a Worker that throws on load ends the restore with its lane named", { timeout: 10_000 }, async () => {
+  const v = new Vault();
+  const broken = (): WalkPort => {
+    const w = new Worker('throw new Error("the walk worker would not load")', { eval: true });
+    spawned.push(w);
+    return {
+      postMessage: (m) => w.postMessage(m),
+      addEventListener: (type, f) => void w.on(type, type === "message" ? (data: unknown) => f({ data }) : () => f({})),
+      terminate: () => void w.terminate(),
+    };
+  };
+  await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP, walk: walkInWorkers(SEED, broken) }), /lane \d: the walk worker failed/);
 });

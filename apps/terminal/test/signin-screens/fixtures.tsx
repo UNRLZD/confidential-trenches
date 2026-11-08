@@ -13,6 +13,8 @@ import type { SigninSource } from "../../src/screens/signin/source.tsx";
 import { applyFit } from "../../src/shell/fit.ts";
 import { fontsReady } from "../../src/shell/fonts.ts";
 import { Footer } from "../../src/shell/Footer.tsx";
+// the footer's block read, answered here so no request leaves the page: the mainnet read the footer drew on 8 Nov 11:06Z (card app-footer-bar)
+const FOOTER_READ = async () => ({ height: 223_607_563, ms: 233 });
 import { Header, PhoneHeader } from "../../src/shell/Header.tsx";
 import { TabBar } from "../../src/shell/TabBar.tsx";
 import "../../src/shell/shell.css";
@@ -76,7 +78,7 @@ function App() {
           <main className="screen" data-route={path}>
             {path === "/profile" && <PhoneAccountMenu />}
           </main>
-          <Footer />
+          <Footer read={FOOTER_READ} />
           <TabBar />
         </div>
         <SigninSheet />

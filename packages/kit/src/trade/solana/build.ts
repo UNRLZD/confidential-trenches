@@ -589,14 +589,24 @@ export function solanaCompileV0(
   const at = (k: string): number => index.get(k) as number;
   const bytes: number[] = [0x80, group(true, true).length + group(true, false).length, group(true, false).length, group(false, false).length];
   bytes.push(...compact(staticKeys.length));
-  for (const k of staticKeys) bytes.push(...base58.decode(k));
-  bytes.push(...base58.decode(blockhash));
+  // every key and the blockhash are 32 bytes: another length would move each field after it (review 4 M1)
+  const b32 = (v: string, what: string): Uint8Array => {
+    let b: Uint8Array;
+    try {
+      b = base58.decode(v);
+    } catch {
+      return bad(`${what} is not base58`);
+    }
+    return b.length === 32 ? b : bad(`${what} is not 32 bytes`);
+  };
+  for (const k of staticKeys) bytes.push(...b32(k, `the key ${k}`));
+  bytes.push(...b32(blockhash, "the blockhash"));
   bytes.push(...compact(ixs.length));
   for (const ix of ixs) {
     bytes.push(at(ix.program), ...compact(ix.accounts.length), ...ix.accounts.map((a) => at(a.key)), ...compact(ix.data.length), ...ix.data);
   }
   bytes.push(...compact(lookups.length));
-  for (const l of lookups) bytes.push(...base58.decode(l.address), ...compact(l.writable.length), ...l.writable, ...compact(l.readonly.length), ...l.readonly);
+  for (const l of lookups) bytes.push(...b32(l.address, `the table ${l.address}`), ...compact(l.writable.length), ...l.writable, ...compact(l.readonly.length), ...l.readonly);
   return { message: Uint8Array.from(bytes), tablesUsed: lookups.map((l) => l.address) };
 }
 
@@ -825,16 +835,25 @@ export async function solanaTeardownChecked(
   lamports: readonly [bigint, bigint],
   chain: { blockhash: string; lastValidBlockHeight: number },
   simulate: (frames: readonly SolanaAssembled[]) => Promise<SolanaTeardownReads["simulations"]>,
-): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
+): Promise<{ plan: SolanaTeardownPlan; frames: SolanaAssembled[]; wires: Uint8Array[]; reads: SolanaTeardownReads; verdict: SolanaTeardownVerdict }> {
   const once = async (p: SolanaTeardownPlan, unclaimed?: SolanaTeardownUnclaimed) => {
     const frames = buildSolanaTeardown(wallet, p, chain);
+    // the bytes checked are copies taken before the first await and handed to no one (card signers-own-bytes): the
+    // caller signs only these (own-wires.ts), so a change to a frame while it simulates is never signed
+    const wires = frames.map((f) => Uint8Array.from(f.wire));
     const reads: SolanaTeardownReads = { accounts, wallet: lamports, simulations: await simulate(frames), ...(unclaimed === undefined ? {} : { unclaimed }) };
-    return { plan: p, frames, reads, verdict: checkSolanaTeardown(frames.map((f) => f.wire), wallet, reads) };
+    // the bytes simulated are the bytes checked and signed: a frame changed while it simulated is refused (review 5 F6)
+    frames.forEach((f, i) => {
+      const w = f.wire;
+      const c = wires[i]!;
+      if (!(w instanceof Uint8Array) || w.length !== c.length || !w.every((b, j) => b === c[j])) bad(`teardown frame ${i} changed while it simulated`);
+    });
+    return { plan: p, frames, wires, reads, verdict: checkSolanaTeardown(wires, wallet, reads) };
   };
   let t = await once(plan);
   // each pass turns at least one more program's claim off, and there are two pump programs
   for (let i = 0; i < 2; i++) {
-    const off = solanaTeardownUnclaimed(t.verdict, t.frames.map((f) => f.wire), t.reads.simulations, t.reads.unclaimed);
+    const off = solanaTeardownUnclaimed(t.verdict, t.wires, t.reads.simulations, t.reads.unclaimed);
     if (off === null || Object.keys(off).length === Object.keys(t.reads.unclaimed ?? {}).length) return t;
     t = await once(solanaTeardownPlan(wallet, accounts, off), off);
   }

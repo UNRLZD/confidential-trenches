@@ -50,9 +50,27 @@ svg { display: block; flex: none; }
 .nav a { height: 40px; padding: 0 14px; display: flex; align-items: center; border-radius: 10px; font-size: 15px; font-weight: 500; color: var(--text-2); }
 .nav a.on { background: var(--bg-raised); color: var(--text-1); }
 
-/* desktop footer (proto.css:124, :132) */
-.ft { height: 32px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 0 16px; border-top: 1px solid #151515; font: 12px var(--font-num); color: var(--text-2); white-space: nowrap; overflow: hidden; }
+/* desktop footer (proto.css:7, :27, :124-133): the prices, the connection, the block and links, the Verify pill (Footer.tsx) */
+.ft { --blue: #5b8cff; --blue-rgb: 91, 140, 255; --sell: #ff5d4d; height: 32px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 16px; border-top: 1px solid #151515; font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; overflow: hidden; }
+.ft .ticks { flex: 1 1 0; min-width: 0; height: 32px; overflow: hidden; display: flex; }
+.ft .tick { flex: none; height: 32px; margin-right: 18px; display: flex; align-items: center; gap: 7px; color: var(--text-2); }
+.ft .tick img { width: 14px; height: 14px; border-radius: 50%; display: block; }
+/* a price holds the room of the longest the ticker draws under $100,000 ($1,234.56 is drawn $1,235; $999.99 and $99,999
+   are 7 characters), so a tick that changes its length moves nothing after it (card app-legend-holds-still) */
+.ft .tick .v { display: inline-block; min-width: 7ch; font-kerning: none; }
+.ft .health { flex: none; display: flex; align-items: center; gap: 6px; color: var(--blue); }
+.ft .health .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px rgba(var(--blue-rgb), .5); }
+.ft .health.off { color: var(--sell); }
+/* the connection, its round trip and the block keep one width from the first paint, so a read that lands, or a round
+   trip of more digits, moves nothing (BAR-10's zero layout shift): each holds the widest it draws (Offline; Connection
+   5000 ms, the read's timeout; a nine-digit block) in the footer's monospace digits, its label fixed at its start */
+.ft .health { min-width: calc(13px + 7ch); }
+.ft .health.wait { visibility: hidden; }
+.ft .conn { min-width: 18ch; }
+.ft [data-block] { min-width: 17ch; }
+.ft .conn { flex: none; color: var(--text-3); }
 .ft .links { flex: none; display: flex; gap: 14px; font-family: var(--font-ui); color: var(--text-3); }
+.ft .links span { font-family: var(--font-num); }
 .ft .pill { flex: none; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 11px; font: 600 11px var(--font-ui); background: var(--bg-raised); color: var(--text-2); }
 
 /* phone header and tab bar (proto.css:232-247, :368) */

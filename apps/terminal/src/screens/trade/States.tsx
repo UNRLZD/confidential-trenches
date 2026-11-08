@@ -41,7 +41,7 @@ export function RunLabel({ phase, now, final = false }: { phase: Phase; now: num
       const t = secs(now - phase.at);
       return (
         <>
-          <W id="slow" />&nbsp;<span className="trb-live" data-time={t}>{t}</span>
+          <W id="slow" />&nbsp;<span className="trb-live" data-time={t} data-slow>{t}</span>
         </>
       );
     }
