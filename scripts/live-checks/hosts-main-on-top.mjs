@@ -28,8 +28,15 @@
 //     APP_HOST's SIGN_HOST and wss HELPER_HOST), and no source in either names a child of SIGN_HOST;
 //   - /.well-known/webauthn on SIGN_HOST is refused: 404, or Pages' fallback page (byte for byte SIGN_HOST's /), never
 //     a file that could let another origin use SIGN_HOST's passkeys;
-//   - the helper at HELPER_HOST echoes each of SIGN_HOST's and APP_HOST's origins (its CORS, the kit's HELPER_CORS);
-//   - the two retired children, sign. and api., give no answer at all.
+//   - the helper at HELPER_HOST echoes each of SIGN_HOST's and APP_HOST's origins (its CORS, the kit's HELPER_CORS), and
+//     echoes neither the retired sign.'s origin nor another site's (REFUSED_ORIGINS): it answers them with no
+//     access-control-allow-origin;
+//   - the two retired children, sign. and api., give no answer at all;
+//   - no certificate for a child of SIGN_HOST is still good: every unexpired one certspotter lists is revoked
+//     (certspotter's revoked, read from the CA's revocation lists), but sign.'s Google Trust Services certificates
+//     (CERTS_ALLOWED), whose keys Cloudflare holds, and Cloudflare serves SIGN_HOST itself. A child's certificate whose
+//     key someone kept would let a page on that child, on a network that steers its lookup, run SIGN_HOST's passkeys.
+//     certspotter alone gives revocation, so the line fails when it is unread.
 // The tree holds no child either: scripts/ci/host-children.mjs, in test:gates.
 //   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer the run read to <file>, so the check's test can replay it.
@@ -51,6 +58,12 @@ export const SIGN_ORIGIN = `https://${SIGN_HOST}`;
 export const APP_ORIGIN = `https://${APP_HOST}`;
 export const HELPER_ORIGIN = `https://${HELPER_HOST}`;
 export const WEBAUTHN = "/.well-known/webauthn";
+/** Origins the helper must not echo: the retired signing page's, and another site's. */
+export const REFUSED_ORIGINS = [`https://sign.${SIGN_HOST}`, "https://evil.example"];
+/** Child certificates that may stay good, each with its reason. */
+export const CERTS_ALLOWED = [
+  { names: [`sign.${SIGN_HOST}`], issuer: "Google Trust Services", why: "Pages' certificate for the old sign.: Cloudflare holds its key, and Cloudflare serves SIGN_HOST itself" },
+];
 /** The child labels read, a random one last (a wildcard answers it). */
 export const LABELS = ["api", "app", "sign"];
 /** The children the switch retired: the old helper's and signing page's names, each read over HTTPS for no answer. */
@@ -76,7 +89,7 @@ export const CT_SOURCES = [
   {
     name: "certspotter",
     canary: SIGN_HOST,
-    url: (after) => `https://api.certspotter.com/v1/issuances?domain=${SIGN_HOST}&include_subdomains=true&expand=dns_names${after ? `&after=${after}` : ""}`,
+    url: (after) => `https://api.certspotter.com/v1/issuances?domain=${SIGN_HOST}&include_subdomains=true&expand=dns_names&expand=issuer&expand=revocation${after ? `&after=${after}` : ""}`,
     names: (j) => j.flatMap((c) => (Array.isArray(c?.dns_names) ? c.dns_names : [])),
     next: (j) => (j.length ? String(j.at(-1).id) : null),
   },
@@ -159,6 +172,29 @@ export function ctNames(rec, name) {
   return { names: [...all].filter((n) => n.endsWith(`.${SIGN_HOST}`)).sort() };
 }
 
+/** certspotter's unexpired certificates naming a child of SIGN_HOST that are neither revoked nor allowed:
+ *  { bad: [line], count } or { error }. `now` is the run's time. */
+export function ctCerts(rec, now) {
+  const src = CT_SOURCES.find((s) => s.name === "certspotter");
+  const read = rec.ct?.find((c) => c.source === "certspotter");
+  if (!ctNames(rec, "certspotter").names) return { error: ctNames(rec, "certspotter").error };
+  const out = [];
+  let count = 0;
+  for (const p of read.pages) {
+    for (const c of ctPage(src, p).json) {
+      const names = (Array.isArray(c?.dns_names) ? c.dns_names : []).map(bare);
+      const kids = names.filter((n) => n.endsWith(`.${SIGN_HOST}`));
+      if (!kids.length || !(Date.parse(c.not_after) > now)) continue;
+      count++;
+      const issuer = String(c.issuer?.friendly_name ?? c.issuer?.name ?? "");
+      if (c.revoked === true) continue;
+      if (CERTS_ALLOWED.some((a) => kids.every((n) => a.names.includes(n)) && names.every((n) => n === SIGN_HOST || a.names.includes(n)) && issuer.includes(a.issuer))) continue;
+      out.push(`${c.id} for ${kids.join(", ")} (${issuer || "issuer unread"}, to ${c.not_after}) ${c.revoked === false ? "is not revoked" : "has no revocation read"}`);
+    }
+  }
+  return { bad: out, count };
+}
+
 const sha = (alg, text, enc) => createHash(alg).update(text).digest(enc);
 // a host name in a bundle: in an https or wss origin, or bare in a string (the quote before it)
 const HOSTS_IN = /(?:https?|wss):\/\/[a-z0-9*.-]*unrealized\.trade(?![a-z0-9-])|(?<=["'\x60])[a-z0-9*.-]*unrealized\.trade(?![a-z0-9-])/gi;
@@ -184,6 +220,8 @@ export async function readHttp(fetchFn = fetch) {
   const app = await get(fetchFn, `${APP_ORIGIN}/`);
   const helperSign = await get(fetchFn, `${HELPER_ORIGIN}/v1/health`, { origin: SIGN_ORIGIN });
   const helperApp = await get(fetchFn, `${HELPER_ORIGIN}/v1/health`, { origin: APP_ORIGIN });
+  const refused = [];
+  for (const origin of REFUSED_ORIGINS) refused.push({ origin, ...kept(await get(fetchFn, `${HELPER_ORIGIN}/v1/health`, { origin })) });
   const retired = [];
   for (const n of RETIRED) retired.push(kept(await get(fetchFn, `https://${n}/`)));
   const digest = (r) => (r.error ? kept(r) : { ...kept(r), sha256: sha("sha256", r.body, "hex") });
@@ -194,6 +232,7 @@ export async function readHttp(fetchFn = fetch) {
     app_index: kept(app),
     helper_sign: kept(helperSign),
     helper_app: kept(helperApp),
+    helper_refused: refused,
     retired,
   };
 }
@@ -228,7 +267,7 @@ export async function read({ fetchFn = fetch, label = `x${randomBytes(8).toStrin
       }
     }
   }
-  return { label, ct, answers, http: await readHttp(fetchFn) };
+  return { at: new Date().toISOString(), label, ct, answers, http: await readHttp(fetchFn) };
 }
 
 export function judge(rec) {
@@ -275,6 +314,8 @@ export function judge(rec) {
     const g = of(name);
     add(g.every((x) => !x.error && x.status === NXDOMAIN), `${name}, in the CT logs: NXDOMAIN on both: ${g.map(say).join("; ")}`);
   }
+  const certs = ctCerts(rec, Date.parse(rec.at ?? "") || Date.now());
+  add(!certs.error && !certs.bad.length, certs.error ? `child certificates: certspotter unread (${certs.error}), so their revocation is not judged` : `child certificates: ${certs.count} unexpired, ${certs.bad.length ? `still good: ${certs.bad.join("; ")}` : `each revoked or allowed (${CERTS_ALLOWED.map((a) => `${a.names.join(", ")} by ${a.issuer}: ${a.why}`).join("; ")})`}`);
   const app = of(APP_HOST);
   add(app.every((g) => !g.error && g.status === NOERROR && g.cnames[0] === APP_TARGET && g.as.length > 0), `${APP_HOST} is the terminal's project ${APP_TARGET}: ${app.map(say).join("; ")}`);
   const helper = of(HELPER_HOST);
@@ -310,6 +351,10 @@ function judgeHttp(h, add) {
   for (const [r, origin] of [[h.helper_sign, SIGN_ORIGIN], [h.helper_app, APP_ORIGIN]]) {
     add(r?.status === 200 && r.acao === origin, `${HELPER_ORIGIN}/v1/health with Origin ${origin}: ${st(r)}, access-control-allow-origin ${r?.acao ?? "none"}`);
   }
+  for (const origin of REFUSED_ORIGINS) {
+    const r = (h.helper_refused ?? []).find((x) => x.origin === origin);
+    add(!!r && !r.error && r.status > 0 && !r.acao, `${HELPER_ORIGIN}/v1/health refuses Origin ${origin}: ${st(r)}, access-control-allow-origin ${r?.acao ?? "none"}`);
+  }
   for (const n of RETIRED) {
     const r = (h.retired ?? []).find((x) => x.url === `https://${n}/`);
     add(!!r?.error, `https://${n}/ gives no answer: ${r ? (r.error ? `none (${r.error})` : `HTTP ${r.status}`) : "not read"}`);
@@ -321,7 +366,7 @@ if (import.meta.main) {
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
   try {
     const rec = await read();
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ at: new Date().toISOString(), ...rec }, null, 1)}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     if (rec.answers.every((x) => x.error)) throw new Error(`no resolver answered: ${rec.answers[0]?.error}`);
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
