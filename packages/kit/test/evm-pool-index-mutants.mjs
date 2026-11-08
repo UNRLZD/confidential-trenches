@@ -41,6 +41,8 @@ const Q3 = "Q3: a pool one reader logs inside the depth whose transaction's rece
 const R1 = "R1: a receipt answered null is asked again after the backoff";
 const R2 = "R2: one-reader pools' receipts are asked in batches small enough";
 const R3 = "R3: a receipt answer that is not a receipt";
+const S1 = "S1: a liar's";
+const S2 = "S2: a receipt answered with a rate limit inside the batch once";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -112,23 +114,34 @@ export const MUTANTS = [
   ["if (!same) refuse(", "if (false) refuse(", Q2],
   // review 3 of 7f1ad79a: a null receipt unread at once, or refused, or never asked again, or asked again at once; a
   // receipt null on every try kept; 500 receipts a batch; an answer that is not a receipt checked as one
-  ["if (a === null) return void again.push(p);", "if (a === null) return void unread.add(p.id);", R1],
-  ["if (a === null) return void again.push(p);", "if (a === null) refuse(\"rpc_disagree\", \"null\");", R1],
+  ["if (a === null || (a === undefined", "if (false || (a === undefined", R1],
+  ["if (a === null || (a === undefined", "if (a === null) refuse(\"rpc_disagree\", \"null\");\n            if (false || (a === undefined", R1],
   ["for (let t = 0; t < INDEX_TRIES && of.length > 0; t++) {", "for (let t = 0; t < 1 && of.length > 0; t++) {", R1],
   ["if (t > 0) await nap(BACKOFF_MS * 2 ** t);", "", R1],
   ["for (const p of of) unread.add(p.id);", "", R1],
   ["for (const p of of) unread.add(p.id);", "", Q3],
   ["const INDEX_RECEIPT_BATCH = 10;", "const INDEX_RECEIPT_BATCH = 500;", R2],
   ["if (typeof a !== \"object\" || Array.isArray(a)) return void unread.add(p.id);", "if (a === undefined) return void unread.add(p.id);", R3],
+  // review 4 of 43f8e45f: no receipt budget, or one past the honest reader's means; the pools past it kept (unasked, so
+  // never checked), or the liar not named; a rate limit inside a receipt batch unread at once
+  ["const INDEX_RECEIPT_BUDGET = INDEX_STATE_BATCH;", "const INDEX_RECEIPT_BUDGET = 1_000_000;", S1],
+  ["for (const p of of.slice(budget)) unread.add(p.id);", "", S1],
+  ["if (over > 0) spent ??=", "if (false) spent ??=", S1],
+  ["if (spent !== null) error = spent;", "", S1],
+  ["(a === undefined && limited(e?.error))", "false", S2],
   // F5 (review): a failed batch not asked one span a request; a span alone that fails not asked as halves
   ["else j.alone[r] = true;", "else j.ans[r] = NO_ANSWER;", ALONE],
   ["for (const j of g) if (j.alone[r]) j.ans[r] = NO_ANSWER;", "for (const j of g) if (j.alone[r]) throw new EvmQuoteError(\"rpc_error\", \"alone\");", ALONE],
 ];
 
+// a child test run must not inherit this process's own node --test context (run as a test, test/mutants/
+// evm-pool-mutants.test.mjs, the child reports to the parent's runner and prints no "# pass N": every mutant "names no
+// test", CI run 42527434981), as evm-pool-buy-mutants.mjs and evm-pool-sell-mutants.mjs clear it
+const CHILD_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
 const RUN_MS = 120_000;
 function run(name) {
   const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, TEST];
-  const r = runSync("node", args, { stdio: "pipe", encoding: "utf8", timeoutMs: RUN_MS });
+  const r = runSync("node", args, { stdio: "pipe", encoding: "utf8", env: CHILD_ENV, timeoutMs: RUN_MS });
   if (r.status !== 0) return "fail";
   return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
 }

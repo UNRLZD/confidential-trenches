@@ -592,3 +592,43 @@ test("R3: a receipt answer that is not a receipt (a number, a string, an array) 
     assert.ok(!s.index!.pools.some((p) => p.id === evmPoolIdOf(gap.key)));
   }
 });
+
+// review 4 of 43f8e45f
+const receiptAsks = (r: Reader) => r.calls.filter((cs) => cs.some((c) => c.method === "eth_getTransactionReceipt"));
+// S1 (P2): a lying reader logs N real pools (each initialized before `from`, so the state holds them on both and the
+// honest reader logs none of them in the depth) at blocks inside the depth with made-up transactions: at 43f8e45f each
+// was asked INDEX_TRIES rounds on the honest reader (500 cost 200 batches and 7 s of backoff), the liar never named
+for (const N of [500, 2000]) test(`S1: a liar's ${N} made-up Initialize txs of real old pools cost the honest reader at most the receipt budget, the sync partial naming the liar`, async () => {
+  const head = 1_000_000;
+  const old = Array.from({ length: N }, (_, i) => ({ key: key(5000 + i), block: 905_000 + (i % 90) * 1_000 }));
+  const st = new Set([real, ...old].map((p) => evmPoolIdOf(p.key)));
+  const honest: Reader = { head, pools: [real], receipts: [real], state: st, calls: [] };
+  const liar: Reader = { head, pools: [real, ...old], state: st, calls: [] };
+  let slept = 0;
+  const r = await evmPoolIndexSync(null, cfgOf(honest, liar, { cap: 131_072, nap: async (ms) => void (slept += ms) }));
+  const asked = receiptAsks(honest).flat().filter((c) => c.method === "eth_getTransactionReceipt").length;
+  assert.ok(asked <= 500, `${asked} receipts asked of the honest reader`);
+  assert.ok(receiptAsks(honest).length <= 50, `${receiptAsks(honest).length} receipt batches`);
+  assert.ok(slept <= 1_000, `${slept} ms of receipt backoff`);
+  assert.equal(r.coversThrough, null);
+  assert.equal(r.pools, null);
+  assert.equal(r.error?.code, "rpc_disagree");
+  assert.match(r.error!.message, /index reader 2's one-reader pools took index reader 1 past its receipt budget of 500/);
+  const made = new Set(old.map((p) => evmPoolIdOf(p.key)));
+  assert.ok(!r.index!.pools.some((p) => made.has(p.id)));
+  assert.ok(!r.index!.spans.some(([a, b]) => old.some((p) => a <= p.block && p.block <= b)), JSON.stringify(r.index!.spans));
+});
+
+// S2 (P3): a rate limit answered inside a receipt batch (the words the spans ask again: answerOf's `limited`) was
+// unread at once, so the sync of two honest readers ended partial
+test("S2: a receipt answered with a rate limit inside the batch once, then present, completes the sync", async () => {
+  const head = 1_000_000;
+  let once = 1;
+  const inner = reader({ head, pools: [real], receipts: [real, gap], state: stGap, calls: [] });
+  const b = wrap(inner, (c, x) => (c.method === "eth_getTransactionReceipt" && once-- > 0 ? { error: { code: -32005, message: "25/second request limit reached" } } : x));
+  const cfg = cfgOf({ head, pools: [real, gap], state: stGap, calls: [] }, { head, pools: [], calls: [] });
+  const r = await evmPoolIndexSync(null, { ...cfg, readers: [cfg.readers[0], b] });
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(r.pools!.find((p) => p.id === evmPoolIdOf(gap.key))?.block, gap.block);
+});

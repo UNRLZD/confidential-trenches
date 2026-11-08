@@ -92,6 +92,10 @@ const INDEX_STATE_BATCH = 500;
 /** The receipts (F5) in one batch: 500 Base receipts were 12.3 MB on base-rpc.publicnode.com (2026-11-08 21:08Z), the
  *  largest 75.5 KB, so 10 stay under evmJsonRpc's 1 MiB. */
 const INDEX_RECEIPT_BATCH = 10;
+/** The receipts one sync asks of each reader, its tries included (review 4 of 43f8e45f: a liar that logs real pools of
+ *  before `from` inside the depth, with made-up transactions, cost the honest reader INDEX_TRIES rounds of each, up to
+ *  the cap's 131,072); honest one-reader pools measured about 0 a sync over 300k Base blocks. */
+const INDEX_RECEIPT_BUDGET = INDEX_STATE_BATCH;
 const BACKOFF_MS = 500;
 const SEL_EXTSLOAD = "1e2eaeaf"; // PoolManager.extsload(bytes32)
 const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
@@ -393,20 +397,30 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     // 1fb6b198: a real pool initialized before `from`, logged by one reader inside the depth, was served there). A
     // receipt answered null is asked again, INDEX_TRIES times with the backoff (review 3 of 7f1ad79a:
     // base.api.pocket.network answered null for 119 of 500 mined Initialize transactions, another set each round), then
-    // unread; one not answered (an error, a batch spent on throws) or not a receipt is unread; only a receipt that is
-    // there and differs refuses
+    // unread, as one answered with a rate limit in the batch (the spans' `limited`); one not answered (an error, a batch
+    // spent on throws) or not a receipt is unread; only a receipt that is there and differs refuses. Past
+    // INDEX_RECEIPT_BUDGET receipts asked of a reader, the rest are unread unasked and the sync names the other reader
     const check = ones.filter((p) => held.has(p.id));
+    let spent: EvmQuoteError | null = null;
     for (const r of [0, 1] as const) {
       let of = check.filter((p) => logged.get(p.id)!.by !== r);
+      let budget = INDEX_RECEIPT_BUDGET;
+      let over = 0;
       for (let t = 0; t < INDEX_TRIES && of.length > 0; t++) {
+        over += Math.max(0, of.length - budget);
+        for (const p of of.slice(budget)) unread.add(p.id);
+        of = of.slice(0, budget);
+        budget -= of.length;
+        if (of.length === 0) break;
         if (t > 0) await nap(BACKOFF_MS * 2 ** t);
         const again: EvmIndexedPool[] = [];
         for (let i = 0; i < of.length; i += INDEX_RECEIPT_BATCH) {
           const part = of.slice(i, i + INDEX_RECEIPT_BATCH);
           const out = await ask(r, part.map((p) => ({ method: "eth_getTransactionReceipt", params: [logged.get(p.id)!.f.tx] })));
           part.forEach((p, k) => {
-            const a = (out?.[k] as { result?: unknown } | null | undefined)?.result;
-            if (a === null) return void again.push(p);
+            const e = out?.[k] as { result?: unknown; error?: unknown } | null | undefined;
+            const a = e?.result;
+            if (a === null || (a === undefined && limited(e?.error))) return void again.push(p);
             if (typeof a !== "object" || Array.isArray(a)) return void unread.add(p.id);
             const f = logged.get(p.id)!.f;
             const rc = a as { blockNumber?: unknown; blockHash?: unknown; logs?: unknown };
@@ -420,7 +434,9 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
         of = again;
       }
       for (const p of of) unread.add(p.id);
+      if (over > 0) spent ??= new EvmQuoteError("rpc_disagree", `index reader ${2 - r}'s one-reader pools took index reader ${r + 1} past its receipt budget of ${INDEX_RECEIPT_BUDGET} (${over} not asked)`);
     }
+    if (spent !== null) error = spent;
     for (const id of unread) held.delete(id);
     if (unread.size > 0) {
       error ??= new EvmQuoteError("rpc_error", `the index readers did not answer the PoolManager's state or the Initialize receipt of ${unread.size} pool(s)`);
