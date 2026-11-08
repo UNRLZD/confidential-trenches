@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctCerts, ctNames, CUTOVER_REVOKED, REFUSED_ORIGINS, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
+import { APP_ORIGIN, APP_TARGET, CT_PAGES_MAX, ctCerts, ctNames, CUTOVER_BY, CUTOVER_REVOKED, REFUSED_ORIGINS, verdict, HELPER_HOST, HELPER_IP, hostsIn, judge, read, SIGN_HOST, SIGN_ORIGIN, SIGN_TARGET, WEBAUTHN } from "./hosts-main-on-top.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "hosts-main-on-top.answers.json"), "utf8"));
@@ -144,11 +144,34 @@ test("planted certificate cases: an unexpired child certificate FAILs only read 
   assert.deepEqual([r.ok, r.inconclusive, bad(r).map((l) => l.split(":")[0])], [false, false, ["BAD child certificates"]]);
   r = judge(spot(cert([api], { id: "17921097554" })));
   assert.deepEqual([r.ok, r.inconclusive, bad(r).length], [false, true, 0]);
+  // the deadline (delta review M3): one the cutover revokes, read not revoked an hour and a second after CUTOVER_BY,
+  // FAILs; read at CUTOVER_BY + 1 h exactly, or before, it waits
+  const late = (ms) => ({ ...read, checked_at: new Date(Date.parse(CUTOVER_BY) + ms).toISOString() });
+  const afterDeadline = of(cert([api], { id: "18102517185", revocation: late(3_601_000) }));
+  assert.deepEqual([afterDeadline.fail.length, afterDeadline.wait.length], [1, 0], "read after the deadline");
+  assert.match(afterDeadline.fail[0], /which the cutover revokes by 2026-11-09T13:00:00Z, is read not revoked at 2026-11-09T14:00:01/);
+  for (const ms of [3_600_000, 0, -86_400_000]) {
+    const g = of(cert([api], { id: "18102517185", revocation: late(ms) }));
+    assert.deepEqual([g.fail.length, g.wait.length], [0, 1], `read at CUTOVER_BY ${ms} ms`);
+  }
+  r = judge(spot(cert([api], { id: "17921097554", revocation: late(7_200_000) })));
+  assert.deepEqual([r.ok, r.inconclusive, bad(r).map((l) => l.split(":")[0])], [false, false, ["BAD child certificates"]]);
   // INCONCLUSIVE never hides another line's FAIL
   const both = spot(cert([api], { id: "17921097554" }));
   both.http.helper_app.acao = null;
   r = judge(both);
   assert.deepEqual([r.ok, r.inconclusive], [false, false]);
+});
+
+test("the verdict line and exit code (delta review L6): PASS 0, FAIL 1, INCONCLUSIVE 2, the line the cutover's step 7 reads", () => {
+  assert.deepEqual(verdict({ ok: true, inconclusive: false }), { line: "live-check hosts-main-on-top: PASS", code: 0 });
+  assert.deepEqual(verdict({ ok: false, inconclusive: false }), { line: "live-check hosts-main-on-top: FAIL", code: 1 });
+  // the exact text scripts/deploy/live-verdict.mjs VERDICT (research repo) requires as the job log's last verdict
+  assert.deepEqual(verdict({ ok: false, inconclusive: true }), { line: "live-check hosts-main-on-top: INCONCLUSIVE", code: 2 });
+  for (const k of ["good", "bad", "stale_cert", "unread_cert", "bad_cert", "bad_cors"]) {
+    const r = judge(ANSWERS[k]);
+    assert.equal(verdict(r).code, { good: 0, stale_cert: 2, unread_cert: 2 }[k] ?? 1, k);
+  }
 });
 
 test("no line prints the helper's address", () => {

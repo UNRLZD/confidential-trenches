@@ -39,8 +39,10 @@
 //     The line FAILs only on an unexpired child certificate certspotter has read as not revoked that is not one the
 //     cutover revoked (CUTOVER_REVOKED, each proven by the CA's own answers in scripts/deploy/hosts-cutover.sh). It is
 //     INCONCLUSIVE, never PASS or FAIL, when certspotter is unread, gives no revocation, or still lists one of those as
-//     not revoked (it reads the CA's lists on its own schedule): a deploy cannot make or keep a certificate, so this
-//     line never fails one. The check then ends INCONCLUSIVE (exit 2) if every other line holds.
+//     not revoked on a read before CUTOVER_BY + 1 h (it reads the CA's lists on its own schedule): a deploy cannot make
+//     or keep a certificate, so this line never fails one. A read after that deadline that still lists one of them as
+//     not revoked FAILs: the cutover did not revoke it. The check then ends INCONCLUSIVE (exit 2) if every other line
+//     holds.
 // The tree holds no child either: scripts/ci/host-children.mjs, in test:gates.
 //   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, INCONCLUSIVE or error
 //   exit 2
@@ -65,9 +67,15 @@ export const HELPER_ORIGIN = `https://${HELPER_HOST}`;
 export const WEBAUTHN = "/.well-known/webauthn";
 /** Origins the helper must not echo: the retired signing page's, and another site's. */
 export const REFUSED_ORIGINS = [`https://sign.${SIGN_HOST}`, "https://evil.example"];
-/** The certificates the cutover revoked at Let's Encrypt (certspotter ids): api.'s, the three ctwatch-test. ones and
- *  SIGN_HOST's own of 2026-10-20. Until certspotter reads them revoked, the certificate line is INCONCLUSIVE. */
+/** The certificates the cutover revokes at Let's Encrypt (certspotter ids): api.'s, the three ctwatch-test. ones and
+ *  SIGN_HOST's own of 2026-10-20. ctCerts judges the four children's: until certspotter reads one revoked, on a read
+ *  before CUTOVER_BY + 1 h, the certificate line is INCONCLUSIVE; after it, FAIL. SIGN_HOST's own (17883777060) is
+ *  listed for the record only: it names no child, so ctCerts never judges it. */
 export const CUTOVER_REVOKED = ["18102517185", "17921097554", "17921221760", "17921365530", "17883777060"];
+/** The time the cutover's paste must be done by; certspotter gets one hour more to read its revocations. Set again at
+ *  the card's merge, right before the owner's paste. */
+export const CUTOVER_BY = "2026-11-09T13:00:00Z";
+export const CUTOVER_GRACE_MS = 60 * 60 * 1000;
 /** Child certificates that may stay good, each with its reason. */
 export const CERTS_ALLOWED = [
   { names: [`sign.${SIGN_HOST}`], issuer: "Google Trust Services", why: "Pages' certificate for the old sign.: Cloudflare holds its key, and Cloudflare serves SIGN_HOST itself" },
@@ -204,7 +212,11 @@ export function ctCerts(rec, now) {
       const what = `${c.id} for ${kids.join(", ")} (${issuer || "issuer unread"}, to ${c.not_after})`;
       // certspotter answers revoked false by default; it has read the CA's lists only when its revocation has a checked_at
       if (c.revoked !== false || !c.revocation?.checked_at) wait.push(`${what} has no revocation read`);
-      else if (CUTOVER_REVOKED.includes(String(c.id))) wait.push(`${what}, revoked by the cutover, is not yet read revoked`);
+      else if (CUTOVER_REVOKED.includes(String(c.id))) {
+        // a read after the deadline that still says not revoked: the cutover did not revoke it
+        if (Date.parse(c.revocation.checked_at) > Date.parse(CUTOVER_BY) + CUTOVER_GRACE_MS) fail.push(`${what}, which the cutover revokes by ${CUTOVER_BY}, is read not revoked at ${c.revocation.checked_at}`);
+        else wait.push(`${what}, revoked by the cutover, is not yet read revoked`);
+      }
       else fail.push(`${what} is not revoked`);
     }
   }
@@ -284,6 +296,12 @@ export async function read({ fetchFn = fetch, label = `x${randomBytes(8).toStrin
     }
   }
   return { at: new Date().toISOString(), label, ct, answers, http: await readHttp(fetchFn) };
+}
+
+/** The run's verdict line and exit code: PASS 0, FAIL 1, INCONCLUSIVE 2 (live.yml's summary keeps the line). */
+export function verdict({ ok, inconclusive }) {
+  const v = ok ? "PASS" : inconclusive ? "INCONCLUSIVE" : "FAIL";
+  return { line: `live-check ${KEY}: ${v}`, code: ok ? 0 : inconclusive ? 2 : 1 };
 }
 
 export function judge(rec) {
@@ -395,10 +413,11 @@ if (import.meta.main) {
     const rec = await read();
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     if (rec.answers.every((x) => x.error)) throw new Error(`no resolver answered: ${rec.answers[0]?.error}`);
-    const { ok, inconclusive, lines } = judge(rec);
-    for (const l of lines) console.log(l);
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : inconclusive ? "INCONCLUSIVE" : "FAIL"}`);
-    process.exit(ok ? 0 : inconclusive ? 2 : 1);
+    const r = judge(rec);
+    for (const l of r.lines) console.log(l);
+    const v = verdict(r);
+    console.log(v.line);
+    process.exit(v.code);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);
