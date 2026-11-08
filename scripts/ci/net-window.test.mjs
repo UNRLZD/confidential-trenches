@@ -30,6 +30,7 @@ export const CHANGED = [
   "scripts/live-checks/app-console-429.mjs",
   "scripts/live-checks/app-footer-bar.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
+  "scripts/live-checks/app-header-search-chain.mjs",
   "scripts/live-checks/app-host-gate.mjs",
   "scripts/live-checks/app-list-age.mjs",
   "scripts/live-checks/app-quick-buy-one-tap.mjs",
